@@ -1064,3 +1064,74 @@ class TestToolContextBuild:
         jid = await ex.submit("needs", {})
         await ex.wait_for(jid)
         assert captured["services"] == {"db": "sqlite-conn"}
+
+
+class TestCompletionQueuePolicy:
+    @pytest.mark.parametrize("queue_enabled", [True, False])
+    @pytest.mark.parametrize(
+        "outcome",
+        ["success", "failure", "exception", "cancel", "cancel_before_start", "direct"],
+    )
+    async def test_completion_delivery(self, queue_enabled, outcome):
+        class RaisesOnExecute(_FailTool):
+            async def execute(self, args, **kwargs):
+                raise RuntimeError("uncaught tool failure")
+
+        seen = []
+        ex = Executor(on_complete=seen.append, queue_completion_events=queue_enabled)
+        tool = (
+            _SlowTool()
+            if outcome.startswith("cancel")
+            else (
+                RaisesOnExecute()
+                if outcome == "exception"
+                else _FailTool() if outcome == "failure" else _EchoTool()
+            )
+        )
+        ex.register_tool(tool)
+        job = await ex.submit(
+            tool.tool_name,
+            {"msg": "payload", "seconds": 10},
+            is_direct=outcome == "direct",
+        )
+        if outcome.startswith("cancel"):
+            if outcome == "cancel":
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+            assert await ex.cancel(job)
+        await ex.wait_for(job)
+        await asyncio.sleep(0)
+        result = ex.get_result(job)
+        assert result is not None
+        if outcome.startswith("cancel"):
+            assert ex.get_status(job).state == JobState.CANCELLED
+        elif outcome in ("failure", "exception"):
+            assert result.error
+        else:
+            assert result.output == "payload"
+        assert len(seen) == (0 if outcome == "direct" else 1)
+        queued = ex.get_next_event_nowait()
+        if queue_enabled and outcome != "direct":
+            assert queued is seen[0]
+        else:
+            assert queued is None
+        assert ex.get_next_event_nowait() is None
+
+    async def test_callback_only_does_not_retain_completed_payloads(self):
+        completions = 0
+
+        def completed(event):
+            nonlocal completions
+            completions += 1
+            assert len(event.content) == 4096
+
+        ex = Executor(
+            JobStore(max_completed=2), completed, queue_completion_events=False
+        )
+        ex.register_tool(_EchoTool())
+        for _ in range(250):
+            job = await ex.submit("echo", {"msg": "x" * 4096})
+            assert (await ex.wait_for(job)).output == "x" * 4096
+        assert completions == 250
+        assert ex._event_queue.qsize() == 0
+        assert len(ex.job_store.get_completed_jobs()) == 2

@@ -31,7 +31,7 @@ def session_dir() -> str:
     return env_fs_path_text(raw)
 
 
-def attach_session_store_for_creature(
+async def attach_session_store_for_creature(
     service: "TerrariumService",
     creature,
     *,
@@ -76,6 +76,8 @@ def attach_session_store_for_creature(
             _retro_install_channel_persistence(engine, sid)
             if sid in getattr(engine, "_topology", SimpleNamespace(graphs={})).graphs:
                 _manifest.checkpoint_graph(engine, sid)
+            if getattr(engine, "_drive_runtime", None) is not None:
+                await engine._drive_runtime.bind_graph_store(sid, existing)
             return
 
         # Engine minting preserves validated metadata and write-before-publish;
@@ -98,6 +100,8 @@ def attach_session_store_for_creature(
         session_stores[sid] = store
         # Channel persistence resolves stores through the engine-owned map.
         engine._session_stores[sid] = store
+        if getattr(engine, "_drive_runtime", None) is not None:
+            await engine._drive_runtime.bind_graph_store(sid, store)
         _index_hooks.attach(sid, store, sess_dir)
         _retro_install_channel_persistence(engine, sid)
         if sid in getattr(engine, "_topology", SimpleNamespace(graphs={})).graphs:

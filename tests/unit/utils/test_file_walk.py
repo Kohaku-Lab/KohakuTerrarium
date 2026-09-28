@@ -1,6 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.utils.file_walk`, the traversal
 behind the tree / grep / glob tools.  Every branch exercised on real fixtures."""
 
+import fnmatch
 import os
 from pathlib import Path
 
@@ -618,3 +619,78 @@ def test_glob_to_regex_returns_compiled_pattern():
     pat = _glob_to_regex("*.py")
     assert pat.match("a.py") is not None
     assert pat.match("b.txt") is None
+
+
+@pytest.mark.parametrize(
+    "pattern",
+    [
+        "src/*/**/*.py",
+        "src/p?g/**/*.py",
+        "src/[pq]kg/**/*.py",
+        "**/[ab].py",
+        "**/[!a].py",
+        "**/[a-c].py",
+        "**/[]].py",
+        "**/[[]x].py",
+        "**/[z-a].py",
+        "**/[-a].py",
+        "**/[abc.py",
+        "src/*/**/deep/**/*.py",
+        "src/**/*.py",
+        r"src\*\**\[ab].py",
+    ],
+)
+def test_recursive_patterns_match_pathlib(tmp_path, pattern):
+    for name in ("a.py", "b.py", "c.py", "].py", "[x].py", "-.py", "[abc.py"):
+        for directory in ("", "src/pkg", "src/pkg/deep", "src/qkg/deep/more"):
+            path = tmp_path / directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("match", encoding="utf-8")
+    normalized = pattern.replace("\\", "/")
+    expected = {p for p in tmp_path.glob(normalized) if p.is_file()}
+    assert set(iter_matching_files(tmp_path, pattern, gitignore=False)) == expected
+    assert {
+        p for p, _ in iter_matching_files_stat(tmp_path, pattern, gitignore=False)
+    } == expected
+
+
+@pytest.mark.parametrize("pattern", ["src/*/**/*.py", "src/pkg/**/*.py"])
+def test_recursive_prefix_preserves_pruning_ignore_and_cap(
+    tmp_path, monkeypatch, pattern
+):
+    _build_tree(
+        tmp_path,
+        {
+            ".gitignore": "/src/pkg/drop.py\n",
+            "src": {"pkg": {"drop.py": "", "a.py": "", "b.py": ""}},
+            "unrelated": {"x.py": ""},
+        },
+    )
+    real_scandir = file_walk.scandir
+    visited = []
+
+    def observe(path):
+        visited.append(Path(path))
+        assert Path(path).is_relative_to(tmp_path / "src")
+        return real_scandir(path)
+
+    monkeypatch.setattr(file_walk, "scandir", observe)
+    assert {p.name for p in iter_matching_files(tmp_path, pattern)} == {"a.py", "b.py"}
+    assert visited[0] == tmp_path / (
+        "src" if pattern.startswith("src/*/") else "src/pkg"
+    )
+    assert len(list(iter_matching_files(tmp_path, pattern, cap=1))) == 1
+
+
+@pytest.mark.parametrize(
+    "pattern", ["[ab]", "[!ab]", "[a-c]", "[]]", "[[]", "[z-a]", "[-a]", "[!]]", "[abc"]
+)
+def test_character_classes_follow_fnmatch_without_crossing_segments(pattern):
+    for name in ("a", "b", "c", "z", "]", "[", "-", "!", "[abc"):
+        assert _glob_match(name, pattern) == fnmatch.fnmatchcase(name, pattern)
+    assert not _glob_match("/", pattern)
+
+
+def test_character_class_cannot_span_path_segments():
+    assert not _glob_match("a.py", "[a/z].py")
+    assert _glob_match("[a/z].py", "[a/z].py")

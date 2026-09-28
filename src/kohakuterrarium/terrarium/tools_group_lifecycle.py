@@ -119,7 +119,7 @@ class GroupAddNodeTool(BaseTool):
         except Exception as exc:
             return err(f"failed to spawn creature from {config_path!r}: {exc}")
 
-        group_hooks.attach_session_store(
+        await group_hooks.attach_session_store(
             gctx.engine, new, config_path=config_path, config_type="agent"
         )
 
@@ -418,7 +418,7 @@ class GroupSpawnChildTool(BaseTool):
         except Exception as exc:
             return err(f"failed to spawn creature from {config_ref!r}: {exc}")
 
-        group_hooks.attach_session_store(
+        await group_hooks.attach_session_store(
             gctx.engine, child, config_path=config_ref, config_type="agent"
         )
 

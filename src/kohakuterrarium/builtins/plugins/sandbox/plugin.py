@@ -8,7 +8,7 @@ import asyncio
 import os
 import shlex
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
@@ -20,6 +20,7 @@ from kohakuterrarium.modules.plugin.base import (
 from kohakuterrarium.modules.sandbox.parse import parse_profile
 from kohakuterrarium.modules.sandbox.presets import WORKSPACE
 from kohakuterrarium.modules.sandbox.profile import DEFAULT_DENY_PATHS, SandboxProfile
+from kohakuterrarium.modules.tool.base import resolve_tool_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -27,7 +28,6 @@ logger = get_logger(__name__)
 READ_PATH_ARGS = {
     "read": ["path"],
     "notebook_read": ["path"],
-    "glob": ["pattern"],
     "grep": ["path"],
     "tree": ["path"],
 }
@@ -169,6 +169,8 @@ class SandboxPlugin(BasePlugin):
         if tool_name in self._blocked_tools:
             self._violate("tool", tool_name, f"tool '{tool_name}' is blocked")
         cwd = _context_cwd(context, self._context)
+        if tool_name == "glob":
+            self._check_glob(args, context, cwd)
         for path in _iter_tool_paths(tool_name, args, cwd):
             self._check_path(tool_name, path.path, path.operation, cwd)
         self._check_network_tool(tool_name, args)
@@ -215,12 +217,44 @@ class SandboxPlugin(BasePlugin):
             max_output_bytes=max_output_bytes,
         )
 
+    def _check_glob(self, args: dict[str, Any], context: Any, cwd: Path) -> None:
+        """Check the tool's actual base and literal pattern prefix."""
+        base = resolve_tool_path(args.get("path", "."), context)
+        self._check_path("glob", base, "read", cwd, literal=True)
+        pattern = str(args.get("pattern", "")).replace("\\", "/")
+        if pattern.startswith("/") or PureWindowsPath(pattern).drive:
+            self._violate("fs_read", pattern, "glob: pattern must be relative to path")
+            return
+        prefix: list[str] = []
+        wildcard = False
+        for part in pattern.split("/"):
+            if part == ".." and wildcard:
+                self._violate(
+                    "fs_read",
+                    pattern,
+                    "glob: parent traversal after a wildcard is unsupported",
+                )
+                return
+            wildcard = wildcard or any(char in part for char in "*?[")
+            if not wildcard:
+                prefix.append(part)
+        if prefix:
+            self._check_path("glob", base.joinpath(*prefix), "read", cwd, literal=True)
+
     def _check_path(
-        self, tool_name: str, path: Path, operation: str, cwd: Path
+        self,
+        tool_name: str,
+        path: Path,
+        operation: str,
+        cwd: Path,
+        *,
+        literal: bool = False,
     ) -> None:
         axis = "fs_write" if operation == "write" else "fs_read"
         level = getattr(self._profile, axis)
-        resolved = Path(os.path.expandvars(str(path))).expanduser().resolve()
+        resolved = (
+            path if literal else Path(os.path.expandvars(str(path))).expanduser()
+        ).resolve()
         for denied in self._profile.fs_deny:
             denied_path = Path(os.path.expandvars(denied)).expanduser().resolve()
             if _is_relative_to(resolved, denied_path):

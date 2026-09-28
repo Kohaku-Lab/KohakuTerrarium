@@ -1,19 +1,18 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.subagent.base`.
+"""Exercise sub-agent turns, tool results, budgets, and failure handling."""
 
-Behavior-first: SubAgent runs a real conversation loop against a
-ScriptedLLM, executes parsed tool calls through a real Registry,
-respects max_turns / timeout / cancellation, charges the iteration
-budget, and surfaces failures as a failed SubAgentResult rather than
-raising.
-"""
+import json
+
+import pytest
 
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig, ToolResult
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 
@@ -288,6 +287,97 @@ class _NativeLLM:
 
 
 class TestNativeMode:
+    @pytest.mark.parametrize("mode", ["native", "bracket"])
+    @pytest.mark.parametrize(
+        "url", ["file:///synthetic/page.png", "data:image/png;base64,c3ludGhldGlj"]
+    )
+    async def test_multimodal_results_reach_llm_without_flattening(self, mode, url):
+        image = ImagePart(
+            url=url, detail="high", source_type="file", source_name="page.png"
+        )
+        file = FilePart(path="/synthetic/video.mp4", name="video.mp4", mime="video/mp4")
+
+        class MediaTool(_EchoTool):
+            media_policy = MediaPolicy(persist=False, pinned=False)
+
+            async def _execute(self, args, **kwargs):
+                if args["text"] == "image":
+                    return ToolResult(output=[TextPart(text="x" * 100), image, file])
+                return await super()._execute(args, **kwargs)
+
+        class MediaLLM(ScriptedLLM):
+            async def chat(self, messages, **kwargs):
+                self.last_tool_calls = (
+                    [
+                        _NativeToolCall(
+                            f"call-{text}", "echo", json.dumps({"text": text})
+                        )
+                        for text in ("before", "image", "after")
+                    ]
+                    if self.call_count == 0
+                    else []
+                )
+                async for chunk in super().chat(messages, **kwargs):
+                    yield chunk
+
+        calls = "".join(
+            _bracket_call("echo", text=text) for text in ("before", "image", "after")
+        )
+        llm = MediaLLM(["" if mode == "native" else calls, "done"])
+        tool = MediaTool()
+        tool.config.max_output = 32
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["echo"]),
+            _registry(tool),
+            llm,
+            tool_format=mode,
+        )
+        activities = []
+        sa.on_tool_activity = lambda *args: activities.append(args)
+
+        result = await sa.run("inspect synthetic media references")
+
+        assert result.success and result.output == "done"
+        assert llm.call_count == 2
+        delivered = llm.call_log[1]
+        if mode == "native":
+            messages = [m for m in delivered if m["role"] == "tool"]
+            assert [m["tool_call_id"] for m in messages] == [
+                "call-before",
+                "call-image",
+                "call-after",
+            ]
+            assert messages[0]["content"] == "[echo]\nechoed: before"
+            assert messages[2]["content"] == "[echo]\nechoed: after"
+            assert isinstance(messages[1]["content"], str)
+            assert [m["role"] for m in delivered[-4:]] == ["tool"] * 3 + ["user"]
+            parts = delivered[-1]["content"]
+            assert "call-image" in parts[0]["text"]
+        else:
+            parts = delivered[-1]["content"]
+        assert isinstance(parts, list)
+        assert all(part["type"] in {"text", "image_url"} for part in parts)
+        assert [part for part in parts if part["type"] == "image_url"] == [
+            image.to_dict()
+        ]
+        text = "".join(part["text"] for part in parts if part["type"] == "text")
+        if mode == "native":
+            text = messages[1]["content"]
+        assert "video.mp4" in text
+        assert "x" * 32 in text and "x" * 100 not in text
+        assert "tool output truncated to 32 bytes" in text
+        if mode == "bracket":
+            assert (
+                text.index("echoed: before")
+                < text.index("x" * 32)
+                < text.index("echoed: after")
+            )
+        assert [activity[0] for activity in activities] == ["tool_start"] * 3 + [
+            "tool_done"
+        ] * 3
+        assert "c3ludGhldGlj" not in str(activities)
+        assert sa.conversation.get_image_count() == 1
+
     async def test_native_turn_executes_tool_and_accumulates_tokens(self):
         echo = _EchoTool()
         sa = SubAgent(

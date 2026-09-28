@@ -9,6 +9,7 @@ operations closed while admin transitions stay open. Authorization is decided by
 capability, never by whether a tool happens to be registered.
 """
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -140,6 +141,63 @@ class TestForeignAssignee:
     def _rec(self):
         return _record(_USER, scope_type="graph", scope_id="g1")
 
+    def test_assignee_can_resume_waiting_with_available_registration(self):
+        rec = replace(self._rec(), status=DriveStatus.WAITING)
+        _ok(
+            DriveOperation.TRANSITION,
+            _ASSIGNEE,
+            rec,
+            _assignment(),
+            _SNAP,
+            target_status=DriveStatus.ACTIVE,
+        )
+        _denied(
+            DriveRegistrationDisabledError,
+            DriveOperation.TRANSITION,
+            _ASSIGNEE,
+            rec,
+            _assignment(),
+            _EMPTY,
+            target_status=DriveStatus.ACTIVE,
+        )
+        _denied(
+            DrivePermissionError,
+            DriveOperation.TRANSITION,
+            _ASSIGNEE,
+            rec,
+            _assignment("other"),
+            _SNAP,
+            target_status=DriveStatus.ACTIVE,
+        )
+
+    @pytest.mark.parametrize(
+        "status",
+        [s for s in DriveStatus if s not in {DriveStatus.ACTIVE, DriveStatus.WAITING}],
+    )
+    def test_assignee_cannot_leave_owner_controlled_states(self, status):
+        rec = replace(self._rec(), status=status)
+        for target in (DriveStatus.ACTIVE, DriveStatus.WAITING, DriveStatus.BLOCKED):
+            _denied(
+                DrivePermissionError,
+                DriveOperation.TRANSITION,
+                _ASSIGNEE,
+                rec,
+                _assignment(),
+                _SNAP,
+                target_status=target,
+            )
+        assert "transition" not in allowed_actions(_ASSIGNEE, rec, _assignment(), _SNAP)
+        # Full owner/privileged control remains authorized; transition validity
+        # is checked separately by the repository and registration.
+        _ok(
+            DriveOperation.TRANSITION,
+            _USER,
+            rec,
+            _assignment(),
+            _SNAP,
+            target_status=DriveStatus.ACTIVE,
+        )
+
     def test_assignee_can_report_and_propose(self):
         rec, asg = self._rec(), _assignment()
         _ok(DriveOperation.REPORT_PROGRESS, _ASSIGNEE, rec, asg, _SNAP)
@@ -166,7 +224,7 @@ class TestForeignAssignee:
 
     def test_assignee_cannot_reactivate_update_cancel_reassign_retire(self):
         rec, asg = self._rec(), _assignment()
-        # ACTIVE is not an assignee-permitted transition target.
+        # Only a waiting assignee can request ACTIVE.
         _denied(
             DrivePermissionError,
             DriveOperation.TRANSITION,

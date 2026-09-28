@@ -26,6 +26,7 @@ Each method runs ONE complete workflow end-to-end.
 """
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -34,9 +35,12 @@ from PIL import Image
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
+from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
+from kohakuterrarium.builtins.tools.edit import EditTool
+from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
@@ -48,6 +52,7 @@ from kohakuterrarium.core.config_types import (
     OutputConfigItem,
 )
 from kohakuterrarium.core.events import EventType, create_user_input_event
+from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
@@ -73,6 +78,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.modules.user_command.base import (
@@ -467,7 +473,7 @@ class TestModulesIntegration:
     """End-to-end workflows exercising each ``modules/`` protocol through
     a real :class:`Agent`."""
 
-    async def test_plugin_hooks_wrap_a_real_tool_call(self, make_agent):
+    async def test_plugin_hooks_wrap_a_real_tool_call(self, make_agent, tmp_path):
         """plugin protocol — the FULL hook surface fires through a real
         agent run: tool pre/post hooks (incl. arg rewrite + a
         ``PluginBlockError`` veto), LLM pre/post hooks, lifecycle
@@ -689,6 +695,42 @@ class TestModulesIntegration:
             )
             assert not (await agent.executor.wait_for(blocked)).success
             assert tool.executed_with[-2:] == [{"msg": "budgeted"}, {"msg": "last"}]
+            assert mgr.unregister("budget") is True
+
+            sandbox = SandboxPlugin(fs_read="workspace")
+            mgr.register(sandbox)
+            work = tmp_path / "workspace"
+            outside = tmp_path / "outside"
+            work.mkdir()
+            outside.mkdir()
+            (work / "allowed.txt").write_text("inside")
+            (outside / "blocked.txt").write_text("outside")
+            agent.executor._working_dir = work
+            agent.executor._path_guard = None
+            agent.executor.register_tool(GlobTool())
+            allowed_job = await agent.executor.submit(
+                "glob",
+                {
+                    "path": work.as_uri(),
+                    "pattern": "*.txt",
+                    "gitignore": False,
+                },
+                is_direct=True,
+            )
+            allowed = await agent.executor.wait_for(allowed_job)
+            assert allowed.error is None
+            assert "allowed.txt" in allowed.output
+            denied_job = await agent.executor.submit(
+                "glob",
+                {
+                    "path": str(outside),
+                    "pattern": "*.txt",
+                },
+                is_direct=True,
+            )
+            denied = await agent.executor.wait_for(denied_job)
+            assert "SandboxViolation[fs_read]" in denied.error
+            assert "blocked.txt" not in denied.output
             # should_proceed with no veto hooks → True (nothing vetoes).
             assert (
                 await mgr.should_proceed("on_compact_start", context_length=10) is True
@@ -989,6 +1031,65 @@ class TestModulesIntegration:
             agent.subagent_manager.cleanup(job_id)
             assert job_id not in agent.subagent_manager._tasks
             assert agent.subagent_manager.get_result(job_id) is direct_result
+
+            class MediaReferenceTool(BaseTool):
+                media_policy = MediaPolicy(persist=False, pinned=False)
+
+                @property
+                def tool_name(self):
+                    return "media_reference"
+
+                @property
+                def description(self):
+                    return "Return a synthetic image reference without reading a file."
+
+                async def _execute(self, args, **kwargs):
+                    return ToolResult(
+                        output=[
+                            TextPart(text=f"reference: {args['label']}"),
+                            ImagePart(
+                                url=f"file:///synthetic/{args['label']}.png",
+                                detail="high",
+                            ),
+                        ]
+                    )
+
+            agent.add_tool(MediaReferenceTool())
+            media_llm = ScriptedLLM(
+                [
+                    "[/media_reference]@@label=first\n[media_reference/]",
+                    "first checked",
+                    "[/media_reference]@@label=second\n[media_reference/]",
+                    "second checked",
+                ]
+            )
+            agent.subagent_manager.llm = media_llm
+            for index, label in enumerate(("first", "second")):
+                name = f"visual_{label}"
+                agent.subagent_manager.register(
+                    SubAgentConfig(name=name, tools=["media_reference"])
+                )
+                media_job = await agent.subagent_manager.spawn(
+                    name, "inspect a synthetic reference", background=False
+                )
+                assert (
+                    agent.subagent_manager.get_result(media_job).output
+                    == f"{label} checked"
+                )
+                delivered = media_llm.call_log[index * 2 + 1][-1]["content"]
+                expected_image = {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"file:///synthetic/{label}.png",
+                        "detail": "high",
+                    },
+                }
+                assert isinstance(delivered, list) and expected_image in delivered
+                saved = json.loads(
+                    store.load_subagent_conversation("modules_agent", name, 0)
+                )
+                assert saved["messages"][-2]["content"] == delivered
+            assert agent.controller.conversation.get_image_count() == 0
 
             # ── SubAgentConfig data surface (real config objects) ──
             # An explicit system_prompt is a full override — load_prompt
@@ -1744,8 +1845,40 @@ class TestModulesIntegration:
                 if "## glob_" in message.get_text_content()
             )
             assert f"\n{(search_dir / 'a.txt').relative_to(tmp_path)}" in glob_output
+
+            # Shared recursive matching must also work through both real tools.
+            for tool_name, args in (
+                ("glob", {"pattern": "src/*/**/[ab].txt"}),
+                ("grep", {"pattern": "MATCH", "glob": "src/*/**/[ab].txt"}),
+            ):
+                job = await agent.executor.submit(tool_name, args, is_direct=True)
+                result = await agent.executor.wait_for(job)
+                assert result.success, result.error
+                assert "a.txt" in result.output
             last = agent.controller.conversation.get_last_assistant_message()
             assert last.get_text_content() == "recursive listing complete"
+            target = tmp_path / "patch.txt"
+            target.write_bytes(b"a\nb\n")
+            agent.executor.register_tool(ReadTool())
+            agent.executor.register_tool(EditTool())
+            read_job = await agent.executor.submit(
+                "read", {"path": str(target)}, is_direct=True
+            )
+            assert (await agent.executor.wait_for(read_job)).error is None
+            edit_job = await agent.executor.submit(
+                "edit",
+                {"path": str(target), "diff": "@@ -1,0 +2,1 @@\n+NEW\n"},
+                is_direct=True,
+            )
+            assert (await agent.executor.wait_for(edit_job)).error is None
+            assert target.read_text() == "a\nNEW\nb\n"
+            bad_job = await agent.executor.submit(
+                "edit",
+                {"path": str(target), "diff": "@@ -99,0 +100,1 @@\n+BAD\n"},
+                is_direct=True,
+            )
+            assert (await agent.executor.wait_for(bad_job)).error
+            assert target.read_text() == "a\nNEW\nb\n"
         finally:
             await agent.stop()
             store.close()

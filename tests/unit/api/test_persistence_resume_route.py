@@ -337,7 +337,7 @@ class TestHostResume:
     def test_legacy_replacement_survives_resume_stop_preflight(
         self, monkeypatch, tmp_path
     ):
-        """Exercise the UI's preflight -> resume -> stop -> preflight lifecycle."""
+        """A relocated legacy session upgrades once, then retains its identity."""
         old_pwd = tmp_path / "deleted-workspace"
         replacement = tmp_path / "relocated"
         replacement.mkdir()
@@ -380,18 +380,37 @@ class TestHostResume:
             )
             assert resumed.status_code == 200, resumed.text
             sid = resumed.json()["instance_id"]
+            cid = engine.list_creatures()[0].creature_id
 
             client.portal.call(lifecycle.stop_session, service, sid)
 
             second = client.post("/sessions/saved/resume/preflight")
             assert second.status_code == 200
-            assert second.json()["legacy"] is True
+            # Resume creates a manifest; recoverable stop must retain it rather
+            # than downgrade the session and remint its identities next time.
+            assert second.json()["legacy"] is False
             assert second.json()["ready"] is True
+            assert {
+                member["creature_id"]: member["saved_pwd"]
+                for member in second.json()["members"]
+            } == {cid: str(replacement.resolve())}
+
+            again = client.post("/sessions/saved/resume")
+            assert again.status_code == 200, again.text
+            assert again.json()["instance_id"] == sid
+            creature = engine.get_creature(cid)
+            assert creature.graph_id == sid
+            assert Path(creature.agent.executor._working_dir) == replacement.resolve()
+            client.portal.call(lifecycle.stop_session, service, sid)
             client.portal.call(engine.shutdown)
 
         reopened = SessionStore(path)
         try:
             assert reopened.load_meta()["pwd"] == str(replacement.resolve())
+            manifest = reopened.load_meta()[MANIFEST_KEY]
+            assert manifest["graph_id"] == sid
+            assert [member["creature_id"] for member in manifest["creatures"]] == [cid]
+            assert manifest["creatures"][0]["pwd"] == str(replacement.resolve())
         finally:
             reopened.close(update_status=False)
 

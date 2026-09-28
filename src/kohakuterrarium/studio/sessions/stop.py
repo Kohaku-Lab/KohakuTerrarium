@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions import cluster_fold
 from kohakuterrarium.studio._runtime import host_engine_or_none
+from kohakuterrarium.studio.sessions import cluster_fold
+from kohakuterrarium.terrarium.session_unload import unload_session_graph
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -279,9 +280,9 @@ async def stop_session(
     if isinstance(engine_stores, dict):
         store = engine_stores.get(session_id) or store
     entry = meta.get(session_id)
-    remote_creature_ids: list[str] = []
     if graph is None and entry is not None:
-        remote_creature_ids = await _remote_creature_ids(
+        _remote_unload_targets(cluster_session_ids, meta)
+        await _remote_creature_ids(
             service,
             cluster_session_ids,
             meta,
@@ -345,33 +346,21 @@ async def stop_session(
 
     try:
         if graph is not None:
-            for creature_id in list(graph.creature_ids):
-                try:
-                    await engine.remove_creature(creature_id)
-                except KeyError:
-                    pass
+            await unload_session_graph(engine, session_id)
         else:
             if entry is None or not entry.get("on_node"):
                 raise KeyError(f"session {session_id!r} not found")
-            for creature_id in remote_creature_ids:
-                try:
-                    await service.remove_creature(creature_id)
-                except KeyError:
-                    pass
-    except Exception:
+            await _unload_remote_sessions(service, cluster_session_ids, meta)
+    except (Exception, asyncio.CancelledError):
+        # A lost reply can mean the worker already unloaded the graph. Keep the
+        # durable dormant marker until a retry confirms all members are stopped.
+        if graph is None:
+            raise
         if store is not None and original_store_lifecycle is not None:
             _set_store_lifecycle(
                 store,
                 is_open=original_store_lifecycle[0],
                 status=original_store_lifecycle[1],
-            )
-        elif graph is None:
-            await _update_remote_cluster_lifecycle(
-                service,
-                cluster_session_ids,
-                meta,
-                end_conversation=False,
-                status_override="running",
             )
         for mirror_path, original_mirror_lifecycle in reversed(mirror_lifecycles):
             _set_mirror_lifecycle(
@@ -415,3 +404,45 @@ async def stop_session(
         "Session ended" if end_conversation else "Session stopped",
         session_id=session_id,
     )
+
+
+def _remote_unload_targets(session_ids, meta) -> list[tuple[str, str, str]]:
+    """Validate every member before changing lifecycle markers or sending RPCs."""
+    targets = []
+    for session_id in session_ids:
+        entry = meta.get(session_id)
+        if entry is None:
+            raise RuntimeError(f"remote session {session_id!r} metadata is missing")
+        node = entry.get("on_node")
+        if not isinstance(node, str) or not node.strip():
+            raise RuntimeError(f"remote session {session_id!r} has no worker node")
+        targets.append((session_id, node, entry.get("remote_session_path", "")))
+    return targets
+
+
+async def _unload_remote_sessions(service, session_ids, meta) -> None:
+    """Unload worker graphs through the session adapter, preserving saved state."""
+    for session_id, node, session_path in _remote_unload_targets(session_ids, meta):
+        response = await service._host.request(
+            to_node=node,
+            namespace="terrarium.session",
+            type="unload",
+            body={
+                "graph_id": session_id,
+                "session_path": session_path,
+            },
+            timeout=60.0,
+        )
+        if not isinstance(response, dict) or response.get("ok") is not True:
+            raise RuntimeError(f"remote session unload failed: {response!r}")
+        removed = set(response.get("removed", ()))
+        home = getattr(service, "_home", {})
+        for creature_id in removed:
+            home.pop(creature_id, None)
+        cache = getattr(service, "_creature_name_cache", {})
+        for key, entries in list(cache.items()):
+            remaining = {entry for entry in entries if entry[2] not in removed}
+            if remaining:
+                cache[key] = remaining
+            else:
+                cache.pop(key, None)

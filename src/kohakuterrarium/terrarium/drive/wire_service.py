@@ -95,6 +95,7 @@ def registration_dtos(runtime: Any) -> tuple[dict[str, Any], ...]:
             "kind": entry.descriptor.kind,
             "schema_version": entry.descriptor.schema_version,
             "available": entry.available,
+            "unconditional_wake": entry.unconditional_wake,
             "has_prompt": entry.prompt_text is not None,
         }
         for entry in runtime.snapshot.entries
@@ -102,9 +103,12 @@ def registration_dtos(runtime: Any) -> tuple[dict[str, Any], ...]:
 
 
 def running_revision(runtime: Any) -> str:
-    """Opaque content hash of the runtime's enabled registration names."""
-    names = sorted(entry.descriptor.name for entry in runtime.snapshot.entries)
-    return hashlib.sha256(repr(names).encode("utf-8")).hexdigest()
+    """Opaque content hash of enabled registrations and applied wake policies."""
+    policies = sorted(
+        (entry.descriptor.name, entry.unconditional_wake)
+        for entry in runtime.snapshot.entries
+    )
+    return hashlib.sha256(repr(policies).encode("utf-8")).hexdigest()
 
 
 def _envelope(wire_type: str, data: dict[str, Any]) -> dict[str, Any]:
