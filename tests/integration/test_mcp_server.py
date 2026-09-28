@@ -90,6 +90,10 @@ class TestMCPServer:
                 == 0
             )
             identity = os.path.normcase(str(workspace.resolve()))
+            store.registry.path.write_text('{"version": 1}')
+            code, malformed = cli("workspace list")
+            assert code == 1 and "Invalid workspace registry" in malformed["error"]
+            store.registry.path.unlink()
             legacy_root = tmp_path / "legacy"
             legacy_dir = (
                 legacy_root / hashlib.sha256(identity.encode()).hexdigest()[:32]
@@ -276,6 +280,13 @@ class TestMCPServer:
             settings = home / "tools.json"
             settings.write_text(json.dumps({"tools": [{"name": "read"}]}))
             assert cli("setup", "--non-interactive", "--config", settings)[0] == 0
+            settings.write_text("tools: [\n")
+            code, invalid_pending = cli("status")
+            assert code == 0 and invalid_pending["local_ready"]
+            assert invalid_pending["instance_id"] == restarted["instance_id"]
+            assert invalid_pending["configured"]["tools_revision"] == "invalid"
+            assert invalid_pending["active"]["tools_revision"] != "invalid"
+            settings.write_text(json.dumps({"tools": [{"name": "read"}]}))
             assert cli("workspace add", "third", workspace)[0] == 0
             before_restart = await call(
                 "python", {"workspace_id": "third", "code": "print('snapshot')"}
@@ -427,6 +438,42 @@ class TestMCPServer:
             encoding="utf-8",
         )
 
+        startup_plugin = tmp_path / "startup.py"
+        startup_plugin.write_text(
+            "import asyncio\n"
+            "from kohakuterrarium.modules.plugin.base import BasePlugin\n"
+            "class Startup(BasePlugin):\n"
+            "    name = 'startup'\n"
+            "    async def on_load(self, context):\n"
+            "        self.root = context.working_dir\n"
+            "        (self.root / 'startup-entered').touch()\n"
+            "        try:\n"
+            "            while not (self.root / 'startup-release').exists():\n"
+            "                await asyncio.sleep(.01)\n"
+            "        except asyncio.CancelledError:\n"
+            "            (self.root / 'startup-cancelled').touch()\n"
+            "            raise\n"
+            "    async def on_unload(self):\n"
+            "        (self.root / 'startup-unloaded').touch()\n"
+        )
+        blocked_path = tmp_path / "blocked.json"
+        blocked_path.write_text(
+            json.dumps(
+                {
+                    "name": "blocked",
+                    "tools": [],
+                    "plugins": [
+                        {
+                            "name": "startup",
+                            "type": "custom",
+                            "module": str(startup_plugin),
+                            "class": "Startup",
+                        }
+                    ],
+                }
+            )
+        )
+
         def provider(target):
             if target == "writer":
                 return ScriptedLLM(
@@ -456,6 +503,7 @@ class TestMCPServer:
                     "delegation": {
                         "worker": {"kind": "creature", "config": str(creature_path)},
                         "writer": {"kind": "subagent", "config": str(subagent_path)},
+                        "blocked": {"kind": "subagent", "config": str(blocked_path)},
                     },
                 }
             ),
@@ -511,7 +559,34 @@ class TestMCPServer:
                         assert {t["name"] for t in targets["targets"]} == {
                             "worker",
                             "writer",
+                            "blocked",
                         }
+                        _, starting = await call(
+                            "delegate", {"target": "blocked", "prompt": "task"}
+                        )
+                        try:
+                            for _ in range(300):
+                                if (tmp_path / "startup-entered").exists():
+                                    break
+                                await asyncio.sleep(0.01)
+                            assert (tmp_path / "startup-entered").exists()
+                            _, cancellation = await asyncio.wait_for(
+                                call("job_cancel", {"job_id": starting["job_id"]}), 5
+                            )
+                            assert cancellation["cancelled"]
+                            assert (tmp_path / "startup-cancelled").exists()
+                            assert (tmp_path / "startup-unloaded").exists()
+                            assert (
+                                await call("job_status", {"job_id": starting["job_id"]})
+                            )[1]["state"] == "cancelled"
+                            assert not (
+                                await call(
+                                    "delegation_close",
+                                    {"session_id": starting["session_id"]},
+                                )
+                            )[0].isError
+                        finally:
+                            (tmp_path / "startup-release").touch()
                         assert (
                             await call(
                                 "delegate", {"target": "foreign", "prompt": "hello"}

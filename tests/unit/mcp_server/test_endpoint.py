@@ -26,6 +26,12 @@ def test_empty_endpoint_setup_snapshot_and_isolation(tmp_path):
     write_json(store.runtime_path, {"run_id": "one", "state": "ready"})
     with FileLock(store.instance_lock.path):
         assert status(store)["restart_required"]
+        tools.write_text("tools: [\n", encoding="utf-8")
+        invalid = status(store)
+        assert invalid["state"] == "ready"
+        assert invalid["configured"]["tools_revision"] == "invalid"
+        assert invalid["active"]["tools_revision"] != "invalid"
+        assert invalid["restart_required"]
     assert [t.name for t in store.active_tools("one").tools] == ["read"]
     assert store.load().url == record.url
     other = EndpointStore(tmp_path / "other")

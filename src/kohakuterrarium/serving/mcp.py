@@ -41,7 +41,9 @@ async def _publish(store, snapshot):
 async def probe_public(record, instance_id: str) -> tuple[bool, str | None]:
     """Verify the configured HTTPS route reaches this exact tool instance."""
     try:
-        async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
+        async with httpx.AsyncClient(
+            timeout=5, follow_redirects=False, trust_env=False
+        ) as client:
             response = await client.post(
                 record.url,
                 headers={"accept": "application/json, text/event-stream"},

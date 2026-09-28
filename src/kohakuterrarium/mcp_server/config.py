@@ -89,9 +89,16 @@ class MCPToolsConfig(GlobalToolsConfig):
         return value
 
 
+def _read_config(path: Path):
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid MCP configuration YAML in {path}: {exc}") from exc
+
+
 def load_global_config(path: Path) -> GlobalToolsConfig:
     """Read global tool settings, resolving module and target paths at the file."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = _read_config(path)
     if not isinstance(data, dict) or "workspace" in data:
         raise ValueError("Global MCP configuration must be an object without workspace")
     config = GlobalToolsConfig.model_validate(data)
@@ -110,7 +117,7 @@ def load_global_config(path: Path) -> GlobalToolsConfig:
 
 def load_config(path: Path) -> MCPToolsConfig:
     """Read a dedicated YAML/JSON document; relative workspace is file-relative."""
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = _read_config(path)
     if not isinstance(data, dict):
         raise ValueError("MCP configuration must be an object")
     if isinstance(data.get("workspace"), str):

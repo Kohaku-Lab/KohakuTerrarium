@@ -12,6 +12,37 @@ from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.serving.mcp import probe_public, serve
 
 
+async def test_public_probe_does_not_contact_environment_proxy(monkeypatch):
+    contacted = []
+
+    async def proxy(reader, writer):
+        contacted.append(await reader.readline())
+        writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(proxy, "127.0.0.1", 0)
+    with socket.socket() as unavailable:
+        unavailable.bind(("127.0.0.1", 0))
+        proxy_url = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            monkeypatch.delenv(name.lower(), raising=False)
+            monkeypatch.setenv(name, proxy_url)
+        monkeypatch.delenv("no_proxy", raising=False)
+        monkeypatch.setenv("NO_PROXY", "")
+        record = Endpoint(
+            home_dir="home",
+            public_origin=f"https://127.0.0.1:{unavailable.getsockname()[1]}",
+            secret="a" * 43,
+        )
+        ok, _ = await probe_public(record, "expected")
+        assert not ok
+        server.close()
+        await server.wait_closed()
+        assert contacted == []
+
+
 async def test_public_probe_is_bounded_and_matches_instance(monkeypatch):
     record = Endpoint(
         home_dir="home", public_origin="https://example.com", secret="a" * 43

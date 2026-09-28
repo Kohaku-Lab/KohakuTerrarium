@@ -21,6 +21,12 @@ class ExecutionResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def _cancel_startup(task):
+    """Interrupt owned startup once without repeatedly cancelling its cleanup."""
+    if task is not None and task is not asyncio.current_task() and not task.done():
+        task.cancel()
+
+
 class DelegationAdapters:
     """Bind configured targets and share one Studio across Creature sessions."""
 
@@ -67,6 +73,7 @@ class CreatureExecution:
         self._pending_llm = None
         self._saved_path = None
         self._state = "starting"
+        self._starting_task = None
         self._lock = asyncio.Lock()
 
     @property
@@ -130,7 +137,11 @@ class CreatureExecution:
         try:
             async with self._lock:
                 if self._creature is None or self._state == "stopped":
-                    await self._start()
+                    self._starting_task = asyncio.current_task()
+                    try:
+                        await self._start()
+                    finally:
+                        self._starting_task = None
                 self._state = "running"
             if self.busy:
                 raise ValueError("Session is busy with autonomous activity")
@@ -159,6 +170,8 @@ class CreatureExecution:
         return result
 
     async def stop(self):
+        task, self._starting_task = self._starting_task, None
+        _cancel_startup(task)
         async with self._lock:
             if self._creature is not None and self._state != "stopped":
                 await self.owner.studio.sessions.stop(self._creature.graph_id)
@@ -196,6 +209,7 @@ class SubagentExecution:
         self._host = None
         self._pending_llm = None
         self.state = "starting"
+        self._starting_task = None
         self._lock = asyncio.Lock()
 
     async def run(self, job_id, prompt):
@@ -211,7 +225,11 @@ class SubagentExecution:
                     llm=self._pending_llm,
                 )
                 self._pending_llm = None
-                await self._host.start(job_id, prompt)
+                self._starting_task = asyncio.current_task()
+                try:
+                    await self._host.start(job_id, prompt)
+                finally:
+                    self._starting_task = None
                 self.state = "running"
             turn = await self._host.wait()
             result.output, result.error = turn.output, turn.error
@@ -258,6 +276,8 @@ class SubagentExecution:
         return result
 
     async def stop(self):
+        task, self._starting_task = self._starting_task, None
+        _cancel_startup(task)
         async with self._lock:
             if self._host is not None:
                 await self._host.cancel()

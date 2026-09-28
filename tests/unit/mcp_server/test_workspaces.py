@@ -10,6 +10,17 @@ from kohakuterrarium.mcp_server.workspaces import WorkspacePool, WorkspaceRegist
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 
+@pytest.mark.parametrize("entries", [None, {}, "", 1, True])
+def test_registry_rejects_malformed_workspace_collection(tmp_path, entries):
+    registry = WorkspaceRegistry(tmp_path / "registry.json")
+    registry.path.write_text(json.dumps({"version": 1, "workspaces": entries}))
+    with pytest.raises(ValueError, match="Invalid workspace registry"):
+        registry.read()
+    registry.path.write_text('{"version": 1}')
+    with pytest.raises(ValueError, match="Invalid workspace registry"):
+        registry.read()
+
+
 @pytest.mark.parametrize("kind", ["creature", "subagent"])
 async def test_unclosed_sessions_keep_workspace_busy(tmp_path, kind):
     target = tmp_path / "worker.json"
@@ -101,7 +112,9 @@ async def test_failed_cleanup_quarantines_registration(tmp_path, operation):
         assert bool(registry.read()) == (operation == "shutdown")
 
 
-async def test_shutdown_cancels_pending_first_load(tmp_path):
+@pytest.mark.parametrize("operation", ["shutdown", "remove"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+async def test_shutdown_cancels_pending_first_load(tmp_path, operation, cleanup_fails):
     registry = WorkspaceRegistry(tmp_path / "registry.json")
     registry.add("project", tmp_path)
     plugin = tmp_path / "loading.py"
@@ -113,8 +126,18 @@ async def test_shutdown_cancels_pending_first_load(tmp_path):
         "    async def on_load(self, context):\n"
         "        self.workspace = context.working_dir\n"
         "        (self.workspace / 'entered').touch()\n"
-        "        await asyncio.Event().wait()\n"
+        "        try:\n"
+        "            while not (self.workspace / 'release-startup').exists():\n"
+        "                await asyncio.sleep(.01)\n"
+        "        except asyncio.CancelledError:\n"
+        "            (self.workspace / 'cancelled').touch()\n"
+        "            raise\n"
         "    async def on_unload(self):\n"
+        "        (self.workspace / 'cleaning').touch()\n"
+        "        while not (self.workspace / 'release-cleanup').exists():\n"
+        "            await asyncio.sleep(.01)\n"
+        "        if (self.workspace / 'fail-cleanup').exists():\n"
+        "            raise OSError('cleanup failed')\n"
         "        (self.workspace / 'unloaded').touch()\n"
     )
     config = GlobalToolsConfig(
@@ -129,25 +152,76 @@ async def test_shutdown_cancels_pending_first_load(tmp_path):
     )
     pool = WorkspacePool(config, registry)
     await pool.__aenter__()
+    if cleanup_fails:
+        (tmp_path / "fail-cleanup").touch()
 
     async def pending():
         async with pool.use("project"):
             pytest.fail("admitted after shutdown")
 
     task = asyncio.create_task(pending())
+    control = None
     for _ in range(100):
         if (tmp_path / "entered").exists():
             break
         await asyncio.sleep(0.01)
     try:
-        await pool.__aexit__(None, None, None)
+        assert (tmp_path / "entered").exists()
+        if operation == "remove":
+            with pytest.raises(ValueError, match="busy"):
+                await asyncio.wait_for(pool.remove("project"), 1)
+        control = asyncio.create_task(
+            pool.remove("project", force=True)
+            if operation == "remove"
+            else pool.__aexit__(None, None, None)
+        )
+        for _ in range(200):
+            if (tmp_path / "cleaning").exists():
+                break
+            await asyncio.sleep(0.01)
+        assert (tmp_path / "cancelled").exists(), "loading never received cancellation"
+        assert (tmp_path / "cleaning").exists()
+        assert not control.done()
+        assert "project" in registry.read(), "removed before cleanup completed"
+        with pytest.raises(ValueError, match="stopping"):
+            async with pool.use("project"):
+                pytest.fail("admitted during cleanup")
+        (tmp_path / "release-cleanup").touch()
+        if cleanup_fails:
+            with pytest.raises(OSError, match="cleanup failed"):
+                await asyncio.wait_for(control, 5)
+            assert "project" in registry.read()
+            assert pool.list()[0]["state"] == "draining"
+            with pytest.raises(ValueError, match="stopping"):
+                async with pool.use("project"):
+                    pytest.fail("admitted while cleanup failed")
+            (tmp_path / "fail-cleanup").unlink()
+            if operation == "remove":
+                await pool.remove("project", force=True)
+            else:
+                await pool.__aexit__(None, None, None)
+        else:
+            await asyncio.wait_for(control, 5)
         assert (
             task.done()
         ), "shutdown left an admitted request waiting on initialization"
         assert (tmp_path / "unloaded").exists()
+        if not cleanup_fails:
+            assert task.cancelled()
+        assert bool(registry.read()) == (operation == "shutdown")
     finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        (tmp_path / "release-startup").touch()
+        (tmp_path / "release-cleanup").touch()
+        (tmp_path / "fail-cleanup").unlink(missing_ok=True)
+        if control is None and not task.done():
+            task.cancel()
+        await asyncio.wait_for(
+            asyncio.gather(
+                *[item for item in (task, control) if item], return_exceptions=True
+            ),
+            10,
+        )
+        await pool.__aexit__(None, None, None)
 
 
 async def test_same_directory_isolation_removal_and_restart(tmp_path):

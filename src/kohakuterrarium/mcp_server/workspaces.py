@@ -33,7 +33,11 @@ class WorkspaceRegistry:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return {}
-        if not isinstance(raw, dict) or raw.get("version") != 1:
+        if (
+            not isinstance(raw, dict)
+            or raw.get("version") != 1
+            or not isinstance(raw.get("workspaces"), list)
+        ):
             raise ValueError("Invalid workspace registry")
         values = [WorkspaceRegistration.model_validate(v) for v in raw["workspaces"]]
         result = {v.workspace_id: v for v in values}
@@ -83,6 +87,7 @@ class WorkspacePool:
         self.llm_factory = llm_factory
         self.instance_id = uuid.uuid4().hex
         self._runtimes = {}
+        self._loaders = {}
         self._locks = {}
         self._calls = {}
         self._requests = set()
@@ -158,6 +163,8 @@ class WorkspacePool:
     async def _use(self, name: str):
         entry = self._entry(name)
         key = entry.registration_id
+        if self._closed or key in self._draining:
+            raise ValueError("Workspace is stopping")
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
             if self._closed or key in self._draining:
@@ -172,7 +179,19 @@ class WorkspacePool:
                         **self.config.model_dump(), workspace=Path(entry.path)
                     )
                     runtime = ToolRuntime(config, llm_factory=self.llm_factory)
-                    await runtime.__aenter__()
+                    self._loaders[key] = asyncio.current_task()
+                    try:
+                        await runtime.__aenter__()
+                    except BaseException:
+                        try:
+                            await runtime.close()
+                        except BaseException:
+                            self._runtimes[key] = runtime
+                            self._draining.add(key)
+                            raise
+                        raise
+                    finally:
+                        self._loaders.pop(key, None)
                     self._runtimes[key] = runtime
                     self._errors.pop(key, None)
                 except Exception as exc:
@@ -189,6 +208,14 @@ class WorkspacePool:
     async def remove(self, name: str, *, force: bool = False):
         entry = self._entry(name)
         key = entry.registration_id
+        loader = self._loaders.get(key)
+        if loader is not None and not force:
+            raise ValueError("Workspace is busy loading; retry or use --force")
+        if force:
+            already_draining = key in self._draining
+            self._draining.add(key)
+            if loader is not None and not loader.done() and not already_draining:
+                loader.cancel()
         async with self._locks.setdefault(key, asyncio.Lock()):
             runtime = self._runtimes.get(key)
             calls = set(self._calls.get(key, ()))

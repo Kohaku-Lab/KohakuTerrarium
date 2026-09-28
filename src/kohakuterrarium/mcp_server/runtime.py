@@ -161,8 +161,7 @@ class ToolRuntime(ToolCatalog):
         try:
             await self.plugins.load_all(self.plugin_context, strict=True)
         except BaseException:
-            await self.plugins.unload_all()
-            self._closed = True
+            await self.close()
             raise
         self._running = True
         return self

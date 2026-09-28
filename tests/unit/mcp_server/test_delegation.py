@@ -521,3 +521,96 @@ async def test_shutdown_error_does_not_skip_other_sessions_or_direct_jobs(tmp_pa
         for model in models:
             model.fail = False
         await runtime.close()
+
+
+@pytest.mark.parametrize("kind", ["creature", "subagent"])
+@pytest.mark.parametrize("operation", ["cancel", "close", "shutdown"])
+async def test_startup_cancellation_reaches_hook_and_joins_cleanup(
+    tmp_path, kind, operation
+):
+    plugin = tmp_path / "startup.py"
+    plugin.write_text(
+        "import asyncio\n"
+        "from kohakuterrarium.modules.plugin.base import BasePlugin\n"
+        "class Startup(BasePlugin):\n"
+        "    name = 'startup'\n"
+        "    async def on_load(self, context):\n"
+        "        self.root = context.working_dir\n"
+        "        (self.root / 'entered').touch()\n"
+        "        try:\n"
+        "            while not (self.root / 'release-startup').exists():\n"
+        "                await asyncio.sleep(.01)\n"
+        "        except asyncio.CancelledError:\n"
+        "            (self.root / 'cancelled').touch()\n"
+        "            raise\n"
+        "    async def on_unload(self):\n"
+        "        (self.root / 'cleaning').touch()\n"
+        "        while not (self.root / 'release-cleanup').exists():\n"
+        "            await asyncio.sleep(.01)\n"
+        "        (self.root / 'unloaded').touch()\n"
+    )
+    config = configuration(
+        tmp_path,
+        kind,
+        plugins=[
+            {
+                "name": "startup",
+                "type": "custom",
+                "module": str(plugin),
+                "class": "Startup",
+            }
+        ],
+    )
+
+    class Model(ScriptedLLM):
+        released = False
+
+        async def close(self):
+            self.released = True
+
+    model = Model(["must not run"])
+    async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
+        submitted = await runtime.delegation.submit("worker", "task")
+        controls = []
+        try:
+            for _ in range(300):
+                if (tmp_path / "entered").exists():
+                    break
+                await asyncio.sleep(0.01)
+            assert (tmp_path / "entered").exists()
+            action = (
+                runtime.cancel(submitted["job_id"])
+                if operation == "cancel"
+                else (
+                    runtime.delegation.close_session(submitted["session_id"])
+                    if operation == "close"
+                    else runtime.close()
+                )
+            )
+            controls.append(asyncio.create_task(action))
+            for _ in range(200):
+                if (tmp_path / "cleaning").exists():
+                    break
+                await asyncio.sleep(0.01)
+            assert (
+                tmp_path / "cancelled"
+            ).exists(), "startup never received cancellation"
+            assert (tmp_path / "cleaning").exists()
+            assert not controls[0].done(), "cancellation abandoned resource cleanup"
+            if operation == "cancel":
+                controls.append(
+                    asyncio.create_task(runtime.cancel(submitted["job_id"]))
+                )
+                await asyncio.sleep(0.05)
+                assert not any(task.done() for task in controls)
+            (tmp_path / "release-cleanup").touch()
+            await asyncio.wait_for(asyncio.gather(*controls), 5)
+            assert (tmp_path / "unloaded").exists() and model.released
+            assert model.call_count == 0
+            assert runtime.job(submitted["job_id"])["state"] == "cancelled"
+        finally:
+            (tmp_path / "release-startup").touch()
+            (tmp_path / "release-cleanup").touch()
+            await asyncio.wait_for(
+                asyncio.gather(*controls, return_exceptions=True), 10
+            )

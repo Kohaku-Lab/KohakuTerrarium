@@ -5,7 +5,19 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from kohakuterrarium.mcp_server.config import MCPToolsConfig, load_config
+from kohakuterrarium.mcp_server.config import (
+    MCPToolsConfig,
+    load_config,
+    load_global_config,
+)
+
+
+@pytest.mark.parametrize("loader", [load_config, load_global_config])
+def test_invalid_yaml_is_a_validation_error(tmp_path, loader):
+    path = tmp_path / "broken.yaml"
+    path.write_text("tools: [\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid MCP configuration YAML"):
+        loader(path)
 
 
 @pytest.mark.parametrize(
