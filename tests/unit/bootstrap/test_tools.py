@@ -17,6 +17,7 @@ from kohakuterrarium.core.config_types import (
 )
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.errors import ConfigError
 
 # ── _coerce_tool_config_value ────────────────────────────────────
 
@@ -69,6 +70,18 @@ class TestUniversalTriggers:
 
 
 class TestCreateToolBuiltin:
+    def test_replay_override_is_a_framework_option(self):
+        cfg = ToolConfigItem(name="image_gen", options={"request_replay": "forbid"})
+        tool = create_tool(cfg, None, strict=True)
+        assert tool.config.request_replay == "forbid"
+        assert "request_replay" not in tool.config.extra
+        assert "request_replay" not in tool.provider_native_options()
+
+    def test_invalid_replay_override_is_rejected(self):
+        cfg = ToolConfigItem(name="image_gen", options={"request_replay": "maybe"})
+        with pytest.raises(ConfigError, match="request_replay"):
+            create_tool(cfg, None, strict=True)
+
     def test_unknown_builtin_returns_none(self):
         cfg = ToolConfigItem(name="definitely_no_tool", type="builtin")
         assert create_tool(cfg, loader=None) is None
@@ -152,7 +165,8 @@ class TestCreateToolCustom:
         )
         assert create_tool(cfg, loader=loader) is None
 
-    def test_load_success(self, tmp_path):
+    @pytest.mark.parametrize("policy", [None, "allow", "forbid"])
+    def test_load_success(self, tmp_path, policy):
         custom = tmp_path / "custom"
         custom.mkdir()
         (custom / "my_tool.py").write_text(textwrap.dedent("""
@@ -176,10 +190,12 @@ class TestCreateToolCustom:
             type="custom",
             module="custom/my_tool.py",
             class_name="MyTool",
+            options={} if policy is None else {"request_replay": policy},
         )
         tool = create_tool(cfg, loader=loader)
         assert tool is not None
         assert tool.tool_name == "my_tool"
+        assert tool.config.request_replay == policy
 
 
 # ── create_tool: unknown type ───────────────────────────────────

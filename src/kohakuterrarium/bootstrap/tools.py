@@ -13,6 +13,7 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
+from kohakuterrarium.modules.tool.request_replay import validate_request_replay
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
 from kohakuterrarium.modules.trigger.universal import list_universal_trigger_classes
@@ -72,9 +73,16 @@ def create_tool(
     Lenient mode returns ``None`` on failure; strict mode raises
     :class:`ConfigError`.
     """
+    raw_options = dict(tool_config.options or {})
+    replay_override = None
+    if "request_replay" in raw_options:
+        try:
+            replay_override = validate_request_replay(raw_options.pop("request_replay"))
+        except ValueError as exc:
+            _fail(strict, f"Invalid config value for tool {tool_config.name!r}: {exc}")
+            return None
     match tool_config.type:
         case "builtin":
-            raw_options = dict(tool_config.options or {})
             tool_cfg_keys = {
                 "timeout",
                 "max_output",
@@ -100,6 +108,7 @@ def create_tool(
                 **tool_cfg_values,
                 doc_mode=tool_config.doc_mode,
                 extra=raw_options,
+                request_replay=replay_override,
             )
             tool = get_builtin_tool(tool_config.name, config=tool_cfg)
             if tool is None:
@@ -133,7 +142,9 @@ def create_tool(
                     tool_name=tool_config.name,
                 )
                 return None
-            return CallableTriggerTool(trigger_cls)
+            tool = CallableTriggerTool(trigger_cls)
+            tool.config.request_replay = replay_override
+            return tool
 
         case "custom" | "package":
             if not tool_config.module or not tool_config.class_name:
@@ -152,12 +163,18 @@ def create_tool(
                 )
                 return None
             try:
-                return loader.load_instance(
+                tool = loader.load_instance(
                     module_path=tool_config.module,
                     class_name=tool_config.class_name,
                     module_type=tool_config.type,
-                    options=tool_config.options,
+                    options=raw_options,
                 )
+                if replay_override is not None:
+                    if isinstance(tool, BaseTool):
+                        tool.config.request_replay = replay_override
+                    else:
+                        tool.request_replay = replay_override
+                return tool
             except ModuleLoadError as e:
                 if strict:
                     raise ConfigError(

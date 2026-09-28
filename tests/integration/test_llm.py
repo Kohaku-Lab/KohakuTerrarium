@@ -29,6 +29,8 @@ Why these collaborators are real:
 """
 
 import base64
+import asyncio
+from collections import deque
 import io
 import json
 import time
@@ -88,6 +90,7 @@ from kohakuterrarium.llm.message import (
     messages_to_dicts,
 )
 from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.llm.presets import iter_all_presets, resolve_alias
 from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset, LLMProfile
 from kohakuterrarium.llm.profiles import (
@@ -1009,6 +1012,7 @@ class TestLlmIntegration:
         bad_call = NativeToolCall(id="c2", name="read", arguments="{not json")
         assert bad_call.parsed_arguments() == {"_raw": "{not json"}
 
+    @pytest.mark.timeout(60)
     async def test_multimodal_message_round_trip_workflow(self, tmp_path, monkeypatch):
         """Build a full multimodal conversation and assert exact wire shape.
 
@@ -1602,11 +1606,54 @@ class TestLlmIntegration:
         ws_submissions = []
 
         async def ws_response(socket):
-            while len(ws_submissions) < 4:
+            while len(ws_submissions) < 5:
                 turn = len(ws_submissions)
                 ws_submissions.append(json.loads(await socket.recv()))
                 if turn == 1:
-                    socket.transport.abort()
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "status": 400,
+                                "error": {
+                                    "code": "previous_response_not_found",
+                                    "message": "cache lost",
+                                },
+                            }
+                        )
+                    )
+                    continue
+                if turn == 2:
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "response.created",
+                                "response": {"id": "abandoned"},
+                            }
+                        )
+                    )
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "response.reasoning_text.delta",
+                                "delta": "discarded",
+                            }
+                        )
+                    )
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "response.output_item.done",
+                                "item": {
+                                    "type": "function_call",
+                                    "call_id": "discarded",
+                                    "name": "must_not_run",
+                                    "arguments": "{}",
+                                },
+                            }
+                        )
+                    )
+                    await socket.close(code=1012, reason="restart")
                     return
                 text = large_text if turn == 0 else "continued"
                 response_id = f"ws-response-{turn}"
@@ -1648,6 +1695,7 @@ class TestLlmIntegration:
                     api_key="test",
                     model="vision",
                     base_url=f"http://127.0.0.1:{port}/v1",
+                    retry_policy={"max_retries": 3, "base_delay": 0, "jitter": 0},
                     extra_body={
                         "websocket_mode": True,
                         "websocket_connection_options": {
@@ -1691,7 +1739,12 @@ class TestLlmIntegration:
                     )
                     chunks = [chunk async for chunk in ws_provider.chat(ws_history)]
                     assert chunks == ["continued"]
-                    assert len(ws_submissions) == 3
+                    assert len(ws_submissions) == 4
+                    assert ws_provider.last_tool_calls == []
+                    assert "discarded" not in str(
+                        ws_provider.last_assistant_extra_fields
+                    )
+                    assert ws_submissions[2] == ws_submissions[3]
                     assert ws_submissions[1]["previous_response_id"] == "ws-response-0"
                     assert ws_submissions[1]["input"] == [
                         {
@@ -1717,9 +1770,9 @@ class TestLlmIntegration:
                     assert [chunk async for chunk in ws_provider.chat(ws_history)] == [
                         "continued"
                     ]
-                    assert len(ws_submissions) == 4
-                    assert ws_submissions[3]["previous_response_id"] == "ws-response-2"
-                    assert ws_submissions[3]["input"] == [
+                    assert len(ws_submissions) == 5
+                    assert ws_submissions[4]["previous_response_id"] == "ws-response-3"
+                    assert ws_submissions[4]["input"] == [
                         {
                             "role": "user",
                             "content": [
@@ -1729,6 +1782,154 @@ class TestLlmIntegration:
                     ]
                 finally:
                     await ws_provider.close()
+
+        # Real controller/tool boundary: discard uncommitted native calls, but
+        # never replay text that the parser could already have dispatched.
+        for provider_type in (OpenAIProvider, CodexOAuthProvider):
+            for mode in ("native", "bracket"):
+                submissions = []
+
+                async def tool_response(socket):
+                    while True:
+                        request = json.loads(await socket.recv())
+                        submissions.append(request)
+                        attempt = len(submissions)
+                        if mode == "bracket":
+                            await socket.send(
+                                json.dumps(
+                                    {
+                                        "type": "response.output_text.delta",
+                                        "delta": "visible before failure [/scratchpad]@@action=set\n@@key=once\n@@value=kept\n[scratchpad/]",
+                                    }
+                                )
+                            )
+                            await socket.close(code=1012, reason="restart")
+                            return
+                        await socket.send(
+                            json.dumps(
+                                {
+                                    "type": "response.created",
+                                    "response": {"id": f"r{attempt}"},
+                                }
+                            )
+                        )
+                        if attempt <= 2:
+                            await socket.send(
+                                json.dumps(
+                                    {
+                                        "type": "response.output_item.done",
+                                        "item": {
+                                            "type": "function_call",
+                                            "call_id": f"call{attempt}",
+                                            "name": "scratchpad",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "action": "set",
+                                                    "key": (
+                                                        "discarded"
+                                                        if attempt == 1
+                                                        else "once"
+                                                    ),
+                                                    "value": "kept",
+                                                }
+                                            ),
+                                        },
+                                    }
+                                )
+                            )
+                        else:
+                            await socket.send(
+                                json.dumps(
+                                    {
+                                        "type": "response.output_text.delta",
+                                        "delta": "recovered",
+                                    }
+                                )
+                            )
+                        if attempt == 1:
+                            await socket.send(
+                                json.dumps(
+                                    {
+                                        "type": "error",
+                                        "status": 400,
+                                        "error": {
+                                            "code": "websocket_connection_limit_reached",
+                                            "message": "expired",
+                                        },
+                                    }
+                                )
+                            )
+                            await socket.wait_closed()
+                            return
+                        await socket.send(
+                            json.dumps(
+                                {
+                                    "type": "response.completed",
+                                    "response": {"id": f"r{attempt}", "output": []},
+                                }
+                            )
+                        )
+                        if attempt == 3:
+                            await socket.wait_closed()
+                            return
+
+                async with serve(tool_response, "127.0.0.1", 0) as server:
+                    port = server.sockets[0].getsockname()[1]
+                    provider = provider_type(
+                        api_key="test",
+                        model="offline",
+                        base_url=f"http://127.0.0.1:{port}/v1",
+                        websocket_mode=True,
+                        retry_policy={"max_retries": 3, "base_delay": 0, "jitter": 0},
+                    )
+                    config = tmp_path / "ws-tool.yaml"
+                    config.write_text(
+                        f"name: ws_probe\nsystem_prompt: offline\ntool_format: {mode}\ninput: {{type: none}}\noutput: {{type: stdout}}\ntools: [{{name: scratchpad, type: builtin}}]\n"
+                    )
+                    queue, log = asyncio.Queue(), deque()
+                    async with Terrarium(
+                        session_dir=tmp_path / f"ws-{provider_type.__name__}-{mode}"
+                    ) as engine:
+                        creature = await engine.add_creature(
+                            str(config), llm=provider, io="headless", start=True
+                        )
+                        creature.agent.output_router.add_secondary(
+                            StreamOutput("ws_probe", queue, log, agent=creature.agent)
+                        )
+                        result = await creature.run(
+                            "remember once", timeout=10, raise_on_error=False
+                        )
+                        assert creature.agent.scratchpad.get("discarded") is None
+                        assert creature.agent.scratchpad.get("once") == "kept"
+                        if provider_type is CodexOAuthProvider:
+                            assert any(
+                                tool["type"] == "image_generation"
+                                for tool in submissions[0]["tools"]
+                            )
+                        assert all(
+                            "request_replay" not in tool
+                            for tool in submissions[0].get("tools", [])
+                        )
+                        if mode == "native":
+                            assert result.text == "recovered"
+                            assert result.ok
+                            assert len(submissions) == 3
+                            assert submissions[0] == submissions[1]
+                        else:
+                            assert result.status == "error"
+                            assert "visible before failure" in result.text
+                            assert len(submissions) == 1
+                        frames = []
+                        while not queue.empty():
+                            frames.append(queue.get_nowait())
+                        statuses = [f for f in frames if f["type"] == "model_recovery"]
+                        assert [f["phase"] for f in statuses] == (
+                            ["reconnecting", None] if mode == "native" else []
+                        )
+                        assert not any(f["type"] == "model_recovery" for f in log)
+                        events = creature.agent.session_store.get_events("ws_probe")
+                        assert not any(e["type"] == "model_recovery" for e in events)
+                    await provider.close()
 
         # A real agent executes a signed Google tool round and resumes its history.
         for is_claude in (False, True):

@@ -69,6 +69,7 @@ class TestGrokTokens:
         )
         monkeypatch.setenv("GROK_HOME", str(grok_home))
         monkeypatch.setenv("OPENCODE_AUTH_FILE", str(opencode))
+        monkeypatch.setattr(grok_auth, "_grok_cli_executable", lambda: None)
 
         monkeypatch.setattr(grok_auth, "_grok_cli_executable", lambda: None)
         candidates = GrokTokens.load_candidates()

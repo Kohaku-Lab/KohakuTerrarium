@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from kohakuterrarium.builtin_skills import get_builtin_tool_doc
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
+from kohakuterrarium.modules.tool.request_replay import RequestReplay
 from kohakuterrarium.modules.tool.runtime_options import validate_tool_options
 from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
@@ -39,6 +40,7 @@ class ToolConfig:
     # Per-tool documentation tier; None defers to the creature default.
     doc_mode: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+    request_replay: RequestReplay | None = None
 
 
 @dataclass
@@ -161,6 +163,7 @@ class BaseTool:
     # Native tools remain in inventory but must be executed by the provider,
     # never by the local runner. Unsupported explicit registrations are dropped.
     is_provider_native: bool = False
+    request_replay: RequestReplay = "allow"
     provider_support: frozenset[str] = frozenset()
 
     @classmethod

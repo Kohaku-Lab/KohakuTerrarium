@@ -4,6 +4,7 @@ Provide streaming and complete chat access to OpenAI-compatible endpoints.
 
 import asyncio
 from contextlib import aclosing
+from copy import deepcopy
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -48,6 +49,8 @@ from kohakuterrarium.llm.recovery import (
     retry_delay,
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
+from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
+from kohakuterrarium.llm.responses_tools import prepare_request_tools
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -258,9 +261,8 @@ class OpenAIProvider(BaseLLMProvider):
     def _sanitize_extra_body(self, extra: dict[str, Any]) -> dict[str, Any]:
         """Remove framework-only request knobs before provider submission."""
         knobs = ws_options.FRAMEWORK_KNOBS
-        if not any(k in extra for k in knobs):
-            return extra
-        return {k: v for k, v in extra.items() if k not in knobs}
+        wire = {k: v for k, v in extra.items() if k not in knobs}
+        return prepare_request_tools(wire)[0]
 
     def _prompt_cache_request_kwargs(self) -> dict[str, Any]:
         """Return provider-specific request fields for stable cache routing."""
@@ -276,46 +278,64 @@ class OpenAIProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream chat completion with KT-side retry and overflow recovery."""
-        current = messages
+        current = deepcopy(messages) if self._websocket_mode else messages
+        if self._websocket_mode:
+            kwargs = deepcopy(kwargs)
+            kwargs["_ws_recovery"] = WSRecovery(self._retry_policy)
+        recovery = kwargs.get("_ws_recovery")
         attempt = 0
         overflow_state = OverflowRecoveryState()
-        while True:
-            try:
-                async with aclosing(
-                    self._raw_stream_chat(current, tools=tools, **kwargs)
-                ) as stream:
-                    async for chunk in stream:
-                        yield chunk
-                return
-            except Exception as exc:
-                if isinstance(exc, ResponsesWSError) and (
-                    exc.submitted or exc.mid_stream
-                ):
-                    raise
-                cls = classify_openai_error(exc)
-                if cls is ErrorClass.OVERFLOW:
-                    replacement = await self._recover_from_overflow(
-                        current, overflow_state
-                    )
-                    if replacement is not None:
-                        current = replacement
+        try:
+            while True:
+                try:
+                    async with aclosing(
+                        self._raw_stream_chat(current, tools=tools, **kwargs)
+                    ) as stream:
+                        async for chunk in stream:
+                            if recovery is not None and chunk:
+                                recovery.delivered = True
+                            yield chunk
+                    return
+                except Exception as exc:
+                    if recovery is not None and (
+                        recovery.delivered or not recovery.has_budget
+                    ):
+                        raise
+                    if isinstance(exc, ResponsesWSError) and (
+                        exc.submitted or exc.mid_stream
+                    ):
+                        raise
+                    cls = classify_openai_error(exc)
+                    if cls is ErrorClass.OVERFLOW:
+                        replacement = await self._recover_from_overflow(
+                            current, overflow_state
+                        )
+                        if replacement is not None:
+                            current = replacement
+                            continue
+                    if (
+                        cls in self._retry_policy.retry_classes
+                        and attempt < self._retry_policy.max_retries
+                    ):
+                        attempt += 1
+                        delay = retry_delay(exc, attempt, self._retry_policy)
+                        logger.warning(
+                            "provider_retry",
+                            attempt=attempt,
+                            error_class=cls.value,
+                            delay=delay,
+                            error=str(exc),
+                        )
+                        if recovery is not None:
+                            await recovery.status(
+                                "waiting" if delay else "reconnecting"
+                            )
+                        await asyncio.sleep(delay)
                         continue
-                if (
-                    cls in self._retry_policy.retry_classes
-                    and attempt < self._retry_policy.max_retries
-                ):
-                    attempt += 1
-                    delay = retry_delay(exc, attempt, self._retry_policy)
-                    logger.warning(
-                        "provider_retry",
-                        attempt=attempt,
-                        error_class=cls.value,
-                        delay=delay,
-                        error=str(exc),
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                raise
+                    raise
+        finally:
+            if recovery is not None:
+                await recovery.status(None)
 
     async def _raw_stream_chat(
         self,
@@ -328,7 +348,8 @@ class OpenAIProvider(BaseLLMProvider):
         self._last_tool_calls = []
         self._last_assistant_extra_fields = {}
 
-        if self._websocket_mode:
+        recovery = kwargs.get("_ws_recovery")
+        if self._websocket_mode and not (recovery and recovery.http):
             session = self._ws_session_for_turn()
             if session is not None:
                 try:
@@ -345,6 +366,8 @@ class OpenAIProvider(BaseLLMProvider):
                         "Responses WebSocket turn unavailable, using HTTP",
                         error=str(exc),
                     )
+        if recovery is not None:
+            recovery.http = True
         # An HTTP turn advances the conversation past the WS-side cache.
         if self._ws_session is not None:
             self._ws_session.invalidate()
@@ -398,9 +421,13 @@ class OpenAIProvider(BaseLLMProvider):
         reasoning_text_seen = False
         reasoning_details_seen = False
 
+        if recovery is not None:
+            recovery.record_submission()
         stream = await self._client.chat.completions.create(**create_kwargs)
 
         async for chunk in stream:
+            if recovery is not None:
+                await recovery.status(None)
             if chunk.usage:
                 self._last_usage = extract_usage(chunk.usage)
 

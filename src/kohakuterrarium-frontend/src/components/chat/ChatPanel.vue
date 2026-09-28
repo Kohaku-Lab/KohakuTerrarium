@@ -375,8 +375,10 @@ const pendingCount = computed(() => {
 const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.value.length > 0)
 
 const viewRunningJobCount = computed(() => chat.runningJobCountForTab(viewActiveTab.value))
+const viewModelRecovery = computed(() => chat.modelRecoveryForTab?.(viewActiveTab.value))
 
 const showKohakUwUingIndicator = computed(() => {
+  if (viewModelRecovery.value) return true
   if (viewRunningJobCount.value > 0) return true
   if (!props.groupId || isFocusedGroup.value) {
     return chat.processing && chat.viewingRunningBranch
@@ -426,6 +428,10 @@ function renderTranscriptMessage(message, context) {
 const kohakuwuingLabel = computed(() => {
   const streaming = !props.groupId || isFocusedGroup.value ? chat.processing && chat.viewingRunningBranch : viewProcessing.value
   const bgCount = viewRunningJobCount.value
+  if (viewModelRecovery.value) {
+    const key = viewModelRecovery.value === "waiting" ? "chat.processingRetry" : "chat.processingRecovery"
+    return t(bgCount ? `${key}Bg` : key, { n: bgCount })
+  }
   if (streaming && bgCount) return t("chat.processingStreamingBg", { n: bgCount })
   if (streaming) return t("chat.processingStreaming")
   if (bgCount) return t("chat.processingWaitingBg", { n: bgCount })

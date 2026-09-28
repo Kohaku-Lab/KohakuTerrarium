@@ -12,7 +12,11 @@ from kohakuterrarium.llm.message import (
     normalize_content_parts,
 )
 from kohakuterrarium.modules.output.event import UIReply
-from kohakuterrarium.studio.attach._event_stream import StreamOutput, get_event_log
+from kohakuterrarium.studio.attach._event_stream import (
+    StreamOutput,
+    get_event_log,
+    model_recovery_snapshot,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
@@ -114,6 +118,15 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                 )  # type: ignore[arg-type]
                 sibling.agent.output_router.add_secondary(sib_module)
                 sibling_modules.append((sibling.agent, sib_module))
+                sink.send_json_nowait(
+                    {
+                        "type": "activity",
+                        "activity_type": "session_info",
+                        "source": sibling.name,
+                        "ts": time.time(),
+                        "model_recovery": model_recovery_snapshot(sibling.agent),
+                    }
+                )
 
         # Replay precedes live delivery so an attach starts with a coherent channel view.
         channel_cbs = self._register_channel_callbacks(creature.graph_id, sink)
@@ -135,6 +148,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
             "source": creature.name,
             "model": agent.config.model,
             "agent_name": creature.name,
+            "model_recovery": model_recovery_snapshot(agent),
             "ts": time.time(),
         }
         return {"setup": session_info}

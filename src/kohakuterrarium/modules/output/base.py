@@ -145,6 +145,8 @@ class BaseOutputModule(ABC):
     async def emit(self, event: OutputEvent) -> None:
         """Forward typed events to legacy methods for backward-compatible outputs."""
         match event.type:
+            case "model_recovery":
+                pass
             case "text":
                 content = event.content
                 if isinstance(content, str):

@@ -29,21 +29,15 @@ from kohakuterrarium.llm.base import (
 from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
 from kohakuterrarium.llm.codex_format import (
     fix_tool_call_pairing,
-    maybe_capture_stream_rate_limit,
     to_responses_input,
 )
 from kohakuterrarium.llm.codex_image_gen import (
-    build_image_part,
     translate_image_gen_tool,
 )
 from kohakuterrarium.llm.codex_rate_limits import (
     capture_rate_limit_headers as _capture_rate_limit_headers,
-    parse_rate_limit_event,
-    UsageSnapshot,
-    set_cached,
 )
-from kohakuterrarium.llm.openai_sanitize import strip_surrogates
-from kohakuterrarium.llm.openai_ws import record_ws_assistant_echo
+from kohakuterrarium.llm.codex_stream import process_codex_event, stream_codex_ws_turn
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
@@ -52,6 +46,9 @@ from kohakuterrarium.llm.recovery import (
     classify_openai_error,
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
+from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
+from kohakuterrarium.llm.responses_tools import prepare_request_tools
+from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -262,67 +259,85 @@ class CodexOAuthProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Stream with classified retries and two-stage overflow recovery."""
-        current = messages
+        current = deepcopy(messages) if self._websocket_mode else messages
+        if self._websocket_mode:
+            kwargs = deepcopy(kwargs)
+            kwargs["_ws_recovery"] = WSRecovery(self._retry_policy)
+        recovery = kwargs.get("_ws_recovery")
         attempt = 0
         auth_retry = False
         overflow_state = OverflowRecoveryState()
-        while True:
-            emitted = False
-            try:
-                async with aclosing(
-                    self._raw_stream_chat(
-                        current,
-                        tools=tools,
-                        provider_native_tools=provider_native_tools,
-                        **kwargs,
-                    )
-                ) as stream:
-                    async for chunk in stream:
-                        emitted = True
-                        yield chunk
-                return
-            except Exception as exc:
-                if isinstance(exc, ResponsesWSError) and (
-                    exc.submitted or exc.mid_stream
-                ):
-                    raise
-                cls = classify_openai_error(exc)
-                if (
-                    not auth_retry
-                    and not emitted
-                    and not self._api_key
-                    and self._is_unauthorized_error(exc)
-                ):
-                    auth_retry = True
-                    if await self._recover_unauthorized():
-                        logger.warning(
-                            "Codex credential rejected; retrying with refreshed token",
-                            error_class=cls.value,
+        try:
+            while True:
+                emitted = False
+                try:
+                    async with aclosing(
+                        self._raw_stream_chat(
+                            current,
+                            tools=tools,
+                            provider_native_tools=provider_native_tools,
+                            **kwargs,
                         )
+                    ) as stream:
+                        async for chunk in stream:
+                            emitted = True
+                            if recovery is not None and chunk:
+                                recovery.delivered = True
+                            yield chunk
+                    return
+                except Exception as exc:
+                    if recovery is not None and (
+                        recovery.delivered or not recovery.has_budget
+                    ):
+                        raise
+                    if isinstance(exc, ResponsesWSError) and (
+                        exc.submitted or exc.mid_stream
+                    ):
+                        raise
+                    cls = classify_openai_error(exc)
+                    if (
+                        not auth_retry
+                        and not emitted
+                        and not self._api_key
+                        and self._is_unauthorized_error(exc)
+                    ):
+                        auth_retry = True
+                        if await self._recover_unauthorized():
+                            logger.warning(
+                                "Codex credential rejected; retrying with refreshed token",
+                                error_class=cls.value,
+                            )
+                            continue
+                    if cls is ErrorClass.OVERFLOW:
+                        replacement = await self._recover_from_overflow(
+                            current, overflow_state
+                        )
+                        if replacement is not None:
+                            current = replacement
+                            continue
+                    if (
+                        cls in self._retry_policy.retry_classes
+                        and attempt < self._retry_policy.max_retries
+                    ):
+                        attempt += 1
+                        delay = backoff_delay(attempt, self._retry_policy)
+                        logger.warning(
+                            "provider_retry",
+                            attempt=attempt,
+                            error_class=cls.value,
+                            delay=delay,
+                            error=str(exc),
+                        )
+                        if recovery is not None:
+                            await recovery.status(
+                                "waiting" if delay else "reconnecting"
+                            )
+                        await asyncio.sleep(delay)
                         continue
-                if cls is ErrorClass.OVERFLOW:
-                    replacement = await self._recover_from_overflow(
-                        current, overflow_state
-                    )
-                    if replacement is not None:
-                        current = replacement
-                        continue
-                if (
-                    cls in self._retry_policy.retry_classes
-                    and attempt < self._retry_policy.max_retries
-                ):
-                    attempt += 1
-                    delay = backoff_delay(attempt, self._retry_policy)
-                    logger.warning(
-                        "provider_retry",
-                        attempt=attempt,
-                        error_class=cls.value,
-                        delay=delay,
-                        error=str(exc),
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                raise
+                    raise
+        finally:
+            if recovery is not None:
+                await recovery.status(None)
 
     async def _raw_stream_chat(
         self,
@@ -379,6 +394,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                 spec = self.translate_provider_native_tool(native)
                 if spec is None:
                     continue
+                spec = {**spec, "request_replay": tool_request_replay(native)}
                 api_tools = (api_tools or []) + [spec]
                 if spec.get("type") == "image_generation":
                     self._image_gen_output_format = spec.get("output_format", "png")
@@ -409,7 +425,8 @@ class CodexOAuthProvider(BaseLLMProvider):
 
         collected_tool_calls: list[NativeToolCall] = []
 
-        if self._websocket_mode:
+        recovery = kwargs.get("_ws_recovery")
+        if self._websocket_mode and not (recovery and recovery.http):
             session = self._ws_session_for_turn(session_headers)
             if session is not None:
                 base_event: dict[str, Any] = {
@@ -422,25 +439,20 @@ class CodexOAuthProvider(BaseLLMProvider):
                 }
                 if api_tools:
                     base_event["tools"] = api_tools
-                output_text: list[str] = []
                 try:
                     async with aclosing(
-                        session.stream_turn(
-                            base_event, api_input, fix_tool_call_pairing
+                        stream_codex_ws_turn(
+                            self,
+                            session,
+                            base_event,
+                            api_input,
+                            echo_options,
+                            kwargs.get("_ws_recovery")
+                            or WSRecovery(self._retry_policy),
                         )
                     ) as stream:
-                        async for event in stream:
-                            piece = self._process_stream_event(
-                                event, collected_tool_calls
-                            )
-                            if piece is not None:
-                                output_text.append(piece)
-                                yield piece
-                    self._last_assistant_extra_fields = self._reasoning.fields()
-                    self._last_tool_calls = collected_tool_calls
-                    record_ws_assistant_echo(
-                        session, self, "".join(output_text), echo_options
-                    )
+                        async for piece in stream:
+                            yield piece
                     return
                 except ResponsesWSError as exc:
                     if exc.mid_stream or exc.submitted:
@@ -449,6 +461,8 @@ class CodexOAuthProvider(BaseLLMProvider):
                         "Codex WebSocket turn unavailable, using HTTP",
                         error=str(exc),
                     )
+        if recovery is not None:
+            recovery.http = True
         # An HTTP turn advances the conversation past the WS-side cache.
         if self._ws_session is not None:
             self._ws_session.invalidate()
@@ -456,10 +470,15 @@ class CodexOAuthProvider(BaseLLMProvider):
         if session_headers:
             extra_params["extra_headers"] = session_headers
         if wire_extra:
-            extra_params["extra_body"] = wire_extra
+            extra_params["extra_body"] = prepare_request_tools(wire_extra)[0]
+        api_tools = prepare_request_tools({"tools": api_tools})[0]["tools"]
 
+        client = self._client
+        if recovery is not None:
+            recovery.record_submission()
+            client = client.with_options(max_retries=0)
         try:
-            stream = await self._client.responses.create(
+            stream = await client.responses.create(
                 model=self.model,
                 instructions=instr_text,
                 # Keep parallel calls together with their matching outputs.
@@ -475,6 +494,8 @@ class CodexOAuthProvider(BaseLLMProvider):
             raise
 
         async for event in stream:
+            if recovery is not None:
+                await recovery.status(None)
             piece = self._process_stream_event(event, collected_tool_calls)
             if piece is not None:
                 yield piece
@@ -532,58 +553,13 @@ class CodexOAuthProvider(BaseLLMProvider):
         return self._ws_session
 
     def _process_stream_event(
-        self, event: Any, collected_tool_calls: list[NativeToolCall]
+        self,
+        event: Any,
+        collected_tool_calls: list[NativeToolCall],
+        image_parts: list | None = None,
     ) -> str | None:
-        """Fold one Responses stream event into provider state; return text."""
-        # Generic SDK events may carry fresher inline rate-limit payloads.
-        maybe_capture_stream_rate_limit(
-            event, parse_rate_limit_event, UsageSnapshot, set_cached
-        )
-        self._reasoning.consume(event)
-
-        match getattr(event, "type", ""):
-            case "response.output_text.delta":
-                piece = strip_surrogates(event.delta)
-                self._reasoning.consume_output_text(piece)
-                return piece
-            case "response.output_item.done":
-                item = event.item
-                itype = getattr(item, "type", "")
-                if itype == "function_call":
-                    call_id = getattr(item, "call_id", "")
-                    self._reasoning.consume_function_call(call_id)
-                    collected_tool_calls.append(
-                        NativeToolCall(
-                            id=call_id,
-                            name=getattr(item, "name", "") or "",
-                            arguments=getattr(item, "arguments", ""),
-                        )
-                    )
-                elif itype == "image_generation_call":
-                    # Image bytes are available before the item status completes.
-                    self._handle_image_generation_call(item)
-            case "response.completed":
-                resp = getattr(event, "response", None)
-                if resp:
-                    u = getattr(resp, "usage", None)
-                    if u:
-                        cached = 0
-                        details = getattr(u, "input_tokens_details", None)
-                        if details:
-                            cached = getattr(details, "cached_tokens", 0) or 0
-                        self._last_usage = {
-                            "prompt_tokens": getattr(u, "input_tokens", 0),
-                            "completion_tokens": getattr(u, "output_tokens", 0),
-                            "total_tokens": getattr(u, "total_tokens", 0),
-                            "cached_tokens": cached,
-                        }
-        return None
-
-    def _handle_image_generation_call(self, item: Any) -> None:
-        """Append an ImagePart for an ``image_generation_call`` item."""
-        part = build_image_part(item, self._image_gen_output_format)
-        if part is not None:
-            self._last_assistant_parts.append(part)
+        """Fold one HTTP or WebSocket event into the current attempt."""
+        return process_codex_event(self, event, collected_tool_calls, image_parts)
 
     async def _reset_ws_session(self) -> None:
         """Drop the WebSocket session so the next turn reconnects with fresh auth."""
