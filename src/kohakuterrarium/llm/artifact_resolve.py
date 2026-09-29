@@ -112,10 +112,10 @@ def resolve_message_image_urls(
             if (
                 isinstance(part, dict)
                 and part.get("type") == "image_url"
-                and isinstance(part.get("image_url"), dict)
+                and isinstance(part.get("image_url"), (dict, str))
             ):
                 iu = part["image_url"]
-                url = iu.get("url")
+                url = iu.get("url") if isinstance(iu, dict) else iu
                 resolved = resolve_artifact_url(url) if isinstance(url, str) else url
                 if isinstance(resolved, str) and _is_unresolved_local_media(resolved):
                     logger.warning(
@@ -125,7 +125,10 @@ def resolve_message_image_urls(
                     msg_changed = True
                     continue
                 if resolved is not url and resolved != url:
-                    new_content.append({**part, "image_url": {**iu, "url": resolved}})
+                    image_url = (
+                        {**iu, "url": resolved} if isinstance(iu, dict) else resolved
+                    )
+                    new_content.append({**part, "image_url": image_url})
                     msg_changed = True
                     continue
             new_content.append(part)

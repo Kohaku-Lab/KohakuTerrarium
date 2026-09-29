@@ -25,6 +25,64 @@ from kohakuterrarium.llm.codex_rate_limits import (
 
 
 class TestToResponsesInput:
+    @pytest.mark.parametrize("role", ["user", "tool"])
+    @pytest.mark.parametrize("as_object", [False, True])
+    @pytest.mark.parametrize("reference_kind", ["file", "artifact"])
+    def test_missing_images_are_omitted_without_mutating_history(
+        self, tmp_path, monkeypatch, role, as_object, reference_kind
+    ):
+        monkeypatch.setattr(artifact_resolve, "_session_dir", lambda: tmp_path)
+        url = (
+            (tmp_path / "missing 頁.png").as_uri()
+            if reference_kind == "file"
+            else "/api/sessions/sid/artifacts/missing.png"
+        )
+        inline = "data:image/png;base64,QUJD"
+        messages = [
+            {
+                "role": role,
+                "tool_call_id": "read1",
+                "content": [
+                    {"type": "text", "text": "keep this"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": url} if as_object else url,
+                    },
+                    {"type": "image_url", "image_url": {"url": inline}},
+                ],
+            }
+        ]
+        original = deepcopy(messages)
+        items = to_responses_input(messages)
+        parts = [
+            {"type": "input_text", "text": "keep this"},
+            {"type": "input_image", "image_url": inline},
+        ]
+        expected = (
+            {"role": "user", "content": parts}
+            if role == "user"
+            else {"type": "function_call_output", "call_id": "read1", "output": parts}
+        )
+        assert items == [expected]
+        assert messages == original
+
+    @pytest.mark.parametrize("role", ["user", "tool"])
+    def test_missing_image_only_message_keeps_tool_pairing(self, tmp_path, role):
+        url = (tmp_path / "removed.png").as_uri()
+        messages = [
+            {
+                "role": role,
+                "tool_call_id": "read1",
+                "content": [{"type": "image_url", "image_url": {"url": url}}],
+            }
+        ]
+        expected = (
+            []
+            if role == "user"
+            else [{"type": "function_call_output", "call_id": "read1", "output": ""}]
+        )
+        assert to_responses_input(messages) == expected
+
     @pytest.mark.parametrize("model", ["slurm/ds", "kimi-k2", "glm-5", "alias"])
     def test_explicit_replay_preserves_reasoning_for_aliases(self, model):
         messages = [
