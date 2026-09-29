@@ -173,6 +173,10 @@ Anthropic-compatible endpoints also get automatic prompt-caching markers
 applied to the system message and the last three non-tool conversation
 messages unless you set `extra_body.disable_prompt_caching: true`.
 
+Missing local image files and unavailable session-artifact images are skipped
+when sending conversation history, including Responses HTTP and WebSocket
+requests. The stored conversation retains its original references.
+
 Responses transports (`codex` over HTTP or WebSocket, and `openai` with
 `websocket_mode: true`) accept the framework setting
 `extra_body.responses_reasoning_replay`. Set it to `true` only for a target

@@ -1606,7 +1606,7 @@ class TestLlmIntegration:
         ws_submissions = []
 
         async def ws_response(socket):
-            while len(ws_submissions) < 5:
+            while len(ws_submissions) < 6:
                 turn = len(ws_submissions)
                 ws_submissions.append(json.loads(await socket.recv()))
                 if turn == 1:
@@ -1691,6 +1691,7 @@ class TestLlmIntegration:
             port = server.sockets[0].getsockname()[1]
             for provider_type in (OpenAIProvider, CodexOAuthProvider):
                 ws_submissions.clear()
+                source.write_bytes(image_bytes)
                 ws_provider = provider_type(
                     api_key="test",
                     model="vision",
@@ -1780,8 +1781,30 @@ class TestLlmIntegration:
                             ],
                         }
                     ]
+                    # Deleting a previously sent file changes the request prefix.
+                    # Neither WS provider may replay the stale local URL or use
+                    # the previous response's image-bearing cached context.
+                    source.unlink()
+                    ws_history.extend(
+                        [
+                            {"role": "assistant", "content": "continued"},
+                            {"role": "user", "content": "Continue without the file"},
+                        ]
+                    )
+                    saved_history = json.dumps(ws_history)
+                    assert [chunk async for chunk in ws_provider.chat(ws_history)] == [
+                        "continued"
+                    ]
+                    assert len(ws_submissions) == 6
+                    assert "previous_response_id" not in ws_submissions[5]
+                    assert ws_submissions[5]["input"][0]["content"] == [
+                        {"type": "input_text", "text": "Inspect"}
+                    ]
+                    assert file_reference not in json.dumps(ws_submissions[5])
+                    assert json.dumps(ws_history) == saved_history
                 finally:
                     await ws_provider.close()
+                    source.write_bytes(image_bytes)
 
         # Real controller/tool boundary: discard uncommitted native calls, but
         # never replay text that the parser could already have dispatched.

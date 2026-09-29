@@ -6,6 +6,7 @@ from typing import Any
 from kohakuterrarium.llm.artifact_resolve import (
     resolve_artifact_url as _resolve_artifact_url,
 )
+from kohakuterrarium.llm.artifact_resolve import resolve_message_image_urls
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -25,6 +26,9 @@ def to_responses_input(
     items: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.get("role")
+        if role in ("user", "tool"):
+            # Filter unavailable images without changing the stored messages.
+            msg = resolve_message_image_urls([msg])[0]
         content = msg.get("content", "")
         if role == "user":
             item = _user_item(content)
