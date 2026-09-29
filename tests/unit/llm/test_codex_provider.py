@@ -1,16 +1,9 @@
-"""Unit tests for ``llm/codex_provider.py`` auth-mode selection.
-
-Behavior-first: the Codex provider is the OpenAI Responses-API transport.
-With an explicit ``api_key`` it authenticates against a custom ``base_url``
-using API-key auth and MUST skip the Codex OAuth login; with no key it
-falls back to the ChatGPT-subscription OAuth flow (tokens). These tests
-pin the client-construction, mode-selection, and token-reload paths
-without external network/OAuth.
-"""
+"""Exercise Codex authentication, request projection, and streaming transports."""
 
 import asyncio
 import json
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 
 import pytest
@@ -488,6 +481,33 @@ class TestSessionIdHeaderGating:
 
 
 class TestReasoningReplay:
+    @pytest.mark.parametrize("websocket", [False, True])
+    async def test_image_limit_preserves_history_on_both_transports(self, websocket):
+        p = CodexOAuthProvider(model="m", websocket_mode=websocket)
+        p._tokens = _FakeTokens()
+        p._client = _FakeWSClient() if websocket else _FakeClient()
+        if websocket:
+            p._client.responses.connection.scripts = [[_ws_completed()]]
+        parts = [
+            {"type": "image_url", "image_url": f"https://example.invalid/{i}.png"}
+            for i in range(51)
+        ]
+        messages = [{"role": "user", "content": parts}]
+        original = deepcopy(messages)
+        _ = [chunk async for chunk in p._raw_stream_chat(messages)]
+        request = (
+            p._client.responses.connection.sent[-1]
+            if websocket
+            else p._client.responses.kwargs
+        )
+        images = [
+            part["image_url"]
+            for part in request["input"][0]["content"]
+            if part["type"] == "input_image"
+        ]
+        assert images == [part["image_url"] for part in parts[1:]]
+        assert messages == original
+
     @pytest.mark.parametrize(
         "model, replay, expected",
         [
