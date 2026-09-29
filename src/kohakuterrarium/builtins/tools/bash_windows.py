@@ -1,12 +1,33 @@
 """Discover common Git Bash installation paths on Windows."""
 
 import os
+import shutil
 from pathlib import Path
+
+
+def _git_install_roots() -> list[Path]:
+    """Return Git installation roots inferred from the active git executable."""
+    git_executable = shutil.which("git")
+    if not git_executable:
+        return []
+    return [
+        parent
+        for parent in Path(git_executable).parents
+        if parent.name.casefold() == "git"
+    ]
 
 
 def windows_git_bash_candidates() -> list[str]:
     """Return likely ``bash.exe`` paths in discovery priority order."""
     candidates: list[str] = []
+    for root in _git_install_roots():
+        candidates.extend(
+            [
+                str(root / "bin" / "bash.exe"),
+                str(root / "usr" / "bin" / "bash.exe"),
+            ]
+        )
+
     program_files = [
         os.environ.get("ProgramW6432"),
         os.environ.get("ProgramFiles"),
