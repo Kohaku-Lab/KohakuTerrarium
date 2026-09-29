@@ -1112,6 +1112,78 @@ class TestLlmIntegration:
         #    stable, which is what makes session resume safe.
         assert [m.to_dict() for m in rebuilt] == wire
 
+        switched = [
+            SystemMessage("\n\n"),
+            UserMessage([TextPart("\n\n"), image]),
+            AssistantMessage(
+                "\n\n",
+                tool_calls=[
+                    {
+                        "id": "blank-call",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{}"},
+                    }
+                ],
+            ),
+            ToolMessage("", tool_call_id="blank-call"),
+            AssistantMessage("\n\n"),
+            UserMessage("  Continue.\n"),
+        ]
+        switched_wire = messages_to_dicts(switched)
+        saved_switched = json.dumps(switched_wire)
+        blank_requests = []
+        blank_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=blank_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await blank_provider.chat_complete(switched_wire)
+            ).content == ANTHROPIC_ANSWER
+        finally:
+            await blank_provider.close()
+        assert json.dumps(switched_wire) == saved_switched
+        assert messages_to_dicts(dicts_to_messages(switched_wire)) == switched_wire
+        assert "system" not in blank_requests[0]
+        assert blank_requests[0]["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AAAA",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "blank-call",
+                        "name": "read",
+                        "input": {},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "blank-call",
+                        "content": "",
+                    }
+                ],
+            },
+            {"role": "user", "content": "  Continue.\n"},
+        ]
+
         # Text-only content stays a plain string, never a list.
         assert make_multimodal_content("just text", images=None) == "just text"
         assert UserMessage("plain").to_dict() == {

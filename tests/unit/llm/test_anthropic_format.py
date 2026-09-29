@@ -8,6 +8,9 @@ usage accounting, and the cache-marker placement helpers.
 """
 
 import base64
+from copy import deepcopy
+
+import pytest
 
 import pytest
 
@@ -135,6 +138,49 @@ class TestAnthropicTools:
 
 
 class TestPrepareMessages:
+    @pytest.mark.parametrize("role", ["system", "user", "assistant"])
+    @pytest.mark.parametrize(
+        "blank", ["", " \t\r\n", [{"type": "text", "text": "\n\n"}]]
+    )
+    def test_blank_ordinary_messages_are_omitted(self, role, blank):
+        messages = [{"role": role, "content": blank}]
+        original = deepcopy(messages)
+        assert prepare_messages(messages) == ("", [])
+        assert messages == original
+
+    def test_blank_assistant_preserves_calls_and_empty_results(self):
+        messages = [
+            {"role": "user", "content": "  run it\n"},
+            {
+                "role": "assistant",
+                "content": "\n\n",
+                "tool_calls": [
+                    {"id": "call", "function": {"name": "read", "arguments": "{}"}}
+                ],
+            },
+            {"role": "assistant", "content": "\n\n"},
+            {"role": "tool", "tool_call_id": "call", "content": ""},
+            {"role": "assistant", "content": "  done\n"},
+        ]
+        original = deepcopy(messages)
+        assert prepare_messages(messages)[1] == [
+            {"role": "user", "content": "  run it\n"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "call", "name": "read", "input": {}}
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "call", "content": ""}
+                ],
+            },
+            {"role": "assistant", "content": [{"type": "text", "text": "  done\n"}]},
+        ]
+        assert messages == original
+
     def test_system_messages_joined_and_split_from_body(self):
         system, body = prepare_messages(
             [
@@ -204,6 +250,40 @@ class TestPrepareMessages:
 
 
 class TestAssistantMessage:
+    def test_cached_native_blank_text_preserves_signed_and_tool_blocks(self):
+        native = [
+            {"type": "text", "text": "\n\n", "cache_control": {"type": "ephemeral"}},
+            {"type": "thinking", "thinking": " signed thought ", "signature": "sig"},
+            {"type": "redacted_thinking", "data": "opaque"},
+            {"type": "text", "text": "  meaningful\n"},
+            {"type": "tool_use", "id": "call", "name": "read", "input": {}},
+        ]
+        msg = {
+            "role": "assistant",
+            "content": "\n\n",
+            KT_CONTENT_KEY: native,
+            "tool_calls": [{"id": "call"}],
+        }
+        original = deepcopy(msg)
+        assert assistant_message(msg)["content"] == native[1:]
+        assert msg == original
+
+    def test_empty_streamed_native_text_cannot_mask_canonical_tool_calls(self):
+        native = ordered_blocks({0: normalise_started_block({"type": "text"})})
+        msg = {
+            "role": "assistant",
+            "content": "\n\n",
+            KT_CONTENT_KEY: native,
+            "tool_calls": [
+                {"id": "call", "function": {"name": "read", "arguments": "{}"}}
+            ],
+        }
+        original = deepcopy(msg)
+        assert assistant_message(msg)["content"] == [
+            {"type": "tool_use", "id": "call", "name": "read", "input": {}}
+        ]
+        assert msg == original
+
     def test_text_plus_tool_calls_become_blocks(self):
         msg = {
             "role": "assistant",
@@ -252,6 +332,23 @@ class TestAssistantMessage:
 
 
 class TestUserContent:
+    def test_blank_text_beside_synthetic_image_is_omitted(self):
+        content = [
+            {"type": "text", "text": "\n\n"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+            {"type": "text", "text": "  keep this\n"},
+            {"type": "text", "text": ""},
+        ]
+        original = deepcopy(content)
+        assert user_content(content) == [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"},
+            },
+            {"type": "text", "text": "  keep this\n"},
+        ]
+        assert content == original
+
     def test_string_content_passes_through(self):
         assert user_content("hello") == "hello"
 
