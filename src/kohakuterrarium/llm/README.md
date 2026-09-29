@@ -18,6 +18,7 @@ provides typed message structures compatible with the OpenAI API format.
 | `turn_segments.py`     | Ordered reasoning/text/tool-call segment builder stored as `_kt_assistant_segments`                                      |
 | `responses_ws.py`       | `ResponsesWSSession`: persistent Responses-API WebSocket transport with `previous_response_id` incremental continuation (shared by the openai + codex providers; enabled via `extra_body.websocket_mode`) |
 | `anthropic_provider.py` | Native Anthropic Messages API provider using the official SDK (+ `anthropic_format.py`, `anthropic_pairing.py`, `anthropic_cache.py`) |
+| `anthropic_images.py`   | Outgoing Anthropic image dimensions, including images nested in tool results; saved history is unchanged |
 | `codex_provider.py`     | `CodexOAuthProvider`: ChatGPT subscription provider (+ `codex_format.py`, `codex_image_gen.py`, `codex_rate_limits.py`)   |
 | `codex_auth.py`         | OAuth PKCE authentication flows (browser redirect and device code) with token caching                                     |
 | `litellm_provider.py`   | LiteLLM provider (optional dep)                                                                                           |
@@ -31,6 +32,21 @@ provides typed message structures compatible with the OpenAI API format.
 | `variations.py`         | `name@group=option` variation-selector machinery                                                                          |
 | `recovery.py`           | Provider-boundary recovery helpers for LLM calls                                                                          |
 | `api_keys.py`           | API key storage and retrieval                                                                                             |
+
+## Anthropic image dimensions
+
+The [Anthropic vision limits](https://platform.claude.com/docs/en/build-with-claude/vision)
+apply to the complete request, including prior turns and image blocks inside
+tool results. Up to 20 images can have dimensions up to 8000 pixels. For larger
+batches, each dimension is limited to 2000 pixels. Document blocks also count
+toward the stricter threshold for compatibility with partner platforms.
+
+The provider resizes oversized base64 images in outgoing requests while
+preserving aspect ratio. Images already within the limit keep their original
+encoded bytes. Stored conversation references and source files are unchanged.
+Remote URLs and Files API references count toward the threshold but are not
+fetched or resized locally. Request preparation runs off the event loop so
+image resizing does not block other creatures.
 
 ## Dependencies
 
