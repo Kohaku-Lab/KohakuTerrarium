@@ -90,6 +90,14 @@ Resume is auto-detected: agent sessions mount a single creature; terrarium sessi
 
 Flags the same as `kt run`: `--mode`, `--llm`, `--log-level`, plus `--pwd <dir>` to override the working directory.
 
+After graphs merge, resuming a retired source file follows its recorded successor
+to the current graph and its latest conversation. If that graph is already
+running in the same engine, resume returns it without rebuilding its creatures.
+History viewing and explicit forks still use the file you selected. A missing
+successor, unfinished merge checkpoint, or ambiguous later split stops resume
+with an error; select the current session explicitly instead of reopening stale
+history. Retain referenced successor files when archiving a merged run.
+
 Programmatic resume mirrors this (see [Sessions from Python](#sessions-from-python)):
 
 ```python

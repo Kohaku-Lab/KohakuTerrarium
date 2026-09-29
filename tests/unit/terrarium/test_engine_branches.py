@@ -57,6 +57,10 @@ async def _async_noop(*_a, **_k):
 
 
 class TestTerrariumResumeNameMatch:
+    @pytest.fixture(autouse=True)
+    def _fake_saved_path(self, monkeypatch):
+        monkeypatch.setattr(resume_mod, "resolve_resume_path", Path)
+
     async def test_fresh_name_in_saved_set_used_directly(self, monkeypatch, tmp_path):
         """When the rebuilt creature's name is already in the saved
         agents list, that name is used directly (no positional pull)."""

@@ -7,6 +7,7 @@ suite in ``test_engine.py`` does not reach.
 """
 
 import asyncio
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,6 +51,7 @@ class TestConstructionClassmethods:
 
     async def test_resume_preflights_before_constructing_runtime(self, monkeypatch):
         events = []
+        monkeypatch.setattr(engine_mod._resume, "resolve_resume_path", Path)
 
         def fake_prepare(store, **kwargs):
             events.append(("preflight", store, kwargs))
@@ -71,16 +73,17 @@ class TestConstructionClassmethods:
             "saved", workspace_overrides={"gap": "/new"}
         )
         assert [event[0] for event in events] == ["preflight", "construct", "adopt"]
-        assert events[-1][2]["prepared_workspace"] is not None
+        assert "prepared_workspace" not in events[-1][2]
         await engine.shutdown()
 
     async def test_resume_delegates(self, monkeypatch):
         captured = {}
+        monkeypatch.setattr(engine_mod._resume, "resolve_resume_path", Path)
 
         prepared = object()
 
         def fake_prepare(store, **kwargs):
-            assert store == "s.kohakutr"
+            assert store == Path("s.kohakutr")
             assert kwargs == {"pwd": "/wd", "workspace_overrides": None}
             return prepared
 
@@ -105,7 +108,7 @@ class TestConstructionClassmethods:
                 "store": "s.kohakutr",
                 "pwd": "/wd",
                 "llm": "gpt",
-                "prepared_workspace": prepared,
+                "prepared_workspace": None,
             }
         finally:
             await t.shutdown()

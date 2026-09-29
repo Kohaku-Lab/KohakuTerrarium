@@ -16,6 +16,7 @@ from kohakuterrarium.session.migrations import (
     path_for_version,
 )
 from kohakuterrarium.session.resume import _open_store_with_migration
+from kohakuterrarium.session.resume_target import resolve_resume_path
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.lifecycle import (
@@ -74,6 +75,7 @@ async def resume_session(
     # file as a side effect of opening it.
     if not path.exists() and not discover_versions(path):
         raise SessionNotFoundError(f"Session not found: {path}")
+    path = await asyncio.to_thread(resolve_resume_path, path)
     sid = await engine.adopt_session(
         path,
         pwd=pwd_override,

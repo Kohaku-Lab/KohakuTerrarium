@@ -12,6 +12,7 @@ from kohakuterrarium.errors import (
 
 import kohakuterrarium.terrarium.graph_manifest as _manifest
 import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
+from kohakuterrarium.terrarium.session_successor import publish_successors
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -118,6 +119,14 @@ async def checkpoint(engine: "Terrarium", graph_id: str) -> bool:
             dirty.add(graph_id)
             raise GraphManifestPersistenceError(
                 f"Graph {graph_id!r} mutated but its manifest checkpoint failed: {exc}",
+                applied=True,
+            ) from exc
+        try:
+            publish_successors(engine, graph_id)
+        except Exception as exc:
+            dirty.add(graph_id)
+            raise GraphManifestPersistenceError(
+                f"Graph {graph_id!r} checkpointed but successor publication failed: {exc}",
                 applied=True,
             ) from exc
         dirty.discard(graph_id)

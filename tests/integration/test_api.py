@@ -43,6 +43,9 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
+from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.api.routes.catalog import _deps as _catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
@@ -1799,12 +1802,45 @@ class TestApiIntegration:
         # Resume from disk (frontend: sessionAPI.resume). The URL slot
         # carries the saved file stem; the response's ``session_name``
         # is the creature's display name ("alice"), not the stem.
-        resp = client.post(f"/api/sessions/{saved_name}/resume")
+        target_path = resolve_session_path_in(saved_name, tmp_path / "sessions")
+        target_meta = read_session_meta(target_path)
+        alias_path = tmp_path / "sessions" / "retired-source.kohakutr"
+        alias = SessionStore(alias_path)
+        alias.init_meta(
+            "retired-source", "agent", "/cfg", str(tmp_path / "missing"), ["alice"]
+        )
+        alias.append_event(
+            "alice", "user_message", {"content": "historic source only"}, turn_index=1
+        )
+        alias.meta["resume_successor"] = {
+            "kind": "merge",
+            "state": "ready",
+            "agents": ["alice"],
+            "targets": [
+                {
+                    "path": str(target_path),
+                    "conversation_id": target_meta["conversation_id"],
+                }
+            ],
+        }
+        alias.close(update_status=False)
+        preflight = client.post("/api/sessions/retired-source/resume/preflight")
+        assert preflight.status_code == 200
+        assert preflight.json()["ready"] is True
+        resp = client.post("/api/sessions/retired-source/resume")
         assert resp.status_code == 200
         resumed = resp.json()
         assert resumed["type"] == "agent"
         assert resumed["session_name"] == "alice"
         resumed_id = resumed["instance_id"]
+        repeated = client.post(f"/api/sessions/{saved_name}/resume")
+        assert repeated.status_code == 200
+        assert repeated.json()["instance_id"] == resumed_id
+        historical = client.get("/api/sessions/retired-source/history/alice")
+        assert historical.status_code == 200
+        assert "historic source only" in str(historical.json())
+        assert "second turn please" not in str(historical.json())
+        assert client.delete("/api/sessions/retired-source").status_code == 200
 
         # Resuming a session that does not exist on disk → 404.
         resp = client.post("/api/sessions/no-such-session/resume")

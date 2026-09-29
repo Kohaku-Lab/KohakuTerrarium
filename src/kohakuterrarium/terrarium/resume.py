@@ -1,12 +1,6 @@
-"""Engine-level resume — adopt a saved session into a live engine.
+"""Restore saved creatures and their state into a Terrarium graph.
 
-Resume is an engine concern: rebuild creatures from saved config,
-inject the saved conversation / scratchpad / triggers / events, wrap
-each agent in a :class:`Creature`, attach the :class:`SessionStore`
-at the graph level, and start everything.  The Studio tier sits on
-top of this and only adds metadata bookkeeping (``_meta`` /
-``_session_stores`` in :mod:`studio.sessions.lifecycle`) plus the
-HTTP / CLI orchestration.
+Studio adds lifecycle bookkeeping and HTTP/CLI orchestration above this layer.
 """
 
 import os
@@ -23,8 +17,11 @@ from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.config_serde import pack_agent_config
-from kohakuterrarium.session.migrations import latest_readable_version
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.resume_target import (
+    active_resume_graph,
+    resolve_resume_path,
+)
 from kohakuterrarium.session.resume import (
     _open_store_with_migration,
     detect_session_type,
@@ -78,7 +75,7 @@ def prepare_resume_workspace(
     """Read and validate workspace state without opening a writer/runtime."""
     if pwd is not None and workspace_overrides:
         raise ValueError("pwd and workspace_overrides are mutually exclusive")
-    path = latest_readable_version(_resolve_store_path(store))
+    path = resolve_resume_path(_resolve_store_path(store))
     meta = read_session_meta(path)
     resume_state = meta.get("workspace_resume_state")
     if (
@@ -115,8 +112,9 @@ async def resume_new_engine(
     drive_store: Any = None,
 ) -> "Terrarium":
     """Preflight, construct, and adopt into a fresh engine."""
-    prepared = prepare_resume_workspace(
-        store,
+    path = resolve_resume_path(_resolve_store_path(store))
+    prepare_resume_workspace(
+        path,
         pwd=pwd,
         workspace_overrides=workspace_overrides,
     )
@@ -131,8 +129,6 @@ async def resume_new_engine(
         resume_kwargs = {"pwd": pwd, "llm": llm}
         if workspace_overrides is not None:
             resume_kwargs["workspace_overrides"] = workspace_overrides
-        if prepared is not None:
-            resume_kwargs["prepared_workspace"] = prepared
         await resume_into_engine(engine, store, **resume_kwargs)
     except BaseException:
         await engine.shutdown()
@@ -156,9 +152,16 @@ async def resume_into_engine(
     if pwd is not None and workspace_overrides:
         raise ValueError("pwd and workspace_overrides are mutually exclusive")
     path = _resolve_store_path(store)
+    path = resolve_resume_path(path)
+    active = active_resume_graph(engine, path)
+    if active is not None:
+        if pwd is not None or workspace_overrides or llm is not None:
+            raise SessionNotResumableError(
+                "Session is already running; change its settings explicitly"
+            )
+        return active
     if isinstance(store, SessionStore):
         store.close(update_status=False)
-    path = latest_readable_version(path)
     meta = read_session_meta(path)
     # None is the checkpoint tombstone — legacy resume, not a manifest.
     dirty_state = meta.get("workspace_resume_state")
@@ -177,7 +180,9 @@ async def resume_into_engine(
                     "pwd is the explicit whole-team compatibility override"
                 )
             replacements = {item.creature_id: pwd for item in manifest.creatures}
-        workspace_plan = prepared_workspace or _workspace.plan_workspace_resume(
+        # Preflight may have targeted a now-retired file. Always rebuild the
+        # plan from the canonical file rather than reuse an unbound old plan.
+        workspace_plan = _workspace.plan_workspace_resume(
             manifest,
             replacements,
             allow_valid_targets=pwd is not None,

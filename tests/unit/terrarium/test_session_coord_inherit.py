@@ -9,6 +9,16 @@ config_path or config_snapshot in metadata".
 """
 
 from kohakuterrarium.session.store import SessionStore
+import pytest
+from kohakuterrarium.errors import SessionNotResumableError
+from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.core.config import build_agent_config
+from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.resume import (
+    prepare_resume_workspace,
+    resume_into_engine,
+)
+from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium.session_coord import (
     merge_session_stores,
     split_session_store,
@@ -78,3 +88,66 @@ def test_merge_inherits_resumable_meta_from_first_old_store(tmp_path):
         merged.close()
         a.close()
         b.close()
+
+
+async def test_old_source_resume_reaches_latest_merged_conversation(
+    tmp_path, monkeypatch
+):
+    for module in ("bootstrap.llm", "bootstrap.agent_init"):
+        monkeypatch.setattr(
+            f"kohakuterrarium.{module}.create_llm_provider",
+            lambda *_args, **_kwargs: ScriptedLLM(["first", "latest"]),
+        )
+    async with Terrarium(session_dir=tmp_path) as engine:
+        creatures = []
+        original_paths = []
+        for name in ("alice", "bob"):
+            cfg = build_agent_config(
+                {
+                    "name": name,
+                    "llm": "openai/gpt-5.4",
+                    "tools": [],
+                    "input": {"type": "none"},
+                    "output": {"type": "none"},
+                    "compact": {"enabled": False},
+                },
+                tmp_path,
+            )
+            creature = await engine.add_creature(
+                cfg,
+                start=True,
+                io="headless",
+                pwd=tmp_path,
+            )
+            creatures.append(creature)
+            original_paths.append(engine._session_stores[creature.graph_id].path)
+            await creature.run("before merge", timeout=5)
+        stale_plan = prepare_resume_workspace(original_paths[0])
+        merged = await engine.connect(*creatures, channel="together")
+        target = engine._session_stores[merged.graph_id]
+        for path in original_paths:
+            if str(path) != str(target.path):
+                assert read_session_meta(path)["resume_successor"]["state"] == "ready"
+        for creature in creatures:
+            await creature.run("after merge", timeout=5)
+        expected_ids = {creature.creature_id for creature in creatures}
+    for path in original_paths:
+        resumed = await Terrarium.resume(path)
+        async with resumed:
+            assert {c.creature_id for c in resumed.list_creatures()} == expected_ids
+            for creature in resumed.list_creatures():
+                assert "after merge" in str(
+                    creature.agent.controller.conversation.to_messages()
+                )
+                assert creature.agent._turn_index == 2
+    async with Terrarium() as resumed:
+        await resume_into_engine(
+            resumed, original_paths[0], prepared_workspace=stale_plan
+        )
+        assert {c.creature_id for c in resumed.list_creatures()} == expected_ids
+        live = next(iter(resumed._session_stores.values()))
+        with pytest.raises(SessionNotResumableError, match="already running"):
+            await resumed.adopt_session(live, pwd=str(tmp_path))
+        assert live._closed is False
+        assert await resumed.adopt_session(live) in resumed._session_stores
+        assert live._closed is False

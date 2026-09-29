@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.drive.topology as _drive_topology
 import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
+from kohakuterrarium.terrarium.session_successor import stage_successor
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.identity import new_conversation_id
 from kohakuterrarium.session.store import SessionStore
@@ -79,6 +80,7 @@ def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
 # stores carry only ``agents`` / ``status`` and a resume request 502s
 # with "Session has no config_path or config_snapshot in metadata".
 _RESUMABLE_META_KEYS: tuple[str, ...] = (
+    "format_version",
     "config_type",
     "config_path",
     "config_snapshot",
@@ -383,11 +385,11 @@ def apply_merge(
     engine._session_stores[keep_gid] = kept
     for gid in drop_gids:
         engine._session_stores.pop(gid, None)
-    # Close every superseded store the engine owned; the survivor stays
-    # open (it now backs the merged graph).
+    # Retirement applies to every source; ownership only controls closing.
     for gid, store in source_stores.items():
         if store is kept:
             continue
+        stage_successor(engine, store, [kept])
         if gid in owned_source_gids:
             _close_superseded(store)
     if owned is not None:
@@ -468,11 +470,11 @@ def apply_split(
         # The parent's graph_id is not among the children (defensive — the
         # largest child normally keeps it); drop its stale map entry.
         engine._session_stores.pop(parent_gid, None)
-    # The parent is superseded ONLY when no child reused its live store; the
-    # fresh children each got their own duplicate. Hand ownership to the
-    # children (the reused store keeps the parent's ownership state).
-    if reuse_gid is None and parent_owned:
-        _close_superseded(parent)
+    # A parent without a retained child has ambiguous split successors.
+    if reuse_gid is None:
+        stage_successor(engine, parent, new_stores, kind="split")
+        if parent_owned:
+            _close_superseded(parent)
     if owned is not None:
         for gid in delta.old_graph_ids:
             owned.discard(gid)

@@ -28,6 +28,13 @@ def _workspace_resume_boundaries(monkeypatch):
         return {"legacy": False, "ready": True, "members": [], "gaps": []}
 
     monkeypatch.setattr(resume_mod, "_worker_workspace_preflight", ready)
+    canonical = resume_mod.canonical_resume_path
+    # Transport fixtures use opaque bytes; retain real missing-file handling.
+    monkeypatch.setattr(
+        resume_mod,
+        "canonical_resume_path",
+        lambda path, root: path if path.is_file() else canonical(path, root),
+    )
     monkeypatch.setattr(
         resume_mod,
         "_persist_remote_workspace_meta",

@@ -14,6 +14,7 @@ from typing import Literal
 
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.resume_target import resolve_resume_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
 from kohakuterrarium.terrarium.engine import Terrarium
@@ -70,6 +71,11 @@ def resume_cli(
             print("No sessions found in ~/.kohakuterrarium/sessions/")
         return 1
 
+    try:
+        path = resolve_resume_path(path)
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
     announce_migration_if_needed(path)
     resolved_pwd = _resolve_missing_pwd(path, pwd_override)
     if resolved_pwd is False:

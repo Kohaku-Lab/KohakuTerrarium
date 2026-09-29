@@ -13,6 +13,7 @@ import pytest
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.session.readonly import read_session_meta as read_meta_strict
+from kohakuterrarium.session.resume_target import resolve_resume_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.graph_manifest import (
     GraphManifest,
@@ -80,6 +81,13 @@ class TestResumeIntoEngine:
             lambda path, pwd=None: str(pwd or "."),
         )
         monkeypatch.setattr(resume_mod, "read_session_meta", lambda path: {})
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_resume_path",
+            lambda path: (
+                resolve_resume_path(path) if Path(path).exists() else Path(path)
+            ),
+        )
 
     async def test_resume_selects_latest_readable_version_before_preflight(
         self, monkeypatch, tmp_path

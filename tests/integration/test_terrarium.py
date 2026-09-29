@@ -37,6 +37,7 @@ from kohakuterrarium.core.config_types import (
 )
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.resume_target import resolve_resume_path
 import kohakuterrarium.terrarium.session_coord as _session_coord
 from kohakuterrarium.terrarium.drive.store import (
     DriveRepositoryClosedError,
@@ -905,6 +906,42 @@ class TestTerrariumIntegration:
         snap = await service.status_snapshot()
         assert set(snap["creatures"]) == {"alice", "carol"}
         assert len(snap["graphs"]) == 2
+
+        # A cold restart through either pre-merge file must restore the newest
+        # complete graph, not resurrect a standalone creature's stale snapshot.
+        restart_dir = tmp_path / "cold-restart"
+        original_paths = []
+        async with Terrarium(session_dir=restart_dir) as before_restart:
+            workers = []
+            for name in ("reader", "writer"):
+                worker = await before_restart.add_creature(
+                    _agent_config(name, tmp_path), start=True, io="headless"
+                )
+                workers.append(worker)
+                original_paths.append(
+                    before_restart._session_stores[worker.graph_id].path
+                )
+                await worker.run("before merging", timeout=5)
+            connected = await before_restart.connect(*workers, channel="team")
+            current_path = before_restart._session_stores[connected.graph_id].path
+            for worker in workers:
+                await worker.run("latest after merging", timeout=5)
+            expected_ids = {worker.creature_id for worker in workers}
+        for old_path in original_paths:
+            assert resolve_resume_path(old_path) == Path(current_path)
+            restored = await Terrarium.resume(old_path)
+            async with restored:
+                assert {
+                    c.creature_id for c in restored.list_creatures()
+                } == expected_ids
+                for worker in restored.list_creatures():
+                    assert "latest after merging" in str(
+                        worker.agent.controller.conversation.to_messages()
+                    )
+                    assert worker.agent._turn_index == 2
+                # Repeated resume attaches to the existing canonical graph.
+                assert await restored.adopt_session(old_path) == connected.graph_id
+                assert len(restored.list_creatures()) == 2
 
     async def test_split_drive_lifecycle_no_repo_race(
         self, make_service, tmp_path, monkeypatch

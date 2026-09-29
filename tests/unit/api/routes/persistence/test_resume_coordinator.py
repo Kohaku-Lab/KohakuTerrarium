@@ -224,3 +224,27 @@ def test_missing_path_key_has_no_filesystem_side_effect(tmp_path):
 
     assert ":path:" in key
     assert missing.exists() is False
+
+
+def test_merged_source_and_target_share_coordination_key(tmp_path):
+    source = SessionStore(tmp_path / "old.kohakutr")
+    target = SessionStore(tmp_path / "current.kohakutr")
+    try:
+        source.init_meta("old", "agent", "/cfg", str(tmp_path), ["alice"])
+        target.init_meta("current", "agent", "/cfg", str(tmp_path), ["alice"])
+        source.meta["resume_successor"] = {
+            "state": "ready",
+            "kind": "merge",
+            "agents": ["alice"],
+            "targets": [
+                {"path": target.path, "conversation_id": target.meta["conversation_id"]}
+            ],
+        }
+        source.checkpoint()
+        target.checkpoint()
+        assert session_coordination_key(
+            source.path, tmp_path
+        ) == session_coordination_key(target.path, tmp_path)
+    finally:
+        source.close(update_status=False)
+        target.close(update_status=False)

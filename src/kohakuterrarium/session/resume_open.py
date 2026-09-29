@@ -15,6 +15,7 @@ from kohakuterrarium.session.migrations import (
 )
 from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.resume_target import reject_retired_writer
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -41,7 +42,14 @@ def open_store_with_migration(
             original=str(session_path),
             opened=str(resolved),
         )
-    return SessionStore(resolved, writer_lock=writer_lock)
+    store = SessionStore(resolved, writer_lock=writer_lock)
+    if writer_lock:
+        try:
+            reject_retired_writer(store)
+        except BaseException:
+            store.close(update_status=False)
+            raise
+    return store
 
 
 def preflight_legacy_workspace(

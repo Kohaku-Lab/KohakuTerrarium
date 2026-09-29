@@ -1,8 +1,21 @@
 """Request-level helpers shared by persisted-session resume routes."""
 
 from typing import Any
+from pathlib import Path
 
 from fastapi import HTTPException, Request
+from kohakuterrarium.errors import SessionNotResumableError
+from kohakuterrarium.session.resume_target import resolve_resume_path
+
+
+def canonical_resume_path(path: Path, session_dir: Path) -> Path:
+    """Resolve within the request namespace before preflight or coordination."""
+    try:
+        return resolve_resume_path(path, session_dir=session_dir)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionNotResumableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def resume_intent(body: Any) -> str:

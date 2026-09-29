@@ -15,6 +15,7 @@ from kohakuterrarium.api.deps import (
     resolve_request_session_dir,
 )
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
+from kohakuterrarium.api.routes.persistence.resume_request import canonical_resume_path
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
@@ -39,6 +40,8 @@ class _LocalService:
 @pytest.fixture(autouse=True)
 def _skip_real_resume_prepare(monkeypatch):
     monkeypatch.setattr(resume_mod, "prepare_resume_workspace", lambda *a, **k: None)
+    # These dispatcher tests separately stub path lookup and store opening.
+    monkeypatch.setattr(resume_mod, "canonical_resume_path", lambda path, _root: path)
 
 
 def _app(
@@ -136,7 +139,22 @@ class TestHostResume:
         self, tmp_path, monkeypatch
     ):
         path = tmp_path / "shared.kohakutr"
-        path.write_bytes(b"saved")
+        alias = tmp_path / "alias.kohakutr"
+        target = SessionStore(path)
+        source = SessionStore(alias)
+        target.init_meta("shared", "agent", "/cfg", str(tmp_path), ["alice"])
+        source.init_meta("alias", "agent", "/cfg", str(tmp_path), ["alice"])
+        source.meta["resume_successor"] = {
+            "kind": "merge",
+            "state": "ready",
+            "agents": ["alice"],
+            "targets": [
+                {"path": target.path, "conversation_id": target.meta["conversation_id"]}
+            ],
+        }
+        source.close(update_status=False)
+        target.close(update_status=False)
+        monkeypatch.setattr(resume_mod, "canonical_resume_path", canonical_resume_path)
         started = asyncio.Event()
         release = asyncio.Event()
         calls = 0
@@ -149,6 +167,7 @@ class TestHostResume:
         ):
             nonlocal calls
             calls += 1
+            assert saved_path == path
             started.set()
             await release.wait()
             return _session()
@@ -157,7 +176,7 @@ class TestHostResume:
         monkeypatch.setattr(
             resume_mod,
             "resolve_session_path_in",
-            lambda name, session_dir: path,
+            lambda name, session_dir: alias if name == "alias" else path,
         )
         transport = ASGITransport(app=_app(session_dir=tmp_path))
         async with AsyncClient(transport=transport, base_url="http://test") as client:
