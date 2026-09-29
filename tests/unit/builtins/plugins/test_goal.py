@@ -492,7 +492,7 @@ class TestGoalCommand:
         assert res.output.startswith(f"{wording}: eligible [status: {target.value}]")
         assert "canceld" not in res.output
 
-    async def test_implicit_complete_selects_active_not_paused_or_terminal(self):
+    async def test_implicit_complete_selects_latest_active_or_paused_not_terminal(self):
         svc = _FakeService(
             views=[
                 _fake_view(drive_id="active", status=DriveStatus.ACTIVE, created_at=1),
@@ -505,7 +505,23 @@ class TestGoalCommand:
             _ctx(service=svc, creature_id="worker", principal="user:alice"),
         )
         assert res.success, res.error
-        assert "Goal completed: active [status: completed]" in res.output
+        assert "Goal completed: paused [status: completed]" in res.output
+        assert svc.transition_call is None
+        assert svc.wake_call is None
+
+    async def test_explicit_complete_proposes_paused_goal_without_waking(self):
+        view = _fake_view(status=DriveStatus.PAUSED)
+        svc = _FakeService(views=[view])
+        res = await GoalCommand()._execute(
+            "complete d1",
+            _ctx(service=svc, creature_id="worker", principal="user:alice"),
+        )
+        assert res.success, res.error
+        assert svc.propose_call.target is DriveStatus.COMPLETED
+        assert svc.propose_call.actor == ActorRef("user", "alice")
+        assert svc.transition_call is None
+        assert svc.wake_call is None
+        assert view.record.status is DriveStatus.PAUSED
 
     @pytest.mark.parametrize(
         ("command", "status"),
@@ -513,7 +529,10 @@ class TestGoalCommand:
             ("pause", DriveStatus.PAUSED),
             ("resume", DriveStatus.CANCELLED),
             ("cancel", DriveStatus.CANCELLED),
-            ("complete", DriveStatus.PAUSED),
+            ("complete", DriveStatus.WAITING),
+            ("complete", DriveStatus.BLOCKED),
+            ("complete", DriveStatus.DRAFT),
+            ("complete", DriveStatus.COMPLETED),
         ],
     )
     async def test_explicit_transition_rejects_ineligible_status(self, command, status):
