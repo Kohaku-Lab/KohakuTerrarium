@@ -1,6 +1,9 @@
 """Unit tests for :mod:`kohakuterrarium.core.job` (JobStatus / JobResult / JobStore)."""
 
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
+from threading import Lock
 
 import pytest
 
@@ -34,6 +37,47 @@ class TestGenerateJobId:
 
 
 class TestJobStatusBasics:
+    @pytest.mark.parametrize("kind", list(JobType))
+    def test_serialization_uses_json_safe_status_and_timestamps(self, kind):
+        start = datetime(2026, 9, 30, 1, 2, 3)
+        status = JobStatus(
+            "job1",
+            kind,
+            "probe",
+            state=JobState.DONE,
+            start_time=start,
+            end_time=start + timedelta(seconds=2),
+            output_lines=3,
+            output_bytes=12,
+            preview="complete",
+            context={"session_id": "synthetic"},
+        )
+        wire = status.to_dict()
+        assert json.loads(json.dumps(wire)) == {
+            "job_id": "job1",
+            "job_type": kind.value,
+            "type_name": "probe",
+            "state": "done",
+            "start_time": "2026-09-30T01:02:03",
+            "end_time": "2026-09-30T01:02:05",
+            "duration": 2.0,
+            "output_lines": 3,
+            "output_bytes": 12,
+            "preview": "complete",
+            "error": None,
+        }
+        assert status.context == {"session_id": "synthetic"}
+
+    @pytest.mark.parametrize(
+        "context", [{"workspace": Path("/synthetic")}, {"handle": Lock()}]
+    )
+    def test_serialization_does_not_expose_or_copy_opaque_context(self, context):
+        status = JobStatus("job1", JobType.TOOL, "probe", context=context)
+        wire = status.to_dict()
+        assert "context" not in wire
+        assert json.loads(json.dumps(wire)) == wire
+        assert status.context is context
+
     def test_construct_pending(self):
         s = JobStatus(job_id="j1", job_type=JobType.TOOL, type_name="bash")
         assert s.job_id == "j1"
