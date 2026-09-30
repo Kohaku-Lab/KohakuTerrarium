@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.models import DriveStatus
 from kohakuterrarium.terrarium.drive.registration import (
     DriveProjection,
     DriveRegistrationDescriptor,
@@ -186,6 +187,10 @@ class GoalDriveRegistration:
 
     def validate_transition(self, before: Any, proposal: Any, context: Any) -> None:
         return None
+
+    def extra_transitions(self) -> frozenset[tuple[DriveStatus, DriveStatus]]:
+        """Allow paused goals to complete through their terminal verifier."""
+        return frozenset({(DriveStatus.PAUSED, DriveStatus.COMPLETED)})
 
     def readiness(
         self, drive: Any, dependencies: Any, now: datetime, *, turns_used: int = 0

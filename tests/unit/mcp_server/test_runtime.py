@@ -315,15 +315,22 @@ async def test_cancelled_job_remains_busy_until_its_resource_cleanup_finishes(tm
         job = await runtime.call(
             "python", {"code": "print('not reached')", "run_in_background": True}
         )
+        waiting = None
         try:
             await asyncio.wait_for(entered.wait(), 2)
             await runtime.cancel(job.job_id)
             await asyncio.wait_for(cleaning.wait(), 2)
             assert runtime.job(job.job_id)["state"] == "cancelled"
             assert runtime.is_busy
+            waiting = asyncio.create_task(runtime.wait(job.job_id, 2))
+            await asyncio.sleep(0)
+            assert not waiting.done()
         finally:
             release.set()
-            await runtime.wait(job.job_id, 2)
+            result = await (waiting or runtime.wait(job.job_id, 2))
+        assert result["state"] == "cancelled"
+        assert result["error"] == "User manually interrupted this job."
+        assert runtime.job(job.job_id) == result
         assert not runtime.is_busy
 
 

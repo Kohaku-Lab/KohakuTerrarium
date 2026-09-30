@@ -92,7 +92,7 @@ _ELIGIBLE_STATUSES = {
         }
     ),
     "cancel": _LIVE,
-    "complete": frozenset({DriveStatus.ACTIVE}),
+    "complete": frozenset({DriveStatus.ACTIVE, DriveStatus.PAUSED}),
 }
 _TRANSITION_TARGETS = {
     "pause": DriveStatus.PAUSED,

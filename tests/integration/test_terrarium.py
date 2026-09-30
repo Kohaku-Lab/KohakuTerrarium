@@ -2059,3 +2059,17 @@ class TestTerrariumIntegration:
             assert (
                 await manager.get_drive(record.drive_id)
             ).status is DriveStatus.PAUSED
+            before_completion = await manager.list_deliveries(record.drive_id)
+            completed = await LocalTerrariumService(engine).propose_drive_transition(
+                record.drive_id,
+                DriveStatus.COMPLETED,
+                actor=actor,
+                expected_revision=paused.revision,
+                evidence={"confirmed_by": actor.format()},
+            )
+            assert completed.record.status is DriveStatus.COMPLETED
+            assert completed.record.revision == paused.revision + 1
+            await manager._scan_ready()
+            await manager.dispatcher.dispatch_once()
+            await manager.dispatcher.drain()
+            assert await manager.list_deliveries(record.drive_id) == before_completion
