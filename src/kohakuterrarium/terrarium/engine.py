@@ -797,51 +797,63 @@ class Terrarium:
         See ``terrarium.session_coord`` for merge/split details.
         """
         gid = self._resolve_graph_id(graph)
-        # Replacing a graph's store: close the previous one first so its
-        # native handles + writer lock are released before the new (or a
-        # freshly-minted) store opens the same file. Detach the graph's Drive
-        # manager first so its dispatcher releases claims against a LIVE
-        # connection, not the companion repo the store close is about to drop.
         previous = self._session_stores.get(gid)
-        if previous is not None and previous is not store:
-            if self._drive_runtime is not None:
-                await self._drive_runtime.detach_graph(gid)
-            try:
-                previous.close(update_status=False)
-            except Exception:  # pragma: no cover - defensive
-                _logger.warning(
-                    "attach_session: closing replaced store failed", exc_info=True
-                )
-            self._owned_sessions.discard(gid)
+        minted = False
         if isinstance(store, (str, Path)):
-            names = [c.name for c in self._creatures.values() if c.graph_id == gid]
-            store = _autosession.mint_store(self, gid, path=store, agents=names)
-            self._owned_sessions.add(gid)
-        self._session_stores[gid] = store
-        # Bind the graph's session-backed Drive repository before its creatures
-        # reach restoration-ready.
-        if self._drive_runtime is not None:
-            await self._drive_runtime.bind_graph_store(gid, store)
+            if (
+                previous is not None
+                and not getattr(previous, "_closed", False)
+                and _autosession.recipe_session_reuses_store(previous, store)
+            ):
+                store = previous
+            else:
+                # Prepare the candidate before disturbing the live writer.
+                names = [c.name for c in self._creatures.values() if c.graph_id == gid]
+                store = _autosession.mint_store(self, gid, path=store, agents=names)
+                minted = True
+        transaction = _recipe_transaction.RecipeApplyTransaction(self)
         g = self._topology.graphs.get(gid)
         if g is None:
-            return
-        # Retroactively wire channel persistence on every channel that
-        # was registered before the store was attached — without this,
-        # channels created at engine.add_channel time before
-        # attach_session lose every send to the void.
-        env = self._environments.get(gid)
-        if env is not None:
-            for channel in env.shared_channels._channels.values():
-                _channels._ensure_channel_persistence(channel, self, gid)
-        for cid in g.creature_ids:
-            c = self._creatures.get(cid)
-            if c is None:
-                continue
-            if hasattr(c.agent, "attach_session_store"):
-                c.agent.attach_session_store(store)
-            elif hasattr(c.agent, "session_store"):
-                c.agent.session_store = store
-        await _checkpoint.checkpoint(self, gid)
+            transaction.snapshot_existing_session(gid)
+        else:
+            transaction.snapshot_existing_members(gid)
+        try:
+            if previous is not store:
+                transaction.stage_session_replacement(gid)
+                if previous is not None and self._drive_runtime is not None:
+                    # Claims must be released against the still-live old store.
+                    await self._drive_runtime.detach_graph(gid)
+            self._session_stores[gid] = store
+            if minted:
+                self._owned_sessions.add(gid)
+            if self._drive_runtime is not None:
+                await self._drive_runtime.bind_graph_store(gid, store)
+            if g is not None:
+                env = self._environments.get(gid)
+                if env is not None:
+                    for channel in env.shared_channels._channels.values():
+                        _channels._ensure_channel_persistence(channel, self, gid)
+                for cid in g.creature_ids:
+                    c = self._creatures.get(cid)
+                    if c is None:
+                        continue
+                    if hasattr(c.agent, "attach_session_store"):
+                        c.agent.attach_session_store(store)
+                    elif hasattr(c.agent, "session_store"):
+                        c.agent.session_store = store
+                await _checkpoint.checkpoint(self, gid)
+        except BaseException:
+            await _recipe_transaction.rollback_shielded(transaction)
+            if minted:
+                store.close(update_status=False)
+            raise
+        else:
+            await transaction.commit()
+        finally:
+            if previous is not store and self._drive_runtime is not None:
+                for creature in self._creatures.values():
+                    if creature.graph_id == gid and creature.is_running:
+                        self._drive_runtime.schedule_reconcile(creature)
 
     # ------------------------------------------------------------------
     # internal helpers

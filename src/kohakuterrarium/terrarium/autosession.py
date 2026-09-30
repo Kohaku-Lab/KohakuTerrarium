@@ -83,18 +83,22 @@ def mint_store(
         path.parent.mkdir(parents=True, exist_ok=True)
 
     store = SessionStore(path, writer_lock=True)
-    existing = store.load_meta()
-    if not existing.get("session_id"):
-        store.init_meta(
-            session_id=session_id or graph_id,
-            config_type=config_type,
-            config_path=config_path,
-            pwd=pwd or str(getattr(engine, "_pwd", None) or Path.cwd()),
-            agents=list(agents or []),
-            config_snapshot=config_snapshot,
-        )
-    elif agents:
-        register_agents_in_meta(store, agents)
+    try:
+        existing = store.load_meta()
+        if not existing.get("session_id"):
+            store.init_meta(
+                session_id=session_id or graph_id,
+                config_type=config_type,
+                config_path=config_path,
+                pwd=pwd or str(getattr(engine, "_pwd", None) or Path.cwd()),
+                agents=list(agents or []),
+                config_snapshot=config_snapshot,
+            )
+        elif agents:
+            register_agents_in_meta(store, agents)
+    except BaseException:
+        store.close(update_status=False)
+        raise
     logger.info(
         "Session store minted",
         graph_id=graph_id,
@@ -188,6 +192,16 @@ async def attach_for_new_creature(
                 creature.agent.attach_session_store(existing)
             return existing
 
+    if (
+        existing is not None
+        and not getattr(existing, "_closed", False)
+        and isinstance(session, (str, Path))
+        and recipe_session_reuses_store(existing, session)
+    ):
+        register_agents_in_meta(existing, [creature.name])
+        await engine.attach_session(gid, existing)
+        return existing
+
     path: "str | Path | None"
     if isinstance(session, (str, Path)):
         path = session
@@ -222,8 +236,7 @@ async def attach_for_new_creature(
         agents=[creature.name],
         session_id=creature.creature_id,
     )
-    engine._owned_sessions.add(gid)
-    await engine.attach_session(gid, store)
+    await _attach_minted_store(engine, gid, store)
     return store
 
 
@@ -273,9 +286,20 @@ async def attach_for_recipe(
         config_path=str(recipe) if isinstance(recipe, (str, Path)) else "",
         agents=names,
     )
-    engine._owned_sessions.add(graph_id)
-    await engine.attach_session(graph_id, store)
+    await _attach_minted_store(engine, graph_id, store)
     return store
+
+
+async def _attach_minted_store(
+    engine: "Terrarium", graph_id: str, store: SessionStore
+) -> None:
+    """Transfer ownership only after attachment succeeds; otherwise close."""
+    try:
+        await engine.attach_session(graph_id, store)
+    except BaseException:
+        store.close(update_status=False)
+        raise
+    engine._owned_sessions.add(graph_id)
 
 
 def recipe_session_reuses_store(

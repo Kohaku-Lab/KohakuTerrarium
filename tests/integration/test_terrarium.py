@@ -1065,6 +1065,20 @@ class TestTerrariumIntegration:
         gid = host.graph_id
         assert engine.get_creature("host").is_running is True
 
+        # Failed replacement must leave the live session writable. Reattaching
+        # the same path must retain its writer before another creature joins.
+        session_path = tmp_path / "hotplug.kohakutr"
+        await engine.attach_session(gid, session_path)
+        original_store = engine._session_stores[gid]
+        blocker = tmp_path / "not-a-directory"
+        blocker.write_text("block", encoding="utf-8")
+        with pytest.raises(OSError):
+            await engine.attach_session(gid, blocker / "session.kohakutr")
+        assert engine._session_stores[gid] is original_store
+        assert not original_store._closed
+        await engine.attach_session(gid, session_path.resolve().as_uri())
+        assert engine._session_stores[gid] is original_store
+
         # Hot-plug a second creature into the live graph — it joins the
         # existing graph rather than minting a new one.
         helper = await service.add_creature(
@@ -1077,6 +1091,16 @@ class TestTerrariumIntegration:
         graphs = await service.list_graphs()
         assert len(graphs) == 1  # still ONE graph, now two creatures
         assert graphs[0].creature_ids == {"host", "helper"}
+
+        assert engine.get_creature("helper").agent.session_store is original_store
+        assert engine.get_creature("host").agent.session_store is original_store
+        replacement_path = tmp_path / "hotplug-replaced.kohakutr"
+        await engine.attach_session(gid, replacement_path)
+        replacement = engine._session_stores[gid]
+        assert replacement is not original_store and original_store._closed
+        assert gid in engine._owned_sessions
+        assert engine.get_creature("helper").agent.session_store is replacement
+        assert engine.get_creature("host").agent.session_store is replacement
 
         # Wire a channel and broadcast — the hot-plugged creature is a
         # first-class graph member, its listen wiring works at once.

@@ -53,19 +53,7 @@ class RecipeApplyTransaction:
         """Snapshot pre-apply edges for members the transaction does not own."""
         graph = self.engine._topology.graphs[graph_id]
         if graph_id not in self.created_graph_ids:
-            self.existing_graph_id = graph_id
-            self.existing_session_store = self.engine._session_stores.get(
-                graph_id, _NO_STORE
-            )
-            self.existing_session_owned = graph_id in self.engine._owned_sessions
-            if self.existing_session_store is not _NO_STORE and hasattr(
-                self.existing_session_store, "meta"
-            ):
-                meta = self.existing_session_store.meta
-                for key in ("agents", "config_type"):
-                    self.existing_session_meta[key] = (
-                        copy.deepcopy(meta[key]) if key in meta else _NO_STORE
-                    )
+            self.snapshot_existing_session(graph_id)
         for creature_id in graph.creature_ids:
             if creature_id in self.created_creature_ids:
                 continue
@@ -82,13 +70,30 @@ class RecipeApplyTransaction:
                     agent, "session_store", _NO_STORE
                 )
 
+    def snapshot_existing_session(self, graph_id: str) -> None:
+        """Capture session ownership independently of graph-member changes."""
+        self.existing_graph_id = graph_id
+        self.existing_session_store = self.engine._session_stores.get(
+            graph_id, _NO_STORE
+        )
+        self.existing_session_owned = graph_id in self.engine._owned_sessions
+        if (
+            self.existing_session_store is not _NO_STORE
+            and not getattr(self.existing_session_store, "_closed", False)
+            and hasattr(self.existing_session_store, "meta")
+        ):
+            meta = self.existing_session_store.meta
+            for key in ("agents", "config_type"):
+                self.existing_session_meta[key] = (
+                    copy.deepcopy(meta[key]) if key in meta else _NO_STORE
+                )
+
     def stage_session_replacement(self, graph_id: str) -> None:
         """Keep the previous store alive until the recipe commits.
 
-        ``Terrarium.attach_session`` normally closes a replaced store
-        immediately. A recipe still has a fallible final checkpoint after
-        attachment, so temporarily removing the old mapping lets rollback
-        restore the same live writer if that checkpoint fails.
+        Direct attachment and recipes both have fallible binding/checkpoint
+        work after preparing a candidate. Removing the old mapping temporarily
+        lets rollback restore the same live writer until the owner commits.
         """
         previous = self.existing_session_store
         if (

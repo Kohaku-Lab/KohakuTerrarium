@@ -14,7 +14,12 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.resume import detect_session_type
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium import autosession, graph_checkpoint
 from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.drive.config import (
+    DriveRuntimeConfig,
+    default_registrations,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.terrarium import _FakeAgent
@@ -318,3 +323,167 @@ class TestRealAgentRoundTrip:
             assert any(e.get("type") == "user_input" for e in events)
         finally:
             reopened.close(update_status=False)
+
+
+class TestSessionReplacement:
+    async def test_failed_replacement_keeps_old_writer_live(self, tmp_path):
+        t = Terrarium(
+            pwd=str(tmp_path),
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        )
+        cfg = AgentConfig(name="alice", system_prompt="Reply briefly.")
+        c = await t.add_creature(
+            cfg,
+            llm=ScriptedLLM(["still working"]),
+            io="headless",
+            session=tmp_path / "old.kohakutr",
+            start=False,
+        )
+        old = t._session_stores[c.graph_id]
+        blocker = tmp_path / "not-a-directory"
+        blocker.write_text("block", encoding="utf-8")
+        target = blocker / "new.kohakutr"
+        try:
+            with pytest.raises(OSError):
+                await t.attach_session(c.graph_id, target)
+            assert t._session_stores[c.graph_id] is old
+            assert not old._closed
+            assert c.agent.session_store is old
+            assert c.graph_id in t._owned_sessions
+            old.append_event("alice", "user_input", {"content": "after failure"})
+            old.flush()
+            assert old.get_events("alice")[-1]["content"] == "after failure"
+        finally:
+            await t.shutdown()
+
+    @pytest.mark.parametrize("reattach", [False, True])
+    async def test_same_path_attach_and_join_reuse_writer(self, tmp_path, reattach):
+        t = Terrarium(pwd=str(tmp_path))
+        target = tmp_path / "shared.kohakutr"
+        c = await t.add_creature(
+            AgentConfig(name="alice"),
+            llm=ScriptedLLM(["a"]),
+            io="headless",
+            session=target,
+            start=False,
+        )
+        old = t._session_stores[c.graph_id]
+        try:
+            if reattach:
+                await t.attach_session(c.graph_id, target.resolve().as_uri())
+            assert t._session_stores[c.graph_id] is old
+            sibling = await t.add_creature(
+                AgentConfig(name="bob"),
+                llm=ScriptedLLM(["b"]),
+                io="headless",
+                graph=c.graph_id,
+                session=str(target),
+                start=False,
+            )
+            assert sibling.agent.session_store is old
+            assert c.agent.session_store is old
+            assert set(old.load_meta()["agents"]) == {"alice", "bob"}
+            assert c.graph_id in t._owned_sessions
+        finally:
+            await t.shutdown()
+
+    async def test_replacement_by_new_creature_preserves_ownership(self, tmp_path):
+        t = Terrarium(pwd=str(tmp_path))
+        c = await t.add_creature(
+            AgentConfig(name="alice"),
+            llm=ScriptedLLM(["a"]),
+            io="headless",
+            session=tmp_path / "first.kohakutr",
+            start=False,
+        )
+        old = t._session_stores[c.graph_id]
+        try:
+            sibling = await t.add_creature(
+                AgentConfig(name="bob"),
+                llm=ScriptedLLM(["b"]),
+                io="headless",
+                graph=c.graph_id,
+                session=tmp_path / "second.kohakutr",
+                start=False,
+            )
+            new = t._session_stores[c.graph_id]
+            assert new is not old and old._closed
+            assert c.agent.session_store is sibling.agent.session_store is new
+            assert c.graph_id in t._owned_sessions
+        finally:
+            await t.shutdown()
+
+    def test_mint_metadata_failure_releases_writer(self, tmp_path):
+        t = Terrarium()
+        target = tmp_path / "invalid.kohakutr"
+        with pytest.raises(ValueError, match="config_type"):
+            autosession.mint_store(t, "graph", path=target, config_type="invalid")
+        reopened = SessionStore(target, writer_lock=True)
+        reopened.close(update_status=False)
+
+    @pytest.mark.parametrize("minted", [True, False])
+    async def test_cancelled_checkpoint_restores_writer_and_bindings(
+        self, tmp_path, minted
+    ):
+        t = Terrarium(
+            pwd=str(tmp_path),
+            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_registrations=default_registrations(),
+        )
+        c = await t.add_creature(
+            AgentConfig(name="alice"),
+            llm=ScriptedLLM(["a"]),
+            io="headless",
+            session=tmp_path / "old.kohakutr",
+            start=True,
+        )
+        await c.wait_restoration_ready()
+        for _ in range(100):
+            if c.graph_id in t._drive_runtime._registry._ready_graphs:
+                break
+            await asyncio.sleep(0.01)
+        assert c.graph_id in t._drive_runtime._registry._ready_graphs
+        old = t._session_stores[c.graph_id]
+        target = tmp_path / "candidate.kohakutr"
+        candidate = (
+            target if minted else autosession.mint_store(t, c.graph_id, path=target)
+        )
+        lock = graph_checkpoint._engine_locks(t)[c.graph_id]
+        await lock.acquire()
+        task = asyncio.create_task(t.attach_session(c.graph_id, candidate))
+        try:
+            for _ in range(100):
+                if c.agent.session_store is not old:
+                    break
+                await asyncio.sleep(0.01)
+            assert c.agent.session_store is not old
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert t._session_stores[c.graph_id] is old
+            assert c.agent.session_store is old
+            assert not old._closed
+            assert c.graph_id in t._owned_sessions
+            old.append_event("alice", "user_input", {"content": "after cancellation"})
+            old.flush()
+            assert t._drive_runtime._registry._bound_stores[c.graph_id] is old
+            for _ in range(100):
+                if c.graph_id in t._drive_runtime._registry._ready_graphs:
+                    break
+                await asyncio.sleep(0.01)
+            assert c.graph_id in t._drive_runtime._registry._ready_graphs
+            if minted:
+                reopened = SessionStore(target, writer_lock=True)
+                reopened.close(update_status=False)
+            else:
+                assert (
+                    not candidate._closed
+                )  # Caller retains failed external candidates.
+        finally:
+            lock.release()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await t.shutdown()
+            if not minted:
+                candidate.close(update_status=False)
