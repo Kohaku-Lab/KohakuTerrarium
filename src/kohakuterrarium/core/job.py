@@ -63,6 +63,22 @@ class JobStatus:
         """Return whether the job is currently running."""
         return self.state == JobState.RUNNING
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize status with enum values and ISO-8601 timestamps."""
+        return {
+            "job_id": self.job_id,
+            "job_type": self.job_type.value,
+            "type_name": self.type_name,
+            "state": self.state.value,
+            "start_time": self.start_time.isoformat(),
+            "end_time": self.end_time.isoformat() if self.end_time else None,
+            "duration": self.duration,
+            "output_lines": self.output_lines,
+            "output_bytes": self.output_bytes,
+            "preview": self.preview,
+            "error": self.error,
+        }
+
     def to_context_string(self) -> str:
         """Format job status for inclusion in controller context."""
         status_str = self.state.value

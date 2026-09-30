@@ -5,8 +5,14 @@ Terrarium engine populated with ``_FakeAgent`` creatures via
 ``TestTerrariumBuilder``. No LLM is involved.
 """
 
+import asyncio
+import json
+
 import pytest
 
+from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
+from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import (
     CreatureInfo,
@@ -96,6 +102,51 @@ class TestProtocol:
 
 
 class TestReadOperations:
+    async def test_list_jobs_serializes_real_running_tool_then_clears(self, tmp_path):
+        class GatedTool(BaseTool):
+            tool_name = "gated"
+            description = "Synthetic gated tool"
+
+            async def _execute(self, args, **kwargs):
+                entered.set()
+                await release.wait()
+                return ToolResult(output="finished")
+
+        entered, release = asyncio.Event(), asyncio.Event()
+        config = tmp_path / "config.yaml"
+        config.write_text("name: jobs\ninput: {type: none}\noutput: {type: none}\n")
+        async with Terrarium() as engine:
+            creature = await engine.add_creature(
+                str(config),
+                llm=ScriptedLLM(["unused"]),
+                tools=[GatedTool()],
+                session=False,
+                io="headless",
+            )
+            service = LocalTerrariumService(engine)
+            executor = creature.agent.executor
+            job_id = await executor.submit("gated", {}, is_direct=True)
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=2)
+                jobs = await service.list_jobs(creature.creature_id)
+                assert json.loads(json.dumps(jobs)) == jobs
+                assert len(jobs) == 1
+                assert jobs[0]["job_id"] == job_id
+                assert jobs[0]["job_type"] == "tool"
+                assert jobs[0]["type_name"] == "gated"
+                assert jobs[0]["state"] == "running"
+                assert jobs[0]["end_time"] is None
+                assert (
+                    jobs[0]["start_time"]
+                    == executor.get_status(job_id).start_time.isoformat()
+                )
+                assert jobs[0]["duration"] >= 0
+            finally:
+                release.set()
+                result = await executor.wait_for(job_id, timeout=2)
+            assert result.output == "finished"
+            assert await service.list_jobs(creature.creature_id) == []
+
     async def test_node_id_default(self):
         svc = await _make_empty_service()
         try:
