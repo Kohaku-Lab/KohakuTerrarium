@@ -44,6 +44,7 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.session.reader import SessionReader
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -680,7 +681,19 @@ class TestApiTerrariumJourney:
             assert err_frame["type"] == "error"
             assert "not found" in err_frame["content"]
 
-        # 8. Remove the hot-plugged creature; the session shrinks back.
+        # 8. Closing a creature keeps its history and the peers alive.
+        with client.websocket_connect(
+            f"/ws/sessions/{session_id}/creatures/{carol_id}/chat"
+        ) as chat_ws:
+            _drain_until(chat_ws, lambda f: f.get("activity_type") == "session_info")
+            assert (
+                _stream_turn(chat_ws, "keep Carol's history", target="carol")
+                == _REPLY_TWO
+            )
+
+        with SessionReader(tmp_path / "sessions" / f"{session_id}.kohakutr") as reader:
+            carol_events = reader.events("carol")
+        assert carol_events
         resp = client.delete(f"/api/sessions/active/{session_id}/creatures/{carol_id}")
         assert resp.status_code == 200
         assert resp.json() == {"status": "removed"}
@@ -688,6 +701,13 @@ class TestApiTerrariumJourney:
         resp = client.get(f"/api/sessions/active/{session_id}/creatures")
         assert resp.status_code == 200
         assert {c["name"] for c in resp.json()} == {"alice", "bob"}
+        assert all(c["running"] for c in resp.json())
+        with SessionReader(tmp_path / "sessions" / f"{session_id}.kohakutr") as reader:
+            assert reader.events("carol")[: len(carol_events)] == carol_events
+            assert any(
+                m.get("content") == "keep Carol's history"
+                for m in reader.conversation("carol")
+            )
 
         # 8b. Cross-session merge — create a SECOND terrarium session
         #     from the same recipe, then merge it into the first via the
@@ -702,6 +722,22 @@ class TestApiTerrariumJourney:
         assert resp.status_code == 200
         second_id = resp.json()["terrarium_id"]
         assert second_id != session_id
+        # A valid creature from another graph must never be removed through
+        # the wrong session URL (for example, a stale graph menu).
+        second_creatures = client.get(
+            f"/api/sessions/active/{second_id}/creatures"
+        ).json()
+        foreign_id = second_creatures[0]["creature_id"]
+        assert (
+            client.delete(
+                f"/api/sessions/active/{session_id}/creatures/{foreign_id}"
+            ).status_code
+            == 404
+        )
+        assert (
+            client.get(f"/api/sessions/active/{second_id}/creatures").json()
+            == second_creatures
+        )
         # Two distinct graphs are live in the runtime snapshot.
         resp = client.get("/api/runtime/graph")
         graph_ids = {g["graph_id"] for g in resp.json()["graphs"]}

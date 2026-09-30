@@ -1165,6 +1165,62 @@ class TestLlmIntegration:
         assert base64.b64decode(mime_content[1]["source"]["data"]) == expected_jpeg
         assert mislabeled.read_bytes() == expected_jpeg
 
+        tool_history = [
+            UserMessage("Read the image."),
+            AssistantMessage(
+                "",
+                tool_calls=[
+                    {
+                        "id": "image-call",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{}"},
+                    }
+                ],
+            ),
+            ToolMessage(
+                [
+                    TextPart(""),
+                    TextPart("Image: synthetic.png"),
+                    TextPart(" \t\n"),
+                    image,
+                ],
+                tool_call_id="image-call",
+            ),
+            UserMessage("Continue."),
+        ]
+        tool_wire = messages_to_dicts(tool_history)
+        saved_tool_wire = json.dumps(tool_wire)
+        tool_requests = []
+        tool_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=tool_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await tool_provider.chat_complete(tool_wire)
+            ).content == ANTHROPIC_ANSWER
+        finally:
+            await tool_provider.close()
+        assert json.dumps(tool_wire) == saved_tool_wire
+        assert tool_requests[0]["messages"][2]["content"] == [
+            {
+                "type": "tool_result",
+                "tool_use_id": "image-call",
+                "content": [
+                    {"type": "text", "text": "Image: synthetic.png"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AAAA",
+                        },
+                    },
+                ],
+            }
+        ]
+
         # Text-only content stays a plain string, never a list.
         assert make_multimodal_content("just text", images=None) == "just text"
         assert UserMessage("plain").to_dict() == {
