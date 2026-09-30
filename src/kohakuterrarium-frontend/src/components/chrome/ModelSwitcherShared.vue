@@ -370,8 +370,8 @@ onUnmounted(() => {
 .status-select {
   --el-input-bg-color: transparent;
   --el-fill-color-blank: transparent;
-  --el-border-color: rgba(120, 109, 98, 0.25);
-  --el-border-color-hover: rgba(120, 109, 98, 0.4);
+  --el-border-color: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 25%, transparent);
+  --el-border-color-hover: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 40%, transparent);
   --el-text-color-regular: currentColor;
 }
 
@@ -391,7 +391,7 @@ onUnmounted(() => {
   padding: 0.25rem 0.6rem;
   min-height: 32px;
   border-radius: 6px;
-  border: 1px solid rgba(120, 109, 98, 0.25);
+  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 25%, transparent);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -407,8 +407,8 @@ onUnmounted(() => {
   }
 }
 .model-pill:hover:not(.is-disabled) {
-  border-color: rgba(120, 109, 98, 0.5);
-  background: rgba(120, 109, 98, 0.06);
+  border-color: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 50%, transparent);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 6%, transparent);
 }
 .model-pill.is-disabled {
   opacity: 0.5;
@@ -431,11 +431,11 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .provider-tab:hover {
-  background: rgba(120, 109, 98, 0.08);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 8%, transparent);
 }
 .provider-tab.is-active {
-  background: rgba(90, 140, 200, 0.12);
-  color: var(--el-color-primary, #5a8cc8);
+  background: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 12%, transparent);
+  color: var(--el-color-primary, var(--kt-color-iolite, #5a4fcf));
   font-weight: 500;
 }
 .provider-tab.is-unavailable {
@@ -455,11 +455,11 @@ onUnmounted(() => {
   cursor: pointer;
 }
 .model-row:hover {
-  background: rgba(120, 109, 98, 0.08);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 8%, transparent);
 }
 .model-row.is-active {
-  background: rgba(90, 140, 200, 0.12);
-  border-color: rgba(90, 140, 200, 0.3);
+  background: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 12%, transparent);
+  border-color: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 30%, transparent);
 }
 .model-row.is-unavailable {
   opacity: 0.4;
@@ -468,7 +468,7 @@ onUnmounted(() => {
 .variation-chip {
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  border: 1px solid rgba(120, 109, 98, 0.3);
+  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 30%, transparent);
   background: transparent;
   font-size: 11px;
   color: inherit;
@@ -476,12 +476,12 @@ onUnmounted(() => {
   transition: background 0.1s ease;
 }
 .variation-chip:hover {
-  background: rgba(120, 109, 98, 0.1);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 10%, transparent);
 }
 .variation-chip.is-active {
-  background: rgba(90, 140, 200, 0.18);
-  border-color: var(--el-color-primary, #5a8cc8);
-  color: var(--el-color-primary, #5a8cc8);
+  background: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 18%, transparent);
+  border-color: var(--el-color-primary, var(--kt-color-iolite, #5a4fcf));
+  color: var(--el-color-primary, var(--kt-color-iolite, #5a4fcf));
   font-weight: 500;
 }
 
@@ -498,10 +498,10 @@ onUnmounted(() => {
     padding: 0.35rem 0.7rem;
     margin-bottom: 0;
     font-size: 12px;
-    border: 1px solid rgba(120, 109, 98, 0.25);
+    border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 25%, transparent);
   }
   .provider-tab.is-active {
-    border-color: var(--el-color-primary, #5a8cc8);
+    border-color: var(--el-color-primary, var(--kt-color-iolite, #5a4fcf));
   }
 }
 

@@ -19,6 +19,24 @@ export default defineConfig({
     }),
   ],
   transformers: [transformerDirectives()],
+  preflights: [
+    {
+      getCSS: ({ theme }) => {
+        const declarations = []
+        for (const [name, value] of Object.entries(theme.colors)) {
+          if (typeof value === "string") {
+            declarations.push(`--kt-color-${name}: ${value};`)
+            continue
+          }
+          for (const [shade, hex] of Object.entries(value)) {
+            const suffix = shade === "DEFAULT" ? "" : `-${shade}`
+            declarations.push(`--kt-color-${name}${suffix}: ${hex};`)
+          }
+        }
+        return `:root {\n  ${declarations.join("\n  ")}\n}`
+      },
+    },
+  ],
   theme: {
     colors: {
       // Gem accent colors
@@ -89,6 +107,10 @@ export default defineConfig({
       "px-4 py-2 rounded-lg bg-iolite text-white hover:bg-iolite-shadow transition-colors font-medium text-sm border-none",
     "btn-secondary":
       "px-4 py-2 rounded-lg bg-warm-100 dark:bg-warm-800 text-warm-700 dark:text-warm-300 hover:bg-warm-200 dark:hover:bg-warm-700 transition-colors font-medium text-sm border border-warm-200/50 dark:border-warm-700/50",
+    "btn-ghost":
+      "px-2.5 py-1 rounded-lg text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-700/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+    "btn-icon":
+      "inline-flex items-center justify-center w-8 h-8 rounded-lg text-warm-500 dark:text-warm-400 hover:bg-warm-200/60 hover:text-warm-700 dark:hover:bg-warm-700/40 dark:hover:text-warm-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
     "gem-badge": "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
     "container-page": "max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6",
     "section-title": "text-lg font-semibold text-warm-800 dark:text-warm-200 mb-4",

@@ -33,7 +33,7 @@
               </div>
             </div>
             <GraphCounts :instance="inst" />
-            <button class="btn-icon text-coral hover:text-coral-dark flex-shrink-0" :title="t('home.stopInstance')" @click.stop="handleStop(inst)">
+            <button class="btn-icon text-coral hover:text-coral-shadow flex-shrink-0" :title="t('home.stopInstance')" @click.stop="handleStop(inst)">
               <span class="i-carbon-stop-filled" />
             </button>
           </div>

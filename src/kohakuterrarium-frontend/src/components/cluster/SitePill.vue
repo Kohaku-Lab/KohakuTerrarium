@@ -28,7 +28,7 @@ const pillClasses = computed(() => {
   }
   // Active cluster (≥2 sites): iolite accent matches "running" status
   // chips used elsewhere in the rail.
-  return "bg-iolite/15 text-iolite-dark dark:text-iolite-light hover:bg-iolite/25"
+  return "bg-iolite/15 text-iolite-shadow dark:text-iolite-light hover:bg-iolite/25"
 })
 
 const title = computed(() => {

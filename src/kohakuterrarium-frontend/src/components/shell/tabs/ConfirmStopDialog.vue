@@ -9,7 +9,7 @@
     <template #footer>
       <div class="flex justify-end gap-2">
         <button class="btn-secondary text-xs px-3 py-1.5" @click="$emit('close')">Cancel</button>
-        <button class="btn-primary text-xs px-3 py-1.5 bg-coral hover:bg-coral-dark" :disabled="stopping" @click="onStop">
+        <button class="btn-primary text-xs px-3 py-1.5 bg-coral hover:bg-coral-shadow" :disabled="stopping" @click="onStop">
           {{ stopping ? "Stopping…" : "Stop" }}
         </button>
       </div>

@@ -473,15 +473,15 @@ watch(
   letter-spacing: 0.05em;
 }
 .variation-group {
-  border: 1px solid rgba(120, 109, 98, 0.18);
+  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
   border-radius: 6px;
   padding: 0.75rem;
   margin-bottom: 0.75rem;
-  background: rgba(120, 109, 98, 0.03);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 3%, transparent);
 }
 .variation-option {
   padding-left: 0.75rem;
-  border-left: 2px solid rgba(120, 109, 98, 0.15);
+  border-left: 2px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 15%, transparent);
   margin-bottom: 0.5rem;
 }
 .variation-patch {
@@ -495,7 +495,7 @@ watch(
   font-family: ui-monospace, monospace;
   font-size: 11px;
   background: rgba(0, 0, 0, 0.04);
-  border: 1px solid rgba(120, 109, 98, 0.15);
+  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 15%, transparent);
   border-radius: 4px;
   padding: 0.5rem;
   max-height: 14rem;

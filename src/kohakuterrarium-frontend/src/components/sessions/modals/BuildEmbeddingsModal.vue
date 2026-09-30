@@ -15,7 +15,7 @@
         <el-input-number v-model="form.dimensions" :placeholder="t('memoryBuild.dimensionsPlaceholder')" size="small" :disabled="running" :min="1" :controls="false" />
       </div>
 
-      <div v-if="rebuild" class="rounded border border-amber-300 bg-amber-50 dark:bg-amber-900/20 p-2 text-[12px]">
+      <div v-if="rebuild" class="rounded border border-amber/40 bg-amber/10 dark:bg-amber/15 p-2 text-[12px]">
         {{ t("memoryBuild.rebuildWarning") }}
       </div>
 
@@ -28,7 +28,7 @@
         <p v-if="progress.agent" class="text-[11px] text-warm-400 font-mono">{{ t("memoryBuild.workingOn") }} {{ progress.agent }}</p>
       </div>
 
-      <p v-if="error" class="text-[12px] text-red-500">{{ error }}</p>
+      <p v-if="error" class="text-[12px] text-coral">{{ error }}</p>
       <p v-if="terminal === 'ok'" class="text-[12px] text-iolite">
         {{ t("memoryBuild.successMsg", { blocks: indexedBlocks }) }}
       </p>

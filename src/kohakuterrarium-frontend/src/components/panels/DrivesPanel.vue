@@ -173,9 +173,9 @@ defineExpose({
   padding: 0.25rem 0.75rem;
   font-size: 11px;
   font-weight: 500;
-  color: rgb(120, 109, 98);
-  background: rgba(120, 109, 98, 0.08);
-  border-bottom: 1px solid rgba(120, 109, 98, 0.12);
+  color: var(--kt-color-warm-500, #8a8480);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 12%, transparent);
   position: sticky;
   top: 0;
 }
@@ -183,7 +183,7 @@ defineExpose({
   width: 20rem;
   flex-shrink: 0;
   overflow-y: auto;
-  border-right: 1px solid rgba(120, 109, 98, 0.18);
+  border-right: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
 }
 .drive-detail-pane {
   flex: 1 1 0;

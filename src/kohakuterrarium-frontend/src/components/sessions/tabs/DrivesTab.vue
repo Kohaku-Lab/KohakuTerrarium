@@ -54,7 +54,7 @@ watch(
   width: 20rem;
   flex-shrink: 0;
   overflow-y: auto;
-  border-right: 1px solid rgba(120, 109, 98, 0.18);
+  border-right: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
 }
 .saved-detail-pane {
   flex: 1 1 0;

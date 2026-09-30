@@ -35,13 +35,13 @@ const cluster = useClusterStore()
 const { t } = useI18n()
 
 function dotClass(site) {
-  if (site.status === "online") return "bg-emerald"
+  if (site.status === "online") return "bg-sage"
   if (site.status === "unreachable") return "bg-rose"
   return "bg-warm-400"
 }
 
 function statusClass(site) {
-  if (site.status === "online") return "text-emerald-dark dark:text-emerald-light"
+  if (site.status === "online") return "text-sage-shadow dark:text-sage-light"
   if (site.status === "unreachable") return "text-rose"
   return ""
 }

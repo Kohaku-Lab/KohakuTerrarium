@@ -1094,7 +1094,7 @@ function onOpenDrives() {
   display: flex;
   gap: 0;
   height: 100%;
-  border: 1px solid rgba(120, 109, 98, 0.18);
+  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
   border-radius: 8px;
   overflow: hidden;
   background: var(--el-bg-color, transparent);
@@ -1105,7 +1105,7 @@ function onOpenDrives() {
   flex-direction: column;
   width: 16rem;
   flex-shrink: 0;
-  border-right: 1px solid rgba(120, 109, 98, 0.18);
+  border-right: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
   min-height: 0;
 }
 
@@ -1128,7 +1128,7 @@ function onOpenDrives() {
   margin-bottom: 0.75rem;
   border-radius: 6px;
   background: transparent;
-  border: 1px solid rgba(120, 109, 98, 0.25);
+  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 25%, transparent);
   color: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -1137,13 +1137,13 @@ function onOpenDrives() {
     border-color 0.1s ease;
 }
 .model-back-button:hover {
-  background: rgba(120, 109, 98, 0.06);
-  border-color: rgba(120, 109, 98, 0.5);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 6%, transparent);
+  border-color: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 50%, transparent);
 }
 
 .model-list-head {
   padding: 0.75rem;
-  border-bottom: 1px solid rgba(120, 109, 98, 0.15);
+  border-bottom: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 15%, transparent);
   flex-shrink: 0;
 }
 
@@ -1224,10 +1224,10 @@ function onOpenDrives() {
   transition: background 0.1s ease;
 }
 .preset-row:hover {
-  background: rgba(120, 109, 98, 0.06);
+  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 6%, transparent);
 }
 .preset-row.is-active {
-  background: rgba(90, 140, 200, 0.15);
-  color: var(--el-color-primary, #5a8cc8);
+  background: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 15%, transparent);
+  color: var(--el-color-primary, var(--kt-color-iolite, #5a4fcf));
 }
 </style>

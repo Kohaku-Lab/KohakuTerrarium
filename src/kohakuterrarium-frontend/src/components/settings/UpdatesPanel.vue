@@ -15,14 +15,14 @@
           Platform: <span class="font-mono">{{ state.platform || "—" }}</span> · ABI: <span class="font-mono">{{ state.py_abi || "—" }}</span>
         </div>
         <div v-if="!state.launcher_install" class="text-warm-500">Running outside the launcher — update controls are disabled.</div>
-        <div v-if="state.last_check_error" class="text-red-500 text-[12px]">Last probe: {{ state.last_check_error }}</div>
+        <div v-if="state.last_check_error" class="text-coral text-[12px]">Last probe: {{ state.last_check_error }}</div>
       </div>
       <div class="flex items-center gap-2 mt-3 flex-wrap">
         <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800" :disabled="busy" @click="onCheckNow">Check now</button>
-        <button class="text-[12px] px-3 py-1 border rounded bg-iolite text-white hover:bg-iolite-dark disabled:opacity-50" :disabled="!canUpdate" @click="onUpdate">{{ updateButtonLabel }}</button>
+        <button class="text-[12px] px-3 py-1 border rounded bg-iolite text-white hover:bg-iolite-shadow disabled:opacity-50" :disabled="!canUpdate" @click="onUpdate">{{ updateButtonLabel }}</button>
         <button class="text-[12px] px-3 py-1 border rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="!canRollback" @click="onRollback">{{ rollbackLabel }}</button>
       </div>
-      <div v-if="error" class="mt-3 text-[12px] text-red-500">{{ error }}</div>
+      <div v-if="error" class="mt-3 text-[12px] text-coral">{{ error }}</div>
     </section>
 
     <!-- ── Channel ────────────────────────────────────────────────── -->

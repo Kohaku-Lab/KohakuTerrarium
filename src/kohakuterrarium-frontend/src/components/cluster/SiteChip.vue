@@ -43,7 +43,7 @@ const chipClasses = computed(() => {
     case "neutral":
       return "bg-warm-200 text-warm-700 dark:bg-warm-800 dark:text-warm-300"
     case "teal":
-      return "bg-teal/15 text-teal-shadow dark:text-teal-light"
+      return "bg-aquamarine/15 text-aquamarine-shadow dark:text-aquamarine-light"
     case "amber":
       return "bg-amber/15 text-amber-shadow dark:text-amber-light"
     case "iolite":
@@ -66,7 +66,7 @@ const dotColor = computed(() => {
     case "neutral":
       return "bg-warm-500"
     case "teal":
-      return "bg-teal"
+      return "bg-aquamarine"
     case "amber":
       return "bg-amber"
     case "iolite":

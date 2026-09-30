@@ -28,11 +28,11 @@
             <span class="i-carbon-add text-[12px]" />
             Creature
           </button>
-          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-aquamarine/15 text-aquamarine-dark dark:text-aquamarine-light hover:bg-aquamarine/25 transition-colors" title="Add a new channel node at the viewport centre" @click="addNewNode('channel')">
+          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-aquamarine/15 text-aquamarine-shadow dark:text-aquamarine-light hover:bg-aquamarine/25 transition-colors" title="Add a new channel node at the viewport centre" @click="addNewNode('channel')">
             <span class="i-carbon-add text-[12px]" />
             Channel
           </button>
-          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber/15 text-amber-dark dark:text-amber-light hover:bg-amber/25 transition-colors" title="Add a new terrarium node at the viewport centre" @click="addNewNode('terrarium')">
+          <button class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber/15 text-amber-shadow dark:text-amber-light hover:bg-amber/25 transition-colors" title="Add a new terrarium node at the viewport centre" @click="addNewNode('terrarium')">
             <span class="i-carbon-add text-[12px]" />
             Terrarium
           </button>
@@ -49,11 +49,11 @@
               <span class="i-carbon-bot text-base" />
               <span>Creature</span>
             </button>
-            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-aquamarine-dark dark:text-aquamarine-light hover:bg-aquamarine/15" @click="onAddPick('channel')">
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-aquamarine-shadow dark:text-aquamarine-light hover:bg-aquamarine/15" @click="onAddPick('channel')">
               <span class="i-carbon-flow-connection text-base" />
               <span>Channel</span>
             </button>
-            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-dark dark:text-amber-light hover:bg-amber/15" @click="onAddPick('terrarium')">
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-amber-shadow dark:text-amber-light hover:bg-amber/15" @click="onAddPick('terrarium')">
               <span class="i-carbon-network-4 text-base" />
               <span>Terrarium</span>
             </button>

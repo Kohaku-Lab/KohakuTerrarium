@@ -42,7 +42,7 @@
       <template v-else>
         <p class="text-[12px] text-warm-400 mb-2 font-mono truncate">{{ editing?.path }}</p>
         <el-input v-model="editorContent" type="textarea" :rows="22" class="font-mono" @input="dirty = true" />
-        <p v-if="saveError" class="text-[12px] text-red-500 mt-2">{{ saveError }}</p>
+        <p v-if="saveError" class="text-[12px] text-coral mt-2">{{ saveError }}</p>
         <p v-if="!editing?.exists" class="text-[12px] text-amber-shadow dark:text-amber-light mt-2">
           {{ t("advanced.newFileHint") }}
         </p>

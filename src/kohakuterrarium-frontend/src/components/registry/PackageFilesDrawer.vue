@@ -32,7 +32,7 @@
                 </div>
               </div>
               <el-input v-model="content" type="textarea" :rows="22" class="font-mono" @input="onEdit" />
-              <p v-if="saveError" class="text-[12px] text-red-500">{{ saveError }}</p>
+              <p v-if="saveError" class="text-[12px] text-coral">{{ saveError }}</p>
             </template>
           </div>
         </div>
