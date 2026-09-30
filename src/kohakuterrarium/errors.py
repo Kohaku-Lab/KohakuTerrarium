@@ -144,7 +144,7 @@ class SessionNotFoundError(SessionError, NotFoundError, FileNotFoundError):
     """A named session does not exist on disk or in the engine."""
 
 
-class SessionLockedError(SessionError, RuntimeError):
+class SessionLockedError(SessionError, ConflictError, RuntimeError):
     """A writer already holds the session file lock.
 
     A second writer is rejected because concurrent writers can overwrite
