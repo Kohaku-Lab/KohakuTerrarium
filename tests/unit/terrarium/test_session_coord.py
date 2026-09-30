@@ -26,14 +26,32 @@ class TestCopyEventsInto:
         dst = SessionStore(str(tmp_path / "dst.kohakutr"))
         try:
             src.init_meta("s1", "agent", "/p", "/w", ["alice"])
-            src.append_event("alice", "user_input", {"content": "hi"})
-            src.append_event("alice", "user_input", {"content": "bye"})
+            src.append_event("alice", "user_input", {"content": "hi", "ts": 10})
+            src.append_event("alice", "user_input", {"content": "bye", "ts": 20})
+            dst.append_event("other", "text_chunk", {"content": "unrelated"})
             src.flush()
 
             n = sc.copy_events_into(src, dst)
             assert n == 2
             events = dst.get_events("alice")
             assert len(events) == 2
+            assert events[0]["event_id"] != src.get_events("alice")[0]["event_id"]
+            dst.append_event("alice", "user_input", {"content": "new", "ts": 30})
+            retained = dst.get_events("alice")
+            assert sc.copy_events_into(src, dst) == 0
+            assert dst.get_events("alice") == retained
+            src.append_event("alice", "user_input", {"content": "new", "ts": 30})
+            src.append_event("alice", "user_input", {"content": "bye", "ts": 40})
+            assert sc.copy_events_into(src, dst) == 1
+            combined = dst.get_events("alice")
+            assert combined[:3] == retained
+            assert [event["content"] for event in combined] == [
+                "hi",
+                "bye",
+                "new",
+                "bye",
+            ]
+            assert sc.copy_events_into(src, dst) == 0
         finally:
             src.close()
             dst.close()
@@ -43,15 +61,24 @@ class TestCopyEventsInto:
         dst = SessionStore(str(tmp_path / "dst.kohakutr"))
         try:
             src.init_meta("s1", "agent", "/p", "/w", ["alice"])
+            dst.append_event(
+                "alice",
+                "user_input",
+                {"content": "hi", "ts": 10},
+                turn_index=2,
+                branch_id=1,
+            )
             src.append_event(
                 "alice",
                 "user_input",
-                {"content": "hi"},
+                {"content": "hi", "ts": 10},
                 turn_index=2,
+                branch_id=2,
             )
             src.flush()
             n = sc.copy_events_into(src, dst)
             assert n == 1
+            assert [event["branch_id"] for event in dst.get_events("alice")] == [1, 2]
         finally:
             src.close()
             dst.close()

@@ -116,21 +116,14 @@ class TestApiLocalRemoteAudit:
     async def test_hotplug_remove_creature_from_remote_session_does_not_500(
         self, tmp_path, monkeypatch
     ):
-        """``DELETE /api/sessions/active/{sid}/creatures/{cid}`` should
-        not 500 when the session lives on a worker.
-
-        ``studio.sessions.lifecycle.remove_creature`` (line ~786) does
-        ``engine = as_engine(service)`` exactly like ``add_creature`` —
-        same failure mode.  Tested separately because the route is a
-        different verb (DELETE) and a different code path on the active
-        router.
-        """
+        """Remove only the requested remote session's own creature."""
         monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "host-sessions"))
         install_scripted_llm(monkeypatch, script=[ScriptEntry(response="ack")])
         cfg_a = _write_cfg(tmp_path, "alpha")
+        cfg_b = _write_cfg(tmp_path, "bravo")
 
         async with RealLabHost(tmp_path) as host:
-            async with RealLabWorker("w1", host.lab_ws_url, tmp_path / "w1"):
+            async with RealLabWorker("w1", host.lab_ws_url, tmp_path / "w1") as worker:
                 await asyncio.sleep(0.3)
 
                 spawn = await host.http.post(
@@ -142,13 +135,32 @@ class TestApiLocalRemoteAudit:
                 sid = payload["session_id"]
                 cid = payload["creatures"][0]["creature_id"]
 
+                foreign = await host.http.post(
+                    "/api/sessions/active/creature",
+                    json={"config_path": str(cfg_b), "on_node": "w1"},
+                )
+                assert foreign.status_code == 200, foreign.text
+                foreign_payload = foreign.json()
+                foreign_sid = foreign_payload["session_id"]
+                foreign_cid = foreign_payload["creatures"][0]["creature_id"]
+                rejected = await host.http.delete(
+                    f"/api/sessions/active/{sid}/creatures/{foreign_cid}",
+                    timeout=OP_TIMEOUT,
+                )
+                assert rejected.status_code == 404, rejected.text
+                for graph_id, creature_id in ((sid, cid), (foreign_sid, foreign_cid)):
+                    creature = worker.engine.get_creature(creature_id)
+                    assert creature.graph_id == graph_id
+                    assert creature.is_running
+
                 resp = await host.http.delete(
                     f"/api/sessions/active/{sid}/creatures/{cid}",
                     timeout=OP_TIMEOUT,
                 )
-                assert resp.status_code < 500, (
-                    f"hot-plug remove_creature on a worker-hosted session "
-                    f"returned {resp.status_code} {resp.text!r} — "
-                    f"lifecycle.remove_creature calls as_engine(service) "
-                    f"which raises RuntimeError on MultiNodeTerrariumService"
-                )
+                assert resp.status_code == 200, resp.text
+                assert resp.json() == {"status": "removed"}
+                with pytest.raises(KeyError):
+                    worker.engine.get_creature(cid)
+                survivor = worker.engine.get_creature(foreign_cid)
+                assert survivor.graph_id == foreign_sid
+                assert survivor.is_running
