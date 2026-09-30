@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig, load_global_config
 from kohakuterrarium.mcp_server.records import (
     https_origin,
+    read_json,
     workspace_identity,
     write_json,
 )
@@ -196,7 +197,7 @@ class EndpointStore:
 
     def _active(self, run_id):
         try:
-            data = json.loads(self.active_path.read_text(encoding="utf-8"))
+            data = read_json(self.active_path)
             record = Endpoint.model_validate(data["connection"])
             if not run_id or data["run_id"] != run_id or not self.owns(record):
                 raise ValueError("identity")
@@ -214,7 +215,7 @@ class EndpointStore:
 
     def runtime(self):
         try:
-            data = json.loads(self.runtime_path.read_text(encoding="utf-8"))
+            data = read_json(self.runtime_path)
             return data if isinstance(data, dict) else {}
         except (ValueError, OSError):
             return {}
