@@ -51,6 +51,7 @@ from kohakuterrarium.llm.recovery import (
     backoff_delay,
     classify_openai_error,
 )
+from kohakuterrarium.llm.stream_replay import ReplayFilter
 from kohakuterrarium.llm.turn_segments import inject_anthropic_segments
 from kohakuterrarium.utils.logging import get_logger
 
@@ -220,20 +221,18 @@ class AnthropicProvider(BaseLLMProvider):
         """Stream Anthropic output with classified retries and overflow recovery."""
         current = messages
         attempt = 0
-        delivered = False
         overflow_state = OverflowRecoveryState()
+        replay = ReplayFilter()
         while True:
+            replay.begin_attempt()
             try:
                 async for chunk in self._raw_stream_chat(
                     current, tools=tools, **kwargs
                 ):
-                    if chunk:
-                        delivered = True
-                    yield chunk
+                    if text := replay.feed(chunk):
+                        yield text
                 return
             except Exception as exc:
-                if delivered:
-                    raise
                 cls = classify_openai_error(exc)
                 if cls is ErrorClass.OVERFLOW:
                     replacement = await self._recover_from_overflow(

@@ -46,6 +46,7 @@ from kohakuterrarium.llm.recovery import (
     classify_openai_error,
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
+from kohakuterrarium.llm.stream_replay import ReplayFilter
 from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
 from kohakuterrarium.llm.responses_tools import prepare_request_tools
 from kohakuterrarium.modules.tool.request_replay import tool_request_replay
@@ -266,11 +267,12 @@ class CodexOAuthProvider(BaseLLMProvider):
         recovery = kwargs.get("_ws_recovery")
         attempt = 0
         auth_retry = False
-        delivered = False
         overflow_state = OverflowRecoveryState()
+        replay = ReplayFilter()
         try:
             while True:
                 emitted = False
+                replay.begin_attempt()
                 try:
                     async with aclosing(
                         self._raw_stream_chat(
@@ -282,14 +284,15 @@ class CodexOAuthProvider(BaseLLMProvider):
                     ) as stream:
                         async for chunk in stream:
                             emitted = True
-                            if chunk:
-                                delivered = True
-                                if recovery is not None:
-                                    recovery.delivered = True
-                            yield chunk
+                            if recovery is not None and chunk:
+                                recovery.delivered = True
+                            if text := replay.feed(chunk):
+                                yield text
                     return
                 except Exception as exc:
-                    if delivered or (recovery is not None and not recovery.has_budget):
+                    if recovery is not None and (
+                        recovery.delivered or not recovery.has_budget
+                    ):
                         raise
                     if isinstance(exc, ResponsesWSError) and (
                         exc.submitted or exc.mid_stream

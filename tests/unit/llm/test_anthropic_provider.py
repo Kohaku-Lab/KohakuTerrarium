@@ -86,7 +86,7 @@ class TestProgrammingErrorsAreNotRetried:
 
 
 class TestMidStreamFailure:
-    def _provider(self, attempts):
+    def _provider(self, attempts, retry_reply):
         provider = anthropic_provider(
             "claude-sonnet-4-6",
             retry_policy=RetryPolicy(max_retries=2, base_delay=0, jitter=0),
@@ -96,26 +96,35 @@ class TestMidStreamFailure:
             attempts.append(1)
             if len(attempts) == 1:
                 yield "Hel"
-            raise httpx.ReadError("connection dropped mid-stream")
+                raise httpx.ReadError("connection dropped mid-stream")
+            yield retry_reply
 
         provider._raw_stream_chat = raw_stream
         return provider
 
-    async def test_text_already_delivered_is_not_replayed_by_a_retry(self):
+    async def _received(self, retry_reply):
         attempts = []
-        provider = self._provider(attempts)
-        received = []
-        with pytest.raises(httpx.ReadError):
-            async for chunk in provider._stream_chat(MESSAGES):
-                received.append(chunk)
-        assert received == ["Hel"]
-        assert len(attempts) == 1
+        provider = self._provider(attempts, retry_reply)
+        received = [chunk async for chunk in provider._stream_chat(MESSAGES)]
+        return "".join(received), len(attempts)
 
-    async def test_failure_before_any_text_is_still_retried(self):
+    async def test_retry_after_a_dropped_stream_does_not_repeat_delivered_text(self):
+        assert await self._received("Hello") == ("Hello", 2)
+
+    async def test_retry_that_words_the_reply_differently_is_still_delivered(self):
+        assert await self._received("Sure thing") == ("HelSure thing", 2)
+
+    async def test_failure_before_any_text_is_retried_until_the_budget_ends(self):
         attempts = []
-        provider = self._provider(attempts)
-        attempts.append(1)
+        provider = self._provider(attempts, "unused")
+
+        async def always_fails(messages, **kwargs):
+            attempts.append(1)
+            raise httpx.ReadError("connection refused")
+            yield
+
+        provider._raw_stream_chat = always_fails
         with pytest.raises(httpx.ReadError):
             async for _ in provider._stream_chat(MESSAGES):
                 pass
-        assert len(attempts) == 4
+        assert len(attempts) == 3

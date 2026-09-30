@@ -293,8 +293,23 @@ class _DropAfterFirstChunk(httpx.AsyncByteStream):
         raise httpx.ReadError("connection dropped mid-stream")
 
 
+def _reply_with(text):
+    chunk = {
+        "id": "reply",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "test",
+        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+    }
+    return httpx.Response(
+        200,
+        text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+        headers={"content-type": "text/event-stream"},
+    )
+
+
 class TestMidStreamFailure:
-    async def test_text_already_delivered_is_not_replayed_by_a_retry(self):
+    async def _received_after_drop(self, retry_reply):
         requests = []
 
         async def respond(request):
@@ -305,7 +320,7 @@ class TestMidStreamFailure:
                     stream=_DropAfterFirstChunk(),
                     headers={"content-type": "text/event-stream"},
                 )
-            return _success(True)
+            return _reply_with(retry_reply)
 
         received = []
         async with OpenAIProvider(
@@ -314,12 +329,19 @@ class TestMidStreamFailure:
             retry_policy=RetryPolicy(max_retries=2, base_delay=0, jitter=0),
         ) as provider:
             await _attach_transport(provider, respond)
-            with pytest.raises(Exception):
-                async for chunk in provider.chat(MESSAGES):
-                    received.append(chunk)
+            async for chunk in provider.chat(MESSAGES):
+                received.append(chunk)
+        return "".join(received), len(requests)
 
-        assert "".join(received) == "Hel"
-        assert len(requests) == 1
+    async def test_retry_after_a_dropped_stream_does_not_repeat_delivered_text(self):
+        text, attempts = await self._received_after_drop("Hello")
+        assert text == "Hello"
+        assert attempts == 2
+
+    async def test_retry_that_words_the_reply_differently_is_still_delivered(self):
+        text, attempts = await self._received_after_drop("Sure thing")
+        assert text == "HelSure thing"
+        assert attempts == 2
 
     async def test_failure_before_any_text_is_still_retried(self):
         requests = []
