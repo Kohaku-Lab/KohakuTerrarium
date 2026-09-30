@@ -302,6 +302,15 @@ class Conversation:
         )
         logger.debug("Conversation cleared", kept_messages=len(self._messages))
 
+    def adopt_contents(self, other: "Conversation") -> None:
+        """Replace this conversation's messages and metadata with ``other``'s.
+
+        Identity and retention config stay, so holders of this object keep a
+        live conversation.
+        """
+        self._messages = other._messages
+        self._metadata = other._metadata
+
     def __len__(self) -> int:
         """Return number of messages."""
         return len(self._messages)

@@ -290,6 +290,31 @@ def _tool_result(tc_id: str, output: str = "ok"):
     return {"role": "tool", "tool_call_id": tc_id, "content": output}
 
 
+class TestAdoptContents:
+    def test_takes_messages_and_metadata_but_keeps_identity_and_config(self):
+        config = ConversationConfig(max_messages=5, sanitize_orphan_tool_calls=False)
+        target = Conversation(config)
+        target.append("user", "old")
+        source = Conversation()
+        source.append("system", "sys")
+        source.append("user", "new")
+
+        target.adopt_contents(source)
+
+        assert [m.content for m in target.get_messages()] == ["sys", "new"]
+        assert target._metadata is source._metadata
+        assert target.config is config
+        assert config.max_messages == 5
+
+    def test_later_appends_land_in_the_adopted_history(self):
+        target = Conversation()
+        source = Conversation()
+        source.append("user", "a")
+        target.adopt_contents(source)
+        target.append("assistant", "b")
+        assert [m.content for m in target.get_messages()] == ["a", "b"]
+
+
 class TestSanitizeOrphans:
     def test_empty_passthrough(self):
         assert Conversation.sanitize_orphan_tool_pairs([]) == []

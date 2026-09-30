@@ -17,7 +17,7 @@ from kohakuterrarium.core.agent_compact import (
     restore_compact_state_from_session,
 )
 from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 
 # ── agent_lifecycle.AgentLifecycleMixin ──────────────────────────
 
@@ -205,8 +205,12 @@ class TestSyncEmergencyDropConversation:
         agent = types.SimpleNamespace()  # no controller
         sync_emergency_drop_conversation(agent, [])  # must not raise
 
-    def test_replaces_conversation(self):
-        original = Conversation()
+    def test_replaces_messages_in_place_and_keeps_the_agents_settings(self):
+        original = Conversation(
+            ConversationConfig(
+                max_messages=7, keep_system=False, sanitize_orphan_tool_calls=False
+            )
+        )
         original.append("user", "first")
         agent = types.SimpleNamespace(
             controller=types.SimpleNamespace(conversation=original)
@@ -216,11 +220,15 @@ class TestSyncEmergencyDropConversation:
             {"role": "assistant", "content": "ok"},
         ]
         sync_emergency_drop_conversation(agent, new_messages)
-        # Same controller, but conversation object replaced.
-        assert agent.controller.conversation is not original
-        msgs = agent.controller.conversation.get_messages()
+        # Anything holding the conversation keeps seeing the live one.
+        assert agent.controller.conversation is original
+        msgs = original.get_messages()
         assert [m.role for m in msgs] == ["user", "assistant"]
         assert msgs[0].content == "fresh"
+        assert original.config == ConversationConfig(
+            max_messages=7, keep_system=False, sanitize_orphan_tool_calls=False
+        )
+        assert original._metadata.message_count == 2
 
     def test_failure_swallowed(self):
         # A controller whose conversation can't supply metadata triggers

@@ -20,7 +20,9 @@ def sync_emergency_drop_conversation(
             "messages": [_message_to_conversation_json(msg) for msg in messages],
             "metadata": _metadata_for_messages(agent, messages),
         }
-        agent.controller.conversation = Conversation.from_json(json.dumps(data))
+        agent.controller.conversation.adopt_contents(
+            Conversation.from_json(json.dumps(data))
+        )
     except Exception as exc:
         logger.debug(
             "Failed to sync emergency-drop conversation",

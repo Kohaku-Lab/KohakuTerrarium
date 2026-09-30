@@ -287,14 +287,6 @@ class Agent(
         # Fresh run: the startup trigger has not settled yet.
         self._startup_settled.clear()
 
-        # Spawn the single event consumer — the only reader of the inbox.
-        # It must be running before the startup trigger fires (it drives
-        # every turn now, including startup / user input / completions).
-        self._consumer_resume.set()
-        self._consumer_task = asyncio.create_task(
-            self._run_event_consumer(), name=f"event_consumer_{self.config.name}"
-        )
-
         # Initialize MCP client manager if mcp_servers configured
         await self._init_mcp()
         self._inject_mcp_tools_into_prompt()
@@ -304,6 +296,13 @@ class Agent(
             self.compact_manager._plugins = self.plugins
         await self._load_plugins()
         self._publish_session_info()
+
+        # The single event consumer starts last: events queued while the
+        # modules above were loading are processed with every module ready.
+        self._consumer_resume.set()
+        self._consumer_task = asyncio.create_task(
+            self._run_event_consumer(), name=f"event_consumer_{self.config.name}"
+        )
 
         if self._termination_checker:
             self._termination_checker.start()
