@@ -24,7 +24,13 @@ function deeper.
 import hashlib
 import io
 import json
+import sys
 import tarfile
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from kohakuterrarium.api.routes import app_update
 
 from kohakuterrarium.launcher import downloader as _dl
 from kohakuterrarium.launcher import feeds as _feeds
@@ -172,9 +178,27 @@ class TestLauncherJourney:
         monkeypatch.setattr(_feeds, "_channel_manifest_url", lambda s: manifest_url)
 
         # ── 3. Run an update; should pick up 2.0.0 from the feed.
-        result = _runner.run_update()
-        assert result.ok, result.error
-        assert result.version == "2.0.0"
+        monkeypatch.setattr(
+            sys, "executable", str(_paths.version_dir("1.0.0") / "bin" / "python")
+        )
+        app = FastAPI()
+        app.state.lab_mode = "standalone"
+        app.include_router(app_update.router, prefix="/api/app")
+        app.include_router(app_update.ws_router)
+        with TestClient(app) as client:
+            ack = client.post("/api/app/update")
+            assert ack.status_code == 200
+            frames = []
+            with client.websocket_connect(ack.json()["websocket"]) as ws:
+                while True:
+                    frame = ws.receive_json()
+                    frames.append(frame)
+                    if "status" in frame:
+                        break
+        assert frames[-1]["status"] == "ok", frames[-1]
+        assert frames[-1]["version"] == "2.0.0"
+        phases = [f["phase"] for f in frames[:-1]]
+        assert phases == ["resolve", "download", "smoke", "done"]
         assert _tree.read_active_pointer().version == "2.0.0"
         assert _paths.version_dir("1.0.0").is_dir()  # prior preserved
         assert _paths.version_dir("2.0.0").is_dir()

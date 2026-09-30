@@ -1,8 +1,15 @@
 """HTTP surface for ``/api/app/*`` (06b)."""
 
+import asyncio
+import json
+import threading
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocket, WebSocketDisconnect
+
+from kohakuterrarium.launcher.update_runner import UpdateResult
 
 from kohakuterrarium.api.routes import app_update as _r
 
@@ -96,3 +103,95 @@ class TestRejectionPaths:
         # surfaces the "use kt self-update from terminal" hint.
         assert client.post("/api/app/update").status_code == 409
         assert client.post("/api/app/rollback").status_code == 409
+
+
+def progress_socket(frames, hook=None):
+    async def receive():
+        return {"type": "websocket.connect"}
+
+    async def send(message):
+        if message["type"] == "websocket.send":
+            frame = json.loads(message["text"])
+            if hook:
+                await hook(frame)
+            frames.append(frame)
+
+    return WebSocket({"type": "websocket", "headers": []}, receive, send)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ok", [True, False])
+async def test_stream_delivers_worker_progress_before_completion(monkeypatch, ok):
+    forwarded = threading.Event()
+    frames = []
+
+    async def delivered(frame):
+        if frame.get("phase") == "download":
+            forwarded.set()
+
+    def update(push):
+        push("download", 10, "first")
+        assert forwarded.wait(3), "progress must arrive while worker is running"
+        push("extract", 80, "second")
+        return UpdateResult(
+            ok=ok, version="1.2.3", error=None if ok else "smoke failed"
+        )
+
+    monkeypatch.setattr(_r, "run_update", update)
+    ws = progress_socket(frames, delivered)
+    await ws.accept()
+    await asyncio.wait_for(_r._stream_update(ws), timeout=5)
+    assert [f["message"] for f in frames[:-1]] == ["first", "second"]
+    assert frames[-1]["status"] == ("ok" if ok else "failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exit_kind", ["success", "failure", "disconnect", "cancel"])
+async def test_stream_quiet_period_leaves_no_pending_getters(monkeypatch, exit_kind):
+    started = threading.Event()
+    release = threading.Event()
+    frames = []
+    before = asyncio.all_tasks()
+
+    def update(push):
+        started.set()
+        assert release.wait(5)
+        push("extract", 90, "late progress")
+        if exit_kind == "failure":
+            raise RuntimeError("updater failed")
+        return UpdateResult(ok=True, version="1.2.3")
+
+    async def delivered(frame):
+        if exit_kind == "disconnect":
+            raise WebSocketDisconnect()
+
+    monkeypatch.setattr(_r, "run_update", update)
+    ws = progress_socket(frames, delivered)
+    await ws.accept()
+    task = asyncio.create_task(_r._stream_update(ws))
+    try:
+        assert await asyncio.to_thread(started.wait, 3)
+        # Cross two old polling intervals with no incoming progress.
+        await asyncio.sleep(1.1)
+        if exit_kind == "cancel":
+            task.cancel()
+        release.set()
+        results = await asyncio.wait_for(
+            asyncio.gather(task, return_exceptions=True), 3
+        )
+        if exit_kind == "failure":
+            assert isinstance(results[0], RuntimeError)
+        elif exit_kind == "disconnect":
+            assert isinstance(results[0], WebSocketDisconnect)
+        elif exit_kind == "cancel":
+            assert isinstance(results[0], asyncio.CancelledError)
+        else:
+            assert [f["message"] for f in frames[:-1]] == ["late progress"]
+        await asyncio.sleep(0)
+        pending = asyncio.all_tasks() - before
+        assert not pending, f"stream leaked tasks: {pending}"
+    finally:
+        release.set()
+        for pending_task in asyncio.all_tasks() - before:
+            pending_task.cancel()
+        await asyncio.gather(*(asyncio.all_tasks() - before), return_exceptions=True)
