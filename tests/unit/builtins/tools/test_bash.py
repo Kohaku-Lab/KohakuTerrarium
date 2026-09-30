@@ -58,14 +58,31 @@ class TestBashOutputFileLifecycle:
     )
     async def test_complete_timeout_output_is_removed(self, tmp_path, monkeypatch):
         paths = _capture_output_files(monkeypatch, tmp_path)
+        command = "printf waiting; while :; do :; done"
+        spawn = asyncio.create_subprocess_exec
+
+        async def marker_written(process):
+            while paths[0].read_bytes() != b"waiting":
+                assert process.returncode is None, "Shell exited before its marker"
+                await asyncio.sleep(0.01)
+
+        async def start_ready(*args, **kwargs):
+            process = await spawn(*args, **kwargs)
+            if args[-1] == command:
+                try:
+                    await asyncio.wait_for(marker_written(process), timeout=5)
+                except BaseException:
+                    await bash_module.terminate_process_tree(process)
+                    raise
+            return process
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", start_ready)
         executor = Executor()
         executor._working_dir = tmp_path
         executor.register_tool(ShellTool(ToolConfig(timeout=0.05, max_output=1024)))
 
         result = await executor.wait_for(
-            await executor.submit(
-                "bash", {"command": "printf waiting; sleep 5", "type": "sh"}
-            )
+            await executor.submit("bash", {"command": command, "type": "sh"})
         )
 
         assert result.output == "waiting"
