@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 import time
 
+from kohakuterrarium.session.errors import SessionNotReadyError
 from kohakuterrarium.session.readonly_view import SessionReadView
 from kohakuterrarium.session.store import SessionStore, iter_kv_keys
 from kohakuterrarium.studio.persistence.session_index.entry import (
@@ -174,6 +175,9 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
                 file_mtime=pre_mtime,
                 file_size=pre_size,
             )
+    except SessionNotReadyError:
+        logger.debug("session still opening; retry later", path=str(path))
+        return None
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "read_entry_from_disk failed",

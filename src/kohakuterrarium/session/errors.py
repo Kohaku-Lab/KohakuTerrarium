@@ -9,6 +9,13 @@ class ForkNotStableError(Exception):
     """
 
 
+class SessionNotReadyError(RuntimeError):
+    """Raised when a session file is read while its live store is still opening.
+
+    The file may be read again once the store finishes opening.
+    """
+
+
 class AlreadyAttachedError(Exception):
     """Raised when an agent is attached to a different session.
 

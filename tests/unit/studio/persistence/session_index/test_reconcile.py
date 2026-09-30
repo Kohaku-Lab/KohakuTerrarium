@@ -297,6 +297,29 @@ class TestReadEntryFromDisk:
         assert entry.preview == "hello there"
         assert entry.agents == ["alice"]
 
+    def test_store_still_opening_is_skipped_quietly_and_retried_later(
+        self, session_dir, monkeypatch
+    ):
+        path = session_dir / "opening.kohakutr"
+        _make_session(session_dir, "opening")
+        warnings = []
+        monkeypatch.setattr(
+            reconcile_logger, "warning", lambda *a, **k: warnings.append(a)
+        )
+        outcome = {}
+        real_open = SessionStore._open_tables
+
+        def open_and_read(self):
+            outcome["entry"] = read_entry_from_disk(path)
+            real_open(self)
+
+        monkeypatch.setattr(SessionStore, "_open_tables", open_and_read)
+        with closing(SessionStore(path)):
+            pass
+        assert outcome["entry"] is None
+        assert warnings == []
+        assert read_entry_from_disk(path) is not None
+
     def test_returns_none_for_nonexistent(self, tmp_path):
         entry = read_entry_from_disk(tmp_path / "ghost.kohakutr")
         assert entry is None

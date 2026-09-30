@@ -18,6 +18,9 @@ the agent from the ``config_path`` in meta and re-injects state;
 """
 
 import asyncio
+import os
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -135,6 +138,9 @@ def patched_llm(monkeypatch):
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
     monkeypatch.setattr(_agent_init, "create_llm_provider", _fake_create)
     return holder
+
+
+CHILD = "tests.helpers.live_store_stress_child"
 
 
 def _write_agent_config(config_dir, name: str = "scribe") -> str:
@@ -1527,3 +1533,23 @@ class TestSessionIntegration:
         # A target version with no registered migrator chain is rejected.
         with pytest.raises((ValueError, RuntimeError)):
             migrate(v1_path, 99)
+
+    def test_live_store_is_readable_while_it_writes_without_crashing(self, tmp_path):
+        """Read a session file through the read view while a live store writes it.
+
+        Runs in a child process: two SQLite library copies on one file used to
+        end in a native bus error, which would kill the test run itself. The
+        child must finish and must have read the events the store wrote.
+        """
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+        done = subprocess.run(
+            [sys.executable, "-X", "faulthandler", "-m", CHILD, str(tmp_path)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert done.returncode == 0, done.stderr[-1500:]
+        marker, _, seen = done.stdout.strip().rpartition(" ")
+        assert marker == "LIVE-STORE-OK"
+        assert int(seen) > 0

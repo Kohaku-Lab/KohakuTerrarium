@@ -16,6 +16,10 @@ from kohakuterrarium.session.history import (
     normalize_resumable_events,
 )
 from kohakuterrarium.session.identity import legacy_conversation_id, new_conversation_id
+from kohakuterrarium.session.open_registry import (
+    register_open_store,
+    unregister_open_store,
+)
 from kohakuterrarium.session.rollup import (
     get_turn_rollup,
     list_turn_rollups,
@@ -27,6 +31,10 @@ from kohakuterrarium.session.store_counters import (
     restore_event_counters,
     restore_subagent_counters,
     restore_suffix_counters,
+)
+from kohakuterrarium.session.store_discovery import (
+    discover_agents,
+    discover_attached_agents,
 )
 from kohakuterrarium.session.store_fork import perform_fork
 from kohakuterrarium.session.store_lock import (
@@ -66,6 +74,10 @@ def iter_kv_keys(
     return table.keys(prefix=prefix, limit=limit)
 
 
+def _key_text(key: Any) -> str:
+    return key.decode("utf-8", errors="replace") if isinstance(key, bytes) else key
+
+
 class SessionStore(StoreAffinityMixin):
     """Persistent session storage backed by KohakuVault.
 
@@ -94,6 +106,8 @@ class SessionStore(StoreAffinityMixin):
 
         # The optional cross-process writer lock is released during close.
         self._writer_lock = acquire_writer_lock(self._path) if writer_lock else None
+        self._ready = False
+        register_open_store(self._path, self)
 
         self._flush_every_n_events: int = (
             flush_every_n_events
@@ -132,7 +146,14 @@ class SessionStore(StoreAffinityMixin):
             )
             release_writer_lock(self._writer_lock)
             self._writer_lock = None
+            unregister_open_store(self._path, self)
             raise
+        self._ready = True
+
+    @property
+    def is_ready(self) -> bool:
+        """Whether the tables finished opening (readers must wait until then)."""
+        return self._ready
 
         logger.debug("SessionStore opened", path=self._path)
 
@@ -797,65 +818,16 @@ class SessionStore(StoreAffinityMixin):
         Framework namespaces and attached-agent namespaces are excluded so
         resume does not rebuild them as standalone creatures.
         """
-        # Buffered event keys must be flushed before namespace discovery.
-        self.events.flush_cache()
-        seen: list[str] = []
-        excluded = {"terrarium"}
-        for key_bytes in iter_kv_keys(self.events):
-            key = (
-                key_bytes.decode("utf-8", errors="replace")
-                if isinstance(key_bytes, bytes)
-                else key_bytes
-            )
-            parts = key.rsplit(":e", 1)
-            if len(parts) != 2:
-                continue
-            agent = parts[0]
-            # Attached namespaces are reported by the dedicated discovery API.
-            if ":attached:" in agent:
-                continue
-            if agent not in excluded and agent not in seen:
-                seen.append(agent)
-        return seen
+        return discover_agents(self._event_key_names())
 
     def discover_attached_agents(self) -> list[dict[str, Any]]:
         """Return attached-agent namespaces from events in first-seen order."""
-        # Buffered event keys must be visible before discovery.
+        return discover_attached_agents(self._event_key_names())
+
+    def _event_key_names(self) -> list[str]:
+        """Event keys as text; buffered keys are flushed so they are visible."""
         self.events.flush_cache()
-        seen: dict[str, dict[str, Any]] = {}
-        for key_bytes in iter_kv_keys(self.events):
-            key = (
-                key_bytes.decode("utf-8", errors="replace")
-                if isinstance(key_bytes, bytes)
-                else key_bytes
-            )
-            parts = key.rsplit(":e", 1)
-            if len(parts) != 2:
-                continue
-            ns = parts[0]
-            # Roles may contain colons, so split the sequence from the right.
-            segments = ns.split(":attached:", 1)
-            if len(segments) != 2:
-                continue
-            host = segments[0]
-            remainder = segments[1]
-            role_and_seq = remainder.rsplit(":", 1)
-            if len(role_and_seq) != 2:
-                continue
-            role, seq_str = role_and_seq
-            try:
-                attach_seq = int(seq_str)
-            except ValueError:
-                continue
-            if ns in seen:
-                continue
-            seen[ns] = {
-                "host": host,
-                "role": role,
-                "attach_seq": attach_seq,
-                "namespace": ns,
-            }
-        return list(seen.values())
+        return [_key_text(key) for key in iter_kv_keys(self.events)]
 
     def search(self, query: str, k: int = 10) -> list[dict]:
         """Search session content via FTS5 (BM25 keyword search).
@@ -926,6 +898,7 @@ class SessionStore(StoreAffinityMixin):
         """
         if not self._begin_close():
             return
+        unregister_open_store(self._path, self)
         if self._readonly:
             update_status = False
         if not self._readonly:
