@@ -18,7 +18,7 @@ from mcp.client.streamable_http import streamable_http_client
 from kohakuterrarium.api.mcp_tools import create_app
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
-from kohakuterrarium.mcp_server.service import is_running
+from kohakuterrarium.mcp_server.service import is_running, status
 from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
@@ -272,10 +272,22 @@ class TestMCPServer:
             )
             store.response_path.write_text("{broken")
             _, restarted = cli("start")
+            restart_run_id = restarted.get("run_id")
+            assert restart_run_id and restart_run_id != started["run_id"], restarted
+            deadline = asyncio.get_running_loop().time() + 8
+            while not (restarted.get("instance_id") and restarted.get("local_ready")):
+                assert restarted.get("running") and restarted.get("state") not in {
+                    "failed",
+                    "stopped",
+                }, restarted
+                assert asyncio.get_running_loop().time() < deadline, restarted
+                await asyncio.sleep(0.05)
+                restarted = status(store)
+                assert restarted.get("run_id") == restart_run_id, restarted
             assert (
                 restarted["instance_id"] != started["instance_id"]
                 and restarted["local_ready"]
-            )
+            ), restarted
             assert cli("workspace add", "after-restart", workspace)[0] == 0
             assert "stale" not in store.registry.read()
             stale = await call(
@@ -731,7 +743,7 @@ class TestMCPServer:
                         assert (await call("job_cancel", {"job_id": bg["job_id"]}))[1][
                             "cancelled"
                         ]
-                        for query in ("job_status", "job_wait"):
+                        for query in ("job_wait", "job_status"):
                             queried, cancelled = await call(
                                 query, {"job_id": bg["job_id"]}
                             )
