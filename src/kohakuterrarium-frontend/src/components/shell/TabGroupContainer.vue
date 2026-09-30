@@ -85,12 +85,13 @@ function onKey(ev) {
     return
   }
 
-  // Ctrl+1..9 → focus the Nth group in tree order
+  // Ctrl+1..9 → focus the Nth group in tree order. Only claimed while the
+  // tabs are split, so a single group leaves the keys to the layout presets.
   if (!ev.altKey && !ev.shiftKey && /^[1-9]$/.test(ev.key)) {
     if (focusedIsChat()) return
     const order = tabs.groupOrder()
     const idx = parseInt(ev.key, 10) - 1
-    if (idx >= 0 && idx < order.length) {
+    if (order.length >= 2 && idx >= 0 && idx < order.length) {
       ev.preventDefault()
       tabs.setFocusedGroup(order[idx])
     }
@@ -106,10 +107,12 @@ function cycleFocus(dir) {
   tabs.setFocusedGroup(order[next])
 }
 
+// Capture phase: runs before the global shortcut handler, which skips keys
+// that were already claimed.
 onMounted(() => {
-  globalThis.addEventListener?.("keydown", onKey)
+  globalThis.addEventListener?.("keydown", onKey, true)
 })
 onUnmounted(() => {
-  globalThis.removeEventListener?.("keydown", onKey)
+  globalThis.removeEventListener?.("keydown", onKey, true)
 })
 </script>

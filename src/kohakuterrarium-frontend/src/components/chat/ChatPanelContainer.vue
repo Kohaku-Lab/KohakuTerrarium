@@ -156,11 +156,12 @@ function onKey(ev) {
     cycleFocus(ev.shiftKey ? -1 : 1)
     return
   }
-  // Ctrl+1..9 → focus Nth group in tree order.
+  // Ctrl+1..9 → focus Nth group in tree order. Only claimed while the chat
+  // is split, so a single group leaves the keys to the layout presets.
   if (ev.ctrlKey && !ev.altKey && !ev.shiftKey && /^[1-9]$/.test(ev.key)) {
     const order = leafOrder()
     const idx = parseInt(ev.key, 10) - 1
-    if (idx >= 0 && idx < order.length) {
+    if (order.length >= 2 && idx >= 0 && idx < order.length) {
       ev.preventDefault()
       chat.setFocusedGroup(order[idx])
     }
@@ -195,10 +196,12 @@ function cycleFocus(dir) {
   chat.setFocusedGroup(order[next])
 }
 
+// Capture phase: runs before the global shortcut handler, which skips keys
+// that were already claimed.
 onMounted(() => {
-  globalThis.addEventListener?.("keydown", onKey)
+  globalThis.addEventListener?.("keydown", onKey, true)
 })
 onUnmounted(() => {
-  globalThis.removeEventListener?.("keydown", onKey)
+  globalThis.removeEventListener?.("keydown", onKey, true)
 })
 </script>

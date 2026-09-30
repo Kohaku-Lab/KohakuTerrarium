@@ -55,7 +55,7 @@ a drag mid-motion.
 | `Ctrl+W` | Close the active tab in the focused group. |
 | `Ctrl+Shift+W` | Close the focused group (or disable multi-group when only one group remains). |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle focus to the next / previous group in tree order. |
-| `Ctrl+1` … `Ctrl+9` | Focus the Nth group in tree order. |
+| `Ctrl+1` … `Ctrl+9` | Focus the Nth group in tree order. Active only while there are two or more groups; with one group these keys switch the layout preset. |
 
 Shortcuts are swallowed when the focus is inside a text input or
 textarea, so you can still use `Ctrl+W` to delete a word in the

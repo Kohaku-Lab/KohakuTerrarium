@@ -57,7 +57,7 @@ ratio is clamped so neither side drops below 10 %.
 | `Ctrl+Alt+\` | Split the focused group vertically (new group on the bottom). |
 | `Ctrl+Shift+W` | Close the focused group (when more than one exists). |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Cycle focus to the next / previous group in tree order. |
-| `Ctrl+1` … `Ctrl+9` | Focus the Nth group in tree order. |
+| `Ctrl+1` … `Ctrl+9` | Focus the Nth group in tree order. Active only while there are two or more groups; with one group these keys switch the layout preset. |
 
 These macro-level shortcuts yield to a focused **chat** tab, which binds
 the same keys for its own internal [multi-chat groups](multi-chat.md).

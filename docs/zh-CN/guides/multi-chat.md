@@ -49,7 +49,7 @@ KohakuTerrarium 的聊天面板可以像 VSCode 的编辑器组一样，被拆�
 | `Ctrl+W` | 关闭聚焦组里的活动标签。 |
 | `Ctrl+Shift+W` | 关闭聚焦组（只剩一个组时会退出多组模式）。 |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 按树顺序切换到下一/上一组。 |
-| `Ctrl+1` … `Ctrl+9` | 聚焦到第 N 个组。 |
+| `Ctrl+1` … `Ctrl+9` | 聚焦到第 N 个组。仅在有两个或更多组时生效；只有一个组时，这些键用来切换布局 preset。 |
 
 当焦点位于 input/textarea 内时快捷键会被让位给文本编辑（例如
 `Ctrl+W` 仍然可以删除一个单词）。

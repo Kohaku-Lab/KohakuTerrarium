@@ -49,7 +49,7 @@ KohakuTerrarium 的聊天面板可以像 VSCode 的編輯器群組一樣，被�
 | `Ctrl+W` | 關閉聚焦群組裡的活躍標籤。 |
 | `Ctrl+Shift+W` | 關閉聚焦群組（剩下一個時退出多組模式）。 |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | 依樹狀順序切換下一 / 上一個群組。 |
-| `Ctrl+1` … `Ctrl+9` | 聚焦到第 N 個群組。 |
+| `Ctrl+1` … `Ctrl+9` | 聚焦到第 N 個群組。僅在有兩個或更多群組時生效；只有一個群組時，這些鍵用來切換版面 preset。 |
 
 焦點在 input/textarea 內時快速鍵會讓位給文字編輯（例如
 `Ctrl+W` 仍可刪除一個單字）。

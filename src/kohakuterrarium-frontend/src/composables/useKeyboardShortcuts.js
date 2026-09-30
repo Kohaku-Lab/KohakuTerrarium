@@ -69,7 +69,7 @@ export function useKeyboardShortcuts() {
       return
     }
 
-    if (!e.shiftKey && !editable) {
+    if (!e.shiftKey && !editable && !e.defaultPrevented) {
       const idx = Number(e.key) - 1
       if (idx >= 0 && idx < PRESET_ORDER.length) {
         const id = PRESET_ORDER[idx]

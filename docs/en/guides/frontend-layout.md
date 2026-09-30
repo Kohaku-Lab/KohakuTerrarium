@@ -91,7 +91,7 @@ modified until explicitly saved.
 
 | Shortcut | Action |
 |----------|--------|
-| Ctrl+1..6 | Switch to preset |
+| Ctrl+1..6 | Switch to preset (when chat or tabs are split into groups, the digits that match a group focus that group instead) |
 | Ctrl+Shift+L | Toggle edit mode |
 | Ctrl+K | Open command palette |
 | Esc | Exit edit mode |

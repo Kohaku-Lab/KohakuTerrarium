@@ -59,7 +59,7 @@ Dashboard 用的是可设置的二元 split tree：每个区块不是 leaf (一�
 
 | 快捷键 | 动作 |
 |----------|--------|
-| Ctrl+1..6 | 切换到某个 preset |
+| Ctrl+1..6 | 切换到某个 preset（聊天或标签已拆成多个组时，对应到某个组的数字改为聚焦该组） |
 | Ctrl+Shift+L | 切换 edit 模式 |
 | Ctrl+K | 开 command palette |
 | Esc | 离开 edit 模式 |
