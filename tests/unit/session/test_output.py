@@ -1567,48 +1567,46 @@ class TestWriteBehindQueue:
     """S4b: event appends ride the store's affinity thread, drain at boundaries."""
 
     async def test_activity_burst_does_not_block_event_loop(self, tmp_path):
-        # Negative case: a subagent-dense turn's appends are queued, so a
-        # ping task keeps the loop alive even while the store worker is
-        # deliberately slow.
+        # Hold the first append until the event loop releases it. This proves
+        # the burst and drain yield without timing the hosted runner's load.
         store, out = _make(tmp_path)
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        release = threading.Event()
+        timed_out = threading.Event()
+        first_append = True
         try:
             real_append = store.append_event
 
             def slow_append(*args, **kwargs):
-                time.sleep(0.03)
+                nonlocal first_append
+                if first_append:
+                    first_append = False
+                    loop.call_soon_threadsafe(entered.set)
+                    if not release.wait(timeout=5):
+                        timed_out.set()
                 return real_append(*args, **kwargs)
 
             store.append_event = slow_append
-            loop_alive: list[float] = []
-            stop = asyncio.Event()
-
-            async def _ping():
-                while not stop.is_set():
-                    loop_alive.append(time.monotonic())
-                    await asyncio.sleep(0.02)
-                loop_alive.append(time.monotonic())
-
-            ping = asyncio.create_task(_ping())
-            await asyncio.sleep(0)
             for i in range(12):
                 out.on_activity_with_metadata(
                     "tool_done",
                     f"[bash] r{i}",
                     {"job_id": f"j{i}", "result": "x" * 300},
                 )
-            await out.drain()
-            stop.set()
-            await ping
-            gaps = [
-                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
-            ]
-            assert (
-                max(gaps) < 0.15
-            ), f"activity burst blocked the loop; max gap={max(gaps):.3f}s"
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            assert not timed_out.is_set(), "activity append blocked the event loop"
+            draining = asyncio.create_task(out.drain())
+            await asyncio.sleep(0)
+            assert not draining.done(), "drain returned before the queued write"
+            release.set()
+            await asyncio.wait_for(draining, timeout=5)
             # Every queued event reached the store.
             evts = [e for e in store.get_events("alice") if e["type"] == "tool_result"]
             assert len(evts) == 12
         finally:
+            release.set()
+            await out.drain()
             store.close()
 
     async def test_burst_preserves_fifo_order(self, tmp_path):
