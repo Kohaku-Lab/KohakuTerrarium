@@ -57,7 +57,17 @@ class TestMCPServer:
             )
             assert completed.stdout.strip(), completed.stderr
             text = completed.stdout.strip().splitlines()[-1]
-            return completed.returncode, text if command == "url" else json.loads(text)
+            result = text if command == "url" else json.loads(text)
+            if completed.returncode and command != "url":
+                print(
+                    {
+                        "command": command,
+                        "exit_code": completed.returncode,
+                        "response": result,
+                        "stderr": completed.stderr,
+                    }
+                )
+            return completed.returncode, result
 
         def port():
             with socket.socket() as sock:
