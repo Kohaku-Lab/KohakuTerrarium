@@ -174,11 +174,9 @@ class TestIoWs:
         async def fake_attach(ws, service, sid, cid):
             raise KeyError("not found")
 
-        # Replace dep + helper.
         monkeypatch.setattr(io_mod, "attach_io", fake_attach)
-        monkeypatch.setattr(io_mod, "get_service", lambda: object())
         ws = _FakeWebSocket()
-        await io_mod.session_creature_chat(ws, "g", "alice")
+        await io_mod.session_creature_chat(ws, "g", "alice", service=object())
         assert ws.sent and ws.sent[0]["type"] == "error"
         assert ws.closed is True
 
@@ -187,9 +185,8 @@ class TestIoWs:
             raise WebSocketDisconnect()
 
         monkeypatch.setattr(io_mod, "attach_io", boom)
-        monkeypatch.setattr(io_mod, "get_service", lambda: object())
         ws = _FakeWebSocket()
-        await io_mod.session_creature_chat(ws, "g", "alice")
+        await io_mod.session_creature_chat(ws, "g", "alice", service=object())
         # Disconnect → no error frame, no explicit close from this branch.
 
     async def test_generic_exception_logs_and_closes(self, monkeypatch):
@@ -197,8 +194,7 @@ class TestIoWs:
             raise RuntimeError("io broken")
 
         monkeypatch.setattr(io_mod, "attach_io", boom)
-        monkeypatch.setattr(io_mod, "get_service", lambda: object())
         ws = _FakeWebSocket()
-        await io_mod.session_creature_chat(ws, "g", "alice")
+        await io_mod.session_creature_chat(ws, "g", "alice", service=object())
         assert ws.sent and ws.sent[0]["type"] == "error"
         assert ws.closed is True

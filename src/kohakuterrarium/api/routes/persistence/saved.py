@@ -42,6 +42,8 @@ from kohakuterrarium.studio.persistence.store import (
 
 router = APIRouter()
 
+MAX_LIST_LIMIT = 500
+
 
 @router.get("/disk-usage")
 async def get_disk_usage():
@@ -93,6 +95,8 @@ def _list_via_index(
     Passing ``_session_dir()`` explicitly keeps the index singleton aligned
     with runtime or test overrides of the session directory.
     """
+    limit = max(1, min(limit, MAX_LIST_LIMIT))
+    offset = max(0, offset)
     session_dir = _session_dir()
     index = get_session_index_default(session_dir)
     if refresh or full_rescan:

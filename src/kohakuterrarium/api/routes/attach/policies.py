@@ -42,10 +42,17 @@ async def get_creature_policies(
         try:
             engine.get_creature(creature_id)
         except KeyError:
-            engine = None
+            pass
         else:
             policies = policy_lib.get_creature_policies(engine, creature_id)
             return {"policies": [p.value for p in policies]}
+        try:
+            engine.get_graph(creature_id)
+        except KeyError:
+            pass
+        else:
+            session_policies = policy_lib.get_session_policies(engine, creature_id)
+            return {"policies": [p.value for p in session_policies]}
     # Only multi-node services own the home registry needed to route remote
     # creature and session policy lookups.
     is_multi_node = hasattr(service, "_home")

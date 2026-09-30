@@ -722,19 +722,28 @@ class TestSessionCreatureCrud:
             removed.append((sid, cid))
             return True
 
+        async def resolve(svc, name_or_id, session_id=None):
+            return {"alice": "cid-1"}.get(name_or_id, name_or_id)
+
         monkeypatch.setattr(active_mod.lifecycle, "remove_creature", fake_remove)
+        monkeypatch.setattr(active_mod, "resolve_creature_id", resolve)
         client = TestClient(self._app())
-        resp = client.delete("/active/g1/creatures/cid-1")
+        assert client.delete("/active/g1/creatures/cid-1").status_code == 200
+        resp = client.delete("/active/g1/creatures/alice")
         assert resp.status_code == 200
         assert resp.json() == {"status": "removed"}
-        # The (session, creature) pair was forwarded to the lifecycle op.
-        assert removed == [("g1", "cid-1")]
+        # A display name reaches the lifecycle op as the canonical id.
+        assert removed == [("g1", "cid-1"), ("g1", "cid-1")]
 
     def test_remove_creature_not_removed(self, monkeypatch):
         async def fake_remove(svc, sid, cid):
             return False
 
+        async def resolve(svc, name_or_id, session_id=None):
+            return name_or_id
+
         monkeypatch.setattr(active_mod.lifecycle, "remove_creature", fake_remove)
+        monkeypatch.setattr(active_mod, "resolve_creature_id", resolve)
         client = TestClient(self._app())
         resp = client.delete("/active/g1/creatures/ghost")
         assert resp.status_code == 404
@@ -743,7 +752,11 @@ class TestSessionCreatureCrud:
         async def boom(svc, sid, cid):
             raise KeyError("no")
 
+        async def resolve(svc, name_or_id, session_id=None):
+            return name_or_id
+
         monkeypatch.setattr(active_mod.lifecycle, "remove_creature", boom)
+        monkeypatch.setattr(active_mod, "resolve_creature_id", resolve)
         client = TestClient(self._app())
         resp = client.delete("/active/g1/creatures/cid")
         assert resp.status_code == 404

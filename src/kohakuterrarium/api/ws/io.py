@@ -5,11 +5,12 @@ Provides the unified replacement for the legacy agent, terrarium, and
 creature chat endpoint shapes.
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
-from kohakuterrarium.api.deps import get_service_legacy as get_service
+from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.attach.io import attach_io
+from kohakuterrarium.terrarium.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -19,13 +20,13 @@ router = APIRouter()
 
 @router.websocket("/ws/sessions/{session_id}/creatures/{creature_id}/chat")
 async def session_creature_chat(
-    websocket: WebSocket, session_id: str, creature_id: str
+    websocket: WebSocket,
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
 ):
     """Bidirectional engine-backed chat for one creature."""
     await accept_with_auth_echo(websocket)
-    # The global service preserves the existing chat session-id contract across
-    # standalone and multi-user deployments; the local alias remains a test seam.
-    service = get_service()
 
     try:
         await attach_io(websocket, service, session_id, creature_id)

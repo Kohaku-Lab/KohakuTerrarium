@@ -55,3 +55,47 @@ class TestListPwdExists:
         assert by_name["nopwd"]["pwd_exists"] is True
         # Worker-hosted row: this host cannot stat the worker's disk.
         assert "pwd_exists" not in by_name["remote"]
+
+
+class _RecordingIndex(_Index):
+    def __init__(self):
+        super().__init__([])
+        self.calls = []
+
+    def list(self, **kwargs):
+        self.calls.append(kwargs)
+        return super().list(**kwargs)
+
+
+class TestListLimitIsBounded:
+    def _list(self, monkeypatch, tmp_path, *, limit, offset=0):
+        index = _RecordingIndex()
+        monkeypatch.setattr(saved_mod, "_session_dir", lambda: tmp_path)
+        monkeypatch.setattr(saved_mod, "get_session_index_default", lambda d: index)
+        saved_mod._list_via_index(
+            search="",
+            sort="last_active",
+            order="desc",
+            status=None,
+            config_type=None,
+            node_id=None,
+            limit=limit,
+            offset=offset,
+            refresh=False,
+            full_rescan=False,
+        )
+        return index.calls[0]
+
+    def test_huge_limit_is_clamped_to_the_maximum(self, monkeypatch, tmp_path):
+        call = self._list(monkeypatch, tmp_path, limit=10_000_000)
+        assert call["limit"] == saved_mod.MAX_LIST_LIMIT
+
+    def test_reasonable_limit_is_untouched(self, monkeypatch, tmp_path):
+        assert self._list(monkeypatch, tmp_path, limit=200)["limit"] == 200
+
+    def test_non_positive_limit_and_negative_offset_are_repaired(
+        self, monkeypatch, tmp_path
+    ):
+        call = self._list(monkeypatch, tmp_path, limit=0, offset=-5)
+        assert call["limit"] == 1
+        assert call["offset"] == 0

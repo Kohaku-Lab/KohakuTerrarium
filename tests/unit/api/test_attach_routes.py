@@ -179,6 +179,24 @@ class TestAttachPoliciesRoute:
         finally:
             await t.shutdown()
 
+    async def test_policies_route_resolves_a_local_graph_id(self):
+        from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
+
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        try:
+            gid = t.get_creature("alice").graph_id
+            r = _policies_client(t, SimpleNamespace()).get(f"/x/policies/{gid}")
+            assert r.status_code == 200
+            assert {"log", "observer", "trace"} <= set(r.json()["policies"])
+            assert (
+                _policies_client(t, SimpleNamespace())
+                .get("/x/policies/ghost")
+                .status_code
+                == 404
+            )
+        finally:
+            await t.shutdown()
+
     def test_session_not_found_multi_node_no_route(self):
         engine = _FakeEngine()
 

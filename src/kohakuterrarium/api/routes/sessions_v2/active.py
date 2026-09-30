@@ -16,6 +16,7 @@ from kohakuterrarium.api.routes.persistence.resume_coordinator import (
     conversation_coordination_key,
     resume_coordinator,
 )
+from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import (
     AgentCreate,
     CreatureAdd,
@@ -418,8 +419,9 @@ async def add_session_creature(
 async def remove_session_creature(
     session_id: str, creature_id: str, service: TerrariumService = Depends(get_service)
 ):
+    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
-        removed = await lifecycle.remove_creature(service, session_id, creature_id)
+        removed = await lifecycle.remove_creature(service, session_id, cid)
     except KeyError as e:
         raise HTTPException(404, str(e))
     if not removed:

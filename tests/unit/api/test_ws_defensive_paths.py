@@ -60,10 +60,9 @@ class TestIoWsDefensive:
             raise KeyError("not found")
 
         monkeypatch.setattr(io_mod, "attach_io", _attach)
-        monkeypatch.setattr(io_mod, "get_service", lambda: object())
         ws = _FlakyWebSocket(send_fail_after=0)
         # Must not raise.
-        await io_mod.session_creature_chat(ws, "g", "alice")
+        await io_mod.session_creature_chat(ws, "g", "alice", service=object())
         assert ws.closed is True
 
     async def test_generic_branch_send_failure_swallowed(self, monkeypatch):
@@ -71,9 +70,8 @@ class TestIoWsDefensive:
             raise RuntimeError("io broken")
 
         monkeypatch.setattr(io_mod, "attach_io", _attach)
-        monkeypatch.setattr(io_mod, "get_service", lambda: object())
         ws = _FlakyWebSocket(send_fail_after=0)
-        await io_mod.session_creature_chat(ws, "g", "alice")
+        await io_mod.session_creature_chat(ws, "g", "alice", service=object())
         assert ws.closed is True
 
 

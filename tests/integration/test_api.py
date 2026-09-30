@@ -2277,8 +2277,9 @@ terrarium:
             assert frame["type"] == "error"
             assert "not found" in frame["text"]
 
-        # Remove the hot-plugged creature; the session shrinks back.
-        resp = client.delete(f"/api/sessions/active/{session_id}/creatures/{bob_id}")
+        # Remove the hot-plugged creature by its display name (every other
+        # creature route accepts name or id); the session shrinks back.
+        resp = client.delete(f"/api/sessions/active/{session_id}/creatures/bob")
         assert resp.status_code == 200
         assert resp.json() == {"status": "removed"}
         resp = client.get(f"/api/sessions/active/{session_id}/creatures")
