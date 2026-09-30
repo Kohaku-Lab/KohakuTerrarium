@@ -39,14 +39,7 @@ logger = get_logger(__name__)
 
 
 def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
-    """Copy every event in ``src`` into ``dst`` preserving agent
-    namespaces.  Returns the number of events copied.
-
-    The destination is appended to via the public ``append_event`` API
-    so its monotonic counters stay consistent.  Original ``ts`` and
-    other payload fields are preserved; ``event_id`` is re-stamped by
-    ``dst`` (a re-stamp is fine — order is what callers care about).
-    """
+    """Append events beyond the shared prefix, assigning destination event IDs."""
     # This synchronous topology transaction includes all accepted writes.
     for store in (src, dst):
         store.submit(lambda: None).result()
@@ -56,7 +49,15 @@ def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
         pass
     n = 0
     for agent in src.discover_agents_from_events():
-        for raw in src.get_events(agent):
+        incoming = src.get_events(agent)
+        shared = 0
+        for old, new in zip(dst.get_events(agent), incoming):
+            old_payload = {k: v for k, v in old.items() if k != "event_id"}
+            new_payload = {k: v for k, v in new.items() if k != "event_id"}
+            if old_payload != new_payload:
+                break
+            shared += 1
+        for raw in incoming[shared:]:
             data = dict(raw)
             event_type = data.pop("type", "event")
             # ``append_event`` sets event_id itself; clear any stale id.
@@ -79,6 +80,7 @@ def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
 # stores carry only ``agents`` / ``status`` and a resume request 502s
 # with "Session has no config_path or config_snapshot in metadata".
 _RESUMABLE_META_KEYS: tuple[str, ...] = (
+    "format_version",
     "config_type",
     "config_path",
     "config_snapshot",

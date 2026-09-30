@@ -310,8 +310,7 @@ class Terrarium:
         if c is None:
             raise KeyError(f"creature {cid!r} not in engine")
         old_gid = c.graph_id
-        if c.is_running:
-            await c.stop(requested=False)
+        await c.stop(requested=False)
         # A creature-scoped Drive orphans-and-blocks on removal,
         # a graph-scoped one unassigns / auto-assigns among the remaining
         # graph members — never a silent semantic reassignment.

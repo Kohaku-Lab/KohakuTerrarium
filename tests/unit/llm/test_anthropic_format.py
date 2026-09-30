@@ -12,8 +12,6 @@ from copy import deepcopy
 
 import pytest
 
-import pytest
-
 from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.anthropic_format import (
     KT_CONTENT_KEY,
@@ -179,6 +177,40 @@ class TestPrepareMessages:
             },
             {"role": "assistant", "content": [{"type": "text", "text": "  done\n"}]},
         ]
+        assert messages == original
+
+    @pytest.mark.parametrize("url_as_string", [False, True])
+    @pytest.mark.parametrize("text", [None, "", " \t\n", "Image: synthetic.png"])
+    def test_tool_images_reach_nested_anthropic_result(self, url_as_string, text):
+        url = "https://example.invalid/synthetic.png"
+        image = {
+            "type": "image_url",
+            "image_url": url if url_as_string else {"url": url},
+        }
+        content = ([{"type": "text", "text": text}] if text is not None else []) + [
+            image
+        ]
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "read-image",
+                        "function": {"name": "read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "read-image", "content": content},
+        ]
+        original = deepcopy(messages)
+        _, body = prepare_messages(messages)
+        result = body[1]["content"][0]
+        assert result["tool_use_id"] == "read-image"
+        assert result["content"] == (
+            ([{"type": "text", "text": text}] if text and text.strip() else [])
+            + [{"type": "image", "source": {"type": "url", "url": url}}]
+        )
         assert messages == original
 
     def test_system_messages_joined_and_split_from_body(self):
