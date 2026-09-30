@@ -114,6 +114,14 @@ callback in the surviving environment, because step 2 re-injected the
 triggers (the callback closes over `engine.session_store_for(graph_id)`,
 which now resolves to the merged store).
 
+When stores share an initial event sequence for an agent, `copy_events_into`
+skips that shared prefix and appends only the remaining source events. It
+compares complete payloads, including timestamps and branch metadata, while
+ignoring reassigned event IDs. This prevents an older saved prefix from
+appearing again after newer replies when graphs reunite. Repeated text with
+a different timestamp or branch remains a separate event. Split and merge
+stores also retain the source format-version marker.
+
 ### Split bookkeeping (`channel_lifecycle.apply_split_bookkeeping`, `session_coord.apply_split`)
 
 When a remove or disconnect call returns a delta with `kind="split"`,
