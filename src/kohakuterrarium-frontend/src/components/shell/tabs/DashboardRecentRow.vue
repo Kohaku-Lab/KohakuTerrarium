@@ -34,6 +34,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useTabsStore } from "@/stores/tabs"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { resumedTabMeta } from "@/utils/resumedTab"
 import { openSavedSessionHistory, prepareWorkspaceResume } from "@/utils/workdirPrompt"
 import { extractTextPreview } from "@/utils/multimodal"
 
@@ -58,7 +59,7 @@ const formatDate = computed(() => {
 const turnCount = computed(() => props.session.turn_count ?? props.session.turns ?? null)
 
 const size = computed(() => {
-  const bytes = props.session.size_bytes ?? props.session.size
+  const bytes = props.session.file_size ?? props.session.size_bytes ?? props.session.size
   if (!bytes) return ""
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -100,8 +101,7 @@ async function onResume() {
         kind: "attach",
         id: `attach:${id}`,
         target: id,
-        config_name: result?.config_name || sessionId.value,
-        type: result?.type || result?.kind || "creature",
+        ...resumedTabMeta(result, sessionId.value),
       })
     }
     ElMessage.success(t("sessions.resumed", { name: sessionId.value }))

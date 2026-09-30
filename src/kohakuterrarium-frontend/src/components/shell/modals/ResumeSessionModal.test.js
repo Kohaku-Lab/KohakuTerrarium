@@ -40,6 +40,33 @@ function expectNoRuntimeSideEffects(tabs, openSurface) {
   expect(tabs.tabs).toHaveLength(0)
 }
 
+describe("ResumeSessionModal session rows", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it("shows the file size the saved-session list actually sends", async () => {
+    list.mockResolvedValue({
+      sessions: [
+        { name: "one", file_size: 2048 },
+        { name: "two", size_bytes: 4096 },
+        { name: "three" },
+      ],
+    })
+    const wrapper = mount(ResumeSessionModal)
+    await flushPromises()
+
+    const rows = wrapper
+      .findAll('input[type="radio"]')
+      .map((input) => input.element.closest("label").textContent)
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toContain("2 KB")
+    expect(rows[1]).toContain("4 KB")
+    expect(rows[2]).not.toMatch(/\d\s?(B|KB|MB)\b/)
+  })
+})
+
 describe("ResumeSessionModal workspace preflight choices", () => {
   let uninstall
   let history

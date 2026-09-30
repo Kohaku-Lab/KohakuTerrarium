@@ -25,7 +25,7 @@
               <div class="text-xs text-warm-500">
                 <span v-if="s.last_active">{{ formatDate(s.last_active) }}</span>
                 <span v-if="s.turn_count"> · {{ s.turn_count }} turns</span>
-                <span v-if="s.size_bytes"> · {{ formatBytes(s.size_bytes) }}</span>
+                <span v-if="s.file_size ?? s.size_bytes"> · {{ formatBytes(s.file_size ?? s.size_bytes) }}</span>
                 <span v-if="s.config_type"> · {{ s.config_type }}</span>
               </div>
               <div v-if="previewOf(s)" class="text-xs text-warm-500 dark:text-warm-500 italic line-clamp-2 mt-0.5" :title="previewOf(s, 600)">
