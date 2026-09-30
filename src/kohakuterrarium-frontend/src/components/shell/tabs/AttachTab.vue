@@ -27,6 +27,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
 import { DEFAULT_PRESET_ID } from "@/stores/layoutPanels"
 import { useTabsStore } from "@/stores/tabs"
+import { buildAttachPanelProps } from "@/utils/attachPanelProps"
 
 const props = defineProps({ tab: { type: Object, required: true } })
 
@@ -94,26 +95,13 @@ const instance = computed(() => {
 
 // Provide panelProps for the existing WorkspaceShell zones, mirroring
 // pages/instances/[id].vue exactly (chat panel + status + files + …).
-const panelProps = computed(() => ({
-  chat: { instance: instance.value },
-  "status-dashboard": { instance: instance.value, onOpenTab: handleOpenTab },
-  activity: { instance: instance.value },
-  state: { instance: instance.value },
-  creatures: { instance: instance.value },
-  files: {
-    root: instance.value?.pwd || "",
-    onSelect: (path) => editor.openFile(path),
-  },
-  "file-tree": {
-    root: instance.value?.pwd || "",
-    onSelect: (path) => editor.openFile(path),
-  },
-  settings: { instance: instance.value },
-  modules: { instance: instance.value },
-  debug: { instance: instance.value },
-  terminal: { instance: instance.value },
-  "status-tab": { instance: instance.value, onOpenTab: handleOpenTab },
-}))
+const panelProps = computed(() =>
+  buildAttachPanelProps({
+    instance: instance.value,
+    onOpenTab: handleOpenTab,
+    onSelectFile: (path) => editor.openFile(path),
+  }),
+)
 provide("panelProps", panelProps)
 
 async function loadInstance() {

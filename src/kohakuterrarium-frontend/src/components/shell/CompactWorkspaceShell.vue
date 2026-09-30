@@ -20,10 +20,11 @@
 </template>
 
 <script setup>
-import { computed, inject, watch } from "vue"
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, watch } from "vue"
 
 import CompactTabBar from "./CompactTabBar.vue"
 import { useLayoutStore } from "@/stores/layout"
+import { LAYOUT_EVENTS, fireOpenDrives, onLayoutEvent } from "@/utils/layoutEvents"
 import { presetLeafPanelIds } from "@/utils/presetTree"
 
 const props = defineProps({
@@ -86,6 +87,33 @@ const activePanelProps = computed(() => {
 function setActive(id) {
   layout.setCompactActivePanel(id)
 }
+
+const panelPropsMap = computed(() => (injectedProps && typeof injectedProps === "object" && "value" in injectedProps ? injectedProps.value : injectedProps) || {})
+
+const drivesSessionIds = computed(() => {
+  const inst = panelPropsMap.value.drives?.instance
+  return [props.instanceId, inst?.id, inst?.graph_id].filter(Boolean)
+})
+
+// The compact layout has no header badge to host a drawer, so a request to
+// open the full Drives panel switches to that tab instead.
+let unsubDrivesOpen = () => {}
+
+onMounted(() => {
+  unsubDrivesOpen = onLayoutEvent(LAYOUT_EVENTS.OPEN_DRIVES_DRAWER, async (evt) => {
+    const detail = evt?.detail || {}
+    if (detail.sessionId && !drivesSessionIds.value.includes(detail.sessionId)) return
+    if (!panels.value.some((p) => p.id === "drives")) return
+    evt?.preventDefault?.()
+    setActive("drives")
+    if (detail.driveId) {
+      await nextTick()
+      fireOpenDrives(detail)
+    }
+  })
+})
+
+onBeforeUnmount(() => unsubDrivesOpen())
 
 // If the active panel disappears (preset switched), fall through to
 // the first available leaf and persist that as the new selection.
