@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from kohakuterrarium.errors import ConfigError, ConfigNotFoundError
+from kohakuterrarium.errors import ConfigNotFoundError
 from kohakuterrarium.core.config_merge import (
     merge_configs as _merge_configs,
     _merge_identity_list as _merge_identity_list,
@@ -24,9 +24,10 @@ from kohakuterrarium.core.config_types import (
     ToolConfigItem,
     TriggerConfig,
 )
+from kohakuterrarium.core.config_resolve import resolve_pwd_guard, resolve_tool_doc_mode
 from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
 from kohakuterrarium.core.output_wiring import parse_wiring_list
-from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE, validate_doc_mode
+from kohakuterrarium.modules.tool.doc_mode import validate_doc_mode
 from kohakuterrarium.packages.resolve import resolve_any_path, resolve_package_path
 
 try:
@@ -212,25 +213,6 @@ def _parse_tool_config(data: dict[str, Any]) -> ToolConfigItem:
     )
 
 
-def _resolve_tool_doc_mode(
-    controller_data: dict[str, Any], config_data: dict[str, Any]
-) -> str:
-    """Resolve the creature-level documentation tier, rejecting ``skill_mode``."""
-    for scope in (controller_data, config_data):
-        if "skill_mode" in scope:
-            raise ConfigError(
-                "'skill_mode' was replaced by 'tool_doc_mode'.\n"
-                "  dynamic -> standard   (the default; you can delete the key)\n"
-                "  static  -> full\n"
-                "Per-tool override: "
-                "tools: [{name: x, type: builtin, doc_mode: full}]"
-            )
-    value = controller_data.get(
-        "tool_doc_mode", config_data.get("tool_doc_mode", DEFAULT_DOC_MODE)
-    )
-    return validate_doc_mode(str(value), where="tool_doc_mode")
-
-
 def _parse_output_config_item(data: dict[str, Any]) -> OutputConfigItem:
     """Parse a single output configuration item."""
     reserved = {"type", "module", "class"}
@@ -409,7 +391,7 @@ def _construct_agent_config(
         system_prompt=config_data.get("system_prompt", "You are a helpful assistant."),
         system_prompt_file=config_data.get("system_prompt_file"),
         prompt_context_files=config_data.get("prompt_context_files", {}),
-        tool_doc_mode=_resolve_tool_doc_mode(controller_data, config_data),
+        tool_doc_mode=resolve_tool_doc_mode(controller_data, config_data),
         include_tools_in_prompt=controller_data.get(
             "include_tools_in_prompt", config_data.get("include_tools_in_prompt", True)
         ),
@@ -424,6 +406,11 @@ def _construct_agent_config(
             "max_messages", config_data.get("max_messages", 0)
         ),
         ephemeral=controller_data.get("ephemeral", config_data.get("ephemeral", False)),
+        pwd_guard=resolve_pwd_guard(controller_data, config_data),
+        sanitize_orphan_tool_calls=controller_data.get(
+            "sanitize_orphan_tool_calls",
+            config_data.get("sanitize_orphan_tool_calls", True),
+        ),
         tool_format=controller_data.get(
             "tool_format", config_data.get("tool_format", "native")
         ),
@@ -435,7 +422,6 @@ def _construct_agent_config(
         compact=config_data.get("compact"),
         startup_trigger=config_data.get("startup_trigger"),
         termination=config_data.get("termination"),
-        max_subagent_depth=config_data.get("max_subagent_depth", 3),
         max_iterations=config_data.get("max_iterations"),
         default_plugins=list(config_data.get("default_plugins") or []),
         agent_path=agent_path,

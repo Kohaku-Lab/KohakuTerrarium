@@ -75,7 +75,7 @@ Executor (`core/executor.py`) 把 `{job_id: asyncio.Task}` 存起來，並為每
 
 ### 1.4 子代理派發
 
-子代理由 `modules/subagent/manager.py:spawn` 產生。深度受 `config.max_subagent_depth` 限制。新的 `SubAgent` (`modules/subagent/base.py`) 共用父代理的 registry、LLM、工具格式，但維護自己的對話。
+子代理由 `modules/subagent/manager.py:spawn` 產生。子代理不能再產生子代理，因此沒有深度設定。新的 `SubAgent` (`modules/subagent/base.py`) 共用父代理的 registry、LLM、工具格式，但維護自己的對話。
 
 執行完成後會推一個 `subagent_output` 事件回父控制器。如果子代理設了 `output_to: external`，它的輸出會直接串到指定的輸出模組，而不是回到父代理。
 

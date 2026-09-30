@@ -45,7 +45,7 @@ tags:
 
 `SubAgentManager`（`modules/subagent/manager.py`）會把 `SubAgent`（`modules/subagent/base.py`）派生成 `asyncio.Task`，依 job id 追蹤它們，並把完成結果作為 `TriggerEvent` 送出。
 
-深度由 `max_subagent_depth`（設定層級）限制，以防止遞迴失控。取消採合作式機制：父生物可以呼叫 `stop_task` 中斷正在執行的子代理。
+子代理是父生物的一個工具，本身不能再產生子代理；巢狀協作由 terrarium 圖負責。取消採合作式機制：父生物可以呼叫 `stop_task` 中斷正在執行的子代理。
 
 執行期預算由統一的 `budget` 外掛執行，並透過 `plugins[].options` 設定 `turn_budget`、`tool_call_budget` 以及可選的 `walltime_budget`。自動壓縮另外透過 `auto-compact` 外掛包啟用（它展開為 `compact.auto`）。舊式共享 iteration budget 在派生時解析：`budget_allocation` 優先，否則 `budget_inherit: true` 會在存在父級預算時複用同一個預算物件。
 

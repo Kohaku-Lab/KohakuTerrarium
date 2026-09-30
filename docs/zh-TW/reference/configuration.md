@@ -51,7 +51,8 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 | `compact` | dict | `null` | 否 | 壓縮設定。見 [壓縮](#壓縮)。 |
 | `startup_trigger` | dict | `null` | 否 | 啟動時觸發一次的觸發器。`{prompt: "..."}`。 |
 | `termination` | dict | `null` | 否 | 終止條件。見 [終止](#終止)。 |
-| `max_subagent_depth` | int | `3` | 否 | 子代理最大巢狀深度。`0` = 無上限。 |
+| `sanitize_orphan_tool_calls` | bool | `true` | 否 | 送出歷史給 provider 前，移除孤立的 tool-call / tool-result 片段。 |
+| `pwd_guard` | str | `"warn"` | 否 | 工作目錄之外的檔案存取：`warn` (對某路徑的第一次嘗試會被拒絕並給出警告，重試則放行)、`block` (一律拒絕) 或 `off` (不檢查)。工作目錄只是預設位置，不是沙箱；需要真正的能力限制請用 `sandbox` 外掛。 |
 | `tool_format` | str \| dict | `"bracket"` | 否 | `bracket`、`xml`、`native`，或自訂 dict 格式。`native` 需要設定的 LLM provider 支援結構化的 tool calling。 |
 | `mcp_servers` | list | `[]` | 否 | 每隻代理的 MCP server。見 [MCP server](#生物-config-裡的-mcp-server)。 |
 | `plugins` | list | `[]` | 否 | Lifecycle 外掛。見 [外掛](#外掛)。 |
@@ -650,7 +651,7 @@ presets:
 標準的 `backend_type` 值是：
 
 - `openai`：OpenAI-compatible `/chat/completions` endpoint。
-- `anthropic`：透過官方 `anthropic` Python package 存取 Anthropic-compatible Messages API endpoint (Claude、MiniMax 的 `/anthropic/v1/messages`，以及相容 proxy)。
+- `anthropic`：透過官方 `anthropic` Python package 存取 Anthropic-compatible Messages API endpoint (Claude、MiniMax 的 `/anthropic/v1/messages`，以及相容 proxy)。此 package 須為 1.x 版本。1.x 不再接受 `temperature`、`top_p`、`top_k` 參數，因此 provider 會把它們放進 `extra_body` 送出；對會拒絕這些參數的 Claude 模型 (Opus 4.7 及之後、Sonnet 5 及之後、Fable、Mythos) 則完全不送。
 - `codex`：ChatGPT 訂閱 Codex OAuth。
 
 舊值 `codex-oauth` 為了向後相容仍會被接受，讀取時會正規化為 `codex`。

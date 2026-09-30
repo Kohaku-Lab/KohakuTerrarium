@@ -1126,24 +1126,12 @@ class TestModulesIntegration:
             assert as_dict["context_mode"] == "queue_append"
             assert as_dict["modifying_tools"] == ["edit", "write"]
 
-            # ── Manager prompt projection + depth guard ──
+            # ── Manager prompt projection ──
             # get_subagents_prompt lists every registered config.
             sa_prompt = agent.subagent_manager.get_subagents_prompt()
             assert "## Available Sub-Agents" in sa_prompt
             assert "- worker: Background worker sub-agent." in sa_prompt
-            # A manager at its depth limit refuses to spawn — the error
-            # surfaces as a failed SubAgentResult, not an exception.
-            agent.subagent_manager._current_depth = 3
-            agent.subagent_manager._max_depth = 3
-            depth_job = await agent.subagent_manager.spawn(
-                "worker", "too deep", background=False
-            )
-            depth_result = agent.subagent_manager.get_result(depth_job)
-            assert depth_result is not None and depth_result.success is False
-            assert "depth limit reached" in depth_result.error
-            depth_status = agent.subagent_manager.get_status(depth_job)
-            assert depth_status.state.value == "error"
-            agent.subagent_manager._current_depth = 0
+            assert not hasattr(agent.subagent_manager, "_max_depth")
         finally:
             await agent.stop()
             store.close()

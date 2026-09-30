@@ -120,6 +120,8 @@ def check_read_before_write(
 
 # -- Path Boundary Guard ---------------------------------------------------
 
+PWD_GUARD_MODES = ("warn", "block", "off")
+
 
 class PathBoundaryGuard:
     """Warns or blocks file access outside the working directory.

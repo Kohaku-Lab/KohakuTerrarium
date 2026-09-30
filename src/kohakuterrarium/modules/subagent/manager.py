@@ -38,8 +38,6 @@ class SubAgentManager(InteractiveManagerMixin):
         llm: LLMProvider,
         job_store: JobStore | None = None,
         agent_path: Path | None = None,
-        current_depth: int = 0,
-        max_depth: int = 3,
         tool_format: str | None = None,
         default_plugin_specs: list[dict[str, Any]] | None = None,
         strict: bool = False,
@@ -52,8 +50,6 @@ class SubAgentManager(InteractiveManagerMixin):
         self.agent_path = agent_path
         self._strict = strict
         self._working_dir = working_dir
-        self._current_depth: int = current_depth
-        self._max_depth: int = max_depth
         self._tool_format: str | None = tool_format
         self._default_plugin_specs = default_plugin_specs or []
         self._loader = ModuleLoader(agent_path=agent_path)
@@ -149,34 +145,6 @@ class SubAgentManager(InteractiveManagerMixin):
         config = self._configs.get(name)
         if config is None:
             raise ValueError(f"Sub-agent not registered: {name}")
-
-        if self._max_depth > 0 and self._current_depth >= self._max_depth:
-            error_msg = (
-                f"Sub-agent depth limit reached ({self._current_depth}/{self._max_depth}). "
-                f"Cannot spawn '{name}'. Simplify your approach or use tools directly."
-            )
-            logger.warning(
-                "Sub-agent depth limit reached",
-                subagent_name=name,
-                current_depth=self._current_depth,
-                max_depth=self._max_depth,
-            )
-            if job_id is None:
-                job_id = generate_job_id(f"agent_{name}")
-
-            error_result = SubAgentResult(success=False, error=error_msg)
-            self._results[job_id] = error_result
-
-            status = JobStatus(
-                job_id=job_id,
-                job_type=JobType.SUBAGENT,
-                type_name=name,
-                state=JobState.ERROR,
-                error=error_msg,
-            )
-            self.job_store.register(status)
-
-            return job_id
 
         if job_id is None:
             job_id = generate_job_id(f"agent_{name}")

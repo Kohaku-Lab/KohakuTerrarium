@@ -75,7 +75,7 @@ executor（`core/executor.py`）会维护 `{job_id: asyncio.Task}`，每次调�
 
 ### 1.4 Sub-agent 分发
 
-Sub-agent 由 `modules/subagent/manager.py:spawn` 启动。深度受 `config.max_subagent_depth` 限制。新的 `SubAgent`（`modules/subagent/base.py`）会复用父级的 registry、LLM 和 tool format，但拥有独立对话。
+Sub-agent 由 `modules/subagent/manager.py:spawn` 启动。Sub-agent 不能再派生 sub-agent，因此没有深度设置。新的 `SubAgent`（`modules/subagent/base.py`）会复用父级的 registry、LLM 和 tool format，但拥有独立对话。
 
 执行完成后，它会将一个 `subagent_output` event 推回父 controller。如果该 sub-agent 配置了 `output_to: external`，输出就会直接流向某个具名 output module，而不再返回父级。
 

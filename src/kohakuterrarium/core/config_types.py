@@ -146,6 +146,9 @@ class AgentConfig:
     # Drop orphan tool_call / tool-result pairs left by compaction.
     sanitize_orphan_tool_calls: bool = True
 
+    # Treatment of file access outside the working directory: warn | block | off.
+    pwd_guard: str = "warn"
+
     input: InputConfig = field(default_factory=InputConfig)
     triggers: list[TriggerConfig] = field(default_factory=list)
     tools: list[ToolConfigItem] = field(default_factory=list)
@@ -160,9 +163,6 @@ class AgentConfig:
     startup_trigger: dict[str, Any] | None = None
 
     termination: dict[str, Any] | None = None
-
-    # Sub-agent depth limit (0 = unlimited)
-    max_subagent_depth: int = 3
 
     # LLM-turn pool shared with budget_inherit sub-agents (None / 0 = off).
     max_iterations: int | None = None

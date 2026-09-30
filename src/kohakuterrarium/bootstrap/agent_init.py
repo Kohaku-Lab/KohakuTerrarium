@@ -269,7 +269,6 @@ class AgentInitMixin:
             llm=self.llm,
             agent_path=self.config.agent_path,
             job_store=self.executor.job_store,  # Shared jobs let parent commands await children.
-            max_depth=self.config.max_subagent_depth,
             tool_format=parent_tool_format,
             default_plugin_specs=default_plugin_specs,
         )

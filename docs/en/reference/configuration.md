@@ -62,7 +62,6 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `compact` | dict | `null` | no | Compaction config. See [Compact](#compact). |
 | `startup_trigger` | dict | `null` | no | One-shot trigger fired on start. `{prompt: "..."}`. |
 | `termination` | dict | `null` | no | Termination conditions. See [Termination](#termination). |
-| `max_subagent_depth` | int | `3` | no | Max nested sub-agent depth. `0` = unlimited. |
 | `tool_format` | str \| dict | `"bracket"` | no | `bracket`, `xml`, `native`, or a custom dict format. `native` requires the configured LLM provider to support structured tool calling. |
 | `mcp_servers` | list | `[]` | no | Per-agent MCP servers. See [MCP servers](#mcp-servers-in-agent-config). |
 | `plugins` | list | `[]` | no | Lifecycle plugins. See [Plugins](#plugins). |
@@ -75,6 +74,7 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `disable_provider_tools` | list[str] | `[]` | no | Opt out of provider-native tools auto-injected by the active backend. |
 | `max_iterations` | int \| null | `null` | no | Shared iteration budget for the parent controller and inheriting sub-agents. |
 | `sanitize_orphan_tool_calls` | bool | `true` | no | Drop orphan tool-call/tool-result fragments before sending history to the provider. |
+| `pwd_guard` | str | `"warn"` | no | File access outside the working directory: `warn` (the first attempt on a path is refused with a warning, a retry proceeds), `block` (always refused), or `off` (no check). The working directory is a default, not a sandbox; use the `sandbox` plugin for real capability limits. |
 
 ### Controller block
 
@@ -949,7 +949,10 @@ Canonical `backend_type` values are:
 - `openai`: OpenAI-compatible `/chat/completions` endpoints.
 - `anthropic`: Anthropic-compatible Messages API endpoints via the official
   `anthropic` Python package (Claude, MiniMax's `/anthropic/v1/messages`, and
-  compatible proxies).
+  compatible proxies). The package must be version 1.x. Version 1.x no longer
+  takes `temperature`, `top_p` or `top_k` as arguments, so the provider sends
+  them in `extra_body`. It sends nothing for Claude models that reject them
+  (Opus 4.7 and later, Sonnet 5 and later, Fable, Mythos).
 - `codex`: OpenAI Responses-API transport. With no `base_url` it uses the
   ChatGPT-subscription Codex OAuth flow; set a `base_url` (a custom
   OpenAI-Responses-compatible endpoint) and it uses API-key auth instead —

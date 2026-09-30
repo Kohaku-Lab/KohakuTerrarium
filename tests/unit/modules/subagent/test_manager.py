@@ -135,16 +135,13 @@ class TestSpawn:
         result = await mgr.wait_for(job_id)
         assert result.output == "bg result"
 
-    async def test_depth_limit_blocks_spawn_with_error_result(self):
-        # A manager already at max depth must refuse to spawn and store
-        # an ERROR result instead of running the sub-agent.
-        mgr = _manager(current_depth=3, max_depth=3)
-        mgr.register(SubAgentConfig(name="explore"))
-        job_id = await mgr.spawn("explore", "task")
-        result = mgr.get_result(job_id)
-        assert result.success is False
-        assert "depth limit" in result.error
-        assert mgr.get_status(job_id).state is JobState.ERROR
+    def test_sub_agents_have_no_nesting_depth_setting(self):
+        # A sub-agent is a tool of its parent and cannot spawn sub-agents,
+        # so the manager carries no depth limit.
+        with pytest.raises(TypeError):
+            _manager(max_depth=3)
+        with pytest.raises(TypeError):
+            _manager(current_depth=1)
 
     async def test_spawn_inherits_parent_executor_context_builder(self):
         # When the manager has a parent executor, the spawned sub-agent

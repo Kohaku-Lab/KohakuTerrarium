@@ -33,13 +33,17 @@ class TestAgentConfigInDefaults:
         assert cfg.temperature == 0.7
         assert cfg.reasoning_effort == "medium"
         assert cfg.tool_doc_mode == "standard"
-        assert cfg.max_subagent_depth == 3
         assert cfg.system_prompt == "You are a helpful assistant."
         # Collection fields default to fresh empty containers.
         assert cfg.tools == []
         assert cfg.subagents == []
         assert cfg.triggers == []
         assert cfg.mcp_servers == []
+
+    def test_removed_sub_agent_depth_key_is_not_a_field_but_still_accepted(self):
+        assert "max_subagent_depth" not in AgentConfigIn.model_fields
+        cfg = AgentConfigIn(name="alice", max_subagent_depth=2)
+        assert cfg.model_dump()["max_subagent_depth"] == 2
 
     def test_input_and_output_default_to_their_submodels(self):
         cfg = AgentConfigIn(name="alice")

@@ -5,7 +5,7 @@ configuration continues to use the core dataclass system, so fields and defaults
 must remain aligned with ``kohakuterrarium/core/config_types.py``.
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -101,6 +101,7 @@ class AgentConfigIn(BaseModel):
     prompt_context_files: dict[str, str] = Field(default_factory=dict)
 
     tool_doc_mode: str = "standard"
+    pwd_guard: Literal["warn", "block", "off"] = "warn"
     include_tools_in_prompt: bool = True
     include_hints_in_prompt: bool = True
 
@@ -116,7 +117,6 @@ class AgentConfigIn(BaseModel):
     compact: dict[str, Any] | None = None
     startup_trigger: dict[str, Any] | None = None
     termination: dict[str, Any] | None = None
-    max_subagent_depth: int = 3
     tool_format: str | dict = "bracket"
     session_key: str | None = None
     mcp_servers: list[dict[str, Any]] = Field(default_factory=list)

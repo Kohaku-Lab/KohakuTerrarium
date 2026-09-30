@@ -45,7 +45,7 @@ tags:
 
 `SubAgentManager`（`modules/sub-agent/manager.py`）会把 `SubAgent`（`modules/sub-agent/base.py`）派生成 `asyncio.Task`，依 job id 追踪它们，并把完成结果作为 `TriggerEvent` 送出。
 
-深度由 `max_subagent_depth`（配置层级）限制，以防止递回失控。取消采合作式机制：父Creature可以调用 `stop_task` 中断正在执行的子 Agent。
+子 Agent 是父 Creature 的一个工具，本身不能再派生子 Agent；嵌套协作由 terrarium 图负责。取消采合作式机制：父Creature可以调用 `stop_task` 中断正在执行的子 Agent。
 
 运行时预算由统一的 `budget` 插件执行，并通过 `plugins[].options` 配置 `turn_budget`、`tool_call_budget` 以及可选的 `walltime_budget`。自动压缩单独通过 `auto-compact` 插件包启用（它展开为 `compact.auto`）。旧式共享 iteration budget 在派生时解析：`budget_allocation` 优先，否则 `budget_inherit: true` 会在存在父级预算时复用同一个预算对象。
 

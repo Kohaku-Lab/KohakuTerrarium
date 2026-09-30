@@ -361,6 +361,21 @@ class TestLoadAgentConfig:
         with pytest.raises(FileNotFoundError, match="No config file"):
             load_agent_config(tmp_path)
 
+    def test_orphan_tool_call_sanitizing_follows_the_yaml_setting(self, tmp_path):
+        (tmp_path / "config.yaml").write_text("name: x\n")
+        assert load_agent_config(tmp_path).sanitize_orphan_tool_calls is True
+
+        (tmp_path / "config.yaml").write_text(
+            "name: x\nsanitize_orphan_tool_calls: false\n"
+        )
+        assert load_agent_config(tmp_path).sanitize_orphan_tool_calls is False
+
+    def test_removed_sub_agent_depth_key_is_ignored(self, tmp_path):
+        (tmp_path / "config.yaml").write_text("name: x\nmax_subagent_depth: 2\n")
+        c = load_agent_config(tmp_path)
+        assert c.name == "x"
+        assert not hasattr(c, "max_subagent_depth")
+
     def test_env_interpolation(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MY_MODEL", "gpt-7")
         (tmp_path / "config.yaml").write_text("name: a\nmodel: ${MY_MODEL}\n")

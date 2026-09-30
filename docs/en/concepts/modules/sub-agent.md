@@ -71,8 +71,8 @@ Three flavours matter:
 (`modules/subagent/base.py`) as `asyncio.Task`s, tracks them by
 job id, and delivers completions as `TriggerEvent`s.
 
-Depth is bounded by `max_subagent_depth` (config-level) to prevent
-runaway recursion. Cancellation is cooperative: the parent can invoke
+A sub-agent is a tool of its parent and cannot spawn sub-agents itself;
+nested collaboration belongs to the terrarium graph. Cancellation is cooperative: the parent can invoke
 `stop_task` to interrupt a running sub-agent. Runtime budgets are enforced by
 the unified `budget` plugin, configured through `plugins[].options` with axes
 such as `turn_budget`, `tool_call_budget`, and optional `walltime_budget`.

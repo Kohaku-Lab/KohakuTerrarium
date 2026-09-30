@@ -140,8 +140,8 @@ See [concepts/modules/tool.md](../concepts/modules/tool.md) and
 
 ### 1.4 Sub-agent dispatch
 
-Sub-agents are spawned by `modules/subagent/manager.py:spawn`. Depth is
-bounded by `config.max_subagent_depth`. A new `SubAgent`
+Sub-agents are spawned by `modules/subagent/manager.py:spawn`. A sub-agent
+cannot spawn sub-agents, so there is no depth setting. A new `SubAgent`
 (`modules/subagent/base.py`) reuses the parent's registry, LLM, and
 tool format but maintains its own conversation.
 
