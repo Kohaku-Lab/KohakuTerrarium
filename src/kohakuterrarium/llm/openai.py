@@ -284,6 +284,7 @@ class OpenAIProvider(BaseLLMProvider):
             kwargs["_ws_recovery"] = WSRecovery(self._retry_policy)
         recovery = kwargs.get("_ws_recovery")
         attempt = 0
+        delivered = False
         overflow_state = OverflowRecoveryState()
         try:
             while True:
@@ -292,14 +293,14 @@ class OpenAIProvider(BaseLLMProvider):
                         self._raw_stream_chat(current, tools=tools, **kwargs)
                     ) as stream:
                         async for chunk in stream:
-                            if recovery is not None and chunk:
-                                recovery.delivered = True
+                            if chunk:
+                                delivered = True
+                                if recovery is not None:
+                                    recovery.delivered = True
                             yield chunk
                     return
                 except Exception as exc:
-                    if recovery is not None and (
-                        recovery.delivered or not recovery.has_budget
-                    ):
+                    if delivered or (recovery is not None and not recovery.has_budget):
                         raise
                     if isinstance(exc, ResponsesWSError) and (
                         exc.submitted or exc.mid_stream

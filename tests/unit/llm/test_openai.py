@@ -274,3 +274,67 @@ class TestOpenAIRetries:
             with pytest.raises(APIStatusError):
                 await provider.chat_complete(MESSAGES)
             assert len(requests) == 2
+
+
+class _DropAfterFirstChunk(httpx.AsyncByteStream):
+    """SSE body that sends one text chunk, then the connection breaks."""
+
+    async def __aiter__(self):
+        chunk = {
+            "id": "reply",
+            "object": "chat.completion.chunk",
+            "created": 0,
+            "model": "test",
+            "choices": [
+                {"index": 0, "delta": {"content": "Hel"}, "finish_reason": None}
+            ],
+        }
+        yield f"data: {json.dumps(chunk)}\n\n".encode()
+        raise httpx.ReadError("connection dropped mid-stream")
+
+
+class TestMidStreamFailure:
+    async def test_text_already_delivered_is_not_replayed_by_a_retry(self):
+        requests = []
+
+        async def respond(request):
+            requests.append(request)
+            if len(requests) == 1:
+                return httpx.Response(
+                    200,
+                    stream=_DropAfterFirstChunk(),
+                    headers={"content-type": "text/event-stream"},
+                )
+            return _success(True)
+
+        received = []
+        async with OpenAIProvider(
+            api_key="test-key",
+            model="test",
+            retry_policy=RetryPolicy(max_retries=2, base_delay=0, jitter=0),
+        ) as provider:
+            await _attach_transport(provider, respond)
+            with pytest.raises(Exception):
+                async for chunk in provider.chat(MESSAGES):
+                    received.append(chunk)
+
+        assert "".join(received) == "Hel"
+        assert len(requests) == 1
+
+    async def test_failure_before_any_text_is_still_retried(self):
+        requests = []
+
+        async def respond(request):
+            requests.append(request)
+            if len(requests) == 1:
+                return _error(503, "temporary outage")
+            return _success(True)
+
+        async with OpenAIProvider(
+            api_key="test-key",
+            model="test",
+            retry_policy=RetryPolicy(max_retries=2, base_delay=0, jitter=0),
+        ) as provider:
+            await _attach_transport(provider, respond)
+            assert await _turn(provider, True) == "ok"
+        assert len(requests) == 2

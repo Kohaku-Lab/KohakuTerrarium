@@ -13,12 +13,14 @@ import json
 import time
 from dataclasses import dataclass
 
+import httpx
 import pytest
 from websockets import serve
 
 from kohakuterrarium.llm import codex_provider as cp
 from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.codex_provider import CODEX_BASE_URL, CodexOAuthProvider
+from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
 pytestmark = pytest.mark.skipif(not cp.HAS_OPENAI, reason="openai SDK not installed")
@@ -459,6 +461,26 @@ class TestUnauthorizedRecovery:
                 chunks.append(chunk)
 
         assert chunks == ["hello"]
+        assert p._client.responses.calls == 1
+
+    async def test_transient_failure_after_output_is_not_replayed(self):
+        async def _chunk_then_drop():
+            yield _Ev(type="response.output_text.delta", delta="hel")
+            raise httpx.ReadError("connection dropped mid-stream")
+
+        p = CodexOAuthProvider(
+            model="gpt-x",
+            retry_policy=RetryPolicy(max_retries=2, base_delay=0, jitter=0),
+        )
+        p._rebuild_client = lambda: None
+        p._client = _ScriptedClient([_chunk_then_drop])
+
+        chunks: list[str] = []
+        with pytest.raises(httpx.ReadError):
+            async for chunk in p._stream_chat([{"role": "user", "content": "hi"}]):
+                chunks.append(chunk)
+
+        assert chunks == ["hel"]
         assert p._client.responses.calls == 1
 
 
