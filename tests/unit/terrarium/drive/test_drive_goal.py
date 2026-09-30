@@ -11,9 +11,23 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.terrarium.drive import goal as goal_mod
-from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.errors import (
+    DriveConflictError,
+    DriveTransitionError,
+    DriveValidationError,
+)
 from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
-from kohakuterrarium.terrarium.drive.models import ActorRef
+from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+
+from tests.unit.terrarium.drive._harness import (
+    ADMIN,
+    USER,
+    WORKER,
+    build_manager,
+    creature_request,
+    make_snapshot,
+)
 
 # ── GoalSpec ────────────────────────────────────────────────────────
 
@@ -164,3 +178,135 @@ class TestGoalRegistration:
             proposed_by=ActorRef("user", "a"), evidence={"stable": True}
         )
         assert reg.verify_terminal(with_ev, ctx).approved is True
+
+
+class TestPausedGoalCompletion:
+    @pytest.mark.parametrize(
+        ("policy", "proposer", "evidence"),
+        [
+            ("self_propose", WORKER, {}),
+            ("self_propose", USER, {}),
+            ("user_confirm", USER, {}),
+            ("verifier", WORKER, {"checks": "passed"}),
+        ],
+    )
+    async def test_completion_finalizes_without_reactivating_or_delivering(
+        self, policy, proposer, evidence
+    ):
+        h = build_manager(snapshot=make_snapshot(GoalDriveRegistration()))
+        record = await h.manager.create_drive(
+            creature_request(
+                kind="goal",
+                spec={
+                    "objective": "finish",
+                    "completion_policy": policy,
+                    "autonomy": "continue_when_ready",
+                },
+            ),
+            actor=WORKER,
+            graph_id="g1",
+        )
+        paused = await h.manager.transition(
+            record.drive_id,
+            DriveStatus.PAUSED,
+            expected_revision=record.revision,
+            actor=WORKER,
+            status_reason="user_interrupted",
+        )
+        await h.manager._scan_ready()
+        await h.manager.dispatcher.dispatch_once()
+        await h.manager.dispatcher.drain()
+        assert await h.manager.get_drive(record.drive_id) == paused
+        before = await h.manager.list_deliveries(record.drive_id)
+        with pytest.raises(DriveConflictError):
+            await h.manager.propose_transition(
+                record.drive_id,
+                DriveStatus.COMPLETED,
+                actor=proposer,
+                is_privileged=True,
+                evidence=evidence,
+                expected_revision=record.revision,
+            )
+        completed = await h.manager.propose_transition(
+            record.drive_id,
+            DriveStatus.COMPLETED,
+            actor=proposer,
+            is_privileged=proposer == USER,
+            evidence=evidence,
+            expected_revision=paused.revision,
+        )
+        assert completed.status is DriveStatus.COMPLETED
+        assert completed.revision == paused.revision + 1
+        assert completed.lifecycle_epoch == paused.lifecycle_epoch
+        await h.manager._scan_ready()
+        await h.manager.dispatcher.dispatch_once()
+        await h.manager.dispatcher.drain()
+        assert await h.manager.list_deliveries(record.drive_id) == before
+        assert h.sink.delivered == []
+
+    @pytest.mark.parametrize(
+        ("policy", "proposer", "evidence"),
+        [
+            ("user_confirm", WORKER, {"done": True}),
+            ("user_confirm", ADMIN, {"done": True}),
+            ("verifier", USER, {}),
+        ],
+    )
+    async def test_completion_policy_rejection_leaves_goal_paused(
+        self, policy, proposer, evidence
+    ):
+        h = build_manager(snapshot=make_snapshot(GoalDriveRegistration()))
+        record = await h.manager.create_drive(
+            creature_request(
+                kind="goal", spec={"objective": "finish", "completion_policy": policy}
+            ),
+            actor=WORKER,
+            graph_id="g1",
+        )
+        paused = await h.manager.transition(
+            record.drive_id,
+            DriveStatus.PAUSED,
+            expected_revision=record.revision,
+            actor=WORKER,
+        )
+        before = await h.manager.list_deliveries(record.drive_id)
+        with pytest.raises(DriveTransitionError, match="verifier rejected"):
+            await h.manager.propose_transition(
+                record.drive_id,
+                DriveStatus.COMPLETED,
+                actor=proposer,
+                is_privileged=True,
+                evidence=evidence,
+                expected_revision=paused.revision,
+            )
+        assert await h.manager.get_drive(record.drive_id) == paused
+        assert await h.manager.list_deliveries(record.drive_id) == before
+        assert h.sink.delivered == []
+
+    @pytest.mark.parametrize(
+        ("kind", "target"),
+        [("generic", DriveStatus.COMPLETED), ("goal", DriveStatus.FAILED)],
+    )
+    async def test_other_paused_terminal_edges_remain_forbidden(self, kind, target):
+        h = build_manager(
+            snapshot=make_snapshot(GoalDriveRegistration(), GenericDriveRegistration())
+        )
+        record = await h.manager.create_drive(
+            creature_request(kind=kind, spec={"objective": "finish"}),
+            actor=WORKER,
+            graph_id="g1",
+        )
+        paused = await h.manager.transition(
+            record.drive_id,
+            DriveStatus.PAUSED,
+            expected_revision=record.revision,
+            actor=WORKER,
+        )
+        with pytest.raises(DriveTransitionError, match="not permitted"):
+            await h.manager.propose_transition(
+                record.drive_id,
+                target,
+                actor=WORKER,
+                expected_revision=paused.revision,
+            )
+        assert await h.manager.get_drive(record.drive_id) == paused

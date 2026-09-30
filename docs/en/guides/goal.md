@@ -216,6 +216,11 @@ Terrarium never decides whether the objective was truly achieved. It
 only applies a transition that an authorized, policy-satisfying proposal
 earned.
 
+An active or paused Goal can be completed through the same proposal path.
+Completing a paused Goal does not reactivate it or schedule another turn;
+the completion policy and authorization checks still apply. Without an ID,
+`/goal complete` selects the newest active or paused Goal on the focused creature.
+
 ## Budgets pause, they never complete
 
 A Goal's `budgets` bound how far `continue_when_ready` autonomy runs

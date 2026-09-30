@@ -41,6 +41,7 @@ def test_split_inherits_resumable_meta(tmp_path):
     try:
         for child in children:
             meta = child.load_meta()
+            assert meta["format_version"] == 2
             assert meta.get("config_type") == "agent"
             assert meta.get("config_path") == "/cfg/path"
             assert meta.get("config_snapshot", {}).get("name") == "alice"
@@ -76,6 +77,7 @@ def test_merge_inherits_resumable_meta_from_first_old_store(tmp_path):
     merged = merge_session_stores([a, b], str(merged_path))
     try:
         meta = merged.load_meta()
+        assert meta["format_version"] == 2
         # First store's config wins for the resumable subset.
         assert meta.get("config_type") == "agent"
         assert meta.get("config_path") == "/cfg/a"

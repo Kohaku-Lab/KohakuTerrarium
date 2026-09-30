@@ -12,11 +12,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.terrarium import engine as engine_mod
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.testing.terrarium import _FakeAgent, TestTerrariumBuilder
+from kohakuterrarium.testing.llm import ScriptedLLM
 
 
 def _creature(cid: str, *, privileged: bool = False) -> Creature:
@@ -27,6 +31,61 @@ def _creature(cid: str, *, privileged: bool = False) -> Creature:
         agent=agent,
         is_privileged=privileged,
     )
+
+
+@pytest.mark.parametrize("state", ["errored", "running", "stopped", "never_started"])
+async def test_removal_stops_live_resources_once_regardless_of_status(tmp_path, state):
+    class Input(NoneInput):
+        async def get_input(self):
+            if state == "errored":
+                raise RuntimeError("input failed")
+            return await super().get_input()
+
+    class Trigger(BaseTrigger):
+        stop_calls = 0
+
+        async def wait_for_trigger(self):
+            await asyncio.Event().wait()
+
+        async def _on_stop(self):
+            self.stop_calls += 1
+
+    config = tmp_path / "config.yaml"
+    config.write_text("name: removal\ninput: {type: none}\noutput: {type: none}\n")
+    agent = await Agent.build(
+        str(config), llm=ScriptedLLM(["unused"]), io="headless", input_module=Input()
+    )
+    trigger = Trigger()
+    await agent.trigger_manager.add(trigger, trigger_id="probe", autostart=False)
+    creature = Creature(creature_id="removal", name="removal", agent=agent)
+    engine = Terrarium()
+    try:
+        await engine.add_creature(creature, start=False, session=False)
+        if state != "never_started":
+            await engine.start(creature)
+        if state == "errored":
+            with pytest.raises(RuntimeError, match="input failed"):
+                await creature._input_task
+            assert creature.status == "error"
+            assert not creature.is_running
+            assert agent.is_running
+            assert trigger.is_running
+        elif state == "stopped":
+            await creature.stop()
+        consumer = getattr(agent, "_consumer_task", None)
+        stop_requested = creature.stop_requested
+        await engine.remove_creature(creature)
+        assert engine.list_creatures() == []
+        assert engine.list_graphs() == []
+        assert not agent.is_running
+        assert consumer is None or consumer.done()
+        assert creature._input_task is None
+        assert not trigger.is_running
+        assert trigger.stop_calls == (0 if state == "never_started" else 1)
+        assert creature.stop_requested == stop_requested
+    finally:
+        await creature.stop(requested=False)
+        await engine.shutdown()
 
 
 # ── construction classmethods ──────────────────────────────────
