@@ -1,4 +1,4 @@
-"""Canonical record fields, atomic writes and serialized lifecycle commands."""
+"""Blocking JSON record I/O and serialized lifecycle commands."""
 
 import json
 import os
@@ -6,6 +6,7 @@ import secrets
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
@@ -54,6 +55,18 @@ def write_json(path: Path, data: dict) -> None:
                 time.sleep(0.02)
     finally:
         temp.unlink(missing_ok=True)
+
+
+def read_json(path: Path) -> Any:
+    """Read a JSON record, retrying brief access denials."""
+    deadline = time.monotonic() + 1
+    while True:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
 
 
 @contextmanager

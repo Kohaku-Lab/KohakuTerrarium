@@ -1240,6 +1240,68 @@ class TestLlmIntegration:
             }
         ]
 
+        small_png = io.BytesIO()
+        Image.new("RGB", (2, 2), "green").save(small_png, format="PNG")
+        small_png_base64 = base64.b64encode(small_png.getvalue()).decode("ascii")
+        large_png = io.BytesIO()
+        Image.new("RGBA", (2500, 1000), (10, 20, 30, 100)).save(large_png, format="PNG")
+        large_path = tmp_path / "large-screenshot.png"
+        large_path.write_bytes(large_png.getvalue())
+        size_wire = messages_to_dicts(
+            [
+                UserMessage(
+                    [
+                        ImagePart(url=f"data:image/png;base64,{small_png_base64}")
+                        for _ in range(20)
+                    ]
+                ),
+                AssistantMessage("Send the next image."),
+                UserMessage(
+                    [TextPart("Large screenshot"), ImagePart(url=large_path.as_uri())]
+                ),
+            ]
+        )
+        saved_size_wire = json.dumps(size_wire)
+        size_requests = []
+        size_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=size_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await size_provider.chat_complete(size_wire)
+            ).content == ANTHROPIC_ANSWER
+            assert (
+                "".join(
+                    [
+                        chunk
+                        async for chunk in size_provider.chat(size_wire, stream=True)
+                    ]
+                )
+                == ANTHROPIC_ANSWER
+            )
+        finally:
+            await size_provider.close()
+        assert len(size_requests) == 2
+        for size_request in size_requests:
+            sent = size_request["messages"]
+            assert len(sent) == 3
+            assert len(sent[0]["content"]) == 20
+            assert all(
+                block["source"]["data"] == small_png_base64
+                for block in sent[0]["content"]
+            )
+            assert sent[2]["content"][0]["text"] == "Large screenshot"
+            resized = sent[2]["content"][1]["source"]
+            assert resized["media_type"] == "image/png"
+            with Image.open(
+                io.BytesIO(base64.b64decode(resized["data"]))
+            ) as resized_image:
+                assert resized_image.size == (2000, 800)
+        assert json.dumps(size_wire) == saved_size_wire
+        assert large_path.read_bytes() == large_png.getvalue()
+
         # Text-only content stays a plain string, never a list.
         assert make_multimodal_content("just text", images=None) == "just text"
         assert UserMessage("plain").to_dict() == {
