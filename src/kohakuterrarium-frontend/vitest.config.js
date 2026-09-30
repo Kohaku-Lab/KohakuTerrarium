@@ -16,6 +16,12 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^monaco-editor$/,
+        replacement: fileURLToPath(
+          new URL("./node_modules/monaco-editor/esm/vs/editor/editor.main.js", import.meta.url),
+        ),
+      },
+      {
         find: /^@kohakuterrarium\/chat-ui$/,
         replacement: fileURLToPath(new URL("./src/public/chat/index.js", import.meta.url)),
       },
@@ -34,6 +40,7 @@ export default defineConfig({
       },
     },
     globals: false,
+    setupFiles: ["./vitest.setup.js"],
     include: ["src/**/*.test.js", "src/**/*.test.ts"],
     // jsdom is flagged unstable for form elements — suppress the noise.
     silent: false,

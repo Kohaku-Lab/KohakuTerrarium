@@ -13,6 +13,7 @@ vi.mock("@/utils/api", () => ({
   settingsAPI: {
     getBackends: vi.fn().mockResolvedValue([]),
     listMCP: vi.fn().mockResolvedValue([]),
+    getUIPrefs: vi.fn().mockResolvedValue({ values: {} }),
   },
   statsAPI: {
     diskUsage: vi.fn().mockResolvedValue({ count: 0, total_bytes: 0 }),
