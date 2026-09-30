@@ -301,18 +301,20 @@ def recipe_session_reuses_store(
         return False
 
 
-def close_owned_stores(engine: "Terrarium") -> None:
-    """Close every store the engine minted.  Called from ``shutdown``."""
-    for gid in list(engine._owned_sessions):
-        store = engine._session_stores.get(gid)
-        if store is None:
-            continue
+def close_attached_stores(engine: "Terrarium") -> None:
+    """Close every store attached to a graph, minted by the engine or not.
+
+    Called from ``shutdown``: a store that stays open keeps its writer lock and
+    its ``running`` status after the engine is gone.
+    """
+    for gid, store in list(engine._session_stores.items()):
         try:
             store.close()
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(
-                "owned session store close failed",
+                "session store close failed",
                 graph_id=gid,
+                owned=gid in engine._owned_sessions,
                 error=str(exc),
             )
     engine._owned_sessions.clear()

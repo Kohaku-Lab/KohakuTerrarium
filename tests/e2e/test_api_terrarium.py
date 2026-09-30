@@ -34,6 +34,7 @@ The journey, in one method:
 """
 
 from collections.abc import Iterator
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -260,6 +262,37 @@ def _drain_until(ws, predicate, *, limit: int = 60) -> dict:
 
 class TestApiTerrariumJourney:
     """One fat journey over the real HTTP + WS terrarium API surface."""
+
+    def test_stopping_the_server_closes_the_terrarium_session_file(
+        self,
+        scripted_llm: ScriptedLLM,
+        recipe_dir: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session_dir = tmp_path / "sessions"
+        session_dir.mkdir()
+        monkeypatch.setenv("KT_SESSION_DIR", str(session_dir))
+        set_service(LocalTerrariumService(Terrarium(session_dir=str(session_dir))))
+        try:
+            with TestClient(create_app()) as client:
+                resp = client.post(
+                    "/api/sessions/active/terrariums",
+                    json={"config_path": str(recipe_dir)},
+                )
+                assert resp.status_code == 200
+                session_id = resp.json()["terrarium_id"]
+        finally:
+            set_service(None)
+
+        # The server has stopped: the file is closed cleanly, its writer lock is
+        # free, and the session is marked as paused and still open.
+        with closing(
+            SessionStore(session_dir / f"{session_id}.kohakutr", writer_lock=True)
+        ) as store:
+            meta = store.load_meta()
+            assert meta["status"] == "paused"
+            assert bool(meta["conversation_open"]) is True
 
     def test_terrarium_session_full_journey(
         self,
