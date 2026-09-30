@@ -212,6 +212,14 @@ def test_daemon_probe_ignores_a_missing_or_dead_pid(tmp_path):
     assert _running_daemon_pid(tmp_path) is None
 
 
+async def test_a_test_cannot_start_a_real_provider_login():
+    from kohakuterrarium.llm import codex_auth, codex_provider
+
+    for module in (codex_auth, codex_provider):
+        with pytest.raises(AssertionError, match="real provider login"):
+            await module.oauth_login()
+
+
 def test_operator_provider_keys_are_not_visible_to_tests():
     inherited = [name for name in PROVIDER_KEY_MAP.values() if name in os.environ]
     assert inherited == []

@@ -202,6 +202,21 @@ def _default_isolated_config_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_provider_login(monkeypatch):
+    """Make a test fail loudly instead of opening a real provider login.
+
+    A provider built without credentials falls back to the browser OAuth flow.
+    A test that exercises that path replaces ``oauth_login`` itself.
+    """
+
+    async def _refuse(*args, **kwargs):
+        raise AssertionError("a test tried to start a real provider login")
+
+    monkeypatch.setattr("kohakuterrarium.llm.codex_auth.oauth_login", _refuse)
+    monkeypatch.setattr("kohakuterrarium.llm.codex_provider.oauth_login", _refuse)
+
+
+@pytest.fixture(autouse=True)
 def _no_inherited_provider_keys(monkeypatch):
     """Hide the operator's provider API keys (``OPENAI_API_KEY`` ...) from tests.
 
