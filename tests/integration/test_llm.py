@@ -1798,6 +1798,60 @@ class TestLlmIntegration:
                 assert reply.content == "A red square."
                 assert responses_requests[-1]["input"][1] == reasoning_item
             assert restored.to_messages() == saved_history
+
+            budget_requests = []
+
+            def budget_response(request):
+                body = json.loads(request.content)
+                budget_requests.append(body)
+                count = sum(
+                    part["type"] == "input_image"
+                    for part in body["input"][0]["content"]
+                )
+                if count > 50:
+                    return httpx.Response(
+                        400,
+                        json={
+                            "error": {
+                                "message": "Exceeded maximum number of images (50) allowed in the request"
+                            }
+                        },
+                    )
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content='data: {"type":"response.output_text.delta","delta":"bounded"}\n\n',
+                )
+
+            previous_client = responses_provider._client
+            responses_provider._client = previous_client.with_options(
+                http_client=httpx.AsyncClient(
+                    transport=httpx.MockTransport(budget_response)
+                )
+            )
+            await previous_client.close()
+            budget_history = [
+                UserMessage(
+                    [
+                        ImagePart(url=f"https://example.invalid/synthetic/{index}")
+                        for index in range(56)
+                    ]
+                )
+            ]
+            saved_budget_history = messages_to_dicts(budget_history)
+            bounded = await responses_provider.chat_complete(budget_history)
+            assert bounded.content == "bounded" and len(budget_requests) == 2
+            assert len(budget_requests[0]["input"][0]["content"]) == 56
+            parts = budget_requests[1]["input"][0]["content"]
+            assert "6 image(s) omitted" in parts[0]["text"]
+            assert [part["image_url"] for part in parts[1:]] == [
+                f"https://example.invalid/synthetic/{index}" for index in range(6, 56)
+            ]
+            assert messages_to_dicts(budget_history) == saved_budget_history
+            assert (
+                await responses_provider.chat_complete(budget_history)
+            ).content == "bounded"
+            assert budget_requests[2]["input"] == budget_requests[1]["input"]
         finally:
             await responses_provider.close()
 

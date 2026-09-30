@@ -20,6 +20,7 @@ provides typed message structures compatible with the OpenAI API format.
 | `anthropic_provider.py` | Native Anthropic Messages API provider using the official SDK (+ `anthropic_format.py`, `anthropic_pairing.py`, `anthropic_cache.py`) |
 | `anthropic_images.py`   | Outgoing Anthropic image dimensions, including images nested in tool results; saved history is unchanged |
 | `codex_provider.py`     | `CodexOAuthProvider`: ChatGPT subscription provider (+ `codex_format.py`, `codex_image_gen.py`, `codex_rate_limits.py`)   |
+| `codex_image_budget.py` | Outbound image limits and recognition of explicit image-count rejections; saved history is unchanged |
 | `codex_auth.py`         | OAuth PKCE authentication flows (browser redirect and device code) with token caching                                     |
 | `litellm_provider.py`   | LiteLLM provider (optional dep)                                                                                           |
 | `deferred_provider.py`  | Placeholder provider for the "no model configured yet" state                                                              |
@@ -32,6 +33,23 @@ provides typed message structures compatible with the OpenAI API format.
 | `variations.py`         | `name@group=option` variation-selector machinery                                                                          |
 | `recovery.py`           | Provider-boundary recovery helpers for LLM calls                                                                          |
 | `api_keys.py`           | API key storage and retrieval                                                                                             |
+
+## Codex image limits
+
+The known Codex OAuth endpoint uses a 50-image request budget. Custom and
+API-key Responses endpoints have no assumed image limit. When one rejects a
+request with HTTP 400 and an explicit maximum image count, the provider learns
+that limit for its current instance and retries once before any output. A new
+model instance learns its own limit. WebSocket retries also respect submission
+budgets and never replay after output or an uncertain transport failure.
+
+Projection retains the newest permitted user/tool image references and replaces
+omitted images with a count and a notice that they were not seen in this request.
+This also applies when one message exceeds the limit; the notice requests smaller
+batches if the omitted images are needed. Projection runs before artifact reads,
+preserves text and tool pairing, and does not edit saved history. A changed image
+projection invalidates WebSocket prefix matching and causes a full resend;
+unchanged projections retain ordinary continuation and prompt-cache routing.
 
 ## Anthropic image dimensions
 
