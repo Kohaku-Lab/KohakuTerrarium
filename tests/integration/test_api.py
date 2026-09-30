@@ -51,6 +51,7 @@ from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.session.embedding import NullEmbedder
 from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.studio.sessions import lifecycle
+from kohakuterrarium.studio.sessions import memory_build as _memory_build
 from kohakuterrarium.studio.sessions import memory_search as _memory_search
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -1733,6 +1734,24 @@ class TestApiIntegration:
         resp = client.get(f"/api/persistence/viewer/{saved_name}/tree")
         assert resp.status_code == 200
         assert "alice" in str(resp.json())
+
+        # Rebuild through the real worker/WebSocket before searching the saved
+        # session. Only the external embedding model is replaced.
+        monkeypatch.setattr(
+            _memory_build, "create_embedder", lambda cfg: NullEmbedder()
+        )
+        ack = client.post(f"/api/sessions/{saved_name}/memory/build", json={})
+        assert ack.status_code == 200
+        build_frames = []
+        with client.websocket_connect(ack.json()["websocket"]) as socket:
+            while True:
+                frame = socket.receive_json()
+                build_frames.append(frame)
+                if "status" in frame:
+                    break
+        assert build_frames[-1]["status"] == "ok", build_frames[-1]
+        assert build_frames[0]["phase"] == "scan"
+        assert any(frame.get("percent") == 100 for frame in build_frames[:-1])
 
         # Memory search over the saved session — FTS finds the turn we
         # wrote ("persist this turn"); ``count`` matches the result list.
