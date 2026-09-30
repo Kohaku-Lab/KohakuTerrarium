@@ -852,8 +852,10 @@ async def remove_creature(
         if session_id not in {g.graph_id for g in engine.list_graphs()}:
             raise KeyError(f"session {session_id!r} not found")
         try:
-            engine.get_creature(creature_id)
+            creature = engine.get_creature(creature_id)
         except KeyError:
+            return False
+        if creature.graph_id != session_id:
             return False
         await engine.remove_creature(creature_id)
         return True
@@ -863,6 +865,9 @@ async def remove_creature(
     if meta is None or not meta.get("on_node"):
         raise KeyError(f"session {session_id!r} not found")
     try:
+        creature = await service.get_creature_info(creature_id)
+        if creature is None or creature.graph_id != session_id:
+            return False
         await service.remove_creature(creature_id)
     except KeyError:
         return False
