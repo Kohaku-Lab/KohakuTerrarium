@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP, get_api_key
+
 _REAL_CONFIG_DIR = Path.home() / ".kohakuterrarium"
 
 # Subtrees populated by a *running* KohakuTerrarium daemon, not by
@@ -208,3 +210,10 @@ def test_daemon_probe_ignores_a_missing_or_dead_pid(tmp_path):
 
     (run_dir / "web.pid").write_text("999999")
     assert _running_daemon_pid(tmp_path) is None
+
+
+def test_operator_provider_keys_are_not_visible_to_tests():
+    inherited = [name for name in PROVIDER_KEY_MAP.values() if name in os.environ]
+    assert inherited == []
+    for provider in PROVIDER_KEY_MAP:
+        assert get_api_key(provider) == ""

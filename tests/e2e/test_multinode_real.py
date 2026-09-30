@@ -72,6 +72,7 @@ def _write_creature_config(
         "output:\n  type: stdout\n"
     )
     if subagents:
+        text += "tool_format: bracket\n"
         text += "subagents:\n"
         for sa in subagents:
             text += f"  - name: {sa}\n    type: builtin\n"

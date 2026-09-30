@@ -169,6 +169,7 @@ class TestApiSettingsJourney:
             "mimo",
             "kimi-code",
             "glm-coding",
+            "google-antigravity",
         }
         grok = next(b for b in baseline if b["name"] == "grok-subscription")
         assert grok["backend_type"] == "grok-subscription"

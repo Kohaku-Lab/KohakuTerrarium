@@ -85,6 +85,7 @@ def _write_creature_config(root: Path, name: str, system_prompt: str) -> Path:
         "llm_profile: openai/gpt-4-test\n"
         "model: gpt-4\n"
         "provider: openai\n"
+        "tool_format: bracket\n"
         "input:\n  type: cli\n"
         "output:\n  type: stdout\n",
         encoding="utf-8",

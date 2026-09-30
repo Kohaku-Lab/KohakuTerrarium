@@ -479,19 +479,24 @@ class TestProgTerrariumJourney:
         assert next(c for c in rg["creatures"] if c["is_root"])["name"] == "root"
 
         # --- 8. runtime-graph prompt block on the evolved team -----------
-        # ``RuntimeGraphPrompt.refresh_creature`` splices the live
-        # ``## Live Group`` section into a creature's system prompt. The
-        # root has the analyst as a child + listens on every channel.
+        # ``RuntimeGraphPrompt.refresh_creature`` splices the group sections
+        # into a creature's system prompt: ``## Working with the group`` for
+        # every member, ``## Growing the group`` only for a privileged node.
         root_creature = engine.get_creature("root")
         await engine._runtime_prompt.refresh_creature(root_creature)
         root_prompt = root_creature.agent.get_system_prompt()
-        assert "## Live Group" in root_prompt
+        assert "## Working with the group" in root_prompt
+        assert "## Growing the group" in root_prompt
         assert "privileged" in root_prompt
         assert "<!-- runtime-graph -->" in root_prompt
-        # The hot-plugged helper's block reflects its single recipe wire.
+        # The hot-plugged helper's block reflects its single recipe wire and,
+        # not being privileged, carries no growth section.
         helper_creature = engine.get_creature("helper")
         await engine._runtime_prompt.refresh_creature(helper_creature)
-        assert "findings" in helper_creature.agent.get_system_prompt()
+        helper_prompt = helper_creature.agent.get_system_prompt()
+        assert "findings" in helper_prompt
+        assert "## Working with the group" in helper_prompt
+        assert "## Growing the group" not in helper_prompt
 
         # --- 9. attach-policy surface on the evolved team ----------------
         # The graph has wired channels + a privileged root, so the full

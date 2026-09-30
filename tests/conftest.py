@@ -41,6 +41,8 @@ if str(_SRC) not in sys.path:
 _SESSION_CONFIG_DIR = Path(tempfile.mkdtemp(prefix="kt-test-session-config-"))
 os.environ["KT_CONFIG_DIR"] = str(_SESSION_CONFIG_DIR)
 
+from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP  # noqa: E402
+
 
 @pytest.fixture(autouse=True)
 def isolate_global_state():
@@ -197,3 +199,14 @@ def _default_isolated_config_dir(tmp_path, monkeypatch):
     # ``KT_CONFIG_DIR`` could itself point at the real config and
     # bypass the autouse intent.
     monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "kt-config-isolated"))
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_provider_keys(monkeypatch):
+    """Hide the operator's provider API keys (``OPENAI_API_KEY`` ...) from tests.
+
+    ``get_api_key`` falls back to these variables, so an operator shell with a
+    real key changes results. A test that needs a key sets it itself.
+    """
+    for name in PROVIDER_KEY_MAP.values():
+        monkeypatch.delenv(name, raising=False)

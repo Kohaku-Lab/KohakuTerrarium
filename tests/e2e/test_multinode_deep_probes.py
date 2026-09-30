@@ -41,6 +41,7 @@ def _write_cfg(root: Path, name: str) -> Path:
         f"system_prompt: 'You are {name}.'\n"
         "model: gpt-4\n"
         "provider: openai\n"
+        "tool_format: bracket\n"
         "input:\n  type: cli\n"
         "output:\n  type: stdout\n",
         encoding="utf-8",
