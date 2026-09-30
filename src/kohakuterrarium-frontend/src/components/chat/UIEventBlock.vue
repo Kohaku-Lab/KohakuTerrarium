@@ -423,8 +423,8 @@ function onOpenHostLink(event, target) {
   background: rgba(212, 146, 10, 0.06);
 }
 .ui-event-card.accent-danger {
-  border-color: rgba(231, 76, 60, 0.4);
-  background: rgba(231, 76, 60, 0.06);
+  border-color: color-mix(in srgb, var(--kt-color-coral, #d46b6b) 40%, transparent);
+  background: color-mix(in srgb, var(--kt-color-coral, #d46b6b) 6%, transparent);
 }
 .ui-event-card.accent-success {
   border-color: rgba(76, 153, 137, 0.4);
@@ -439,8 +439,8 @@ function onOpenHostLink(event, target) {
   background: rgba(90, 79, 207, 0.06);
 }
 .ui-event-card.accent-error {
-  border-color: rgba(231, 76, 60, 0.4);
-  background: rgba(231, 76, 60, 0.06);
+  border-color: color-mix(in srgb, var(--kt-color-coral, #d46b6b) 40%, transparent);
+  background: color-mix(in srgb, var(--kt-color-coral, #d46b6b) 6%, transparent);
 }
 /* A card link action whose target the host cannot resolve: shown, not hidden. */
 .card-link-unavailable {

@@ -238,7 +238,7 @@ export default defineComponent({
             },
             [
               h("span", { class: "kt-transcript-processing__dot", "aria-hidden": "true" }),
-              h("span", props.processingLabel),
+              h("span", { class: "kt-transcript-processing__label" }, props.processingLabel),
             ],
           ),
         )

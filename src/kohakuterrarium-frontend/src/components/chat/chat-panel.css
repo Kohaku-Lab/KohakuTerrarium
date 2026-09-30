@@ -22,50 +22,87 @@
   margin-bottom: 0.5rem;
 }
 
+:deep(.kt-chat-composer) {
+  --kc-iolite: var(--kt-color-iolite, #5a4fcf);
+  --kc-iolite-shadow: var(--kt-color-iolite-shadow, #312a7a);
+  --kc-aquamarine: var(--kt-color-aquamarine, #4c9989);
+  --kc-coral: var(--kt-color-coral, #d46b6b);
+  --kc-text: var(--kt-color-warm-800, #3a3632);
+  --kc-placeholder: var(--kt-color-warm-400, #a09a92);
+  --kc-idle: var(--kt-color-warm-400, #a09a92);
+  --kc-disabled: var(--kt-color-warm-300, #c5bfb7);
+  --kc-surface: var(--kt-color-warm-50, #f7f5f2);
+  --kc-border: var(--kt-color-warm-200, #e0dbd4);
+  --kc-focus: color-mix(in srgb, var(--kc-iolite) 40%, transparent);
+}
+
+:global(html.dark .kt-chat-composer) {
+  --kc-text: var(--kt-color-warm-200, #e0dbd4);
+  --kc-placeholder: var(--kt-color-warm-500, #8a8480);
+  --kc-disabled: var(--kt-color-warm-600, #6a645f);
+  --kc-surface: var(--kt-color-warm-800, #3a3632);
+  --kc-border: var(--kt-color-warm-700, #4a4540);
+  --kc-focus: color-mix(in srgb, var(--kt-color-iolite-light, #ddd0f0) 30%, transparent);
+}
+
 :deep(.kt-chat-composer__chip) {
   gap: 0.5rem;
   padding: 0.25rem 0.625rem;
-  border-color: rgb(112 91 169 / 0.2);
-  background: rgb(112 91 169 / 0.08);
+  border-color: color-mix(in srgb, var(--kc-iolite) 20%, transparent);
+  background: color-mix(in srgb, var(--kc-iolite) 8%, transparent);
   font-size: 0.75rem;
 }
 
 :deep(.kt-chat-composer__shell) {
   gap: 0.5rem;
   padding: 0.5rem 0.75rem 0.5rem 0.5rem;
-  border-color: rgb(168 162 158 / 0.35);
-  background: rgb(250 250 249);
+  border-color: var(--kc-border);
+  background: var(--kc-surface);
   transition: border-color 0.15s ease;
 }
 
 :deep(.kt-chat-composer__shell:focus-within) {
-  border-color: rgb(112 91 169 / 0.4);
+  border-color: var(--kc-focus);
 }
 
 :deep(.kt-chat-composer__shell textarea) {
   border: 0;
   outline: 0;
   background: transparent;
-  color: inherit;
+  color: var(--kc-text);
   font-size: 0.875rem;
   line-height: 1.625;
 }
 
+:deep(.kt-chat-composer__shell textarea::placeholder) {
+  color: var(--kc-placeholder);
+}
+
 :deep(.kt-chat-composer__shell > button),
 :deep(.kt-chat-composer__menu button) {
+  --kc-hue: var(--kc-iolite);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-width: 1.75rem;
   min-height: 1.75rem;
   border-radius: 0.375rem;
-  color: rgb(120 113 108);
+  color: var(--kc-idle);
   transition: all 0.15s ease;
 }
 
-:deep(.kt-chat-composer__shell > button:hover) {
-  color: rgb(112 91 169);
-  background: rgb(112 91 169 / 0.1);
+:deep(.kt-chat-composer__action--file) {
+  --kc-hue: var(--kc-aquamarine);
+}
+
+:deep(.kt-chat-composer__action--clear) {
+  --kc-hue: var(--kc-coral);
+}
+
+:deep(.kt-chat-composer__shell > button:hover),
+:deep(.kt-chat-composer__menu button:hover) {
+  color: var(--kc-hue);
+  background: color-mix(in srgb, var(--kc-hue) 10%, transparent);
 }
 
 :deep(.kt-chat-composer__shell > .kt-chat-composer__primary) {
@@ -73,23 +110,37 @@
   height: 2rem;
   border-radius: 0.5rem;
   color: white;
-  background: rgb(112 91 169);
+  background: var(--kc-iolite);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kc-iolite) 20%, transparent);
+}
+
+:deep(.kt-chat-composer__shell > .kt-chat-composer__primary:hover) {
+  color: white;
+  background: var(--kc-iolite-shadow);
+}
+
+:deep(.kt-chat-composer__shell > .kt-chat-composer__primary.is-stop) {
+  background: color-mix(in srgb, var(--kc-coral) 90%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kc-coral) 20%, transparent);
+}
+
+:deep(.kt-chat-composer__shell > .kt-chat-composer__primary.is-stop:hover) {
+  background: var(--kc-coral);
 }
 
 :deep(.kt-chat-composer__shell > .kt-chat-composer__primary:disabled) {
-  color: rgb(168 162 158);
+  color: var(--kc-disabled);
   background: transparent;
+  box-shadow: none;
 }
 
 :deep(.kt-chat-composer__menu) {
-  border-color: rgb(168 162 158 / 0.35);
+  border-color: var(--kc-border);
   background: white;
 }
 
-:global(html.dark .kt-chat-composer__shell),
 :global(html.dark .kt-chat-composer__menu) {
-  border-color: rgb(87 83 78);
-  background: rgb(41 37 36);
+  background: var(--kt-color-warm-800, #3a3632);
 }
 
 @media (pointer: coarse) {

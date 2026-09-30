@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+
 import { flushPromises, mount } from "@vue/test-utils"
 import { describe, expect, it, vi } from "vitest"
 
@@ -77,11 +79,34 @@ describe("ChatComposer", () => {
     expect(payload).toMatchObject({ text: "hello", parts: [{ type: "text", text: "hello" }] })
     expect(wrapper.emitted("update:modelValue").at(-1)).toEqual([""])
 
+    expect(wrapper.get(".kt-chat-composer__primary").classes()).not.toContain("is-stop")
+
     await wrapper.setProps({ processing: true })
     expect(wrapper.find('button[aria-label="Send message"]').exists()).toBe(false)
+    expect(wrapper.get(".kt-chat-composer__primary").classes()).toContain("is-stop")
     await wrapper.get('button[aria-label="Stop generation"]').trigger("click")
     expect(wrapper.emitted("interrupt")).toHaveLength(1)
     expect(wrapper.findAll(".kt-chat-composer__primary")).toHaveLength(1)
+  })
+
+  it("marks each action button so hosts can style attach, image, compact and clear apart", () => {
+    const wrapper = mountComposer()
+    const kinds = {
+      "Attach file": "file",
+      "Attach image": "image",
+      "Compact context": "compact",
+      "Clear context": "clear",
+    }
+    for (const [label, kind] of Object.entries(kinds)) {
+      expect(wrapper.get(`button[aria-label="${label}"]`).classes()).toContain(
+        `kt-chat-composer__action--${kind}`,
+      )
+    }
+  })
+
+  it("inherits the host font so the textarea is never the browser monospace default", () => {
+    const css = readFileSync("src/public/chat/chat-composer.css", "utf8")
+    expect(css).toMatch(/\.kt-chat-composer__shell textarea\s*\{[^}]*font-family:\s*inherit/)
   })
 
   it("has hidden file/image inputs, adds/removes chips, and reports validation errors", async () => {

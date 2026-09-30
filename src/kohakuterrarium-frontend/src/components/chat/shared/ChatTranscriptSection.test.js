@@ -55,6 +55,7 @@ describe("ChatTranscriptSection", () => {
     const processing = wrapper.find(".kt-transcript-processing")
     expect(processing.text()).toContain("Working")
     expect(processing.attributes()).toMatchObject({ role: "status", "aria-live": "polite" })
+    expect(processing.get(".kt-transcript-processing__label").text()).toBe("Working")
   })
 
   it("keeps renderer roots as direct list children for message alignment", () => {
@@ -217,6 +218,19 @@ describe("ChatTranscriptSection", () => {
     expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/)
     expect(css).toMatch(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*\.kt-transcript-processing__dot[\s\S]*animation:\s*none/,
+    )
+  })
+
+  it("pulses the processing label, dot and reconnect icon with the same animation", () => {
+    const css = fs.readFileSync("src/components/chat/shared/chat-transcript-section.css", "utf8")
+    const animated = css.match(
+      /((?:\.kt-transcript-[\w-]+,?\s*)+)\{\s*animation:\s*kt-transcript-pulse[^}]*\}/,
+    )
+    expect(animated?.[1]).toContain(".kt-transcript-processing__label")
+    expect(animated?.[1]).toContain(".kt-transcript-processing__dot")
+    expect(animated?.[1]).toContain(".kt-transcript-reconnect__icon")
+    expect(css).toMatch(
+      /@keyframes kt-transcript-pulse\s*\{[^}]*opacity:\s*0\.4[\s\S]*opacity:\s*1/,
     )
   })
 

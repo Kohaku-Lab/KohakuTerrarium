@@ -37,6 +37,7 @@
 }
 
 .kt-chat-composer__shell textarea {
+  font-family: inherit;
   flex: 1;
   min-width: 0;
   min-height: 2em;

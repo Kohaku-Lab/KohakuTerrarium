@@ -18,31 +18,31 @@
 
       <button v-if="showAttachmentActions && compactMode && active" type="button" :aria-label="label('moreActions')" :title="label('moreActions')" :disabled="disabled" @click="secondaryOpen = !secondaryOpen"><slot name="more-icon">＋</slot></button>
       <template v-else-if="showAttachmentActions">
-        <button type="button" :aria-label="label('attachFile')" :title="label('attachFile')" :disabled="disabled" @click="openFile"><slot name="file-icon">＋</slot></button>
-        <button type="button" :aria-label="label('attachImage')" :title="label('attachImage')" :disabled="disabled" @click="openImage"><slot name="image-icon">▧</slot></button>
+        <button type="button" class="kt-chat-composer__action--file" :aria-label="label('attachFile')" :title="label('attachFile')" :disabled="disabled" @click="openFile"><slot name="file-icon">＋</slot></button>
+        <button type="button" class="kt-chat-composer__action--image" :aria-label="label('attachImage')" :title="label('attachImage')" :disabled="disabled" @click="openImage"><slot name="image-icon">▧</slot></button>
       </template>
 
       <slot name="suggestions" />
       <textarea ref="textarea" :value="modelValue" rows="1" :placeholder="placeholder" :aria-label="label('message', {}, placeholder || 'Message')" :aria-autocomplete="ariaAutocomplete" :aria-expanded="ariaExpanded" :aria-controls="ariaControls" :aria-activedescendant="ariaActivedescendant" :role="inputRole" :disabled="disabled" @input="onInput" @keydown="onKeydown" @paste="onPaste" @focus="onFocus" @blur="onBlur" />
 
       <template v-if="showContextActions && !(compactMode && active)">
-        <button type="button" :aria-label="label('compact')" :title="label('compact')" :disabled="disabled || contextActionsDisabled" @click="$emit('compact')"><slot name="compact-icon">⇤</slot></button>
-        <button type="button" :aria-label="label('clear')" :title="label('clear')" :disabled="disabled || contextActionsDisabled" @click="$emit('clear')"><slot name="clear-icon">⌫</slot></button>
+        <button type="button" class="kt-chat-composer__action--compact" :aria-label="label('compact')" :title="label('compact')" :disabled="disabled || contextActionsDisabled" @click="$emit('compact')"><slot name="compact-icon">⇤</slot></button>
+        <button type="button" class="kt-chat-composer__action--clear" :aria-label="label('clear')" :title="label('clear')" :disabled="disabled || contextActionsDisabled" @click="$emit('clear')"><slot name="clear-icon">⌫</slot></button>
       </template>
-      <button v-if="processing" type="button" class="kt-chat-composer__primary" :aria-label="label('stop')" :title="label('stop')" :disabled="disabled" @click="$emit('interrupt')"><slot name="stop-icon">■</slot></button>
+      <button v-if="processing" type="button" class="kt-chat-composer__primary is-stop" :aria-label="label('stop')" :title="label('stop')" :disabled="disabled" @click="$emit('interrupt')"><slot name="stop-icon">■</slot></button>
       <button v-else type="button" class="kt-chat-composer__primary" :aria-label="label('send')" :title="label('send')" :disabled="disabled || !canSubmit" @click="submit"><slot name="send-icon">➤</slot></button>
 
       <template v-if="compactMode && secondaryOpen">
         <div class="kt-chat-composer__menu-backdrop" @click="secondaryOpen = false" />
         <div class="kt-chat-composer__menu" @click.stop>
-          <button type="button" :aria-label="label('attachFile')" @click="secondaryAction(openFile)">
+          <button type="button" class="kt-chat-composer__action--file" :aria-label="label('attachFile')" @click="secondaryAction(openFile)">
             <slot name="file-icon">＋</slot><span>{{ label("attachFile") }}</span>
           </button>
-          <button type="button" :aria-label="label('attachImage')" @click="secondaryAction(openImage)">
+          <button type="button" class="kt-chat-composer__action--image" :aria-label="label('attachImage')" @click="secondaryAction(openImage)">
             <slot name="image-icon">▧</slot><span>{{ label("attachImage") }}</span>
           </button>
-          <button v-if="showContextActions" type="button" :aria-label="label('compact')" :disabled="disabled || contextActionsDisabled" @click="secondaryAction(() => $emit('compact'))"><slot name="compact-icon">⇤</slot></button>
-          <button v-if="showContextActions" type="button" :aria-label="label('clear')" :disabled="disabled || contextActionsDisabled" @click="secondaryAction(() => $emit('clear'))"><slot name="clear-icon">⌫</slot></button>
+          <button v-if="showContextActions" type="button" class="kt-chat-composer__action--compact" :aria-label="label('compact')" :disabled="disabled || contextActionsDisabled" @click="secondaryAction(() => $emit('compact'))"><slot name="compact-icon">⇤</slot></button>
+          <button v-if="showContextActions" type="button" class="kt-chat-composer__action--clear" :aria-label="label('clear')" :disabled="disabled || contextActionsDisabled" @click="secondaryAction(() => $emit('clear'))"><slot name="clear-icon">⌫</slot></button>
         </div>
       </template>
     </div>

@@ -1,27 +1,33 @@
 .kt-conversation-host {
-  --kt-conversation-text: #4a4540;
-  --kt-conversation-muted: #8a8480;
-  --kt-conversation-surface: #f7f5f2;
+  --kt-conversation-text: var(--kt-color-warm-700, #4a4540);
+  --kt-conversation-muted: var(--kt-color-warm-500, #8a8480);
+  --kt-conversation-surface: var(--kt-color-warm-50, #f7f5f2);
   --kt-conversation-surface-raised: #ffffff;
-  --kt-conversation-border: #e0dbd4;
-  --kt-conversation-accent: #5a4fcf;
-  --kt-conversation-warning: #d4920a;
-  --kt-conversation-error: #d46b6b;
-  --kt-conversation-success: #4c9989;
-  --kt-conversation-code: #2a2724;
+  --kt-conversation-border: var(--kt-color-warm-200, #e0dbd4);
+  --kt-conversation-accent: var(--kt-color-iolite, #5a4fcf);
+  --kt-conversation-accent-tint: var(--kt-color-iolite, #5a4fcf);
+  --kt-conversation-warning: var(--kt-color-amber, #d4920a);
+  --kt-conversation-warning-text: var(--kt-color-amber-shadow, #8b5e00);
+  --kt-conversation-attention: var(--kt-color-amber, #d4920a);
+  --kt-conversation-error: var(--kt-color-coral, #d46b6b);
+  --kt-conversation-success: var(--kt-color-aquamarine, #4c9989);
+  --kt-conversation-code: var(--kt-color-warm-900, #2a2724);
+  --kt-conversation-reasoning-text: var(--kt-color-warm-700, #4a4540);
 }
 
 .dark .kt-conversation-host {
-  --kt-conversation-text: #e0dbd4;
-  --kt-conversation-muted: #a09a92;
-  --kt-conversation-surface: #3a3632;
-  --kt-conversation-surface-raised: #2a2724;
-  --kt-conversation-border: #6a645f;
-  --kt-conversation-accent: #ddd0f0;
-  --kt-conversation-warning: #f5e6c8;
-  --kt-conversation-error: #f5d5d5;
-  --kt-conversation-success: #d4ede8;
-  --kt-conversation-code: #1a1816;
+  --kt-conversation-text: var(--kt-color-warm-200, #e0dbd4);
+  --kt-conversation-muted: var(--kt-color-warm-400, #a09a92);
+  --kt-conversation-surface: var(--kt-color-warm-800, #3a3632);
+  --kt-conversation-surface-raised: var(--kt-color-warm-900, #2a2724);
+  --kt-conversation-border: var(--kt-color-warm-600, #6a645f);
+  --kt-conversation-accent: var(--kt-color-iolite-light, #ddd0f0);
+  --kt-conversation-warning: var(--kt-color-amber-light, #f5e6c8);
+  --kt-conversation-warning-text: var(--kt-color-amber-light, #f5e6c8);
+  --kt-conversation-error: var(--kt-color-coral-light, #f5d5d5);
+  --kt-conversation-success: var(--kt-color-aquamarine-light, #d4ede8);
+  --kt-conversation-code: var(--kt-color-warm-950, #1a1816);
+  --kt-conversation-reasoning-text: var(--kt-color-warm-300, #c5bfb7);
 }
 
 .kt-conversation-list {
@@ -78,16 +84,26 @@
 }
 
 .kt-conversation-reasoning {
-  padding: 0.4rem 0.6rem;
-  border: 1px solid color-mix(in srgb, var(--kt-conversation-accent) 25%, transparent);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--kt-conversation-accent-tint) 20%, transparent);
   border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--kt-conversation-accent) 6%, transparent);
+  background: color-mix(in srgb, var(--kt-conversation-accent-tint) 5%, transparent);
+}
+
+.dark .kt-conversation-reasoning {
+  border-color: color-mix(in srgb, var(--kt-conversation-accent-tint) 25%, transparent);
+  background: color-mix(in srgb, var(--kt-conversation-accent-tint) 10%, transparent);
 }
 
 .kt-conversation-reasoning summary {
   color: var(--kt-conversation-accent);
   cursor: pointer;
   font-size: 0.75rem;
+}
+
+.reasoning-source {
+  margin-left: 0.25rem;
+  color: var(--kt-conversation-muted);
 }
 
 .kt-conversation-reasoning pre,
@@ -114,6 +130,7 @@
 .reasoning-full {
   max-height: 15rem;
   overflow-y: auto;
+  color: var(--kt-conversation-reasoning-text);
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
@@ -212,8 +229,8 @@
 .kt-conversation-banner.is-compact {
   padding: 0;
   overflow: hidden;
-  border-color: color-mix(in srgb, var(--kt-conversation-accent) 25%, transparent);
-  background: color-mix(in srgb, var(--kt-conversation-accent) 6%, transparent);
+  border-color: color-mix(in srgb, var(--kt-conversation-accent-tint) 25%, transparent);
+  background: color-mix(in srgb, var(--kt-conversation-accent-tint) 6%, transparent);
 }
 
 .kt-conversation-compact__header {
@@ -276,7 +293,7 @@
   max-height: 12rem;
   padding: 0.5rem 0.75rem;
   overflow-y: auto;
-  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-accent) 15%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-accent-tint) 15%, transparent);
   font-size: 0.75rem;
 }
 

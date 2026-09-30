@@ -43,7 +43,7 @@
       <span class="i-carbon-connect text-iolite dark:text-iolite-light text-xs shrink-0" />
       <span class="text-xs text-iolite-shadow dark:text-iolite-light flex-1">
         Inbound from <span class="font-semibold">{{ message.from }}</span>
-        <span v-if="message.crossNode" class="ml-1 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] uppercase tracking-wider bg-teal/20 text-teal-shadow dark:text-teal-light" :title="t('cluster.graphEditor.crossSiteEdge')">
+        <span v-if="message.crossNode" class="ml-1 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] uppercase tracking-wider bg-aquamarine/20 text-aquamarine-shadow dark:text-aquamarine-light" :title="t('cluster.graphEditor.crossSiteEdge')">
           <span class="i-carbon-network-3 w-2.5 h-2.5" />
           {{ t("cluster.chat.crossSiteBadge") }}
         </span>
@@ -103,13 +103,13 @@
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <span class="text-warm-400 dark:text-warm-500 mr-auto">Ctrl/Cmd+Enter to rerun · Esc to cancel</span>
           <button class="px-2.5 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="editSaving" @click="cancelEdit">Cancel</button>
-          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" aria-label="Save and rerun" :disabled="editSaving || branchOperationBusy || (!editText.trim() && editAttachments.length === 0)" @click="confirmEdit">
+          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-shadow disabled:opacity-60" aria-label="Save and rerun" :disabled="editSaving || branchOperationBusy || (!editText.trim() && editAttachments.length === 0)" @click="confirmEdit">
             {{ editSaving ? "Starting..." : "Save & Rerun" }}
           </button>
         </div>
       </div>
       <ConversationMessage v-else :message="message" :render-text="renderSharedText" :render-content-part="renderSharedContentPart" bare />
-      <p v-if="editError || branchOperationError" class="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{{ editError || branchOperationError }}</p>
+      <p v-if="editError || branchOperationError" class="mt-1 text-sm text-coral-shadow dark:text-coral-light" role="alert">{{ editError || branchOperationError }}</p>
     </div>
     <!-- Hover actions for user messages -->
     <div v-if="!editing && !message.queued && !message.injectedMidTurn && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
@@ -383,9 +383,9 @@ const { editing, editText, editAttachments, editTextareaEl, editImageInputEl, ed
 }
 
 .message-edit-textarea:focus {
-  border-color: rgb(124 103 184 / 0.55);
+  border-color: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 55%, transparent);
   box-shadow:
-    0 0 0 2px rgb(124 103 184 / 0.12),
+    0 0 0 2px color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 12%, transparent),
     inset 0 1px 2px rgb(0 0 0 / 0.04);
 }
 

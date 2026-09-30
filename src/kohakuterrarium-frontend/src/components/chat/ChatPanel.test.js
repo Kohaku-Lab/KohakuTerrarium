@@ -194,6 +194,19 @@ describe("ChatPanel disconnected sends", () => {
     wrapper.unmount()
   })
 
+  it("shows exactly one reconnecting banner while the socket is down", async () => {
+    const label = "Disconnected — reconnecting…"
+    const down = mountPanel({ wsOpen: false })
+    await flushPromises()
+    expect(down.wrapper.text().split(label)).toHaveLength(2)
+    down.wrapper.unmount()
+
+    const up = mountPanel({ wsOpen: true })
+    await flushPromises()
+    expect(up.wrapper.text()).not.toContain(label)
+    up.wrapper.unmount()
+  })
+
   it("keeps the draft when there is no active tab", async () => {
     const error = vi.spyOn(ElMessage, "error").mockImplementation(() => {})
     const { chat, wrapper } = mountPanel()
@@ -746,17 +759,32 @@ describe("ChatPanel theme", () => {
         rules.set(selector, { ...rules.get(selector), ...declarations })
       }
     })
-    for (const target of ["shell", "menu"]) {
-      expect(rules.get(`html.dark .kt-chat-composer__${target}`)).toMatchObject({
-        background: "rgb(41 37 36)",
-        "border-color": "rgb(87 83 78)",
-      })
-    }
-    expect(rules.get("[data-v-chat-panel] .kt-chat-composer__shell").background).toBe(
-      "rgb(250 250 249)",
-    )
+    expect(rules.get("html.dark .kt-chat-composer")).toMatchObject({
+      "--kc-surface": "var(--kt-color-warm-800, #3a3632)",
+      "--kc-border": "var(--kt-color-warm-700, #4a4540)",
+    })
+    expect(rules.get("[data-v-chat-panel] .kt-chat-composer")).toMatchObject({
+      "--kc-surface": "var(--kt-color-warm-50, #f7f5f2)",
+      "--kc-border": "var(--kt-color-warm-200, #e0dbd4)",
+    })
+    expect(rules.get("[data-v-chat-panel] .kt-chat-composer__shell")).toMatchObject({
+      background: "var(--kc-surface)",
+      "border-color": "var(--kc-border)",
+    })
     expect(rules.get("[data-v-chat-panel] .kt-chat-composer__menu").background).toBe("white")
-    expect(rules.get(".dark")?.background).not.toBe("rgb(41 37 36)")
+    expect(rules.get("html.dark .kt-chat-composer__menu").background).toBe(
+      "var(--kt-color-warm-800, #3a3632)",
+    )
+  })
+
+  it("colours the stop button coral and keeps send iolite", () => {
+    const source = readFileSync(fileURLToPath(import.meta.resolve("./chat-panel.css")), "utf8")
+    const stop = source.match(/\.kt-chat-composer__primary\.is-stop\)\s*\{([^}]*)\}/)?.[1] ?? ""
+    expect(stop).toContain("var(--kc-coral)")
+    const send = source.match(
+      /\.kt-chat-composer__shell > \.kt-chat-composer__primary\)\s*\{([^}]*)\}/,
+    )
+    expect(send?.[1]).toContain("background: var(--kc-iolite)")
   })
 
   it("applies light and dark conversation tokens at the Studio transcript boundary", () => {
@@ -774,13 +802,13 @@ describe("ChatPanel theme", () => {
         document.documentElement.classList.toggle("dark", dark)
         const computed = getComputedStyle(transcript)
         expect(computed.getPropertyValue("--kt-conversation-text")).toBe(
-          dark ? "#e0dbd4" : "#4a4540",
+          dark ? "var(--kt-color-warm-200,#e0dbd4)" : "var(--kt-color-warm-700,#4a4540)",
         )
         expect(computed.getPropertyValue("--kt-conversation-muted")).toBe(
-          dark ? "#a09a92" : "#8a8480",
+          dark ? "var(--kt-color-warm-400,#a09a92)" : "var(--kt-color-warm-500,#8a8480)",
         )
         expect(computed.getPropertyValue("--kt-conversation-surface")).toBe(
-          dark ? "#3a3632" : "#f7f5f2",
+          dark ? "var(--kt-color-warm-800,#3a3632)" : "var(--kt-color-warm-50,#f7f5f2)",
         )
       }
     } finally {
