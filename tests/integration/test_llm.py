@@ -122,7 +122,16 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
+from kohakuterrarium.llm.turn_segments import KT_ASSISTANT_SEGMENTS
 from kohakuterrarium.session.store import SessionStore
+from tests.helpers.anthropic_stream import ANSWER as ANTHROPIC_ANSWER
+from tests.helpers.anthropic_stream import anthropic_provider
+from tests.helpers.reasoning_stream import (
+    ANSWER,
+    REASONING_PIECES,
+    dual_form_provider,
+    reasoning_segments,
+)
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -2127,6 +2136,95 @@ class TestLlmIntegration:
                 finally:
                     await compacted.__aexit__(None, None, None)
                 assert len(submissions) == 5
+
+    @pytest.mark.timeout(60)
+    async def test_dual_form_reasoning_stream_workflow(self):
+        """A provider streaming reasoning in two forms per delta, end to end.
+
+        Real ``OpenAIProvider`` over an in-memory HTTP stream: the displayed
+        segments come out as one per form (not one per delta), and the next
+        request still echoes the full reasoning back to the endpoint without
+        leaking the internal segment list onto the wire.
+        """
+        requests: list[dict[str, Any]] = []
+        provider = dual_form_provider(requests=requests)
+        history = [SystemMessage("You think."), UserMessage("what is the answer?")]
+
+        reply = "".join([chunk async for chunk in provider.chat(history)])
+        assert reply == ANSWER
+
+        fields = provider.last_assistant_extra_fields
+        full_text = "".join(REASONING_PIECES)
+        assert [
+            (s["source"], s["text"])
+            for s in reasoning_segments(fields[KT_ASSISTANT_SEGMENTS])
+        ] == [("reasoning_content", full_text), ("reasoning_details", full_text)]
+        assert fields[KT_ASSISTANT_SEGMENTS][-1] == {"type": "text", "text": ANSWER}
+
+        history += [AssistantMessage(reply, extra_fields=fields), UserMessage("more")]
+        "".join([chunk async for chunk in provider.chat(history)])
+
+        echoed = requests[1]["messages"][2]
+        assert echoed["reasoning_content"] == full_text
+        assert echoed["reasoning_details"] == [
+            {"type": "reasoning.text", "index": 0, "text": full_text}
+        ]
+        assert KT_ASSISTANT_SEGMENTS not in echoed
+
+    @pytest.mark.timeout(60)
+    async def test_anthropic_sampling_parameters_workflow(self):
+        """Sampling settings reach the Anthropic wire only for models that accept them.
+
+        Real ``AnthropicProvider`` and SDK 1.x client over an in-memory ``httpx2``
+        transport. The SDK no longer takes ``temperature``/``top_p``/``top_k`` as
+        keyword arguments, so they must travel in ``extra_body``; models that
+        reject them must not receive them at all.
+        """
+        history = [SystemMessage("s"), UserMessage("q")]
+        sampling = {"top_p": 0.9, "top_k": 5, "custom_flag": True}
+
+        async def send(model, *, stream, **kwargs):
+            wire: list[dict[str, Any]] = []
+            provider = anthropic_provider(
+                model, wire, temperature=0.7, extra_body=dict(sampling)
+            )
+            if stream:
+                reply = "".join([c async for c in provider.chat(history, **kwargs)])
+            else:
+                reply = (await provider.chat_complete(history, **kwargs)).content
+            assert reply == ANTHROPIC_ANSWER
+            return wire[0]
+
+        for stream in (True, False):
+            accepting = await send("claude-sonnet-4-6", stream=stream)
+            assert (
+                accepting["temperature"],
+                accepting["top_p"],
+                accepting["top_k"],
+            ) == (
+                0.7,
+                0.9,
+                5,
+            )
+            assert accepting["custom_flag"] is True
+
+            overridden = await send("claude-haiku-4-5", stream=stream, temperature=0.2)
+            assert overridden["temperature"] == 0.2
+
+            for rejecting in (
+                "claude-opus-4-7",
+                "claude-opus-4-8",
+                "claude-opus-5-5",
+                "claude-sonnet-5",
+                "claude-sonnet-5-5",
+                "claude-fable-5-1",
+            ):
+                body = await send(rejecting, stream=stream)
+                assert not {"temperature", "top_p", "top_k"} & set(body), rejecting
+                assert body["custom_flag"] is True
+
+            other_vendor = await send("kimi-for-coding", stream=stream)
+            assert (other_vendor["temperature"], other_vendor["top_p"]) == (0.7, 0.9)
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.

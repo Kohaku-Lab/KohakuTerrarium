@@ -32,17 +32,12 @@ class TurnSegmentsBuilder:
         piece = _coerce_text(text)
         if not piece and not signature:
             return
-        last = self._segments[-1] if self._segments else None
-        if (
-            last is not None
-            and last.get("type") == "reasoning"
-            and last.get("source") == source
-            and last.get("key") == key
-        ):
+        existing = self._find_in_reasoning_run(source, key)
+        if existing is not None:
             if piece:
-                last["text"] = f"{last.get('text', '')}{piece}"
+                existing["text"] = f"{existing.get('text', '')}{piece}"
             if signature:
-                last["signature"] = signature
+                existing["signature"] = signature
             return
         segment: dict[str, Any] = {"type": "reasoning", "source": source}
         if key is not None:
@@ -54,6 +49,17 @@ class TurnSegmentsBuilder:
         if signature:
             segment["signature"] = signature
         self._segments.append(segment)
+
+    def _find_in_reasoning_run(
+        self, source: str, key: str | None
+    ) -> dict[str, Any] | None:
+        """Return the segment with this source/key inside the trailing reasoning run."""
+        for segment in reversed(self._segments):
+            if segment.get("type") != "reasoning":
+                return None
+            if segment.get("source") == source and segment.get("key") == key:
+                return segment
+        return None
 
     def append_text(self, text: Any) -> None:
         piece = _coerce_text(text)

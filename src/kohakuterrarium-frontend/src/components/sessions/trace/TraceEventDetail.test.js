@@ -56,3 +56,41 @@ describe("TraceEventDetail sub-agent conversation navigation", () => {
     ])
   })
 })
+
+describe("TraceEventDetail reasoning", () => {
+  const fragments = [
+    { type: "reasoning", source: "reasoning_content", text: "Let me " },
+    { type: "reasoning", source: "reasoning_details", text: "Let me " },
+    { type: "reasoning", source: "reasoning_content", text: "think." },
+    { type: "reasoning", source: "reasoning_details", text: "think." },
+    { type: "text", text: "Answer." },
+  ]
+
+  it("shows one block per thought, not one per streamed fragment", () => {
+    const wrapper = mount(TraceEventDetail, {
+      props: { event: { type: "assistant_text", _kt_assistant_segments: fragments } },
+    })
+    const blocks = wrapper.findAll("details")
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].find("pre").text()).toBe("Let me think.")
+  })
+
+  it("keeps separate blocks for reasoning that a text segment separates", () => {
+    const wrapper = mount(TraceEventDetail, {
+      props: {
+        event: {
+          type: "assistant_text",
+          _kt_assistant_segments: [
+            { type: "reasoning", source: "reasoning_content", text: "First." },
+            { type: "text", text: "Now a tool." },
+            { type: "reasoning", source: "reasoning_content", text: "Second." },
+          ],
+        },
+      },
+    })
+    expect(wrapper.findAll("details").map((d) => d.find("pre").text())).toEqual([
+      "First.",
+      "Second.",
+    ])
+  })
+})

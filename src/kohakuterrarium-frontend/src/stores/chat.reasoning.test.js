@@ -1,5 +1,9 @@
+import { mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
+import { h } from "vue"
 import { beforeEach, describe, expect, it } from "vitest"
+
+import ConversationMessage from "@/components/chat/shared/ConversationMessage"
 
 import { _convertHistory, _replayEvents, useChatStore } from "./chat"
 
@@ -46,6 +50,101 @@ describe("_convertHistory reasoning segments", () => {
     ])
     expect(assistant.parts[0].text).toBe("think 1")
     expect(assistant.parts[2].jobId).toBe("call_1")
+  })
+})
+
+function alternatingDualFormSegments() {
+  const segments = []
+  for (const piece of ["Let me ", "think ", "about it"]) {
+    segments.push({ type: "reasoning", source: "reasoning_content", text: piece })
+    segments.push({
+      type: "reasoning",
+      source: "reasoning_details",
+      key: "0:reasoning.text",
+      text: piece,
+    })
+  }
+  segments.push({ type: "text", text: "answer" })
+  return segments
+}
+
+describe("dual-form reasoning stream (persisted alternating segments)", () => {
+  it("snapshot history shows one reasoning part per run", () => {
+    const out = _convertHistory([
+      { role: "user", content: "q" },
+      {
+        role: "assistant",
+        content: "answer",
+        _kt_assistant_segments: alternatingDualFormSegments(),
+      },
+    ])
+    const assistant = out.find((message) => message.role === "assistant")
+    expect(assistant.parts.map((part) => part.type)).toEqual(["reasoning", "text"])
+    expect(assistant.parts[0].text).toBe("Let me think about it")
+  })
+
+  it("event replay shows one reasoning part per run", () => {
+    const events = [
+      { type: "user_input", content: "q", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "processing_start", event_id: 2, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", content: "answer", event_id: 3, turn_index: 1, branch_id: 1 },
+      {
+        type: "assistant_reasoning",
+        event_id: 4,
+        turn_index: 1,
+        branch_id: 1,
+        _kt_assistant_segments: alternatingDualFormSegments(),
+      },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 1 },
+    ]
+    const { messages } = _replayEvents([], events)
+    const assistant = messages.find((message) => message.role === "assistant")
+    expect(assistant.parts.map((part) => part.type)).toEqual(["reasoning", "text"])
+    expect(assistant.parts[0].text).toBe("Let me think about it")
+  })
+
+  it("renders a single Thinking disclosure for the whole run", () => {
+    const out = _convertHistory([
+      { role: "user", content: "q" },
+      {
+        role: "assistant",
+        content: "answer",
+        _kt_assistant_segments: alternatingDualFormSegments(),
+      },
+    ])
+    const assistant = out.find((message) => message.role === "assistant")
+    const wrapper = mount(ConversationMessage, {
+      props: {
+        message: assistant,
+        renderText: (content) => h("span", { class: "test-markdown" }, content),
+      },
+    })
+    expect(wrapper.findAll("details.reasoning-details")).toHaveLength(1)
+    expect(wrapper.text()).toContain("Let me think about it")
+    expect(wrapper.get("details summary").text()).toContain(
+      "Thinking · reasoning_content + reasoning_details",
+    )
+  })
+
+  it("does not merge reasoning across a tool call", () => {
+    const out = _convertHistory([
+      { role: "user", content: "q" },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "read", arguments: "{}" } },
+        ],
+        _kt_assistant_segments: [
+          { type: "reasoning", source: "reasoning_content", text: "same" },
+          { type: "tool_call_ref", call_id: "call_1" },
+          { type: "reasoning", source: "reasoning_content", text: "same" },
+        ],
+      },
+      { role: "tool", content: "ok", tool_call_id: "call_1" },
+    ])
+    const assistant = out.find((message) => message.role === "assistant")
+    expect(assistant.parts.map((part) => part.type)).toEqual(["reasoning", "tool", "reasoning"])
   })
 })
 

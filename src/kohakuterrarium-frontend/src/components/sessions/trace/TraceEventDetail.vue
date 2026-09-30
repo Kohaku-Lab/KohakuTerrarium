@@ -79,6 +79,7 @@
 import { computed } from "vue"
 import { useRoute } from "vue-router"
 
+import { mergeReasoningSegments } from "@/utils/chatReasoning"
 import { extractTextPreview, listAttachments } from "@/utils/multimodal"
 import { useI18n } from "@/utils/i18n"
 
@@ -210,7 +211,7 @@ const subagentRef = computed(() => {
 const reasoningSegments = computed(() => {
   const segments = props.event?._kt_assistant_segments
   if (!Array.isArray(segments)) return []
-  return segments.filter((segment) => segment?.type === "reasoning")
+  return mergeReasoningSegments(segments).filter((segment) => segment?.type === "reasoning")
 })
 
 function reasoningSegmentText(segment) {

@@ -37,6 +37,68 @@ class TestTurnSegmentsBuilder:
             {"type": "reasoning", "source": "reasoning_content", "text": "think hard"}
         ]
 
+    def test_alternating_parallel_forms_merge_within_the_run(self):
+        builder = TurnSegmentsBuilder()
+        for piece in ("He", "llo", " wor", "ld"):
+            builder.append_reasoning(piece, source="reasoning_content")
+            builder.append_reasoning(
+                piece, source="reasoning_details", key="0:reasoning.text"
+            )
+        builder.append_text("hi")
+
+        assert builder.as_list() == [
+            {"type": "reasoning", "source": "reasoning_content", "text": "Hello world"},
+            {
+                "type": "reasoning",
+                "source": "reasoning_details",
+                "key": "0:reasoning.text",
+                "text": "Hello world",
+            },
+            {"type": "text", "text": "hi"},
+        ]
+
+    def test_reasoning_does_not_merge_across_text_or_tool_refs(self):
+        builder = TurnSegmentsBuilder()
+        builder.append_reasoning("a", source="reasoning_content")
+        builder.append_reasoning("x", source="reasoning_details", key="0:t")
+        builder.append_text("mid")
+        builder.append_reasoning("b", source="reasoning_content")
+        builder.append_tool_call_ref("call_1")
+        builder.append_reasoning("c", source="reasoning_content")
+
+        texts = [
+            (s.get("source"), s.get("text"))
+            for s in builder.as_list()
+            if s["type"] != "tool_call_ref"
+        ]
+        assert texts == [
+            ("reasoning_content", "a"),
+            ("reasoning_details", "x"),
+            (None, "mid"),
+            ("reasoning_content", "b"),
+            ("reasoning_content", "c"),
+        ]
+
+    def test_same_source_different_key_stays_separate_in_a_run(self):
+        builder = TurnSegmentsBuilder()
+        builder.append_reasoning("one", source="reasoning_details", key="0:t")
+        builder.append_reasoning("two", source="reasoning_details", key="1:t")
+        builder.append_reasoning("!", source="reasoning_details", key="0:t")
+
+        assert [s["text"] for s in builder.as_list()] == ["one!", "two"]
+
+    def test_signature_updates_the_matching_segment_in_the_run(self):
+        builder = TurnSegmentsBuilder()
+        builder.append_reasoning("a", source="reasoning_details", key="0:t")
+        builder.append_reasoning("b", source="reasoning_content")
+        builder.append_reasoning(
+            "", source="reasoning_details", key="0:t", signature="sig"
+        )
+
+        first = builder.as_list()[0]
+        assert first["signature"] == "sig"
+        assert len(builder.as_list()) == 2
+
     def test_text_only_turn_does_not_emit_segments(self):
         builder = TurnSegmentsBuilder()
         builder.append_text("answer")

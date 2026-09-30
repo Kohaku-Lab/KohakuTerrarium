@@ -61,7 +61,7 @@ import { computed, h, onMounted, onUnmounted, ref, watch } from "vue"
 
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { sessionAPI, terrariumAPI } from "@/utils/api"
-import { extractReasoning } from "@/utils/chatReasoning"
+import { extractReasoning, mergeReasoningSegments } from "@/utils/chatReasoning"
 import { useI18n } from "@/utils/i18n"
 
 import MarkdownRenderer from "../../public/chat/MarkdownRenderer.vue"
@@ -165,7 +165,7 @@ function assistantRenderMessage(message, resultById, index) {
     return tool
   })
 
-  const segments = Array.isArray(message?._kt_assistant_segments) ? message._kt_assistant_segments : []
+  const segments = Array.isArray(message?._kt_assistant_segments) ? mergeReasoningSegments(message._kt_assistant_segments) : []
   const content = messageText(message)
   const parts = []
   const placed = new Set()
