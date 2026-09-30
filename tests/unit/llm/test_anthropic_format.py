@@ -9,9 +9,12 @@ usage accounting, and the cache-marker placement helpers.
 
 import base64
 
+import pytest
+
 from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.anthropic_format import (
     KT_CONTENT_KEY,
+    model_accepts_sampling,
     anthropic_tools,
     apply_delta,
     assistant_message,
@@ -45,6 +48,50 @@ class _Delta:
 class _Usage:
     def __init__(self, **kw):
         self.__dict__.update(kw)
+
+
+class TestModelAcceptsSampling:
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-7",
+            "claude-opus-4-8",
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-opus-5-5-20260401",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5",
+            "claude-fable-5",
+            "claude-fable-5-1",
+            "claude-mythos-5-1",
+            "anthropic.claude-opus-4-8",
+        ],
+    )
+    def test_rejecting_models(self, model):
+        assert model_accepts_sampling(model) is False
+
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "claude-opus-4-6",
+            "claude-opus-4-1-20250805",
+            "claude-opus-4",
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-5-20250929",
+            "claude-haiku-4-5",
+            "claude-haiku-4-5-20251001",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+        ],
+    )
+    def test_accepting_models(self, model):
+        assert model_accepts_sampling(model) is True
+
+    @pytest.mark.parametrize(
+        "model", ["kimi-for-coding", "glm-5.3", "MiniMax-M2", "", None]
+    )
+    def test_non_claude_ids_pass_through(self, model):
+        assert model_accepts_sampling(model) is True
 
 
 class TestEndpointHeuristics:

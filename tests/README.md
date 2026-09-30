@@ -204,7 +204,7 @@ testing otherwise.
 |---|---|
 | `cli/` | argparse + interactive prompts; covered by e2e for the resumable paths |
 | `builtins/cli_rich/`, `builtins/tui/` | Rich / Textual terminal UI; visual |
-| `llm/openai.py`, `llm/anthropic_provider.py`, `llm/codex_*.py`, `llm/litellm_provider.py` | Need a live provider |
+| `llm/openai.py`, `llm/codex_*.py`, `llm/litellm_provider.py` | Need a live provider |
 | `terrarium/engine_cli.py`, `terrarium/engine_rich_cli.py`, `terrarium/cli_output.py` | CLI / TTY UI |
 | `studio/attach/pty_posix.py`, `studio/attach/pty_windows.py`, `studio/attach/pty_router.py` | Platform-specific PTY backends, gated at import |
 | `studio/identity/codex_oauth.py` | 3rd-party OAuth flow |

@@ -29,7 +29,7 @@ dependencies = [
     # Core
     "httpx>=0.27.0",
     "openai>=2.0.0",
-    "anthropic>=0.68.0",
+    "anthropic>=1.0.0,<2",
     # Pinned <2.13 to match the pydantic-core Android wheel we ship.
     "pydantic>=2.12.0,<2.13",
     # Direct dep (transitive of pydantic) so the Android build emits a wheel

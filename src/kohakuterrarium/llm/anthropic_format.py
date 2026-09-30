@@ -24,9 +24,33 @@ ANTHROPIC_KNOWN_BODY_FIELDS = {
     "stop_sequences",
     "thinking",
     "tool_choice",
-    "top_k",
-    "top_p",
 }
+SAMPLING_FIELDS = ("temperature", "top_p", "top_k")
+CLAUDE_MODEL_RE = re.compile(
+    r"claude-(?:(?P<family>opus|sonnet|haiku|fable|mythos)-(?P<major>\d+)(?:-(?P<minor>\d{1,2})(?!\d))?"
+    r"|\d+(?:-\d+)?-(?:opus|sonnet|haiku))"
+)
+SAMPLING_REJECTING_FAMILIES = {"fable", "mythos"}
+
+
+def model_accepts_sampling(model: str | None) -> bool:
+    """Whether the model accepts temperature, top_p and top_k.
+
+    Claude Opus 4.7 and later, Sonnet 5 and later, Fable and Mythos reject them.
+    Other Claude models and non-Claude ids on Anthropic-compatible endpoints accept them.
+    """
+    match = CLAUDE_MODEL_RE.search((model or "").lower())
+    if not match or not match.group("family"):
+        return True
+    family = match.group("family")
+    version = (int(match.group("major")), int(match.group("minor") or 0))
+    if family in SAMPLING_REJECTING_FAMILIES:
+        return False
+    if family == "opus":
+        return version < (4, 7)
+    if family == "sonnet":
+        return version[0] < 5
+    return True
 
 
 def looks_like_bearer_endpoint(base_url: str) -> bool:

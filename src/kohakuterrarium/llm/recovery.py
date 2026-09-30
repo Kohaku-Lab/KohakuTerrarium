@@ -120,6 +120,9 @@ _TRANSIENT_MARKERS = (
 )
 
 
+_PROGRAMMING_ERRORS = (TypeError, AttributeError, NameError, NotImplementedError)
+
+
 def classify_openai_error(exc: BaseException) -> ErrorClass:
     """Classify SDK and compatible-provider errors without exact class coupling."""
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
@@ -156,6 +159,8 @@ def classify_openai_error(exc: BaseException) -> ErrorClass:
         return ErrorClass.USER_ERROR
     if _contains_any(message, _TRANSIENT_MARKERS):
         return ErrorClass.TRANSIENT
+    if isinstance(exc, _PROGRAMMING_ERRORS):
+        return ErrorClass.UNKNOWN
     # Missing status means transport failure; unknown is reserved for server responses.
     if not isinstance(status, int):
         return ErrorClass.TRANSIENT

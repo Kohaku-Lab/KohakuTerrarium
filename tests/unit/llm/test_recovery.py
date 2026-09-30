@@ -32,6 +32,19 @@ class _HTTPError(Exception):
 
 
 class TestClassifyOpenAIError:
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            TypeError("create() got an unexpected keyword argument 'temperature'"),
+            AttributeError("'NoneType' object has no attribute 'content'"),
+            NameError("name 'x' is not defined"),
+            NotImplementedError(),
+        ],
+    )
+    def test_programming_errors_are_not_retried(self, exc):
+        assert classify_openai_error(exc) == ErrorClass.UNKNOWN
+        assert ErrorClass.UNKNOWN not in RetryPolicy().retry_classes
+
     def test_timeout_is_transient(self):
         assert classify_openai_error(asyncio.TimeoutError()) == ErrorClass.TRANSIENT
         assert classify_openai_error(TimeoutError()) == ErrorClass.TRANSIENT

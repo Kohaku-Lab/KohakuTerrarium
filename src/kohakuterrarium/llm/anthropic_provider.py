@@ -19,6 +19,7 @@ from kohakuterrarium.llm.anthropic_format import (
     ANTHROPIC_KNOWN_BODY_FIELDS,
     INTERNAL_EXTRA_KEYS,
     KT_CONTENT_KEY,
+    SAMPLING_FIELDS,
     anthropic_tools,
     apply_delta,
     block_to_dict,
@@ -26,6 +27,7 @@ from kohakuterrarium.llm.anthropic_format import (
     looks_like_bearer_endpoint,
     mark_system_cache,
     mark_tail_cache,
+    model_accepts_sampling,
     normalise_started_block,
     ordered_blocks,
     prepare_messages,
@@ -218,15 +220,20 @@ class AnthropicProvider(BaseLLMProvider):
         """Stream Anthropic output with classified retries and overflow recovery."""
         current = messages
         attempt = 0
+        delivered = False
         overflow_state = OverflowRecoveryState()
         while True:
             try:
                 async for chunk in self._raw_stream_chat(
                     current, tools=tools, **kwargs
                 ):
+                    if chunk:
+                        delivered = True
                     yield chunk
                 return
             except Exception as exc:
+                if delivered:
+                    raise
                 cls = classify_openai_error(exc)
                 if cls is ErrorClass.OVERFLOW:
                     replacement = await self._recover_from_overflow(
@@ -427,6 +434,31 @@ class AnthropicProvider(BaseLLMProvider):
             updated["messages"] = mark_tail_cache(messages, max(0, 4 - used))
         return updated
 
+    def _apply_sampling(
+        self, model: str, extra: dict[str, Any], call_kwargs: dict[str, Any]
+    ) -> None:
+        """Route sampling settings into ``extra`` (SDK 1.x takes them only there).
+
+        A per-call temperature beats ``extra_body`` beats the provider default.
+        Models that reject sampling parameters get none of them.
+        """
+        sampling = {key: extra.pop(key) for key in SAMPLING_FIELDS if key in extra}
+        if "temperature" in call_kwargs:
+            temperature = call_kwargs["temperature"]
+        else:
+            temperature = sampling.get("temperature", self.config.temperature)
+        sampling.pop("temperature", None)
+        if temperature is not None:
+            sampling["temperature"] = temperature
+        if not sampling:
+            return
+        if model_accepts_sampling(model):
+            extra.update(sampling)
+        else:
+            logger.debug(
+                "Dropping sampling parameters", model=model, dropped=sorted(sampling)
+            )
+
     def _build_create_kwargs(
         self,
         messages: list[dict[str, Any]],
@@ -444,9 +476,6 @@ class AnthropicProvider(BaseLLMProvider):
         }
         if system:
             create_kwargs["system"] = system
-        temp = kwargs.get("temperature", self.config.temperature)
-        if temp is not None:
-            create_kwargs["temperature"] = temp
         stop = kwargs.get("stop")
         if stop:
             create_kwargs["stop_sequences"] = stop
@@ -458,6 +487,7 @@ class AnthropicProvider(BaseLLMProvider):
         disable_cache = bool(merged_extra.get("disable_prompt_caching"))
         for key in list(INTERNAL_EXTRA_KEYS):
             merged_extra.pop(key, None)
+        self._apply_sampling(create_kwargs["model"], merged_extra, kwargs)
         for key in list(ANTHROPIC_KNOWN_BODY_FIELDS):
             if key in merged_extra:
                 create_kwargs[key] = merged_extra.pop(key)
