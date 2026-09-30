@@ -31,7 +31,9 @@ KohakuTerrarium 默认以无身份验证模式运行，适合桌面应用在 loo
 身份验证完全位于 API 服务器边界（``api/auth/``）。引擎、Studio、
 terrarium runtime 和 session store 对用户、令牌、主机**毫不知情**。
 当 L4 启用时，按用户隔离通过引擎池将每个已认证请求路由到一个按用户
-分配的 ``Terrarium`` 引擎；引擎本身保持单租户。
+分配的 ``Terrarium`` 引擎；引擎本身保持单租户。引擎池不会因为引擎闲置而停止它，
+也绝不会停止仍承载 creature 的引擎：超过十个引擎时，只会移除最久未使用且没有承载
+任何 creature 的引擎，否则保留所有引擎。
 
 这意味着 CLI（``kt run``、``kt list``、``kt resume``）和内嵌 TUI
 在所有身份验证模式下保持不变；只有 FastAPI 服务器进行多路复用。

@@ -48,7 +48,7 @@ def app(tmp_path, monkeypatch) -> FastAPI:
     # NOTE: capabilities/login routes mount on the auth router; this
     # test app only exposes a dummy engine-handing route to isolate
     # the dependency-chain behaviour.
-    app.state.engine_pool = EnginePool(max_active=4, idle_timeout_s=0)
+    app.state.engine_pool = EnginePool(max_active=4)
     app.state.auth_config = AuthConfig(
         multi_user="required", bcrypt_rounds=_TEST_ROUNDS
     )

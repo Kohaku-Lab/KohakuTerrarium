@@ -36,7 +36,10 @@ engine, Studio, terrarium runtime, and session store have **zero**
 knowledge of users, tokens, or hosts.  When L4 is enabled, per-user
 isolation is enforced by routing each authenticated request to a
 per-user ``Terrarium`` engine via an engine pool; the engine itself
-stays single-tenant.
+stays single-tenant.  The pool never stops an engine because it is idle,
+and never stops an engine that hosts creatures: past ten engines it removes
+only the least recently used engine that hosts no creatures, and otherwise
+keeps every engine.
 
 This means the CLI (``kt run``, ``kt list``, ``kt resume``) and the
 embedded TUI work unchanged in every auth mode; only the FastAPI

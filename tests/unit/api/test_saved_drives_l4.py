@@ -90,7 +90,7 @@ def l4_app(tmp_path, monkeypatch):
     set_service(None)
 
     app = FastAPI()
-    app.state.engine_pool = EnginePool(max_active=4, idle_timeout_s=0)
+    app.state.engine_pool = EnginePool(max_active=4)
     app.state.auth_config = AuthConfig(
         multi_user="required", bcrypt_rounds=_TEST_ROUNDS
     )

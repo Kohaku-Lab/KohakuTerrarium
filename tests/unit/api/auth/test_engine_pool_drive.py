@@ -25,7 +25,7 @@ def fresh_dirs(tmp_path, monkeypatch):
 
 
 def test_no_resolver_builds_default_drive_engines(fresh_dirs):
-    pool = EnginePool(max_active=4, idle_timeout_s=0)
+    pool = EnginePool(max_active=4)
     try:
         runtime = pool.get_or_create(1).drives
         assert runtime is not None
@@ -49,7 +49,7 @@ def test_resolver_is_called_per_build_with_fresh_instances(fresh_dirs):
             "drive_store": None,
         }
 
-    pool = EnginePool(max_active=4, idle_timeout_s=0, drive_resolver=resolver)
+    pool = EnginePool(max_active=4, drive_resolver=resolver)
     try:
         e1 = pool.get_or_create(1)
         e2 = pool.get_or_create(2)
@@ -76,9 +76,7 @@ def test_real_studio_resolver_gives_per_user_immutable_runtime(fresh_dirs):
             registrations={"generic": RegistrationSetting(enabled=True)},
         )
     )
-    pool = EnginePool(
-        max_active=4, idle_timeout_s=0, drive_resolver=ds.resolve_drive_kwargs
-    )
+    pool = EnginePool(max_active=4, drive_resolver=ds.resolve_drive_kwargs)
     try:
         e1 = pool.get_or_create(1)
         e2 = pool.get_or_create(2)

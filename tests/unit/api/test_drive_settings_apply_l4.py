@@ -44,7 +44,7 @@ def app(tmp_path, monkeypatch):
 
     app = FastAPI()
     app.state.engine_pool = EnginePool(
-        max_active=8, idle_timeout_s=0, drive_resolver=ds.resolve_drive_kwargs
+        max_active=8, drive_resolver=ds.resolve_drive_kwargs
     )
     app.state.auth_config = AuthConfig(multi_user="optional", bcrypt_rounds=4)
     app.include_router(settings_mod.router, prefix="/api/settings")

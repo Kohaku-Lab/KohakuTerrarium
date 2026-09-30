@@ -29,9 +29,13 @@ This is one regression-protection workflow against the four-layer
 composition; unit tier covers each cell independently.
 """
 
+import asyncio
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
+from kohakuterrarium.api.auth import engine_pool as engine_pool_module
 from kohakuterrarium.api.auth.config import AuthConfig
 from kohakuterrarium.api.auth.db import (
     connection,
@@ -40,6 +44,8 @@ from kohakuterrarium.api.auth.db import (
 )
 from kohakuterrarium.api.auth.users import create_user
 from kohakuterrarium.api.deps import set_service
+from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.testing.terrarium import _FakeAgent
 
 _TEST_ROUNDS = 4
 
@@ -215,6 +221,46 @@ class TestAuthIntegration:
             client2.post("/api/auth/logout", headers=new_bearer)
             r = client2.get("/api/auth/me", headers=new_bearer)
             assert r.status_code == 401
+
+
+class _FastSleepAsyncio:
+    """``asyncio`` whose ``sleep`` returns almost at once, so timer loops spin fast."""
+
+    def __getattr__(self, name):
+        return getattr(asyncio, name)
+
+    @staticmethod
+    async def sleep(_seconds, *args, **kwargs):
+        await asyncio.sleep(0.005)
+
+
+class TestEnginePoolRetention:
+    """Per-user engines that host agents stay alive through the app lifespan."""
+
+    def test_running_agents_survive_idle_time_and_capacity_pressure(
+        self, app, monkeypatch
+    ):
+        monkeypatch.setattr(engine_pool_module, "asyncio", _FastSleepAsyncio())
+        clock = [1000.0]
+        with TestClient(app) as client:
+            pool = app.state.engine_pool
+            pool._monotonic = lambda: clock[0]
+            busy = pool.get_or_create(1)
+            creature = Creature(
+                creature_id="waiter", name="waiter", agent=_FakeAgent("waiter")
+            )
+            client.portal.call(busy.add_creature, creature)
+            pool.get_or_create(2)
+
+            clock[0] += 6 * 3600
+            time.sleep(0.5)
+            assert set(pool.live_user_ids()) == {1, 2}
+
+            for user_id in range(3, 3 + 12):
+                pool.get_or_create(user_id)
+            time.sleep(0.2)
+            assert 1 in pool.live_user_ids()
+            assert [c.name for c in busy.list_creatures()] == ["waiter"]
 
 
 class TestAuthIntegrationOffMode:

@@ -14,9 +14,13 @@ is fast enough for a few-test pool to be cheap, and it exercises the
 real session-dir creation that the pool depends on.
 """
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.api.auth.engine_pool import EnginePool, _user_session_dir
+from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.testing.terrarium import _FakeAgent
 
 
 @pytest.fixture
@@ -36,7 +40,7 @@ class TestSessionDirResolution:
         assert path == fresh_dirs / "users" / "42" / "sessions"
 
     def test_session_dir_is_created_on_first_access(self, fresh_dirs):
-        pool = EnginePool(max_active=2, idle_timeout_s=0)
+        pool = EnginePool(max_active=2)
         pool.get_or_create(7)
         assert (fresh_dirs / "users" / "7" / "sessions").is_dir()
         pool.evict_all()
@@ -53,7 +57,7 @@ class TestGetOrCreate:
                 created.append(kwargs)
 
         monkeypatch.setattr(kohakuterrarium, "Terrarium", _Terrarium)
-        pool = EnginePool(max_active=1, idle_timeout_s=0)
+        pool = EnginePool(max_active=1)
 
         engine = pool.get_or_create(7)
 
@@ -63,28 +67,28 @@ class TestGetOrCreate:
         ]
 
     def test_same_user_returns_same_engine(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         e1 = pool.get_or_create(1)
         e2 = pool.get_or_create(1)
         assert e1 is e2
         pool.evict_all()
 
     def test_different_users_get_different_engines(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         e1 = pool.get_or_create(1)
         e2 = pool.get_or_create(2)
         assert e1 is not e2
         pool.evict_all()
 
     def test_anonymous_slot_is_shared(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         e1 = pool.get_or_create(None)
         e2 = pool.get_or_create(None)
         assert e1 is e2
         pool.evict_all()
 
     def test_anonymous_and_user_are_distinct(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         anon = pool.get_or_create(None)
         named = pool.get_or_create(1)
         assert anon is not named
@@ -93,7 +97,7 @@ class TestGetOrCreate:
 
 class TestLruEviction:
     def test_oldest_evicted_at_capacity(self, fresh_dirs):
-        pool = EnginePool(max_active=2, idle_timeout_s=0)
+        pool = EnginePool(max_active=2)
         pool.get_or_create(1)  # oldest
         pool.get_or_create(2)
         # Insert third user → triggers eviction of the LRU.
@@ -104,7 +108,7 @@ class TestLruEviction:
         pool.evict_all()
 
     def test_touch_keeps_user_alive(self, fresh_dirs):
-        pool = EnginePool(max_active=2, idle_timeout_s=0)
+        pool = EnginePool(max_active=2)
         pool.get_or_create(1)
         pool.get_or_create(2)
         # Touch 1 so it's no longer the LRU.
@@ -126,7 +130,7 @@ class TestLruEviction:
         # caught this when the CI matrix for Windows + py312 went
         # red on ``test_touch_keeps_user_alive`` with the wrong
         # user evicted.
-        pool = EnginePool(max_active=2, idle_timeout_s=0)
+        pool = EnginePool(max_active=2)
         # Pin every monotonic() read to the same value so ALL
         # touches tie.
         pool._monotonic = lambda: 42.0  # type: ignore[assignment]
@@ -144,7 +148,7 @@ class TestLruEviction:
 
 class TestEvict:
     def test_evict_specific_user(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         pool.get_or_create(1)
         pool.get_or_create(2)
         assert pool.evict(1) is True
@@ -154,13 +158,13 @@ class TestEvict:
         pool.evict_all()
 
     def test_evict_anonymous(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         pool.get_or_create(None)
         assert pool.evict(None) is True
         assert None not in set(pool.live_user_ids())
 
     def test_evict_all(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
+        pool = EnginePool(max_active=4)
         pool.get_or_create(1)
         pool.get_or_create(2)
         pool.get_or_create(None)
@@ -168,18 +172,51 @@ class TestEvict:
         assert pool.live_user_ids() == []
 
 
-class TestReaper:
-    @pytest.mark.asyncio
-    async def test_reaper_starts_and_stops(self, fresh_dirs):
-        # idle_timeout_s > 0 enables the reaper.  The reaper interval
-        # is computed as max(30, idle/2) — too long for a unit test,
-        # but starting + cancelling should still work cleanly.
-        pool = EnginePool(max_active=4, idle_timeout_s=60)
-        await pool.start_reaper()
-        await pool.stop_reaper()
+async def busy_engine(pool, user_id):
+    """An engine that hosts a running creature (for example one waiting on a trigger)."""
+    engine = pool.get_or_create(user_id)
+    creature = Creature(creature_id="worker", name="worker", agent=_FakeAgent("worker"))
+    await engine.add_creature(creature)
+    return engine
 
-    @pytest.mark.asyncio
-    async def test_reaper_with_zero_timeout_is_noop(self, fresh_dirs):
-        pool = EnginePool(max_active=4, idle_timeout_s=0)
-        await pool.start_reaper()  # no task created
-        await pool.stop_reaper()  # idempotent
+
+class TestEnginesHostingCreaturesAreNeverStopped:
+    async def test_capacity_pressure_does_not_stop_a_busy_engine(self, fresh_dirs):
+        pool = EnginePool(max_active=1)
+        busy = await busy_engine(pool, 1)
+
+        pool.get_or_create(2)
+        await asyncio.sleep(0)
+
+        assert set(pool.live_user_ids()) == {1, 2}
+        assert [c.name for c in busy.list_creatures()] == ["worker"]
+        await pool.evict_all_async()
+
+    async def test_capacity_pressure_stops_an_idle_engine_before_a_busy_one(
+        self, fresh_dirs
+    ):
+        pool = EnginePool(max_active=2)
+        busy = await busy_engine(pool, 1)
+        pool.get_or_create(2)
+
+        pool.get_or_create(3)
+        await asyncio.sleep(0)
+
+        assert set(pool.live_user_ids()) == {1, 3}
+        assert len(busy.list_creatures()) == 1
+        await pool.evict_all_async()
+
+    async def test_engines_are_not_expired_by_the_passage_of_time(self, fresh_dirs):
+        clock = [1000.0]
+        pool = EnginePool(max_active=4)
+        pool._monotonic = lambda: clock[0]  # type: ignore[assignment]
+        busy = await busy_engine(pool, 1)
+        idle = pool.get_or_create(2)
+
+        clock[0] += 30 * 24 * 3600
+        await asyncio.sleep(0)
+
+        assert pool.get_or_create(1) is busy
+        assert pool.get_or_create(2) is idle
+        assert len(busy.list_creatures()) == 1
+        await pool.evict_all_async()

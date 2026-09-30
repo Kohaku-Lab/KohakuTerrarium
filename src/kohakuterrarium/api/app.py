@@ -143,10 +143,7 @@ async def lifespan(app: FastAPI):
         logger.exception("auth: schema migration failed at startup")
         raise
 
-    # Reap idle per-user engines so long-running multi-user hosts release resources.
     engine_pool: EnginePool | None = getattr(app.state, "engine_pool", None)
-    if engine_pool is not None:
-        await engine_pool.start_reaper()
 
     lab_mode = getattr(app.state, "lab_mode", "standalone")
     host_engine = None
@@ -257,13 +254,9 @@ async def lifespan(app: FastAPI):
                 engine._runtime_prompt.detach()
             except Exception:  # pragma: no cover - defensive
                 pass
-        # Await both the reaper and cached-engine shutdowns so no tasks outlive
-        # the event loop that owns them.
+        # Await cached-engine shutdowns so no tasks outlive the event loop that
+        # owns them.
         if engine_pool is not None:
-            try:
-                await engine_pool.stop_reaper()
-            except Exception:  # pragma: no cover - defensive
-                logger.exception("engine_pool.stop_reaper raised")
             try:
                 await engine_pool.evict_all_async()
             except Exception:  # pragma: no cover - defensive
@@ -508,7 +501,6 @@ def create_app(
     # the operator's shared Drive policy.
     app.state.engine_pool = EnginePool(
         max_active=10,
-        idle_timeout_s=1800,
         drive_resolver=_drive_settings.resolve_drive_kwargs,
     )
 
