@@ -82,16 +82,18 @@ def prepare_messages(
         role = msg.get("role")
         if role == "system":
             text = content_text(msg.get("content", ""))
-            if text:
+            if text.strip():
                 system_parts.append(text)
             continue
         if role == "user":
-            body.append(
-                {"role": "user", "content": user_content(msg.get("content", ""))}
-            )
+            content = user_content(msg.get("content", ""))
+            if content:
+                body.append({"role": "user", "content": content})
             continue
         if role == "assistant":
-            body.append(assistant_message(msg))
+            assistant = assistant_message(msg)
+            if assistant["content"]:
+                body.append(assistant)
             continue
         if role == "tool":
             append_tool_result(body, msg)
@@ -108,7 +110,7 @@ def assistant_message(msg: dict[str, Any]) -> dict[str, Any]:
     content = msg.get("content", "")
     parts: list[dict[str, Any]] = []
     text = content_text(content, assistant=True)
-    if text:
+    if text.strip():
         parts.append({"type": "text", "text": text})
     for call in msg.get("tool_calls") or []:
         func = call.get("function") or {}
@@ -120,7 +122,7 @@ def assistant_message(msg: dict[str, Any]) -> dict[str, Any]:
                 "input": parse_tool_arguments(func.get("arguments", "{}")),
             }
         )
-    return {"role": "assistant", "content": parts or text}
+    return {"role": "assistant", "content": parts or ""}
 
 
 def sanitized_native_content(msg: dict[str, Any]) -> list[dict[str, Any]]:
@@ -141,14 +143,28 @@ def sanitized_native_content(msg: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(block, dict)
         or block.get("type") != "tool_use"
         or str(block.get("id") or "") in valid_ids
+        if not isinstance(block, dict)
+        or block.get("type") != "text"
+        or str(block.get("text") or "").strip()
     ]
 
 
 def append_tool_result(body: list[dict[str, Any]], msg: dict[str, Any]) -> None:
+    content = msg.get("content", "")
+    has_images = isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in content
+    )
+    result_content = user_content(content) if has_images else content_text(content)
+    if isinstance(result_content, list):
+        result_content = [
+            part
+            for part in result_content
+            if part["type"] != "text" or part["text"].strip()
+        ]
     block = {
         "type": "tool_result",
         "tool_use_id": str(msg.get("tool_call_id") or ""),
-        "content": content_text(msg.get("content", "")),
+        "content": result_content,
     }
     if (
         body
@@ -167,7 +183,7 @@ def append_tool_result(body: list[dict[str, Any]], msg: dict[str, Any]) -> None:
 
 def user_content(content: Any) -> str | list[dict[str, Any]]:
     if isinstance(content, str):
-        return content
+        return content if content.strip() else ""
     if not isinstance(content, list):
         return str(content) if content is not None else ""
     parts: list[dict[str, Any]] = []
@@ -176,7 +192,9 @@ def user_content(content: Any) -> str | list[dict[str, Any]]:
             continue
         ptype = part.get("type")
         if ptype == "text":
-            parts.append({"type": "text", "text": str(part.get("text") or "")})
+            text = str(part.get("text") or "")
+            if text.strip():
+                parts.append({"type": "text", "text": text})
         elif ptype == "image_url":
             parts.append(image_part(part))
         elif ptype == "file":
@@ -187,8 +205,12 @@ def user_content(content: Any) -> str | list[dict[str, Any]]:
 
 
 def image_part(part: dict[str, Any]) -> dict[str, Any]:
-    image = part.get("image_url") if isinstance(part.get("image_url"), dict) else {}
-    url = str(image.get("url") or part.get("url") or "")
+    image = part.get("image_url")
+    url = str(
+        (image.get("url") if isinstance(image, dict) else image)
+        or part.get("url")
+        or ""
+    )
     # Remote APIs cannot fetch local artifact paths, so inline them before sending.
     url = resolve_artifact_url(url)
     if url.startswith("data:"):

@@ -549,6 +549,25 @@ class TestHotPlug:
         finally:
             await t.shutdown()
 
+    async def test_remove_creature_rejects_other_graph(self):
+        t = await (
+            TestTerrariumBuilder()
+            .with_creature("alice")
+            .with_creature("bob")
+            .with_separate_graphs()
+            .build()
+        )
+        svc = LocalTerrariumService(t)
+        try:
+            alice = t.get_creature("alice")
+            bob = t.get_creature("bob")
+            assert alice.graph_id != bob.graph_id
+            assert await lifecycle.remove_creature(svc, alice.graph_id, "bob") is False
+            assert t.get_creature("alice") is alice
+            assert t.get_creature("bob") is bob
+        finally:
+            await t.shutdown()
+
 
 # ── find_creature ───────────────────────────────────────────
 

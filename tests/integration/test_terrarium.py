@@ -808,6 +808,11 @@ class TestTerrariumIntegration:
         await service.engine.attach_session(gid, store)
 
         # --- AUTO-SPLIT: remove the bridge creature -------------------
+        for name in ("alice", "carol"):
+            store.append_event(
+                name, "user_message", {"content": f"before {name}"}, turn_index=1
+            )
+        store.flush()
         events: list = []
         collector = await _events(service, events)
         await service.remove_creature("bob")
@@ -848,6 +853,12 @@ class TestTerrariumIntegration:
         assert store_alice is not store_carol
         assert store_alice.meta["parent_session_ids"] == [gid]
         assert store_carol.meta["parent_session_ids"] == [gid]
+        store_alice.append_event(
+            "alice", "user_message", {"content": "after alice"}, turn_index=2
+        )
+        store_carol.append_event(
+            "carol", "user_message", {"content": "after carol"}, turn_index=2
+        )
 
         # --- AUTO-MERGE: connect across the two graphs ----------------
         merge_res = await service.connect("alice", "carol", channel="reunite")
@@ -875,6 +886,13 @@ class TestTerrariumIntegration:
             store_carol.session_id,
         }
         assert "merged_at" in merged_store.meta
+        for name in ("alice", "carol"):
+            assert [
+                event["content"]
+                for event in merged_store.get_events(name)
+                if event["type"] == "user_message"
+            ] == [f"before {name}", f"after {name}"]
+        assert merged_store.meta["format_version"] == 2
 
         # --- AUTO-SPLIT via disconnect (the other split trigger) -------
         # The merged graph has exactly one channel (``reunite``) joining
@@ -2041,3 +2059,17 @@ class TestTerrariumIntegration:
             assert (
                 await manager.get_drive(record.drive_id)
             ).status is DriveStatus.PAUSED
+            before_completion = await manager.list_deliveries(record.drive_id)
+            completed = await LocalTerrariumService(engine).propose_drive_transition(
+                record.drive_id,
+                DriveStatus.COMPLETED,
+                actor=actor,
+                expected_revision=paused.revision,
+                evidence={"confirmed_by": actor.format()},
+            )
+            assert completed.record.status is DriveStatus.COMPLETED
+            assert completed.record.revision == paused.revision + 1
+            await manager._scan_ready()
+            await manager.dispatcher.dispatch_once()
+            await manager.dispatcher.drain()
+            assert await manager.list_deliveries(record.drive_id) == before_completion

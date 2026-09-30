@@ -1112,6 +1112,196 @@ class TestLlmIntegration:
         #    stable, which is what makes session resume safe.
         assert [m.to_dict() for m in rebuilt] == wire
 
+        switched = [
+            SystemMessage("\n\n"),
+            UserMessage([TextPart("\n\n"), image]),
+            AssistantMessage(
+                "\n\n",
+                tool_calls=[
+                    {
+                        "id": "blank-call",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{}"},
+                    }
+                ],
+            ),
+            ToolMessage("", tool_call_id="blank-call"),
+            AssistantMessage("\n\n"),
+            UserMessage("  Continue.\n"),
+        ]
+        switched_wire = messages_to_dicts(switched)
+        saved_switched = json.dumps(switched_wire)
+        blank_requests = []
+        blank_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=blank_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await blank_provider.chat_complete(switched_wire)
+            ).content == ANTHROPIC_ANSWER
+        finally:
+            await blank_provider.close()
+        assert json.dumps(switched_wire) == saved_switched
+        assert messages_to_dicts(dicts_to_messages(switched_wire)) == switched_wire
+        assert "system" not in blank_requests[0]
+        assert blank_requests[0]["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AAAA",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "blank-call",
+                        "name": "read",
+                        "input": {},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "blank-call",
+                        "content": "",
+                    }
+                ],
+            },
+            {"role": "user", "content": "  Continue.\n"},
+        ]
+
+        tool_history = [
+            UserMessage("Read the image."),
+            AssistantMessage(
+                "",
+                tool_calls=[
+                    {
+                        "id": "image-call",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{}"},
+                    }
+                ],
+            ),
+            ToolMessage(
+                [
+                    TextPart(""),
+                    TextPart("Image: synthetic.png"),
+                    TextPart(" \t\n"),
+                    image,
+                ],
+                tool_call_id="image-call",
+            ),
+            UserMessage("Continue."),
+        ]
+        tool_wire = messages_to_dicts(tool_history)
+        saved_tool_wire = json.dumps(tool_wire)
+        tool_requests = []
+        tool_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=tool_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await tool_provider.chat_complete(tool_wire)
+            ).content == ANTHROPIC_ANSWER
+        finally:
+            await tool_provider.close()
+        assert json.dumps(tool_wire) == saved_tool_wire
+        assert tool_requests[0]["messages"][2]["content"] == [
+            {
+                "type": "tool_result",
+                "tool_use_id": "image-call",
+                "content": [
+                    {"type": "text", "text": "Image: synthetic.png"},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AAAA",
+                        },
+                    },
+                ],
+            }
+        ]
+
+        small_png = io.BytesIO()
+        Image.new("RGB", (2, 2), "green").save(small_png, format="PNG")
+        small_png_base64 = base64.b64encode(small_png.getvalue()).decode("ascii")
+        large_png = io.BytesIO()
+        Image.new("RGBA", (2500, 1000), (10, 20, 30, 100)).save(large_png, format="PNG")
+        large_path = tmp_path / "large-screenshot.png"
+        large_path.write_bytes(large_png.getvalue())
+        size_wire = messages_to_dicts(
+            [
+                UserMessage(
+                    [
+                        ImagePart(url=f"data:image/png;base64,{small_png_base64}")
+                        for _ in range(20)
+                    ]
+                ),
+                AssistantMessage("Send the next image."),
+                UserMessage(
+                    [TextPart("Large screenshot"), ImagePart(url=large_path.as_uri())]
+                ),
+            ]
+        )
+        saved_size_wire = json.dumps(size_wire)
+        size_requests = []
+        size_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=size_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await size_provider.chat_complete(size_wire)
+            ).content == ANTHROPIC_ANSWER
+            assert (
+                "".join(
+                    [
+                        chunk
+                        async for chunk in size_provider.chat(size_wire, stream=True)
+                    ]
+                )
+                == ANTHROPIC_ANSWER
+            )
+        finally:
+            await size_provider.close()
+        assert len(size_requests) == 2
+        for size_request in size_requests:
+            sent = size_request["messages"]
+            assert len(sent) == 3
+            assert len(sent[0]["content"]) == 20
+            assert all(
+                block["source"]["data"] == small_png_base64
+                for block in sent[0]["content"]
+            )
+            assert sent[2]["content"][0]["text"] == "Large screenshot"
+            resized = sent[2]["content"][1]["source"]
+            assert resized["media_type"] == "image/png"
+            with Image.open(
+                io.BytesIO(base64.b64decode(resized["data"]))
+            ) as resized_image:
+                assert resized_image.size == (2000, 800)
+        assert json.dumps(size_wire) == saved_size_wire
+        assert large_path.read_bytes() == large_png.getvalue()
+
         # Text-only content stays a plain string, never a list.
         assert make_multimodal_content("just text", images=None) == "just text"
         assert UserMessage("plain").to_dict() == {
