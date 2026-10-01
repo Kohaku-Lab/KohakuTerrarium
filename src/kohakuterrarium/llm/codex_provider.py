@@ -64,9 +64,8 @@ logger = get_logger(__name__)
 class CodexOAuthProvider(BaseLLMProvider):
     """Stream Codex Responses API output with tools, retries, and token refresh."""
 
-    # Native tools use this key to declare provider compatibility.
+    # Native-tool compatibility key; image generation is enabled unless opted out.
     provider_name = "codex"
-    # Image generation is available by default unless the creature opts out.
     provider_native_tools = frozenset({"image_gen"})
 
     def __init__(
