@@ -7,7 +7,15 @@ non-interactive configs, pushes context, and tracks running instances.
 
 import pytest
 
+from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.write import WriteTool
+from kohakuterrarium.core.execution_context import ExecutionBinding
+from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.tool.base import ToolContext
+from kohakuterrarium.parsing import ToolCallEvent
+from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
     SubAgentConfig,
@@ -139,3 +147,76 @@ class TestSetOutputCallback:
 
     def test_get_interactive_output_empty_for_unknown(self):
         assert _manager().get_interactive_output("ghost") == ""
+
+
+async def test_interactive_tools_follow_live_parent_context(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "inside.txt").write_text("inside marker")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside marker")
+    registry = Registry()
+    registry.register_tool(ReadTool())
+    registry.register_tool(WriteTool())
+    binding = ExecutionBinding(
+        ToolContext(
+            agent_name="parent",
+            session=None,
+            working_dir=workspace,
+            path_guard=PathBoundaryGuard(workspace, mode="block"),
+            file_read_state=FileReadState(),
+        ),
+        PluginManager(),
+    )
+    manager = SubAgentManager(registry, ScriptedLLM(["ok"]))
+    manager._parent_executor = Executor(binding=binding)
+    manager.register(
+        SubAgentConfig(
+            name="guarded",
+            interactive=True,
+            tools=["read", "write"],
+            can_modify=True,
+            model="inherit",
+        )
+    )
+    child = await manager.start_interactive("guarded")
+    try:
+        for _ in range(2):
+            denied = await child._execute_tools(
+                [ToolCallEvent(name="read", args={"path": str(outside)})]
+            )
+            assert "Access denied" in denied[0]
+            assert "outside marker" not in denied[0]
+        target = tmp_path / "forbidden.txt"
+        denied = await child._execute_tools(
+            [ToolCallEvent(name="write", args={"path": str(target), "content": "no"})]
+        )
+        assert "Access denied" in denied[0]
+        assert not target.exists()
+        read = await child._execute_tools(
+            [ToolCallEvent(name="read", args={"path": "inside.txt"})]
+        )
+        assert "inside marker" in read[0]
+        await child._execute_tools(
+            [
+                ToolCallEvent(
+                    name="write", args={"path": "inside.txt", "content": "updated"}
+                )
+            ]
+        )
+        assert (workspace / "inside.txt").read_text() == "updated"
+        moved = tmp_path / "moved"
+        moved.mkdir()
+        (moved / "inside.txt").write_text("moved marker")
+        binding.context.working_dir = moved
+        binding.context.path_guard = PathBoundaryGuard(moved, mode="block")
+        read = await child._execute_tools(
+            [ToolCallEvent(name="read", args={"path": "inside.txt"})]
+        )
+        assert "moved marker" in read[0]
+        denied = await child._execute_tools(
+            [ToolCallEvent(name="read", args={"path": str(workspace / "inside.txt")})]
+        )
+        assert "Access denied" in denied[0]
+    finally:
+        await manager.stop_all_interactive()

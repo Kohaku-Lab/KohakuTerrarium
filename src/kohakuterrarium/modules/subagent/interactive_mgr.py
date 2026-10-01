@@ -49,6 +49,9 @@ class InteractiveManagerMixin:
             tool_format=effective_tool_format,
         )
 
+        if self._parent_executor:
+            agent._build_tool_context = self._parent_executor._build_tool_context
+
         if on_output:
             agent.on_output = on_output
             self._output_callbacks[name] = on_output
