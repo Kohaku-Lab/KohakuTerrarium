@@ -4,10 +4,8 @@ Live stores can be reused through a process-local Terrarium engine. Index builds
 live in :mod:`studio.sessions.memory_build`; :func:`build_embeddings` remains a
 compatibility alias for existing CLI and Python callers.
 
-The whole search — event scans, embedder load, indexing, query — is one
-blocking unit. Live stores dispatch it onto the store's affinity thread;
-saved stores run it as a worker-thread open/search/close unit, so neither
-freezes the caller's event loop.
+Live searches isolate model work from serialized store operations. Saved searches
+run as a worker-thread open/search/close unit.
 """
 
 import asyncio
@@ -18,6 +16,7 @@ from typing import Any
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
 from kohakuterrarium.session.embedding import create_embedder
 from kohakuterrarium.session.memory import SessionMemory
+from kohakuterrarium.session.memory_async import live_memory_for_store
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory_build import (
     build_index as _build_index,
@@ -164,7 +163,11 @@ def _search_session_sync(
         )
         raise SessionError(f"Memory search failed: {type(e).__name__}: {e}")
 
-    return {
+    return _search_response(path, q, mode, k, results)
+
+
+def _search_response(path, q, mode, k, results, warning=None):
+    response = {
         "session_name": path.stem,
         "query": q,
         "mode": mode,
@@ -185,6 +188,9 @@ def _search_session_sync(
             for r in results
         ],
     }
+    if warning:
+        response["warning"] = warning
+    return response
 
 
 async def search_session_memory(
@@ -235,5 +241,27 @@ async def search_session_memory(
         live_store=live_store,
     )
     if live_store is not None:
-        return await live_store.run(dispatch)
+        try:
+            memory = await live_store.run(live_memory_for_store, live_store)
+            config = (
+                await live_store.run(_resolve_embed_config, live_store, live_agent)
+                if mode != "fts"
+                else None
+            )
+            meta = await live_store.run(live_store.load_meta)
+            results, warning = await memory.search(
+                q,
+                names=meta.get("agents", []),
+                config=config,
+                create_embedder=create_embedder,
+                mode=mode if mode in ("auto", "fts", "semantic", "hybrid") else "fts",
+                k=k,
+                agent=agent,
+                semantic_fallback=True,
+            )
+            return _search_response(path, q, mode, k, results, warning)
+        except Exception as exc:
+            raise SessionError(
+                f"Memory search failed: {type(exc).__name__}: {exc}"
+            ) from exc
     return await asyncio.to_thread(dispatch)
