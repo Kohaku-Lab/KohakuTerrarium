@@ -481,20 +481,39 @@ class TestSessionIdHeaderGating:
 
 
 class TestReasoningReplay:
+    @pytest.mark.parametrize("log_level", [10, 20])
     @pytest.mark.parametrize("websocket", [False, True])
-    async def test_image_limit_preserves_history_on_both_transports(self, websocket):
+    async def test_image_limit_preserves_history_on_both_transports(
+        self, websocket, monkeypatch, caplog, log_level
+    ):
         p = CodexOAuthProvider(model="m", websocket_mode=websocket)
         p._tokens = _FakeTokens()
         p._client = _FakeWSClient() if websocket else _FakeClient()
         if websocket:
             p._client.responses.connection.scripts = [[_ws_completed()]]
         parts = [
-            {"type": "image_url", "image_url": f"https://example.invalid/{i}.png"}
+            {
+                "type": "image_url",
+                "image_url": (
+                    "data:image/png;base64," + "A" * (2 * 1024 * 1024)
+                    if i == 50
+                    else f"https://example.invalid/{i}.png"
+                ),
+            }
             for i in range(51)
         ]
         messages = [{"role": "user", "content": parts}]
         original = deepcopy(messages)
-        _ = [chunk async for chunk in p._raw_stream_chat(messages)]
+        serialized = []
+        dumps = json.dumps
+
+        def record(value, *args, **kwargs):
+            serialized.append(value)
+            return dumps(value, *args, **kwargs)
+
+        monkeypatch.setattr(json, "dumps", record)
+        with caplog.at_level(log_level, logger=cp.logger.name):
+            _ = [chunk async for chunk in p._raw_stream_chat(messages)]
         request = (
             p._client.responses.connection.sent[-1]
             if websocket
@@ -507,6 +526,7 @@ class TestReasoningReplay:
         ]
         assert images == [part["image_url"] for part in parts[1:]]
         assert messages == original
+        assert not any(value == request["input"] for value in serialized)
 
     @pytest.mark.parametrize(
         "model, replay, expected",
