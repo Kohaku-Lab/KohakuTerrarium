@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-import json as _json
+import logging
 from contextlib import aclosing
 from copy import deepcopy
 from typing import Any, AsyncIterator
@@ -423,12 +423,13 @@ class CodexOAuthProvider(BaseLLMProvider):
                 if spec.get("type") == "image_generation":
                     self._image_gen_output_format = spec.get("output_format", "png")
 
-        logger.debug(
-            "Codex API request",
-            model=self.model,
-            input_items=len(api_input),
-            input_preview=_json.dumps(api_input, ensure_ascii=False)[:500],
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Codex API request",
+                model=self.model,
+                input_items=len(api_input),
+                input_types=[item.get("type", "message") for item in api_input[:10]],
+            )
 
         extra_params: dict[str, Any] = {}
         reasoning = self._merged_reasoning()
