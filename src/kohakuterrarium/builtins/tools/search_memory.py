@@ -1,8 +1,6 @@
 """Search memory tool: search session history via FTS or semantic search.
 
-Embedder creation, index refresh, and the query itself are blocking work;
-they run on worker or store-affinity threads so the agent's event loop
-stays responsive during large-session searches.
+Model work stays outside the live store's serialized database executor.
 """
 
 import asyncio
@@ -16,10 +14,10 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.session.embedding import create_embedder
-from kohakuterrarium.session.memory import SessionMemory
-from kohakuterrarium.utils.logging import get_logger
-
-logger = get_logger(__name__)
+from kohakuterrarium.session.memory_async import (
+    LiveSessionMemory,
+    live_memory_for_store,
+)
 
 # Display cap per search result: large enough to surface the meaningful body
 # of a recovered tool output while bounding the tool-result context.
@@ -66,15 +64,24 @@ class SearchMemoryTool(BaseTool):
                 "No session store attached or embedding not configured."
             )
 
-        await self._ensure_indexed(context, memory)
-
+        warning = None
         try:
-            # A live store routes the query through its affinity thread so
-            # the SessionMemory handles stay serialized with store writes.
             store = getattr(context.agent, "session_store", None)
-            run = getattr(store, "run", None) if store is not None else None
-            if callable(run):
-                results = await run(memory.search, query, mode=mode, k=k, agent=agent)
+            if isinstance(memory, LiveSessionMemory):
+                config = (
+                    await store.run(self._load_embed_config, store, context.agent)
+                    if mode != "fts"
+                    else None
+                )
+                results, warning = await memory.search(
+                    query,
+                    names=[context.agent_name or "agent"],
+                    config=config,
+                    create_embedder=create_embedder,
+                    mode=mode,
+                    k=k,
+                    agent=agent,
+                )
             else:
                 results = await asyncio.to_thread(
                     memory.search, query, mode=mode, k=k, agent=agent
@@ -83,9 +90,16 @@ class SearchMemoryTool(BaseTool):
             return ToolResult(error=f"Search failed: {e}")
 
         if not results:
-            return ToolResult(output="No results found.", exit_code=0)
+            return ToolResult(
+                output=(
+                    f"{warning}\nNo results found." if warning else "No results found."
+                ),
+                exit_code=0,
+            )
 
         lines = [f"Found {len(results)} result(s) for: {query}\n"]
+        if warning:
+            lines.insert(0, warning + "\n")
         for i, r in enumerate(results, 1):
             header = f"#{i} [round {r.round_num}] {r.block_type}"
             if r.tool_name:
@@ -109,51 +123,15 @@ class SearchMemoryTool(BaseTool):
         return ToolResult(output="\n".join(lines), exit_code=0)
 
     async def _get_memory(self, context: ToolContext) -> Any:
-        """Return the session-scoped memory index, creating it when needed.
-
-        First-time construction loads the embedding model on a worker
-        thread so a cold search never blocks the event loop.
-        """
+        """Return the store-owned index without initializing an embedding model."""
         session = context.session
-        if session and hasattr(session, "_memory"):
-            return session._memory
-
         agent = context.agent
         if not agent or not hasattr(agent, "session_store") or not agent.session_store:
-            return None
-
+            return getattr(session, "_memory", None)
         store = agent.session_store
-        run = getattr(store, "run", None)
-        if callable(run):
-            # SessionMemory opens its own handles on the same file as the
-            # live store; constructing on the affinity thread keeps them
-            # serialized with the store's writes.
-            return await run(self._build_memory, context)
-        return await asyncio.to_thread(self._build_memory, context)
-
-    def _build_memory(self, context: ToolContext) -> Any:
-        """Construct the memory index (blocking: model load + SQLite open)."""
-        session = context.session
-        # Concurrent cold requests can all miss the event-loop cache check.
-        # Recheck inside the store's serialized worker before opening handles.
-        if session and hasattr(session, "_memory"):
-            return session._memory
-        agent = context.agent
-        store = agent.session_store
-
-        embed_config = self._load_embed_config(store, agent)
-        try:
-            embedder = create_embedder(embed_config)
-        except Exception as e:
-            logger.warning("Embedder creation failed, using FTS only", error=str(e))
-            embedder = None
-
-        memory = SessionMemory(store._path, embedder=embedder)
-
-        # The session owns the cache so it cannot leak across attached stores.
+        memory = await store.run(live_memory_for_store, store)
         if session:
             session._memory = memory
-
         return memory
 
     def _load_embed_config(self, store: Any, agent: Any) -> dict[str, Any] | None:
@@ -172,26 +150,3 @@ class SearchMemoryTool(BaseTool):
                 return memory_cfg["embedding"]
 
         return {"provider": "auto"}
-
-    async def _ensure_indexed(self, context: ToolContext, memory: Any) -> None:
-        """Bring the memory index up to date with the attached session store.
-
-        The event scan runs on the store's affinity thread, serialized with
-        the engine's writes.
-        """
-        agent = context.agent
-        if not agent or not hasattr(agent, "session_store") or not agent.session_store:
-            return
-
-        store = agent.session_store
-        agent_name = context.agent_name or "agent"
-
-        try:
-            await store.run(self._index_events, store, memory, agent_name)
-        except Exception as e:
-            logger.warning("Memory indexing failed", error=str(e))
-
-    def _index_events(self, store: Any, memory: Any, agent_name: str) -> None:
-        events = store.get_events(agent_name)
-        if events:
-            memory.index_events(agent_name, events)

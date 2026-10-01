@@ -1,4 +1,12 @@
 export default {
+  "sessions.filterType": "對話類型",
+  "sessions.allTypes": "全部類型",
+  "sessions.agentType": "智慧體",
+  "sessions.terrariumType": "生態瓶",
+  "sessions.sortBy": "對話排序",
+  "sessions.sortActive": "最近活躍",
+  "sessions.sortCreated": "最近建立",
+
   "common.activity": "活動",
   "common.add": "新增",
   "common.agent": "生物配置",

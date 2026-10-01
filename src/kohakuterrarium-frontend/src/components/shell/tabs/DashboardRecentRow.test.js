@@ -130,3 +130,15 @@ describe("DashboardRecentRow workspace choices", () => {
     expect(openTab).not.toHaveBeenCalled()
   })
 })
+describe("saved session display identity", () => {
+  it("shows the display name while opening history by storage key", async () => {
+    const wrapper = mount(DashboardRecentRow, {
+      props: { session: { name: "saved_ab12", terrarium_name: "Research notes" } },
+    })
+    expect(wrapper.text()).toContain("Research notes")
+    await wrapper.find("button").trigger("click")
+    expect(openTab).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "session:saved_ab12", name: "saved_ab12" }),
+    )
+  })
+})

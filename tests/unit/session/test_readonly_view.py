@@ -27,6 +27,7 @@ def _populate(store):
     store.append_event("alice:attached:helper:1", "text", {"content": "private"})
     store.append_event("alice", "user_input", {"content": "first"})
     store.append_event("alice", "user_input", {"content": "second"})
+    store.save_conversation("alice", [{"role": "user", "content": "second"}])
 
 
 def test_view_of_a_live_store_reads_through_it(tmp_path, monkeypatch):
@@ -42,6 +43,9 @@ def test_view_of_a_live_store_reads_through_it(tmp_path, monkeypatch):
             store.meta["nested"] = {"items": ["new value"]}
             assert reader.get("meta", "nested") == {"items": ["new value"]}
             assert reader.get("state", "missing", "default") == "default"
+            assert reader.get("conversation", "alice") == [
+                {"role": "user", "content": "second"}
+            ]
             assert reader.get("meta", "missing") is None
             assert (
                 list(reader.items("events", prefix="discovered:e"))[0][1]["content"]
@@ -82,6 +86,9 @@ def test_view_of_a_closed_store_reads_a_sqlite_snapshot(tmp_path, monkeypatch):
         assert [
             event["content"] for _, event in reader.items("events", prefix="alice:e")
         ] == ["first", "second"]
+        assert reader.get("conversation", "alice") == [
+            {"role": "user", "content": "second"}
+        ]
     assert len(opened) == 1
     assert opened[0].endswith("?mode=ro")
 

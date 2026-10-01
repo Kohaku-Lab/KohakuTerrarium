@@ -1,4 +1,12 @@
 export default {
+  "sessions.filterType": "会话类型",
+  "sessions.allTypes": "全部类型",
+  "sessions.agentType": "智能体",
+  "sessions.terrariumType": "生态瓶",
+  "sessions.sortBy": "会话排序",
+  "sessions.sortActive": "最近活跃",
+  "sessions.sortCreated": "最近创建",
+
   "settings.oauth.login": "登录",
   "settings.oauth.relogin": "重新登录",
   "settings.oauth.check": "检查状态",

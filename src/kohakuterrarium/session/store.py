@@ -11,6 +11,7 @@ from typing import Any
 from kohakuvault import KVault, TextVault
 
 from kohakuterrarium.session.artifacts import artifacts_dir_for, write_artifact_bytes
+from kohakuterrarium.session.event_key_index import EventKeyIndex
 from kohakuterrarium.session.history import (
     dedupe_adjacent_duplicate_events,
     normalize_resumable_events,
@@ -123,6 +124,7 @@ class SessionStore(StoreAffinityMixin):
         self._last_flush_at: float = time.monotonic()
 
         # Per-namespace sequences coexist with one session-wide event identifier.
+        self._event_keys = EventKeyIndex()
         self._event_seq: dict[str, int] = {}
         self._channel_seq: dict[str, int] = {}
         self._subagent_runs: dict[str, int] = {}
@@ -207,6 +209,7 @@ class SessionStore(StoreAffinityMixin):
 
     def _restore_counters(self) -> None:
         """Restore sequence counters; persisted counters skip the value scan."""
+        self._event_keys.clear()
         self._global_event_id = restore_event_counters(
             self.events, self._event_seq, state=self.state
         )
@@ -278,6 +281,7 @@ class SessionStore(StoreAffinityMixin):
         if "ts" not in data:
             data["ts"] = time.time()
         self.events[key] = data
+        self._event_keys.record(key, event_id)
 
         text = data.get("content") or data.get("output") or data.get("text") or ""
         if isinstance(text, str) and len(text) > 10:
@@ -387,22 +391,13 @@ class SessionStore(StoreAffinityMixin):
         return self._global_event_id
 
     def get_event_by_id(self, agent: str, event_id: int) -> dict | None:
-        """Fetch a single event by its session-global ``event_id``.
+        """Fetch a current event using a lazily built, per-agent key index.
 
-        Scans the agent's keys but reads only values until the id matches —
-        the lazy companion to ``output_preview``-bounded history payloads
-        (frontend expands fetch the full output on demand).
+        The first lookup scans historical values; subsequent lookups read only
+        the matching payload. Appends update locators, including mirrored ids.
         """
         self._flush_events_cache()
-        for key_bytes in iter_kv_keys(self.events, prefix=f"{agent}:e"):
-            try:
-                evt = self.events[key_bytes]
-            except Exception as e:
-                logger.warning("Failed to read event", error=str(e), exc_info=True)
-                continue
-            if isinstance(evt, dict) and evt.get("event_id") == event_id:
-                return evt
-        return None
+        return self._event_keys.get(self.events, agent, event_id)
 
     def get_resumable_events(
         self,

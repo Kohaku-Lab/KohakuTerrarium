@@ -11,9 +11,11 @@ conservative CPU and descriptor budget used by the original store readers.
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+import json
 import os
 import time
 
+from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
 from kohakuterrarium.session.errors import SessionNotReadyError
 from kohakuterrarium.session.readonly_view import SessionReadView
 from kohakuterrarium.session.store import SessionStore, iter_kv_keys
@@ -91,6 +93,44 @@ def _extract_text_preview(content, limit: int = 200) -> str:
     return str(content)[:limit]
 
 
+def _snapshot_user_preview(snapshot) -> str | None:
+    """Latest user prompt; None means a legacy or unreadable snapshot.
+
+    An empty valid snapshot must not resurrect deleted inputs from events.
+    """
+    if isinstance(snapshot, (str, bytes)):
+        try:
+            snapshot = json.loads(snapshot)
+        except (ValueError, UnicodeDecodeError):
+            return None
+    if isinstance(snapshot, dict):
+        snapshot = snapshot.get("messages")
+    if not isinstance(snapshot, list):
+        return None
+    for message in reversed(snapshot):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        metadata = message.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("kind") == TOOL_FEEDBACK_KIND:
+            continue
+        preview = _extract_text_preview(message.get("content")).strip()
+        if preview:
+            return preview
+    return ""
+
+
+def _listing_preview(store: SessionStore, meta: dict) -> str:
+    agent = (meta.get("agents") or [""])[0]
+    if agent:
+        try:
+            preview = _snapshot_user_preview(store.conversation.get(agent))
+            if preview is not None:
+                return preview
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Conversation preview unavailable", error=str(exc))
+    return _first_user_input_preview(store, meta)
+
+
 def _first_user_input_preview(store: SessionStore, meta: dict | None = None) -> str:
     """Read only through the primary agent's first nonempty user input.
 
@@ -159,8 +199,13 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
         with SessionReadView(path) as reader:
             meta = reader.load_meta()
             agent = (meta.get("agents") or [""])[0]
-            preview = ""
-            if agent:
+            preview = (
+                _snapshot_user_preview(reader.get("conversation", agent))
+                if agent
+                else ""
+            )
+            if agent and preview is None:
+                preview = ""
                 for _, event in reader.items("events", prefix=f"{agent}:e"):
                     if isinstance(event, dict) and event.get("type") == "user_input":
                         preview = _extract_text_preview(event.get("content"))

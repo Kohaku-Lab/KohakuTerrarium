@@ -2,7 +2,7 @@
   <div class="relative h-full shrink-0" :style="{ width: width + 'px' }">
     <nav class="h-full flex flex-col border-r border-warm-200 dark:border-warm-700 bg-warm-200/50 dark:bg-warm-800/40 overflow-hidden">
       <!-- Brand + cluster pill + command palette trigger -->
-      <div class="relative flex items-center gap-2 px-3 py-3">
+      <div class="relative flex shrink-0 items-center gap-2 px-3 py-3">
         <BrandMark class="w-7 h-7 rounded-full shrink-0" />
         <span class="kt-text-body flex-1 truncate">
           <span class="font-bold text-amber">Kohaku</span>
@@ -12,36 +12,36 @@
         <SitePopover :open="popoverOpen" @close="popoverOpen = false" />
         <button class="i-carbon-search w-4 h-4 text-warm-400 hover:text-warm-700" :title="t('shell.rail.commandPalette')" @click="openPalette" />
       </div>
-      <div class="mx-2 border-t border-warm-200 dark:border-warm-700" />
+      <div class="mx-2 shrink-0 border-t border-warm-200 dark:border-warm-700" />
 
-      <!-- Group: Top — Dashboard above Conversations -->
-      <RailGroupTop />
+      <div class="flex-1 min-h-0 overflow-y-auto">
+        <!-- Group: Top — Dashboard above Conversations -->
+        <RailGroupTop />
 
-      <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
+        <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
 
-      <!-- Group: Conversations -->
-      <RailGroupAttached />
+        <!-- Group: Conversations -->
+        <RailGroupAttached />
 
-      <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
+        <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
 
-      <!-- Group: Quick -->
-      <RailGroupQuick />
+        <!-- Group: Quick -->
+        <RailGroupQuick />
 
-      <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
+        <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
 
-      <!-- Group: Pinned -->
-      <div class="flex-1 overflow-y-auto">
+        <!-- Group: Pinned -->
         <RailGroupPinned />
       </div>
 
       <!-- Footer -->
-      <div class="mx-2 border-t border-warm-200 dark:border-warm-700" />
-      <div class="flex items-center justify-between gap-2 px-3 py-1.5">
+      <div class="mx-2 shrink-0 border-t border-warm-200 dark:border-warm-700" />
+      <div class="flex shrink-0 items-center justify-between gap-2 px-3 py-1.5">
         <!-- Host-picker chip — clickable indicator of which backend
              we're talking to, opens the modal to add / switch hosts. -->
         <HostStatusChip :show-label="true" @open="openHostPicker" />
       </div>
-      <div class="flex items-center justify-between gap-2 px-3 py-2">
+      <div class="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
         <button class="w-9 h-9 sm:w-5 sm:h-5 flex items-center justify-center text-warm-400 hover:text-warm-700 rounded sm:rounded-none" :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" :title="theme.dark ? t('shell.rail.themeToLight') : t('shell.rail.themeToDark')" @click="theme.toggle()" />
         <button class="text-xs sm:text-[10px] uppercase tracking-wider text-warm-400 hover:text-warm-700 px-2 py-1 rounded" :title="t('shell.rail.cycleLocale')" @click="cycleLocale">
           {{ locale.current ?? "en" }}

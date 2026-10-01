@@ -5,8 +5,15 @@ Terrarium engine populated with ``_FakeAgent`` creatures via
 ``TestTerrariumBuilder``. No LLM is involved.
 """
 
+import asyncio
+import json
+import threading
+
 import pytest
 
+from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
+from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import (
     CreatureInfo,
@@ -96,6 +103,51 @@ class TestProtocol:
 
 
 class TestReadOperations:
+    async def test_list_jobs_serializes_real_running_tool_then_clears(self, tmp_path):
+        class GatedTool(BaseTool):
+            tool_name = "gated"
+            description = "Synthetic gated tool"
+
+            async def _execute(self, args, **kwargs):
+                entered.set()
+                await release.wait()
+                return ToolResult(output="finished")
+
+        entered, release = asyncio.Event(), asyncio.Event()
+        config = tmp_path / "config.yaml"
+        config.write_text("name: jobs\ninput: {type: none}\noutput: {type: none}\n")
+        async with Terrarium() as engine:
+            creature = await engine.add_creature(
+                str(config),
+                llm=ScriptedLLM(["unused"]),
+                tools=[GatedTool()],
+                session=False,
+                io="headless",
+            )
+            service = LocalTerrariumService(engine)
+            executor = creature.agent.executor
+            job_id = await executor.submit("gated", {}, is_direct=True)
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=2)
+                jobs = await service.list_jobs(creature.creature_id)
+                assert json.loads(json.dumps(jobs)) == jobs
+                assert len(jobs) == 1
+                assert jobs[0]["job_id"] == job_id
+                assert jobs[0]["job_type"] == "tool"
+                assert jobs[0]["type_name"] == "gated"
+                assert jobs[0]["state"] == "running"
+                assert jobs[0]["end_time"] is None
+                assert (
+                    jobs[0]["start_time"]
+                    == executor.get_status(job_id).start_time.isoformat()
+                )
+                assert jobs[0]["duration"] >= 0
+            finally:
+                release.set()
+                result = await executor.wait_for(job_id, timeout=2)
+            assert result.output == "finished"
+            assert await service.list_jobs(creature.creature_id) == []
+
     async def test_node_id_default(self):
         svc = await _make_empty_service()
         try:
@@ -430,3 +482,47 @@ class TestSubscribe:
             assert received[0].creature_id == "erin"
         finally:
             await svc.shutdown()
+
+
+async def test_chat_event_waits_for_accepted_writes_off_loop(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("name: history\ninput: {type: none}\noutput: {type: none}\n")
+    async with Terrarium() as engine:
+        creature = await engine.add_creature(
+            str(config),
+            llm=ScriptedLLM(["unused"]),
+            session=tmp_path / "history.kohakutr",
+            io="headless",
+        )
+        service = LocalTerrariumService(engine)
+        store = creature.agent.session_store
+        _, eid = store.append_event(creature.name, "text", {"content": "first"})
+        assert (await service.chat_event(creature.creature_id, eid))["event"][
+            "content"
+        ] == "first"
+        release, entered = threading.Event(), threading.Event()
+
+        def blocked():
+            entered.set()
+            assert release.wait(5)
+
+        store.submit(blocked)
+        assert await asyncio.to_thread(entered.wait, 3)
+        store.submit(
+            store.append_event,
+            creature.name,
+            "text",
+            {"event_id": 900, "content": "accepted"},
+        )
+        reading = asyncio.create_task(service.chat_event(creature.creature_id, 900))
+        try:
+            await asyncio.sleep(0)
+            assert not reading.done(), "event read overtook an accepted write"
+        finally:
+            release.set()
+            result = await reading
+        assert result["event"]["content"] == "accepted"
+        assert result["creature_id"] == creature.creature_id
+        assert store._affinity_worker_ident != threading.get_ident()
+        with pytest.raises(KeyError, match="event 9999 not found"):
+            await service.chat_event(creature.creature_id, 9999)

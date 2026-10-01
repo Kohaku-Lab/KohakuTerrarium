@@ -2,7 +2,7 @@
 
 import asyncio
 import hashlib
-import json as _json
+import logging
 from contextlib import aclosing
 from copy import deepcopy
 from typing import Any, AsyncIterator
@@ -31,6 +31,12 @@ from kohakuterrarium.llm.codex_format import (
     fix_tool_call_pairing,
     to_responses_input,
 )
+from kohakuterrarium.llm.codex_image_budget import (
+    CODEX_BASE_URL,
+    initial_image_limit,
+    limit_codex_images,
+    reported_image_limit,
+)
 from kohakuterrarium.llm.codex_image_gen import (
     translate_image_gen_tool,
 )
@@ -54,15 +60,12 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-
 
 class CodexOAuthProvider(BaseLLMProvider):
     """Stream Codex Responses API output with tools, retries, and token refresh."""
 
-    # Native tools use this key to declare provider compatibility.
+    # Native-tool compatibility key; image generation is enabled unless opted out.
     provider_name = "codex"
-    # Image generation is available by default unless the creature opts out.
     provider_native_tools = frozenset({"image_gen"})
 
     def __init__(
@@ -88,6 +91,9 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._retry_policy = RetryPolicy.from_value(retry_policy)
         self._api_key = api_key
         self._base_url = base_url
+        self._request_image_limit = initial_image_limit(
+            api_key, base_url or CODEX_BASE_URL
+        )
         self.extra_body = dict(extra_body or {})
         self._ws_connection_options = ws_options.build_websocket_connection_options(
             self.extra_body.get("websocket_connection_options"), timeout=timeout
@@ -267,6 +273,7 @@ class CodexOAuthProvider(BaseLLMProvider):
         recovery = kwargs.get("_ws_recovery")
         attempt = 0
         auth_retry = False
+        image_retry = False
         overflow_state = OverflowRecoveryState()
         replay = ReplayFilter()
         try:
@@ -290,6 +297,19 @@ class CodexOAuthProvider(BaseLLMProvider):
                                 yield text
                     return
                 except Exception as exc:
+                    limit = reported_image_limit(exc, self._request_image_limit)
+                    if (
+                        limit is not None
+                        and not image_retry
+                        and not emitted
+                        and not (recovery is not None and recovery.delivered)
+                    ):
+                        self._request_image_limit = limit
+                        image_retry = True
+                        if recovery is None or recovery.has_budget:
+                            if self._ws_session is not None:
+                                self._ws_session.invalidate()
+                            continue
                     if recovery is not None and (
                         recovery.delivered or not recovery.has_budget
                     ):
@@ -362,7 +382,6 @@ class CodexOAuthProvider(BaseLLMProvider):
         if not self._client:
             self._rebuild_client()
 
-        # Responses API carries system content separately as instructions.
         instructions = ""
         input_messages = []
         for msg in messages:
@@ -373,7 +392,7 @@ class CodexOAuthProvider(BaseLLMProvider):
 
         echo_options = dict(model=self.model, extra_body=deepcopy(self.extra_body))
         api_input = to_responses_input(
-            input_messages,
+            limit_codex_images(input_messages, self._request_image_limit),
             model=self.model,
             replay_reasoning=self.extra_body.get("responses_reasoning_replay"),
         )
@@ -403,12 +422,13 @@ class CodexOAuthProvider(BaseLLMProvider):
                 if spec.get("type") == "image_generation":
                     self._image_gen_output_format = spec.get("output_format", "png")
 
-        logger.debug(
-            "Codex API request",
-            model=self.model,
-            input_items=len(api_input),
-            input_preview=_json.dumps(api_input, ensure_ascii=False)[:500],
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Codex API request",
+                model=self.model,
+                input_items=len(api_input),
+                input_types=[item.get("type", "message") for item in api_input[:10]],
+            )
 
         extra_params: dict[str, Any] = {}
         reasoning = self._merged_reasoning()

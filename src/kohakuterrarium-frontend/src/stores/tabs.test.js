@@ -334,3 +334,19 @@ describe("tabs store — layout migration", () => {
     expect(localStorage.getItem("kt.attach.agent_1.preset")).toBeNull()
   })
 })
+describe("live surface metadata", () => {
+  it("refreshes existing titles without moving or recreating tabs", async () => {
+    const tabs = useTabsStore()
+    await tabs.openSurface("graph-1", "chat", { config_name: "graph-1" })
+    await tabs.openSurface("graph-1", "inspector", { config_name: "graph-1" })
+    const original = tabs.byId["attach:graph-1"]
+    await tabs.openSurface("graph-1", "chat", { config_name: "My session", type: "creature" })
+    expect(tabs.byId["attach:graph-1"]).toBe(original)
+    expect(original.config_name).toBe("My session")
+    expect(tabs.byId["inspect:graph-1"].config_name).toBe("My session")
+    expect(tabs.tabs).toHaveLength(2)
+    expect(tabs.serializeToStorage().tabs.find((t) => t.id === original.id).config_name).toBe(
+      "My session",
+    )
+  })
+})

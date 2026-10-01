@@ -1165,6 +1165,78 @@ class TestLlmIntegration:
         assert base64.b64decode(mime_content[1]["source"]["data"]) == expected_jpeg
         assert mislabeled.read_bytes() == expected_jpeg
 
+        switched = [
+            SystemMessage("\n\n"),
+            UserMessage([TextPart("\n\n"), image]),
+            AssistantMessage(
+                "\n\n",
+                tool_calls=[
+                    {
+                        "id": "blank-call",
+                        "type": "function",
+                        "function": {"name": "read", "arguments": "{}"},
+                    }
+                ],
+            ),
+            ToolMessage("", tool_call_id="blank-call"),
+            AssistantMessage("\n\n"),
+            UserMessage("  Continue.\n"),
+        ]
+        switched_wire = messages_to_dicts(switched)
+        saved_switched = json.dumps(switched_wire)
+        blank_requests = []
+        blank_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=blank_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await blank_provider.chat_complete(switched_wire)
+            ).content == ANTHROPIC_ANSWER
+        finally:
+            await blank_provider.close()
+        assert json.dumps(switched_wire) == saved_switched
+        assert messages_to_dicts(dicts_to_messages(switched_wire)) == switched_wire
+        assert "system" not in blank_requests[0]
+        assert blank_requests[0]["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "AAAA",
+                        },
+                    }
+                ],
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "blank-call",
+                        "name": "read",
+                        "input": {},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "blank-call",
+                        "content": "",
+                    }
+                ],
+            },
+            {"role": "user", "content": "  Continue.\n"},
+        ]
+
         tool_history = [
             UserMessage("Read the image."),
             AssistantMessage(
@@ -1220,6 +1292,68 @@ class TestLlmIntegration:
                 ],
             }
         ]
+
+        small_png = io.BytesIO()
+        Image.new("RGB", (2, 2), "green").save(small_png, format="PNG")
+        small_png_base64 = base64.b64encode(small_png.getvalue()).decode("ascii")
+        large_png = io.BytesIO()
+        Image.new("RGBA", (2500, 1000), (10, 20, 30, 100)).save(large_png, format="PNG")
+        large_path = tmp_path / "large-screenshot.png"
+        large_path.write_bytes(large_png.getvalue())
+        size_wire = messages_to_dicts(
+            [
+                UserMessage(
+                    [
+                        ImagePart(url=f"data:image/png;base64,{small_png_base64}")
+                        for _ in range(20)
+                    ]
+                ),
+                AssistantMessage("Send the next image."),
+                UserMessage(
+                    [TextPart("Large screenshot"), ImagePart(url=large_path.as_uri())]
+                ),
+            ]
+        )
+        saved_size_wire = json.dumps(size_wire)
+        size_requests = []
+        size_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=size_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await size_provider.chat_complete(size_wire)
+            ).content == ANTHROPIC_ANSWER
+            assert (
+                "".join(
+                    [
+                        chunk
+                        async for chunk in size_provider.chat(size_wire, stream=True)
+                    ]
+                )
+                == ANTHROPIC_ANSWER
+            )
+        finally:
+            await size_provider.close()
+        assert len(size_requests) == 2
+        for size_request in size_requests:
+            sent = size_request["messages"]
+            assert len(sent) == 3
+            assert len(sent[0]["content"]) == 20
+            assert all(
+                block["source"]["data"] == small_png_base64
+                for block in sent[0]["content"]
+            )
+            assert sent[2]["content"][0]["text"] == "Large screenshot"
+            resized = sent[2]["content"][1]["source"]
+            assert resized["media_type"] == "image/png"
+            with Image.open(
+                io.BytesIO(base64.b64decode(resized["data"]))
+            ) as resized_image:
+                assert resized_image.size == (2000, 800)
+        assert json.dumps(size_wire) == saved_size_wire
+        assert large_path.read_bytes() == large_png.getvalue()
 
         # Text-only content stays a plain string, never a list.
         assert make_multimodal_content("just text", images=None) == "just text"
@@ -1717,6 +1851,60 @@ class TestLlmIntegration:
                 assert reply.content == "A red square."
                 assert responses_requests[-1]["input"][1] == reasoning_item
             assert restored.to_messages() == saved_history
+
+            budget_requests = []
+
+            def budget_response(request):
+                body = json.loads(request.content)
+                budget_requests.append(body)
+                count = sum(
+                    part["type"] == "input_image"
+                    for part in body["input"][0]["content"]
+                )
+                if count > 50:
+                    return httpx.Response(
+                        400,
+                        json={
+                            "error": {
+                                "message": "Exceeded maximum number of images (50) allowed in the request"
+                            }
+                        },
+                    )
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content='data: {"type":"response.output_text.delta","delta":"bounded"}\n\n',
+                )
+
+            previous_client = responses_provider._client
+            responses_provider._client = previous_client.with_options(
+                http_client=httpx.AsyncClient(
+                    transport=httpx.MockTransport(budget_response)
+                )
+            )
+            await previous_client.close()
+            budget_history = [
+                UserMessage(
+                    [
+                        ImagePart(url=f"https://example.invalid/synthetic/{index}")
+                        for index in range(56)
+                    ]
+                )
+            ]
+            saved_budget_history = messages_to_dicts(budget_history)
+            bounded = await responses_provider.chat_complete(budget_history)
+            assert bounded.content == "bounded" and len(budget_requests) == 2
+            assert len(budget_requests[0]["input"][0]["content"]) == 56
+            parts = budget_requests[1]["input"][0]["content"]
+            assert "6 image(s) omitted" in parts[0]["text"]
+            assert [part["image_url"] for part in parts[1:]] == [
+                f"https://example.invalid/synthetic/{index}" for index in range(6, 56)
+            ]
+            assert messages_to_dicts(budget_history) == saved_budget_history
+            assert (
+                await responses_provider.chat_complete(budget_history)
+            ).content == "bounded"
+            assert budget_requests[2]["input"] == budget_requests[1]["input"]
         finally:
             await responses_provider.close()
 

@@ -4,14 +4,122 @@ import asyncio
 import threading
 from types import SimpleNamespace
 
+import numpy as np
+import pytest
+
+import kohakuterrarium.builtins.tools.search_memory as search_mod
 from kohakuterrarium.core.session import Session
+from kohakuterrarium.session.embedding import BaseEmbedder, NullEmbedder
+from kohakuterrarium.session.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.history_service import LocalHistoryServiceMixin
 from kohakuterrarium.builtins.tools.search_memory import (
     SEARCH_RESULT_DISPLAY_CHARS,
     SearchMemoryTool,
 )
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.memory import SearchResult
+
+
+@pytest.mark.parametrize("phase", ["load", "index", "query"])
+async def test_blocked_embedding_keeps_history_writes_and_close_available(
+    tmp_path, monkeypatch, phase
+):
+    store = SessionStore(tmp_path / "blocked.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    store.append_event("alice", "user_input", {"content": "original needle"})
+    store.flush()
+    agent = SimpleNamespace(
+        session_store=store, config=None, is_processing=False, conversation_history=[]
+    )
+    context = ToolContext(
+        agent_name="alice", session=Session(key="s"), agent=agent, working_dir=None
+    )
+    service = LocalHistoryServiceMixin()
+    creature = SimpleNamespace(agent=agent, name="alice", graph_id="s")
+    service._history_source = lambda _: (creature, store)
+    output = SessionOutput("alice", store, None)
+    await output.drain()
+    entered, release = threading.Event(), threading.Event()
+
+    def block():
+        entered.set()
+        assert release.wait(10), "embedding test gate was not released"
+
+    class Embedder(BaseEmbedder):
+        dimensions = 2
+
+        def encode(self, texts):
+            if phase == "index":
+                block()
+            return np.ones((len(texts), 2), dtype=np.float32)
+
+        def encode_one(self, text):
+            if phase == "query":
+                block()
+            return np.ones(2, dtype=np.float32)
+
+    def create(_):
+        if phase == "load":
+            block()
+        return Embedder()
+
+    monkeypatch.setattr(search_mod, "create_embedder", create)
+    task = asyncio.create_task(
+        SearchMemoryTool().execute({"query": "needle"}, context=context)
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        history = await asyncio.wait_for(service.chat_history_page("alice"), 1)
+        assert any(e.get("content") == "original needle" for e in history["events"])
+        output._append_event("user_input", {"content": "saved while embedding waits"})
+        await asyncio.wait_for(output.drain(), 1)
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.wait_for(asyncio.to_thread(store.close, update_status=False), 1)
+        reader = SessionStore.open_readonly(store.path)
+        try:
+            assert any(
+                e.get("content") == "saved while embedding waits"
+                for e in reader.get_events("alice")
+            )
+        finally:
+            reader.close(update_status=False)
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        memory = getattr(context.session, "_memory", None)
+        if memory is not None:
+            memory.close()
+        await asyncio.to_thread(store.close, update_status=False)
+
+
+async def test_fts_does_not_create_embedder(tmp_path, monkeypatch):
+    store = SessionStore(tmp_path / "fts.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    store.append_event("alice", "user_input", {"content": "needle"})
+    calls = []
+    monkeypatch.setattr(
+        search_mod, "create_embedder", lambda cfg: calls.append(cfg) or NullEmbedder()
+    )
+    ctx = ToolContext(
+        agent_name="alice",
+        session=Session(key="s"),
+        working_dir=None,
+        agent=SimpleNamespace(session_store=store, config=None),
+    )
+    try:
+        result = await SearchMemoryTool().execute(
+            {"query": "needle", "mode": "fts"}, context=ctx
+        )
+        assert result.error is None
+        assert "needle" in result.output
+        assert calls == []
+    finally:
+        memory = getattr(ctx.session, "_memory", None)
+        if memory is not None:
+            memory.close()
+        store.close(update_status=False)
 
 
 class _FakeMemory:
@@ -120,7 +228,9 @@ class TestEnsureIndexedOffLoop:
 
             ping = asyncio.create_task(_ping())
             await asyncio.sleep(0)
-            await tool._ensure_indexed(ctx, _FakeMemory([]))
+            result = await tool.execute({"query": "hi", "mode": "fts"}, context=ctx)
+            assert result.error is None
+            assert "hi" in result.output
             stop.set()
             await ping
             gaps = [

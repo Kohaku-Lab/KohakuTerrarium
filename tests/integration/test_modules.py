@@ -100,6 +100,7 @@ from kohakuterrarium.parsing import (
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
+from kohakuterrarium.utils.file_guard import PathBoundaryGuard
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -1136,7 +1137,7 @@ class TestModulesIntegration:
             await agent.stop()
             store.close()
 
-    async def test_interactive_subagent_stays_alive(self, make_agent):
+    async def test_interactive_subagent_stays_alive(self, make_agent, tmp_path):
         """subagent protocol — an interactive sub-agent (``interactive:
         true``) is started through the real :class:`SubAgentManager`,
         stays alive across multiple ``push_context`` calls, and produces
@@ -1147,10 +1148,19 @@ class TestModulesIntegration:
         """
         agent = make_agent(script=["interactive reply"])
 
+        workspace = tmp_path / "interactive-workspace"
+        workspace.mkdir()
+        (workspace / "inside.txt").write_text("inside workflow marker")
+        outside = tmp_path / "outside.txt"
+        outside.write_text("outside workflow marker")
+        agent.executor._working_dir = workspace
+        agent.executor._path_guard = PathBoundaryGuard(workspace, mode="block")
+        agent.registry.register_tool(ReadTool())
+
         interactive_cfg = SubAgentConfig(
             name="watcher",
             description="Interactive watcher.",
-            tools=[],
+            tools=["read"],
             system_prompt="You are a watcher. React to each context update.",
             interactive=True,
             stateless=False,
@@ -1226,6 +1236,27 @@ class TestModulesIntegration:
                 await agent.subagent_manager.start_interactive("plain")
             with pytest.raises(ValueError, match="not running"):
                 await agent.subagent_manager.push_context("ghost", {"x": 1})
+
+            sub.config.max_turns = 3
+            sub.llm = ScriptedLLM(
+                [
+                    "[/read]\n@@path=inside.txt\n[read/]",
+                    f"[/read]\n@@path={outside.as_posix()}\n[read/]",
+                    "guard workflow finished",
+                ]
+            )
+            completed = len([o for o in outputs if o.is_complete])
+            await agent.subagent_manager.push_context("watcher", {"event": "guard"})
+            await _settle(
+                agent,
+                until=lambda: len([o for o in outputs if o.is_complete]) > completed,
+            )
+            transcript = "\n".join(
+                m.get_text_content() for m in sub.conversation.get_messages()
+            )
+            assert "inside workflow marker" in transcript
+            assert "Access denied" in transcript
+            assert "outside workflow marker" not in transcript
 
             # Explicit stop tears watcher down; stop_all_interactive sweeps
             # the rest.

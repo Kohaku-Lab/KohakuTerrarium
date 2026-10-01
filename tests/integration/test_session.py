@@ -18,6 +18,7 @@ the agent from the ``config_path`` in meta and re-injects state;
 """
 
 import asyncio
+import hashlib
 import os
 import subprocess
 import sys
@@ -53,6 +54,7 @@ from kohakuterrarium.session.history import (
     replay_conversation,
 )
 from kohakuterrarium.session.memory import SessionMemory
+from kohakuterrarium.session.memory_async import live_memory_for_store
 from kohakuterrarium.session.migrations import (
     discover_versions,
     ensure_latest_version,
@@ -89,7 +91,7 @@ class _HashEmbedder(BaseEmbedder):
         out = np.zeros((len(texts), self.dimensions), dtype=np.float32)
         for row, text in enumerate(texts):
             for token in text.lower().split():
-                idx = hash(token) % self.dimensions
+                idx = hashlib.sha256(token.encode()).digest()[0] % self.dimensions
                 out[row, idx] += 1.0
             norm = float(np.linalg.norm(out[row]))
             if norm > 0:
@@ -951,6 +953,19 @@ class TestSessionIntegration:
             assert reopened_stats["vec_blocks"] > 0
         finally:
             reopened_mem.close()
+        live_memory = await store.run(live_memory_for_store, store)
+        for mode in ("fts", "semantic", "hybrid"):
+            hits, warning = await live_memory.search(
+                "plan the database migration carefully",
+                names=["seeker"],
+                config={},
+                create_embedder=lambda _: _HashEmbedder(),
+                mode=mode,
+            )
+            assert warning is None
+            assert any(
+                h.content == "plan the database migration carefully" for h in hits
+            )
         store.close()
 
     async def test_fork_at_event_copies_lineage(self, patched_llm, tmp_path):
@@ -1005,6 +1020,7 @@ class TestSessionIntegration:
             if e["type"] == "user_input" and e.get("content") == "turn two"
         )
         fork_point_id = turn_two_evt["event_id"]
+        assert store.get_event_by_id("brancher", fork_point_id) == turn_two_evt
         events_at_or_before = [e for e in all_events if e["event_id"] <= fork_point_id]
 
         fork_path = tmp_path / "brancher-fork.kohakutr.v2"
@@ -1019,6 +1035,9 @@ class TestSessionIntegration:
             assert [e["event_id"] for e in child_events] == [
                 e["event_id"] for e in events_at_or_before
             ]
+            for event in child_events:
+                assert child.get_event_by_id("brancher", event["event_id"]) == event
+            assert child.get_event_by_id("brancher", all_events[-1]["event_id"]) is None
             child_max = max(e["event_id"] for e in child_events)
             assert child_max == fork_point_id
             parent_max = max(e["event_id"] for e in all_events)

@@ -14,6 +14,7 @@ Frames:
 
 import asyncio
 import json
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -33,6 +34,16 @@ _VALID_EMBEDDERS = {"auto", "model2vec", "sentence-transformer", "api"}
 # clear-and-reindex operations could leave its search index inconsistent.
 _INFLIGHT_BUILDS: set[str] = set()
 _INFLIGHT_LOCK = asyncio.Lock()
+_BUILD_FUTURES: dict[str, asyncio.Future] = {}
+
+
+def _build_finished(session_name: str, future: asyncio.Future) -> None:
+    """Release the session only after its worker has actually stopped."""
+    if not future.cancelled():
+        future.exception()  # Retrieve failures even when the socket detached.
+    if _BUILD_FUTURES.get(session_name) is future:
+        del _BUILD_FUTURES[session_name]
+        _INFLIGHT_BUILDS.discard(session_name)
 
 
 def _parse_query(ws: WebSocket) -> dict[str, Any]:
@@ -71,19 +82,25 @@ async def _stream_progress(
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
 
+    accepting_progress = True
+
+    def enqueue(frame: dict[str, Any]) -> None:
+        if accepting_progress:
+            _queue_put_nowait(queue, frame)
+
     def progress(frame: dict[str, Any]) -> None:
         """Transfer worker-thread progress without blocking the build."""
         # Slow consumers lose intermediate progress rather than stalling the
         # indexing thread.
         try:
-            loop.call_soon_threadsafe(_queue_put_nowait, queue, frame)
+            loop.call_soon_threadsafe(enqueue, frame)
         except RuntimeError:
             # A disconnected client may close the loop while the worker finishes.
             pass
 
-    async def run_build() -> dict[str, Any]:
-        """Execute the synchronous indexer outside the event loop."""
-        return await asyncio.to_thread(
+    build_future = loop.run_in_executor(
+        None,
+        partial(
             run_build_sync,
             session_name,
             embedder=args["embedder"],
@@ -91,31 +108,23 @@ async def _stream_progress(
             dimensions=args["dimensions"],
             force=args["force"],
             progress=progress,
-        )
-
-    build_task = asyncio.create_task(run_build())
-    sender_done = asyncio.Event()
+        ),
+    )
+    _BUILD_FUTURES[session_name] = build_future
+    build_future.add_done_callback(partial(_build_finished, session_name))
 
     async def sender() -> None:
         """Forward queued progress frames until the sentinel arrives."""
-        try:
-            while True:
-                frame = await queue.get()
-                if frame is None:
-                    return
-                try:
-                    await ws.send_text(json.dumps(frame))
-                except WebSocketDisconnect:
-                    return
-        finally:
-            sender_done.set()
+        while True:
+            frame = await queue.get()
+            if frame is None:
+                return
+            await ws.send_text(json.dumps(frame))
 
     sender_task = asyncio.create_task(sender())
 
     try:
-        result = await build_task
-        # Yield once so callbacks already scheduled on the loop reach the queue.
-        await asyncio.sleep(0)
+        result = await asyncio.shield(build_future)
         terminal = {
             "status": "ok",
             "error": None,
@@ -123,7 +132,7 @@ async def _stream_progress(
             "indexed_per_agent": result.get("indexed_per_agent") or {},
         }
     except asyncio.CancelledError:
-        terminal = {"status": "cancelled", "error": None, "stats": None}
+        sender_task.cancel()
         raise
     except LookupError as e:
         terminal = {"status": "failed", "error": str(e), "stats": None}
@@ -131,19 +140,23 @@ async def _stream_progress(
         logger.exception("memory build failed")
         terminal = {"status": "failed", "error": str(e), "stats": None}
     finally:
-        # The sentinel lets the sender finish after all queued progress frames.
         try:
-            await queue.put(None)
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(sender_done.wait(), timeout=2.0)
-        except asyncio.TimeoutError:
-            sender_task.cancel()
+            # Drain queued worker callbacks on both successful and failed builds.
+            await asyncio.sleep(0)
+        finally:
+            accepting_progress = False
+            # Never wait for space: a disconnected sender may have stopped draining.
+            _queue_put_nowait(queue, None)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(sender_task, return_exceptions=True), timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                pass
 
     try:
-        await ws.send_text(json.dumps(terminal))
-    except WebSocketDisconnect:
+        await asyncio.wait_for(ws.send_text(json.dumps(terminal)), timeout=2.0)
+    except (asyncio.TimeoutError, WebSocketDisconnect, OSError, RuntimeError):
         return
 
 
@@ -202,7 +215,8 @@ async def ws_memory_build(ws: WebSocket, session_name: str) -> None:
         return
     finally:
         async with _INFLIGHT_LOCK:
-            _INFLIGHT_BUILDS.discard(session_name)
+            if session_name not in _BUILD_FUTURES:
+                _INFLIGHT_BUILDS.discard(session_name)
         try:
             await ws.close()
         except Exception:  # pragma: no cover - already closed

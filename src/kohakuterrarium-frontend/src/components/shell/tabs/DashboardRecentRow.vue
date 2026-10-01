@@ -8,8 +8,9 @@
       <span class="i-carbon-recently-viewed text-warm-400 shrink-0" />
       <span class="text-warm-500 text-xs shrink-0 w-20">{{ formatDate }}</span>
       <span class="shrink-0 max-w-48 truncate font-medium text-warm-800 dark:text-warm-200">
-        {{ sessionId }}
+        {{ savedSessionLabel(session) }}
       </span>
+      <span v-if="savedSessionLabel(session) !== sessionId" class="text-xs text-warm-400 truncate max-w-32" :title="sessionId">{{ sessionId }}</span>
       <span v-if="preview" class="text-warm-500 truncate flex-1 text-xs italic"> — {{ preview }} </span>
       <span v-else class="flex-1" />
       <span v-if="turnCount" class="text-xs text-warm-500 shrink-0">{{ turnCount }} turns</span>
@@ -27,6 +28,7 @@
 </template>
 
 <script setup>
+import { savedSessionLabel } from "@/utils/sessionLabels"
 import { computed, ref } from "vue"
 import { ElMessage } from "element-plus"
 
@@ -72,6 +74,7 @@ function onView() {
     kind: "session-viewer",
     id: `session:${sessionId.value}`,
     name: sessionId.value,
+    config_name: savedSessionLabel(props.session),
   })
 }
 
