@@ -530,3 +530,56 @@ describe("reasoning segment ordering", () => {
     ])
   })
 })
+
+describe("live reasoning branch isolation", () => {
+  it.each(["source", "agent_name", "activeTab"])(
+    "ignores off-branch reasoning using the %s tab route",
+    (route) => {
+      const chat = useChatStore()
+      chat.activeTab = route === "activeTab" ? "main" : "other"
+      chat.messagesByTab = { main: [], other: [] }
+      chat._appendStreamChunk("main", "old answer")
+      chat._appendStreamChunk("other", "other answer")
+      chat.branchViewByTab = { main: { 1: 1 }, other: { 1: 2 } }
+      chat._streamingBranchByTab.main = { turnIndex: 1, branchId: 2 }
+      const target = chat.messagesByTab.main[0]
+      target._pendingReasoningCursor = target.parts.length
+      const before = JSON.parse(JSON.stringify(chat.messagesByTab))
+      const frame = {
+        activity_type: "assistant_reasoning",
+        id: "new_reasoning",
+        turn_index: 1,
+        branch_id: 2,
+        ...(route === "agent_name" ? { agent_name: "main" } : {}),
+        _kt_assistant_segments: [
+          { type: "reasoning", source: "reasoning_content", text: "new branch thought" },
+        ],
+      }
+      const source = route === "source" ? "main" : ""
+      chat._handleActivity(source, frame)
+      expect(chat.messagesByTab).toEqual(before)
+
+      chat.branchViewByTab.main = { 1: 2 }
+      chat._handleActivity(source, frame)
+      expect(
+        target.parts.filter((part) => part.type === "reasoning").map((part) => part.text),
+      ).toEqual(["new branch thought"])
+      expect(target._pendingReasoningCursor).toBeUndefined()
+      expect(chat.messagesByTab.other).toEqual(before.other)
+    },
+  )
+
+  it("accepts legacy reasoning without branch metadata", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat._appendStreamChunk("main", "answer")
+    chat.branchViewByTab.main = { 1: 1 }
+    chat._streamingBranchByTab.main = { turnIndex: 1, branchId: 2 }
+    chat._handleActivity("main", {
+      activity_type: "assistant_reasoning",
+      _kt_assistant_segments: [{ type: "reasoning", source: "reasoning_content", text: "legacy" }],
+    })
+    expect(chat.messagesByTab.main[0].parts.map((part) => part.type)).toEqual(["reasoning", "text"])
+    expect(chat.messagesByTab.main[0].parts[0].text).toBe("legacy")
+  })
+})

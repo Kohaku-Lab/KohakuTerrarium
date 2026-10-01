@@ -3391,6 +3391,7 @@ const _chatStoreOptions = {
 
       if (at === "assistant_reasoning") {
         const tab = source || data.agent_name || this.activeTab
+        if (!this._frameMatchesViewedBranch(tab, data)) return
         const list = this.messagesByTab[tab] || []
         const target = [...list].reverse().find((message) => message?.role === "assistant")
         if (target) {
