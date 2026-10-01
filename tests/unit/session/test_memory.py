@@ -395,6 +395,79 @@ class TestSessionMemoryConstruction:
 
 
 class TestSessionMemoryIndexing:
+    def test_fts_then_vectors_indexes_every_agent_and_catches_up(self, tmp_path):
+        memory = SessionMemory(str(tmp_path / "multi.db"))
+        events = {
+            "alice": [{"type": "user_input", "content": "alice needle"}],
+            "bob": [{"type": "user_input", "content": "bob needle"}],
+        }
+        try:
+            for name, rows in events.items():
+                memory._index_keywords(name, rows)
+            memory._set_embedder(_FakeEmbedder())
+            for name, rows in events.items():
+                memory.index_events(name, rows)
+                hits = memory.search(f"{name} needle", mode="semantic", agent=name)
+                assert [hit.content for hit in hits] == [f"{name} needle"]
+            events["alice"].append({"type": "user_input", "content": "later needle"})
+            memory._index_keywords("alice", events["alice"])
+            memory.index_events("alice", events["alice"])
+            assert memory.get_stats()["vec_blocks"] == 3
+            assert memory.index_events("alice", events["alice"]) == 0
+        finally:
+            memory.close()
+
+    def test_force_reset_also_rewinds_vector_progress(self, tmp_path):
+        memory = SessionMemory(str(tmp_path / "force.db"), _FakeEmbedder())
+        try:
+            rows = [{"type": "user_input", "content": "needle"}]
+            memory.index_events("alice", rows)
+            memory._set_indexed_count("alice", 0)
+            start, blocks = memory._vector_batch("alice", rows)
+            assert start == 0
+            assert [block.content for block in blocks] == ["needle"]
+        finally:
+            memory.close()
+
+    def test_legacy_progress_survives_keyword_catchup(self, tmp_path):
+        path = str(tmp_path / "legacy.db")
+        memory = SessionMemory(path, _FakeEmbedder())
+        rows = [{"type": "user_input", "content": "old needle"}]
+        memory.index_events("alice", rows)
+        memory._state["alice:indexed_events"] = 1
+        del memory._state["alice:indexed_keywords"]
+        del memory._state["alice:indexed_vectors:4"]
+        memory.close()
+        memory = SessionMemory(path)
+        try:
+            rows.append({"type": "user_input", "content": "new needle"})
+            memory.index_events("alice", rows)
+            memory._set_embedder(_FakeEmbedder())
+            memory.index_events("alice", rows)
+            assert memory.get_stats()["vec_blocks"] == 2
+            assert {
+                hit.content for hit in memory.search("needle", mode="semantic")
+            } == {
+                "old needle",
+                "new needle",
+            }
+        finally:
+            memory.close()
+
+    def test_prepared_vectors_reject_stale_or_incomplete_results(self, tmp_path):
+        memory = SessionMemory(str(tmp_path / "commit.db"), _FakeEmbedder())
+        rows = [{"type": "user_input", "content": "needle"}]
+        try:
+            start, blocks = memory._vector_batch("alice", rows)
+            with pytest.raises(ValueError, match="result count"):
+                memory._commit_vectors("alice", start, 1, blocks, [])
+            memory.index_events("alice", rows)
+            with pytest.raises(RuntimeError, match="index changed"):
+                memory._commit_vectors("alice", start, 1, blocks, [])
+            assert memory.get_stats()["vec_blocks"] == 1
+        finally:
+            memory.close()
+
     def _events(self):
         return [
             {"type": "user_input", "content": "fix the auth bug", "event_id": 1},

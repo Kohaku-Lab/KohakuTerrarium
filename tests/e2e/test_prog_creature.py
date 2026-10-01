@@ -21,12 +21,15 @@ over a deterministic embedder — is the production collaborator.
 """
 
 import asyncio
+import hashlib
+import threading
 
 import numpy as np
 import pytest
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
+from kohakuterrarium.builtins.tools import search_memory as _search_memory_mod
 from kohakuterrarium.core import agent_model as _agent_model_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.conversation import Conversation
@@ -43,6 +46,7 @@ from kohakuterrarium.session.embedding import BaseEmbedder
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resume import resume_agent
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
@@ -69,7 +73,8 @@ class _HashEmbedder(BaseEmbedder):
         out = np.zeros((len(texts), self.dimensions), dtype=np.float32)
         for row, text in enumerate(texts):
             for token in text.lower().split():
-                out[row, hash(token) % self.dimensions] += 1.0
+                idx = hashlib.sha256(token.encode()).digest()[0] % self.dimensions
+                out[row, idx] += 1.0
             norm = float(np.linalg.norm(out[row]))
             if norm > 0:
                 out[row] /= norm
@@ -273,7 +278,7 @@ class TestProgCreatureJourney:
     """One fat end-to-end test for the programmatic single-creature path."""
 
     async def test_full_creature_session(
-        self, patched_llm, patched_model_switch, tmp_path
+        self, patched_llm, patched_model_switch, tmp_path, monkeypatch
     ):
         config_path = _write_config(tmp_path / "creature", name="pilot")
         session_path = tmp_path / "pilot.kohakutr.v2"
@@ -767,3 +772,52 @@ class TestProgCreatureJourney:
         assert sem_hits, "semantic search returned nothing"
         assert sem_hits[0].content == "first recorded question"
         sem_memory.close()
+
+        entered, release = threading.Event(), threading.Event()
+
+        def blocked_embedding(_):
+            entered.set()
+            assert release.wait(15), "embedding gate was not released"
+            return _HashEmbedder()
+
+        monkeypatch.setattr(_search_memory_mod, "create_embedder", blocked_embedding)
+        memory_script = ["[/search_memory]\n@@query=needle\n[search_memory/]", "done"]
+        patched_llm["script"] = memory_script
+        memory_config = _write_config(tmp_path / "memory-creature", name="pilot")
+        config_file = tmp_path / "memory-creature" / "config.yaml"
+        config_file.write_text(
+            config_file.read_text(encoding="utf-8")
+            + "  - name: search_memory\n    type: builtin\n",
+            encoding="utf-8",
+        )
+        async with Terrarium(session_dir=tmp_path / "blocked-memory") as engine:
+            creature = await engine.add_creature(
+                memory_config,
+                pwd=tmp_path,
+                io="headless",
+                start=True,
+            )
+            studio = Studio(engine)
+            blocked_store = creature.agent.session_store
+            turn = asyncio.create_task(
+                creature.run("remember needle", raise_on_error=False)
+            )
+            try:
+                assert await asyncio.to_thread(entered.wait, 5)
+                history = await asyncio.wait_for(
+                    studio.service.chat_history_page(creature.creature_id), 2
+                )
+                assert "remember needle" in str(history)
+                await asyncio.wait_for(studio.sessions.stop(creature.graph_id), 5)
+                await asyncio.wait_for(asyncio.gather(turn, return_exceptions=True), 2)
+                assert not engine.list_graphs()
+                reader = SessionStore.open_readonly(blocked_store.path)
+                try:
+                    saved = reader.get_events("pilot")
+                    assert "remember needle" in str(saved)
+                    assert any(event["type"] == "processing_end" for event in saved)
+                finally:
+                    reader.close(update_status=False)
+            finally:
+                release.set()
+                await asyncio.gather(turn, return_exceptions=True)

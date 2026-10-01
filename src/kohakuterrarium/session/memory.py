@@ -139,13 +139,16 @@ class SessionMemory:
 
     def _get_indexed_count(self, agent: str) -> int:
         """Get number of events already indexed for an agent."""
-        try:
-            return self._state[f"{agent}:indexed_events"]
-        except KeyError:
-            return 0
+        return self._state.get(
+            f"{agent}:indexed_keywords", self._state.get(f"{agent}:indexed_events", 0)
+        )
 
     def _set_indexed_count(self, agent: str, count: int) -> None:
-        self._state[f"{agent}:indexed_events"] = count
+        self._state[f"{agent}:indexed_keywords"] = count
+        if count == 0:
+            dims = self._embedder.dimensions or self._state.get("vec_dimensions", 0)
+            self._state[f"{agent}:indexed_vectors:{dims}"] = 0
+            self._state[f"{agent}:indexed_events"] = 0
 
     def _clear_fts(self, agent: str) -> None:
         """Clear FTS entries for an agent (before full re-index)."""
@@ -172,59 +175,73 @@ class SessionMemory:
         ``start_from`` supports incremental indexing and is advanced past the
         persisted per-agent watermark when necessary.
         """
-        already_indexed = self._get_indexed_count(agent)
+        count = self._index_keywords(agent, events, start_from)
+        if self._has_vectors and self._vec is not None:
+            start, blocks = self._vector_batch(agent, events, start_from)
+            vectors = (
+                self._embedder.encode([b.content for b in blocks]) if blocks else []
+            )
+            self._commit_vectors(agent, start, len(events), blocks, vectors)
+            count = max(count, len(blocks))
+        return count
 
-        # Rebuild both indexes when vector support is added after FTS-only indexing.
-        vec_needs_rebuild = (
-            self._vec is not None and self._vec.count() == 0 and already_indexed > 0
-        )
-        if vec_needs_rebuild:
-            already_indexed = 0
-            self._clear_fts(agent)
+    def _vector_watermark(self, agent: str) -> int:
+        key = f"{agent}:indexed_vectors:{self._embedder.dimensions}"
+        if not self._has_vectors:
+            dims = self._state.get("vec_dimensions", 0)
+            key = f"{agent}:indexed_vectors:{dims}"
+        value = self._state.get(key)
+        if value is None:
+            value = (
+                self._state.get(f"{agent}:indexed_events", 0)
+                if self._vec is not None and self._vec.count()
+                else 0
+            )
+            self._state[key] = value
+        return value
 
-        if start_from < already_indexed:
-            start_from = already_indexed
-
+    def _index_keywords(
+        self, agent: str, events: list[dict], start_from: int = 0
+    ) -> int:
+        if self._vec is not None:
+            self._vector_watermark(agent)
+        start_from = max(start_from, self._get_indexed_count(agent))
         if start_from >= len(events):
             return 0
-
-        new_events = events[start_from:]
-        blocks = _extract_blocks(agent, new_events, start_from)
-
-        if not blocks:
-            self._set_indexed_count(agent, len(events))
-            return 0
-
+        blocks = _extract_blocks(agent, events[start_from:], start_from)
         for block in blocks:
             if block.content.strip():
-                metadata = _block_metadata(block)
-                self._fts[block.content] = metadata
-
-        if self._has_vectors and self._vec is not None:
-            vec_texts = [b.content for b in blocks if b.content.strip()]
-            vec_metas = [
-                _block_metadata(b, include_content=True)
-                for b in blocks
-                if b.content.strip()
-            ]
-            if vec_texts:
-                vectors = self._embedder.encode(vec_texts)
-                for v, m in zip(vectors, vec_metas):
-                    self._vec.insert(v, m)
-                logger.debug(
-                    "Vectors indexed",
-                    count=len(vectors),
-                    vec_count=self._vec.count(),
-                )
-
+                self._fts[block.content] = _block_metadata(block)
         self._set_indexed_count(agent, len(events))
-        logger.info(
-            "Indexed session blocks",
-            agent=agent,
-            new_blocks=len(blocks),
-            total_events=len(events),
-        )
         return len(blocks)
+
+    def _set_embedder(self, embedder: BaseEmbedder) -> None:
+        self._embedder = embedder
+        self._has_vectors = not isinstance(embedder, NullEmbedder)
+        if self._has_vectors and embedder.dimensions > 0:
+            self._vec = VectorKVault(
+                self._path,
+                table=f"memory_vec_{embedder.dimensions}d",
+                dimensions=embedder.dimensions,
+            )
+            self._state["vec_dimensions"] = embedder.dimensions
+
+    def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
+        start = self._vector_watermark(agent)
+        offset = max(start, start_from)
+        blocks = _extract_blocks(agent, events[offset:], offset)
+        return start, [block for block in blocks if block.content.strip()]
+
+    def _commit_vectors(self, agent, start, count, blocks, vectors) -> None:
+        if self._vector_watermark(agent) != start:
+            raise RuntimeError("Memory index changed during embedding; retry search")
+        if len(vectors) != len(blocks):
+            raise ValueError("Embedding result count does not match memory blocks")
+        for vector, block in zip(vectors, blocks):
+            self._vec.insert(vector, _block_metadata(block, include_content=True))
+        self._state[f"{agent}:indexed_vectors:{self._embedder.dimensions}"] = max(
+            start, count
+        )
 
     def search(
         self,
@@ -297,6 +314,11 @@ class SessionMemory:
             return []
 
         query_vec = self._embedder.encode_one(query)
+        return self._search_vector(query_vec, k, agent)
+
+    def _search_vector(
+        self, query_vec, k: int, agent: str | None
+    ) -> list[SearchResult]:
         results = self._vec.search(query_vec, k=k * 2)
         out = []
         for _, distance, meta in results:
@@ -326,7 +348,10 @@ class SessionMemory:
         """Hybrid search: FTS + vector with reciprocal rank fusion."""
         fts_results = self._search_fts(query, k=k * 2, agent=agent)
         sem_results = self._search_semantic(query, k=k * 2, agent=agent)
+        return self._fuse_results(fts_results, sem_results, k)
 
+    @staticmethod
+    def _fuse_results(fts_results, sem_results, k: int) -> list[SearchResult]:
         scores: dict[str, float] = {}
         result_map: dict[str, SearchResult] = {}
 

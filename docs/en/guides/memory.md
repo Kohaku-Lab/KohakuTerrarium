@@ -106,6 +106,21 @@ memory:
 
 When the LLM calls `search_memory`, the tool runs over the *current* session's index. This is the seamless-memory primitive: agents can look up what they (or their teammates) said in earlier rounds without explicit RAG scaffolding.
 
+Live searches keep model loading and encoding off the session's storage thread,
+so a stalled embedder does not prevent history reads, event persistence, or graph
+shutdown. `fts` never loads or calls an embedder. `auto` and `hybrid` fall back to
+keywords if a model operation fails or takes more than 30 seconds; the tool result
+reports that fallback. Explicit `semantic` tool calls return an error instead.
+The Studio live-search adapter retains its existing semantic-to-FTS fallback and
+includes a `warning` field when it degrades.
+
+Only one model operation may remain outstanding per live store. Cancelling or
+timing out a search does not forcibly terminate a native model call; later searches
+use keywords while it remains busy. The isolated daemon worker owns no database
+handles and cannot write late results into a closed session. Session database work
+still drains in its original serial order. Keyword and vector indexing keep
+separate progress, allowing semantic indexing to catch up after keyword searches.
+
 Tool args (shape; concrete syntax depends on your `tool_format`; default bracket shown):
 
 ```
