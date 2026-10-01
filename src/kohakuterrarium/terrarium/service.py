@@ -732,7 +732,7 @@ class LocalTerrariumService(
             store = self._engine._session_stores.get(creature.graph_id)
         if store is None:
             raise KeyError(creature_id)
-        evt = store.get_event_by_id(creature.name, event_id)
+        evt = await store.run(store.get_event_by_id, creature.name, event_id)
         if evt is None:
             raise KeyError(f"event {event_id} not found")
         return {"event": evt, "creature_id": creature_id}

@@ -1005,6 +1005,7 @@ class TestSessionIntegration:
             if e["type"] == "user_input" and e.get("content") == "turn two"
         )
         fork_point_id = turn_two_evt["event_id"]
+        assert store.get_event_by_id("brancher", fork_point_id) == turn_two_evt
         events_at_or_before = [e for e in all_events if e["event_id"] <= fork_point_id]
 
         fork_path = tmp_path / "brancher-fork.kohakutr.v2"
@@ -1019,6 +1020,9 @@ class TestSessionIntegration:
             assert [e["event_id"] for e in child_events] == [
                 e["event_id"] for e in events_at_or_before
             ]
+            for event in child_events:
+                assert child.get_event_by_id("brancher", event["event_id"]) == event
+            assert child.get_event_by_id("brancher", all_events[-1]["event_id"]) is None
             child_max = max(e["event_id"] for e in child_events)
             assert child_max == fork_point_id
             parent_max = max(e["event_id"] for e in all_events)

@@ -7,6 +7,7 @@ Terrarium engine populated with ``_FakeAgent`` creatures via
 
 import asyncio
 import json
+import threading
 
 import pytest
 
@@ -481,3 +482,47 @@ class TestSubscribe:
             assert received[0].creature_id == "erin"
         finally:
             await svc.shutdown()
+
+
+async def test_chat_event_waits_for_accepted_writes_off_loop(tmp_path):
+    config = tmp_path / "config.yaml"
+    config.write_text("name: history\ninput: {type: none}\noutput: {type: none}\n")
+    async with Terrarium() as engine:
+        creature = await engine.add_creature(
+            str(config),
+            llm=ScriptedLLM(["unused"]),
+            session=tmp_path / "history.kohakutr",
+            io="headless",
+        )
+        service = LocalTerrariumService(engine)
+        store = creature.agent.session_store
+        _, eid = store.append_event(creature.name, "text", {"content": "first"})
+        assert (await service.chat_event(creature.creature_id, eid))["event"][
+            "content"
+        ] == "first"
+        release, entered = threading.Event(), threading.Event()
+
+        def blocked():
+            entered.set()
+            assert release.wait(5)
+
+        store.submit(blocked)
+        assert await asyncio.to_thread(entered.wait, 3)
+        store.submit(
+            store.append_event,
+            creature.name,
+            "text",
+            {"event_id": 900, "content": "accepted"},
+        )
+        reading = asyncio.create_task(service.chat_event(creature.creature_id, 900))
+        try:
+            await asyncio.sleep(0)
+            assert not reading.done(), "event read overtook an accepted write"
+        finally:
+            release.set()
+            result = await reading
+        assert result["event"]["content"] == "accepted"
+        assert result["creature_id"] == creature.creature_id
+        assert store._affinity_worker_ident != threading.get_ident()
+        with pytest.raises(KeyError, match="event 9999 not found"):
+            await service.chat_event(creature.creature_id, 9999)
