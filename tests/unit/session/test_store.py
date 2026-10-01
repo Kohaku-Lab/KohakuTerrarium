@@ -1429,3 +1429,51 @@ class TestCompanionCloser:
     def test_no_closers_is_noop(self, tmp_path):
         s = _store(tmp_path)
         s.close()  # empty companion list closes cleanly
+
+
+class _CountedEvents:
+    """Instrument reads while keeping the real native table as the collaborator."""
+
+    def __init__(self, table):
+        self.table = table
+        self.reads = 0
+        self.scans = 0
+
+    def __getattr__(self, name):
+        return getattr(self.table, name)
+
+    def __getitem__(self, key):
+        self.reads += 1
+        return self.table[key]
+
+    def __setitem__(self, key, value):
+        self.table[key] = value
+
+    def keys(self, **kwargs):
+        self.scans += 1
+        return self.table.keys(**kwargs)
+
+
+def test_event_lookup_reuses_keys_and_tracks_appends(tmp_path):
+    store = _store(tmp_path)
+    try:
+        for i in range(100):
+            store.append_event(
+                "alice", "text", {"content": str(i), "event_id": 1000 + i}
+            )
+        table = _CountedEvents(store.events)
+        store.events = table
+        assert store.get_event_by_id("alice", 1099)["content"] == "99"
+        table.reads = table.scans = 0
+        assert store.get_event_by_id("alice", 1098)["content"] == "98"
+        assert store.get_event_by_id("alice", 9999) is None
+        assert (table.reads, table.scans) == (1, 0)
+        store.append_event("alice", "text", {"content": "new", "event_id": 42})
+        store.append_event("alice", "text", {"content": "duplicate", "event_id": 1099})
+        assert store.get_event_by_id("alice", 42)["content"] == "new"
+        assert store.get_event_by_id("alice", 1099)["content"] == "99"
+        assert table.scans == 0
+        store.append_event("bob", "text", {"content": "other", "event_id": 42})
+        assert store.get_event_by_id("bob", 42)["content"] == "other"
+    finally:
+        store.close()
