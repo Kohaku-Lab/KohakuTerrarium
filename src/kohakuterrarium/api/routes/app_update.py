@@ -174,37 +174,50 @@ _WS_PATH = "/ws/app/update"
 async def _stream_update(ws: WebSocket) -> None:
     """Run the update in an executor and stream progress through ``ws``."""
     queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    accepting_progress = True
+
+    def enqueue(frame: dict[str, Any]) -> None:
+        if accepting_progress:
+            queue.put_nowait(frame)
 
     def _push(phase: str, percent: float, message: str) -> None:
-        """Translate update-runner progress into queued WebSocket frames."""
+        """Hand worker-thread progress back to the event loop."""
         try:
-            queue.put_nowait({"phase": phase, "percent": percent, "message": message})
-        except Exception:  # pragma: no cover - defensive
+            loop.call_soon_threadsafe(
+                enqueue, {"phase": phase, "percent": percent, "message": message}
+            )
+        except RuntimeError:  # The client loop may already have closed.
             pass
 
-    loop = asyncio.get_running_loop()
-
-    async def _pump() -> UpdateResult:
-        """Execute the blocking updater outside the event loop."""
-        return await loop.run_in_executor(None, lambda: run_update(_push))
-
-    runner_task = asyncio.create_task(_pump())
+    runner = loop.run_in_executor(None, lambda: run_update(_push))
+    getter = asyncio.create_task(queue.get())
     try:
         while True:
             done, _ = await asyncio.wait(
-                [runner_task, asyncio.create_task(queue.get())],
-                return_when=asyncio.FIRST_COMPLETED,
-                timeout=0.5,
+                [runner, getter], return_when=asyncio.FIRST_COMPLETED
             )
-            # Flush all available progress before testing for completion so the
-            # terminal frame cannot overtake an already queued update.
-            while not queue.empty():
-                frame = queue.get_nowait()
+            if getter in done:
+                frame = getter.result()
+                getter = None
                 await ws.send_text(json.dumps(frame))
-            if runner_task in done:
+            if runner in done:
+                if getter is not None:
+                    getter.cancel()
+                    await asyncio.gather(getter, return_exceptions=True)
+                    getter = None
+                # Thread-safe progress callbacks precede executor completion.
+                while not queue.empty():
+                    await ws.send_text(json.dumps(queue.get_nowait()))
                 break
+            getter = asyncio.create_task(queue.get())
     finally:
-        result = await runner_task
+        accepting_progress = False
+        if getter is not None:
+            getter.cancel()
+            await asyncio.gather(getter, return_exceptions=True)
+        # A socket closing must not interrupt an installation in progress.
+        result = await asyncio.shield(runner)
     terminal = {
         "phase": "done" if result.ok else "failed",
         "percent": 100,
