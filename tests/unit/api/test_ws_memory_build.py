@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -121,3 +122,34 @@ async def test_progress_precedes_terminal_and_failure_releases_guard(
     assert [frame["percent"] for frame in frames[:-1]] == [0, 100]
     assert frames[-1]["status"] == ("failed" if error else "ok")
     assert "terminal-build" not in mod._INFLIGHT_BUILDS
+
+
+@pytest.mark.parametrize("error_type", [LookupError, RuntimeError])
+async def test_completed_worker_failure_drains_scheduled_progress(
+    monkeypatch, error_type
+):
+    loop = asyncio.get_running_loop()
+
+    def build(*args, progress, **kwargs):
+        progress({"phase": "scan", "percent": 0})
+        progress({"phase": "write", "percent": 100})
+        raise error_type("build failed")
+
+    def completed_worker(executor, callback):
+        # Model a worker result ready before its queued progress callbacks run.
+        future = loop.create_future()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            worker = pool.submit(callback)
+            try:
+                future.set_result(worker.result(timeout=3))
+            except error_type as error:
+                future.set_exception(error)
+        return future
+
+    monkeypatch.setattr(mod, "run_build_sync", build)
+    monkeypatch.setattr(loop, "run_in_executor", completed_worker)
+    frames = []
+    await mod.ws_memory_build(socket(frames), "completed-worker")
+    assert [frame["percent"] for frame in frames[:-1]] == [0, 100]
+    assert frames[-1]["status"] == "failed"
+    assert "completed-worker" not in mod._INFLIGHT_BUILDS

@@ -125,8 +125,6 @@ async def _stream_progress(
 
     try:
         result = await asyncio.shield(build_future)
-        # Yield once so callbacks already scheduled on the loop reach the queue.
-        await asyncio.sleep(0)
         terminal = {
             "status": "ok",
             "error": None,
@@ -142,15 +140,19 @@ async def _stream_progress(
         logger.exception("memory build failed")
         terminal = {"status": "failed", "error": str(e), "stats": None}
     finally:
-        accepting_progress = False
-        # Never wait for space: a disconnected sender may have stopped draining.
-        _queue_put_nowait(queue, None)
         try:
-            await asyncio.wait_for(
-                asyncio.gather(sender_task, return_exceptions=True), timeout=2.0
-            )
-        except asyncio.TimeoutError:
-            pass
+            # Drain queued worker callbacks on both successful and failed builds.
+            await asyncio.sleep(0)
+        finally:
+            accepting_progress = False
+            # Never wait for space: a disconnected sender may have stopped draining.
+            _queue_put_nowait(queue, None)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(sender_task, return_exceptions=True), timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                pass
 
     try:
         await asyncio.wait_for(ws.send_text(json.dumps(terminal)), timeout=2.0)
