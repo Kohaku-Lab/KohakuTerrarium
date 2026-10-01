@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils"
+import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -82,5 +82,60 @@ describe("SessionsListPage workspace choices", () => {
     expect(fetchAll).not.toHaveBeenCalled()
     expect(onResume).not.toHaveBeenCalled()
     expect(push).not.toHaveBeenCalled()
+  })
+})
+
+describe("SessionsListPage discovery filters", () => {
+  beforeEach(() => {
+    globalThis.useRouter = () => ({ push })
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    delete globalThis.useRouter
+    vi.useRealTimers()
+  })
+  it("sends search, type and sort together and rejects older responses", async () => {
+    let resolveOld
+    list.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOld = resolve
+      }),
+    )
+    const wrapper = mount(SessionsListPage, {
+      global: {
+        stubs: {
+          ElDropdown: true,
+          ElDropdownMenu: true,
+          ElDropdownItem: true,
+          BuildEmbeddingsModal: true,
+        },
+      },
+    })
+    await wrapper.get('input[type="text"]').setValue("recent")
+    const selects = wrapper.findAll("select")
+    await selects[0].setValue("terrarium")
+    await selects[1].setValue("created_at")
+    resolveOld({ sessions: [{ name: "stale" }], total: 1 })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain("stale")
+    list.mockResolvedValueOnce({
+      sessions: [{ name: "file-key", terrarium_name: "My project", preview: "recent work" }],
+      total: 1,
+    })
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        search: "recent",
+        configType: "terrarium",
+        sort: "created_at",
+        offset: 0,
+      }),
+    )
+    expect(wrapper.text()).toContain("My project")
+    expect(wrapper.text()).toContain("file-key")
+    wrapper.unmount()
   })
 })

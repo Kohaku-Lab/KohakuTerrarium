@@ -20,6 +20,7 @@ import { useHostsStore } from "./hosts"
 
 import { sessionAPI } from "@/utils/api"
 import { useInstancesStore } from "./instances"
+import { useTabsStore } from "./tabs"
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -447,4 +448,38 @@ it("does not resurrect a missing session from a listing requested before its det
   await pending
   expect(store.list).toEqual([])
   expect(store.current).toBeNull()
+})
+
+describe("open tab title refresh", () => {
+  it("refreshes both surfaces after delayed metadata without reopening or moving focus", async () => {
+    const tabs = useTabsStore(),
+      instances = useInstancesStore()
+    tabs.openSurface("graph_title", "chat", { config_name: "graph_title" })
+    tabs.openSurface("graph_title", "inspector", { config_name: "graph_title" })
+    const active = tabs.activeId
+    sessionAPI.listActive.mockResolvedValue([
+      { session_id: "graph_title", name: "My research", creatures: 1 },
+    ])
+    await instances.fetchAll()
+    expect(tabs.tabs.filter((t) => t.target === "graph_title").map((t) => t.config_name)).toEqual([
+      "My research",
+      "My research",
+    ])
+    expect(tabs.activeId).toBe(active)
+    const stale = promiseWithResolvers()
+    sessionAPI.listActive.mockReturnValueOnce(stale.promise)
+    const pending = instances.fetchAll()
+    sessionAPI.getActive.mockResolvedValue({
+      session_id: "graph_title",
+      name: "Renamed",
+      creatures: [],
+      channels: [],
+    })
+    await instances.fetchOne("graph_title")
+    stale.resolve([{ session_id: "graph_title", name: "Old name", creatures: 1 }])
+    await pending
+    expect(
+      tabs.tabs.filter((t) => t.target === "graph_title").every((t) => t.config_name === "Renamed"),
+    ).toBe(true)
+  })
 })

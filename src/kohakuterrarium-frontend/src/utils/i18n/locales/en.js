@@ -1,4 +1,12 @@
 export default {
+  "sessions.filterType": "Session type",
+  "sessions.allTypes": "All types",
+  "sessions.agentType": "Agent",
+  "sessions.terrariumType": "Terrarium",
+  "sessions.sortBy": "Sort sessions",
+  "sessions.sortActive": "Recently active",
+  "sessions.sortCreated": "Recently created",
+
   "settings.oauth.login": "Log in",
   "settings.oauth.relogin": "Log in again",
   "settings.oauth.check": "Check status",

@@ -3,6 +3,7 @@
 </template>
 
 <script setup>
+import { savedSessionLabel } from "@/utils/sessionLabels"
 // Embed: SessionsListPage accepts onView/onResume callbacks that win
 // over its route-based defaults.
 import SessionsListPage from "@/components/sessions/pages/SessionsListPage.vue"
@@ -19,6 +20,7 @@ function onView(session) {
     kind: "session-viewer",
     id: `session:${session.name}`,
     name: session.name,
+    config_name: savedSessionLabel(session),
   })
 }
 

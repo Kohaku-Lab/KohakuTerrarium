@@ -127,3 +127,21 @@ describe("sessionAPI.getHistoryPage", () => {
     expect(apiGet.mock.calls[0][1].params).toMatchObject({ paged: true, limit: 400 })
   })
 })
+
+it("forwards existing session listing filters to the server", async () => {
+  await sessionAPI.list({
+    search: "project",
+    configType: "terrarium",
+    sort: "created_at",
+    offset: 20,
+  })
+  expect(apiGet).toHaveBeenCalledWith("/sessions", {
+    params: expect.objectContaining({
+      search: "project",
+      config_type: "terrarium",
+      sort: "created_at",
+      offset: 20,
+      limit: 20,
+    }),
+  })
+})

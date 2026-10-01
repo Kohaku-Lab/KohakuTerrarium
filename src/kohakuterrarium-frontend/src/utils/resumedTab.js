@@ -5,7 +5,7 @@
  */
 export function resumedTabMeta(result, fallbackName) {
   return {
-    config_name: result?.session_name || fallbackName,
+    config_name: result?.session_name || result?.session?.name || fallbackName,
     type: result?.type === "terrarium" ? "terrarium" : "creature",
   }
 }

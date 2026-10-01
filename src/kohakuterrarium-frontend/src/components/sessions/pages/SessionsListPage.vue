@@ -6,6 +6,19 @@
         <p class="text-secondary">{{ t("sessions.subtitle") }}</p>
       </div>
 
+      <div class="mb-4 flex flex-wrap gap-2">
+        <input v-model="searchQuery" type="text" class="input-field flex-1 min-w-48" :placeholder="t('sessions.searchPlaceholder')" />
+        <select v-model="configType" class="input-field" :aria-label="t('sessions.filterType')">
+          <option value="">{{ t("sessions.allTypes") }}</option>
+          <option value="agent">{{ t("sessions.agentType") }}</option>
+          <option value="terrarium">{{ t("sessions.terrariumType") }}</option>
+        </select>
+        <select v-model="sort" class="input-field" :aria-label="t('sessions.sortBy')">
+          <option value="last_active">{{ t("sessions.sortActive") }}</option>
+          <option value="created_at">{{ t("sessions.sortCreated") }}</option>
+        </select>
+      </div>
+
       <div v-if="loading" class="card p-12 text-center text-secondary">
         <div class="i-carbon-renew kohaku-pulse text-2xl mx-auto mb-3 text-amber" />
         <div>{{ t("sessions.loading") }}</div>
@@ -18,17 +31,13 @@
         <button class="btn-secondary" @click="fetchSessions(true)"><span class="i-carbon-renew mr-1" /> {{ t("common.retry") }}</button>
       </div>
 
-      <div v-else-if="totalSessions === 0 && !searchQuery" class="card p-12 text-center text-secondary">
+      <div v-else-if="totalSessions === 0 && !searchQuery && !configType" class="card p-12 text-center text-secondary">
         <div class="i-carbon-time text-3xl mx-auto mb-3 text-warm-400" />
         <div class="text-warm-600 dark:text-warm-400 mb-1">{{ t("sessions.noSaved") }}</div>
         <div class="text-xs">{{ t("sessions.noSavedHint") }}</div>
       </div>
 
       <template v-else>
-        <div class="mb-4">
-          <input v-model="searchQuery" type="text" class="input-field w-full" :placeholder="t('sessions.searchPlaceholder')" />
-        </div>
-
         <div v-if="sessions.length === 0" class="card p-8 text-center text-secondary">{{ t("sessions.noMatch", { query: searchQuery }) }}</div>
 
         <div v-else class="flex flex-col gap-2">
@@ -48,7 +57,7 @@
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 mb-0.5 flex-wrap">
                   <span class="font-medium text-warm-800 dark:text-warm-200 truncate">
-                    {{ session.name }}
+                    {{ savedSessionLabel(session) }}
                   </span>
                   <GemBadge :gem="session.config_type === 'terrarium' ? 'iolite' : 'aquamarine'">
                     {{ session.config_type }}
@@ -68,6 +77,7 @@
                   </span>
                   <span v-if="session.format_version && session.format_version > 1" class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-warm-100 dark:bg-warm-800 text-warm-500" :title="`Format version ${session.format_version}`"> v{{ session.format_version }} </span>
                 </div>
+                <div v-if="savedSessionLabel(session) !== session.name" class="text-xs text-warm-400 truncate" :title="session.name">{{ session.name }}</div>
                 <div class="flex items-center gap-3 text-xs text-secondary">
                   <span v-if="session.config_path" class="font-mono truncate">
                     {{ session.config_path }}
@@ -151,6 +161,7 @@
 </template>
 
 <script setup>
+import { savedSessionLabel } from "@/utils/sessionLabels"
 import { ElMessage, ElMessageBox } from "element-plus"
 import { openSavedSessionHistory, prepareWorkspaceResume } from "@/utils/workdirPrompt"
 
@@ -191,24 +202,36 @@ const loading = ref(false)
 const error = ref(null)
 const resuming = ref(null)
 const searchQuery = ref("")
+const configType = ref("")
+const sort = ref("last_active")
+let requestGeneration = 0
 let searchTimer = null
 
 const buildModalOpen = ref(false)
 const buildTarget = ref(null)
 const buildRebuild = ref(false)
 
-watch(searchQuery, () => {
+watch([searchQuery, configType, sort], () => {
+  requestGeneration++
   clearTimeout(searchTimer)
+  loading.value = true
+  currentOffset.value = 0
   searchTimer = setTimeout(() => {
     currentOffset.value = 0
     fetchSessions()
   }, 300)
 })
 
+onBeforeUnmount(() => {
+  requestGeneration++
+  clearTimeout(searchTimer)
+})
+
 const hasMore = computed(() => currentOffset.value + pageSize < totalSessions.value)
 const hasPrev = computed(() => currentOffset.value > 0)
 
 async function fetchSessions(forceRefresh = false) {
+  const generation = ++requestGeneration
   loading.value = true
   error.value = null
   try {
@@ -222,13 +245,16 @@ async function fetchSessions(forceRefresh = false) {
       offset: currentOffset.value,
       search: searchQuery.value.trim(),
       refresh: forceRefresh,
+      configType: configType.value,
+      sort: sort.value,
     })
+    if (generation !== requestGeneration) return
     sessions.value = result.sessions || []
     totalSessions.value = result.total || 0
   } catch (err) {
-    error.value = err.response?.data?.detail || err.message
+    if (generation === requestGeneration) error.value = err.response?.data?.detail || err.message
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
 }
 
