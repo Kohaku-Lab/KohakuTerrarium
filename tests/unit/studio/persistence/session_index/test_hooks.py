@@ -52,12 +52,17 @@ class TestPushIndexUpdate:
         try:
             push_index_update(s, idx)
             s.append_event("alice", "user_input", {"content": "fresh preview"})
+            s.save_conversation(
+                "alice", [{"role": "user", "content": "latest request"}]
+            )
             s.flush()
             push_index_update(s, idx)
         finally:
             s.close()
         row = idx.get("alice.kohakutr")
-        assert row["preview"] == "fresh preview"
+        assert row["preview"] == "latest request"
+        assert idx.list(search="latest").total == 1
+        assert idx.list(search="fresh").total == 0
         assert idx.list().total == 1  # not duplicated
 
     def test_swallows_load_meta_exception(self, idx):

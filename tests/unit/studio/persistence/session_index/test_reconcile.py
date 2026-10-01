@@ -623,3 +623,71 @@ class TestWorkerBudget:
         assert report.read == 4
         assert idx.list().total == 4
         assert sizes == [2]
+
+
+def test_listing_preview_prefers_latest_snapshot_user_message(session_dir):
+    path = session_dir / "recent.kohakutr"
+    with closing(SessionStore(path)) as store:
+        store.init_meta("sid", "agent", "", "", ["alice"])
+        store.append_event("alice", "user_input", {"content": "hello"})
+        store.save_conversation(
+            "alice",
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "user", "content": "Investigate rendering race"},
+                {"role": "assistant", "content": "Working"},
+                {
+                    "role": "user",
+                    "content": "tool output",
+                    "metadata": {"kind": "tool_results"},
+                },
+            ],
+        )
+        store.flush()
+    assert read_entry_from_disk(path).preview == "Investigate rendering race"
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        [],
+        [{"role": "assistant", "content": "done"}],
+        [{"role": "user", "content": "feedback", "metadata": {"kind": "tool_results"}}],
+    ],
+)
+def test_cleared_snapshot_does_not_resurrect_old_prompt(session_dir, snapshot):
+    path = session_dir / "cleared.kohakutr"
+    with closing(SessionStore(path)) as store:
+        store.init_meta("sid", "agent", "", "", ["alice"])
+        store.append_event("alice", "user_input", {"content": "deleted prompt"})
+        store.save_conversation("alice", snapshot)
+        store.flush()
+        assert reconcile_mod._listing_preview(store, store.load_meta()) == ""
+    assert read_entry_from_disk(path).preview == ""
+
+
+@pytest.mark.parametrize(
+    "snapshot, expected",
+    [
+        (None, None),
+        ("not json", None),
+        ({"unexpected": []}, None),
+        ('{"messages": [{"role": "user", "content": "JSON prompt"}]}', "JSON prompt"),
+        (
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Read this"},
+                        {"type": "image_url", "image_url": {"url": "data:secret"}},
+                    ],
+                },
+                {"role": "user", "content": "  "},
+            ],
+            "Read this [image]",
+        ),
+        ([None, {"role": "user", "content": "x" * 250}], "x" * 200),
+    ],
+)
+def test_snapshot_preview_compatibility(snapshot, expected):
+    assert reconcile_mod._snapshot_user_preview(snapshot) == expected

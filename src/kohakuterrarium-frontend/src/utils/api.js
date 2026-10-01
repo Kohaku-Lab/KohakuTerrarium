@@ -804,10 +804,19 @@ export const sessionAPI = {
 
   // ── saved-session lookups ────────────────────────────────────────
 
-  async list({ limit = 20, offset = 0, search = "", refresh = false } = {}) {
+  async list({
+    limit = 20,
+    offset = 0,
+    search = "",
+    refresh = false,
+    configType = "",
+    sort = "last_active",
+  } = {}) {
     const params = { limit, offset }
     if (search) params.search = search
     if (refresh) params.refresh = true
+    if (configType) params.config_type = configType
+    if (sort !== "last_active") params.sort = sort
     const { data } = await api.get("/sessions", { params })
     return data
   },

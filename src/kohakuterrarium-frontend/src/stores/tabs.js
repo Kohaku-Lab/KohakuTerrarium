@@ -40,6 +40,7 @@ import { defineStore } from "pinia"
 
 import { acquireScope, releaseScope } from "@/composables/useScope"
 import { attachAPI } from "@/utils/api"
+import { resumedTabMeta } from "@/utils/resumedTab"
 import { parseTabId } from "@/utils/tabsUrl"
 import {
   firstLeafId,
@@ -203,6 +204,7 @@ export const useTabsStore = defineStore("tabs", {
     openTab(spec) {
       this._ensureTree()
       if (this.byId[spec.id]) {
+        if (["attach", "inspector"].includes(spec.kind)) this.updateSurfaceMeta(spec.target, spec)
         const gid = this._groupOf(spec.id)
         if (gid) {
           this.tabGroups[gid].activeId = spec.id
@@ -571,6 +573,22 @@ export const useTabsStore = defineStore("tabs", {
 
     // ─── live-attach lifecycle ────────────────────────────────
 
+    /** Refresh presentation fields without changing identity, placement, or focus. */
+    updateSurfaceMeta(target, meta = {}) {
+      let changed = false
+      for (const tab of Object.values(this.byId)) {
+        if (tab.target !== target || !["attach", "inspector"].includes(tab.kind)) continue
+        for (const key of ["config_name", "type"]) {
+          const value = meta[key]
+          if (typeof value === "string" && value.trim() && value !== tab[key]) {
+            tab[key] = value
+            changed = true
+          }
+        }
+      }
+      if (changed) this._dirty()
+    },
+
     /** Open a surface tab for a running target. */
     async openSurface(target, surface, meta = {}) {
       if (surface === "chat") {
@@ -604,6 +622,7 @@ export const useTabsStore = defineStore("tabs", {
       const { useInstancesStore } = await import("@/stores/instances")
       const instances = useInstancesStore()
       let id
+      let resumeMeta = {}
       if (kind === "resume") {
         if (!sessionName) throw new Error("createSession: sessionName required for resume")
         const { sessionAPI } = await import("@/utils/api")
@@ -624,6 +643,7 @@ export const useTabsStore = defineStore("tabs", {
           pwd: prepared.pwd,
         })
         id = result.instance_id
+        resumeMeta = resumedTabMeta(result, sessionName)
       } else {
         if (!configPath) throw new Error("createSession: configPath required")
         if (!pwd) throw new Error("createSession: pwd required")
@@ -635,7 +655,7 @@ export const useTabsStore = defineStore("tabs", {
       } catch {
         /* ignore — tab still works with just the id */
       }
-      const meta = inst ? { config_name: inst.config_name, type: inst.type } : {}
+      const meta = inst ? { config_name: inst.config_name, type: inst.type } : resumeMeta
       if (attachMode !== "none") {
         const surfaces = []
         if (attachMode === "chat" || attachMode === "both") surfaces.push("chat")

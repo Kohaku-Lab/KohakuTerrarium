@@ -142,7 +142,7 @@ const label = computed(() => {
     case "inspector":
       return `${tab.config_name ?? tab.target ?? "agent"} · ${t("shell.tab.suffix.watch")}`
     case "session-viewer":
-      return tab.name ?? "session"
+      return tab.config_name || tab.name || "session"
     case "saved-sessions":
       return t("shell.rail.savedSessions")
     case "studio-editor":

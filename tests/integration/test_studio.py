@@ -458,7 +458,7 @@ class TestStudioIntegration:
             entry = next(e for e in saved if e["name"] == saved_stem)
             assert entry["config_type"] == "agent"
             assert entry["agents"] == ["scout"]
-            assert entry["preview"] == "ping one"
+            assert entry["preview"] == "ping two"
 
             saved_path = studio.persistence.resolve_path(saved_stem)
             assert saved_path is not None and saved_path.exists()

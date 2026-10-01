@@ -23,7 +23,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_TABLES = frozenset({"meta", "events", "state"})
+_TABLES = frozenset({"meta", "events", "state", "conversation"})
 
 
 def _text(key: Any) -> str:

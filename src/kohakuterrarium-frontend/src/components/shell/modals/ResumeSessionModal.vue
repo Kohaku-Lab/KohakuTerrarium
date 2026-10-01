@@ -12,16 +12,17 @@
           {{ search ? t("shell.modal.resume.matches") : t("shell.modal.resume.recent") }}
         </label>
         <div v-if="loading" class="text-warm-400 italic text-sm py-3 text-center">{{ t("shell.modal.resume.loading") }}</div>
-        <div v-else-if="filteredSessions.length === 0" class="text-warm-400 italic text-sm py-3 text-center">
+        <div v-else-if="allSessions.length === 0" class="text-warm-400 italic text-sm py-3 text-center">
           {{ search ? t("shell.modal.resume.noMatches") : t("shell.modal.resume.empty") }}
         </div>
         <div v-else class="max-h-72 overflow-y-auto space-y-1 pr-1">
-          <label v-for="s in filteredSessions" :key="s.session_name ?? s.name" class="flex items-start gap-3 px-3 py-2 rounded cursor-pointer transition-colors border border-transparent" :class="selected === (s.session_name ?? s.name) ? 'bg-iolite/10 border-iolite/40' : 'hover:bg-warm-100 dark:hover:bg-warm-900'">
+          <label v-for="s in allSessions" :key="s.session_name ?? s.name" class="flex items-start gap-3 px-3 py-2 rounded cursor-pointer transition-colors border border-transparent" :class="selected === (s.session_name ?? s.name) ? 'bg-iolite/10 border-iolite/40' : 'hover:bg-warm-100 dark:hover:bg-warm-900'">
             <input v-model="selected" type="radio" :value="s.session_name ?? s.name" class="mt-1 accent-iolite" />
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium truncate">
-                {{ s.session_name ?? s.name }}
+                {{ savedSessionLabel(s) }}
               </div>
+              <div v-if="savedSessionLabel(s) !== (s.session_name ?? s.name)" class="text-xs text-warm-400 truncate">{{ s.session_name ?? s.name }}</div>
               <div class="text-xs text-warm-500">
                 <span v-if="s.last_active">{{ formatDate(s.last_active) }}</span>
                 <span v-if="s.turn_count"> · {{ s.turn_count }} turns</span>
@@ -34,6 +35,12 @@
             </div>
           </label>
         </div>
+      </div>
+
+      <div v-if="total > pageSize" class="flex items-center justify-between gap-2 text-xs">
+        <button type="button" class="btn-secondary" :disabled="loading || offset === 0" @click="changePage(-1)">{{ t("sessions.prev") }}</button>
+        <span>{{ offset + 1 }}–{{ Math.min(offset + pageSize, total) }} / {{ total }}</span>
+        <button type="button" class="btn-secondary" :disabled="loading || offset + pageSize >= total" @click="changePage(1)">{{ t("sessions.next") }}</button>
       </div>
 
       <SitePicker v-model="onNode" :label="t('cluster.resume.label')" />
@@ -58,7 +65,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { savedSessionLabel } from "@/utils/sessionLabels"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
@@ -86,22 +94,52 @@ const resuming = ref(false)
 const errorMsg = ref("")
 const onNode = ref("_host")
 
-onMounted(async () => {
+const pageSize = 20
+const offset = ref(0)
+const total = ref(0)
+let requestGeneration = 0
+let searchTimer
+
+async function fetchSessions() {
+  const generation = ++requestGeneration
+  loading.value = true
+  errorMsg.value = ""
   try {
-    const data = await sessionAPI.list({ limit: 50 })
+    const data = await sessionAPI.list({ limit: pageSize, offset: offset.value, search: search.value.trim() })
+    if (generation !== requestGeneration) return
     const list = Array.isArray(data) ? data : (data?.sessions ?? data?.items ?? [])
     allSessions.value = Array.isArray(list) ? list : []
-  } catch {
+    total.value = data?.total ?? allSessions.value.length
+  } catch (err) {
+    if (generation !== requestGeneration) return
     allSessions.value = []
+    total.value = 0
+    errorMsg.value = err?.response?.data?.detail || err?.message || String(err)
   } finally {
-    loading.value = false
+    if (generation === requestGeneration) loading.value = false
   }
+}
+
+watch(search, () => {
+  requestGeneration++
+  clearTimeout(searchTimer)
+  selected.value = null
+  offset.value = 0
+  loading.value = true
+  searchTimer = setTimeout(fetchSessions, 300)
 })
 
-const filteredSessions = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  if (!q) return allSessions.value.slice(0, 10)
-  return allSessions.value.filter((s) => (s.session_name ?? s.name ?? "").toLowerCase().includes(q))
+function changePage(delta) {
+  clearTimeout(searchTimer)
+  offset.value = Math.max(0, offset.value + delta * pageSize)
+  selected.value = null
+  fetchSessions()
+}
+
+onMounted(fetchSessions)
+onBeforeUnmount(() => {
+  requestGeneration++
+  clearTimeout(searchTimer)
 })
 
 // Default the site picker to the session's originating site when the
@@ -115,7 +153,7 @@ watch(selected, (sid) => {
   if (origin) onNode.value = origin
 })
 
-const canSubmit = computed(() => Boolean(selected.value && !resuming.value))
+const canSubmit = computed(() => Boolean(selected.value && !resuming.value && !loading.value))
 
 async function onSubmit() {
   if (!canSubmit.value) return

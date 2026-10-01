@@ -180,6 +180,25 @@ compensates already resumed members, removes partial runtime metadata, preserves
 the original saved lifecycle, and returns a non-success response rather than a
 degraded partial cluster.
 
+## Finding saved sessions in Studio
+
+The recent-session list, Sessions page, and Resume dialog display the saved
+terrarium name or primary creature name, with the storage key as a secondary
+label. File keys remain unchanged for resume, history, and deletion. Open chat
+and inspector tabs refresh their names when runtime metadata arrives, without
+closing the tab.
+
+Listing previews use the latest nonempty user message in the primary creature's
+saved active conversation, excluding tool feedback. Legacy sessions without a
+readable snapshot fall back to their first user-input event. An empty saved
+conversation has an empty preview. This is a short text preview, not an AI summary;
+compacted snapshots may no longer contain older user messages. The derived index
+rebuilds on upgrade; session files are not rewritten for this change.
+
+Use search, session type, and last-active or creation-time sorting on the Sessions
+page. The Resume dialog searches the server index and pages through results, so
+older sessions are reachable beyond the initial recent page.
+
 ## HTTP history pagination
 
 History target endpoints return one bounded page, with a default and maximum

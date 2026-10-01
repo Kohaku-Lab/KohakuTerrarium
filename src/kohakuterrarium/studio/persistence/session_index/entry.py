@@ -37,7 +37,8 @@ def _max_mtime_with_wal(path: Path, *, fallback: float | None = None) -> float:
 # mismatch. Version 2 added terrarium/config search fields and WAL-aware
 # fingerprints. Version 3 added the persisted conversation-open marker;
 # version 4 added stable conversation identities.
-SCHEMA_VERSION = 4
+# Version 5 refreshes listing previews from the saved active conversation.
+SCHEMA_VERSION = 5
 
 
 @dataclass

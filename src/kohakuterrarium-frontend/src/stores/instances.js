@@ -1,4 +1,5 @@
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { useTabsStore } from "@/stores/tabs"
 import { getRuntimeScope } from "@/stores/runtimeScope"
 import { agentAPI, sessionAPI, terrariumAPI } from "@/utils/api"
 
@@ -75,6 +76,7 @@ export const useInstancesStore = defineStore("instances", {
             return fresh || _mergeSession(data, previous.get(data.session_id))
           })
           this.list.push(...refreshed.values())
+          for (const instance of this.list) useTabsStore().updateSurfaceMeta(instance.id, instance)
           if (this.current) {
             this.current = this.list.find((item) => item.id === this.current.id) || null
           }
@@ -119,6 +121,8 @@ export const useInstancesStore = defineStore("instances", {
         const data = await sessionAPI.getActive(id)
         const loaded = _mapSession(data)
         if (!isCurrent() || request.stopped.has(loaded.id)) return null
+        useTabsStore().updateSurfaceMeta(id, loaded)
+        if (id !== loaded.id) useTabsStore().updateSurfaceMeta(loaded.id, loaded)
         this.current = loaded
         const idx = this.list.findIndex((item) => item.id === loaded.id)
         if (idx >= 0) {
