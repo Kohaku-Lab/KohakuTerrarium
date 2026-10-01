@@ -17,6 +17,7 @@ Query params:
 """
 
 import asyncio
+import codecs
 import json
 import re
 from pathlib import Path
@@ -55,44 +56,77 @@ def _line_level(line: str) -> int:
     return _LEVEL_ORDER.get(m.group(1), 20)
 
 
+_READ_CHUNK_BYTES = 64 * 1024
+
+
 def _read_backlog(path: Path, lines: int) -> list[str]:
-    """Return the last ``lines`` lines of ``path`` (best-effort)."""
-    if not path.is_file():
+    """Read a suffix in bounded chunks, preserving splitlines semantics."""
+    if lines <= 0:
         return []
     try:
         with open(path, "rb") as f:
-            data = f.read()
+            pos = f.seek(0, 2)
+            chunks = []
+            newlines = 0
+            # One extra newline excludes the first, potentially partial line.
+            while pos and newlines <= lines:
+                size = min(pos, _READ_CHUNK_BYTES)
+                pos -= size
+                f.seek(pos)
+                chunk = f.read(size)
+                chunks.append(chunk)
+                newlines += chunk.count(b"\n")
     except OSError:
         return []
-    text = data.decode("utf-8", errors="replace")
-    return text.splitlines()[-lines:]
+    return (
+        b"".join(reversed(chunks))
+        .decode("utf-8", errors="replace")
+        .splitlines()[-lines:]
+    )
+
+
+def _log_size(path: Path) -> int:
+    """Return the current end offset, tolerating missing log files."""
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _read_chunk(path: Path, pos: int) -> tuple[bytes, int, bool]:
+    """Read at most one chunk; signal a truncation to reset partial text."""
+    try:
+        with open(path, "rb") as f:
+            reset = f.seek(0, 2) < pos
+            if reset:
+                pos = 0
+            f.seek(pos)
+            chunk = f.read(_READ_CHUNK_BYTES)
+            return chunk, pos + len(chunk), reset
+    except OSError:
+        return b"", pos, False
 
 
 async def _tail(path: Path, send) -> None:
-    """Poll a local log file for complete new lines until the socket closes."""
-    pos = path.stat().st_size if path.is_file() else 0
+    """Poll for complete new lines, performing disk work off the event loop."""
+    pos = await asyncio.to_thread(_log_size, path)
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     buf = ""
     try:
         while True:
-            if path.is_file():
-                try:
-                    size = path.stat().st_size
-                    # Rotation or truncation invalidates the saved offset; reset
-                    # to preserve the beginning of the replacement file.
-                    if size < pos:
-                        pos = 0
-                    with open(path, "rb") as f:
-                        f.seek(pos)
-                        chunk = f.read()
-                        pos = f.tell()
-                except OSError:
-                    chunk = b""
-                if chunk:
-                    buf += chunk.decode("utf-8", errors="replace")
-                    while "\n" in buf:
-                        line, _, buf = buf.partition("\n")
-                        await send(line)
-            await asyncio.sleep(0.5)
+            chunk, pos, reset = await asyncio.to_thread(_read_chunk, path, pos)
+            if reset:
+                decoder.reset()
+                buf = ""
+            if chunk:
+                buf += decoder.decode(chunk)
+                complete = buf.split("\n")
+                buf = complete.pop()
+                for line in complete:
+                    await send(line)
+            # Drain bursts promptly; each read still yields to the event loop.
+            if len(chunk) < _READ_CHUNK_BYTES:
+                await asyncio.sleep(0.5)
     except asyncio.CancelledError:
         raise
     except WebSocketDisconnect:
@@ -126,7 +160,7 @@ async def ws_daemon_logs(ws: WebSocket) -> None:
             raise
 
     try:
-        for line in _read_backlog(path, lines):
+        for line in await asyncio.to_thread(_read_backlog, path, lines):
             await send_line(line)
         if not follow:
             await ws.send_text(

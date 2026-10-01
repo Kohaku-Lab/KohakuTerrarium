@@ -2267,6 +2267,10 @@ terrarium:
             frame = ws.receive_json()
             assert frame["type"] in {"meta", "error"}
 
+        # A zero-backlog daemon stream closes without replaying historical logs.
+        with client.websocket_connect("/ws/daemon/logs?follow=false&lines=0") as ws:
+            assert ws.receive_json() == {"status": "closed", "reason": "follow=false"}
+
         # File-watch WS: a live creature with a working dir streams a
         # ``ready`` frame; an unknown agent gets an ``error`` frame.
         with client.websocket_connect(f"/ws/files/{alice_id}") as ws:
