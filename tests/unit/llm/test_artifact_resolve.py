@@ -8,8 +8,10 @@ identity no-op when nothing needs resolving (the common hot path).
 """
 
 import base64
+import io
 
 import pytest
+from PIL import Image
 
 from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.artifact_resolve import (
@@ -30,6 +32,37 @@ def _lay_artifact(tmp_path, monkeypatch, sid="sid123", rel="pic.png", data=b"PNG
 
 
 class TestResolveArtifactUrl:
+    @pytest.mark.parametrize("reference_kind", ["file", "artifact"])
+    @pytest.mark.parametrize(
+        ("image_format", "mime", "filename"),
+        [
+            ("JPEG", "image/jpeg", "misnamed.png"),
+            ("PNG", "image/png", "misnamed.jpg"),
+            ("GIF", "image/gif", "misnamed.png"),
+            ("WEBP", "image/webp", "misnamed.png"),
+            ("JPEG", "image/jpeg", "no-extension"),
+        ],
+    )
+    def test_actual_image_type_overrides_filename(
+        self, tmp_path, monkeypatch, reference_kind, image_format, mime, filename
+    ):
+        encoded = io.BytesIO()
+        Image.new("RGB", (2, 2), color=(4, 8, 16)).save(encoded, format=image_format)
+        data = encoded.getvalue()
+        if reference_kind == "file":
+            path = tmp_path / filename
+            path.write_bytes(data)
+            url = path.as_uri()
+        else:
+            directory = _lay_artifact(tmp_path, monkeypatch, rel=filename, data=data)
+            path = directory / "sid123.artifacts" / filename
+            url = f"/api/sessions/sid123/artifacts/{filename}"
+
+        assert resolve_artifact_url(url) == (
+            f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+        )
+        assert path.read_bytes() == data
+
     def test_non_artifact_urls_passthrough(self):
         assert resolve_artifact_url("https://example.com/x.png") == (
             "https://example.com/x.png"

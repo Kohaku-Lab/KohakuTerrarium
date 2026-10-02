@@ -1112,6 +1112,59 @@ class TestLlmIntegration:
         #    stable, which is what makes session resume safe.
         assert [m.to_dict() for m in rebuilt] == wire
 
+        jpeg_buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), "blue").save(jpeg_buffer, format="JPEG")
+        expected_jpeg = jpeg_buffer.getvalue()
+        mime_sessions = tmp_path / "mime-sessions"
+        mime_artifacts = mime_sessions / "synthetic-mime.artifacts"
+        mime_artifacts.mkdir(parents=True)
+        mislabeled = mime_artifacts / "synthetic-jpeg.png"
+        mislabeled.write_bytes(expected_jpeg)
+        jpeg_result = await ReadTool().execute(
+            {"path": str(mislabeled)},
+            context=ToolContext(
+                agent_name="reader", session=None, working_dir=tmp_path
+            ),
+        )
+        assert jpeg_result.success
+        assert jpeg_result.output[1].url == mislabeled.resolve().as_uri()
+        mime_wire = messages_to_dicts(
+            [
+                UserMessage(
+                    [
+                        jpeg_result.output[0],
+                        ImagePart(
+                            url="/api/sessions/synthetic-mime/artifacts/synthetic-jpeg.png"
+                        ),
+                    ]
+                )
+            ]
+        )
+        saved_mime_wire = json.dumps(mime_wire)
+        replayed_mime_wire = json.loads(saved_mime_wire)
+        mime_requests = []
+        mime_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=mime_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            with monkeypatch.context() as mime_patch:
+                mime_patch.setattr(
+                    artifact_resolve, "_session_dir", lambda: mime_sessions
+                )
+                assert (
+                    await mime_provider.chat_complete(replayed_mime_wire)
+                ).content == ANTHROPIC_ANSWER
+        finally:
+            await mime_provider.close()
+        assert json.dumps(replayed_mime_wire) == saved_mime_wire
+        mime_content = mime_requests[0]["messages"][0]["content"]
+        assert "image/jpeg" in mime_content[0]["text"]
+        assert mime_content[1]["source"]["media_type"] == "image/jpeg"
+        assert base64.b64decode(mime_content[1]["source"]["data"]) == expected_jpeg
+        assert mislabeled.read_bytes() == expected_jpeg
+
         switched = [
             SystemMessage("\n\n"),
             UserMessage([TextPart("\n\n"), image]),

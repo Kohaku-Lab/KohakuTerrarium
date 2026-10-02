@@ -64,6 +64,19 @@ def _local_media_path(url: str) -> Path | None:
     return resolve_artifact_file(artifacts, match.group("path"))
 
 
+def _image_mime(data: bytes) -> str | None:
+    """Identify supported raster formats by signature without decoding pixels."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 def resolve_artifact_url(url: str) -> str:
     """Inline a local media reference, preserving the original URL on failure."""
     if not isinstance(url, str):
@@ -84,7 +97,11 @@ def resolve_artifact_url(url: str) -> str:
         )
         return url
     ext = path.suffix.lower()
-    mime = _ARTIFACT_MIME_BY_EXT.get(ext, "application/octet-stream")
+    # Canvas artifacts retain their source filename, which may not match the
+    # encoded format. Describe the bytes we send, leaving stored refs untouched.
+    mime = _image_mime(data) or _ARTIFACT_MIME_BY_EXT.get(
+        ext, "application/octet-stream"
+    )
     b64 = base64.b64encode(data).decode("ascii")
     return f"data:{mime};base64,{b64}"
 
