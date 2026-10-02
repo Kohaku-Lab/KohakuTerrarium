@@ -28,6 +28,13 @@ def _workspace_resume_boundaries(monkeypatch):
         return {"legacy": False, "ready": True, "members": [], "gaps": []}
 
     monkeypatch.setattr(resume_mod, "_worker_workspace_preflight", ready)
+    canonical = resume_mod.canonical_resume_path
+    # Transport fixtures use opaque bytes; retain real missing-file handling.
+    monkeypatch.setattr(
+        resume_mod,
+        "canonical_resume_path",
+        lambda path, root: path if path.is_file() else canonical(path, root),
+    )
     monkeypatch.setattr(
         resume_mod,
         "_persist_remote_workspace_meta",
@@ -41,7 +48,7 @@ def _workspace_resume_boundaries(monkeypatch):
     monkeypatch.setattr(resume_mod, "_read_saved_cluster_members", lambda path: None)
 
 
-def _app(*, service=None, session_dir: Path = Path("/")):
+def _app(*, session_dir: Path, service=None):
     app = FastAPI()
     app.state.lab_mode = "standalone"
     resolved = service or SimpleNamespace()
@@ -123,7 +130,7 @@ class TestRemoteWritePath:
             resume_mod, "resolve_session_path_in", lambda name, session_dir: ghost
         )
         svc = _Svc(_FakeHost())
-        client = TestClient(_app(service=svc))
+        client = TestClient(_app(session_dir=tmp_path, service=svc))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 404
 
@@ -136,7 +143,7 @@ class TestRemoteWritePath:
         host = _FakeHost(
             responses={"terrarium.files:stat": {"error": {"message": "no write"}}}
         )
-        client = TestClient(_app(service=_Svc(host)))
+        client = TestClient(_app(session_dir=tmp_path, service=_Svc(host)))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 502
 
@@ -154,7 +161,7 @@ class TestRemoteWritePath:
                 "terrarium.session:resume": {"error": {"message": "bad resume"}},
             }
         )
-        client = TestClient(_app(service=_Svc(host)))
+        client = TestClient(_app(session_dir=tmp_path, service=_Svc(host)))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 502
 
@@ -169,7 +176,7 @@ class TestRemoteWritePath:
         host = _FakeHost(
             raises={"terrarium.files:write_begin": RuntimeError("transport down")}
         )
-        client = TestClient(_app(service=_Svc(host)))
+        client = TestClient(_app(session_dir=tmp_path, service=_Svc(host)))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 502
 
@@ -217,7 +224,7 @@ class TestRemoteWritePath:
                 raise RuntimeError("controller roster refresh unavailable")
 
         svc = _RosterSvc(host)
-        client = TestClient(_app(service=svc))
+        client = TestClient(_app(session_dir=tmp_path, service=svc))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 200
         body = resp.json()
@@ -265,7 +272,7 @@ class TestRemoteWritePath:
                 },
             }
         )
-        client = TestClient(_app(service=_Svc(host)))
+        client = TestClient(_app(session_dir=tmp_path, service=_Svc(host)))
         resp = client.post(
             "/sessions/x/resume", json={"on_node": "w1", "pwd": "/new/dir"}
         )
@@ -300,7 +307,7 @@ class TestRemoteWritePath:
             }
         )
 
-        response = TestClient(_app(service=_Svc(host))).post(
+        response = TestClient(_app(session_dir=tmp_path, service=_Svc(host))).post(
             "/sessions/x/resume", json={"on_node": "w1"}
         )
 
@@ -334,7 +341,7 @@ class TestRemoteWritePath:
                 },
             }
         )
-        client = TestClient(_app(service=_Svc(host)))
+        client = TestClient(_app(session_dir=tmp_path, service=_Svc(host)))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 200
         assert resp.json()["session"]["pwd_exists"] is False
@@ -367,7 +374,7 @@ class TestRemoteWritePath:
                 return self._responses.get(f"{namespace}:{type}", {})
 
         host = _FailingHost()
-        response = TestClient(_app(service=_Svc(host))).post(
+        response = TestClient(_app(session_dir=tmp_path, service=_Svc(host))).post(
             "/sessions/x/resume", json={"on_node": "w1"}
         )
 
@@ -409,7 +416,7 @@ class TestRemoteWritePath:
                 "terrarium.session:resume": {"meta": {}},
             }
         )
-        client = TestClient(_app(service=_Svc(host)))
+        client = TestClient(_app(session_dir=tmp_path, service=_Svc(host)))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 502
         cleanup = [
@@ -453,7 +460,7 @@ class TestRemoteWritePath:
             }
         )
 
-        response = TestClient(_app(service=_Svc(host))).post(
+        response = TestClient(_app(session_dir=tmp_path, service=_Svc(host))).post(
             "/sessions/x/resume", json={"on_node": "w1"}
         )
 
@@ -572,7 +579,7 @@ class TestClusterResume:
             _ci("cid-alpha-2", "alpha-2", "new-a"),
             _ci("cid-bravo", "bravo", "new-b"),
         ]
-        client = TestClient(_app(service=svc))
+        client = TestClient(_app(session_dir=tmp_path, service=svc))
         resp = client.post(
             f"/sessions/{sid_a}/resume",
             json={
@@ -664,7 +671,7 @@ class TestClusterResume:
             _ci("cid-b", "agent-b", "new-b"),
         ]
 
-        response = TestClient(_app(service=service)).post(
+        response = TestClient(_app(session_dir=tmp_path, service=service)).post(
             "/sessions/renamed/resume",
             json={"on_node": "w1"},
         )
@@ -689,7 +696,7 @@ class TestClusterResume:
         )
         host = _FakeHost()
 
-        response = TestClient(_app(service=_Svc(host))).post(
+        response = TestClient(_app(session_dir=tmp_path, service=_Svc(host))).post(
             "/sessions/sid-a/resume",
             json={"on_node": "w1"},
         )
@@ -712,7 +719,7 @@ class TestClusterResume:
         )
         host = _FakeHost()
         svc = _ClusterSvc(host, nodes=("w1",))  # w2 missing on purpose
-        client = TestClient(_app(service=svc))
+        client = TestClient(_app(session_dir=tmp_path, service=svc))
         resp = client.post(
             f"/sessions/{sid_a}/resume",
             json={
@@ -744,7 +751,7 @@ class TestClusterResume:
         host = _FakeHost()
         svc = _ClusterSvc(host)
 
-        response = TestClient(_app(service=svc)).post(
+        response = TestClient(_app(session_dir=tmp_path, service=svc)).post(
             "/sessions/sid-a/resume",
             json={
                 "on_node": "w1",
@@ -777,7 +784,7 @@ class TestClusterResume:
         host = _FakeHost()
         service = _ClusterSvc(host)
 
-        response = TestClient(_app(service=service)).post(
+        response = TestClient(_app(session_dir=tmp_path, service=service)).post(
             "/sessions/sid-a/resume",
             json={
                 "on_node": "w1",
@@ -830,7 +837,7 @@ class TestClusterResume:
 
         host = _FailingHost()
         svc = _ClusterSvc(host)
-        client = TestClient(_app(service=svc))
+        client = TestClient(_app(session_dir=tmp_path, service=svc))
         resp = client.post(
             f"/sessions/{sid_a}/resume",
             json={
@@ -941,7 +948,7 @@ class TestClusterResume:
 
         svc.connect = fail_connect
         svc.disconnect = disconnect
-        client = TestClient(_app(service=svc))
+        client = TestClient(_app(session_dir=tmp_path, service=svc))
         resp = client.post(
             f"/sessions/{sid_a}/resume",
             json={

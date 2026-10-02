@@ -40,6 +40,7 @@ from kohakuterrarium.api.routes.persistence.resume_remote import (
     worker_workspace_preflight as _worker_workspace_preflight,
 )
 from kohakuterrarium.api.routes.persistence.resume_request import (
+    canonical_resume_path,
     partial_dirty as _partial_dirty,
     reject_lab_host_target as _reject_lab_host_target,
     resume_intent as _resume_intent,
@@ -93,6 +94,7 @@ async def preflight_resume(
     path = await asyncio.to_thread(resolve_session_path_in, session_name, session_dir)
     if path is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    path = await asyncio.to_thread(canonical_resume_path, path, session_dir)
     requested_members = req.members if req is not None and req.members else None
     saved_members = await asyncio.to_thread(_read_saved_cluster_members, path)
     primary_sid = await asyncio.to_thread(
@@ -259,6 +261,7 @@ async def resume_session(
         raise HTTPException(
             status_code=404, detail=f"Session {session_name!r} not found"
         )
+    path = await asyncio.to_thread(canonical_resume_path, path, session_dir)
     key = await asyncio.to_thread(session_coordination_key, path, session_dir)
     intent = _resume_intent(body)
     try:
@@ -294,6 +297,12 @@ async def _resume_session(
     called, so invalid resumes cannot allocate an engine runtime.
     """
     on_node = req.on_node or "_host"
+
+    current = await asyncio.to_thread(canonical_resume_path, path, session_dir)
+    if current != path:
+        raise HTTPException(
+            status_code=409, detail="Session successor changed; retry resume"
+        )
 
     if on_node == "_host":
         try:

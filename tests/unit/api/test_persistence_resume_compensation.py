@@ -19,6 +19,8 @@ def _resume_boundaries(monkeypatch):
         return {"ready": True}
 
     monkeypatch.setattr(resume_mod, "_worker_workspace_preflight", ready)
+    # Transport/rollback fixtures are opaque byte payloads, not session DBs.
+    monkeypatch.setattr(resume_mod, "canonical_resume_path", lambda path, root: path)
     monkeypatch.setattr(
         resume_mod,
         "_persist_remote_workspace_meta",

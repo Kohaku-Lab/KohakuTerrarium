@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TypeVar
 
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.errors import SessionNotResumableError
 
 T = TypeVar("T")
 
@@ -29,6 +31,14 @@ def session_coordination_key(path: str | Path, session_dir: str | Path) -> str:
     )
     resolved = os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
     candidate = Path(path)
+    if candidate.is_file():
+        try:
+            candidate = resolve_resume_path(candidate, session_dir=session_dir)
+        except SessionNotResumableError:
+            raise
+        except Exception:
+            pass  # Corrupt stores retain the historical path-key fallback.
+        resolved = os.path.normcase(str(candidate))
     try:
         if not candidate.is_file():
             raise FileNotFoundError(candidate)

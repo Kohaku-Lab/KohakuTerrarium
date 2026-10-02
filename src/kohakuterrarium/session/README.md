@@ -19,6 +19,7 @@ state; engine-level terrarium resume lives in `terrarium/resume.py`.
 | `reader.py`             | `SessionReader`: read a finished `.kohakutr` without spelunking                                                                            |
 | `output.py`             | `SessionOutput`: output module that records text chunks, tool activity, and processing state to the store                                  |
 | `resume.py`             | `resume_agent` / `detect_session_type`: rebuild from a `.kohakutr` file, inject saved conversation and scratchpad (engine-level terrarium resume lives in `terrarium/resume.py`) |
+| `resume_target.py`      | Resume-only successor resolution, format companions, identity checks, and already-running target lookup; historical reads retain the requested file |
 | `attach.py`, `agent_attach.py`, `attachment_service.py` | Attach/detach a store to a live agent (compat re-exports + service)                                       |
 | `session.py`            | Async wrapper around a running agent + `SessionStore`                                                                                      |
 | `artifacts.py`          | Session-local artifact helpers                                                                                                             |
