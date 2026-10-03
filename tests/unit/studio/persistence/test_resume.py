@@ -2,10 +2,12 @@
 
 import asyncio
 import threading
+from contextlib import closing
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import resume_session
 from kohakuterrarium.studio.persistence.session_index import get_session_index_default
+from kohakuterrarium.studio.persistence.session_index import reconcile as reconcile_mod
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
 from kohakuterrarium.studio.sessions import index_hooks
 from kohakuterrarium.terrarium import Terrarium
@@ -25,6 +27,20 @@ async def test_resume_registers_real_history_without_index_io_on_loop(
     store.init_meta("saved", "agent", str(config), str(tmp_path), ["worker"])
     store.append_event("worker", "user_input", {"content": "resume preview"})
     store.close()
+    other_path = tmp_path / "unrelated.kohakutr"
+    with closing(SessionStore(other_path)) as other:
+        other.init_meta("unrelated", "agent", str(config), str(tmp_path), ["worker"])
+        other.append_event(
+            "worker", "user_input", {"content": "other searchable input"}
+        )
+    reads = []
+    original_read = reconcile_mod.read_entry_from_disk
+
+    def observe_read(path):
+        reads.append(path.name)
+        return original_read(path)
+
+    monkeypatch.setattr(reconcile_mod, "read_entry_from_disk", observe_read)
     writes = []
     original_upsert = SessionIndex.upsert
 
@@ -40,8 +56,13 @@ async def test_resume_registers_real_history_without_index_io_on_loop(
                 LocalTerrariumService(engine), path, llm=ScriptedLLM(["ready"])
             )
             session_id = session.session_id
-            index = get_session_index_default(tmp_path)
+            assert other_path.name not in reads
+            index = await asyncio.to_thread(get_session_index_default, tmp_path)
             assert index.get(path.name)["preview"] == "resume preview"
+            assert (
+                index.list(search="searchable").rows[0]["filename"] == other_path.name
+            )
+            assert index.count() == 2
             assert writes and threading.get_ident() not in writes
             assert session_id in engine._session_stores
     finally:

@@ -92,6 +92,11 @@ class SessionIndex:
         self._write_lock = RLock()
         self._writer_lock = RLock()
         self._close_lock = RLock()
+        self._reconcile_lock = RLock()
+        self._startup_reconciled = False
+        self._revision = 0
+        self._entry_revisions: dict[str, int] = {}
+        self._clear_revision = 0
         self._writer: ThreadPoolExecutor | None = None
         self._path = str(sidecar_path)
         sidecar_path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,6 +212,7 @@ class SessionIndex:
         """
         with self._write_lock:
             cols = entry.to_search_columns()
+            self._mark_changed(entry.filename)
             existing = (
                 self._entries.get(entry.filename)
                 if entry.filename in self._entries
@@ -233,6 +239,32 @@ class SessionIndex:
                 )
             self._entries.put(entry.filename, asdict(entry))
 
+    def _scan_revision(self) -> int:
+        """Return the process-local mutation watermark for a directory scan."""
+        with self._write_lock:
+            return self._revision
+
+    def _mark_changed(self, filename: str) -> None:
+        self._revision += 1
+        self._entry_revisions[filename] = self._revision
+
+    def _changed_since(self, filename: str, revision: int) -> bool:
+        return (
+            max(self._clear_revision, self._entry_revisions.get(filename, 0)) > revision
+        )
+
+    def _upsert_if_unchanged(self, entry: SessionIndexEntry, revision: int) -> None:
+        """Apply a scan result only when no newer local mutation supersedes it."""
+        with self._write_lock:
+            if not self._changed_since(entry.filename, revision):
+                self.upsert(entry)
+
+    def _delete_if_unchanged(self, filename: str, revision: int) -> None:
+        """Remove a missing file only when its indexed entry is unchanged."""
+        with self._write_lock:
+            if not self._changed_since(filename, revision):
+                self.delete(filename)
+
     def upsert_many(self, entries: Iterable[SessionIndexEntry]) -> int:
         n = 0
         for e in entries:
@@ -248,7 +280,9 @@ class SessionIndex:
         """
         with self._write_lock:
             if filename not in self._entries:
+                self._mark_changed(filename)
                 return False
+            self._mark_changed(filename)
             existing = self._entries.get(filename)
             rowid = int((existing or {}).get("_search_rowid", 0))
             if rowid:
@@ -267,6 +301,9 @@ class SessionIndex:
     def clear(self) -> None:
         """Wipe every table — used on schema bumps and explicit rebuild."""
         with self._write_lock:
+            self._revision += 1
+            self._clear_revision = self._revision
+            self._entry_revisions.clear()
             try:
                 self._entries.clear()
             except Exception as exc:  # noqa: BLE001
@@ -457,7 +494,7 @@ class SessionIndex:
         Explicitly deleting native wrappers forces refcount-driven cleanup,
         which prevents lingering Windows handles from blocking later opens.
         """
-        with self._close_lock:
+        with self._close_lock, self._reconcile_lock:
             with self._writer_lock:
                 if self._closed:
                     return

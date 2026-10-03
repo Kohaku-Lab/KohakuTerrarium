@@ -247,7 +247,17 @@ def reconcile(
     counts to callers. A directory scan failure aborts the pass with the index
     untouched, since an unreadable directory is not an empty one.
     """
+    with index._reconcile_lock:
+        if index._closed:
+            raise RuntimeError("Session index is closed")
+        return _reconcile(index, session_dir, full=full, workers=workers)
+
+
+def _reconcile(
+    index: SessionIndex, session_dir: Path, *, full: bool, workers: int | None
+) -> ReconcileReport:
     started = time.monotonic()
+    revision = index._scan_revision()
     if not session_dir.exists():
         return ReconcileReport(read=0, deleted=0, total=0, elapsed_ms=0.0)
 
@@ -274,7 +284,7 @@ def reconcile(
     # current disk membership throughout reconciliation.
     gone = in_index - on_disk_paths.keys()
     for fname in gone:
-        index.delete(fname)
+        index._delete_if_unchanged(fname, revision)
 
     # WAL-aware mtimes invalidate active sessions before checkpointing updates
     # the main file, keeping preview, status, and activity metadata current.
@@ -309,12 +319,12 @@ def reconcile(
             for path in to_read:
                 entry = read_entry_from_disk(path)
                 if entry is not None:
-                    index.upsert(entry)
+                    index._upsert_if_unchanged(entry, revision)
         else:
             with ThreadPoolExecutor(max_workers=worker_count) as pool:
                 for entry in pool.map(read_entry_from_disk, to_read):
                     if entry is not None:
-                        index.upsert(entry)
+                        index._upsert_if_unchanged(entry, revision)
 
     index.meta_put("last_reconcile_at", time.time())
     elapsed = (time.monotonic() - started) * 1000.0

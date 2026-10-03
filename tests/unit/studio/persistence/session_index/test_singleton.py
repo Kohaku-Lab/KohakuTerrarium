@@ -8,6 +8,8 @@ import pytest
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import session_index as pkg
+from kohakuterrarium.studio.persistence.session_index import reconcile as reconcile_mod
+from kohakuterrarium.studio.sessions import index_hooks
 from kohakuterrarium.studio.persistence.session_index import (
     ReconcileReport,
     close_session_index,
@@ -36,6 +38,103 @@ def _make_session(session_dir: Path, name: str, *, preview: str = "") -> Path:
     finally:
         s.close()
     return path
+
+
+def test_live_hook_attaches_during_bootstrap_without_stale_overwrite(
+    tmp_path, monkeypatch
+):
+    path = _make_session(tmp_path, "alice", preview="old input")
+    captured = threading.Event()
+    release = threading.Event()
+    original = reconcile_mod.read_entry_from_disk
+
+    def paused_read(path):
+        entry = original(path)
+        captured.set()
+        assert release.wait(10)
+        return entry
+
+    monkeypatch.setattr(reconcile_mod, "read_entry_from_disk", paused_read)
+    store = None
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            scan = pool.submit(get_session_index_default, tmp_path)
+            try:
+                assert captured.wait(5)
+                store = SessionStore(path)
+                store.save_conversation(
+                    "alice", [{"role": "user", "content": "new input"}]
+                )
+                attach = pool.submit(
+                    index_hooks.attach, "bootstrap-alice", store, tmp_path
+                )
+                attach.result(timeout=5)
+                index = pkg._get_open_index(tmp_path)
+                assert index.get(path.name)["preview"] == "new input"
+                assert not scan.done()
+            finally:
+                release.set()
+            assert scan.result(timeout=5).get(path.name)["preview"] == "new input"
+    finally:
+        release.set()
+        hook = index_hooks.registry().pop("bootstrap-alice", None)
+        if hook is not None:
+            hook.detach()
+        if store is not None:
+            store.close()
+        close_session_index()
+
+
+def test_failed_startup_retries_on_same_open_index(tmp_path, monkeypatch):
+    path = _make_session(tmp_path, "alice", preview="retryable input")
+    original = pkg._run_reconcile
+    calls = []
+
+    def fail_once(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("temporary directory failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pkg, "_run_reconcile", fail_once)
+    try:
+        index = get_session_index_default(tmp_path)
+        assert index.count() == 0
+        assert index.meta_get("bootstrap_completed") is None
+        assert get_session_index_default(tmp_path) is index
+        assert index.get(path.name)["preview"] == "retryable input"
+        assert index.meta_get("bootstrap_completed") == "1"
+    finally:
+        close_session_index()
+
+
+def test_ready_lookup_does_not_wait_for_explicit_refresh(tmp_path, monkeypatch):
+    _make_session(tmp_path, "alice", preview="existing input")
+    index = get_session_index_default(tmp_path)
+    captured = threading.Event()
+    release = threading.Event()
+    original = reconcile_mod.read_entry_from_disk
+
+    def paused_read(path):
+        entry = original(path)
+        captured.set()
+        assert release.wait(10)
+        return entry
+
+    monkeypatch.setattr(reconcile_mod, "read_entry_from_disk", paused_read)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            scan = pool.submit(reconcile_mod.reconcile, index, tmp_path, full=True)
+            try:
+                assert captured.wait(5)
+                assert (
+                    pool.submit(get_session_index_default, tmp_path).result(1) is index
+                )
+            finally:
+                release.set()
+            assert scan.result(5).read == 1
+    finally:
+        close_session_index()
 
 
 # ── Helpers ──────────────────────────────────────────────────────
