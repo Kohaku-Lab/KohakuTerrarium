@@ -46,6 +46,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.attach.policies import Policy
 from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
 from kohakuterrarium.studio.persistence import store as _persistence_store_mod
+from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -556,7 +557,15 @@ class TestProgStudioJourney:
                 store.close(update_status=False)
 
             # --- persistence.resume: adopt the saved session -----------
+            expected_saved = {
+                row["filename"] for row in studio.persistence.list(search="scout")
+            }
+            assert saved_path.name in expected_saved
+            close_session_index()
             resumed = await studio.persistence.resume(saved_path)
+            assert {
+                row["filename"] for row in studio.persistence.list(search="scout")
+            } == expected_saved
             assert len(resumed.creatures) == 1
             resumed_cid = resumed.creatures[0]["creature_id"]
             assert resumed_cid == creature_id

@@ -4,7 +4,7 @@ The KohakuVault sidecar stores session listing entries, full-text search rows,
 and reconciliation metadata in one SQLite file. It avoids reopening every
 session database for cold listings.
 
-The process cache lock protects construction and bootstrap only. Per-request
+The process cache lock protects construction and disposal only. Per-request
 reads and writes rely on SQLite WAL and KohakuVault busy retries. The
 reconciliation function remains available from the ``reconcile`` submodule
 rather than this package namespace so the submodule attribute is not shadowed.
@@ -98,6 +98,30 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
     refreshes handle drift during the current process lifetime. Each normalized
     session directory owns an independent cached index.
     """
+    instance = _get_open_index(session_dir)
+    if instance._startup_reconciled:
+        return instance
+    with instance._reconcile_lock:
+        if instance._closed:
+            raise RuntimeError("Session index is closed")
+        if instance._startup_reconciled:
+            return instance
+        normalized_dir = Path(instance.path).parent
+        is_first_bootstrap = instance.meta_get(_BOOTSTRAP_FLAG) != "1"
+        try:
+            report = _run_reconcile(instance, normalized_dir, full=is_first_bootstrap)
+            if not report.aborted:
+                instance.meta_put(_BOOTSTRAP_FLAG, "1")
+                instance._startup_reconciled = True
+        except Exception:
+            logger.exception(
+                "session index startup reconcile failed; serving stale data"
+            )
+        return instance
+
+
+def _get_open_index(session_dir: Path | None = None) -> SessionIndex:
+    """Open the shared sidecar without reading unrelated session files."""
     if session_dir is None:
         session_dir = _default_session_dir()
     normalized_dir = coerce_fs_path(session_dir).expanduser().resolve(strict=False)
@@ -108,32 +132,6 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
             return cached
         sidecar = sidecar_path_for(normalized_dir)
         instance = SessionIndex(sidecar)
-        is_first_bootstrap = instance.meta_get(_BOOTSTRAP_FLAG) != "1"
-        try:
-            if is_first_bootstrap:
-                logger.info(
-                    "Bootstrapping session index from disk (full)",
-                    path=str(sidecar),
-                )
-                report = _run_reconcile(instance, normalized_dir, full=True)
-                # An aborted pass leaves the flag unset so the next start retries.
-                if not report.aborted:
-                    instance.meta_put(_BOOTSTRAP_FLAG, "1")
-            else:
-                logger.debug(
-                    "Reconciling session index on startup (incremental)",
-                    path=str(sidecar),
-                )
-                _run_reconcile(instance, normalized_dir, full=False)
-        except Exception as exc:  # noqa: BLE001
-            # Startup remains available with stale index data; the error is
-            # logged because later refreshes may recover it.
-            logger.error(
-                "session index startup reconcile failed; serving stale data",
-                error=str(exc),
-                first_bootstrap=is_first_bootstrap,
-                exc_info=True,
-            )
         _singletons[cache_key] = instance
         return instance
 

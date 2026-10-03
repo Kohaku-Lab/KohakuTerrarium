@@ -10,7 +10,7 @@ from typing import Any
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.session_index import (
     SessionIndexHook,
-    get_session_index_default,
+    _get_open_index,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -39,7 +39,7 @@ def attach(sid: str, store: SessionStore, sess_dir: str | Path) -> None:
                 logger.warning(
                     "prior index-hook detach failed", error=str(exc), exc_info=True
                 )
-        index = get_session_index_default(Path(sess_dir))
+        index = _get_open_index(Path(sess_dir))
         _session_index_hooks[sid] = SessionIndexHook(store, index)
     except Exception as exc:  # noqa: BLE001
         logger.warning(

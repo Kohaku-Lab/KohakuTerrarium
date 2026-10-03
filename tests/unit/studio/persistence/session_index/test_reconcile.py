@@ -2,6 +2,8 @@
 
 import errno
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from contextlib import closing
 from pathlib import Path
 
@@ -56,6 +58,74 @@ def _make_session(
     finally:
         s.close()
     return path
+
+
+@pytest.mark.parametrize("action", ["delete", "clear", "close"])
+def test_scan_does_not_undo_mutations_or_outlive_close(
+    idx, session_dir, monkeypatch, action
+):
+    path = _make_session(session_dir, "alice")
+    captured = threading.Event()
+    release = threading.Event()
+    original = reconcile_mod.read_entry_from_disk
+
+    def paused_read(path):
+        entry = original(path)
+        captured.set()
+        assert release.wait(10)
+        return entry
+
+    monkeypatch.setattr(reconcile_mod, "read_entry_from_disk", paused_read)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        scan = pool.submit(reconcile, idx, session_dir, full=True, workers=1)
+        closing = None
+        try:
+            assert captured.wait(5)
+            if action == "delete":
+                path.unlink()
+                assert not idx.delete(path.name)
+            elif action == "clear":
+                idx.clear()
+            else:
+                closing = pool.submit(idx.close)
+                with pytest.raises(TimeoutError):
+                    closing.result(timeout=0.1)
+        finally:
+            release.set()
+        assert scan.result(timeout=5).read == 1
+        if closing is not None:
+            closing.result(timeout=5)
+            with pytest.raises(RuntimeError, match="closed"):
+                reconcile(idx, session_dir)
+        else:
+            assert idx.count() == 0
+
+
+def test_scan_does_not_delete_session_created_after_directory_walk(
+    idx, session_dir, monkeypatch
+):
+    captured = threading.Event()
+    release = threading.Event()
+    original = reconcile_mod.pick_canonical_per_session
+
+    def paused_walk(directory):
+        paths = original(directory)
+        captured.set()
+        assert release.wait(10)
+        return paths
+
+    monkeypatch.setattr(reconcile_mod, "pick_canonical_per_session", paused_walk)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        scan = pool.submit(reconcile, idx, session_dir)
+        try:
+            assert captured.wait(5)
+            path = _make_session(session_dir, "new", preview_text="newly registered")
+            idx.upsert(read_entry_from_disk(path))
+        finally:
+            release.set()
+        scan.result(timeout=5)
+    assert idx.get(path.name)["preview"] == "newly registered"
+    assert idx.list(search="registered").total == 1
 
 
 # ── Preview extraction ────────────────────────────────────────────
