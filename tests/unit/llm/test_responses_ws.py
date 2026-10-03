@@ -3,6 +3,7 @@
 import asyncio
 import json
 
+import openai
 import pytest
 from openai import AsyncOpenAI
 from websockets import serve as serve_websocket
@@ -268,10 +269,11 @@ class TestFailureRecovery:
             def __init__(self):
                 self.attempts = 0
                 self.closed = False
+                self.error = ConnectionError("synthetic underlying send failure")
 
             async def send(self, data):
                 self.attempts += 1
-                raise ConnectionError("synthetic underlying send failure")
+                raise self.error
 
             async def recv(self, **kwargs):
                 raise EOFError
@@ -281,9 +283,6 @@ class TestFailureRecovery:
 
         raw = FailingSocket()
         connection = connection_type(connection=raw)
-        if getattr(connection, "_send_queue", None) is None:
-            await connection.close()
-            pytest.skip("Installed OpenAI SDK has no failed-send buffer")
         session = ResponsesWSSession(lambda: FakeManager(connection))
         history = [{"role": "user", "content": "x" * (1024**2 + 1)}]
         try:
@@ -305,11 +304,50 @@ class TestFailureRecovery:
             assert not captured.value.mid_stream
             assert raw.attempts == 1 and raw.closed
             assert session._connection is None and session._prev_id is None
-            assert (
-                captured.value.__cause__.__class__.__name__ == "WebSocketQueueFullError"
-            )
+            causes = []
+            cause = captured.value.__cause__
+            while cause is not None and cause not in causes:
+                causes.append(cause)
+                cause = cause.__cause__ or cause.__context__
+            assert raw.error in causes
         finally:
             await session.close()
+
+    @pytest.mark.parametrize("chain", ["__cause__", "__context__", None])
+    async def test_queue_full_send_preserves_cause_without_replay(self, chain):
+        error_type = getattr(openai, "WebSocketQueueFullError", None)
+        if error_type is None:
+            pytest.skip("Installed OpenAI SDK has no WebSocketQueueFullError")
+        transport_error = ConnectionError("synthetic underlying send failure")
+        queue_error = error_type("synthetic queue overflow")
+        if chain is not None:
+            setattr(queue_error, chain, transport_error)
+        h = Harness()
+        h.conn.send_exc = queue_error
+        try:
+            with pytest.raises(ResponsesWSError) as captured:
+                await h.run(
+                    [USER1],
+                    base={
+                        "model": "m",
+                        "tools": [
+                            {"type": "image_generation", "request_replay": "forbid"}
+                        ],
+                    },
+                )
+            assert str(captured.value) == str(
+                transport_error if chain is not None else queue_error
+            )
+            assert captured.value.__cause__ is queue_error
+            if chain is not None:
+                assert getattr(queue_error, chain) is transport_error
+            assert captured.value.submitted and captured.value.transport
+            assert not captured.value.mid_stream
+            assert h.factory_calls == 1 and h.conn.send_attempts == 1
+            assert h.conn.closed and not h.conn.sent
+            assert h.session._connection is None and h.session._prev_id is None
+        finally:
+            await h.session.close()
 
     async def test_real_sdk_closed_socket_reconnects_with_full_history_before_send(
         self,
