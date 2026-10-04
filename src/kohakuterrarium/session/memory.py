@@ -3,9 +3,7 @@
 Events are grouped into rounds and searchable text, tool, trigger, or user blocks.
 """
 
-import sqlite3
 import time
-from contextlib import closing
 from dataclasses import dataclass
 from typing import Any
 
@@ -160,14 +158,16 @@ class SessionMemory:
             ids = vault.keys(limit=vault.count())
         else:
             dims = int(kind.split(":")[1])
-            # Enumerate sqlite-vec row IDs without loading vectors into memory.
-            with closing(sqlite3.connect(self._path)) as db:
-                ids = [
-                    row[0]
-                    for row in db.execute(
-                        f'SELECT rowid FROM "memory_vec_{dims}d_rowids"'
-                    )
-                ]
+            # VectorKVault has no keys API. TextVault.keys performs a plain
+            # rowid SELECT on the existing table through the same native SQLite
+            # library; its CREATE IF NOT EXISTS leaves the vec0 table intact.
+            # Python sqlite3 must not open a live vault: separate SQLite copies
+            # can invalidate each other's WAL/locking state on POSIX.
+            reader = TextVault(self._path, table=f"memory_vec_{dims}d")
+            try:
+                ids = reader.keys(limit=vault.count())
+            finally:
+                del reader._vault
         for row_id in ids:
             _, meta = vault.get_by_id(row_id)
             if isinstance(meta, dict) and meta.get("agent") == agent:

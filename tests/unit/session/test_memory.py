@@ -1,5 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.session.memory`."""
 
+import sqlite3
 import time
 
 import numpy as np
@@ -144,6 +145,42 @@ class TestSessionMemoryConstruction:
 
 
 class TestSessionMemoryIndexing:
+    def test_rebuild_uses_native_handles_and_preserves_other_agents(
+        self, tmp_path, monkeypatch
+    ):
+        def forbidden_connection(*args, **kwargs):
+            raise AssertionError("A second SQLite library must not open a live vault")
+
+        path = str(tmp_path / "native.db")
+        memory = SessionMemory(path, _FakeEmbedder())
+        rows = [{"type": "user_input", "content": "alice needle"}]
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(sqlite3, "connect", forbidden_connection)
+                memory.index_events("alice", rows)
+                memory.index_events(
+                    "bob", [{"type": "user_input", "content": "bob needle"}]
+                )
+                for _ in range(2):
+                    memory.index_events("alice", [])
+                    for mode in ("fts", "semantic", "hybrid"):
+                        assert [
+                            h.content for h in memory.search("needle", mode=mode)
+                        ] == ["bob needle"]
+                    memory.index_events("alice", rows)
+                    assert memory.get_stats()["vec_blocks"] == 2
+        finally:
+            memory.close()
+        memory = SessionMemory(path, _FakeEmbedder())
+        try:
+            for mode in ("fts", "semantic", "hybrid"):
+                assert {h.content for h in memory.search("needle", mode=mode)} == {
+                    "alice needle",
+                    "bob needle",
+                }
+        finally:
+            memory.close()
+
     def test_legacy_indexes_rebuild_on_use_and_preserve_other_agents(self, tmp_path):
         path = str(tmp_path / "migration.db")
         memory = SessionMemory(path, _FakeEmbedder())
