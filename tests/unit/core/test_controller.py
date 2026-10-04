@@ -22,7 +22,7 @@ from kohakuterrarium.core.events import (
 )
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.llm.message import FilePart, ImagePart
+from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.parsing.events import (
     TextEvent,
 )
@@ -1097,6 +1097,58 @@ class _NativeScriptedLLM(ScriptedLLM):
 
 
 class TestNativeCompletion:
+    @pytest.mark.parametrize(
+        "parts",
+        [
+            [ImagePart(url="https://example.invalid/attachment.png")],
+            [
+                TextPart(text=" \n"),
+                ImagePart(url="https://example.invalid/attachment.png"),
+            ],
+            [FilePart(name="notes.txt", content="attachment contents")],
+        ],
+        ids=["image-only", "image-with-whitespace", "file-only"],
+    )
+    async def test_attachment_without_text_reaches_native_request(self, parts):
+        llm = _NativeScriptedLLM([("previous reply", []), ("attachment received", [])])
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = "native"
+        await env.inject("previous question")
+        await env.inject(parts)
+
+        request = llm.call_log[-1]
+        assert request[-1]["role"] == "user"
+        stored = env.controller.conversation.get_messages()[-2]
+        assert stored.role == "user"
+        assert stored.content[-1] == parts[-1]
+        if isinstance(parts[-1], ImagePart):
+            assert request[-1]["content"][-1] == parts[-1].to_dict()
+        else:
+            assert "attachment contents" in request[-1]["content"][-1]["text"]
+
+    @pytest.mark.parametrize(
+        "event",
+        [
+            create_tool_complete_event(job_id="", content=""),
+            create_user_input_event(
+                [ImagePart(url="https://example.invalid/attachment.png")],
+                rerun=True,
+            ),
+        ],
+        ids=["empty-tool-wake", "unedited-rerun"],
+    )
+    async def test_native_continuation_reuses_existing_user_message(self, event):
+        llm = _NativeScriptedLLM([("continued", [])])
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = "native"
+        env.controller.conversation.append("user", "original request")
+        await env.controller.push_event(event)
+        async for _ in env.controller.run_once():
+            pass
+        assert [m for m in llm.call_log[-1] if m["role"] == "user"] == [
+            {"role": "user", "content": "original request"}
+        ]
+
     async def test_native_tool_call_emitted_as_event(self):
         llm = _NativeScriptedLLM(
             [

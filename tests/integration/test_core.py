@@ -1984,6 +1984,22 @@ class TestCoreIntegration:
             # ``get_image_count`` sees exactly the one image we injected.
             assert agent.controller.conversation.get_image_count() == 1
 
+            image_only_llm = ScriptedLLM(["received the attachment without text"])
+            agent.llm = image_only_llm
+            agent.controller.llm = image_only_llm
+            original_format = agent.controller.config.tool_format
+            agent.controller.config.tool_format = "native"
+            image_only = ImagePart(url="https://example.invalid/image-only.png")
+            try:
+                await agent.inject_input([image_only], source="chat")
+            finally:
+                agent.controller.config.tool_format = original_format
+            assert image_only_llm.call_log[-1][-1]["role"] == "user"
+            assert (
+                image_only_llm.call_log[-1][-1]["content"][-1] == image_only.to_dict()
+            )
+            assert "received the attachment without text" in _assistant_text(agent)
+
             # --- inline-file user input through inject_input -----------
             # Browser-style text uploads are materialized once for the live
             # session. The provider sees both their content and the stable
