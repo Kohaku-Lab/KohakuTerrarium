@@ -1028,6 +1028,21 @@ an Anthropic-compatible `/v1/messages` API. API keys are resolved first from
 Anthropic backend presets can pass SDK request fields through `extra_body`;
 for provider beta headers, set `extra_body.extra_headers` on the preset.
 
+The direct Anthropic provider prepares inline images before both streaming and
+non-streaming requests, including images nested in tool results. Supported static
+images are resized within 2000×2000 pixels and compressed toward 512,000 bytes
+each. If the complete JSON request would exceed 28 MB, the provider lowers the
+per-image target while retaining every image block. It caches prepared copies;
+source files and stored conversation history are unchanged.
+
+Compression can reduce image detail. Transparency is preserved; a transparent
+image keeps its original encoding if converting to PNG would increase its size.
+Opaque grayscale images may use JPEG when the image budget requires it.
+Animated, malformed, unsupported (including high-bit-depth modes), or
+over-40-megapixel images are left to the existing provider limits. The byte
+target is best effort: large text, documents, or images that cannot be
+compressed enough can still cause a provider size error.
+
 To add a new transport implementation in code, create a `BaseLLMProvider`
 subclass under `src/kohakuterrarium/llm/`, implement `_stream_chat()` and
 `_complete_chat()` using KohakuTerrarium's OpenAI-shaped internal message
