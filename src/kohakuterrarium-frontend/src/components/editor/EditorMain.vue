@@ -2,7 +2,7 @@
   <div class="h-full flex flex-col">
     <!-- File tabs + mode toggle -->
     <div v-if="editor.openFilePaths.length > 0" class="flex items-center gap-0.5 px-2 h-7 border-b border-warm-200 dark:border-warm-700 overflow-x-auto shrink-0">
-      <div v-for="filePath in editor.openFilePaths" :key="filePath" class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] cursor-pointer select-none transition-colors max-w-40 shrink-0" :class="editor.activeFilePath === filePath ? 'bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light' : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-700'" @click="editor.activeFilePath = filePath">
+      <div v-for="filePath in editor.openFilePaths" :key="filePath" class="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] cursor-pointer select-none transition-colors max-w-40 shrink-0" :class="editor.activeFilePath === filePath ? 'bg-iolite/10 dark:bg-iolite/15 text-iolite dark:text-iolite-light' : 'text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-700'" @click="editor.selectFile(filePath)">
         <span v-if="editor.openFiles[filePath]?.dirty" class="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />
         <span class="truncate">{{ fileName(filePath) }}</span>
         <button class="ml-0.5 w-3.5 h-3.5 flex items-center justify-center rounded-sm text-warm-400 hover:text-warm-600 dark:hover:text-warm-300" @click.stop="editor.closeFile(filePath)">
@@ -23,9 +23,9 @@
     <div class="flex-1 min-h-0">
       <template v-if="editor.activeFile">
         <!-- Vditor for markdown when toggled on -->
-        <VditorEditor v-if="isMarkdown && useVditor" :file-path="editor.activeFilePath" :content="editor.activeFile.content" @change="onChange" @save="onSave" />
+        <VditorEditor v-if="isMarkdown && useVditor" :buffer="editor.activeFile" :file-path="editor.activeFilePath" :content="editor.activeFile.content" @edit="onEdit" @change="onChange" @save="onSave" />
         <!-- Monaco for everything else -->
-        <MonacoEditor v-else :file-path="editor.activeFilePath" :content="editor.activeFile.content" :language="editor.activeFile.language" @change="onChange" @save="onSave" />
+        <MonacoEditor v-else :buffer="editor.activeFile" :file-path="editor.activeFilePath" :content="editor.activeFile.content" :language="editor.activeFile.language" @edit="onEdit" @change="onChange" @save="onSave" />
       </template>
       <div v-else class="h-full flex items-center justify-center text-warm-400 text-sm">
         <div class="text-center">
@@ -67,15 +67,15 @@ function fileName(path) {
   return path.split("/").pop() || path.split("\\").pop() || path
 }
 
-function onChange(content) {
-  if (editor.activeFilePath) {
-    editor.updateContent(editor.activeFilePath, content)
-  }
+function onChange(content, buffer, path) {
+  editor.updateContent(path, content, buffer)
 }
 
-function onSave() {
-  if (editor.activeFilePath) {
-    editor.saveFile(editor.activeFilePath)
-  }
+function onEdit(buffer, path) {
+  editor.markEdited(path, buffer)
+}
+
+function onSave(buffer, path) {
+  if (editor.openFiles[path] === buffer) editor.saveFile(path)
 }
 </script>

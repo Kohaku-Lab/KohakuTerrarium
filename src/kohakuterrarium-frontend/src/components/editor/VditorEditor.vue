@@ -10,16 +10,19 @@ import "vditor/dist/index.css"
 import { useThemeStore } from "@/stores/theme"
 
 const props = defineProps({
+  buffer: { type: Object, default: null },
   content: { type: String, default: "" },
   filePath: { type: String, default: "" },
 })
 
-const emit = defineEmits(["change", "save"])
+const emit = defineEmits(["edit", "change", "save"])
 
 const theme = useThemeStore()
 const editorEl = ref(null)
 let vd = null
 let suppressChange = false
+let loadedBuffer = props.buffer
+let loadedPath = props.filePath
 
 onMounted(() => {
   if (!editorEl.value) return
@@ -39,11 +42,12 @@ onMounted(() => {
     },
     input: (value) => {
       if (!suppressChange) {
-        emit("change", value)
+        emit("edit", loadedBuffer, loadedPath)
+        emit("change", value, loadedBuffer, loadedPath)
       }
     },
     ctrlEnter: () => {
-      emit("save")
+      emit("save", loadedBuffer, loadedPath)
     },
     after: () => {
       vd?.focus()
@@ -54,15 +58,17 @@ onMounted(() => {
   editorEl.value.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault()
-      emit("save")
+      emit("save", loadedBuffer, loadedPath)
     }
   })
 })
 
 // Sync external content changes (e.g. file revert).
 watch(
-  () => props.content,
-  (newVal) => {
+  () => [props.content, props.buffer, props.filePath],
+  ([newVal, buffer, path]) => {
+    loadedBuffer = buffer
+    loadedPath = path
     if (!vd) return
     const current = vd.getValue()
     if (current !== newVal) {

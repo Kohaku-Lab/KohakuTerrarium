@@ -6,18 +6,41 @@
 import { useThemeStore } from "@/stores/theme"
 
 const props = defineProps({
+  buffer: { type: Object, default: null },
   filePath: { type: String, default: "" },
   content: { type: String, default: "" },
   language: { type: String, default: "" },
 })
 
-const emit = defineEmits(["change", "save"])
+const emit = defineEmits(["edit", "change", "save"])
 
 const containerEl = ref(null)
 const theme = useThemeStore()
 
 let editor = null
 let changeTimeout = null
+let loadedBuffer = null
+let loadedPath = ""
+let suppressChange = false
+let disposed = false
+
+function flushChange() {
+  if (changeTimeout === null) return
+  clearTimeout(changeTimeout)
+  changeTimeout = null
+  if (editor) emit("change", editor.getValue(), loadedBuffer, loadedPath)
+}
+
+function replaceContent(content) {
+  if (changeTimeout !== null) clearTimeout(changeTimeout)
+  changeTimeout = null
+  suppressChange = true
+  try {
+    editor.setValue(content)
+  } finally {
+    suppressChange = false
+  }
+}
 
 const monacoTheme = computed(() => (theme.dark ? "vs-dark" : "vs"))
 
@@ -59,6 +82,9 @@ function mapLanguage(lang) {
 
 onMounted(async () => {
   const monaco = await import("monaco-editor")
+  if (disposed) return
+  loadedBuffer = props.buffer
+  loadedPath = props.filePath
 
   editor = monaco.editor.create(containerEl.value, {
     value: props.content,
@@ -77,33 +103,34 @@ onMounted(async () => {
 
   // Content change with debounce
   editor.onDidChangeModelContent(() => {
-    if (changeTimeout) clearTimeout(changeTimeout)
-    changeTimeout = setTimeout(() => {
-      emit("change", editor.getValue())
-    }, 300)
+    if (suppressChange) return
+    emit("edit", loadedBuffer, loadedPath)
+    if (changeTimeout !== null) clearTimeout(changeTimeout)
+    changeTimeout = setTimeout(flushChange, 300)
   })
 
   // Ctrl+S / Cmd+S save
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-    emit("save")
+    flushChange()
+    emit("save", loadedBuffer, loadedPath)
   })
 })
 
 // Watch filePath changes -> update content
 watch(
-  () => props.filePath,
+  () => [props.filePath, props.buffer],
   () => {
     if (editor && props.content !== undefined) {
+      flushChange()
+      loadedBuffer = props.buffer
+      loadedPath = props.filePath
       const model = editor.getModel()
       if (model) {
-        model.setValue(props.content)
-        const monaco = window.monaco
-        if (monaco) {
-          // Try to set language from import cache (dynamic import already loaded)
-          import("monaco-editor").then((m) => {
-            m.editor.setModelLanguage(model, mapLanguage(props.language))
-          })
-        }
+        replaceContent(props.content)
+        const language = mapLanguage(props.language)
+        import("monaco-editor").then((m) => {
+          if (!disposed && editor?.getModel() === model) m.editor.setModelLanguage(model, language)
+        })
       }
     }
   },
@@ -114,7 +141,7 @@ watch(
   () => props.content,
   (newContent) => {
     if (editor && newContent !== editor.getValue()) {
-      editor.setValue(newContent)
+      replaceContent(newContent)
     }
   },
 )
@@ -128,8 +155,9 @@ watch(monacoTheme, (newTheme) => {
   }
 })
 
-onUnmounted(() => {
-  if (changeTimeout) clearTimeout(changeTimeout)
+onBeforeUnmount(() => {
+  disposed = true
+  flushChange()
   if (editor) {
     editor.dispose()
     editor = null

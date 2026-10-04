@@ -87,7 +87,7 @@ watch(
       if (tc.status === "done" && (tc.name === "write" || tc.name === "edit" || tc.name === "bash")) {
         editor.refreshTree()
         if (editor.activeFilePath) {
-          editor.revertFile(editor.activeFilePath)
+          editor.refreshFile(editor.activeFilePath)
         }
         break
       }
