@@ -1,28 +1,84 @@
 <template>
-  <div ref="editorEl" class="h-full w-full overflow-hidden" />
+  <div ref="editorEl" class="h-full w-full overflow-hidden" @input.capture="onInput" @keydown.capture="onKeydown" @click.capture="onClick" />
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from "vue"
+import { onBeforeUnmount, onMounted, ref, watch } from "vue"
 import Vditor from "vditor"
 import "vditor/dist/index.css"
 
 import { useThemeStore } from "@/stores/theme"
 
 const props = defineProps({
+  buffer: { type: Object, default: null },
   content: { type: String, default: "" },
   filePath: { type: String, default: "" },
 })
 
-const emit = defineEmits(["change", "save"])
+const emit = defineEmits(["edit", "change", "save"])
 
 const theme = useThemeStore()
 const editorEl = ref(null)
 let vd = null
 let suppressChange = false
+let ready = false
+let disposed = false
+let loadedBuffer = props.buffer
+let loadedPath = props.filePath
+let syncedContent = props.content
+
+function syncContent(value) {
+  if (!ready || disposed || suppressChange || value === syncedContent) return
+  syncedContent = value
+  emit("change", value, loadedBuffer, loadedPath)
+}
+
+function flushChange() {
+  if (ready && !disposed) syncContent(vd.getValue())
+}
+
+function replaceContent(content) {
+  suppressChange = true
+  try {
+    vd.setValue(content)
+    syncedContent = vd.getValue()
+  } finally {
+    suppressChange = false
+  }
+}
+
+function onInput(event) {
+  if (ready && !disposed && !suppressChange && event.target.closest?.('[contenteditable="true"]')) {
+    emit("edit", loadedBuffer, loadedPath)
+  }
+}
+
+function save() {
+  if (!ready || disposed) return
+  flushChange()
+  emit("save", loadedBuffer, loadedPath)
+}
+
+function onKeydown(event) {
+  if (!event.ctrlKey && !event.metaKey) return
+  if (event.key.toLowerCase() === "s") {
+    event.preventDefault()
+    save()
+  } else {
+    // Vditor shortcuts can change the document without a DOM input event.
+    Promise.resolve().then(() => {
+      if (event.defaultPrevented) flushChange()
+    })
+  }
+}
+
+function onClick(event) {
+  if (event.target.closest?.(".vditor-toolbar")) Promise.resolve().then(flushChange)
+}
 
 onMounted(() => {
   if (!editorEl.value) return
+  const initialContent = props.content
 
   vd = new Vditor(editorEl.value, {
     mode: "ir", // instant rendering (WYSIWYG-ish)
@@ -37,39 +93,33 @@ onMounted(() => {
       hljs: { lineNumber: true },
       math: { engine: "KaTeX" },
     },
-    input: (value) => {
-      if (!suppressChange) {
-        emit("change", value)
-      }
-    },
-    ctrlEnter: () => {
-      emit("save")
-    },
+    input: syncContent,
+    ctrlEnter: save,
     after: () => {
-      vd?.focus()
+      if (disposed) {
+        vd.destroy()
+        vd = null
+        return
+      }
+      ready = true
+      loadedBuffer = props.buffer
+      loadedPath = props.filePath
+      if (props.content !== initialContent) replaceContent(props.content)
+      else syncedContent = vd.getValue()
+      vd.focus()
     },
-  })
-
-  // Ctrl+S to save (Vditor doesn't have a native hook for this).
-  editorEl.value.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-      e.preventDefault()
-      emit("save")
-    }
   })
 })
 
 // Sync external content changes (e.g. file revert).
 watch(
-  () => props.content,
-  (newVal) => {
-    if (!vd) return
-    const current = vd.getValue()
-    if (current !== newVal) {
-      suppressChange = true
-      vd.setValue(newVal)
-      suppressChange = false
-    }
+  () => [props.content, props.buffer, props.filePath],
+  ([newVal, buffer, path]) => {
+    const changedBuffer = buffer !== loadedBuffer || path !== loadedPath
+    if (changedBuffer) flushChange()
+    loadedBuffer = buffer
+    loadedPath = path
+    if (ready && (changedBuffer || newVal !== syncedContent)) replaceContent(newVal)
   },
 )
 
@@ -77,14 +127,16 @@ watch(
 watch(
   () => theme.dark,
   (dark) => {
-    if (vd) {
+    if (ready && !disposed) {
       vd.setTheme(dark ? "dark" : "classic", dark ? "dark" : "light")
     }
   },
 )
 
-onUnmounted(() => {
-  if (vd) {
+onBeforeUnmount(() => {
+  flushChange()
+  disposed = true
+  if (ready) {
     vd.destroy()
     vd = null
   }

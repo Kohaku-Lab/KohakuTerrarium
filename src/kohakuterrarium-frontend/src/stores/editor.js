@@ -36,6 +36,16 @@ function _findNode(root, path) {
 }
 
 const _saveQueues = new WeakMap()
+const _fileRequests = new WeakMap()
+
+function _filesFor(store) {
+  let state = _fileRequests.get(store)
+  if (!state) {
+    state = { reads: new Map(), selected: null, disposed: false }
+    _fileRequests.set(store, state)
+  }
+  return state
+}
 
 const _editorStoreOptions = {
   state: () => ({
@@ -58,27 +68,49 @@ const _editorStoreOptions = {
 
   actions: {
     async openFile(path) {
+      const state = _filesFor(this)
+      state.selected = path
       if (this.openFiles[path]) {
         this.activeFilePath = path
         return
       }
+      const prior = state.reads.get(path)
+      if (prior) return prior.promise
+      const request = {}
+      state.reads.set(path, request)
       this.loading = true
-      try {
-        const data = await filesAPI.readFile(path)
-        this.openFiles[path] = {
-          content: data.content,
-          dirty: false,
-          language: data.language || "",
+      request.promise = (async () => {
+        try {
+          const data = await filesAPI.readFile(path)
+          if (state.disposed || state.reads.get(path) !== request || this.openFiles[path]) return
+          this.openFiles[path] = {
+            content: data.content,
+            dirty: false,
+            language: data.language || "",
+            revision: 0,
+          }
+          if (state.selected === path) this.activeFilePath = path
+        } catch (err) {
+          if (!state.disposed && state.reads.get(path) === request)
+            console.error("Failed to open file:", err)
+        } finally {
+          if (state.reads.get(path) === request) state.reads.delete(path)
+          this.loading = state.reads.size > 0
         }
-        this.activeFilePath = path
-      } catch (err) {
-        console.error("Failed to open file:", err)
-      } finally {
-        this.loading = false
-      }
+      })()
+      return request.promise
+    },
+
+    selectFile(path) {
+      _filesFor(this).selected = path
+      this.activeFilePath = path
     },
 
     closeFile(path) {
+      const state = _filesFor(this)
+      state.reads.delete(path)
+      if (state.selected === path) state.selected = null
+      this.loading = state.reads.size > 0
       delete this.openFiles[path]
       if (this.activeFilePath === path) {
         const remaining = Object.keys(this.openFiles)
@@ -90,6 +122,10 @@ const _editorStoreOptions = {
       const file = this.openFiles[path]
       if (!file) return
       const submittedText = file.content
+      const revision = file.revision || 0
+      const requests = _filesFor(this)
+      requests.reads.delete(path)
+      this.loading = requests.reads.size > 0
       let queue = _saveQueues.get(this)
       if (!queue) {
         queue = new Map()
@@ -100,7 +136,7 @@ const _editorStoreOptions = {
         try {
           await filesAPI.writeFile(path, submittedText)
           if (this.openFiles[path] === file) {
-            file.dirty = file.content !== submittedText
+            file.dirty = (file.revision || 0) !== revision || file.content !== submittedText
           }
         } catch (err) {
           console.error("Failed to save file:", err)
@@ -114,11 +150,18 @@ const _editorStoreOptions = {
       }
     },
 
-    updateContent(path, content) {
+    markEdited(path, expected = null) {
       const file = this.openFiles[path]
-      if (!file) return
-      file.content = content
+      if (!file || (expected && file !== expected)) return
+      file.revision = (file.revision || 0) + 1
       file.dirty = true
+    },
+
+    updateContent(path, content, expected = null) {
+      const file = this.openFiles[path]
+      if (!file || (expected && file !== expected)) return
+      file.content = content
+      this.markEdited(path, file)
     },
 
     async refreshTree() {
@@ -178,16 +221,40 @@ const _editorStoreOptions = {
       }
     },
 
-    /** Re-read a file from disk (revert unsaved changes) */
+    /** Refresh clean buffers after external file changes. */
+    async refreshFile(path) {
+      if (!this.openFiles[path] || this.openFiles[path].dirty) return
+      return this.revertFile(path)
+    },
+
     async revertFile(path) {
+      const file = this.openFiles[path]
+      if (!file) return
+      const revision = file.revision || 0
+      const state = _filesFor(this)
+      const request = {}
+      state.reads.set(path, request)
       try {
+        const saving = _saveQueues.get(this)?.get(path)
+        if (saving) await saving
+        if (state.disposed || state.reads.get(path) !== request) return
         const data = await filesAPI.readFile(path)
-        if (this.openFiles[path]) {
-          this.openFiles[path].content = data.content
-          this.openFiles[path].dirty = false
+        if (
+          !state.disposed &&
+          state.reads.get(path) === request &&
+          this.openFiles[path] === file &&
+          (file.revision || 0) === revision
+        ) {
+          file.content = data.content
+          file.dirty = false
+          file.revision = revision + 1
         }
       } catch (err) {
-        console.error("Failed to revert file:", err)
+        if (!state.disposed && state.reads.get(path) === request)
+          console.error("Failed to revert file:", err)
+      } finally {
+        if (state.reads.get(path) === request) state.reads.delete(path)
+        this.loading = state.reads.size > 0
       }
     },
   },
@@ -208,6 +275,11 @@ function _factoryFor(scope) {
           const state = _treeRequests.get(store)
           if (state) state.generation++
           _treeRequests.delete(store)
+          const files = _fileRequests.get(store)
+          if (files) {
+            files.disposed = true
+            files.reads.clear()
+          }
           store.$dispose?.()
         } catch {
           /* swallow */
