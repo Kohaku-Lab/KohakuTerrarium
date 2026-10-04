@@ -901,11 +901,11 @@ class TestSessionIntegration:
         # ONLY the new events — _extract_blocks emits a tool block and
         # the indexed counter advances past the original two turns.
         patched_llm["script"] = ["[/echo]search-target-token[echo/]", "noted."]
-        agent2 = Agent.from_path(config_path)
+        store.close()
+        agent2, store = resume_agent(session_path)
         echo2 = _EchoTool()
         agent2.registry.register_tool(echo2)
         agent2.executor.register_tool(echo2)
-        agent2.attach_session_store(store)
         await agent2.start()
         try:
             await agent2._process_event(
@@ -966,6 +966,37 @@ class TestSessionIntegration:
             assert any(
                 h.content == "plan the database migration carefully" for h in hits
             )
+        await store.run(
+            store.append_event,
+            "seeker",
+            "user_input",
+            {"content": "continuityneedle question"},
+        )
+        hits, warning = await live_memory.search(
+            "continuityneedle",
+            names=["seeker"],
+            config={},
+            create_embedder=lambda _: _HashEmbedder(),
+            mode="fts",
+        )
+        assert warning is None
+        assert [hit.content for hit in hits] == ["continuityneedle question"]
+        await store.run(
+            store.append_event, "seeker", "text", {"content": "continuityneedle answer"}
+        )
+        for mode in ("fts", "semantic", "hybrid"):
+            hits, warning = await live_memory.search(
+                "continuityneedle",
+                names=["seeker"],
+                config={},
+                create_embedder=lambda _: _HashEmbedder(),
+                mode=mode,
+                k=100,
+            )
+            assert warning is None
+            assert {"continuityneedle question", "continuityneedle answer"} <= {
+                h.content for h in hits
+            }
         store.close()
 
     async def test_fork_at_event_copies_lineage(self, patched_llm, tmp_path):

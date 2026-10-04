@@ -3,39 +3,26 @@
 Events are grouped into rounds and searchable text, tool, trigger, or user blocks.
 """
 
+import sqlite3
 import time
-from dataclasses import dataclass, field
+from contextlib import closing
+from dataclasses import dataclass
 from typing import Any
 
 from kohakuvault import KVault, TextVault, VectorKVault
 
 from kohakuterrarium.session.embedding import BaseEmbedder, NullEmbedder
-from kohakuterrarium.session.history import (
-    dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+from kohakuterrarium.session.memory_blocks import (
+    Block,
+    RebuildRequired,
+    TOOL_RESULT_INDEX_CHARS as TOOL_RESULT_INDEX_CHARS,
+    _content_to_text as _content_to_text,
+    _extract_blocks as _extract_blocks,
+    extract_batch,
 )
 from kohakuterrarium.utils.logging import get_logger
 
-# Tool results are indexed up to this many chars so elided-but-≤256KB outputs
-# stay recoverable via search_memory without bloating the FTS index.
-TOOL_RESULT_INDEX_CHARS = 50_000
-
 logger = get_logger(__name__)
-
-
-@dataclass
-class Block:
-    """A searchable block within a round."""
-
-    round_num: int
-    block_num: int
-    agent: str
-    block_type: str
-    content: str
-    ts: float = 0.0
-    tool_name: str = ""
-    tool_args: dict[str, Any] = field(default_factory=dict)
-    channel: str = ""
 
 
 @dataclass
@@ -51,6 +38,7 @@ class SearchResult:
     ts: float = 0.0
     tool_name: str = ""
     channel: str = ""
+    block_id: str = ""
 
     @property
     def age_str(self) -> str:
@@ -63,6 +51,15 @@ class SearchResult:
         if elapsed < 3600:
             return f"{int(elapsed / 60)}m ago"
         return f"{elapsed / 3600:.1f}h ago"
+
+
+@dataclass
+class _IndexBatch:
+    start: int
+    revision: int
+    generation: int
+    embedder: object
+    checkpoint: dict
 
 
 class SessionMemory:
@@ -146,23 +143,80 @@ class SessionMemory:
     def _set_indexed_count(self, agent: str, count: int) -> None:
         self._state[f"{agent}:indexed_keywords"] = count
         if count == 0:
+            self._state[f"{agent}:generation"] = self._generation(agent) + 1
             dims = self._embedder.dimensions or self._state.get("vec_dimensions", 0)
             self._state[f"{agent}:indexed_vectors:{dims}"] = 0
             self._state[f"{agent}:indexed_events"] = 0
 
+    def _generation(self, agent: str) -> int:
+        return self._state.get(f"{agent}:generation", 0)
+
     def _clear_fts(self, agent: str) -> None:
-        """Clear FTS entries for an agent (before full re-index)."""
-        try:
-            to_delete = []
-            for row_id in self._fts.keys():
-                _, val = self._fts.get_by_id(row_id)
-                if isinstance(val, dict) and val.get("agent") == agent:
-                    to_delete.append(row_id)
-            for row_id in to_delete:
-                self._fts.delete(row_id)
-            logger.debug("Cleared FTS entries", agent=agent, count=len(to_delete))
-        except Exception as e:
-            logger.warning("Failed to clear FTS", error=str(e))
+        self._clear_index(agent, "keywords")
+
+    def _clear_index(self, agent: str, kind: str) -> None:
+        vault = self._fts if kind == "keywords" else self._vec
+        if kind == "keywords":
+            ids = vault.keys(limit=vault.count())
+        else:
+            dims = int(kind.split(":")[1])
+            # Enumerate sqlite-vec row IDs without loading vectors into memory.
+            with closing(sqlite3.connect(self._path)) as db:
+                ids = [
+                    row[0]
+                    for row in db.execute(
+                        f'SELECT rowid FROM "memory_vec_{dims}d_rowids"'
+                    )
+                ]
+        for row_id in ids:
+            _, meta = vault.get_by_id(row_id)
+            if isinstance(meta, dict) and meta.get("agent") == agent:
+                vault.delete(row_id)
+
+    def _prepare(self, agent: str, events: list[dict], kind: str, start_from: int):
+        key = f"{agent}:cursor:{kind}"
+        checkpoint = self._state.get(key)
+        revision = self._state.get(f"{key}:revision", 0)
+        generation = self._generation(agent)
+        reset = (
+            checkpoint is None
+            or checkpoint.get("generation") != generation
+            or self._state.get(f"{key}:pending", False)
+        )
+        if not reset:
+            try:
+                blocks, next_state = extract_batch(
+                    agent, events, checkpoint, start_from
+                )
+            except RebuildRequired:
+                generation += 1
+                self._state[f"{agent}:generation"] = generation
+                reset = True
+        if reset:
+            self._state[f"{key}:pending"] = True
+            self._clear_index(agent, kind)
+            revision += 1
+            self._state[f"{key}:revision"] = revision
+            checkpoint = None
+            blocks, next_state = extract_batch(agent, events, start_from=start_from)
+        next_state["generation"] = generation
+        return (
+            _IndexBatch(
+                checkpoint["count"] if checkpoint else 0,
+                revision,
+                generation,
+                self._embedder,
+                next_state,
+            ),
+            blocks,
+        )
+
+    def _finish_batch(self, agent: str, kind: str, batch: _IndexBatch) -> None:
+        key = f"{agent}:cursor:{kind}"
+        self._state[key] = batch.checkpoint
+        self._state[f"{agent}:indexed_{kind}"] = batch.checkpoint["count"]
+        self._state[f"{key}:revision"] = batch.revision + 1
+        self._state[f"{key}:pending"] = False
 
     def index_events(
         self,
@@ -185,34 +239,20 @@ class SessionMemory:
             count = max(count, len(blocks))
         return count
 
-    def _vector_watermark(self, agent: str) -> int:
-        key = f"{agent}:indexed_vectors:{self._embedder.dimensions}"
-        if not self._has_vectors:
-            dims = self._state.get("vec_dimensions", 0)
-            key = f"{agent}:indexed_vectors:{dims}"
-        value = self._state.get(key)
-        if value is None:
-            value = (
-                self._state.get(f"{agent}:indexed_events", 0)
-                if self._vec is not None and self._vec.count()
-                else 0
-            )
-            self._state[key] = value
-        return value
-
     def _index_keywords(
         self, agent: str, events: list[dict], start_from: int = 0
     ) -> int:
-        if self._vec is not None:
-            self._vector_watermark(agent)
-        start_from = max(start_from, self._get_indexed_count(agent))
-        if start_from >= len(events):
+        batch, blocks = self._prepare(agent, events, "keywords", start_from)
+        if (
+            batch.start == len(events)
+            and not blocks
+            and not self._state.get(f"{agent}:cursor:keywords:pending")
+        ):
             return 0
-        blocks = _extract_blocks(agent, events[start_from:], start_from)
+        self._state[f"{agent}:cursor:keywords:pending"] = True
         for block in blocks:
-            if block.content.strip():
-                self._fts[block.content] = _block_metadata(block)
-        self._set_indexed_count(agent, len(events))
+            self._fts.insert(block.content, _block_metadata(block))
+        self._finish_batch(agent, "keywords", batch)
         return len(blocks)
 
     def _set_embedder(self, embedder: BaseEmbedder) -> None:
@@ -227,21 +267,33 @@ class SessionMemory:
             self._state["vec_dimensions"] = embedder.dimensions
 
     def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
-        start = self._vector_watermark(agent)
-        offset = max(start, start_from)
-        blocks = _extract_blocks(agent, events[offset:], offset)
-        return start, [block for block in blocks if block.content.strip()]
+        return self._prepare(
+            agent, events, f"vectors:{self._embedder.dimensions}", start_from
+        )
 
-    def _commit_vectors(self, agent, start, count, blocks, vectors) -> None:
-        if self._vector_watermark(agent) != start:
+    def _commit_vectors(
+        self, agent, start: _IndexBatch, count, blocks, vectors
+    ) -> None:
+        kind = f"vectors:{self._embedder.dimensions}"
+        key = f"{agent}:cursor:{kind}"
+        if (
+            start.embedder is not self._embedder
+            or start.generation != self._generation(agent)
+            or start.revision != self._state.get(f"{key}:revision", 0)
+        ):
             raise RuntimeError("Memory index changed during embedding; retry search")
-        if len(vectors) != len(blocks):
+        if len(vectors) != len(blocks) or count != start.checkpoint["count"]:
             raise ValueError("Embedding result count does not match memory blocks")
+        if (
+            start.start == count
+            and not blocks
+            and not self._state.get(f"{key}:pending")
+        ):
+            return
+        self._state[f"{key}:pending"] = True
         for vector, block in zip(vectors, blocks):
             self._vec.insert(vector, _block_metadata(block, include_content=True))
-        self._state[f"{agent}:indexed_vectors:{self._embedder.dimensions}"] = max(
-            start, count
-        )
+        self._finish_batch(agent, kind, start)
 
     def search(
         self,
@@ -300,6 +352,7 @@ class SessionMemory:
                     ts=meta.get("ts", 0),
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
+                    block_id=meta.get("block_id", ""),
                 )
             )
             if len(out) >= k:
@@ -336,6 +389,7 @@ class SessionMemory:
                     ts=meta.get("ts", 0),
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
+                    block_id=meta.get("block_id", ""),
                 )
             )
             if len(out) >= k:
@@ -356,12 +410,12 @@ class SessionMemory:
         result_map: dict[str, SearchResult] = {}
 
         for rank, r in enumerate(fts_results):
-            key = f"{r.agent}:r{r.round_num}:b{r.block_num}"
+            key = r.block_id or f"{r.agent}:r{r.round_num}:b{r.block_num}"
             scores[key] = scores.get(key, 0) + 1.0 / (60 + rank)
             result_map[key] = r
 
         for rank, r in enumerate(sem_results):
-            key = f"{r.agent}:r{r.round_num}:b{r.block_num}"
+            key = r.block_id or f"{r.agent}:r{r.round_num}:b{r.block_num}"
             scores[key] = scores.get(key, 0) + 1.0 / (60 + rank)
             if key not in result_map:
                 result_map[key] = r
@@ -399,159 +453,8 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
         "ts": block.ts,
         "tool_name": block.tool_name,
         "channel": block.channel,
+        "block_id": block.block_id,
     }
     if include_content:
         meta["content"] = block.content
     return meta
-
-
-def _content_to_text(content: Any) -> str:
-    """Flatten an event's ``content`` to a single searchable string.
-
-    Strings pass through, multimodal parts contribute searchable text or stable
-    attachment markers, and dictionaries are handled as single parts.
-    """
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        chunks: list[str] = []
-        for part in content:
-            if isinstance(part, str):
-                chunks.append(part)
-            elif isinstance(part, dict):
-                if isinstance(part.get("text"), str):
-                    chunks.append(part["text"])
-                elif isinstance(part.get("content"), str):
-                    chunks.append(part["content"])
-                else:
-                    kind = part.get("type") or ""
-                    if kind in ("image_url", "image"):
-                        chunks.append("[image]")
-                    elif kind == "file":
-                        chunks.append("[file]")
-        return " ".join(c for c in chunks if c)
-    if isinstance(content, dict):
-        return _content_to_text([content])
-    return "" if content is None else str(content)
-
-
-def _extract_blocks(
-    agent: str, events: list[dict], event_offset: int = 0
-) -> list[Block]:
-    """Extract searchable blocks from session events."""
-    events = dedupe_adjacent_duplicate_events(events)
-    live_ids = select_live_event_ids(events)
-    blocks: list[Block] = []
-    round_num = 0
-    block_num = 0
-    in_round = False
-
-    for i, evt in enumerate(events):
-        etype = evt.get("type", "")
-        ts = evt.get("ts", 0)
-        eid = evt.get("event_id")
-        if isinstance(eid, int) and eid not in live_ids:
-            continue
-
-        if etype == "user_input":
-            round_num += 1
-            block_num = 0
-            in_round = True
-            content = _content_to_text(evt.get("content", ""))
-            if content.strip():
-                blocks.append(
-                    Block(
-                        round_num=round_num,
-                        block_num=block_num,
-                        agent=agent,
-                        block_type="user",
-                        content=content,
-                        ts=ts,
-                    )
-                )
-                block_num += 1
-
-        elif etype == "trigger_fired":
-            round_num += 1
-            block_num = 0
-            in_round = True
-            channel = evt.get("channel", "")
-            content = _content_to_text(evt.get("content", ""))
-            label = f"[trigger:{channel}] {content}" if channel else content
-            if label.strip():
-                blocks.append(
-                    Block(
-                        round_num=round_num,
-                        block_num=block_num,
-                        agent=agent,
-                        block_type="trigger",
-                        content=label,
-                        ts=ts,
-                        channel=channel,
-                    )
-                )
-                block_num += 1
-
-        elif etype in ("text", "text_chunk") and in_round:
-            # Stream chunks remain separate searchable blocks in event order.
-            content = _content_to_text(evt.get("content", ""))
-            # Paragraph splits improve retrieval precision for long responses.
-            paragraphs = content.split("\n\n") if len(content) > 300 else [content]
-            for para in paragraphs:
-                if para.strip():
-                    blocks.append(
-                        Block(
-                            round_num=round_num,
-                            block_num=block_num,
-                            agent=agent,
-                            block_type="text",
-                            content=para.strip(),
-                            ts=ts,
-                        )
-                    )
-                    block_num += 1
-
-        elif etype == "tool_call" and in_round:
-            name = evt.get("name", "")
-            args = evt.get("args", {})
-            args_text = " ".join(
-                f"{k}={v}" for k, v in args.items() if k != "_tool_call_id"
-            )
-            content = f"[tool:{name}] {args_text}"
-            blocks.append(
-                Block(
-                    round_num=round_num,
-                    block_num=block_num,
-                    agent=agent,
-                    block_type="tool",
-                    content=content[:1000],
-                    ts=ts,
-                    tool_name=name,
-                    tool_args=args,
-                )
-            )
-            block_num += 1
-
-        elif etype == "tool_result" and in_round:
-            name = evt.get("name", "")
-            output = _content_to_text(evt.get("output", ""))
-            error = _content_to_text(evt.get("error", ""))
-            content = f"[result:{name}] {error or output}"
-            if content.strip() and len(content) > 20:
-                blocks.append(
-                    Block(
-                        round_num=round_num,
-                        block_num=block_num,
-                        agent=agent,
-                        block_type="tool",
-                        content=content[:TOOL_RESULT_INDEX_CHARS],
-                        ts=ts,
-                        tool_name=name,
-                    )
-                )
-                block_num += 1
-
-        elif etype == "processing_end":
-            in_round = False
-
-    return blocks
