@@ -466,6 +466,8 @@ export default {
   "activity.jobs": ({ count }) => `${count} Aufgaben`,
   "activity.context": "Kontext",
 
+  "creatures.inChannel": "In diesem Kanal",
+  "creatures.notInChannel": "Nicht in diesem Kanal",
   "creatures.notTerrarium": "Dies ist kein Terrarium. Eine einzelne Kreatur laeuft eigenstaendig.",
 
   "panelHeader.prefersTitle": "Bevorzugt {zone}",

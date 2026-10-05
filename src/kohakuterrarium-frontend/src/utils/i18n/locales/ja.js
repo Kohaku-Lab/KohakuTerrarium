@@ -455,6 +455,8 @@ export default {
   "activity.jobs": ({ count }) => `${count} 件のジョブ`,
   "activity.context": "コンテキスト",
 
+  "creatures.inChannel": "このチャンネル内",
+  "creatures.notInChannel": "このチャンネル外",
   "creatures.notTerrarium":
     "これはテラリウムではありません。単一の creature が独立して実行されます。",
 

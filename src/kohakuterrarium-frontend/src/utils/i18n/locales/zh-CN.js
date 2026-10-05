@@ -577,6 +577,8 @@ export default {
   "activity.jobs": ({ count }) => `${count} 个作业`,
   "activity.context": "上下文",
 
+  "creatures.inChannel": "在此频道中",
+  "creatures.notInChannel": "不在此频道中",
   "creatures.notTerrarium": "这不是生态瓶。单一智能体会独立运行。",
 
   "state.tab.drives": "驱动",

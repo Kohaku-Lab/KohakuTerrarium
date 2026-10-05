@@ -630,6 +630,8 @@ export default {
   "activity.jobs": ({ count }) => `${count} jobs`,
   "activity.context": "Context",
 
+  "creatures.inChannel": "In this channel",
+  "creatures.notInChannel": "Not in this channel",
   "creatures.notTerrarium": "Not a terrarium. A single creature runs standalone.",
 
   "state.tab.drives": "Drives",

@@ -502,6 +502,8 @@ export default {
   "activity.jobs": ({ count }) => `${count} 個作業`,
   "activity.context": "上下文",
 
+  "creatures.inChannel": "在此頻道中",
+  "creatures.notInChannel": "不在此頻道中",
   "creatures.notTerrarium": "這不是生態瓶。單一生物會獨立執行。",
 
   "state.tab.drives": "驅動",
