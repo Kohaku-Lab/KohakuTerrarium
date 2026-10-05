@@ -33,6 +33,7 @@ import asyncio
 from collections import deque
 import io
 import json
+import random
 import time
 from typing import Any
 
@@ -1354,6 +1355,57 @@ class TestLlmIntegration:
                 assert resized_image.size == (2000, 800)
         assert json.dumps(size_wire) == saved_size_wire
         assert large_path.read_bytes() == large_png.getvalue()
+
+        compression_path = tmp_path / "synthetic-noise.png"
+        noise = Image.frombytes(
+            "RGB", (800, 800), random.Random(7).randbytes(800 * 800 * 3)
+        )
+        noise.save(compression_path, format="PNG")
+        original_noise = compression_path.read_bytes()
+        compression_wire = messages_to_dicts(
+            [
+                UserMessage(
+                    [
+                        TextPart("Inspect the synthetic fixture."),
+                        ImagePart(url=compression_path.as_uri()),
+                    ]
+                )
+            ]
+        )
+        saved_compression_wire = json.dumps(compression_wire)
+        compression_requests = []
+        compression_provider = anthropic_provider(
+            "claude-opus-5-5",
+            requests=compression_requests,
+            extra_body={"disable_prompt_caching": True},
+        )
+        try:
+            assert (
+                await compression_provider.chat_complete(compression_wire)
+            ).content == ANTHROPIC_ANSWER
+            assert (
+                "".join(
+                    [
+                        chunk
+                        async for chunk in compression_provider.chat(
+                            compression_wire, stream=True
+                        )
+                    ]
+                )
+                == ANTHROPIC_ANSWER
+            )
+        finally:
+            await compression_provider.close()
+        assert len(compression_requests) == 2
+        for request in compression_requests:
+            source = request["messages"][0]["content"][1]["source"]
+            compressed = base64.b64decode(source["data"])
+            assert source["media_type"] == "image/jpeg"
+            assert len(compressed) <= 512_000 < len(original_noise)
+            with Image.open(io.BytesIO(compressed)) as prepared_noise:
+                assert prepared_noise.size == (800, 800)
+        assert json.dumps(compression_wire) == saved_compression_wire
+        assert compression_path.read_bytes() == original_noise
 
         # Text-only content stays a plain string, never a list.
         assert make_multimodal_content("just text", images=None) == "just text"

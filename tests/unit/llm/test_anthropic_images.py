@@ -2,12 +2,17 @@
 
 import base64
 import io
+import json
+import random
 from copy import deepcopy
 
 import pytest
 from PIL import Image
 
-from kohakuterrarium.llm.anthropic_images import prepare_anthropic_images
+from kohakuterrarium.llm.anthropic_images import (
+    prepare_anthropic_images,
+    prepare_anthropic_request,
+)
 
 
 def image_block(size, *, format="PNG", mode="RGB"):
@@ -234,3 +239,94 @@ def test_image_shaped_tool_arguments_and_metadata_are_not_media_blocks():
 def test_text_only_and_empty_messages_are_unchanged():
     for messages in ([], [{"role": "user", "content": "text"}]):
         assert prepare_anthropic_images(messages) is messages
+
+
+def test_request_budget_keeps_all_individually_small_images_and_json_overhead():
+    data = io.BytesIO()
+    pixels = random.Random(4).randbytes(384 * 384 * 3)
+    Image.frombytes("RGB", (384, 384), pixels).save(data, "PNG")
+    assert len(data.getvalue()) < 512_000
+    block = {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": base64.b64encode(data.getvalue()).decode(),
+        },
+    }
+    body = {
+        "model": "test",
+        "system": "界" * 10_000,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "read1",
+                        "content": [
+                            {"type": "text", "text": "Preserve the caption"},
+                            *[deepcopy(block) for _ in range(12)],
+                        ],
+                    }
+                ],
+            }
+        ],
+        "tools": [{"name": "unchanged", "input_schema": {"type": "object"}}],
+    }
+    saved = deepcopy(body)
+    result = prepare_anthropic_request(body, max_bytes=1_000_000)
+    assert (
+        len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode())
+        <= 1_000_000
+    )
+    content = result["messages"][0]["content"][0]["content"]
+    assert len(content) == 13
+    assert content[0] == saved["messages"][0]["content"][0]["content"][0]
+    assert result["system"] == body["system"] and result["tools"] == body["tools"]
+    assert body == saved
+    for image in content[1:]:
+        with decode(image) as prepared:
+            assert prepared.size == (384, 384)
+            assert prepared.format == "JPEG"
+    assert prepare_anthropic_request(body, max_bytes=1_000_000) == result
+
+
+def test_budget_preserves_uncompressible_content_and_ignores_transport_options():
+    image = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"},
+    }
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "large" * 500}, image]}
+    ]
+    kwargs = {
+        "messages": [],
+        "extra_body": {"messages": messages},
+        "extra_headers": {"private": object()},
+        "timeout": object(),
+    }
+    prepared = prepare_anthropic_request(kwargs, max_bytes=1000)
+    assert prepared["extra_body"]["messages"] == messages
+    assert prepared["extra_headers"] is kwargs["extra_headers"]
+    assert prepared["timeout"] is kwargs["timeout"]
+    assert kwargs["messages"] == []
+
+
+def test_text_only_request_identity_and_tool_argument_images_are_preserved():
+    kwargs = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "a",
+                        "name": "store",
+                        "input": image_block((8001, 2)),
+                    }
+                ],
+            }
+        ]
+    }
+    assert prepare_anthropic_request(kwargs) is kwargs

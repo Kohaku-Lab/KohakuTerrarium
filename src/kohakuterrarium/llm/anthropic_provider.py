@@ -35,7 +35,10 @@ from kohakuterrarium.llm.anthropic_format import (
     merge_usage,
     usage_to_dict,
 )
-from kohakuterrarium.llm.anthropic_images import prepare_anthropic_images
+from kohakuterrarium.llm.anthropic_images import (
+    prepare_anthropic_images,
+    prepare_anthropic_request,
+)
 from kohakuterrarium.llm.api_keys import get_api_key
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
@@ -503,4 +506,4 @@ class AnthropicProvider(BaseLLMProvider):
             create_kwargs = self._with_prompt_cache_markers(create_kwargs)
         if merged_extra:
             create_kwargs["extra_body"] = merged_extra
-        return create_kwargs
+        return prepare_anthropic_request(create_kwargs)
