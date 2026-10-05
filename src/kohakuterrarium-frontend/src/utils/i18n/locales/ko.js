@@ -450,6 +450,8 @@ export default {
   "activity.jobs": ({ count }) => `${count}개 작업`,
   "activity.context": "컨텍스트",
 
+  "creatures.inChannel": "이 채널에 있음",
+  "creatures.notInChannel": "이 채널에 없음",
   "creatures.notTerrarium": "테라리움이 아닙니다. 단일 creature가 독립적으로 실행됩니다.",
 
   "state.tab.drives": "드라이브",
