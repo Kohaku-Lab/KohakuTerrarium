@@ -828,7 +828,8 @@ class Controller:
         # Tool continuations and unedited regeneration reuse existing context;
         # appending an empty user message would corrupt provider turn ordering.
         skip_empty = (
-            not combined_text.strip()
+            isinstance(user_content, str)
+            and not combined_text.strip()
             and (self._is_native_mode or all(e.type == "tool_complete" for e in events))
         ) or any(
             e.type == "user_input"
