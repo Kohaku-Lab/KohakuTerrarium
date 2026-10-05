@@ -86,6 +86,9 @@ _OVERFLOW_MARKERS = (
     "too many tokens",
     "input is too long",
     "request too large",
+    # Anthropic Messages API wordings.
+    "prompt is too long",
+    "exceed context limit",
 )
 _RATE_LIMIT_MARKERS = (
     "rate_limit",
