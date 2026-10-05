@@ -595,8 +595,9 @@ class Creature:
         session_id = ""
         if agent.session_store:
             try:
-                meta = agent.session_store.load_meta()
-                session_id = meta.get("session_id", "")
+                store_meta = agent.session_store.meta
+                if "session_id" in store_meta:
+                    session_id = str(store_meta["session_id"] or "")
             except Exception as e:
                 logger.warning(
                     "Failed to load session meta",
