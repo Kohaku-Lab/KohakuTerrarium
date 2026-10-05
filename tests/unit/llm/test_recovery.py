@@ -56,6 +56,22 @@ class TestClassifyOpenAIError:
         exc = _HTTPError("this model's maximum context length is 8192", status_code=400)
         assert classify_openai_error(exc) == ErrorClass.OVERFLOW
 
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "prompt is too long: 1039019 tokens > 1000000 maximum",
+            "input length and `max_tokens` exceed context limit: "
+            "990000 + 32000 > 1000000, decrease input length or `max_tokens`",
+        ],
+    )
+    def test_anthropic_context_overflow_messages_are_overflow(self, message):
+        body = {
+            "type": "error",
+            "error": {"type": "invalid_request_error", "message": message},
+        }
+        exc = _HTTPError(f"Error code: 400 - {body}", status_code=400, body=body)
+        assert classify_openai_error(exc) == ErrorClass.OVERFLOW
+
     def test_429_status_is_rate_limit(self):
         assert (
             classify_openai_error(_HTTPError(status_code=429)) == ErrorClass.RATE_LIMIT
