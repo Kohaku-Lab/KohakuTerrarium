@@ -65,15 +65,16 @@ def fix_anthropic_tool_block_pairing(
             if not isinstance(content, list):
                 rebuilt.append(msg)
                 continue
-            kept_blocks = [
-                block
-                for block in content
-                if not (
-                    isinstance(block, dict)
-                    and block.get("type") == "tool_use"
-                    and str(block.get("id") or "") in seen_tool_use_ids
-                )
-            ]
+            kept_blocks: list[Any] = []
+            ids_in_message: set[str] = set()
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    block_id = str(block.get("id") or "")
+                    if block_id in seen_tool_use_ids or block_id in ids_in_message:
+                        continue
+                    if block_id:
+                        ids_in_message.add(block_id)
+                kept_blocks.append(block)
             if len(kept_blocks) != len(content):
                 logger.warning(
                     "Dropped repeated tool_use block(s)",

@@ -140,6 +140,23 @@ class TestDuplicateToolUses:
         assert _result_ids([fixed[3]]) == ["fresh"]
         assert collections.Counter(_result_ids(fixed)) == {"dup": 1, "fresh": 1}
 
+    def test_same_tool_use_twice_in_one_message_is_paired_once(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "twin", "name": "bash", "input": {}},
+                    {"type": "tool_use", "id": "twin", "name": "bash", "input": {}},
+                ],
+            },
+            {"role": "user", "content": [_result("twin", "out")]},
+        ]
+
+        fixed = fix_anthropic_tool_block_pairing(messages)
+
+        assert [b["id"] for b in fixed[0]["content"]] == ["twin"]
+        assert _result_ids(fixed) == ["twin"]
+
 
 class TestExistingPairingBehaviour:
     def test_matching_result_kept_once(self):
