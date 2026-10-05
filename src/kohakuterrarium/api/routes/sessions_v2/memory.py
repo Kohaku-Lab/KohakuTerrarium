@@ -1,4 +1,4 @@
-"""Search saved session memory with full-text, vector, or hybrid modes."""
+"""Search live or saved session memory with full-text, vector, or hybrid modes."""
 
 import asyncio
 from pathlib import Path
@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 from kohakuterrarium.studio.sessions import cluster_fold
-from kohakuterrarium.studio.sessions.memory_search import search_session_memory
 from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.studio.persistence.store import resolve_session_path_default
+from kohakuterrarium.studio.sessions.memory_search import search_session_memory
+from kohakuterrarium.api.routes.persistence.live_paths import live_store_path
 
 router = APIRouter()
 
@@ -71,10 +72,13 @@ async def search_session_memory_route(
     same path with one member. When the lab host has no agent engine, searches open
     the on-disk stores directly.
     """
-    # Path resolution performs synchronous filesystem stats for every member.
-    member_paths = await asyncio.to_thread(
-        _resolve_cluster_member_paths, session_name, service
-    )
+    live_path = live_store_path(service, session_name)
+    if live_path is not None:
+        member_paths = [(session_name, live_path)]
+    else:
+        member_paths = await asyncio.to_thread(
+            _resolve_cluster_member_paths, session_name, service
+        )
     if not member_paths:
         raise HTTPException(404, f"Session not found: {session_name}")
 

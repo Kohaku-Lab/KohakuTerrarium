@@ -756,6 +756,17 @@ class TestApiCreatureJourney:
         saved_name = saved["name"]
         assert "alice" in saved["agents"]
 
+        assert session_id != saved_name
+        resp = client.get(
+            f"/api/sessions/{session_id}/memory/search",
+            params={"q": "persist", "mode": "fts"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert any(
+            "persist this turn" in result["content"]
+            for result in resp.json()["results"]
+        )
+
         # On-disk history index + per-target history read.
         resp = client.get(f"/api/sessions/{saved_name}/history")
         assert resp.status_code == 200
@@ -811,6 +822,16 @@ class TestApiCreatureJourney:
         assert resumed["type"] == "agent"
         assert resumed["session_name"] == "alice"
         resumed_id = resumed["instance_id"]
+
+        resp = client.get(
+            f"/api/sessions/{resumed_id}/memory/search",
+            params={"q": "persist", "mode": "fts"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert any(
+            "persist this turn" in result["content"]
+            for result in resp.json()["results"]
+        )
 
         # The resumed session is live again in the active list, and its
         # restored conversation still carries the original turn.

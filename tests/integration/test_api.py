@@ -1366,6 +1366,21 @@ class TestApiIntegration:
         saved_name = listing["sessions"][0]["name"]
         assert "alice" in listing["sessions"][0]["agents"]
 
+        assert session_id != saved_name
+        monkeypatch.setattr(
+            _memory_search, "create_embedder", lambda cfg: NullEmbedder()
+        )
+        for mode in ("fts", "auto"):
+            resp = client.get(
+                f"/api/sessions/{session_id}/memory/search",
+                params={"q": "persist", "mode": mode},
+            )
+            assert resp.status_code == 200, resp.text
+            assert any(
+                "persist this turn" in result["content"]
+                for result in resp.json()["results"]
+            )
+
         # Saved-session aggregates — disk usage + stats both read the
         # same cached index the rail loads.
         resp = client.get("/api/sessions/disk-usage")
@@ -1855,6 +1870,15 @@ class TestApiIntegration:
         repeated = client.post(f"/api/sessions/{saved_name}/resume")
         assert repeated.status_code == 200
         assert repeated.json()["instance_id"] == resumed_id
+        resp = client.get(
+            f"/api/sessions/{resumed_id}/memory/search",
+            params={"q": "persist", "mode": "fts"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert any(
+            "persist this turn" in result["content"]
+            for result in resp.json()["results"]
+        )
         historical = client.get("/api/sessions/retired-source/history/alice")
         assert historical.status_code == 200
         assert "historic source only" in str(historical.json())
