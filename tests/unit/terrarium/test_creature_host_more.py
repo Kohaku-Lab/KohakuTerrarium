@@ -156,7 +156,7 @@ class TestBuildCreatureDispatch:
 class TestGetStatusBranches:
     def test_status_with_session_store(self):
         agent = _FakeAgent()
-        agent.session_store = SimpleNamespace(load_meta=lambda: {"session_id": "sid-x"})
+        agent.session_store = SimpleNamespace(meta={"session_id": "sid-x"})
         c = Creature(creature_id="c", name="alice", agent=agent)
         out = c.get_status()
         assert out["session_id"] == "sid-x"
@@ -164,10 +164,11 @@ class TestGetStatusBranches:
     def test_status_session_store_load_fails(self):
         agent = _FakeAgent()
 
-        def _boom():
-            raise RuntimeError("nope")
+        class _BrokenMeta:
+            def __contains__(self, key):
+                raise RuntimeError("nope")
 
-        agent.session_store = SimpleNamespace(load_meta=_boom)
+        agent.session_store = SimpleNamespace(meta=_BrokenMeta())
         c = Creature(creature_id="c", name="alice", agent=agent)
         out = c.get_status()
         assert out["session_id"] == ""

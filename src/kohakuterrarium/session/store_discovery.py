@@ -24,13 +24,14 @@ def discover_agents(event_keys: Iterable[str]) -> list[str]:
     Framework and attached-agent namespaces are excluded so resume does not
     rebuild them as standalone creatures.
     """
-    seen: list[str] = []
+    seen: dict[str, None] = {}
     for namespace in _namespaces(event_keys):
+        if namespace in seen:
+            continue
         if _ATTACHED in namespace or namespace in _FRAMEWORK_NAMESPACES:
             continue
-        if namespace not in seen:
-            seen.append(namespace)
-    return seen
+        seen[namespace] = None
+    return list(seen)
 
 
 def discover_attached_agents(event_keys: Iterable[str]) -> list[dict[str, Any]]:

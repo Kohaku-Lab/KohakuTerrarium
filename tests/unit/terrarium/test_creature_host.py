@@ -8,6 +8,7 @@ from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.builtins.outputs.stdout import StdoutOutput
 from kohakuterrarium.modules.trigger.base import BaseTrigger
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import Creature, build_creature
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.terrarium import _FakeAgent
@@ -379,6 +380,34 @@ class TestStatus:
         assert out["creature_id"] == "alice"
         assert out["name"] == "alice"
         assert out["running"] is False
+
+    def test_get_status_reads_session_id_without_scanning_events(
+        self, tmp_path, monkeypatch
+    ):
+        store = SessionStore(tmp_path / "s.kohakutr")
+        store.init_meta("sess-1", "agent", "cfg", str(tmp_path), ["alice"])
+        store.append_event("alice", "user_input", {"content": "hi"})
+        agent = _FakeAgent(name="alice")
+        agent.attach_session_store(store)
+
+        def _no_scan(*_a, **_kw):
+            raise AssertionError("get_status must not scan event keys")
+
+        monkeypatch.setattr(store, "discover_agents_from_events", _no_scan)
+        monkeypatch.setattr(store, "load_meta", _no_scan)
+        try:
+            assert _creature(agent=agent).get_status()["session_id"] == "sess-1"
+        finally:
+            store.close(update_status=False)
+
+    def test_get_status_session_id_empty_when_meta_lacks_it(self, tmp_path):
+        store = SessionStore(tmp_path / "s.kohakutr")
+        agent = _FakeAgent(name="alice")
+        agent.attach_session_store(store)
+        try:
+            assert _creature(agent=agent).get_status()["session_id"] == ""
+        finally:
+            store.close(update_status=False)
 
 
 # ── status enum (Creature.status) ────────────────────────────
