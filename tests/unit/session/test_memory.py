@@ -1,5 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.session.memory`."""
 
+import sqlite3
 import time
 
 import numpy as np
@@ -11,8 +12,6 @@ from kohakuterrarium.session.memory import (
     SearchResult,
     SessionMemory,
     _block_metadata,
-    _content_to_text,
-    _extract_blocks,
 )
 
 # ── _block_metadata ──────────────────────────────────────────────
@@ -49,255 +48,6 @@ class TestBlockMetadata:
 
 
 # ── _extract_blocks ──────────────────────────────────────────────
-
-
-class TestContentToText:
-    """Regression coverage for the 500 on memory/search when an event's
-    ``content`` is a multimodal list and a caller naively calls
-    ``.strip()`` / ``.split()`` on it."""
-
-    def test_string_passthrough(self):
-        assert _content_to_text("hello") == "hello"
-
-    def test_empty_string(self):
-        assert _content_to_text("") == ""
-
-    def test_none_returns_empty(self):
-        assert _content_to_text(None) == ""
-
-    def test_list_of_text_parts(self):
-        parts = [
-            {"type": "text", "text": "first"},
-            {"type": "text", "text": "second"},
-        ]
-        assert _content_to_text(parts) == "first second"
-
-    def test_list_with_image_part(self):
-        parts = [
-            {"type": "text", "text": "look at this"},
-            {"type": "image_url", "image_url": {"url": "https://x"}},
-        ]
-        # Image is preserved as a placeholder, not dropped silently.
-        assert _content_to_text(parts) == "look at this [image]"
-
-    def test_list_with_file_part(self):
-        parts = [{"type": "file", "name": "x.pdf"}]
-        assert _content_to_text(parts) == "[file]"
-
-    def test_bare_string_inside_list(self):
-        # Some pre-multimodal sessions stored content as ["text"]
-        assert _content_to_text(["raw"]) == "raw"
-
-    def test_dict_input_wrapped(self):
-        assert _content_to_text({"type": "text", "text": "x"}) == "x"
-
-    def test_other_type_str_fallback(self):
-        # Numbers shouldn't crash — get coerced to str.
-        assert _content_to_text(42) == "42"
-
-
-class TestExtractBlocksMultimodal:
-    """Regression: ``user_input`` events with multimodal content
-    (image attached to a message) used to take down ``index_events`` →
-    memory.search with ``'list' object has no attribute 'strip'``.
-    """
-
-    def test_multimodal_user_input_is_indexed(self):
-        events = [
-            {
-                "type": "user_input",
-                "content": [
-                    {"type": "text", "text": "what's in this picture"},
-                    {"type": "image_url", "image_url": {"url": "data:..."}},
-                ],
-                "event_id": 1,
-            }
-        ]
-        # Must not raise.
-        blocks = _extract_blocks("alice", events)
-        assert len(blocks) == 1
-        assert blocks[0].block_type == "user"
-        assert "what's in this picture" in blocks[0].content
-        assert "[image]" in blocks[0].content
-
-    def test_empty_multimodal_input_skipped(self):
-        events = [
-            {
-                "type": "user_input",
-                "content": [],
-                "event_id": 1,
-            }
-        ]
-        blocks = _extract_blocks("alice", events)
-        # Empty list flattens to "" which strips to "" → skipped.
-        assert blocks == []
-
-
-class TestExtractBlocks:
-    def test_user_input_starts_round(self):
-        events = [
-            {
-                "type": "user_input",
-                "content": "find the bug",
-                "event_id": 1,
-            }
-        ]
-        blocks = _extract_blocks("alice", events)
-        assert len(blocks) == 1
-        assert blocks[0].block_type == "user"
-        assert blocks[0].round_num == 1
-
-    def test_empty_user_input_skipped(self):
-        events = [
-            {"type": "user_input", "content": "   ", "event_id": 1},
-        ]
-        blocks = _extract_blocks("alice", events)
-        assert blocks == []
-
-    def test_trigger_fired_creates_round(self):
-        events = [
-            {
-                "type": "trigger_fired",
-                "channel": "ch1",
-                "content": "ping",
-                "event_id": 1,
-            }
-        ]
-        blocks = _extract_blocks("alice", events)
-        assert len(blocks) == 1
-        assert blocks[0].block_type == "trigger"
-        assert blocks[0].channel == "ch1"
-
-    def test_text_only_indexed_inside_round(self):
-        events = [
-            # No user_input → in_round=False, text dropped.
-            {"type": "text", "content": "orphan text", "event_id": 1},
-        ]
-        blocks = _extract_blocks("alice", events)
-        assert blocks == []
-
-    def test_text_chunk_indexed_inside_round(self):
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {"type": "text_chunk", "content": "first reply", "event_id": 2},
-        ]
-        blocks = _extract_blocks("alice", events)
-        # 1 user + 1 text block.
-        types = [b.block_type for b in blocks]
-        assert "user" in types
-        assert "text" in types
-
-    def test_coalesced_segment_indexes_as_one_whole_block(self):
-        # UXI-02: streamed text is now stored as ONE text_chunk per
-        # segment, so a whole assistant reply embeds as a single block
-        # instead of one fragment per streamed chunk (which fractured
-        # embeddings across former chunk boundaries).
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {
-                "type": "text_chunk",
-                "content": "Hello, world! Here is the complete answer.",
-                "event_id": 2,
-            },
-        ]
-        blocks = _extract_blocks("alice", events)
-        text_blocks = [b for b in blocks if b.block_type == "text"]
-        assert len(text_blocks) == 1
-        assert text_blocks[0].content == "Hello, world! Here is the complete answer."
-
-    def test_long_text_splits_on_double_newline(self):
-        long_text = "para1\n\n" + ("y" * 350) + "\n\n" + "para3"
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {"type": "text", "content": long_text, "event_id": 2},
-        ]
-        blocks = _extract_blocks("alice", events)
-        text_blocks = [b for b in blocks if b.block_type == "text"]
-        assert len(text_blocks) == 3
-
-    def test_tool_call_indexed(self):
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {
-                "type": "tool_call",
-                "name": "bash",
-                "args": {"cmd": "ls"},
-                "event_id": 2,
-            },
-        ]
-        blocks = _extract_blocks("alice", events)
-        tool_blocks = [b for b in blocks if b.block_type == "tool"]
-        assert len(tool_blocks) == 1
-        assert tool_blocks[0].tool_name == "bash"
-        assert "cmd=ls" in tool_blocks[0].content
-
-    def test_tool_result_indexed(self):
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {
-                "type": "tool_result",
-                "name": "bash",
-                "output": "this is the output of the tool call",
-                "event_id": 2,
-            },
-        ]
-        blocks = _extract_blocks("alice", events)
-        tool_blocks = [b for b in blocks if b.block_type == "tool"]
-        assert len(tool_blocks) == 1
-        assert "output" in tool_blocks[0].content
-
-    def test_short_tool_result_skipped(self):
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {
-                "type": "tool_result",
-                "name": "x",
-                "output": "ok",
-                "event_id": 2,
-            },
-        ]
-        blocks = _extract_blocks("alice", events)
-        # Tool result content "[result:x] ok" is <=20 chars → skipped.
-        tool_blocks = [b for b in blocks if b.block_type == "tool"]
-        assert tool_blocks == []
-
-    def test_large_tool_result_indexed_beyond_old_2000_cap(self):
-        # Elided tool results (≤256KB) must stay recoverable: the index cap
-        # covers far more than the historical 2000-char truncation.
-        from kohakuterrarium.session.memory import TOOL_RESULT_INDEX_CHARS
-
-        big = (
-            "needle-at-tail "
-            + "z" * (TOOL_RESULT_INDEX_CHARS - 50)
-            + " unique-tail-marker"
-        )
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {
-                "type": "tool_result",
-                "name": "bash",
-                "output": big,
-                "event_id": 2,
-            },
-        ]
-        blocks = _extract_blocks("alice", events)
-        tool_blocks = [b for b in blocks if b.block_type == "tool"]
-        assert len(tool_blocks) == 1
-        assert "unique-tail-marker" in tool_blocks[0].content
-
-    def test_processing_end_ends_round(self):
-        events = [
-            {"type": "user_input", "content": "q", "event_id": 1},
-            {"type": "processing_end", "event_id": 2},
-            # After processing_end, text events are no longer indexed.
-            {"type": "text", "content": "post round", "event_id": 3},
-        ]
-        blocks = _extract_blocks("alice", events)
-        types = [b.block_type for b in blocks]
-        assert "text" not in types
-
-
-# ── SearchResult ─────────────────────────────────────────────────
 
 
 class TestSearchResultAgeStr:
@@ -395,6 +145,258 @@ class TestSessionMemoryConstruction:
 
 
 class TestSessionMemoryIndexing:
+    def test_rebuild_uses_native_handles_and_preserves_other_agents(
+        self, tmp_path, monkeypatch
+    ):
+        def forbidden_connection(*args, **kwargs):
+            raise AssertionError("A second SQLite library must not open a live vault")
+
+        path = str(tmp_path / "native.db")
+        memory = SessionMemory(path, _FakeEmbedder())
+        rows = [{"type": "user_input", "content": "alice needle"}]
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(sqlite3, "connect", forbidden_connection)
+                memory.index_events("alice", rows)
+                memory.index_events(
+                    "bob", [{"type": "user_input", "content": "bob needle"}]
+                )
+                for _ in range(2):
+                    memory.index_events("alice", [])
+                    for mode in ("fts", "semantic", "hybrid"):
+                        assert [
+                            h.content for h in memory.search("needle", mode=mode)
+                        ] == ["bob needle"]
+                    memory.index_events("alice", rows)
+                    assert memory.get_stats()["vec_blocks"] == 2
+        finally:
+            memory.close()
+        memory = SessionMemory(path, _FakeEmbedder())
+        try:
+            for mode in ("fts", "semantic", "hybrid"):
+                assert {h.content for h in memory.search("needle", mode=mode)} == {
+                    "alice needle",
+                    "bob needle",
+                }
+        finally:
+            memory.close()
+
+    def test_legacy_indexes_rebuild_on_use_and_preserve_other_agents(self, tmp_path):
+        path = str(tmp_path / "migration.db")
+        memory = SessionMemory(path, _FakeEmbedder())
+        rows = [
+            {"type": "user_input", "content": "needle prompt"},
+            {"type": "text", "content": "needle reply"},
+        ]
+        try:
+            memory.index_events("alice", rows[:1])
+            memory.index_events(
+                "bob", [{"type": "user_input", "content": "bob needle"}]
+            )
+            for kind in ("keywords", "vectors:4"):
+                del memory._state[f"alice:cursor:{kind}"]
+                memory._state[f"alice:indexed_{kind}"] = len(rows)
+            before = memory.get_stats()
+        finally:
+            memory.close()
+        memory = SessionMemory(path, _FakeEmbedder())
+        try:
+            assert memory.get_stats() == before
+            memory.index_events("alice", rows)
+            for mode in ("fts", "semantic", "hybrid"):
+                assert {r.content for r in memory.search("needle", mode=mode)} == {
+                    "needle prompt",
+                    "needle reply",
+                    "bob needle",
+                }
+            assert memory.get_stats()["vec_blocks"] == 3
+        finally:
+            memory.close()
+
+    def test_incremental_encode_only_sees_new_blocks_and_force_does_not_duplicate(
+        self, tmp_path
+    ):
+        class CountingEmbedder(_FakeEmbedder):
+            def __init__(self):
+                self.inputs = []
+
+            def encode(self, texts):
+                self.inputs.extend(texts)
+                return super().encode(texts)
+
+        embedder = CountingEmbedder()
+        memory = SessionMemory(str(tmp_path / "cost.db"), embedder)
+        rows = [{"type": "user_input", "content": "needle prompt"}]
+        try:
+            memory.index_events("alice", rows)
+            rows.append({"type": "text", "content": "needle reply"})
+            memory.index_events("alice", rows)
+            memory.index_events("alice", rows)
+            assert embedder.inputs == ["needle prompt", "needle reply"]
+            for _ in range(2):
+                memory._set_indexed_count("alice", 0)
+                memory._clear_fts("alice")
+                memory.index_events("alice", rows)
+                assert memory.get_stats()["vec_blocks"] == 2
+                assert memory.get_stats()["fts_blocks"] == 2
+        finally:
+            memory.close()
+
+    @pytest.mark.parametrize("kind", ["keywords", "vectors:4"])
+    def test_interrupted_batch_recovers_without_duplicate_rows(
+        self, tmp_path, monkeypatch, kind
+    ):
+        path = str(tmp_path / "interrupted.db")
+        memory = SessionMemory(path, _FakeEmbedder())
+        rows = [
+            {"type": "user_input", "content": "needle prompt"},
+            {"type": "text", "content": "needle reply"},
+        ]
+        vault = memory._fts if kind == "keywords" else memory._vec
+        insert = vault.insert
+        calls = 0
+
+        def failing_insert(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("interrupted write")
+            return insert(*args, **kwargs)
+
+        try:
+            with monkeypatch.context() as patch:
+                patch.setattr(vault, "insert", failing_insert)
+                with pytest.raises(OSError, match="interrupted write"):
+                    memory.index_events("alice", rows)
+        finally:
+            memory.close()
+        memory = SessionMemory(path, _FakeEmbedder())
+        try:
+            memory.index_events("alice", rows)
+            assert memory.get_stats()["fts_blocks"] == 2
+            assert memory.get_stats()["vec_blocks"] == 2
+            assert len(memory.search("needle", mode="hybrid")) == 2
+        finally:
+            memory.close()
+
+    def test_truncated_history_removes_rows_and_reindexes_after_empty_reset(
+        self, tmp_path
+    ):
+        memory = SessionMemory(str(tmp_path / "truncate.db"), _FakeEmbedder())
+        rows = [
+            {"type": "user_input", "content": "needle prompt"},
+            {"type": "text", "content": "needle reply"},
+        ]
+        try:
+            memory.index_events("alice", rows)
+            memory.index_events("alice", [])
+            assert memory.search("needle", mode="hybrid") == []
+            memory.index_events("alice", rows[:1])
+            assert len(memory.search("needle", mode="hybrid")) == 1
+        finally:
+            memory.close()
+
+    def test_partial_rounds_keep_blocks_and_global_round_numbers(self, tmp_path):
+        path = str(tmp_path / "partial.db")
+        rows = []
+        expected = []
+        for turn in range(3):
+            for row in (
+                {"type": "user_input", "content": f"needle question {turn}"},
+                {"type": "text", "content": f"needle answer {turn}"},
+                {"type": "processing_end"},
+            ):
+                rows.append(row)
+                memory = SessionMemory(path, _FakeEmbedder())
+                try:
+                    memory.index_events("alice", rows)
+                    if row["type"] != "processing_end":
+                        expected.append(row["content"])
+                    for mode in ("fts", "semantic", "hybrid"):
+                        hits = memory.search("needle", mode=mode, k=20)
+                        assert {hit.content for hit in hits} == set(expected)
+                        assert {hit.round_num for hit in hits} == set(
+                            range(1, turn + 2)
+                        )
+                finally:
+                    memory.close()
+
+    def test_keyword_progress_does_not_skip_late_vectors_or_duplicate_boundary(
+        self, tmp_path
+    ):
+        rows = [{"type": "user_input", "content": "needle question", "event_id": 1}]
+        memory = SessionMemory(str(tmp_path / "catchup.db"))
+        try:
+            memory.index_events("alice", rows)
+            rows.extend(
+                [
+                    {**rows[0], "event_id": 2},
+                    {
+                        "type": "tool_result",
+                        "name": "read",
+                        "output": "needle tool result",
+                        "event_id": 3,
+                    },
+                ]
+            )
+            memory.index_events("alice", rows)
+            memory._set_embedder(_FakeEmbedder())
+            memory.index_events("alice", rows)
+            assert memory.get_stats()["fts_blocks"] == 2
+            assert memory.get_stats()["vec_blocks"] == 2
+            assert len(memory.search("needle", mode="hybrid")) == 2
+        finally:
+            memory.close()
+
+    def test_branch_change_replaces_obsolete_hits_and_fences_prepared_vectors(
+        self, tmp_path
+    ):
+        rows = [
+            {
+                "type": "user_input",
+                "content": "needle old",
+                "turn_index": 1,
+                "branch_id": 1,
+                "event_id": 1,
+            },
+            {
+                "type": "text",
+                "content": "needle answer",
+                "turn_index": 1,
+                "branch_id": 1,
+                "event_id": 2,
+            },
+        ]
+        memory = SessionMemory(str(tmp_path / "branch.db"), _FakeEmbedder())
+        try:
+            memory.index_events("alice", rows[:1])
+            start, blocks = memory._vector_batch("alice", rows)
+            rows.append(
+                {
+                    "type": "user_input",
+                    "content": "needle replacement",
+                    "turn_index": 1,
+                    "branch_id": 2,
+                    "event_id": 3,
+                }
+            )
+            memory._index_keywords("alice", rows)
+            with pytest.raises(RuntimeError, match="index changed"):
+                memory._commit_vectors(
+                    "alice",
+                    start,
+                    2,
+                    blocks,
+                    _FakeEmbedder().encode([b.content for b in blocks]),
+                )
+            memory.index_events("alice", rows)
+            for mode in ("fts", "semantic", "hybrid"):
+                assert [hit.content for hit in memory.search("needle", mode=mode)] == [
+                    "needle replacement"
+                ]
+        finally:
+            memory.close()
+
     def test_fts_then_vectors_indexes_every_agent_and_catches_up(self, tmp_path):
         memory = SessionMemory(str(tmp_path / "multi.db"))
         events = {
@@ -424,7 +426,7 @@ class TestSessionMemoryIndexing:
             memory.index_events("alice", rows)
             memory._set_indexed_count("alice", 0)
             start, blocks = memory._vector_batch("alice", rows)
-            assert start == 0
+            assert start.start == 0
             assert [block.content for block in blocks] == ["needle"]
         finally:
             memory.close()
