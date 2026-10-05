@@ -61,10 +61,30 @@ def fix_anthropic_tool_block_pairing(
     for mi, msg in enumerate(messages):
         role = msg.get("role")
         if role == "assistant":
-            rebuilt.append(msg)
             content = msg.get("content")
             if not isinstance(content, list):
+                rebuilt.append(msg)
                 continue
+            kept_blocks = [
+                block
+                for block in content
+                if not (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and str(block.get("id") or "") in seen_tool_use_ids
+                )
+            ]
+            if len(kept_blocks) != len(content):
+                logger.warning(
+                    "Dropped repeated tool_use block(s)",
+                    count=len(content) - len(kept_blocks),
+                    message_index=mi,
+                )
+                if not kept_blocks:
+                    continue
+                msg = {**msg, "content": kept_blocks}
+                content = kept_blocks
+            rebuilt.append(msg)
             tool_uses = [
                 block
                 for block in content
@@ -102,6 +122,7 @@ def fix_anthropic_tool_block_pairing(
                 continue
             filtered: list[dict[str, Any]] = []
             dropped_orphan = 0
+            dropped_duplicate = 0
             for bi, block in enumerate(content):
                 if not isinstance(block, dict) or block.get("type") != "tool_result":
                     filtered.append(block)
@@ -112,12 +133,18 @@ def fix_anthropic_tool_block_pairing(
                 if tu_id not in seen_tool_use_ids:
                     dropped_orphan += 1
                     continue
-                # Keep valid results not already moved beside their tool use.
-                filtered.append(block)
+                # A seen tool use already received its one spliced result.
+                dropped_duplicate += 1
             if dropped_orphan:
                 logger.warning(
                     "Dropped orphan tool_result block(s)",
                     count=dropped_orphan,
+                    message_index=mi,
+                )
+            if dropped_duplicate:
+                logger.warning(
+                    "Dropped duplicate tool_result block(s)",
+                    count=dropped_duplicate,
                     message_index=mi,
                 )
             if filtered:
