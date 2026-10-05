@@ -39,6 +39,19 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _comparable_event(event: dict) -> dict:
+    """Event payload as ``append_event`` would store it, minus ``event_id``.
+
+    A copy gains ``spawned_in_turn = turn_index`` when the original predates
+    that field, so both sides are normalised before prefix comparison.
+    """
+    payload = {k: v for k, v in event.items() if k != "event_id"}
+    turn_index = payload.get("turn_index")
+    if turn_index is not None and "spawned_in_turn" not in payload:
+        payload["spawned_in_turn"] = turn_index
+    return payload
+
+
 def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
     """Append events beyond the shared prefix, assigning destination event IDs."""
     # This synchronous topology transaction includes all accepted writes.
@@ -53,9 +66,7 @@ def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
         incoming = src.get_events(agent)
         shared = 0
         for old, new in zip(dst.get_events(agent), incoming):
-            old_payload = {k: v for k, v in old.items() if k != "event_id"}
-            new_payload = {k: v for k, v in new.items() if k != "event_id"}
-            if old_payload != new_payload:
+            if _comparable_event(old) != _comparable_event(new):
                 break
             shared += 1
         for raw in incoming[shared:]:

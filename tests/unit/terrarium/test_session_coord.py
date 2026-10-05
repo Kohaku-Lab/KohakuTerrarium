@@ -83,6 +83,37 @@ class TestCopyEventsInto:
             src.close()
             dst.close()
 
+    def test_merge_back_of_split_copy_does_not_reappend_legacy_events(self, tmp_path):
+        original = SessionStore(str(tmp_path / "original.kohakutr"))
+        split = SessionStore(str(tmp_path / "split.kohakutr"))
+        try:
+            original.init_meta("s1", "agent", "/p", "/w", ["alice"])
+            original.append_event("alice", "user_input", {"content": "a", "ts": 1})
+            key, _ = original.append_event(
+                "alice", "tool_call", {"content": "b", "ts": 2}, turn_index=1
+            )
+            legacy = dict(original.events[key])
+            del legacy["spawned_in_turn"]
+            original.events[key] = legacy
+            original.append_event("alice", "tool_result", {"content": "c", "ts": 3})
+            original.flush()
+
+            assert sc.copy_events_into(original, split) == 3
+            assert split.get_events("alice")[1]["spawned_in_turn"] == 1
+            original.append_event("alice", "user_input", {"content": "d", "ts": 4})
+            split.flush()
+
+            assert sc.copy_events_into(split, original) == 0
+            assert [e["content"] for e in original.get_events("alice")] == [
+                "a",
+                "b",
+                "c",
+                "d",
+            ]
+        finally:
+            original.close()
+            split.close()
+
 
 # ── merge_session_stores ──────────────────────────────────────
 
