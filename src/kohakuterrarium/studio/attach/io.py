@@ -315,49 +315,51 @@ async def attach_io(
     log = get_event_log(f"{session_id}:{creature.creature_id}")
     out_module = StreamOutput(creature.name, queue, log, agent=agent)
     agent.output_router.add_secondary(out_module)
-
-    # One graph websocket serves every creature tab, so sibling output must share
-    # the bound creature's outbound queue.
     sibling_modules: list[tuple[Any, Any]] = []
-    siblings: list[Any] = []
-    if creature.graph_id and creature.graph_id in engine._topology.graphs:
-        graph = engine._topology.graphs[creature.graph_id]
-        for cid in graph.creature_ids:
-            if cid == creature.creature_id:
-                continue
-            try:
-                sibling = engine.get_creature(cid)
-            except KeyError:
-                continue
-            sib_module = StreamOutput(sibling.name, queue, log, agent=sibling.agent)
-            sibling.agent.output_router.add_secondary(sib_module)
-            sibling_modules.append((sibling.agent, sib_module))
-            siblings.append(sibling)
-
-    # Channel history and live sends share the same ordered websocket stream.
-    env = engine._environments.get(creature.graph_id)
     channel_cbs: list[tuple[Any, Any]] = []
-    if env is not None and env.shared_channels.list_channels():
-        channel_cbs = _register_channel_callbacks(env, queue)
-        await _send_channel_history(websocket, env)
-
-    # Initialization events predate attachment, so each tab needs a fresh model-state
-    # frame before live forwarding begins.
-    await websocket.send_json(_session_info_frame(creature))
-    for sibling in siblings:
-        try:
-            await websocket.send_json(_session_info_frame(sibling))
-        except Exception:  # pragma: no cover - one sibling must not block attachment
-            logger.debug("sibling session_info frame failed", exc_info=True)
-
-    fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
-
-    # Input runs independently so the receive loop can deliver replies awaited by
-    # interactive tools. Turns belong to the engine rather than the viewer and must
-    # survive websocket refreshes or disconnects.
     input_tasks: list[asyncio.Task] = []
-
+    fwd_task: asyncio.Task | None = None
+    # Every registration above and below is released in ``finally``, even when
+    # history replay or the first frames fail before the receive loop starts.
     try:
+        # One graph websocket serves every creature tab, so sibling output must share
+        # the bound creature's outbound queue.
+        siblings: list[Any] = []
+        if creature.graph_id and creature.graph_id in engine._topology.graphs:
+            graph = engine._topology.graphs[creature.graph_id]
+            for cid in graph.creature_ids:
+                if cid == creature.creature_id:
+                    continue
+                try:
+                    sibling = engine.get_creature(cid)
+                except KeyError:
+                    continue
+                sib_module = StreamOutput(sibling.name, queue, log, agent=sibling.agent)
+                sibling.agent.output_router.add_secondary(sib_module)
+                sibling_modules.append((sibling.agent, sib_module))
+                siblings.append(sibling)
+
+        # Channel history and live sends share the same ordered websocket stream.
+        env = engine._environments.get(creature.graph_id)
+        if env is not None and env.shared_channels.list_channels():
+            channel_cbs = _register_channel_callbacks(env, queue)
+            await _send_channel_history(websocket, env)
+
+        # Initialization events predate attachment, so each tab needs a fresh model-state
+        # frame before live forwarding begins.
+        await websocket.send_json(_session_info_frame(creature))
+        for sibling in siblings:
+            # One sibling's failed frame must not block attachment.
+            try:
+                await websocket.send_json(_session_info_frame(sibling))
+            except Exception:  # pragma: no cover
+                logger.debug("sibling session_info frame failed", exc_info=True)
+
+        fwd_task = asyncio.create_task(_forward_queue(queue, websocket))
+
+        # Input runs independently so the receive loop can deliver replies awaited by
+        # interactive tools. Turns belong to the engine rather than the viewer and must
+        # survive websocket refreshes or disconnects.
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
@@ -423,7 +425,8 @@ async def attach_io(
             input_tasks[:] = [t for t in input_tasks if not t.done()]
     finally:
         queue.put_nowait(None)
-        fwd_task.cancel()
+        if fwd_task is not None:
+            fwd_task.cancel()
         # Engine-owned turns outlive the viewer. Their final frames may enter the
         # unbounded orphaned queue, which is released after the tasks finish.
         try:

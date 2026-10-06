@@ -1,11 +1,13 @@
 """Unit tests for :mod:`kohakuterrarium.studio.attach.io`."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.studio.attach import input_ops as input_ops_mod
 from kohakuterrarium.studio.attach import io as io_mod
 from kohakuterrarium.studio.attach import io_cluster as io_cluster_mod
@@ -970,3 +972,79 @@ class TestAttachIoLabHostNameResolution:
         svc = _FakeMultiNodeService([])
         with pytest.raises(KeyError):
             await io_mod.attach_io(_FakeWebSocket(), svc, "g1", "nobody")
+
+
+# ── attach_io: registrations are released when attach fails early ──
+
+
+class _JsonStrictWebSocket:
+    """Fails like Starlette when a frame is not JSON serialisable."""
+
+    def __init__(self, *, fail_on_type=None):
+        self.fail_on_type = fail_on_type
+        self.sent = []
+
+    async def send_json(self, data):
+        if data.get("type") == self.fail_on_type:
+            raise RuntimeError("client went away")
+        json.dumps(data)
+        self.sent.append(data)
+
+    async def receive_json(self):  # pragma: no cover - never reached
+        raise AssertionError("receive loop must not start")
+
+
+class _NotJson:
+    pass
+
+
+async def _graph_with_channel():
+    engine = await (
+        TestTerrariumBuilder()
+        .with_creature("alice")
+        .with_creature("bob")
+        .with_channel("ch")
+        .with_connection("alice", "bob", channel="ch")
+        .build()
+    )
+    alice = engine.get_creature("alice")
+    channel = engine._environments[alice.graph_id].shared_channels.get("ch")
+    return engine, alice, channel
+
+
+def _registrations(engine, channel):
+    sinks = {
+        cid: len(engine.get_creature(cid).agent.output_router._secondary_outputs)
+        for cid in engine._topology.graphs[
+            engine.get_creature("alice").graph_id
+        ].creature_ids
+    }
+    return sinks, len(channel._on_send_callbacks)
+
+
+class TestAttachIoReleasesRegistrationsOnEarlyFailure:
+    async def test_unserialisable_channel_history_leaves_no_sinks(self):
+        engine, alice, channel = await _graph_with_channel()
+        await channel.send(ChannelMessage(sender="human", content=[_NotJson()]))
+        before = _registrations(engine, channel)
+
+        with pytest.raises(TypeError):
+            await io_mod.attach_io(
+                _JsonStrictWebSocket(), engine, alice.graph_id, "alice"
+            )
+
+        assert _registrations(engine, channel) == before
+
+    async def test_disconnect_during_session_info_leaves_no_sinks(self):
+        engine, alice, channel = await _graph_with_channel()
+        before = _registrations(engine, channel)
+
+        with pytest.raises(RuntimeError, match="client went away"):
+            await io_mod.attach_io(
+                _JsonStrictWebSocket(fail_on_type="activity"),
+                engine,
+                alice.graph_id,
+                "alice",
+            )
+
+        assert _registrations(engine, channel) == before
