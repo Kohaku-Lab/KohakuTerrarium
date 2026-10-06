@@ -555,6 +555,51 @@ class TestOwnerAssigneeSplit:
 
 
 class TestTerminalProposals:
+    async def _parked(self, h) -> DriveRecord:
+        rec = await h.manager.create_drive(
+            creature_request(kind="verified"), actor=WORKER, graph_id="g1"
+        )
+        return await h.manager.transition(
+            rec.drive_id,
+            DriveStatus.WAITING,
+            expected_revision=rec.revision,
+            actor=WORKER,
+        )
+
+    async def test_actor_mode_refuses_proposal_on_waiting_drive(self):
+        h = _verified_manager("actor")
+        waiting = await self._parked(h)
+
+        with pytest.raises(DriveTransitionError, match="'waiting' -> 'completed'"):
+            await h.manager.propose_transition(
+                waiting.drive_id, DriveStatus.COMPLETED, actor=WORKER
+            )
+
+        after = await h.manager.get_drive(waiting.drive_id)
+        assert after.status is DriveStatus.WAITING
+        assert after.revision == waiting.revision
+        assert not h.manager._pending_proposals
+        assert not await h.repo.list_proposals()
+
+    async def test_auto_accept_mode_refuses_completion_of_waiting_drive(self):
+        h = build_manager()
+        rec = await h.manager.create_drive(
+            creature_request(), actor=WORKER, graph_id="g1"
+        )
+        waiting = await h.manager.transition(
+            rec.drive_id,
+            DriveStatus.WAITING,
+            expected_revision=rec.revision,
+            actor=WORKER,
+        )
+
+        with pytest.raises(DriveTransitionError):
+            await h.manager.propose_transition(
+                waiting.drive_id, DriveStatus.FAILED, actor=WORKER
+            )
+
+        assert (await h.manager.get_drive(rec.drive_id)).status is DriveStatus.WAITING
+
     async def test_verifier_none_auto_accepts(self):
         h = build_manager()
         rec = await h.manager.create_drive(

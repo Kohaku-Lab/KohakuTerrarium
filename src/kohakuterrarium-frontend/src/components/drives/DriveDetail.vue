@@ -153,7 +153,8 @@
           <el-button v-if="canGo('paused')" size="small" @click="$emit('transition', 'paused')">Pause</el-button>
           <el-button v-if="canGo('blocked')" size="small" @click="$emit('transition', 'blocked')">Block</el-button>
         </template>
-        <el-button v-if="has('propose_terminal') && !pendingProposal" size="small" type="primary" plain @click="$emit('propose-terminal')">Propose complete</el-button>
+        <!-- Completion requires an active Drive; the server refuses other states. -->
+        <el-button v-if="has('propose_terminal') && !pendingProposal && record.status === 'active'" size="small" type="primary" plain @click="$emit('propose-terminal')">Propose complete</el-button>
         <!-- Approve/reject only when there is a proposal to verify (its id
              arrives via the propose response or drive_proposal_pending event). -->
         <template v-if="has('verify_terminal') && pendingProposal">

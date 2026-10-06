@@ -28,6 +28,7 @@ from kohakuterrarium.terrarium.drive.models import (
     DriveRecord,
     DriveStatus,
 )
+from kohakuterrarium.terrarium.drive.policy import validate_transition
 from kohakuterrarium.terrarium.drive.repository import (
     IdempotencyRecord,
     Mutation,
@@ -302,6 +303,13 @@ class DriveManagerOps:
             is_privileged=is_privileged,
         )
         self._check_evidence_size(evidence)
+        # Refuse up front what finalisation would refuse, so no proposal is
+        # created that can never be approved.
+        validate_transition(
+            current.status,
+            target_status,
+            extra_transitions=self._registration_extra_transitions(current.kind),
+        )
         self._validate_registration_transition(
             current, target_status, {"terminal": True, "evidence": evidence or {}}
         )
