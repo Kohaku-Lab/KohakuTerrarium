@@ -70,6 +70,20 @@ describe("DriveDetail — R1-38 wake wiring", () => {
   })
 })
 
+describe("DriveDetail — terminal proposals need an active drive", () => {
+  const proposer = ["read", "propose_terminal"]
+
+  it("offers Propose complete on an active drive", () => {
+    const w = mountDetail({ record: _rec({ status: "active" }), allowedActions: proposer })
+    expect(buttonByText(w, "Propose complete")).toBeTruthy()
+  })
+
+  it.each(["waiting", "paused", "blocked"])("hides Propose complete on a %s drive", (status) => {
+    const w = mountDetail({ record: _rec({ status }), allowedActions: proposer })
+    expect(buttonByText(w, "Propose complete")).toBeFalsy()
+  })
+})
+
 describe("DriveDetail — R1-38 timeline sections", () => {
   it("renders progress and audit from the detail payload", () => {
     const w = mountDetail({
