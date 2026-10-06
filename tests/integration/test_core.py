@@ -1218,11 +1218,8 @@ class TestCoreIntegration:
             agent.controller._last_usage = {"prompt_tokens": 5000}
             compacts_before = agent.compact_manager._compact_count
             agent._maybe_trigger_compact(agent.controller)
-            # The compact job runs as a background task — let it finish.
-            for _ in range(100):
-                if agent.compact_manager._compact_count > compacts_before:
-                    break
-                await asyncio.sleep(0.02)
+            # The compact job runs as a background task — await it.
+            await agent.compact_manager.wait_for_current()
             assert agent.compact_manager._compact_count == compacts_before + 1
             # Compaction spliced the conversation: a summary message
             # replaced the older turns, so the message count dropped.
@@ -1235,10 +1232,7 @@ class TestCoreIntegration:
             agent.controller._last_usage = {"prompt_tokens": 5000}
             count_after_first = agent.compact_manager._compact_count
             agent._maybe_trigger_compact(agent.controller)
-            for _ in range(100):
-                if agent.compact_manager._compact_count > count_after_first:
-                    break
-                await asyncio.sleep(0.02)
+            await agent.compact_manager.wait_for_current()
             assert agent.compact_manager._compact_count == count_after_first + 1
 
             # With usage BELOW the threshold, the turn-end hook is a
