@@ -46,7 +46,8 @@ def _resize_image(block: dict[str, Any], limit: int) -> dict[str, Any]:
     try:
         raw = base64.b64decode(data, validate=True)
         with Image.open(io.BytesIO(raw)) as image:
-            format = image.format
+            # Camera MPO files are JPEGs whose first frame is the photo.
+            format = "JPEG" if image.format == "MPO" else image.format
             if format not in _MIME_TYPES or max(image.size) <= limit:
                 return block
             oriented = ImageOps.exif_transpose(image)

@@ -330,3 +330,57 @@ def test_text_only_request_identity_and_tool_argument_images_are_preserved():
         ]
     }
     assert prepare_anthropic_request(kwargs) is kwargs
+
+
+def _tinted_photo(size, tint, seed):
+    noise = random.Random(seed).randbytes(size[0] * size[1] * 3)
+    base = Image.frombytes("RGB", size, noise)
+    return Image.blend(base, Image.new("RGB", size, tint), 0.6)
+
+
+def mpo_block(size):
+    data = io.BytesIO()
+    with _tinted_photo(size, (255, 0, 0), 1) as first:
+        with _tinted_photo(size, (0, 255, 0), 2) as second:
+            first.save(data, "MPO", save_all=True, append_images=[second])
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": base64.b64encode(data.getvalue()).decode("ascii"),
+        },
+    }
+
+
+def test_many_image_request_resizes_camera_mpo_photo_to_jpeg():
+    photo = mpo_block((4032, 3024))
+    messages = [
+        {"role": "user", "content": [image_block((10, 10)) for _ in range(20)]},
+        {"role": "user", "content": [photo]},
+    ]
+
+    result = prepare_anthropic_images(messages)
+
+    resized = result[1]["content"][0]
+    with decode(resized) as image:
+        assert image.format == "JPEG"
+        assert image.size == (2000, 1500)
+        red, green, _ = (sum(c) for c in zip(*image.resize((8, 8)).getdata()))
+        assert red > green
+    assert resized["source"]["media_type"] == "image/jpeg"
+
+
+def test_request_budget_compresses_large_mpo_photo():
+    body = {
+        "model": "test",
+        "messages": [{"role": "user", "content": [mpo_block((4032, 3024))]}],
+    }
+
+    result = prepare_anthropic_request(body)
+
+    block = result["messages"][0]["content"][0]
+    with decode(block) as image:
+        assert image.format == "JPEG"
+        assert max(image.size) <= 2000
+    assert block["source"]["media_type"] == "image/jpeg"

@@ -303,3 +303,25 @@ def test_transparent_webp_does_not_expand_to_a_larger_png(size):
     prepared, stats = ImagePreparer().prepare(request(original), max_image_bytes=10_000)
     assert stats.prepared_bytes <= stats.original_bytes
     assert decoded(output(prepared)).getchannel("A").getextrema() == (100, 100)
+
+
+def _tinted_photo(size, tint, seed):
+    noise = random.Random(seed).randbytes(size[0] * size[1] * 3)
+    base = Image.frombytes("RGB", size, noise)
+    return Image.blend(base, Image.new("RGB", size, tint), 0.6)
+
+
+def test_camera_mpo_photo_shrinks_to_its_primary_jpeg_frame():
+    original = io.BytesIO()
+    with _tinted_photo((4032, 3024), (255, 0, 0), 1) as first:
+        with _tinted_photo((4032, 3024), (0, 255, 0), 2) as second:
+            first.save(original, "MPO", save_all=True, append_images=[second])
+
+    data, mime = ImagePreparer._encode(original.getvalue())
+
+    assert mime == "image/jpeg"
+    with Image.open(io.BytesIO(data)) as prepared:
+        assert prepared.format == "JPEG"
+        assert prepared.size == (2000, 1500)
+        red, green, _ = (sum(c) for c in zip(*prepared.resize((8, 8)).getdata()))
+        assert red > green
