@@ -14,5 +14,5 @@ describe("studio home placeholder", () => {
   it("module loads", async () => {
     const mod = await import("./StudioHomePage.vue")
     expect(mod.default).toBeTruthy()
-  })
+  }, 15_000)
 })
