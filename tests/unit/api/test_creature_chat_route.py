@@ -52,6 +52,7 @@ class _FakeService:
         return tuple(self._creatures)
 
     def chat(self, cid, message):
+        self.last_chat_message = message
         if "chat" in self._raise:
 
             async def boom():
@@ -200,6 +201,8 @@ class TestChat:
             },
         )
         assert resp.status_code == 200
+        assert svc.last_chat_message == [{"type": "text", "text": "hi"}]
+        assert all(type(part) is dict for part in svc.last_chat_message)
 
     def test_unknown_creature(self):
         svc = _FakeService(creatures=[])

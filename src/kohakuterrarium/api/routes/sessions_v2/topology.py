@@ -133,9 +133,14 @@ async def send_session_channel(
     Worker-owned channel objects are unavailable from an empty lab coordinator,
     so cross-node delivery requires a service protocol operation not exposed here.
     """
+    content: str | list[dict] = (
+        req.content
+        if isinstance(req.content, str)
+        else [part.model_dump() for part in req.content]
+    )
     try:
         msg_id = await topology_lib.send_to_channel(
-            service, session_id, channel, req.content, req.sender
+            service, session_id, channel, content, req.sender
         )
         return {"message_id": msg_id, "status": "sent"}
     except KeyError as e:

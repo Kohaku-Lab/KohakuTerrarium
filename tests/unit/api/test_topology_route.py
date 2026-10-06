@@ -1,5 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.api.routes.sessions_v2.topology`."""
 
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -187,6 +189,33 @@ class TestSendChannel:
         )
         assert resp.status_code == 200
         assert resp.json()["message_id"] == "msg-1"
+
+    def test_multipart_content_reaches_channel_as_plain_dicts(self, monkeypatch):
+        received = {}
+
+        async def fake_send(eng, sid, ch, content, sender):
+            received["content"] = content
+            return "msg-2"
+
+        monkeypatch.setattr(topology_mod.topology_lib, "send_to_channel", fake_send)
+        client = TestClient(_app())
+        parts = [
+            {"type": "text", "text": "look at this"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,AAAA", "detail": "low"},
+            },
+        ]
+        resp = client.post(
+            "/topology/g1/channels/ch/send",
+            json={"content": parts, "sender": "human"},
+        )
+
+        assert resp.status_code == 200
+        assert all(type(part) is dict for part in received["content"])
+        assert received["content"][0] == {"type": "text", "text": "look at this"}
+        assert received["content"][1]["image_url"]["url"].startswith("data:")
+        json.dumps(received["content"])
 
     def test_value_error(self, monkeypatch):
         async def boom(eng, sid, ch, content, sender):

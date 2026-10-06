@@ -35,7 +35,11 @@ async def chat_creature(
 ):
     """Non-streaming HTTP chat fallback — collects the streaming chunks."""
     cid = await resolve_creature_id(service, creature_id, session_id)
-    content = req.content if req.content is not None else (req.message or "")
+    content: str | list[dict] = (
+        [part.model_dump() for part in req.content]
+        if req.content is not None
+        else (req.message or "")
+    )
     try:
         chunks: list[str] = []
         async for chunk in service.chat(cid, content):
