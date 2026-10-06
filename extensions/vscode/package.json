@@ -14,7 +14,8 @@
   "main": "./dist/extension.cjs",
   "icon": "media/kohaku-icon.png",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.90.0",
+    "node": ">=22"
   },
   "extensionKind": [
     "workspace"

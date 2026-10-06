@@ -85,6 +85,8 @@ test('manifest defines a workspace sidebar extension and deterministic package s
   assert.equal(manifest.name, 'kohakuterrarium-vscode')
   assert.equal(manifest.private, true)
   assert.equal(manifest.main, './dist/extension.cjs')
+  assert.equal(manifest.engines.vscode, '^1.90.0')
+  assert.equal(manifest.engines.node, '>=22')
   assert.deepEqual(manifest.extensionKind, ['workspace'])
   assert.ok(manifest.activationEvents.includes('onView:kohakuterrarium.chat'))
   assert.deepEqual(manifest.contributes.views.kohakuterrarium, [{ type: 'webview', id: 'kohakuterrarium.chat', name: 'KohakuTerrarium' }])
