@@ -101,6 +101,8 @@ Connection credentials, discovery, HTTP/WebSocket transport and filesystem-sensi
 
 ## Development
 
+Packaging uses `@vscode/vsce` 4, which requires Node.js 22 or later. The installed extension still follows `engines.vscode` (`^1.90.0`); the Node requirement is for `npm ci`, tests, and `npm run package`.
+
 Install both packages from their lockfiles before building the shared frontend:
 
 ```bash

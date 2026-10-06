@@ -11,6 +11,10 @@ function read(relative) {
   return fs.readFileSync(path.join(ROOT, relative), 'utf8')
 }
 
+function normalizeNewlines(text) {
+  return text.replace(/\r\n/g, '\n')
+}
+
 function readZipEntry(archive, entryName) {
   return new Promise((resolve, reject) => {
     yauzl.open(archive, { lazyEntries: true }, (openError, zip) => {
@@ -81,6 +85,8 @@ test('manifest defines a workspace sidebar extension and deterministic package s
   assert.equal(manifest.name, 'kohakuterrarium-vscode')
   assert.equal(manifest.private, true)
   assert.equal(manifest.main, './dist/extension.cjs')
+  assert.equal(manifest.engines.vscode, '^1.90.0')
+  assert.equal(manifest.engines.node, '>=22')
   assert.deepEqual(manifest.extensionKind, ['workspace'])
   assert.ok(manifest.activationEvents.includes('onView:kohakuterrarium.chat'))
   assert.deepEqual(manifest.contributes.views.kohakuterrarium, [{ type: 'webview', id: 'kohakuterrarium.chat', name: 'KohakuTerrarium' }])
@@ -107,7 +113,7 @@ test('manifest defines a workspace sidebar extension and deterministic package s
   assert.equal(manifest.devDependencies.prettier, '^3.8.2')
   assert.equal(lockManifest.devDependencies.prettier, manifest.devDependencies.prettier)
   const rootLicense = fs.readFileSync(path.resolve(ROOT, '..', '..', 'LICENSE'), 'utf8')
-  assert.equal(read('LICENSE'), rootLicense)
+  assert.equal(normalizeNewlines(read('LICENSE')), normalizeNewlines(rootLicense))
   assert.match(rootLicense, /KohakuTerrarium License/)
   assert.match(rootLicense, /Naming Requirement/)
   assert.equal(manifest.files, undefined)
@@ -134,7 +140,7 @@ test('packaged VSIX carries the repository license', async () => {
       [path.join(ROOT, 'node_modules', '@vscode', 'vsce', 'vsce'), 'package', '--no-dependencies', '--out', archive],
       { cwd: ROOT, stdio: 'pipe' },
     )
-    assert.equal(await readZipEntry(archive, 'extension/LICENSE.txt'), read('LICENSE'))
+    assert.equal(normalizeNewlines(await readZipEntry(archive, 'extension/LICENSE.txt')), normalizeNewlines(read('LICENSE')))
   } finally {
     fs.rmSync(archive, { force: true })
     fs.rmSync(dist, { recursive: true, force: true })
