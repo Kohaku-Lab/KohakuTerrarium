@@ -183,9 +183,11 @@ class ImagePreparer:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(io.BytesIO(original)) as source:
+                # Camera MPO files are JPEGs whose first frame is the photo.
+                is_mpo = source.format == "MPO"
                 if (
-                    source.format not in {"PNG", "JPEG", "WEBP"}
-                    or getattr(source, "n_frames", 1) != 1
+                    (source.format not in {"PNG", "JPEG", "WEBP"} and not is_mpo)
+                    or (getattr(source, "n_frames", 1) != 1 and not is_mpo)
                     or source.mode not in {"1", "L", "LA", "P", "RGB", "RGBA", "CMYK"}
                 ):
                     return original, ""
