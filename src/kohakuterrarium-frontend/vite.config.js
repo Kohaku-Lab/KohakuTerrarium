@@ -8,6 +8,9 @@ import { ElementPlusResolver } from "unplugin-vue-components/resolvers"
 import UnoCSS from "unocss/vite"
 import { fileURLToPath, URL } from "node:url"
 
+// Backend the dev server proxies to; set KT_API_TARGET when the API runs on another port.
+const apiTarget = process.env.KT_API_TARGET || "http://127.0.0.1:8001"
+
 export default defineConfig({
   plugins: [
     VueRouter({
@@ -38,11 +41,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": {
-        target: "http://localhost:8001",
+        target: apiTarget,
         changeOrigin: true,
       },
       "/ws/": {
-        target: "http://localhost:8001",
+        target: apiTarget,
         ws: true,
         changeOrigin: true,
       },
