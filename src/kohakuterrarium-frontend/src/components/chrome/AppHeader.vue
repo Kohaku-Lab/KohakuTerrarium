@@ -7,6 +7,9 @@
     <GraphCounts v-if="instance" :instance="instance" compact />
     <DriveHeaderBadge v-if="instance" :instance="instance" />
 
+    <button v-if="instance" class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-iolite transition-colors" :title="t('appHeader.openGraph')" @click="openGraph">
+      <div class="i-carbon-network-3 text-[11px]" />
+    </button>
     <button v-if="instance" class="w-5 h-5 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors" :title="t('appHeader.instanceSettings')" @click="settingsOpen = true">
       <div class="i-carbon-settings text-[11px]" />
     </button>
@@ -62,6 +65,7 @@ import GraphCounts from "@/components/common/GraphCounts.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
+import { useTabsStore } from "@/stores/tabs"
 import { useI18n } from "@/utils/i18n"
 import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents"
 
@@ -88,7 +92,14 @@ const presetLabel = computed(() => {
   return translatePreset(preset.id, preset.label || preset.id)
 })
 
-const PRESET_ORDER = ["chat-focus", "workspace", "multi-creature", "canvas", "debug", "chat-terminal"]
+const PRESET_ORDER = ["chat-focus", "workspace", "multi-creature", "team", "canvas", "debug", "chat-terminal"]
+
+const tabs = useTabsStore()
+
+function openGraph() {
+  const sid = instance.value?.graph_id || instance.value?.id
+  if (sid) tabs.openTab({ kind: "graph", id: `graph:${sid}`, target: sid, config_name: instanceName.value })
+}
 
 const presets = computed(() => {
   const all = layout.allPresets

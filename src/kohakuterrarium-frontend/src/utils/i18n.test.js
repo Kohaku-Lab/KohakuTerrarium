@@ -74,6 +74,7 @@ describe("i18n helpers", () => {
       "settings",
       "state",
       "creatures",
+      "graph",
       "canvas",
       "debug",
       "terminal",

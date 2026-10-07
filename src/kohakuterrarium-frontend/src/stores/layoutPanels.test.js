@@ -27,6 +27,9 @@ vi.mock("@/components/panels/CanvasPanel.vue", () => ({
 vi.mock("@/components/panels/CreaturesPanel.vue", () => ({
   default: stub("CreaturesPanel"),
 }))
+vi.mock("@/components/graph/GraphPanel.vue", () => ({
+  default: stub("GraphPanel"),
+}))
 vi.mock("@/components/panels/DebugPanel.vue", () => ({
   default: stub("DebugPanel"),
 }))
@@ -76,6 +79,7 @@ describe("layoutPanels — registerBuiltinPanels", () => {
       "activity",
       "state",
       "creatures",
+      "graph",
       "canvas",
       "settings",
       "debug",
@@ -97,6 +101,13 @@ describe("layoutPanels — registerBuiltinPanels", () => {
       expect(p.tree, `preset ${id} should have a tree`).toBeDefined()
       expect(p.tree.type).toMatch(/leaf|split/)
     }
+  })
+
+  it("pairs the session graph with the chat in the team preset", async () => {
+    const { registerBuiltinPanels } = await import("./layoutPanels.js")
+    registerBuiltinPanels()
+    const store = useLayoutStore()
+    expect(leaves(store.allPresets.team.tree)).toEqual(["graph", "chat"])
   })
 
   function leaves(node, out = []) {

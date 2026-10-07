@@ -38,6 +38,15 @@ describe("tabsUrl — parseTabId", () => {
     })
   })
 
+  it("parses the all-sessions graph and a session-scoped graph", () => {
+    expect(parseTabId("graph")).toEqual({ kind: "graph", id: "graph" })
+    expect(parseTabId("graph:graph_ab12")).toEqual({
+      kind: "graph",
+      id: "graph:graph_ab12",
+      target: "graph_ab12",
+    })
+  })
+
   it("parses code-editor", () => {
     expect(parseTabId("code-editor:src-foo-py")).toEqual({
       kind: "code-editor",

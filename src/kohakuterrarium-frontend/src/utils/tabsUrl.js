@@ -13,7 +13,7 @@
  * source of truth even when a registered plugin has unloaded).
  */
 
-const SINGLETONS = new Set(["dashboard", "catalog", "settings", "saved-sessions", "stats"])
+const SINGLETONS = new Set(["dashboard", "catalog", "settings", "saved-sessions", "stats", "graph"])
 
 /** Encode the tab list and active id into a query-string fragment. */
 export function encodeTabsToQuery(tabs, activeId) {
@@ -63,6 +63,9 @@ export function parseTabId(id) {
   }
   if (id.startsWith("session:")) {
     return { kind: "session-viewer", id, name: id.slice("session:".length) }
+  }
+  if (id.startsWith("graph:")) {
+    return { kind: "graph", id, target: id.slice("graph:".length) }
   }
   if (id.startsWith("code-editor:")) {
     return { kind: "code-editor", id, slug: id.slice("code-editor:".length) }

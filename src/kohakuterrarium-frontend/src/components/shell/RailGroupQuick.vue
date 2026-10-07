@@ -25,19 +25,11 @@ import NewCreatureModal from "@/components/shell/modals/NewCreatureModal.vue"
 import NewTerrariumModal from "@/components/shell/modals/NewTerrariumModal.vue"
 import ResumeSessionModal from "@/components/shell/modals/ResumeSessionModal.vue"
 import AdvancedStartModal from "@/components/shell/modals/AdvancedStartModal.vue"
-import GraphEditorTab from "@/components/graph-editor/GraphEditorTab.vue"
-import { registerTabKind, tabKindRegistry } from "@/stores/tabKindRegistry"
 import { useAuthStore } from "@/stores/auth"
 import { useTabsStore } from "@/stores/tabs"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { buildStudioTabId } from "@/utils/tabsUrl"
 import { useI18n } from "@/utils/i18n"
-
-// Register the graph-editor tab kind once at module load. Idempotent
-// guard against repeated registrations (HMR / multiple rail mounts).
-if (!tabKindRegistry.has("graph-editor")) {
-  registerTabKind({ kind: "graph-editor", component: GraphEditorTab })
-}
 
 const tabs = useTabsStore()
 const auth = useAuthStore()
@@ -122,10 +114,10 @@ const entries = computed(() => [
     action: () => tabs.openTab({ kind: "stats", id: "stats" }),
   },
   {
-    id: "graph-editor",
-    label: "Graph Editor",
+    id: "graph",
+    label: t("graph.tab.title"),
     icon: "i-carbon-network-3",
-    action: () => tabs.openTab({ kind: "graph-editor", id: "graph-editor" }),
+    action: () => tabs.openTab({ kind: "graph", id: "graph" }),
   },
   {
     id: "settings",

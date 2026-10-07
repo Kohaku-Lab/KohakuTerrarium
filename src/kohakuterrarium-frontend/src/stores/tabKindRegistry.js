@@ -20,8 +20,9 @@ export const tabKinds = reactive(new Map())
 export const inspectorInnerTabs = reactive(new Map())
 export const railGroups = reactive(new Map())
 
-/** The 10 built-in kinds, listed for URL parser sync. */
+/** The URL-restorable built-in kinds, listed for URL parser sync. */
 export const BUILTIN_KINDS = [
+  "graph",
   "dashboard",
   "attach",
   "inspector",

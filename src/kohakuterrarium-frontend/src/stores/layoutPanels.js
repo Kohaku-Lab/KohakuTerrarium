@@ -13,6 +13,7 @@ import EditorStatus from "@/components/editor/EditorStatus.vue"
 import FileTree from "@/components/editor/FileTree.vue"
 import CanvasPanel from "@/components/panels/CanvasPanel.vue"
 import CreaturesPanel from "@/components/panels/CreaturesPanel.vue"
+import GraphPanel from "@/components/graph/GraphPanel.vue"
 import DebugPanel from "@/components/panels/DebugPanel.vue"
 import DrivesPanel from "@/components/panels/DrivesPanel.vue"
 import FilesPanel from "@/components/panels/FilesPanel.vue"
@@ -103,6 +104,13 @@ const MULTI_CREATURE_PRESET = {
   ),
 }
 
+/** Team — the session graph beside the chat; clicking a node switches the chat. */
+const TEAM_PRESET = {
+  id: "team",
+  label: "Team graph",
+  tree: hsplit(55, leaf("graph"), leaf("chat")),
+}
+
 /** Canvas — chat on left, canvas + modules on right. ``modules`` here
  *  takes the slot the legacy ``tool-options`` panel used to occupy
  *  (provider-native tool options) — the unified module surface
@@ -150,6 +158,7 @@ export const DEFAULT_PRESETS = [
   CHAT_FOCUS_PRESET,
   WORKSPACE_PRESET,
   MULTI_CREATURE_PRESET,
+  TEAM_PRESET,
   CANVAS_PRESET,
   DEBUG_PRESET,
   SETTINGS_PRESET,
@@ -234,6 +243,12 @@ export function registerBuiltinPanels() {
     label: "Creatures",
     description: "Graph members and channels for a multi-creature session.",
     component: CreaturesPanel,
+  })
+  layout.registerPanel({
+    id: "graph",
+    label: "Graph",
+    description: "The session's creatures, channels, and output wiring as a live graph.",
+    component: GraphPanel,
   })
   layout.registerPanel({
     id: "canvas",

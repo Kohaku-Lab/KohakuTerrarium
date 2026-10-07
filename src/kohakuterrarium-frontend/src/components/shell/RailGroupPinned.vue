@@ -35,6 +35,7 @@ function iconFor(kind) {
       catalog: "i-carbon-catalog",
       settings: "i-carbon-settings",
       "code-editor": "i-carbon-code",
+      graph: "i-carbon-network-3",
     }[kind] ?? "i-carbon-circle"
   )
 }
@@ -47,6 +48,7 @@ function labelFor(tab) {
     dashboard: t("shell.rail.dashboard"),
     catalog: t("shell.quick.catalog"),
     settings: t("shell.quick.settings"),
+    graph: tab.target ? null : t("graph.tab.title"),
   }[tab.kind]
   return localised ?? tab.config_name ?? tab.name ?? tab.entity ?? tab.slug ?? tab.id
 }

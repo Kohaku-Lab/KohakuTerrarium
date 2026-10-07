@@ -125,6 +125,7 @@ const iconClass = computed(
       catalog: "i-carbon-catalog",
       settings: "i-carbon-settings",
       "code-editor": "i-carbon-code",
+      graph: "i-carbon-network-3",
     })[props.tab.kind] ?? "i-carbon-circle",
 )
 
@@ -156,6 +157,8 @@ const label = computed(() => {
       return t("shell.quick.settings")
     case "code-editor":
       return tab.slug ?? "editor"
+    case "graph":
+      return tab.config_name ? `${tab.config_name} · ${t("graph.tab.suffix")}` : t("graph.tab.title")
     default:
       return tab.kind
   }

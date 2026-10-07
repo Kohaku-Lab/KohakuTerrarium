@@ -9,6 +9,7 @@ export function buildAttachPanelProps({ instance, onOpenTab, onSelectFile }) {
     activity: { instance },
     state: { instance },
     creatures: { instance },
+    graph: { instance },
     drives: { instance },
     files,
     "file-tree": files,

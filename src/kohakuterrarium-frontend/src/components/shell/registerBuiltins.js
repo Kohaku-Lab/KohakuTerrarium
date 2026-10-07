@@ -22,6 +22,7 @@ import ExtensionsTab from "@/components/shell/tabs/ExtensionsTab.vue"
 import SettingsTab from "@/components/shell/tabs/SettingsTab.vue"
 import CodeEditorTab from "@/components/shell/tabs/CodeEditorTab.vue"
 import AdminTab from "@/components/shell/tabs/AdminTab.vue"
+import GraphTab from "@/components/graph/GraphTab.vue"
 
 let _registered = false
 
@@ -56,4 +57,8 @@ export function registerBuiltinTabKinds() {
   // Admin portal (L4 user/invitation/token management). The launcher is
   // gated on the admin role in the rail; the tab itself re-checks.
   registerTabKind({ kind: "admin", component: AdminTab })
+  // Graph view: `graph` is the all-sessions surface, `graph:<session>`
+  // opens scoped to one session. `graph-editor` keeps persisted tabs alive.
+  registerTabKind({ kind: "graph", component: GraphTab })
+  registerTabKind({ kind: "graph-editor", component: GraphTab })
 }
