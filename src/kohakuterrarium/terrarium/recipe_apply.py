@@ -287,6 +287,9 @@ async def _wire_members(
 
     if root_creature is not None:
         await engine.assign_root(root_creature)
+        for creature_config in config.creatures:
+            member = engine.get_creature(runtime_ids[creature_config.name])
+            member.recipe_root_id = root_creature.creature_id
 
     _wiring.install_output_wiring_resolver(engine)
 

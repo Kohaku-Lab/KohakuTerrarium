@@ -195,6 +195,43 @@ class TestApplyRecipe:
         finally:
             await engine.shutdown()
 
+    async def test_recipe_members_record_their_root(self):
+        engine = Terrarium()
+        try:
+            r1 = _recipe(
+                creatures=[_creature_cfg("bob")],
+                root=RootConfig(config_data={"name": "root"}, base_dir=Path(".")),
+            )
+            g = await recipe_mod.apply_recipe(
+                engine, r1, creature_builder=_fake_builder
+            )
+            root_id = next(
+                cid for cid in g.creature_ids if engine.get_creature(cid).name == "root"
+            )
+            bob = engine.get_creature("bob")
+            assert bob.recipe_root_id == root_id
+            assert bob.parent_creature_id is None
+            assert engine.get_creature(root_id).recipe_root_id is None
+            assert bob.get_status()["recipe_root_id"] == root_id
+
+            # A second rooted recipe records its own root, not the first one's.
+            r2 = _recipe(
+                creatures=[_creature_cfg("carol")],
+                root=RootConfig(config_data={"name": "root"}, base_dir=Path(".")),
+            )
+            await recipe_mod.apply_recipe(engine, r2, creature_builder=_fake_builder)
+            carol = engine.get_creature("carol")
+            assert carol.recipe_root_id not in (None, root_id)
+            assert engine.get_creature(carol.recipe_root_id).is_privileged is True
+            assert engine.get_creature("bob").recipe_root_id == root_id
+
+            # A recipe without a root leaves its members unattached.
+            r3 = _recipe(creatures=[_creature_cfg("dave")])
+            await recipe_mod.apply_recipe(engine, r3, creature_builder=_fake_builder)
+            assert engine.get_creature("dave").recipe_root_id is None
+        finally:
+            await engine.shutdown()
+
     async def test_reuses_existing_graph(self):
         engine = Terrarium()
         try:

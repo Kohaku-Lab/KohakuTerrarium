@@ -94,6 +94,9 @@ class Creature:
     # creatures. Used by ``group_status`` to surface workers that the
     # caller spawned but hasn't wired into a graph yet.
     parent_creature_id: str | None = None
+    # Creature_id of the privileged root created by the same recipe; None
+    # for that root itself and for creatures not made by a rooted recipe.
+    recipe_root_id: str | None = None
 
     # Internal queue for chat() output streaming.  Created lazily so
     # the dataclass stays trivially constructible.
@@ -633,6 +636,7 @@ class Creature:
             "send_channels": list(self.send_channels),
             "is_privileged": self.is_privileged,
             "parent_creature_id": self.parent_creature_id,
+            "recipe_root_id": self.recipe_root_id,
         }
 
     # ------------------------------------------------------------------
