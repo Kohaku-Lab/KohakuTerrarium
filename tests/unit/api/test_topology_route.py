@@ -176,6 +176,44 @@ class TestGetChannel:
         assert resp.status_code == 404
 
 
+class TestRemoveChannel:
+    def test_success_returns_delta(self, monkeypatch):
+        captured = {}
+
+        async def fake_remove(svc, sid, name):
+            captured.update(sid=sid, name=name)
+            return {"removed": name, "delta": {"kind": "split"}}
+
+        monkeypatch.setattr(topology_mod.topology_lib, "remove_channel", fake_remove)
+        client = TestClient(_app())
+        resp = client.delete("/topology/g1/channels/tasks")
+        assert resp.status_code == 200
+        assert resp.json() == {"removed": "tasks", "delta": {"kind": "split"}}
+        assert captured == {"sid": "g1", "name": "tasks"}
+
+    def test_unknown_channel_404(self, monkeypatch):
+        async def boom(svc, sid, name):
+            raise KeyError(f"channel {name!r} not in graph")
+
+        monkeypatch.setattr(topology_mod.topology_lib, "remove_channel", boom)
+        client = TestClient(_app())
+        resp = client.delete("/topology/g1/channels/ghost")
+        assert resp.status_code == 404
+
+    def test_unknown_session_404_before_removal(self, monkeypatch):
+        called = False
+
+        async def fake_remove(*args):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(topology_mod.topology_lib, "remove_channel", fake_remove)
+        client = TestClient(_app(service=_FakeService(graph=None)))
+        resp = client.delete("/topology/ghost/channels/tasks")
+        assert resp.status_code == 404
+        assert called is False
+
+
 class TestSendChannel:
     def test_success(self, monkeypatch):
         async def fake_send(eng, sid, ch, content, sender):

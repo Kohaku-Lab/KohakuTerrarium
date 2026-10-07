@@ -121,6 +121,23 @@ async def get_session_channel(
     return info
 
 
+@router.delete("/{session_id}/channels/{channel}")
+async def remove_session_channel(
+    session_id: str,
+    channel: str,
+    service: TerrariumService = Depends(get_service),
+):
+    """Remove a shared channel, unwiring every member; the graph may split."""
+    if await service.get_graph(session_id) is None:
+        raise HTTPException(404, f"session {session_id!r} not found")
+    try:
+        return await topology_lib.remove_channel(service, session_id, channel)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/{session_id}/channels/{channel}/send")
 async def send_session_channel(
     session_id: str,
