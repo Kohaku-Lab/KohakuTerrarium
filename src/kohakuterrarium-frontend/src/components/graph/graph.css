@@ -1,0 +1,678 @@
+@import "@vue-flow/core/dist/style.css";
+@import "@vue-flow/core/dist/theme-default.css";
+@import "@vue-flow/controls/dist/style.css";
+@import "@vue-flow/minimap/dist/style.css";
+
+.kt-graph-surface {
+  --kt-graph-grid: var(--kt-color-warm-300);
+  --kt-graph-minimap-mask: rgb(239 236 231 / 0.7);
+  --kt-graph-panel: var(--kt-color-warm-50);
+  --kt-graph-panel-border: var(--kt-color-warm-200);
+  --kt-graph-text: var(--kt-color-warm-700);
+}
+html.dark .kt-graph-surface {
+  --kt-graph-grid: var(--kt-color-warm-800);
+  --kt-graph-minimap-mask: rgb(26 24 22 / 0.7);
+  --kt-graph-panel: var(--kt-color-warm-900);
+  --kt-graph-panel-border: var(--kt-color-warm-700);
+  --kt-graph-text: var(--kt-color-warm-300);
+}
+
+.kt-graph-surface .vue-flow__node {
+  font-family: var(--font-sans);
+}
+.kt-graph-surface .vue-flow__node-group,
+.kt-graph-surface .vue-flow__node-creature,
+.kt-graph-surface .vue-flow__node-channel,
+.kt-graph-surface .vue-flow__node-aggregate {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+.kt-graph-surface .vue-flow__node.selected,
+.kt-graph-surface .vue-flow__node:focus,
+.kt-graph-surface .vue-flow__node:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.kt-graph-surface .vue-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--kt-graph-panel-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.kt-graph-surface .vue-flow__controls-button {
+  background: var(--kt-graph-panel);
+  border-bottom: 1px solid var(--kt-graph-panel-border);
+  color: var(--kt-graph-text);
+  fill: var(--kt-graph-text);
+}
+.kt-graph-surface .vue-flow__controls-button:hover {
+  background: var(--kt-color-warm-200);
+}
+html.dark .kt-graph-surface .vue-flow__controls-button:hover {
+  background: var(--kt-color-warm-800);
+}
+.kt-graph-surface .vue-flow__minimap {
+  background: var(--kt-graph-panel);
+  border: 1px solid var(--kt-graph-panel-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+/* Top-right corner of the minimap: Vue Flow's panel margin is 15px, the map 200×150. */
+.kt-graph-minimap-hide {
+  right: 19px;
+  bottom: 152px;
+}
+
+/* Dock controls */
+.kt-graph-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 1.75rem;
+  padding: 0 0.6rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--kt-color-warm-200);
+  color: var(--kt-color-warm-700);
+  background: transparent;
+}
+html.dark .kt-graph-action {
+  border-color: var(--kt-color-warm-700);
+  color: var(--kt-color-warm-300);
+}
+.kt-graph-action:hover:not(:disabled) {
+  border-color: var(--kt-color-iolite);
+  color: var(--kt-color-iolite);
+}
+.kt-graph-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.kt-graph-action--primary {
+  border-color: var(--kt-color-iolite);
+  background: var(--kt-color-iolite);
+  color: white;
+}
+html.dark .kt-graph-action--primary {
+  border-color: var(--kt-color-iolite);
+  color: white;
+}
+.kt-graph-action--primary:hover:not(:disabled) {
+  background: var(--kt-color-iolite-shadow);
+  color: white;
+}
+.kt-graph-action--danger {
+  border-color: rgb(212 107 107 / 0.5);
+  color: var(--kt-color-coral);
+}
+html.dark .kt-graph-action--danger {
+  border-color: rgb(212 107 107 / 0.5);
+  color: var(--kt-color-coral);
+}
+.kt-graph-action--danger:hover:not(:disabled) {
+  border-color: var(--kt-color-coral);
+  background: rgb(212 107 107 / 0.1);
+  color: var(--kt-color-coral);
+}
+.kt-graph-toggle {
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  border: 1px solid var(--kt-color-warm-300);
+  color: var(--kt-color-warm-500);
+}
+html.dark .kt-graph-toggle {
+  border-color: var(--kt-color-warm-700);
+}
+.kt-graph-toggle--on {
+  border-color: var(--kt-color-aquamarine);
+  background: rgb(76 153 137 / 0.15);
+  color: var(--kt-color-aquamarine-shadow);
+}
+html.dark .kt-graph-toggle--on {
+  border-color: var(--kt-color-aquamarine);
+  color: var(--kt-color-aquamarine-light);
+}
+.kt-graph-select {
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--kt-color-warm-200);
+  background: var(--kt-graph-panel);
+  color: var(--kt-graph-text);
+}
+html.dark .kt-graph-select {
+  border-color: var(--kt-color-warm-700);
+}
+.kt-graph-select:focus {
+  outline: none;
+  border-color: var(--kt-color-iolite);
+}
+.kt-graph-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.5rem;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  border: 1px solid var(--kt-color-warm-200);
+  color: var(--kt-color-warm-500);
+}
+html.dark .kt-graph-chip {
+  border-color: var(--kt-color-warm-700);
+}
+.kt-graph-chip--on {
+  border-color: var(--kt-color-iolite);
+  color: var(--kt-color-iolite);
+  background: rgb(90 79 207 / 0.08);
+}
+.kt-graph-chip--aqua {
+  border-color: var(--kt-color-aquamarine);
+  color: var(--kt-color-aquamarine-shadow);
+  background: rgb(76 153 137 / 0.12);
+}
+html.dark .kt-graph-chip--aqua {
+  color: var(--kt-color-aquamarine-light);
+}
+.kt-graph-chip--sapphire {
+  border-color: var(--kt-color-sapphire);
+  color: var(--kt-color-sapphire);
+  background: rgb(15 82 186 / 0.08);
+}
+html.dark .kt-graph-chip--sapphire {
+  color: var(--kt-color-sapphire-light);
+}
+.kt-graph-section {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kt-color-warm-500);
+  font-weight: 500;
+}
+
+/* Ports: in = warm, send = aquamarine circle, wire = sapphire diamond.
+   No transforms on the handle itself: Vue Flow measures it to start the drag line. */
+.kt-graph-port {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  border-width: 2px;
+  border-style: solid;
+  background: var(--kt-graph-panel);
+  opacity: 0.55;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease;
+}
+.kt-graph-port::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 999px;
+}
+.kt-graph-creature:hover .kt-graph-port,
+.kt-graph-channel:hover .kt-graph-port,
+.vue-flow__node.selected .kt-graph-port,
+.kt-graph-port:hover {
+  opacity: 1;
+}
+.kt-graph-port--in {
+  border-color: var(--kt-color-warm-400);
+}
+.kt-graph-port--send {
+  border-color: var(--kt-color-aquamarine);
+}
+.kt-graph-port--send:hover {
+  background: var(--kt-color-aquamarine);
+}
+.kt-graph-port--wire {
+  border-color: transparent;
+  background: transparent;
+}
+.kt-graph-port--wire::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--kt-color-sapphire);
+  background: var(--kt-graph-panel);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+.kt-graph-port--wire:hover::before {
+  background: var(--kt-color-sapphire);
+}
+.kt-graph-port--hidden {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+.vue-flow__connection-path {
+  stroke: var(--kt-color-iolite);
+  stroke-width: 2.5;
+  stroke-dasharray: 6 4;
+}
+.vue-flow__handle.connectingto,
+.vue-flow__handle.valid {
+  opacity: 1;
+  border-color: var(--kt-color-iolite);
+  background: var(--kt-color-iolite-light);
+}
+
+/* Channel: a filled aquamarine pill, never confused with a label. */
+.kt-graph-channel {
+  background: var(--kt-color-aquamarine);
+  color: white;
+  box-shadow: 0 1px 2px rgb(27 107 90 / 0.35);
+}
+html.dark .kt-graph-channel {
+  background: var(--kt-color-aquamarine-shadow);
+  color: var(--kt-color-aquamarine-light);
+  box-shadow: inset 0 0 0 1.5px var(--kt-color-aquamarine);
+}
+.kt-graph-channel--lit {
+  box-shadow: 0 0 0 2px var(--kt-color-iolite-light);
+}
+.kt-graph-channel--selected,
+html.dark .kt-graph-channel--selected {
+  box-shadow: 0 0 0 3px var(--kt-color-iolite);
+}
+.kt-graph-channel .kt-graph-port {
+  background: var(--kt-color-aquamarine-light);
+}
+
+/* Per-node menu button: visible on hover or selection. */
+.kt-graph-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.3rem;
+  color: var(--kt-color-warm-500);
+  opacity: 0;
+  flex-shrink: 0;
+}
+.group:hover .kt-graph-more,
+.vue-flow__node.selected .kt-graph-more,
+.kt-graph-backdrop-head .kt-graph-more {
+  opacity: 1;
+}
+.kt-graph-more:hover {
+  background: var(--kt-color-warm-200);
+  color: var(--kt-color-iolite);
+}
+html.dark .kt-graph-more:hover {
+  background: var(--kt-color-warm-800);
+}
+.kt-graph-more--on-fill {
+  color: inherit;
+}
+.kt-graph-more--on-fill:hover {
+  background: rgb(255 255 255 / 0.2);
+  color: inherit;
+}
+
+/* Group backdrop: only the header takes pointer events. */
+.kt-graph-backdrop-head {
+  pointer-events: auto;
+  cursor: grab;
+}
+.kt-graph-backdrop-head button {
+  cursor: pointer;
+}
+
+.kt-graph-edge--dim {
+  opacity: 0.12;
+}
+.kt-graph-edge-label {
+  background: var(--kt-graph-panel);
+  box-shadow: 0 0 0 1px var(--kt-graph-panel-border);
+}
+
+/* One-shot event motion only; nothing animates while the graph is idle. */
+@keyframes kt-graph-pulse-node {
+  0% {
+    box-shadow: 0 0 0 0 rgb(76 153 137 / 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgb(76 153 137 / 0);
+  }
+}
+.kt-graph-pulse-node {
+  animation: kt-graph-pulse-node 700ms ease-out 1;
+}
+@keyframes kt-graph-pulse-edge {
+  from {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+  to {
+    stroke-dashoffset: -60;
+    opacity: 0;
+  }
+}
+.kt-graph-pulse-edge {
+  stroke-width: 4;
+  stroke-dasharray: 10 50;
+  animation: kt-graph-pulse-edge 900ms ease-out 1 forwards;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kt-graph-pulse-node,
+  .kt-graph-pulse-edge,
+  .kt-bus-rail-pulse {
+    animation: none;
+  }
+}
+
+/* Flow hub: where the links all of a session's privileged nodes share start. */
+.kt-graph-hub {
+  border-radius: 999px;
+  border: 1.5px solid var(--kt-color-iolite);
+  color: var(--kt-color-iolite);
+  background: var(--kt-graph-panel);
+}
+
+/* Tier card chips */
+.kt-graph-chiplet {
+  max-width: 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  line-height: 1rem;
+  flex-shrink: 1;
+}
+.kt-graph-chiplet--listen {
+  border: 1px solid var(--kt-color-aquamarine);
+  color: var(--kt-color-aquamarine-shadow);
+}
+html.dark .kt-graph-chiplet--listen {
+  color: var(--kt-color-aquamarine-light);
+}
+.kt-graph-chiplet--send {
+  background: var(--kt-color-aquamarine);
+  color: white;
+}
+.kt-graph-chiplet--wire {
+  border: 1px solid var(--kt-color-sapphire);
+  color: var(--kt-color-sapphire);
+}
+html.dark .kt-graph-chiplet--wire {
+  color: var(--kt-color-sapphire-light);
+}
+/* The card widens to fit these (flow.js stageSize), so they never truncate. */
+.kt-graph-chiplet--full {
+  max-width: none;
+  flex-shrink: 0;
+}
+.kt-graph-chiplet--control {
+  border: 1px solid var(--kt-color-iolite);
+  color: var(--kt-color-iolite);
+}
+html.dark .kt-graph-chiplet--control {
+  color: var(--kt-color-iolite-light);
+}
+.kt-graph-bundle-label {
+  border: 1px solid var(--kt-color-iolite);
+  color: var(--kt-color-iolite);
+}
+html.dark .kt-graph-bundle-label {
+  color: var(--kt-color-iolite-light);
+}
+.kt-graph-chiplet:hover {
+  box-shadow: 0 0 0 1.5px var(--kt-color-iolite);
+}
+
+/* Bus view: an HTML grid; creatures are column cards, channels and wires are rows. */
+.kt-bus {
+  background: var(--kt-color-warm-50);
+}
+html.dark .kt-bus {
+  background: var(--kt-color-warm-950);
+}
+.kt-bus-sticky-top {
+  position: sticky;
+  z-index: 3;
+  top: 0;
+  background: inherit;
+}
+.kt-bus-grid {
+  background: inherit;
+  padding-bottom: 24px;
+}
+.kt-bus-band-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 28px;
+  padding: 0 0.5rem;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--kt-color-warm-500);
+  border-bottom: 2px dashed var(--kt-color-warm-300);
+  background: var(--kt-color-warm-50);
+}
+html.dark .kt-bus-band-head {
+  border-color: var(--kt-color-warm-700);
+  background: var(--kt-color-warm-950);
+}
+.kt-bus-colheads {
+  background: var(--kt-color-warm-50);
+  border-bottom: 1px solid var(--kt-color-warm-200);
+}
+html.dark .kt-bus-colheads {
+  background: var(--kt-color-warm-950);
+  border-color: var(--kt-color-warm-800);
+}
+.kt-bus-corner {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 0.75rem 0.5rem;
+  background: inherit;
+}
+.kt-bus-colcard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  height: 52px;
+  justify-content: center;
+  padding: 0 0.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--kt-color-warm-200);
+  background: white;
+  color: var(--kt-color-warm-800);
+  cursor: pointer;
+}
+html.dark .kt-bus-colcard {
+  border-color: var(--kt-color-warm-700);
+  background: var(--kt-color-warm-900);
+  color: var(--kt-color-warm-100);
+}
+.kt-bus-colcard:hover,
+.kt-bus-colcard--selected {
+  border-color: var(--kt-color-iolite);
+}
+.kt-bus-colcard--selected {
+  box-shadow: 0 0 0 2px rgb(90 79 207 / 0.35);
+}
+.kt-bus-section {
+  position: sticky;
+  left: 0;
+  padding: 0.9rem 0.75rem 0.3rem;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--kt-color-aquamarine-shadow);
+}
+html.dark .kt-bus-section {
+  color: var(--kt-color-aquamarine-light);
+}
+.kt-bus-section--wire,
+html.dark .kt-bus-section--wire {
+  color: var(--kt-color-sapphire);
+}
+.kt-bus-row {
+  height: 40px;
+  align-items: center;
+}
+.kt-bus-row:hover {
+  background: rgb(160 154 146 / 0.08);
+}
+.kt-bus-row--selected {
+  background: rgb(90 79 207 / 0.08);
+}
+.kt-bus-rowhead {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  padding: 0 0.75rem;
+  background: var(--kt-color-warm-50);
+}
+html.dark .kt-bus-rowhead {
+  background: var(--kt-color-warm-950);
+}
+.kt-bus-rail {
+  position: absolute;
+  top: 50%;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.kt-bus-rail--channel {
+  background: var(--kt-color-aquamarine);
+  opacity: 0.7;
+}
+.kt-bus-rail--wire {
+  background: var(--kt-color-sapphire);
+}
+.kt-bus-rail--ping {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--kt-color-sapphire) 0 8px,
+    transparent 8px 13px
+  );
+}
+@keyframes kt-bus-rail-pulse {
+  from {
+    height: 7px;
+    margin-top: -3.5px;
+    opacity: 1;
+  }
+  to {
+    height: 3px;
+    margin-top: -1.5px;
+    opacity: 0.7;
+  }
+}
+.kt-bus-rail-pulse {
+  animation: kt-bus-rail-pulse 700ms ease-out 1;
+}
+.kt-bus-cell {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kt-bus-cell--control {
+  background: color-mix(in srgb, var(--kt-color-iolite) 5%, transparent);
+}
+.kt-bus-cell--control .kt-bus-tap {
+  opacity: 0.45;
+}
+button.kt-bus-cell:hover .kt-bus-tap--none {
+  border: 1.5px dashed var(--kt-color-warm-400);
+}
+.kt-bus-tap {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+}
+.kt-bus-tap--listen {
+  border: 2.5px solid var(--kt-color-aquamarine);
+  background: var(--kt-color-warm-50);
+}
+html.dark .kt-bus-tap--listen {
+  background: var(--kt-color-warm-950);
+}
+.kt-bus-tap--send {
+  background: var(--kt-color-aquamarine);
+  box-shadow: 0 0 0 2px var(--kt-color-warm-50);
+}
+html.dark .kt-bus-tap--send {
+  box-shadow: 0 0 0 2px var(--kt-color-warm-950);
+}
+.kt-bus-tap--both {
+  border: 2.5px solid var(--kt-color-aquamarine);
+  background: radial-gradient(
+    circle,
+    var(--kt-color-aquamarine) 0 3.5px,
+    var(--kt-color-warm-50) 4px
+  );
+}
+html.dark .kt-bus-tap--both {
+  background: radial-gradient(
+    circle,
+    var(--kt-color-aquamarine) 0 3.5px,
+    var(--kt-color-warm-950) 4px
+  );
+}
+.kt-bus-wirechip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.75rem;
+  padding: 0 0.6rem;
+  border-radius: 0.4rem;
+  border: 1.5px solid var(--kt-color-sapphire);
+  color: var(--kt-color-sapphire);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  min-width: 0;
+}
+html.dark .kt-bus-wirechip {
+  color: var(--kt-color-sapphire-light);
+}
+.kt-bus-wirechip--selected {
+  box-shadow: 0 0 0 2px var(--kt-color-iolite);
+}
+.kt-bus-diamond {
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  border: 2px solid var(--kt-color-sapphire);
+  background: var(--kt-color-warm-50);
+}
+.kt-bus-diamond--source {
+  width: 14px;
+  height: 14px;
+  background: var(--kt-color-sapphire);
+}
+.kt-bus-arrowhead {
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-left: 13px solid var(--kt-color-sapphire);
+}
+.kt-bus-arrowhead--left {
+  border-left: 0;
+  border-right: 13px solid var(--kt-color-sapphire);
+}

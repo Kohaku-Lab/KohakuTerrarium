@@ -555,6 +555,9 @@ export default {
   "layout.panelDesc.creatureState":
     "フォーカス中の生物のドライブ、スクラッチパッド、メモリ検索、圧縮。",
   "layout.panelDesc.creatures": "複数生物セッションのグラフメンバーとチャンネル。",
+  "layout.panelDesc.graph": "セッションの生物、チャンネル、出力配線をライブグラフで表示。",
+  "layout.panel.graph": "グラフ",
+  "layout.preset.team": "チームグラフ",
   "layout.panelDesc.canvas": "生物が生成した画像と成果物。",
   "layout.panelDesc.debug": "ランタイムのログと診断。",
   "layout.panelDesc.terminal": "生物の作業ディレクトリのターミナル。",
