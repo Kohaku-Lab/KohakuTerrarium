@@ -294,6 +294,14 @@ export const terrariumAPI = {
     return data
   },
 
+  /** Remove a channel; every member is unwired and the graph may split. */
+  async removeChannel(id, name) {
+    const { data } = await api.delete(
+      `/sessions/topology/${encodeTarget(id)}/channels/${encodeURIComponent(name)}`,
+    )
+    return data
+  },
+
   /** Merge graph ``b`` into graph ``a`` so both creature sets share
    * one engine graph. Returns ``{session_id, merged}`` where
    * ``session_id`` is the surviving graph id.
@@ -795,6 +803,25 @@ export const sessionAPI = {
 
   async stopActive(id) {
     await api.delete(`/sessions/active/${encodeTarget(id)}`)
+  },
+
+  /** Add a creature from a config path into a running session. */
+  async addCreature(id, { name, configPath, listenChannels = [], sendChannels = [] }) {
+    const { data } = await api.post(`/sessions/active/${encodeTarget(id)}/creatures`, {
+      name,
+      config_path: configPath,
+      listen_channels: listenChannels,
+      send_channels: sendChannels,
+    })
+    return data
+  },
+
+  /** Remove one creature from a running session; the graph may split. */
+  async removeCreature(id, creatureId) {
+    const { data } = await api.delete(
+      `/sessions/active/${encodeTarget(id)}/creatures/${encodeTarget(creatureId)}`,
+    )
+    return data
   },
 
   async endConversation(conversationId) {
