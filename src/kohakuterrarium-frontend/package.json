@@ -30,6 +30,7 @@
     "dagre": "^0.8.5",
     "dayjs": "^1.11.0",
     "element-plus": "^2.13.7",
+    "elkjs": "^0.11.1",
     "highlight.js": "^11.11.0",
     "katex": "^0.16.45",
     "markdown-it": "^14.0.0",
