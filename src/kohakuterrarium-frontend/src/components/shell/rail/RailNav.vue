@@ -16,7 +16,7 @@ import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue
 import { useTabsStore } from "@/stores/tabs"
 import { useI18n } from "@/utils/i18n"
 
-/** The sidebar's way in: start a session, then the lab, history, library and graph. */
+/** The sidebar's way in: start a session, then the lab, history and library. */
 const tabs = useTabsStore()
 const { t } = useI18n()
 const newOpen = ref(false)
@@ -25,7 +25,6 @@ const items = computed(() => [
   { id: "lab", label: t("lab.rail.lab"), icon: "i-carbon-home", tab: { kind: "dashboard", id: "dashboard" } },
   { id: "history", label: t("lab.history.title"), icon: "i-carbon-recently-viewed", tab: { kind: "saved-sessions", id: "saved-sessions" } },
   { id: "library", label: t("lab.library.title"), icon: "i-carbon-catalog", tab: { kind: "catalog", id: "catalog" } },
-  { id: "graph", label: t("graph.tab.title"), icon: "i-carbon-network-3", tab: { kind: "graph", id: "graph" } },
 ])
 
 function isActive(item) {

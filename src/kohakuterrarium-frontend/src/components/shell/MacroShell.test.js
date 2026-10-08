@@ -6,9 +6,11 @@ import { createRouter, createMemoryHistory } from "vue-router"
 vi.mock("@/utils/api", () => ({
   attachAPI: { getCreaturePolicies: vi.fn(), getSessionPolicies: vi.fn() },
   sessionAPI: {
+    list: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
     listActive: vi.fn().mockResolvedValue([]),
     listOpen: vi.fn().mockResolvedValue([]),
   },
+  runtimeGraphAPI: { snapshot: vi.fn().mockResolvedValue({ graphs: [] }) },
   configAPI: { listCreatures: vi.fn(), listTerrariums: vi.fn(), getServerInfo: vi.fn() },
   settingsAPI: {
     getBackends: vi.fn().mockResolvedValue([]),

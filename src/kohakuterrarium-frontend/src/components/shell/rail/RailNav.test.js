@@ -24,7 +24,7 @@ beforeEach(() => {
 })
 
 describe("RailNav", () => {
-  it("starts a session from one button and opens the lab, history, library and graph", async () => {
+  it("starts a session from one button and opens the lab, history and library", async () => {
     const tabs = useTabsStore()
     const openTab = vi.spyOn(tabs, "openTab")
     const w = mount(RailNav)
@@ -37,11 +37,11 @@ describe("RailNav", () => {
       ["lab", "dashboard"],
       ["history", "saved-sessions"],
       ["library", "catalog"],
-      ["graph", "graph"],
     ]) {
       await w.find(`[data-test="rail-nav-${id}"]`).trigger("click")
       expect(openTab).toHaveBeenLastCalledWith({ kind, id: kind })
     }
+    expect(w.find('[data-test="rail-nav-graph"]').exists()).toBe(false)
     expect(w.text()).not.toContain("shell.quick.stats")
     expect(w.text()).not.toContain("shell.quick.extensions")
   })
