@@ -33,6 +33,8 @@ function iconFor(kind) {
       "session-viewer": "i-carbon-recently-viewed",
       "studio-editor": "i-carbon-tool-box",
       catalog: "i-carbon-catalog",
+      extensions: "i-carbon-catalog",
+      "saved-sessions": "i-carbon-recently-viewed",
       settings: "i-carbon-settings",
       "code-editor": "i-carbon-code",
       graph: "i-carbon-network-3",
@@ -45,8 +47,10 @@ function labelFor(tab) {
   // (attach config_name, session name, etc.) stay raw because they
   // are user-data, not UI chrome.
   const localised = {
-    dashboard: t("shell.rail.dashboard"),
-    catalog: t("shell.quick.catalog"),
+    dashboard: t("lab.rail.lab"),
+    catalog: t("lab.library.title"),
+    extensions: t("lab.library.title"),
+    "saved-sessions": t("lab.history.title"),
     settings: t("shell.quick.settings"),
     graph: tab.target ? null : t("graph.tab.title"),
   }[tab.kind]

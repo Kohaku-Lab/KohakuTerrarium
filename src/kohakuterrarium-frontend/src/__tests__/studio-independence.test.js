@@ -28,12 +28,8 @@ const ALLOWLIST = new Set([
   // bridge per the v1/v2 paradigm — Studio pages still own the surface,
   // we just embed them as tabs).
   path.join(SRC_ROOT, "components", "shell", "tabs", "StudioEditorTab.vue"),
-  // RailGroupQuick reads the studio workspace store solely to decide
-  // which Studio tab to open from the rail (workspace dashboard if a
-  // workspace is open, picker otherwise). Read-only consumer; no
-  // mutation of studio state. Same sanctioned-bridge category as
-  // StudioEditorTab above.
-  path.join(SRC_ROOT, "components", "shell", "RailGroupQuick.vue"),
+  // useOpenStudio only reads the studio workspace store to pick which Studio tab the rail opens.
+  path.join(SRC_ROOT, "components", "shell", "rail", "useOpenStudio.js"),
 ])
 
 const STUDIO_IMPORT_PATTERNS = [

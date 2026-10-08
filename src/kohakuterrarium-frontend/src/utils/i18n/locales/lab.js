@@ -3,7 +3,12 @@
 // each locale by ``./index.js``; English is the fallback elsewhere.
 export default {
   en: {
-    "lab.rail.newSession": "New session…",
+    "lab.rail.app": "App",
+    "lab.rail.terrarium": "Terrarium",
+    "lab.rail.studio": "Studio",
+    "lab.rail.lab": "Lab",
+    "lab.rail.running": "Running",
+    "lab.rail.runningEmpty": "Nothing running.",
     "lab.new.title": "New session",
     "lab.new.subtitle": "From a creature config or a recipe",
     "lab.new.mode.creature": "From a config",
@@ -40,7 +45,12 @@ export default {
     "lab.library.noModuleMatch": "No modules match.",
   },
   "zh-TW": {
-    "lab.rail.newSession": "新工作階段…",
+    "lab.rail.app": "應用",
+    "lab.rail.terrarium": "Terrarium",
+    "lab.rail.studio": "Studio",
+    "lab.rail.lab": "實驗室",
+    "lab.rail.running": "執行中",
+    "lab.rail.runningEmpty": "沒有執行中的工作階段。",
     "lab.new.title": "新工作階段",
     "lab.new.subtitle": "由 Creature 設定或配方啟動",
     "lab.new.mode.creature": "由設定",
@@ -77,7 +87,12 @@ export default {
     "lab.library.noModuleMatch": "沒有符合的模組。",
   },
   "zh-CN": {
-    "lab.rail.newSession": "新会话…",
+    "lab.rail.app": "应用",
+    "lab.rail.terrarium": "Terrarium",
+    "lab.rail.studio": "Studio",
+    "lab.rail.lab": "实验室",
+    "lab.rail.running": "运行中",
+    "lab.rail.runningEmpty": "没有运行中的会话。",
     "lab.new.title": "新会话",
     "lab.new.subtitle": "由 Creature 配置或配方启动",
     "lab.new.mode.creature": "由配置",

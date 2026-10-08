@@ -28,26 +28,22 @@ describe("RailPane scroll layout", () => {
     const viewport = viewports[0]
     expect(classes(viewport)).toEqual(expect.arrayContaining(["flex-1", "min-h-0"]))
     expect(descendants(viewport).map((node) => node.tag)).toEqual(
-      expect.arrayContaining([
-        "RailGroupTop",
-        "RailGroupAttached",
-        "RailGroupQuick",
-        "RailGroupPinned",
-      ]),
+      expect.arrayContaining(["RailNav", "RailGroupAttached", "RailGroupPinned"]),
     )
+    expect(descendants(viewport).map((node) => node.tag)).not.toContain("RailAppSwitch")
     expect(descendants(viewport).map((node) => node.tag)).not.toContain("HostStatusChip")
     expect(descendants(viewport).map((node) => node.tag)).not.toContain("BrandMark")
   })
 
   it("keeps the brand and footer from shrinking when the navigation overflows", () => {
     const nav = descendants(root).find(
-      (node) =>
-        node.tag === "nav" && descendants(node).some((child) => child.tag === "RailGroupTop"),
+      (node) => node.tag === "nav" && descendants(node).some((child) => child.tag === "RailNav"),
     )
-    const fixedRows = elements(nav).filter((node) =>
-      descendants(node).some((child) =>
-        ["BrandMark", "HostStatusChip", "button"].includes(child.tag),
-      ),
+    const fixedRows = elements(nav).filter(
+      (node) =>
+        descendants(node).some((child) =>
+          ["BrandMark", "HostStatusChip", "button"].includes(child.tag),
+        ) || node.tag === "RailAppSwitch",
     )
     for (const row of fixedRows.filter((node) => !classes(node).includes("overflow-y-auto"))) {
       expect(classes(row)).toContain("shrink-0")

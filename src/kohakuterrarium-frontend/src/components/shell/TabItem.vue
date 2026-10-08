@@ -138,7 +138,7 @@ const label = computed(() => {
   const tab = props.tab
   switch (tab.kind) {
     case "dashboard":
-      return t("shell.rail.dashboard")
+      return t("lab.rail.lab")
     case "attach":
       return tab.config_name ?? tab.target ?? "attach"
     case "inspector":
