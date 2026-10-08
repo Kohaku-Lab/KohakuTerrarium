@@ -10,7 +10,7 @@ the change out to live agents (channel-trigger injection, environment
 union on graph merge, session-store copy on graph split).
 """
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -300,10 +300,14 @@ class Terrarium:
             register_privileged=force_register_privileged_tools,
         )
 
-    async def remove_creature(self, creature: CreatureRef) -> None:
+    async def remove_creature(
+        self, creature: CreatureRef, *, split: bool = True
+    ) -> None:
         """Stop and remove a creature.  May split the graph it lived in.
 
-        Raises ``KeyError`` when the creature is not in the engine.
+        ``split=False`` keeps the remaining members in one graph; it is for
+        undoing an add that just happened, so the graph returns exactly to
+        how it was. Raises ``KeyError`` when the creature is not in the engine.
         """
         cid = self._resolve_creature_id(creature)
         c = self._creatures.get(cid)
@@ -337,7 +341,7 @@ class Terrarium:
                     creature_id=cid,
                     error=str(exc),
                 )
-        delta = _topo.remove_creature(self._topology, cid)
+        delta = _topo.remove_creature(self._topology, cid, split=split)
         self._creatures.pop(cid, None)
         _wiring.install_output_wiring_resolver(self)
         # Drop the environment + the graph's Drive manager if the graph went
@@ -624,11 +628,14 @@ class Terrarium:
         creature_builder=None,
         created_ids: list[str] | None = None,
         io: str = "config",
+        on_applied: Callable[[GraphTopology], Awaitable[None]] | None = None,
     ) -> GraphTopology:
         """Apply a terrarium recipe into this engine.
 
         ``session`` follows ``add_creature`` and creates one graph store.
         ``created_ids`` collects only creatures added by this call.
+        ``on_applied`` runs after the members are in place and before the
+        checkpoint; if it raises, the whole application rolls back.
         """
         kwargs = {
             "graph": graph,
@@ -661,6 +668,8 @@ class Terrarium:
                     await _autosession.attach_for_recipe(
                         self, topo.graph_id, recipe=recipe, session=session
                     )
+                    if on_applied is not None:
+                        await on_applied(topo)
             if topo is not None:
                 await _checkpoint.checkpoint(self, topo.graph_id)
         except BaseException:

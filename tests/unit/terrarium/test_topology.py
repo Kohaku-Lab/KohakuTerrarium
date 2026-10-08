@@ -126,6 +126,19 @@ class TestRemoveCreature:
         assert delta.kind == "nothing"
         assert s.creature_count() == 1
 
+    def test_split_false_keeps_unconnected_members_together(self):
+        s = TopologyState()
+        gid = add_creature(s, "a")
+        add_creature(s, "b", graph_id=gid)
+        add_creature(s, "new", graph_id=gid)
+        delta = remove_creature(s, "new", split=False)
+        assert delta.kind == "nothing"
+        assert s.graph_count() == 1
+        assert s.graphs[gid].creature_ids == {"a", "b"}
+        add_creature(s, "new2", graph_id=gid)
+        assert remove_creature(s, "new2").kind == "split"
+        assert s.graph_count() == 2
+
 
 # ── add_channel / remove_channel ─────────────────────────────────
 

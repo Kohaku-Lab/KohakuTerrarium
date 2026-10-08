@@ -114,6 +114,67 @@ class TestApplyRecipe:
         finally:
             await engine.shutdown()
 
+    async def test_on_applied_failure_rolls_back_a_merge_without_splitting(self):
+        engine = Terrarium()
+        try:
+            existing = _fake_builder(_creature_cfg("lead"), creature_id="existing")
+            await engine.add_creature(existing, start=False, session=False)
+            gid = existing.graph_id
+            recipe = _recipe(
+                creatures=[
+                    _creature_cfg("a", listen=["link"], send=["link"]),
+                    _creature_cfg("b", listen=["link"]),
+                ],
+                channels=[ChannelConfig(name="link")],
+            )
+            seen = []
+
+            async def boom(topo):
+                seen.append(set(topo.creature_ids))
+                raise RuntimeError("bind failed")
+
+            with pytest.raises(RuntimeError, match="bind failed"):
+                await engine.apply_recipe(
+                    recipe,
+                    graph=gid,
+                    start=False,
+                    session=False,
+                    creature_builder=_fake_builder,
+                    on_applied=boom,
+                )
+            assert len(seen[0]) == 3
+            assert [g.graph_id for g in engine.list_graphs()] == [gid]
+            assert engine.get_graph(gid).creature_ids == {"existing"}
+            assert engine.get_graph(gid).channels == {}
+            assert [c.creature_id for c in engine.list_creatures()] == ["existing"]
+        finally:
+            await engine.shutdown()
+
+    async def test_on_applied_sees_the_merged_members(self):
+        engine = Terrarium()
+        try:
+            existing = _fake_builder(_creature_cfg("lead"), creature_id="existing")
+            await engine.add_creature(existing, start=False, session=False)
+            seen = []
+
+            async def record(topo):
+                seen.append(set(topo.creature_ids))
+
+            created = []
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("a")]),
+                graph=existing.graph_id,
+                start=False,
+                session=False,
+                creature_builder=_fake_builder,
+                created_ids=created,
+                on_applied=record,
+            )
+            assert seen == [{"existing", *created}]
+            assert len(created) == 1
+        finally:
+            await engine.shutdown()
+
     async def test_empty_recipe(self):
         engine = Terrarium()
         try:

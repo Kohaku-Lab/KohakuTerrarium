@@ -152,11 +152,15 @@ def add_creature(
     return graph_id
 
 
-def remove_creature(state: TopologyState, creature_id: str) -> TopologyDelta:
+def remove_creature(
+    state: TopologyState, creature_id: str, *, split: bool = True
+) -> TopologyDelta:
     """Remove a creature from its graph.  Returns the resulting delta.
 
-    May split the graph if removing the creature breaks connectivity.
-    May leave the graph empty (the empty graph is dropped).
+    May split the graph if removing the creature breaks connectivity
+    (``split=False`` keeps the remaining members together — for undoing an
+    add, which must restore the graph exactly). May leave the graph empty
+    (the empty graph is dropped).
     """
     g = state.graph_of(creature_id)
     g.creature_ids.discard(creature_id)
@@ -169,6 +173,13 @@ def remove_creature(state: TopologyState, creature_id: str) -> TopologyDelta:
         return TopologyDelta(
             kind="nothing",
             old_graph_ids=[g.graph_id],
+            affected_creatures={creature_id},
+        )
+    if not split:
+        return TopologyDelta(
+            kind="nothing",
+            old_graph_ids=[g.graph_id],
+            new_graph_ids=[g.graph_id],
             affected_creatures={creature_id},
         )
 
