@@ -90,17 +90,27 @@ class LocalWorkspace:
         return f"{prefix}/{path.relative_to(self.root_path).as_posix()}"
 
     def summary(self) -> dict:
+        """Everything Studio lists for the workspace; its own module files carry their ``users``."""
         with package_snapshot():
             prefix = self.ref_prefix()
+            listed = {kind: self.list_modules(kind) for kind in KNOWN_KINDS}
+            users = workspace_wiring.users_by_file(self, listed)
+            modules = {}
+            for kind, entries in listed.items():
+                own = [
+                    {
+                        **m,
+                        "users": users[workspace_wiring.module_file_key(self, kind, m)],
+                    }
+                    for m in entries
+                ]
+                modules[kind] = modules_summary(self, kind, own)
             return {
                 "root": self.root,
                 "ref_prefix": prefix,
                 "is_project": prefix == "@",
                 "creatures": self.list_creatures(),
-                "modules": {
-                    kind: modules_summary(self, kind, self.list_modules(kind))
-                    for kind in KNOWN_KINDS
-                },
+                "modules": modules,
             }
 
     def list_creatures(self) -> list[dict]:

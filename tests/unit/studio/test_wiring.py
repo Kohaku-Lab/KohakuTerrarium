@@ -179,6 +179,20 @@ class TestWorkspace:
         with pytest.raises(FileNotFoundError):
             project.module_users("tools", "nope")
 
+    def test_the_summary_carries_each_own_modules_users(self, project):
+        project.scaffold_creature("alpha", None)
+        project.scaffold_creature("beta", None)
+        project.scaffold_module("tools", "echo", None, ["alpha", "beta"])
+        project.scaffold_module("plugins", "guard", None)
+        modules = project.summary()["modules"]
+        echo = next(m for m in modules["tools"] if m["name"] == "echo")
+        guard = next(m for m in modules["plugins"] if m["name"] == "guard")
+        assert echo["users"] == ["alpha", "beta"]
+        assert guard["users"] == []
+        assert all(
+            "users" not in m for m in modules["tools"] if m.get("source") != "workspace"
+        )
+
     def test_a_plain_folder_wires_by_absolute_path(self, tmp_path, project):
         (tmp_path / "plain").mkdir()
         plain = LocalWorkspace.open(tmp_path / "plain")

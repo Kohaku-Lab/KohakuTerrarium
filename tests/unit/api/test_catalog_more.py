@@ -208,6 +208,17 @@ class TestModulesRoute:
         assert client.get(PREFIX + "/plugins/nope/wiring").status_code == 404
         assert client.get(PREFIX + "/not-a-kind/x/wiring").status_code == 400
 
+    def test_check_reports_load_failures_and_success(self, _workspace):
+        client = _client(modules_mod.router)
+        client.post(PREFIX + "/triggers", json={"name": "tick"})
+        r = client.post(PREFIX + "/triggers/tick/check")
+        assert r.json() == {"ok": True, "errors": [], "loaded": "TickTrigger"}
+        path = _workspace.root_path / "modules" / "triggers" / "tick.py"
+        path.write_text("class TickTrigger:\n    pass\n", encoding="utf-8")
+        r = client.post(PREFIX + "/triggers/tick/check")
+        assert r.json()["errors"][0]["code"] == "wrong_type"
+        assert client.post(PREFIX + "/triggers/ghost/check").status_code == 404
+
     def test_scaffold_refuses_unknown_starters_and_creatures(self, _workspace):
         client = _client(modules_mod.router)
         r = client.post(PREFIX + "/tools", json={"name": "t", "template": "nope"})

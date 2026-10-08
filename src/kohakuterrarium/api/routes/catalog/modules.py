@@ -1,10 +1,13 @@
 """Manage every supported workspace module kind through one router."""
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.routes.catalog._deps import get_workspace
 from kohakuterrarium.studio.editors.codegen_init import RoundTripError
+from kohakuterrarium.studio.editors.module_check import check_module
 from kohakuterrarium.studio.editors.starters import UnknownStarterError
 from kohakuterrarium.studio.editors.workspace_fs import KNOWN_KINDS
 from kohakuterrarium.studio.editors.workspace_manifest import Workspace
@@ -124,6 +127,20 @@ async def _edit_wiring(kind: str, name: str, body: PlugBody, ws, plug: bool) -> 
         return {"changed": changed, "users": ws.module_users(kind, name)}
     except FileNotFoundError as e:
         raise HTTPException(404, detail={"code": "not_found", "message": str(e)})
+    except ValueError as e:
+        raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
+
+
+@router.post("/{kind}/{name}/check")
+async def check(kind: str, name: str, ws: Workspace = Depends(get_workspace)) -> dict:
+    """Compile and load the saved module as a creature would; ``{ok, errors, loaded}``."""
+    _check_kind(kind)
+    try:
+        return await asyncio.to_thread(check_module, ws, kind, name)
+    except FileNotFoundError:
+        raise HTTPException(
+            404, detail={"code": "not_found", "message": f"{kind}/{name} not found"}
+        )
     except ValueError as e:
         raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
 

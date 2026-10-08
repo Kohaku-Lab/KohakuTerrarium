@@ -6,7 +6,7 @@ import pytest
 from jinja2 import UndefinedError
 
 from kohakuterrarium.studio.editors.templates import (
-    _pyrepr,
+    py_literal,
     _yaml_list,
     import_block,
     render,
@@ -56,7 +56,7 @@ class TestImportBlock:
 
 class TestPyrepr:
     def test_short_values_stay_on_one_line_with_double_quotes(self):
-        assert _pyrepr({"a": [1, True, None], "b": "it's"}) == (
+        assert py_literal({"a": [1, True, None], "b": "it's"}) == (
             '{"a": [1, True, None], "b": "it\'s"}'
         )
 
@@ -66,7 +66,7 @@ class TestPyrepr:
             "properties": {"path": {"type": "string", "description": "x" * 40}},
             "required": ["path"],
         }
-        text = _pyrepr(value, 8, 7)
+        text = py_literal(value, 8, 7)
         lines = ("        return " + text).splitlines()
         assert all(len(line) <= 88 for line in lines)
         assert lines[-1] == "        }"

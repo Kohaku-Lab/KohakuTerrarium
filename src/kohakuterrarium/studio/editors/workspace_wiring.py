@@ -76,6 +76,36 @@ def module_users(ws: Any, kind: str, name: str) -> list[str]:
     return users
 
 
+def module_file_key(ws: Any, kind: str, entry: dict) -> tuple[str, Path]:
+    """The ``(kind, resolved file)`` key of a ``list_modules`` entry."""
+    return kind, (ws.root_path / entry["path"]).resolve()
+
+
+def users_by_file(
+    ws: Any, listed: dict[str, list[dict]]
+) -> dict[tuple[str, Path], list[str]]:
+    """For every listed module file, the workspace creatures loading it.
+
+    ``listed`` maps a kind to its ``list_modules`` entries. Each creature
+    config is read once, whatever the number of modules.
+    """
+    files = {
+        module_file_key(ws, kind, m)
+        for kind, entries in listed.items()
+        for m in entries
+    }
+    out: dict[tuple[str, Path], list[str]] = {key: [] for key in files}
+    for creature_dir, cfg in _creature_configs(ws, None):
+        try:
+            config = load_creature_file(cfg)
+        except Exception:
+            continue
+        for kind, target in files:
+            if wiring.uses(config, kind, target, creature_dir):
+                out[(kind, target)].append(creature_dir.name)
+    return out
+
+
 def _edit(ws: Any, kind: str, name: str, creatures: list[str], plug: bool) -> list[str]:
     target = _module_file(ws, kind, name)
     info = module_wiring(ws, kind, name) if plug else None

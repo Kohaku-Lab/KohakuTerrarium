@@ -34,7 +34,7 @@ def _flat(value) -> str:
     return repr(value)
 
 
-def _pyrepr(value, indent: int = 0, lead: int = 0, tail: int = 0) -> str:
+def py_literal(value, indent: int = 0, lead: int = 0, tail: int = 0) -> str:
     """A black-style Python literal for ``value``.
 
     The line holding it is indented by ``indent`` and has ``lead`` characters
@@ -49,10 +49,10 @@ def _pyrepr(value, indent: int = 0, lead: int = 0, tail: int = 0) -> str:
         items = []
         for k, v in value.items():
             key = f"{_flat(k)}: "
-            items.append(key + _pyrepr(v, indent + 4, len(key), 1))
+            items.append(key + py_literal(v, indent + 4, len(key), 1))
         open_, close = "{", "}"
     else:
-        items = [_pyrepr(v, indent + 4, 0, 1) for v in value]
+        items = [py_literal(v, indent + 4, 0, 1) for v in value]
         open_, close = "[", "]"
     body = "".join(f"\n{inner}{item}," for item in items)
     return f"{open_}{body}\n{' ' * indent}{close}"
@@ -72,7 +72,7 @@ _env = Environment(
     keep_trailing_newline=True,
     autoescape=select_autoescape(disabled_extensions=("j2", "py", "yaml")),
 )
-_env.filters["pyrepr"] = _pyrepr
+_env.filters["pyrepr"] = py_literal
 _env.filters["pystr"] = _pystr
 _env.filters["yaml_list"] = _yaml_list
 

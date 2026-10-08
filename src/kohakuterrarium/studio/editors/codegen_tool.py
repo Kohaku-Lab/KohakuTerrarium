@@ -15,11 +15,21 @@ from kohakuterrarium.studio.editors.codegen_common import (
     read_class_attr_bool,
     read_method_body,
     read_property_string,
+    replace_class_attr_bool,
     replace_class_in_module,
     replace_method_body,
     replace_string_property,
 )
 from kohakuterrarium.studio.editors.templates import import_block, render
+from kohakuterrarium.studio.editors.tool_params import (
+    METHOD,
+    read_schema,
+    rows_to_schema,
+    schema_to_rows,
+    write_schema,
+)
+
+_MODES = ("direct", "background", "stateful")
 
 BASE_IMPORTS = [
     "from typing import Any",
@@ -35,8 +45,9 @@ BASE_IMPORTS = [
 def render_new(form: dict) -> str:
     """Render a new tool from identity, execution metadata, and method body.
 
-    ``imports`` adds module-level import lines; ``parameters`` (a JSON schema)
-    renders ``get_parameters_schema`` so native providers see the arguments.
+    ``imports`` adds module-level import lines; ``parameters`` (a JSON schema,
+    else built from the form's ``params`` rows) renders
+    ``get_parameters_schema`` so native providers see the arguments.
     """
     name = form.get("name") or form.get("tool_name") or "my_tool"
     class_name = form.get("class_name") or _to_class_name(name)
@@ -47,7 +58,8 @@ def render_new(form: dict) -> str:
         "description": form.get("description", "TODO: describe this tool"),
         "execution_mode": (form.get("execution_mode") or "direct").lower(),
         "needs_context": bool(form.get("needs_context", False)),
-        "parameters": form.get("parameters") or None,
+        "parameters": form.get("parameters")
+        or rows_to_schema(form.get("params") or []),
         "import_block": import_block(BASE_IMPORTS, form.get("imports")),
         "execute_body": form.get("execute_body") or 'return ToolResult(output="TODO")',
     }
@@ -55,7 +67,12 @@ def render_new(form: dict) -> str:
 
 
 def update_existing(source: str, form: dict, execute_body: str) -> str:
-    """Update managed tool properties and the ``_execute`` body in place."""
+    """Update the managed tool surface in place, leaving the rest of the source.
+
+    Managed: ``tool_name``, ``description``, ``execution_mode``, the
+    ``needs_context`` / ``require_manual_read`` flags, the argument schema
+    (``params``, when the source keeps it as a literal) and ``_execute``.
+    """
     tree = parse(source)
     class_name = form.get("class_name")
     if class_name:
@@ -70,6 +87,16 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
         klass = replace_string_property(klass, "tool_name", form["tool_name"])
     if "description" in form:
         klass = replace_string_property(klass, "description", form["description"])
+    mode = str(form.get("execution_mode") or "").lower()
+    if mode in _MODES and _read_execution_mode(klass) not in (None, mode):
+        klass = replace_method_body(
+            klass, "execution_mode", f"return ExecutionMode.{mode.upper()}"
+        )
+    for flag in ("needs_context", "require_manual_read"):
+        if flag in form and bool(form[flag]) != read_class_attr_bool(klass, flag):
+            klass = replace_class_attr_bool(klass, flag, bool(form[flag]))
+    if "params" in form and read_schema(klass)[1]:
+        klass = write_schema(klass, rows_to_schema(form["params"] or []))
     if execute_body is not None:
         klass = replace_method_body(klass, "_execute", execute_body)
 
@@ -97,6 +124,15 @@ def parse_back(source: str) -> dict:
     execution_mode = _read_execution_mode(klass)
     needs_context = read_class_attr_bool(klass, "needs_context")
     require_manual_read = read_class_attr_bool(klass, "require_manual_read")
+
+    schema, params_editable = read_schema(klass)
+    if not params_editable:
+        warnings.append(
+            {
+                "code": "params_computed",
+                "message": f"{METHOD} computes its schema; edit it in raw mode",
+            }
+        )
 
     exec_body = read_method_body(klass, "_execute")
     if exec_body is None:
@@ -133,8 +169,8 @@ def parse_back(source: str) -> dict:
             "execution_mode": execution_mode or "direct",
             "needs_context": needs_context,
             "require_manual_read": require_manual_read,
-            # BaseTool source does not expose a canonical parameter declaration.
-            "params": [],
+            "params": schema_to_rows(schema or {}),
+            "params_editable": params_editable,
         },
         "execute_body": exec_body,
         "warnings": warnings,
@@ -152,6 +188,7 @@ def _raw_mode_envelope(source: str, reason: str) -> dict:
             "needs_context": False,
             "require_manual_read": False,
             "params": [],
+            "params_editable": False,
         },
         "execute_body": "",
         "warnings": [{"code": "ast_roundtrip_unsafe", "message": reason}],
