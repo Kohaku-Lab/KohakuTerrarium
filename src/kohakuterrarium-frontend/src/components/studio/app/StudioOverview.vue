@@ -60,11 +60,28 @@
               </span>
               <span class="text-[12px] text-warm-500 line-clamp-2 min-h-[2lh]">{{ c.description || "—" }}</span>
               <span class="flex items-center gap-1.5 min-w-0 text-[11px]">
-                <span v-if="c.base_config" class="chip truncate">{{ t("studioApp.overview.extends", { base: c.base_config }) }}</span>
-                <span v-if="c.ref" class="font-mono text-warm-400 truncate">{{ c.ref }}</span>
+                <span v-if="c.base_config" class="chip shrink-0 max-w-[70%] truncate" :title="c.base_config">{{ t("studioApp.overview.extends", { base: c.base_config }) }}</span>
+                <span v-if="c.ref" class="font-mono text-warm-400 truncate min-w-0" :title="c.ref">{{ c.ref }}</span>
               </span>
             </button>
           </div>
+
+          <template v-if="terrariums.length">
+            <h3 class="text-[11px] uppercase tracking-wider text-warm-500 mb-2">{{ t("studioApp.nav.terrariums") }} · {{ terrariums.length }}</h3>
+            <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 mb-6">
+              <div v-for="tr in terrariums" :key="tr.name" class="kt-v2-card p-3.5 flex flex-col gap-1" :data-test="`studio-terrarium-${tr.name}`">
+                <span class="flex items-center gap-2 min-w-0">
+                  <span :class="TERRARIUM_ICON" class="text-taaffeite shrink-0" />
+                  <span class="text-[13px] font-semibold text-warm-800 dark:text-warm-100 truncate">{{ tr.name }}</span>
+                  <span class="text-[11px] text-warm-500 shrink-0 flex items-center gap-0.5" :title="t('studioApp.nav.creatures')"><span :class="CREATURE_ICON" />{{ tr.creatures }}</span>
+                  <span class="flex-1" />
+                  <button type="button" :class="GHOST" class="!h-7" :data-test="`studio-run-terrarium-${tr.name}`" @click="runRecipe = tr.ref"><span class="i-carbon-play" />{{ t("studioApp.run.label") }}</button>
+                </span>
+                <span class="text-[12px] text-warm-500 line-clamp-2">{{ tr.description || "—" }}</span>
+                <span class="font-mono text-[11px] text-warm-400 truncate">{{ tr.ref }}</span>
+              </div>
+            </div>
+          </template>
 
           <h3 class="text-[11px] uppercase tracking-wider text-warm-500 mb-2">{{ t("studioApp.nav.modules") }} · {{ modules.length }}</h3>
           <p v-if="!modules.length" class="text-[12px] text-warm-500" data-test="studio-no-modules">{{ t("studioApp.overview.emptyModules") }}</p>
@@ -82,6 +99,7 @@
         </section>
       </div>
     </div>
+    <NewSessionDialog v-if="runRecipe" mode="terrarium" :initial-config="runRecipe" @started="setAppMode('terrarium')" @close="runRecipe = ''" />
   </div>
 </template>
 
@@ -89,7 +107,9 @@
 import { computed, onMounted, ref } from "vue"
 import { ElMessage } from "element-plus"
 
-import { CREATURE_ICON, MODULE_KINDS, kindMeta, workspaceLabel, workspaceModules } from "@/components/studio/app/studioKinds"
+import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
+import { setAppMode } from "@/components/shell/rail/useAppMode"
+import { CREATURE_ICON, MODULE_KINDS, TERRARIUM_ICON, kindMeta, workspaceLabel, workspaceModules } from "@/components/studio/app/studioKinds"
 import { goStudio } from "@/components/studio/app/useStudioRoute"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { starterAPI } from "@/utils/studio/api"
@@ -108,6 +128,8 @@ const creatureStarters = ref([])
 
 const label = computed(() => workspaceLabel(ws.summary, t))
 const modules = computed(() => workspaceModules(ws.summary))
+const terrariums = computed(() => ws.summary?.terrariums || [])
+const runRecipe = ref("")
 
 async function copy(text) {
   try {

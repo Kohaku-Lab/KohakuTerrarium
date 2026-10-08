@@ -442,8 +442,10 @@ class TestApiIntegration:
             "root",
             "ref_prefix",
             "is_project",
+            "terrariums",
         }
         assert summary["ref_prefix"] is None and summary["is_project"] is False
+        assert summary["terrariums"] == []
 
         # Creatures: empty, then scaffold one, then it lists + loads.
         resp = client.get("/api/studio/creatures")

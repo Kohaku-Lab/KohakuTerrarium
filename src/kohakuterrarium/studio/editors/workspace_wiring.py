@@ -7,10 +7,14 @@ functions of :mod:`.wiring`, applied to round-trip YAML so comments survive.
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.studio.catalog.catalog_sources import workspace_manifest_entries
 from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
 from kohakuterrarium.studio.editors import wiring
 from kohakuterrarium.studio.editors.utils_paths import sanitize_name
-from kohakuterrarium.studio.editors.workspace_manifest import detect_class_name
+from kohakuterrarium.studio.editors.workspace_manifest import (
+    detect_class_name,
+    resolve_manifest_path,
+)
 from kohakuterrarium.studio.editors.yaml_creature import (
     load_creature_file,
     save_creature_file,
@@ -26,17 +30,46 @@ def _module_file(ws: Any, kind: str, name: str) -> Path:
     return path.resolve()
 
 
+def _manifest_for(ws: Any, kind: str, path: Path) -> list[dict]:
+    """The workspace manifest's declarations of ``kind`` that load ``path``."""
+    return [
+        e
+        for e in workspace_manifest_entries(ws, kind)
+        if resolve_manifest_path(ws.root_path, e.get("module")) == path
+    ]
+
+
+def module_target(
+    ws: Any, kind: str, path: Path, manifest: list[dict] | None = None
+) -> wiring.Target:
+    """``path`` with the dotted import path and manifest names configs may use."""
+    rel = path.relative_to(ws.root_path.resolve()).with_suffix("")
+    entries = _manifest_for(ws, kind, path) if manifest is None else manifest
+    return wiring.Target(
+        path, ".".join(rel.parts), frozenset(e["name"] for e in entries if e["name"])
+    )
+
+
 def module_wiring(ws: Any, kind: str, name: str) -> dict:
-    """``{ref, name, entry}``: how a creature config loads this module."""
+    """``{ref, name, entry}``: how a creature config loads this module.
+
+    A manifest declaration of ``name`` gives the class, which matters for a
+    file holding several (an input and an output side by side).
+    """
     path = _module_file(ws, kind, name)
     ref = ws.ref_for(path, ws.ref_prefix())
+    declared = next((e for e in _manifest_for(ws, kind, path) if e["name"] == name), {})
     form = ws.load_module(kind, name).get("form") or {}
-    wired_name = form.get(_IDENTITY_FIELD.get(kind, ""), "") or path.stem
+    wired_name = (
+        declared.get("name") or form.get(_IDENTITY_FIELD.get(kind, ""), "") or path.stem
+    )
     entry = wiring.wiring_entry(
         kind,
         wired_name,
         ref,
-        class_name=form.get("class_name") or detect_class_name(path, kind),
+        class_name=declared.get("class_name")
+        or form.get("class_name")
+        or detect_class_name(path, kind),
         config_var=wiring.detect_config_var(path) if kind == "subagents" else None,
     )
     return {"ref": ref, "name": wired_name, "entry": entry}
@@ -64,7 +97,7 @@ def _creature_configs(ws: Any, names: list[str] | None):
 
 def module_users(ws: Any, kind: str, name: str) -> list[str]:
     """Names of the workspace creatures whose own config loads this module."""
-    target = _module_file(ws, kind, name)
+    target = module_target(ws, kind, _module_file(ws, kind, name))
     users = []
     for creature_dir, cfg in _creature_configs(ws, None):
         try:
@@ -77,7 +110,7 @@ def module_users(ws: Any, kind: str, name: str) -> list[str]:
 
 
 def module_file_key(ws: Any, kind: str, entry: dict) -> tuple[str, Path]:
-    """The ``(kind, resolved file)`` key of a ``list_modules`` entry."""
+    """The ``(kind, resolved file)`` key of a module entry carrying ``path``."""
     return kind, (ws.root_path / entry["path"]).resolve()
 
 
@@ -86,28 +119,34 @@ def users_by_file(
 ) -> dict[tuple[str, Path], list[str]]:
     """For every listed module file, the workspace creatures loading it.
 
-    ``listed`` maps a kind to its ``list_modules`` entries. Each creature
-    config is read once, whatever the number of modules.
+    ``listed`` maps a kind to entries carrying a workspace ``path``; manifest
+    entries among them name the file for name-only config entries. Each
+    creature config is read once, whatever the number of modules.
     """
-    files = {
-        module_file_key(ws, kind, m)
-        for kind, entries in listed.items()
-        for m in entries
+    declared: dict[tuple[str, Path], list[dict]] = {}
+    for kind, entries in listed.items():
+        for m in entries:
+            names = declared.setdefault(module_file_key(ws, kind, m), [])
+            if m.get("source") == "workspace-manifest":
+                names.append(m)
+    targets = {
+        key: module_target(ws, key[0], key[1], manifest)
+        for key, manifest in declared.items()
     }
-    out: dict[tuple[str, Path], list[str]] = {key: [] for key in files}
+    out: dict[tuple[str, Path], list[str]] = {key: [] for key in targets}
     for creature_dir, cfg in _creature_configs(ws, None):
         try:
             config = load_creature_file(cfg)
         except Exception:
             continue
-        for kind, target in files:
+        for (kind, path), target in targets.items():
             if wiring.uses(config, kind, target, creature_dir):
-                out[(kind, target)].append(creature_dir.name)
+                out[(kind, path)].append(creature_dir.name)
     return out
 
 
 def _edit(ws: Any, kind: str, name: str, creatures: list[str], plug: bool) -> list[str]:
-    target = _module_file(ws, kind, name)
+    target = module_target(ws, kind, _module_file(ws, kind, name))
     info = module_wiring(ws, kind, name) if plug else None
     found = {d.name: (d, cfg) for d, cfg in _creature_configs(ws, creatures)}
     missing = [c for c in creatures if sanitize_name(c) not in found]

@@ -17,6 +17,13 @@ vi.mock("@/utils/i18n", () => ({
   useI18n: () => ({ t: (k, p) => (p ? `${k}:${JSON.stringify(p)}` : k) }),
 }))
 
+vi.mock("@/components/shell/newSession/NewSessionDialog.vue", () => ({
+  default: {
+    props: ["mode", "initialConfig"],
+    template: "<div data-test='run-dialog' :data-mode='mode' :data-config='initialConfig' />",
+  },
+}))
+
 import StudioOverview from "./StudioOverview.vue"
 import { MODULE_KINDS, wiringSnippet, workspaceLabel } from "./studioKinds"
 import { _resetStudioRouteForTests, useStudioRoute } from "./useStudioRoute"
@@ -98,6 +105,45 @@ describe("StudioOverview", () => {
     expect(route.value).toEqual({ view: "module", kind: "plugins", name: "guard" })
     await w.find("[data-test='studio-creature-dev']").trigger("click")
     expect(route.value).toEqual({ view: "creature", name: "dev" })
+  })
+
+  it("lists a package's manifest modules and runs its terrariums", async () => {
+    const w = await mountOverview({
+      root: "/pkgs/kt-biome",
+      ref_prefix: "@kt-biome",
+      is_project: false,
+      creatures: [],
+      terrariums: [
+        {
+          name: "swe_team",
+          ref: "@kt-biome/terrariums/swe_team",
+          description: "Review",
+          creatures: 2,
+        },
+      ],
+      modules: {
+        plugins: [
+          {
+            name: "otel",
+            source: "workspace-manifest",
+            editable: true,
+            path: "kt_biome/plugins/otel.py",
+            users: ["general"],
+          },
+          { name: "foreign", source: "package:other", editable: false },
+        ],
+      },
+    })
+    expect(w.find("[data-test='studio-module-plugins-otel']").text()).toContain("general")
+    expect(w.find("[data-test='studio-module-plugins-foreign']").exists()).toBe(false)
+    expect(w.find("[data-test='studio-terrarium-swe_team']").text()).toContain("Review")
+    expect(w.find("[data-test='run-dialog']").exists()).toBe(false)
+    await w.find("[data-test='studio-run-terrarium-swe_team']").trigger("click")
+    const dialog = w.find("[data-test='run-dialog']")
+    expect([dialog.attributes("data-mode"), dialog.attributes("data-config")]).toEqual([
+      "terrarium",
+      "@kt-biome/terrariums/swe_team",
+    ])
   })
 
   it("says what goes where when the workspace is empty", async () => {

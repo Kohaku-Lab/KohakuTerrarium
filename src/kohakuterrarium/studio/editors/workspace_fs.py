@@ -15,6 +15,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.packages.walk import package_snapshot
+from kohakuterrarium.studio.catalog.catalog_sources import load_workspace_manifest
 from kohakuterrarium.studio.catalog.packages_scan import (
     invalidate_scan_caches,
     package_ref,
@@ -90,33 +91,92 @@ class LocalWorkspace:
         return f"{prefix}/{path.relative_to(self.root_path).as_posix()}"
 
     def summary(self) -> dict:
-        """Everything Studio lists for the workspace; its own module files carry their ``users``."""
+        """Everything Studio lists for the workspace.
+
+        Every module file the workspace owns (in ``modules/<kind>/`` or
+        declared by its manifest) carries its ``ref`` and ``users``.
+        """
         with package_snapshot():
             prefix = self.ref_prefix()
-            listed = {kind: self.list_modules(kind) for kind in KNOWN_KINDS}
-            users = workspace_wiring.users_by_file(self, listed)
-            modules = {}
-            for kind, entries in listed.items():
-                own = [
-                    {
-                        **m,
-                        "users": users[workspace_wiring.module_file_key(self, kind, m)],
-                    }
-                    for m in entries
-                ]
-                modules[kind] = modules_summary(self, kind, own)
+            modules = {
+                kind: modules_summary(self, kind, self.list_modules(kind))
+                for kind in KNOWN_KINDS
+            }
+            own = {
+                kind: [m for m in entries if m.get("editable") and m.get("path")]
+                for kind, entries in modules.items()
+            }
+            users = workspace_wiring.users_by_file(self, own)
+            for kind, entries in own.items():
+                for m in entries:
+                    key = workspace_wiring.module_file_key(self, kind, m)
+                    m["users"] = users[key]
+                    m.setdefault("ref", self.ref_for(key[1], prefix))
             return {
                 "root": self.root,
                 "ref_prefix": prefix,
                 "is_project": prefix == "@",
                 "creatures": self.list_creatures(),
+                "terrariums": self.list_terrariums(),
                 "modules": modules,
             }
+
+    def list_terrariums(self) -> list[dict]:
+        """Recipe folders under ``terrariums/`` (a ``terrarium.yaml`` each)."""
+        folder = self.root_path / "terrariums"
+        if not folder.is_dir():
+            return []
+        prefix = self.ref_prefix()
+        declared = {
+            str(e.get("path", "")).strip("/"): e
+            for e in load_workspace_manifest(self).get("terrariums") or []
+            if isinstance(e, dict)
+        }
+        results: list[dict] = []
+        for child in sorted(p for p in folder.iterdir() if p.is_dir()):
+            listed = declared.get(f"terrariums/{child.name}", {})
+            cfg = next(
+                (
+                    child / f
+                    for f in ("terrarium.yaml", "terrarium.yml")
+                    if (child / f).exists()
+                ),
+                None,
+            )
+            if cfg is None:
+                continue
+            try:
+                data = load_creature_file(cfg)
+            except Exception as e:
+                data = {"error": f"parse failed: {e}"}
+            body = (
+                data.get("terrarium")
+                if isinstance(data.get("terrarium"), dict)
+                else data
+            )
+            creatures = body.get("creatures") or []
+            results.append(
+                {
+                    "name": body.get("name") or child.name,
+                    "path": str(child),
+                    "ref": self.ref_for(child, prefix),
+                    "description": body.get("description")
+                    or listed.get("description", ""),
+                    "creatures": len(creatures) if isinstance(creatures, list) else 0,
+                    **({"error": data["error"]} if "error" in data else {}),
+                }
+            )
+        return results
 
     def list_creatures(self) -> list[dict]:
         if not self.creatures_dir.is_dir():
             return []
         prefix = self.ref_prefix()
+        declared = {
+            str(e.get("path", "")).strip("/"): e
+            for e in load_workspace_manifest(self).get("creatures") or []
+            if isinstance(e, dict)
+        }
         results: list[dict] = []
         for child in sorted(self.creatures_dir.iterdir()):
             if not child.is_dir():
@@ -146,7 +206,10 @@ class LocalWorkspace:
                     "name": data.get("name", child.name),
                     "path": str(child),
                     "ref": self.ref_for(child, prefix),
-                    "description": data.get("description", ""),
+                    "description": data.get("description")
+                    or declared.get(f"creatures/{child.name}", {}).get(
+                        "description", ""
+                    ),
                     "base_config": data.get("base_config"),
                 }
             )

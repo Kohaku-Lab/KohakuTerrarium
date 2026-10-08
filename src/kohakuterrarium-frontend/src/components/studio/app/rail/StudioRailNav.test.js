@@ -23,6 +23,13 @@ vi.mock("@/components/studio/common/FolderPickerDialog.vue", () => ({
   },
 }))
 
+vi.mock("@/components/shell/newSession/NewSessionDialog.vue", () => ({
+  default: {
+    props: ["initialConfig"],
+    template: "<div data-test='run-dialog' :data-config='initialConfig' />",
+  },
+}))
+
 import StudioRailNav from "./StudioRailNav.vue"
 import { _resetStudioRouteForTests, useStudioRoute } from "../useStudioRoute"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
@@ -101,6 +108,17 @@ describe("StudioRailNav", () => {
     await flushPromises()
     expect(api.workspaceAPI.open).toHaveBeenLastCalledWith("/picked")
     expect(JSON.parse(localStorage.getItem("kt.studio.workspace"))).toBe("/picked")
+    w.unmount()
+  })
+
+  it("lists terrariums and offers to run one", async () => {
+    useStudioWorkspaceStore().summary = {
+      ...SUMMARY,
+      terrariums: [{ name: "team", ref: "@/terrariums/team" }],
+    }
+    const w = mount(StudioRailNav, { attachTo: document.body })
+    await w.find("[data-test='studio-rail-terrarium-team']").trigger("click")
+    expect(w.find("[data-test='run-dialog']").attributes("data-config")).toBe("@/terrariums/team")
     w.unmount()
   })
 

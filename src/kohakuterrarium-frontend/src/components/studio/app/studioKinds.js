@@ -25,16 +25,21 @@ export function kindMeta(kind) {
   )
 }
 
-/** The workspace modules of `summary` (files Studio can edit), each tagged with its kind. */
+/**
+ * The workspace's own modules in `summary` (files Studio can edit: under
+ * `modules/<kind>/` or declared by its manifest), each tagged with its kind.
+ */
 export function workspaceModules(summary) {
   const out = []
   for (const { kind } of MODULE_KINDS) {
     for (const m of summary?.modules?.[kind] || []) {
-      if (m.source === "workspace") out.push({ ...m, kind })
+      if (m.source === "workspace" || (m.editable && m.path)) out.push({ ...m, kind })
     }
   }
   return out
 }
+
+export const TERRARIUM_ICON = "i-carbon-network-4"
 
 function yamlScalar(v) {
   return /^[\w@./-]+$/.test(String(v)) ? String(v) : JSON.stringify(v)

@@ -193,6 +193,78 @@ class TestWorkspace:
             "users" not in m for m in modules["tools"] if m.get("source") != "workspace"
         )
 
+    def test_a_package_style_workspace_lists_its_manifest_modules_and_terrariums(
+        self, tmp_path
+    ):
+        root = tmp_path / "pkg"
+        (root / "pkg_mod" / "plugins").mkdir(parents=True)
+        (root / "pkg_mod" / "io").mkdir(parents=True)
+        (root / "pkg_mod" / "plugins" / "guard.py").write_text(
+            "from kohakuterrarium.modules.plugin.base import BasePlugin\n"
+            "class GuardPlugin(BasePlugin):\n    name = 'guard'\n",
+            encoding="utf-8",
+        )
+        (root / "pkg_mod" / "io" / "chat.py").write_text(
+            "class ChatInput:\n    pass\nclass ChatOutput:\n    pass\n",
+            encoding="utf-8",
+        )
+        (root / "kohaku.yaml").write_text(
+            "name: pkg\n"
+            "plugins:\n  - {name: guard, module: pkg_mod.plugins.guard, class: GuardPlugin}\n"
+            "io:\n"
+            "  - {name: chat_input, module: pkg_mod.io.chat, class: ChatInput}\n"
+            "  - {name: chat_output, module: pkg_mod.io.chat, class: ChatOutput}\n"
+            "terrariums:\n  - {name: team, path: terrariums/team, description: Two of them}\n",
+            encoding="utf-8",
+        )
+        with (root / "kohaku.yaml").open("a", encoding="utf-8") as f:
+            f.write(
+                "creatures:\n  - {name: named, path: creatures/named, description: Named one}\n"
+            )
+        for name, plugins in {
+            "dotted": "  - {name: guard, type: package, module: pkg_mod.plugins.guard}\n",
+            "named": "  - name: guard\n",
+            "builtin": "  - {name: guard, type: builtin}\n",
+        }.items():
+            (root / "creatures" / name).mkdir(parents=True)
+            (root / "creatures" / name / "config.yaml").write_text(
+                f"name: {name}\nplugins:\n{plugins}", encoding="utf-8"
+            )
+        (root / "terrariums" / "team").mkdir(parents=True)
+        (root / "terrariums" / "team" / "terrarium.yaml").write_text(
+            "terrarium:\n  name: team\n  creatures:\n    - {name: a}\n    - {name: b}\n",
+            encoding="utf-8",
+        )
+        ws = LocalWorkspace.open(root)
+        summary = ws.summary()
+
+        described = {c["name"]: c["description"] for c in summary["creatures"]}
+        assert described == {"builtin": "", "dotted": "", "named": "Named one"}
+        [guard] = [m for m in summary["modules"]["plugins"] if m["name"] == "guard"]
+        assert guard["source"] == "workspace-manifest" and guard["editable"] is True
+        assert guard["users"] == ["dotted", "named"]
+        assert summary["terrariums"] == [
+            {
+                "name": "team",
+                "path": str((root / "terrariums" / "team").resolve()),
+                "ref": str((root / "terrariums" / "team").resolve()),
+                "description": "Two of them",
+                "creatures": 2,
+            }
+        ]
+        out = ws.module_wiring("outputs", "chat_output")
+        assert out["entry"]["class"] == "ChatOutput" and out["name"] == "chat_output"
+
+        assert ws.unplug_module("plugins", "guard", ["dotted", "named", "builtin"]) == [
+            "dotted",
+            "named",
+        ]
+        builtin = ws.load_creature("builtin")["config"]["plugins"]
+        assert builtin == [{"name": "guard", "type": "builtin"}]
+        assert ws.module_users("plugins", "guard") == []
+        assert ws.plug_module("plugins", "guard", ["dotted"]) == ["dotted"]
+        assert ws.module_users("plugins", "guard") == ["dotted"]
+
     def test_a_plain_folder_wires_by_absolute_path(self, tmp_path, project):
         (tmp_path / "plain").mkdir()
         plain = LocalWorkspace.open(tmp_path / "plain")

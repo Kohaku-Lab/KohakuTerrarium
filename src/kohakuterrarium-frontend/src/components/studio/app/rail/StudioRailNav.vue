@@ -13,6 +13,16 @@
       <span :class="CREATURE_ICON" class="shrink-0 text-iolite" /><span class="truncate">{{ c.name }}</span>
     </button>
 
+    <template v-if="terrariums.length">
+      <div :class="HEAD">
+        <span class="flex-1">{{ t("studioApp.nav.terrariums") }}</span>
+      </div>
+      <button v-for="tr in terrariums" :key="tr.name" type="button" :class="itemClass(false)" :title="t('studioApp.run.terrarium', { name: tr.name })" :data-test="`studio-rail-terrarium-${tr.name}`" @click="runRecipe = tr.ref">
+        <span :class="TERRARIUM_ICON" class="shrink-0 text-taaffeite" /><span class="truncate">{{ tr.name }}</span>
+        <span class="i-carbon-play ml-auto text-warm-400 shrink-0" />
+      </button>
+    </template>
+
     <div :class="HEAD">
       <span class="flex-1">{{ t("studioApp.nav.modules") }}</span>
       <button type="button" class="i-carbon-add w-4 h-4 hover:text-iolite" :title="t('studioApp.nav.new')" data-test="studio-rail-new-module" @click="goStudio({ view: 'new' })" />
@@ -25,14 +35,17 @@
         <span v-if="m.users && !m.users.length" class="ml-auto w-1.5 h-1.5 rounded-full bg-amber shrink-0" :title="t('studioApp.overview.unused')" />
       </button>
     </template>
+    <NewSessionDialog v-if="runRecipe" mode="terrarium" :initial-config="runRecipe" @started="setAppMode('terrarium')" @close="runRecipe = ''" />
   </div>
 </template>
 
 <script setup>
-import { computed } from "vue"
+import { computed, ref } from "vue"
 
+import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
+import { setAppMode } from "@/components/shell/rail/useAppMode"
 import StudioWorkspaceMenu from "@/components/studio/app/rail/StudioWorkspaceMenu.vue"
-import { CREATURE_ICON, MODULE_KINDS, workspaceModules } from "@/components/studio/app/studioKinds"
+import { CREATURE_ICON, MODULE_KINDS, TERRARIUM_ICON, workspaceModules } from "@/components/studio/app/studioKinds"
 import { goStudio, useStudioRoute } from "@/components/studio/app/useStudioRoute"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { useI18n } from "@/utils/i18n"
@@ -46,6 +59,8 @@ const ws = useStudioWorkspaceStore()
 const { route } = useStudioRoute()
 
 const modules = computed(() => workspaceModules(ws.summary))
+const terrariums = computed(() => ws.summary?.terrariums || [])
+const runRecipe = ref("")
 const groups = computed(() => MODULE_KINDS.map((k) => ({ ...k, items: modules.value.filter((m) => m.kind === k.kind) })).filter((g) => g.items.length))
 
 function itemClass(active) {

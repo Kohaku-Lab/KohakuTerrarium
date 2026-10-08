@@ -4,10 +4,12 @@ A module is wired as ``type: custom`` with ``module:`` its reference
 (``@/modules/tools/x.py``, ``@pkg/...`` or an absolute path). Tools, sub-agents,
 triggers and plugins join their config list; an input replaces ``input:``; an
 output joins ``output.named_outputs`` under its name. Entries are matched by
-the file they load, whatever spelling (ref, relative or absolute) they use.
+the file they load, whatever spelling (ref, relative or absolute path, the
+dotted import path, or a manifest name on a name-only entry) they use.
 """
 
 import ast
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -90,15 +92,38 @@ def _module_path(value: Any, creature_dir: Path) -> Path | None:
         return None
 
 
-def _loads(entry: Any, target: Path, creature_dir: Path) -> bool:
+@dataclass(frozen=True)
+class Target:
+    """A module file and the other spellings a config may load it by.
+
+    ``dotted`` is its import path (``kt_biome.tools.database``), loaded as
+    ``type: package``; ``names`` are the manifest names a name-only entry
+    resolves to it by.
+    """
+
+    path: Path
+    dotted: str = ""
+    names: frozenset[str] = frozenset()
+
+
+def _loads(entry: Any, target: Target | Path, creature_dir: Path) -> bool:
+    if isinstance(target, Path):
+        target = Target(target)
+    if not isinstance(entry, dict):
+        return False
+    module = entry.get("module")
+    if not module:
+        builtin = entry.get("type") in ("builtin", "trigger")
+        return not builtin and entry.get("name") in target.names
+    if target.dotted and module == target.dotted:
+        return True
     return (
-        isinstance(entry, dict)
-        and entry.get("type", "custom") == "custom"
-        and _module_path(entry.get("module"), creature_dir) == target
+        entry.get("type", "custom") == "custom"
+        and _module_path(module, creature_dir) == target.path
     )
 
 
-def uses(config: dict, kind: str, target: Path, creature_dir: Path) -> bool:
+def uses(config: dict, kind: str, target: Target | Path, creature_dir: Path) -> bool:
     """Whether ``config`` (of the creature in ``creature_dir``) loads ``target``."""
     if kind in LIST_KEYS:
         items = config.get(LIST_KEYS[kind]) or []
@@ -117,7 +142,7 @@ def plug(
     kind: str,
     name: str,
     entry: dict,
-    target: Path,
+    target: Target | Path,
     creature_dir: Path,
 ) -> bool:
     """Wire ``entry`` into ``config`` unless it already loads ``target``."""
@@ -140,7 +165,9 @@ def plug(
     return True
 
 
-def unplug(config: CommentedMap, kind: str, target: Path, creature_dir: Path) -> bool:
+def unplug(
+    config: CommentedMap, kind: str, target: Target | Path, creature_dir: Path
+) -> bool:
     """Remove every entry of ``config`` that loads ``target``."""
     changed = False
     if kind in LIST_KEYS:
