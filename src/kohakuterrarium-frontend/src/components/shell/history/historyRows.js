@@ -27,8 +27,8 @@ export function resumeNode(session, picked) {
 
 /**
  * Display fields of one saved session: `label` (the user-facing name),
- * `key` (the storage name, shown when it differs), `isTerrarium`, `meta`
- * (config, member count, working directory) and a one-line `preview`.
+ * `key` (the storage name, shown when it differs), the config it started
+ * from, member count, working directory and a one-line `preview`.
  */
 export function historyRow(session) {
   const label = savedSessionLabel(session)
@@ -37,7 +37,6 @@ export function historyRow(session) {
     key: session.name,
     label,
     showKey: label !== session.name,
-    isTerrarium: session?.config_type === "terrarium",
     config: baseName(session?.config_path),
     agents,
     pwd: session?.pwd || "",

@@ -20,9 +20,6 @@
           <span class="i-carbon-search text-warm-400" />
           <input v-model="search" class="flex-1 min-w-0 bg-transparent border-none outline-none text-sm text-warm-800 dark:text-warm-100 placeholder-warm-400" :placeholder="t('sessions.searchPlaceholder')" data-test="history-search" @keydown.escape="search = ''" />
         </div>
-        <div class="kt-v2-edge flex rounded-lg border overflow-hidden text-xs" role="radiogroup" :aria-label="t('sessions.filterType')">
-          <button v-for="o in TYPES" :key="o.value" type="button" role="radio" :aria-checked="configType === o.value" class="h-8 px-3" :class="configType === o.value ? 'bg-iolite text-white' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" :data-test="`history-type-${o.value || 'all'}`" @click="configType = o.value">{{ t(o.label) }}</button>
-        </div>
         <div class="kt-v2-edge flex rounded-lg border overflow-hidden text-xs" role="radiogroup" :aria-label="t('sessions.sortBy')">
           <button v-for="o in SORTS" :key="o.value" type="button" role="radio" :aria-checked="sort === o.value" class="h-8 px-3" :class="sort === o.value ? 'bg-iolite text-white' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" :data-test="`history-sort-${o.value}`" @click="sort = o.value">{{ t(o.label) }}</button>
         </div>
@@ -41,7 +38,7 @@
 
       <ul v-else class="kt-v2-card !p-0 overflow-hidden" :class="loading ? 'opacity-60' : ''">
         <li v-for="r in rows" :key="r.key" class="kt-v2-line border-b last:border-b-0 grid grid-cols-[20px_minmax(0,1fr)_auto] sm:grid-cols-[20px_minmax(0,1fr)_88px_auto] items-center gap-x-3 px-4 py-2.5 hover:bg-warm-100/60 dark:hover:bg-warm-800/40" :data-test="`history-row-${r.key}`">
-          <span :class="r.isTerrarium ? 'i-carbon-network-4 text-iolite' : 'i-carbon-bot text-aquamarine'" />
+          <span class="i-carbon-network-4 text-iolite dark:text-iolite-light" />
           <div class="min-w-0">
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-[13px] font-medium text-warm-800 dark:text-warm-100 truncate">{{ r.label }}</span>
@@ -101,17 +98,12 @@ import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
 /**
- * Every saved session: search, filter by kind, sort, then view its
+ * Every saved session: search, sort, then view its
  * history or resume it (on the machine it last ran on unless another is
  * picked). Also builds memory embeddings and deletes.
  */
 const PAGE = 30
 const GHOST = "kt-v2-edge kt-v2-panel h-8 px-2.5 rounded-lg border text-xs text-warm-700 dark:text-warm-200 hover:border-iolite/50 flex items-center gap-1.5 disabled:opacity-50"
-const TYPES = [
-  { value: "", label: "lab.history.all" },
-  { value: "agent", label: "lab.history.creatures" },
-  { value: "terrarium", label: "lab.history.terrariums" },
-]
 const SORTS = [
   { value: "last_active", label: "lab.history.recent" },
   { value: "created_at", label: "lab.history.created" },
@@ -128,7 +120,6 @@ const offset = ref(0)
 const loading = ref(false)
 const error = ref("")
 const search = ref("")
-const configType = ref("")
 const sort = ref("last_active")
 const resumeOn = ref("")
 const resuming = ref("")
@@ -139,7 +130,7 @@ let generation = 0
 let searchTimer = null
 
 const rows = computed(() => sessions.value.map(historyRow))
-const filtered = computed(() => !!(search.value.trim() || configType.value))
+const filtered = computed(() => !!search.value.trim())
 const byKey = computed(() => new Map(sessions.value.map((s) => [s.name, s])))
 
 async function fetchSessions(refresh = false) {
@@ -148,7 +139,7 @@ async function fetchSessions(refresh = false) {
   loading.value = true
   error.value = ""
   try {
-    const data = await sessionAPI.list({ limit: PAGE, offset: offset.value, search: search.value.trim(), refresh, configType: configType.value, sort: sort.value })
+    const data = await sessionAPI.list({ limit: PAGE, offset: offset.value, search: search.value.trim(), refresh, sort: sort.value })
     if (mine !== generation) return
     sessions.value = data?.sessions || []
     total.value = data?.total || 0
@@ -159,7 +150,7 @@ async function fetchSessions(refresh = false) {
   }
 }
 
-// Typing waits for a pause; a filter or sort change reloads at once. Either way older replies are dropped.
+// Typing waits for a pause; a sort change reloads at once. Either way older replies are dropped.
 watch(search, () => {
   generation++
   clearTimeout(searchTimer)
@@ -167,7 +158,7 @@ watch(search, () => {
   loading.value = true
   searchTimer = setTimeout(() => fetchSessions(), 300)
 })
-watch([configType, sort], () => {
+watch(sort, () => {
   offset.value = 0
   fetchSessions()
 })

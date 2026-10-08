@@ -21,7 +21,6 @@ describe("history rows", () => {
       key: "team_ab12",
       label: "My team",
       showKey: true,
-      isTerrarium: true,
       config: "swe_team",
       agents: 3,
       pwdName: "project",
@@ -32,7 +31,6 @@ describe("history rows", () => {
     expect(historyRow({ name: "solo", config_type: "agent" })).toMatchObject({
       label: "solo",
       showKey: false,
-      isTerrarium: false,
       config: "",
       agents: 0,
       preview: "",

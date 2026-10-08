@@ -169,12 +169,12 @@ describe("HistoryPage: resume", () => {
 })
 
 describe("HistoryPage: finding sessions", () => {
-  it("sends search, kind and sort together and drops older replies", async () => {
+  it("sends search and sort together, never a session kind, and drops older replies", async () => {
     vi.useFakeTimers()
     let resolveOld
     api.list.mockReturnValueOnce(new Promise((resolve) => (resolveOld = resolve)))
     const w = mountPage()
-    await w.find('[data-test="history-type-terrarium"]').trigger("click")
+    expect(w.find('[data-test^="history-type-"]').exists()).toBe(false)
     await w.find('[data-test="history-sort-created_at"]').trigger("click")
     await w.find('[data-test="history-search"]').setValue("recent")
     resolveOld({ sessions: [{ name: "stale" }], total: 1 })
@@ -191,7 +191,6 @@ describe("HistoryPage: finding sessions", () => {
       offset: 0,
       search: "recent",
       refresh: false,
-      configType: "terrarium",
       sort: "created_at",
     })
     expect(w.text()).toContain("My project")
@@ -210,11 +209,18 @@ describe("HistoryPage: finding sessions", () => {
     expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 30 }))
     expect(w.text()).toContain("second")
     api.list.mockResolvedValueOnce({ sessions: [], total: 0 })
-    await w.find('[data-test="history-type-agent"]').trigger("click")
+    await w.find('[data-test="history-sort-created_at"]').trigger("click")
     await flushPromises()
     expect(api.list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ offset: 0, configType: "agent" }),
+      expect.objectContaining({ offset: 0, sort: "created_at" }),
     )
+    expect(w.find('[data-test="history-empty"]').text()).toContain("sessions.noSaved")
+    api.list.mockResolvedValueOnce({ sessions: [], total: 0 })
+    vi.useFakeTimers()
+    await w.find('[data-test="history-search"]').setValue("zzz")
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    vi.useRealTimers()
     expect(w.find('[data-test="history-empty"]').text()).toContain("sessions.noMatch")
     await w.find('[data-test="history-refresh"]').trigger("click")
     await flushPromises()
