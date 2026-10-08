@@ -234,6 +234,13 @@
                 <el-option v-for="option in localeOptions" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
             </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3" data-test="settings-ui-version">
+              <div>
+                <div class="text-sm text-warm-600 dark:text-warm-400">{{ v2t("settings.interface") }}</div>
+                <div class="kt-text-caption text-warm-400 mt-1">{{ v2t("settings.interfaceHint") }}</div>
+              </div>
+              <el-segmented :model-value="uiVersion" :options="uiVersionOptions" size="small" @change="setUiVersion" />
+            </div>
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
               <div>
                 <div class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.readingSize") }}</div>
@@ -383,6 +390,8 @@ import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
 import { requestAttentionAudioUnlock, requestNotificationPermission } from "@/composables/useAttentionEffects"
 import { useDensity } from "@/composables/useDensity"
+import { UI_VERSIONS, useUiVersion } from "@/components/session-v2/model/useUiVersion"
+import { useV2T } from "@/components/session-v2/model/v2Strings"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { useAuthStore } from "@/stores/auth"
 import { useClusterStore } from "@/stores/cluster"
@@ -411,6 +420,9 @@ const localeOptions = computed(() =>
   })),
 )
 
+const v2t = useV2T()
+const { uiVersion, setUiVersion } = useUiVersion()
+const uiVersionOptions = computed(() => UI_VERSIONS.map((value) => ({ value, label: v2t(`settings.interface.${value}`) })))
 const readingSizeOptions = computed(() =>
   READING_SIZES.map((value) => ({
     value,

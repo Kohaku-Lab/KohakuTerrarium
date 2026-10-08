@@ -1,0 +1,141 @@
+/*
+ * v2 surfaces. Five levels, each a job:
+ *   chrome  — the session bar; equals the shell's active tab (warm-50 / warm-950), so that tab
+ *             flows into the bar;
+ *   canvas  — what a tab shows (chat, pages); the active session tab shares this color;
+ *   panel   — side regions (rails, member list, side view, workspace columns, settings nav),
+ *             always edged by a strong line;
+ *   card    — grouped content on a canvas (status cards);
+ *   float   — things above the page (dock, widgets, floating buttons), with a shadow.
+ * Light mode ("stone frame") steps panels darker than a near-white canvas under a stone shell
+ * frame; dark mode lifts each level lighter.
+ * Region boundaries use `--v2-line-strong`; rows inside a region use `--v2-line`.
+ */
+.kt-v2 {
+  --v2-chrome: var(--kt-shell-tab-active, #eeeae4);
+  --v2-canvas: #fbfaf8;
+  --v2-panel: #f2eee8;
+  --v2-card: #ffffff;
+  --v2-card-shadow: 0 1px 2px rgb(40 34 28 / 0.05);
+  --v2-float: #ffffff;
+  --v2-line: #e5dfd7;
+  --v2-line-strong: #cdc5ba;
+  --v2-tab-hover: rgb(36 33 29 / 0.07);
+}
+html.dark .kt-v2 {
+  --v2-chrome: #1a1816;
+  --v2-canvas: #221f1d;
+  --v2-panel: #2a2724;
+  --v2-card: #2a2724;
+  --v2-card-shadow: none;
+  --v2-float: #2e2b28;
+  --v2-line: #3a3632;
+  --v2-line-strong: #4a4540;
+  --v2-tab-hover: rgb(255 255 255 / 0.05);
+}
+
+/* Transcript text reads at the contrast of the active tab's label: near black (light), near white (dark). */
+.kt-v2 .kt-conversation-host {
+  --kt-conversation-text: #24211d;
+  --kt-conversation-reasoning-text: #4a4540;
+  --color-text: #24211d;
+}
+html.dark .kt-v2 .kt-conversation-host {
+  --kt-conversation-text: #f3efe9;
+  --kt-conversation-reasoning-text: #d6d0c8;
+  --color-text: #f3efe9;
+}
+
+.kt-v2-chrome {
+  background: var(--v2-chrome);
+}
+.kt-v2-canvas {
+  background: var(--v2-canvas);
+}
+.kt-v2-panel {
+  background: var(--v2-panel);
+}
+.kt-v2-card {
+  background: var(--v2-card);
+  border: 1px solid var(--v2-line);
+  border-radius: 0.75rem;
+  box-shadow: var(--v2-card-shadow);
+}
+.kt-v2-float {
+  background: var(--v2-float);
+}
+/*
+ * The app has no border reset; line classes (and `kt-v2-b`, for a border colored by a utility)
+ * draw solid on exactly the sides their width utilities name.
+ */
+:where(.kt-v2-line, .kt-v2-edge, .kt-v2-b) {
+  border-width: 0;
+  border-style: solid;
+}
+.kt-v2-line {
+  border-color: var(--v2-line);
+}
+.kt-v2-edge {
+  border-color: var(--v2-line-strong);
+}
+
+/*
+ * Tabs fused by color alone: the active tab is the canvas color and the bar has no bottom line,
+ * so tab and page read as one surface; the outward corner curves join the tab to the bar.
+ */
+.kt-v2-tab {
+  position: relative;
+  border-radius: 0.625rem 0.625rem 0 0;
+}
+.kt-v2-tab:hover {
+  background: var(--v2-tab-hover);
+}
+.kt-v2-tab--active,
+.kt-v2-tab--active:hover {
+  background: var(--v2-canvas);
+}
+.kt-v2-tab--active::before,
+.kt-v2-tab--active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 0.625rem;
+  height: 0.625rem;
+  pointer-events: none;
+}
+.kt-v2-tab--active::before {
+  left: -0.625rem;
+  background: radial-gradient(circle at 0 0, transparent 0.625rem, var(--v2-canvas) 0.65rem);
+}
+.kt-v2-tab--active::after {
+  right: -0.625rem;
+  background: radial-gradient(circle at 100% 0, transparent 0.625rem, var(--v2-canvas) 0.65rem);
+}
+
+/* A drag handle that is visible before it is hovered. */
+.kt-v2-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.kt-v2-grip::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 3px;
+  height: 36px;
+  margin-top: -18px;
+  border-radius: 2px;
+  background: var(--v2-line-strong);
+  transition: background 0.15s;
+}
+.kt-v2-grip:hover::after,
+.kt-v2-grip.is-dragging::after {
+  background: var(--kt-color-iolite, #5a4fcf);
+  height: 56px;
+  margin-top: -28px;
+}

@@ -1,6 +1,7 @@
 <template>
   <div v-if="instance" class="h-full overflow-hidden">
-    <CompactWorkspaceShell v-if="isCompact" :instance-id="target" />
+    <SessionShellV2 v-if="isV2" :instance="instance" :instance-id="target" :refresh="loadInstance" :focused="isKeyboardTarget" @stop="confirmStop = true" />
+    <CompactWorkspaceShell v-else-if="isCompact" :instance-id="target" />
     <WorkspaceShell v-else :instance-id="target" @stop="confirmStop = true" />
     <ConfirmStopDialog v-if="confirmStop" :instance="instance" @close="confirmStop = false" @stopped="onStopped" />
   </div>
@@ -12,9 +13,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, provide, ref, watch, watchEffect } from "vue"
+import { computed, defineAsyncComponent, onMounted, onUnmounted, provide, ref, watch, watchEffect } from "vue"
 
 import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
+import { useUiVersion } from "@/components/session-v2/model/useUiVersion"
 import CompactWorkspaceShell from "@/components/shell/CompactWorkspaceShell.vue"
 import ConfirmStopDialog from "@/components/shell/tabs/ConfirmStopDialog.vue"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
@@ -28,6 +30,8 @@ import { useLayoutStore } from "@/stores/layout"
 import { DEFAULT_PRESET_ID } from "@/stores/layoutPanels"
 import { useTabsStore } from "@/stores/tabs"
 import { buildAttachPanelProps } from "@/utils/attachPanelProps"
+
+const SessionShellV2 = defineAsyncComponent(() => import("@/components/session-v2/SessionShellV2.vue"))
 
 const props = defineProps({ tab: { type: Object, required: true } })
 
@@ -55,8 +59,14 @@ const editor = useEditorStore(target.value)
 const layout = useLayoutStore(target.value)
 const tabsStore = useTabsStore()
 const { isCompact } = useDensity()
+const { isV2 } = useUiVersion()
 
 const isActiveAttachTab = computed(() => Object.values(tabsStore.tabGroups).some((group) => group.activeId === props.tab.id))
+// The shown tab of the focused group takes the keyboard (Esc) when tabs are split.
+const isKeyboardTarget = computed(() => {
+  const focused = tabsStore.focusedGroup
+  return focused ? focused.activeId === props.tab.id : isActiveAttachTab.value
+})
 
 // Per-scope artifact scanning. App.vue keeps its own (default-scope)
 // detector for the v1 page-routed flow; this one feeds the scoped
