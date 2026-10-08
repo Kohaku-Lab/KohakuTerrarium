@@ -224,6 +224,8 @@ function _mapSession(data) {
     config_ref: c.config_ref || "",
     creature_id: c.creature_id || c.agent_id || "",
     status: c.running ? "running" : "idle",
+    running: !!c.running,
+    is_privileged: !!c.is_privileged,
     model: c.model || "",
     llm_name: c.llm_name || "",
     max_context: c.max_context || 0,

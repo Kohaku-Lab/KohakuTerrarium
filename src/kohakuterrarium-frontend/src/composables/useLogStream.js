@@ -5,7 +5,9 @@
  * The backend endpoint is the one added in Phase 1
  * (src/kohakuterrarium/api/ws/logs.py). Each incoming message is
  * either `{type: "meta", ...}`, `{type: "line", ts, level, module,
- * text}`, or `{type: "error", text}`.
+ * text}`, or `{type: "error", text}`. Each kept line carries a `seq`
+ * that increases across the stream's life. With `autoConnect: false`
+ * the caller opens and closes the socket.
  */
 
 import { onMounted, onUnmounted, ref } from "vue"
@@ -14,7 +16,7 @@ import { wsUrl as _wsUrl } from "@/utils/wsUrl"
 
 const BUFFER_SIZE = 5000
 
-export function useLogStream() {
+export function useLogStream({ autoConnect = true } = {}) {
   const lines = ref(
     /** @type {Array<{ts: string, level: string, module: string, text: string}>} */ ([]),
   )
@@ -26,24 +28,32 @@ export function useLogStream() {
   let retryTimer = null
   let retryDelay = 500
   let closedByCaller = false
+  let seq = 0
 
   function connect() {
+    if (ws) return
     closedByCaller = false
+    let socket
     try {
-      ws = new WebSocket(_wsUrl("/ws/logs"))
+      socket = new WebSocket(_wsUrl("/ws/logs"))
     } catch (err) {
       error.value = String(err)
       scheduleReconnect()
       return
     }
+    ws = socket
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+      if (ws !== socket) return
+      // Every connection replays the log's recent tail, so it replaces what was kept.
+      lines.value = []
       connected.value = true
       error.value = ""
       retryDelay = 500
     }
 
-    ws.onmessage = (ev) => {
+    socket.onmessage = (ev) => {
+      if (ws !== socket) return
       let data
       try {
         data = JSON.parse(ev.data)
@@ -60,6 +70,7 @@ export function useLogStream() {
       }
       if (data.type === "line") {
         lines.value.push({
+          seq: seq++,
           ts: data.ts || "",
           level: data.level || "info",
           module: data.module || "",
@@ -72,11 +83,12 @@ export function useLogStream() {
       }
     }
 
-    ws.onerror = () => {
-      error.value = "WebSocket error"
+    socket.onerror = () => {
+      if (ws === socket) error.value = "WebSocket error"
     }
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (ws !== socket) return
       connected.value = false
       ws = null
       if (!closedByCaller) scheduleReconnect()
@@ -86,8 +98,9 @@ export function useLogStream() {
   function scheduleReconnect() {
     if (retryTimer) clearTimeout(retryTimer)
     retryTimer = setTimeout(() => {
+      retryTimer = null
       retryDelay = Math.min(retryDelay * 2, 5000)
-      connect()
+      if (!closedByCaller) connect()
     }, retryDelay)
   }
 
@@ -112,7 +125,7 @@ export function useLogStream() {
     lines.value = []
   }
 
-  onMounted(connect)
+  if (autoConnect) onMounted(connect)
   onUnmounted(disconnect)
 
   return { lines, meta, connected, error, clear, connect, disconnect }

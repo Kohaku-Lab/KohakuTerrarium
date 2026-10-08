@@ -139,6 +139,65 @@ describe("canvas store — artifact detection", () => {
     expect(a.content).toMatch(/^data:image\/png;base64,/)
   })
 
+  it("keeps one artifact per image and code block when history reload re-keys the message", () => {
+    const store = useCanvasStore()
+    const body = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")
+    const parts = [
+      { type: "text", content: "Code:\n```python\n" + body + "\n```\n" },
+      { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" }, meta: {} },
+    ]
+    store.scanMessages([{ id: "m_1712345", role: "assistant", parts }])
+    expect(store.artifacts).toHaveLength(2)
+    const reloaded = parts.map((p) => ({ ...p }))
+    store.scanMessages([{ id: "h_evt_42", role: "assistant", parts: reloaded }])
+    expect(store.artifacts.map((a) => a.type).sort()).toEqual(["code", "image"])
+  })
+
+  it("keeps a closed image closed after history reload re-keys its message", () => {
+    const store = useCanvasStore()
+    const image = { type: "image_url", image_url: { url: "data:image/png;base64,REVG" } }
+    store.scanMessages([{ id: "m_1", role: "assistant", parts: [image] }])
+    store.dismissArtifact(store.artifacts[0].id)
+    store.scanMessages([{ id: "h_7", role: "assistant", parts: [{ ...image }] }])
+    expect(store.artifacts).toHaveLength(0)
+  })
+
+  it("shows a new message's block even when an older, still-present message's identical block was closed", () => {
+    const store = useCanvasStore()
+    const image = { type: "image_url", image_url: { url: "data:image/png;base64,SAME" } }
+    const first = { id: "m_1", role: "assistant", parts: [image] }
+    store.scanMessages([first])
+    store.dismissArtifact(store.artifacts[0].id)
+    store.scanMessages([first, { id: "m_2", role: "assistant", parts: [{ ...image }] }])
+    expect(store.artifacts.map((a) => a.sourceId)).toEqual(["m_2:image:0"])
+  })
+
+  it("keeps one artifact, owned by the first message, for identical blocks in two live messages", () => {
+    const store = useCanvasStore()
+    const image = { type: "image_url", image_url: { url: "data:image/png;base64,TWIN" } }
+    const messages = [
+      { id: "m_1", role: "assistant", parts: [image] },
+      { id: "m_2", role: "assistant", parts: [{ ...image }] },
+    ]
+    store.scanMessages(messages)
+    store.scanMessages(messages)
+    expect(store.artifacts.map((a) => a.sourceId)).toEqual(["m_1:image:0"])
+  })
+
+  it("moves a closed block's persisted dismissal to its re-keyed message and drops the old key", () => {
+    const image = { type: "image_url", image_url: { url: "data:image/png;base64,PERSIST" } }
+    let store = useCanvasStore("rekey-dismissal")
+    store.scanMessages([{ id: "m_1", role: "assistant", parts: [image] }])
+    store.dismissArtifact(store.artifacts[0].id)
+    store.scanMessages([{ id: "h_9", role: "assistant", parts: [{ ...image }] }])
+    const saved = JSON.parse(localStorage.getItem("kt-canvas-dismissals:rekey-dismissal"))
+    expect(saved.map(([source]) => source)).toEqual(["h_9:image:0"])
+    setActivePinia(createPinia())
+    store = useCanvasStore("rekey-dismissal")
+    store.scanMessages([{ id: "h_9", role: "assistant", parts: [{ ...image }] }])
+    expect(store.artifacts).toHaveLength(0)
+  })
+
   it("infers image format from a data URL when meta is missing", () => {
     const store = useCanvasStore()
     const msg = {

@@ -4,9 +4,14 @@
  *
  * Detects long code / markdown / html chunks in assistant messages,
  * explicit ``##canvas##`` / ``##artifact##`` markers, and provider-
- * native image outputs; indexes them by source-message id; exposes
- * them to the Canvas panel. Regeneration of the same source block
- * appends a version rather than a new artifact.
+ * native image outputs; exposes them to the Canvas panel. Message-
+ * derived artifacts are keyed by source-message id. Within one scan, a
+ * new key whose content matches an artifact (or a closed block) whose own
+ * key is gone from the scan takes that artifact (or its closed state)
+ * over — message ids change when history reloads — and a new key
+ * repeating a block another scanned message still shows adds nothing.
+ * Tool previews are keyed by file path, so re-touching a file refreshes
+ * it in place.
  *
  * **Per-scope** (scope = attach target). Two attach tabs each have
  * their own artifact list, active selection, and dismissed flag — no
@@ -341,6 +346,46 @@ function _setupCanvasStore(scope) {
       }
     }
 
+    /** Move a closed source's hidden state (and its persisted dismissal) to `sourceId`. */
+    function _transferHidden(fromId, sourceId) {
+      const hidden = new Set(hiddenSourceIds.value)
+      hidden.delete(fromId)
+      hidden.add(sourceId)
+      hiddenSourceIds.value = hidden
+      const seen = new Map(seenContentBySource.value)
+      seen.set(sourceId, seen.get(fromId) || new Set())
+      seen.delete(fromId)
+      seenContentBySource.value = seen
+      dismissedRevisions.set(sourceId, dismissedRevisions.get(fromId) || new Set())
+      dismissedRevisions.delete(fromId)
+      persistDismissals()
+    }
+
+    /**
+     * Reconcile a message-derived block whose sourceId is new to the
+     * store against the scan's live keys: true when it was absorbed (a
+     * live twin shows it, an orphaned artifact was re-keyed to it, or an
+     * orphaned closed block's dismissal moved to it).
+     */
+    function _absorbRekeyed({ sourceId, content }, live) {
+      const revision = JSON.stringify([null, content])
+      const twin = artifacts.value.find((a) => a.revisionId == null && a.content === content)
+      if (twin) {
+        if (!live.has(twin.sourceId)) twin.sourceId = sourceId
+        _noteSeen(sourceId, revision)
+        return true
+      }
+      const fingerprint = _revisionFingerprint(revision)
+      for (const [closedId, revisions] of dismissedRevisions) {
+        if (live.has(closedId) || closedId.startsWith("file:") || !revisions.has(fingerprint))
+          continue
+        _transferHidden(closedId, sourceId)
+        _noteSeen(sourceId, revision)
+        return true
+      }
+      return false
+    }
+
     function scanMessages(messages) {
       const latest = new Map()
       for (const msg of messages) {
@@ -349,6 +394,11 @@ function _setupCanvasStore(scope) {
         })
       }
       for (const artifact of latest.values()) {
+        const known =
+          artifact.revisionId != null ||
+          hiddenSourceIds.value.has(artifact.sourceId) ||
+          artifacts.value.some((a) => a.sourceId === artifact.sourceId)
+        if (!known && _absorbRekeyed(artifact, latest)) continue
         upsertArtifact(artifact)
       }
     }

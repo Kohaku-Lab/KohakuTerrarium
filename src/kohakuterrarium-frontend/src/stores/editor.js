@@ -57,6 +57,8 @@ const _editorStoreOptions = {
     treeData: null,
     /** @type {string} */
     treeRoot: "",
+    /** Why the last tree load failed, or "". */
+    treeError: "",
     loading: false,
   }),
 
@@ -88,6 +90,9 @@ const _editorStoreOptions = {
             dirty: false,
             language: data.language || "",
             revision: 0,
+            diskContent: data.content,
+            saveError: "",
+            conflict: false,
           }
           if (state.selected === path) this.activeFilePath = path
         } catch (err) {
@@ -137,9 +142,14 @@ const _editorStoreOptions = {
           await filesAPI.writeFile(path, submittedText)
           if (this.openFiles[path] === file) {
             file.dirty = (file.revision || 0) !== revision || file.content !== submittedText
+            file.diskContent = submittedText
+            file.saveError = ""
+            file.conflict = false
           }
         } catch (err) {
           console.error("Failed to save file:", err)
+          if (this.openFiles[path] === file)
+            file.saveError = err?.response?.data?.detail || err?.message || String(err)
         }
       })
       queue.set(path, pending)
@@ -176,14 +186,23 @@ const _editorStoreOptions = {
         // chevron; deeper levels are fetched on click via
         // ``expandTreeNode``.
         const fetched = await filesAPI.getTree(root, 1)
-        if (isCurrent()) this.treeData = fetched
+        if (isCurrent()) {
+          this.treeData = fetched
+          this.treeError = ""
+        }
       } catch (err) {
-        if (isCurrent()) console.error("Failed to refresh tree:", err)
+        if (isCurrent()) {
+          console.error("Failed to refresh tree:", err)
+          this.treeError = err?.response?.data?.detail || err?.message || String(err)
+        }
       }
     },
 
     setTreeRoot(path) {
-      if (this.treeRoot !== path) this.treeData = null
+      if (this.treeRoot !== path) {
+        this.treeData = null
+        this.treeError = ""
+      }
       this.treeRoot = path
       this.refreshTree()
     },
@@ -227,6 +246,29 @@ const _editorStoreOptions = {
       return this.revertFile(path)
     },
 
+    /**
+     * Bring an open buffer in line with the file on disk: a clean buffer
+     * reloads; a dirty one whose file changed since it was read or saved
+     * is flagged `conflict` (kept as typed until the user reverts or saves).
+     */
+    async syncFromDisk(path) {
+      const file = this.openFiles[path]
+      if (!file) return
+      if (!file.dirty) return this.refreshFile(path)
+      try {
+        const data = await filesAPI.readFile(path)
+        if (
+          this.openFiles[path] === file &&
+          file.dirty &&
+          file.diskContent != null &&
+          data.content !== file.diskContent
+        )
+          file.conflict = true
+      } catch (err) {
+        console.error("Failed to check file on disk:", err)
+      }
+    },
+
     async revertFile(path) {
       const file = this.openFiles[path]
       if (!file) return
@@ -248,6 +290,9 @@ const _editorStoreOptions = {
           file.content = data.content
           file.dirty = false
           file.revision = revision + 1
+          file.diskContent = data.content
+          file.saveError = ""
+          file.conflict = false
         }
       } catch (err) {
         if (!state.disposed && state.reads.get(path) === request)
