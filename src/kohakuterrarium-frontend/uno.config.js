@@ -96,7 +96,7 @@ export default defineConfig({
     "nav-rail":
       "w-14 flex flex-col items-center py-3 gap-1 border-r border-warm-200 dark:border-warm-700 bg-warm-100 dark:bg-warm-950",
     "nav-item":
-      "w-10 h-10 flex items-center justify-center rounded-lg cursor-pointer bg-transparent text-warm-500 dark:text-warm-400 hover:bg-warm-200/60 dark:hover:bg-warm-700/40 transition-colors",
+      "w-10 h-10 flex items-center justify-center rounded-lg cursor-pointer bg-transparent text-warm-600 dark:text-warm-400 hover:bg-warm-200/60 dark:hover:bg-warm-700/40 transition-colors",
     "nav-item-active":
       "nav-item !bg-warm-200/80 dark:!bg-warm-800/60 !text-iolite dark:!text-iolite-light",
     card: "bg-white dark:bg-warm-900 rounded-xl border border-warm-200/60 dark:border-warm-700/60",
@@ -110,13 +110,13 @@ export default defineConfig({
     "btn-ghost":
       "px-2.5 py-1 rounded-lg text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-700/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
     "btn-icon":
-      "inline-flex items-center justify-center w-8 h-8 rounded-lg text-warm-500 dark:text-warm-400 hover:bg-warm-200/60 hover:text-warm-700 dark:hover:bg-warm-700/40 dark:hover:text-warm-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+      "inline-flex items-center justify-center w-8 h-8 rounded-lg text-warm-600 dark:text-warm-400 hover:bg-warm-200/60 hover:text-warm-700 dark:hover:bg-warm-700/40 dark:hover:text-warm-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
     "gem-badge": "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
     "container-page": "max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6",
     "section-title": "text-lg font-semibold text-warm-800 dark:text-warm-200 mb-4",
     "text-body": "text-sm text-warm-800 dark:text-warm-200",
-    "text-secondary": "text-sm text-warm-500 dark:text-warm-400",
+    "text-secondary": "text-sm text-warm-600 dark:text-warm-400",
     "input-field":
-      "w-full px-3 py-2 rounded-lg bg-warm-50 dark:bg-warm-900 border border-warm-200 dark:border-warm-700 text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-600 focus:outline-none focus:border-iolite dark:focus:border-iolite-light transition-colors text-sm",
+      "w-full px-3 py-2 rounded-lg bg-[var(--color-bg)] dark:bg-warm-900 border border-warm-200 dark:border-warm-700 text-warm-800 dark:text-warm-200 placeholder-warm-500 dark:placeholder-warm-600 focus:outline-none focus:border-iolite dark:focus:border-iolite-light transition-colors text-sm",
   },
 })

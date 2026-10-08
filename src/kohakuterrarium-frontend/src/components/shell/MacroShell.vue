@@ -1,6 +1,6 @@
 <template>
   <CompactShell v-if="isCompact" />
-  <div v-else class="h-full flex overflow-hidden bg-warm-50 dark:bg-warm-950">
+  <div v-else class="h-full flex overflow-hidden bg-[var(--color-bg)] dark:bg-warm-950">
     <RailPane />
     <TabGroupContainer />
   </div>

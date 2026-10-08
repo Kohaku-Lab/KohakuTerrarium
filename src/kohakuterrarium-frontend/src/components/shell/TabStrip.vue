@@ -1,9 +1,9 @@
 <template>
-  <div class="relative h-8 flex items-center bg-warm-100 dark:bg-warm-900 border-b border-warm-200 dark:border-warm-700 overflow-hidden">
+  <div class="relative h-8 flex items-center bg-[var(--kt-shell-strip)] dark:bg-warm-900 border-b border-warm-200 dark:border-warm-700 overflow-hidden">
     <div class="flex items-center overflow-x-auto h-8 flex-1" @dragover.prevent="onStripDragOver" @drop.prevent="onStripDrop">
       <TabItem v-for="t in stripTabs" :key="t.id" :tab="t" :active="t.id === activeId" :group-id="groupId" @activate="tabs.activateTab(t.id)" @close="tabs.closeTab(t.id)" @drop="onDrop(t.id, $event)" />
     </div>
-    <button class="w-8 h-8 flex items-center justify-center text-warm-400 hover:text-warm-700 hover:bg-warm-200/50 dark:hover:bg-warm-800/50 shrink-0" :title="'New tab menu'" @click="openMenu">
+    <button class="w-8 h-8 flex items-center justify-center text-warm-600 dark:text-warm-400 hover:text-warm-700 dark:hover:text-warm-200 hover:bg-warm-200/50 dark:hover:bg-warm-800/50 shrink-0" :title="'New tab menu'" @click="openMenu">
       <span class="i-carbon-add text-sm" />
     </button>
     <NewTabMenu v-if="menuOpen" :group-id="groupId" @close="menuOpen = false" />

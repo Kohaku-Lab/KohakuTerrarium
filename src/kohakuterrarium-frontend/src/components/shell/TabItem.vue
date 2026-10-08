@@ -1,5 +1,5 @@
 <template>
-  <div class="group h-8 flex items-center gap-1.5 pl-3 pr-1.5 text-xs border-r border-warm-200 dark:border-warm-700 cursor-pointer select-none shrink-0" :class="active ? 'bg-warm-50 dark:bg-warm-950 text-warm-800 dark:text-warm-200 border-b-2 border-b-iolite' : 'text-warm-500 hover:bg-warm-200/40 dark:hover:bg-warm-800/40'" :draggable="true" @click="$emit('activate')" @mousedown.middle.prevent="onMiddleClick" @dragstart="onDragStart" @dragover.prevent @drop.stop.prevent="$emit('drop', $event)" @contextmenu.prevent="onContextMenu">
+  <div class="group h-8 flex items-center gap-1.5 pl-3 pr-1.5 text-xs border-r border-warm-200 dark:border-warm-700 cursor-pointer select-none shrink-0" :class="active ? 'bg-[var(--kt-shell-tab-active)] dark:bg-warm-950 text-warm-800 dark:text-warm-200 border-b-2 border-b-iolite' : 'text-warm-600 dark:text-warm-500 hover:bg-warm-300/40 dark:hover:bg-warm-800/40'" :draggable="true" @click="$emit('activate')" @mousedown.middle.prevent="onMiddleClick" @dragstart="onDragStart" @dragover.prevent @drop.stop.prevent="$emit('drop', $event)" @contextmenu.prevent="onContextMenu">
     <!-- Pinned indicator. Dashboard's kind icon is already a house, so
          we don't render an extra one beside it; the kind icon below
          is enough on its own. -->

@@ -35,14 +35,36 @@
   --kt-chat-code-meta-size: 0.8rem;
   --kt-chat-code-line-height: 1.55;
 
-  /* Light mode surfaces */
-  --color-bg: #f7f5f2;
+  /* Light mode surfaces ("stone"): page under white cards, framed by the stone shell. */
+  --color-bg: #f2eee8;
   --color-surface: #ffffff;
-  --color-surface-alt: #efece7;
-  --color-border: #e0dbd4;
-  --color-text: #3a3632;
-  --color-text-muted: #8a8480;
-  --color-text-faint: #b5b0aa;
+  --color-surface-alt: #efebe5;
+  --color-border: #e5dfd7;
+  --color-text: #2e2a26;
+  --color-text-muted: #6c655d;
+  --color-text-faint: #8f8880;
+
+  /* Light shell frame: sidebar, tab strip, active tab. Dark mode uses its own dark: classes.
+     The active tab is the page tone, so it flows into the page under it. */
+  --kt-shell-rail: #dcd5cb;
+  --kt-shell-strip: #e3ddd5;
+  --kt-shell-tab-active: var(--color-bg);
+}
+
+/*
+ * Light-mode muted greys at readable contrast (warm-400 / warm-500 are too pale on stone
+ * surfaces). Same specificity as the utilities and loaded after them, so hover, group and
+ * dark variants still win.
+ */
+:where(html:not(.dark)) .text-warm-400 {
+  color: #77706a;
+}
+:where(html:not(.dark)) .text-warm-500 {
+  color: #655e57;
+}
+/* Light-mode page tone: the warm-50 page surfaces take the stone page colour under white cards. */
+:where(html:not(.dark)) .bg-warm-50 {
+  background-color: var(--color-bg);
 }
 
 /* Mobile: bump every chrome tier so the rail / nav / tabs hit

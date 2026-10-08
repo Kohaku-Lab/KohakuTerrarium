@@ -1,12 +1,12 @@
 <template>
   <div>
     <div class="flex items-center justify-between px-3 py-1">
-      <span class="kt-text-caption uppercase tracking-wider text-warm-500 font-medium"> {{ t("shell.rail.conversations") }} </span>
-      <span class="kt-text-caption text-warm-400">{{ conversations.liveRows.length }}</span>
+      <span class="kt-text-caption uppercase tracking-wider text-warm-600 dark:text-warm-500 font-medium"> {{ t("shell.rail.conversations") }} </span>
+      <span class="kt-text-caption text-warm-600 dark:text-warm-400">{{ conversations.liveRows.length }}</span>
     </div>
     <div class="flex flex-col gap-0.5">
       <RailItem v-for="conversation in conversations.liveRows" :key="conversation.id" :instance="conversation" />
-      <div v-if="conversations.liveRows.length === 0" class="px-3 py-2 text-[11px] text-warm-400 italic">{{ t("shell.rail.conversationsEmpty") }}</div>
+      <div v-if="conversations.liveRows.length === 0" class="px-3 py-2 text-[11px] text-warm-600 dark:text-warm-400 italic">{{ t("shell.rail.conversationsEmpty") }}</div>
     </div>
   </div>
 </template>
