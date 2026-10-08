@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.packages.locations import get_package_root, packages_dir
+from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.walk import list_packages
 
 # Repeated dashboard discovery should not reparse every YAML file. A short TTL
@@ -90,8 +90,6 @@ def manifest_entry_rel_path(entry, kind: str) -> str | None:
 def _build_package_root_map() -> dict[str, str]:
     """Map resolved package roots to names for portable reference rendering."""
     mapping: dict[str, str] = {}
-    if not packages_dir().exists():
-        return mapping
     for pkg in list_packages():
         pkg_root = get_package_root(pkg["name"])
         if pkg_root is not None:
@@ -102,7 +100,8 @@ def _build_package_root_map() -> dict[str, str]:
 def to_ref(path: Path, package_roots: dict[str, str]) -> str:
     """Render package-contained paths as portable ``@pkg/...`` references.
 
-    Paths outside installed packages remain filesystem paths.  Matching is by
+    The local project (empty name) renders as ``@/...``.  Paths outside
+    installed packages remain filesystem paths.  Matching is by
     path component, and the longest root wins, so a package whose name extends
     a sibling's (``kt-biome-extended`` under ``kt-biome``) resolves to its own
     reference rather than the sibling's.
@@ -116,6 +115,12 @@ def to_ref(path: Path, package_roots: dict[str, str]) -> str:
         return str(path)
     rel = resolved.relative_to(best).as_posix()
     return f"@{package_roots[best]}/{rel}" if rel != "." else f"@{package_roots[best]}"
+
+
+def package_ref(path: Path) -> str | None:
+    """The ``@pkg/...`` reference of ``path``, or None outside every package."""
+    ref = to_ref(path, _build_package_root_map())
+    return ref if ref.startswith("@") else None
 
 
 def _parse_creature_detail(config_dir: Path) -> CatalogEntry | None:
@@ -261,7 +266,7 @@ def scan_catalog() -> list[CatalogEntry]:
     # Manifest declarations define package visibility, including editable installs.
     for pkg in list_packages():
         pkg_path = Path(pkg["path"])
-        pkg_name = pkg["name"]
+        pkg_name = pkg["name"] or "project"
         for c in pkg.get("creatures", []):
             rel = manifest_entry_rel_path(c, "creatures")
             if rel:

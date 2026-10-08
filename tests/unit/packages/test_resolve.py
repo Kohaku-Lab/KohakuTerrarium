@@ -83,13 +83,24 @@ class TestResolvePackagePath:
         with pytest.raises(PackagePathNotFoundError):
             resolve_package_path("@biome/missing")
 
-    def test_bare_at_raises_ref_error(self, pkg_dir):
-        # A bare "@" used to resolve to the whole packages dir.
-        with pytest.raises(PackageRefError, match="Empty package name"):
-            resolve_package_path("@")
+    def test_empty_name_is_the_local_project_once_it_exists(self, pkg_dir):
+        with pytest.raises(
+            PackageNotInstalledError, match="local project does not exist"
+        ):
+            resolve_package_path("@/creatures")
+        root = loc_mod.ensure_local_project()
+        assert root == (pkg_dir.parent / "project").resolve()
+        assert resolve_package_path("@") == root
+        assert resolve_package_path("@/creatures") == root / "creatures"
+        # Never the packages directory itself, whatever the spelling.
+        assert resolve_package_path("@ /creatures") == root / "creatures"
 
-    def test_bare_at_slash_raises_ref_error(self, pkg_dir):
-        with pytest.raises(PackageRefError, match="Empty package name"):
+    def test_local_project_refs_cannot_escape_it(self, pkg_dir):
+        loc_mod.ensure_local_project()
+        (pkg_dir / "biome").mkdir()
+        with pytest.raises(PackageRefError, match="escapes the package root"):
+            resolve_package_path("@/../packages/biome")
+        with pytest.raises(PackagePathNotFoundError):
             resolve_package_path("@/etc")
 
     def test_traversal_escape_raises_ref_error(self, pkg_dir):
@@ -111,8 +122,10 @@ class TestResolvePackagePath:
         # Migration contract: old except sites keep working.
         with pytest.raises(FileNotFoundError):
             resolve_package_path("@ghost")
-        with pytest.raises(ValueError):
+        with pytest.raises(FileNotFoundError):
             resolve_package_path("@")
+        with pytest.raises(ValueError):
+            resolve_package_path("creatures/x")
 
 
 class TestResolveAnyPath:

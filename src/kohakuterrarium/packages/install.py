@@ -25,6 +25,7 @@ from kohakuterrarium.packages import git_backend
 from kohakuterrarium.packages import marketplace
 from kohakuterrarium.packages.locations import _packages_dir
 from kohakuterrarium.packages.locations import get_package_root
+from kohakuterrarium.packages.locations import is_local_project
 from kohakuterrarium.packages.locations import remove_link
 from kohakuterrarium.packages.locations import write_link
 from kohakuterrarium.packages.manifest import DEP_POLICIES
@@ -243,6 +244,10 @@ def update_package(name: str, *, deps: str = "auto") -> str:
     PackageError for a refusal or a failed update.
     """
     _check_deps_policy(deps)
+    if is_local_project(name):
+        raise PackageError(
+            "The local project is not an installed package and cannot be updated"
+        )
     # Resolve through ``.link`` pointers / symlinks to the real checkout so
     # ``git -C`` sees the literal path a submodule's gitdir resolves against.
     target = get_package_root(name)
@@ -563,7 +568,11 @@ def _install_from_local(
 
 
 def uninstall_package(name: str) -> bool:
-    """Remove an installed package."""
+    """Remove an installed package. The local project (empty name) is never removed."""
+    if is_local_project(name):
+        raise PackageError(
+            "The local project is not an installed package and cannot be uninstalled"
+        )
     removed = False
 
     # Remove .link pointer

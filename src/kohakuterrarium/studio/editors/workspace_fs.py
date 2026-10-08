@@ -13,6 +13,11 @@ from typing import Any
 
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from kohakuterrarium.packages.walk import package_snapshot
+from kohakuterrarium.studio.catalog.packages_scan import (
+    invalidate_scan_caches,
+    package_ref,
+)
 from kohakuterrarium.studio.editors import creatures_crud, modules_crud
 from kohakuterrarium.studio.editors.codegen_init import get_codegen
 from kohakuterrarium.studio.editors.utils_paths import ensure_in_root, sanitize_name
@@ -69,19 +74,34 @@ class LocalWorkspace:
             raise ValueError(f"unknown module kind: {kind!r}")
         return self.modules_dir / kind
 
+    def ref_prefix(self) -> str | None:
+        """The ``@pkg`` reference of the root, or None outside every package."""
+        return package_ref(self.root_path)
+
+    def ref_for(self, path: Path, prefix: str | None) -> str:
+        """The reference a config uses for ``path``: ``@pkg/rel`` or absolute."""
+        if prefix is None:
+            return str(path)
+        return f"{prefix}/{path.relative_to(self.root_path).as_posix()}"
+
     def summary(self) -> dict:
-        return {
-            "root": self.root,
-            "creatures": self.list_creatures(),
-            "modules": {
-                kind: modules_summary(self, kind, self.list_modules(kind))
-                for kind in KNOWN_KINDS
-            },
-        }
+        with package_snapshot():
+            prefix = self.ref_prefix()
+            return {
+                "root": self.root,
+                "ref_prefix": prefix,
+                "is_project": prefix == "@",
+                "creatures": self.list_creatures(),
+                "modules": {
+                    kind: modules_summary(self, kind, self.list_modules(kind))
+                    for kind in KNOWN_KINDS
+                },
+            }
 
     def list_creatures(self) -> list[dict]:
         if not self.creatures_dir.is_dir():
             return []
+        prefix = self.ref_prefix()
         results: list[dict] = []
         for child in sorted(self.creatures_dir.iterdir()):
             if not child.is_dir():
@@ -99,6 +119,7 @@ class LocalWorkspace:
                     {
                         "name": child.name,
                         "path": str(child),
+                        "ref": self.ref_for(child, prefix),
                         "description": "",
                         "base_config": None,
                         "error": f"parse failed: {e}",
@@ -109,6 +130,7 @@ class LocalWorkspace:
                 {
                     "name": data.get("name", child.name),
                     "path": str(child),
+                    "ref": self.ref_for(child, prefix),
                     "description": data.get("description", ""),
                     "base_config": data.get("base_config"),
                 }
@@ -133,14 +155,17 @@ class LocalWorkspace:
 
     def scaffold_creature(self, name: str, base: str | None) -> dict:
         creatures_crud.scaffold_creature(self.creatures_dir, name, base)
+        invalidate_scan_caches()
         return self.load_creature(name)
 
     def save_creature(self, name: str, body: dict) -> dict:
         creatures_crud.save_creature(self.creatures_dir, name, body)
+        invalidate_scan_caches()
         return self.load_creature(name)
 
     def delete_creature(self, name: str) -> None:
         creatures_crud.delete_creature(self.creatures_dir, name)
+        invalidate_scan_caches()
 
     def read_prompt(self, creature: str, rel: str) -> str:
         creature = sanitize_name(creature)
@@ -159,6 +184,7 @@ class LocalWorkspace:
         kind_dir = self.module_kind_dir(kind)
         if not kind_dir.is_dir():
             return []
+        prefix = self.ref_prefix()
         results: list[dict] = []
         for child in sorted(kind_dir.iterdir()):
             if child.is_file() and child.suffix in (".py", ".yaml", ".yml"):
@@ -169,6 +195,7 @@ class LocalWorkspace:
                         "path": str(child.relative_to(self.root_path)).replace(
                             "\\", "/"
                         ),
+                        "ref": self.ref_for(child, prefix),
                     }
                 )
         return results

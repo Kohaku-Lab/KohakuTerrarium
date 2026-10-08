@@ -1,7 +1,8 @@
 """``@pkg/path`` references and per-kind manifest resolvers.
 
 This module owns the ``@`` *path-reference* grammar
-(``@<package>[/sub/path]`` → filesystem path).  The marketplace
+(``@<package>[/sub/path]`` → filesystem path; the empty package name is
+the local project, so ``@/sub/path``).  The marketplace
 *install-spec* grammar (``@name`` / ``@name@version`` / ``@source/name``)
 lives in :mod:`kohakuterrarium.packages.marketplace` — the two look alike
 but are routed by context: config loaders call :func:`resolve_any_path`,
@@ -16,7 +17,11 @@ from kohakuterrarium.errors import (
     PackagePathNotFoundError,
     PackageRefError,
 )
-from kohakuterrarium.packages.locations import get_package_root
+from kohakuterrarium.packages.locations import (
+    get_package_root,
+    is_local_project,
+    project_dir,
+)
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger
 
@@ -28,16 +33,19 @@ def resolve_package_path(ref: str) -> Path:
 
     Args:
         ref: Reference like ``"@kt-biome/creatures/swe"``.  A bare
-            ``"@pkg"`` resolves to the package root.
+            ``"@pkg"`` resolves to the package root.  An empty package
+            name is the local project: ``"@/creatures/x"``, and ``"@"``
+            alone is its root.
 
     Returns:
         Absolute path to the resolved location.  Always inside the
         package root — ``..`` segments that would escape it are rejected.
 
     Raises:
-        PackageRefError: Malformed reference (no ``@``, empty package
-            name, or a sub-path that escapes the package root).
-        PackageNotInstalledError: The named package isn't installed.
+        PackageRefError: Malformed reference (no ``@``, or a sub-path
+            that escapes the package root).
+        PackageNotInstalledError: The named package isn't installed, or
+            the local project doesn't exist yet.
         PackagePathNotFoundError: Package exists, sub-path doesn't.
     """
     if not ref.startswith("@"):
@@ -48,14 +56,13 @@ def resolve_package_path(ref: str) -> Path:
     package_name = parts[0].strip()
     sub_path = parts[1] if len(parts) > 1 else ""
 
-    if not package_name:
-        raise PackageRefError(
-            f"Empty package name in reference: {ref!r} "
-            "(expected @<package>[/sub/path])"
-        )
-
     pkg_root = get_package_root(package_name)
     if pkg_root is None:
+        if is_local_project(package_name):
+            raise PackageNotInstalledError(
+                f"The local project does not exist yet ({project_dir()}); "
+                f"open Studio or create it to use {ref!r}"
+            )
         raise PackageNotInstalledError(
             f"Package not installed: {package_name}. "
             f"Run: kt install @{package_name} (marketplace) "

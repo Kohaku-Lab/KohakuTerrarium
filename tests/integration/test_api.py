@@ -435,7 +435,15 @@ class TestApiIntegration:
         assert resp.status_code == 200
         resp = client.get("/api/studio/workspace")
         assert resp.status_code == 200
-        assert set(resp.json()) == {"creatures", "modules", "root"}
+        summary = resp.json()
+        assert set(summary) == {
+            "creatures",
+            "modules",
+            "root",
+            "ref_prefix",
+            "is_project",
+        }
+        assert summary["ref_prefix"] is None and summary["is_project"] is False
 
         # Creatures: empty, then scaffold one, then it lists + loads.
         resp = client.get("/api/studio/creatures")

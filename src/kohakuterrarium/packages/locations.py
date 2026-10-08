@@ -21,6 +21,15 @@ PACKAGES_DIR = Path.home() / ".kohakuterrarium" / "packages"
 _DEFAULT_PACKAGES_DIR = PACKAGES_DIR
 LINK_SUFFIX = ".link"
 
+# The local project is the package with the empty name (``@/sub/path``); None derives its dir.
+PROJECT_DIR: Path | None = None
+LOCAL_PROJECT_NAME = ""
+_PROJECT_MANIFEST = (
+    "name: local\n"
+    "version: 0.1.0\n"
+    "description: Your local KohakuTerrarium project. Reference it as @/...\n"
+)
+
 
 def packages_dir() -> Path:
     """Return the active packages directory.
@@ -46,6 +55,34 @@ def packages_dir() -> Path:
 # Internal alias kept for the package-local modules that predate the
 # public name.
 _packages_dir = packages_dir
+
+
+def project_dir() -> Path:
+    """Return the local project's directory (it may not exist yet).
+
+    A set :data:`PROJECT_DIR` wins. Otherwise it sits beside the packages
+    directory, so a pinned PACKAGES_DIR (tests, embedders) pins it too, and
+    the default is ``config_dir() / "project"``.
+    """
+    if PROJECT_DIR is not None:
+        return Path(PROJECT_DIR)
+    return packages_dir().parent / "project"
+
+
+def ensure_local_project() -> Path:
+    """Create the local project (folders and a minimal ``kohaku.yaml``) if missing; return its root."""
+    root = project_dir()
+    for sub in ("creatures", "terrariums", "modules"):
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    manifest = root / "kohaku.yaml"
+    if not manifest.exists() and not (root / "kohaku.yml").exists():
+        manifest.write_text(_PROJECT_MANIFEST, encoding="utf-8")
+    return root.resolve()
+
+
+def is_local_project(name: str) -> bool:
+    """True for the local project's (empty) package name."""
+    return name.strip() == LOCAL_PROJECT_NAME
 
 
 def read_link(name: str) -> Path | None:
@@ -80,10 +117,15 @@ def get_package_root(name: str) -> Path | None:
 
     Checks, in order:
 
+    0. The empty name is the local project (``None`` until it exists).
     1. ``.link`` pointer file for editable installs.
     2. Direct directory under :data:`PACKAGES_DIR`.
     3. Legacy symlink under :data:`PACKAGES_DIR`.
     """
+    if is_local_project(name):
+        root = project_dir()
+        return root.resolve() if root.is_dir() else None
+
     link_target = read_link(name)
     if link_target is not None:
         return link_target
