@@ -13,6 +13,7 @@ import "element-plus/es/components/message-box/style/css"
 import "element-plus/es/components/notification/style/css"
 import "uno.css"
 import "./style.css"
+import "./components/session-v2/surfaces.css"
 
 const router = createRouter({
   history: createWebHistory(),

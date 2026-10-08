@@ -7,7 +7,7 @@
     </div>
     <div class="flex-1 min-h-0 overflow-y-auto py-1">
       <div v-if="loading" class="px-3 py-6 text-center text-xs text-warm-400">{{ t("add.loading") }}</div>
-      <div v-else-if="error" class="px-3 py-4 text-xs text-coral">{{ error }}</div>
+      <div v-else-if="error" class="px-3 py-4 text-xs text-coral" role="alert">{{ error }}</div>
       <div v-else-if="!filtered.length" class="px-3 py-6 text-center text-xs text-warm-400">{{ t("add.noConfigs") }}</div>
       <button v-for="r in filtered" :key="r.path" type="button" class="w-full text-left px-3 py-2 flex items-start gap-2.5 hover:bg-warm-100 dark:hover:bg-warm-800/60" :class="modelValue === r.path ? 'bg-iolite/10' : ''" :data-test="`add-config-${r.name}`" @click="$emit('update:modelValue', r.path)">
         <span class="kt-v2-b mt-0.5 w-3.5 h-3.5 rounded-full border-2 shrink-0" :class="modelValue === r.path ? 'border-iolite bg-iolite' : 'border-warm-300 dark:border-warm-600'" />
@@ -22,15 +22,22 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import { configAPI } from "@/utils/api"
 
-/** A filterable single-choice list of creature configs (`kind="creature"`) or terrarium recipes (`kind="terrarium"`); `modelValue` is the chosen path. */
+/**
+ * A filterable single-choice list of creature configs (`kind="creature"`) or
+ * terrarium recipes (`kind="terrarium"`); `modelValue` is the chosen path.
+ * `onNode` lists the creature configs of that machine; with `siteRequired`
+ * and no `onNode` it lists nothing and asks for a machine.
+ */
 const props = defineProps({
   kind: { type: String, default: "creature" },
   modelValue: { type: String, default: "" },
+  onNode: { type: String, default: "" },
+  siteRequired: { type: Boolean, default: false },
 })
 const emit = defineEmits(["update:modelValue", "picked"])
 
@@ -49,10 +56,16 @@ const filtered = computed(() => {
 let request = 0
 async function load() {
   const id = ++request
-  loading.value = true
+  rows.value = []
   error.value = ""
+  if (props.siteRequired && !props.onNode) {
+    loading.value = false
+    error.value = t("add.err.site")
+    return
+  }
+  loading.value = true
   try {
-    const data = props.kind === "terrarium" ? await configAPI.listTerrariums() : await configAPI.listCreatures()
+    const data = props.kind === "terrarium" ? await configAPI.listTerrariums() : props.onNode ? await configAPI.listCreatures({ onNode: props.onNode }) : await configAPI.listCreatures()
     if (id === request) rows.value = Array.isArray(data) ? data : []
   } catch (err) {
     if (id === request) error.value = err?.response?.data?.detail || err?.message || String(err)
@@ -68,6 +81,9 @@ watch(
     if (row) emit("picked", row)
   },
 )
-watch(() => props.kind, load)
+watch(() => [props.kind, props.onNode, props.siteRequired], load)
 onMounted(load)
+onBeforeUnmount(() => {
+  request += 1
+})
 </script>

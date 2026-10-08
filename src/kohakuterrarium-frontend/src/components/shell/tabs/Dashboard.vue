@@ -17,11 +17,9 @@
 
       <!-- Quick start -->
       <DashboardSection :title="t('shell.dashboard.quickStart')">
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-          <QuickStartCard icon="i-carbon-bot" :label="t('shell.dashboard.startCreature')" :subtitle="t('shell.dashboard.startCreatureSub')" @click="openModal('creature')" />
-          <QuickStartCard icon="i-carbon-network-4" :label="t('shell.dashboard.startTerrarium')" :subtitle="t('shell.dashboard.startTerrariumSub')" @click="openModal('terrarium')" />
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <QuickStartCard icon="i-carbon-add-large" :label="t('lab.new.title')" :subtitle="t('lab.new.subtitle')" @click="openModal('new')" />
           <QuickStartCard icon="i-carbon-restart" :label="t('shell.dashboard.resumeQs')" :subtitle="t('shell.dashboard.resumeQsSub')" @click="openModal('resume')" />
-          <QuickStartCard icon="i-carbon-settings" :label="t('shell.dashboard.advanced')" :subtitle="t('shell.dashboard.advancedSub')" @click="openModal('advanced')" />
         </div>
       </DashboardSection>
 
@@ -50,10 +48,8 @@
     </div>
 
     <!-- Real start modals (Phase 5) -->
-    <NewCreatureModal v-if="modal === 'creature'" @close="modal = null" />
-    <NewTerrariumModal v-if="modal === 'terrarium'" @close="modal = null" />
+    <NewSessionDialog v-if="modal === 'new'" @close="modal = null" />
     <ResumeSessionModal v-if="modal === 'resume'" @close="modal = null" />
-    <AdvancedStartModal v-if="modal === 'advanced'" @close="modal = null" />
   </div>
 </template>
 
@@ -66,10 +62,8 @@ import DashboardRunningCard from "@/components/shell/tabs/DashboardRunningCard.v
 import DashboardRecentRow from "@/components/shell/tabs/DashboardRecentRow.vue"
 import DashboardStudioCard from "@/components/shell/tabs/DashboardStudioCard.vue"
 import DashboardStatsCard from "@/components/shell/tabs/DashboardStatsCard.vue"
-import NewCreatureModal from "@/components/shell/modals/NewCreatureModal.vue"
-import NewTerrariumModal from "@/components/shell/modals/NewTerrariumModal.vue"
 import ResumeSessionModal from "@/components/shell/modals/ResumeSessionModal.vue"
-import AdvancedStartModal from "@/components/shell/modals/AdvancedStartModal.vue"
+import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"

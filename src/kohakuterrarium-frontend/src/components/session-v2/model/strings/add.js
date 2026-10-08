@@ -76,6 +76,7 @@ export default {
     "add.err.recipeRequired": "Pick a recipe or enter a path.",
     "add.err.unknownTarget": "One of the chosen creatures is no longer in the session.",
     "add.err.unknownChannel": "One of the chosen channels is no longer in the session.",
+    "add.err.site": "Select a machine to run on.",
   },
   "zh-TW": {
     "add.title": "加入工作階段",
@@ -151,6 +152,7 @@ export default {
     "add.err.recipeRequired": "請選擇配方或輸入路徑。",
     "add.err.unknownTarget": "所選生物中有已不在工作階段內的。",
     "add.err.unknownChannel": "所選頻道中有已不在工作階段內的。",
+    "add.err.site": "請選擇要執行的機器。",
   },
   "zh-CN": {
     "add.title": "加入会话",
@@ -226,5 +228,6 @@ export default {
     "add.err.recipeRequired": "请选择配方或输入路径。",
     "add.err.unknownTarget": "所选 Creature 中有已不在会话内的。",
     "add.err.unknownChannel": "所选频道中有已不在会话内的。",
+    "add.err.site": "请选择要运行的机器。",
   },
 }

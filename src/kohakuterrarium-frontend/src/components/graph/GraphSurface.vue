@@ -27,15 +27,7 @@
 
     <GraphContextMenu v-if="menu" :x="menu.x" :y="menu.y" :title="menu.title" :items="menu.items" @pick="onMenuPick" @close="menu = null" />
     <GraphQuickAdd v-if="quickAdd" :view="view" :actions="actions" :initial-kind="quickAdd.kind" :context="quickAdd.context" @close="quickAdd = null" />
-    <NewCreatureModal v-if="newSessionOpen === 'creature'" silent @close="newSessionOpen = false" />
-    <NewTerrariumModal v-if="newSessionOpen === 'terrarium'" silent @close="newSessionOpen = false" />
-    <ModalShell v-if="newSessionOpen === true" @close="newSessionOpen = false">
-      <template #title>{{ t("graph.action.newSession") }}</template>
-      <div class="grid grid-cols-2 gap-2">
-        <button class="kt-graph-action h-auto py-3 justify-center" @click="newSessionOpen = 'creature'"><span class="i-carbon-bot" />{{ t("graph.quickAdd.fromCreature") }}</button>
-        <button class="kt-graph-action h-auto py-3 justify-center" @click="newSessionOpen = 'terrarium'"><span class="i-carbon-network-4" />{{ t("graph.quickAdd.fromRecipe") }}</button>
-      </div>
-    </ModalShell>
+    <NewSessionDialog v-if="newSessionOpen" silent @close="newSessionOpen = false" />
   </div>
 </template>
 
@@ -43,7 +35,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 
 import "@/components/graph/graph.css"
-import ModalShell from "@/components/common/ModalShell.vue"
 import BusView from "@/components/graph/views/bus/BusView.vue"
 import FlowView from "@/components/graph/views/flow/FlowView.vue"
 import NetworkView from "@/components/graph/views/network/NetworkView.vue"
@@ -53,8 +44,7 @@ import { menuItemsFor } from "@/components/graph/canvas/graphMenus"
 import GraphDock from "@/components/graph/dock/GraphDock.vue"
 import GraphQuickAdd from "@/components/graph/toolbar/GraphQuickAdd.vue"
 import GraphToolbar from "@/components/graph/toolbar/GraphToolbar.vue"
-import NewCreatureModal from "@/components/shell/modals/NewCreatureModal.vue"
-import NewTerrariumModal from "@/components/shell/modals/NewTerrariumModal.vue"
+import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import { useGraphActions } from "@/composables/graph/useGraphActions"
 import { useDensity } from "@/composables/useDensity"
 import { useGraphLiveStore } from "@/stores/graph/live"

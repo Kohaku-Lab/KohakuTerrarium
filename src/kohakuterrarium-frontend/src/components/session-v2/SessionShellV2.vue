@@ -54,5 +54,3 @@ const ctx = provideSessionV2(
 const current = computed(() => (ctx.tab.value === "chat" ? ChatTab : TABS[ctx.tab.value]))
 const kept = computed(() => (ctx.tab.value === "workspace" ? ALWAYS_KEPT : ["ChatTab", ...ALWAYS_KEPT]))
 </script>
-
-<style src="./surfaces.css"></style>
