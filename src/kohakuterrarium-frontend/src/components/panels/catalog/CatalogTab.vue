@@ -48,8 +48,9 @@
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-3">
+      <LibraryModules v-if="activeTab === 'modules'" ref="modulesEl" :query="query" @count="moduleCount = $event" />
       <!-- Loading skeleton (only when truly empty) -->
-      <div v-if="loading && currentList.length === 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+      <div v-else-if="loading && currentList.length === 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         <div v-for="i in 6" :key="i" class="card p-3 animate-pulse flex flex-col gap-2">
           <div class="flex gap-2">
             <div class="w-9 h-9 rounded-lg bg-warm-200 dark:bg-warm-800" />
@@ -94,7 +95,7 @@
     </div>
 
     <!-- Status footer -->
-    <div class="flex items-center justify-between text-[10px] text-warm-500 dark:text-warm-400 px-3 py-2 shrink-0 border-t border-warm-200 dark:border-warm-700">
+    <div v-if="activeTab !== 'modules'" class="flex items-center justify-between text-[10px] text-warm-500 dark:text-warm-400 px-3 py-2 shrink-0 border-t border-warm-200 dark:border-warm-700">
       <span>
         {{ currentList.length }} shown
         <template v-if="activeTab === 'browse'">/ {{ marketplace.packages.length }} in marketplace</template>
@@ -118,14 +119,19 @@ import CatalogCard from "@/components/panels/catalog/CatalogCard.vue"
 import InstallConfirmModal from "@/components/panels/catalog/InstallConfirmModal.vue"
 import InstallFromSourceModal from "@/components/panels/catalog/InstallFromSourceModal.vue"
 import InstalledPackagesAccordion from "@/components/panels/catalog/InstalledPackagesAccordion.vue"
+import LibraryModules from "@/components/panels/catalog/LibraryModules.vue"
 import SourceListSettings from "@/components/panels/catalog/SourceListSettings.vue"
 import PackageFilesDrawer from "@/components/registry/PackageFilesDrawer.vue"
 import { useMarketplaceStore } from "@/stores/marketplace"
 import { packagesAPI, registryAPI } from "@/utils/api"
 
+const props = defineProps({ initialTab: { type: String, default: "browse" } })
+
 const marketplace = useMarketplaceStore()
 
-const activeTab = ref("browse") // "browse" | "installed"
+const activeTab = ref(["browse", "installed", "modules"].includes(props.initialTab) ? props.initialTab : "browse")
+const modulesEl = ref(null)
+const moduleCount = ref(null)
 const query = ref("")
 const activeTag = ref(null)
 const sourcesOpen = ref(false)
@@ -150,6 +156,7 @@ const updatingAll = ref(false)
 const tabs = computed(() => [
   { id: "browse", label: "Browse", count: marketplace.packages.length || null },
   { id: "installed", label: "Installed", count: installed.value.length || null },
+  { id: "modules", label: "Modules", count: moduleCount.value || null },
 ])
 
 const loading = computed(() => (activeTab.value === "browse" ? marketplace.loading : installedLoading.value))
@@ -178,6 +185,7 @@ const installedNameSet = computed(() => {
 const gitInstalled = computed(() => installed.value.filter((p) => !p.editable))
 
 const searchPlaceholder = computed(() => {
+  if (activeTab.value === "modules") return moduleCount.value ? `Search ${moduleCount.value} modules…` : "Search modules…"
   const n = activeTab.value === "browse" ? marketplace.packages.length : installed.value.length
   const what = activeTab.value === "browse" ? "marketplace" : "installed"
   return n ? `Search ${n} ${what} package${n === 1 ? "" : "s"}…` : `Search ${what}…`
@@ -246,7 +254,9 @@ async function loadInstalled() {
 }
 
 async function onRefresh() {
-  if (activeTab.value === "browse") {
+  if (activeTab.value === "modules") {
+    await modulesEl.value?.load()
+  } else if (activeTab.value === "browse") {
     await marketplace.invalidate()
     // Browse-tab refresh may surface new updates → re-scan installed
     // so "update available" badges stay accurate.

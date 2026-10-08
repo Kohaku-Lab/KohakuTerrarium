@@ -112,6 +112,15 @@ export default defineConfig({
     "btn-icon":
       "inline-flex items-center justify-center w-8 h-8 rounded-lg text-warm-600 dark:text-warm-400 hover:bg-warm-200/60 hover:text-warm-700 dark:hover:bg-warm-700/40 dark:hover:text-warm-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
     "gem-badge": "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+    chip: "inline-flex items-center px-2 h-6 rounded-full text-[11px] leading-none border border-solid transition-colors cursor-pointer",
+    "chip-warm":
+      "inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] leading-none border border-solid border-warm-200 dark:border-warm-700 bg-warm-100 dark:bg-warm-800 text-warm-600 dark:text-warm-300",
+    "chip-iolite":
+      "inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] leading-none border border-solid border-iolite/40 bg-iolite/10 text-iolite dark:text-iolite-light",
+    "chip-aqua":
+      "inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] leading-none border border-solid border-aquamarine/40 bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light",
+    "chip-amber":
+      "inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] leading-none border border-solid border-amber/40 bg-amber/10 text-amber-shadow dark:text-amber-light",
     "container-page": "max-w-6xl mx-auto px-4 sm:px-6 py-4 sm:py-6",
     "section-title": "text-lg font-semibold text-warm-800 dark:text-warm-200 mb-4",
     "text-body": "text-sm text-warm-800 dark:text-warm-200",

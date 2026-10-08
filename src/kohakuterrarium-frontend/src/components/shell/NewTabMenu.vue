@@ -12,11 +12,7 @@
     <div class="border-t border-warm-200 dark:border-warm-700 my-1" />
     <button class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" @click="openCatalog">
       <span class="i-carbon-catalog" />
-      Open Catalog
-    </button>
-    <button class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" @click="openExtensions">
-      <span class="i-carbon-plug" />
-      Open Extensions
+      Open Library
     </button>
     <button class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" @click="openSettings">
       <span class="i-carbon-settings" />
@@ -61,11 +57,6 @@ function goDashboard() {
 function openCatalog() {
   focusGroup()
   tabs.openTab({ kind: "catalog", id: "catalog" })
-  emit("close")
-}
-function openExtensions() {
-  focusGroup()
-  tabs.openTab({ kind: "extensions", id: "extensions" })
   emit("close")
 }
 function openSettings() {

@@ -81,7 +81,9 @@ describe("MacroShell — render", () => {
     expect(wrapper.text()).toContain("Kohaku")
     expect(wrapper.text()).toContain("Terrarium")
     // Quick group entries
-    expect(wrapper.text()).toContain("Catalog")
+    expect(wrapper.text()).toContain("History")
+    expect(wrapper.text()).toContain("Library")
+    expect(wrapper.text()).not.toContain("Extensions")
     expect(wrapper.text()).toContain("Studio")
     expect(wrapper.text()).toContain("Settings")
     // Pinned group placeholder

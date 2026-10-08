@@ -123,6 +123,7 @@ const iconClass = computed(
       "saved-sessions": "i-carbon-recently-viewed",
       "studio-editor": "i-carbon-tool-box",
       catalog: "i-carbon-catalog",
+      extensions: "i-carbon-catalog",
       settings: "i-carbon-settings",
       "code-editor": "i-carbon-code",
       graph: "i-carbon-network-3",
@@ -152,7 +153,8 @@ const label = computed(() => {
       if (tab.entityKind === "workspace") return `${tab.workspace} · ${t("shell.tab.suffix.workspace")}`
       return t("shell.quick.studio")
     case "catalog":
-      return t("shell.quick.catalog")
+    case "extensions":
+      return t("lab.library.title")
     case "settings":
       return t("shell.quick.settings")
     case "code-editor":

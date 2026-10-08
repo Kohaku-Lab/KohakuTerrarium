@@ -1,12 +1,10 @@
 <template>
-  <CatalogPanel />
+  <CatalogPanel :initial-tab="tab.kind === 'extensions' ? 'modules' : 'browse'" />
 </template>
 
 <script setup>
-// The top-level Catalog tab — Browse marketplace + Installed packages
-// with the unified install flow (marketplace spec / git URL / local
-// path / editable).  Replaces the legacy RegistryPage which only
-// surfaced the bundled static index.
+// The Library tab: marketplace, installed packages and the modules they contribute.
+// An `extensions` tab (from an older layout) opens it on the modules list.
 import CatalogPanel from "@/components/panels/catalog/CatalogTab.vue"
 
 defineProps({ tab: { type: Object, required: true } })

@@ -18,7 +18,6 @@ import SavedSessionsTab from "@/components/shell/tabs/SavedSessionsTab.vue"
 import StatsTab from "@/components/shell/tabs/StatsTab.vue"
 import StudioEditorTab from "@/components/shell/tabs/StudioEditorTab.vue"
 import CatalogTab from "@/components/shell/tabs/CatalogTab.vue"
-import ExtensionsTab from "@/components/shell/tabs/ExtensionsTab.vue"
 import SettingsTab from "@/components/shell/tabs/SettingsTab.vue"
 import CodeEditorTab from "@/components/shell/tabs/CodeEditorTab.vue"
 import AdminTab from "@/components/shell/tabs/AdminTab.vue"
@@ -51,7 +50,7 @@ export function registerBuiltinTabKinds() {
   // (1 → 2 → 3 columns) so no gating needed.
   registerTabKind({ kind: "studio-editor", component: StudioEditorTab, minDensity: "regular" })
   registerTabKind({ kind: "catalog", component: CatalogTab })
-  registerTabKind({ kind: "extensions", component: ExtensionsTab })
+  registerTabKind({ kind: "extensions", component: CatalogTab })
   registerTabKind({ kind: "settings", component: SettingsTab })
   registerTabKind({ kind: "code-editor", component: CodeEditorTab })
   // Admin portal (L4 user/invitation/token management). The launcher is

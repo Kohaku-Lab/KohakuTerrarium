@@ -38,6 +38,9 @@ export default {
     "lab.history.fork": "fork",
     "lab.history.forks": "{n} forks",
     "lab.history.migrated": "migrated v{v}",
+    "lab.library.title": "Library",
+    "lab.library.allKinds": "All kinds",
+    "lab.library.noModuleMatch": "No modules match.",
   },
   "zh-TW": {
     "lab.rail.newSession": "新工作階段…",
@@ -75,6 +78,9 @@ export default {
     "lab.history.fork": "分支",
     "lab.history.forks": "{n} 個分支",
     "lab.history.migrated": "已遷移 v{v}",
+    "lab.library.title": "資源庫",
+    "lab.library.allKinds": "全部種類",
+    "lab.library.noModuleMatch": "沒有符合的模組。",
   },
   "zh-CN": {
     "lab.rail.newSession": "新会话…",
@@ -112,5 +118,8 @@ export default {
     "lab.history.fork": "分支",
     "lab.history.forks": "{n} 个分支",
     "lab.history.migrated": "已迁移 v{v}",
+    "lab.library.title": "资源库",
+    "lab.library.allKinds": "全部种类",
+    "lab.library.noModuleMatch": "没有匹配的模块。",
   },
 }
