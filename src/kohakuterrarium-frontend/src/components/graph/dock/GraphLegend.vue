@@ -46,6 +46,7 @@ const LINES = {
   membership: { color: EDGE_COLOR.channel, width: 2 },
   handoff: { color: EDGE_COLOR.via, width: 2 },
   control: { color: EDGE_COLOR.control, width: 2 },
+  direct: { color: EDGE_COLOR.direct, width: 2, dash: "6 2 2 2" },
   wire: { color: EDGE_COLOR.wire, width: 2.5 },
   ping: { color: EDGE_COLOR.wire, width: 2, dash: "5 3" },
   back: { color: EDGE_COLOR.via, width: 2, opacity: 0.35 },

@@ -9,7 +9,7 @@ import { computed, ref, watch } from "vue"
 
 import { useGraphLiveStore } from "@/stores/graph/live"
 import { buildGraphModel, indexModel } from "@/utils/graph/data/model"
-import { DEFAULT_LAYERS, projectGraph } from "@/utils/graph/data/projection"
+import { DEFAULT_LAYERS, LAYER_IDS, projectGraph } from "@/utils/graph/data/projection"
 import { generateSampleSnapshot } from "@/utils/graph/data/sample"
 import { DEFAULT_ASPECT } from "@/utils/graph/layout/auto"
 import { DEFAULT_PRIVILEGED_LINKS, PRIVILEGED_LINK_MODES } from "@/utils/graph/views/flow"
@@ -21,6 +21,13 @@ import {
 } from "@/utils/uiPrefs"
 
 export const VIEW_MODES = ["network", "flow", "tiers", "bus"]
+/** Layer toggles each view follows (the rest it reads its own way). */
+export const VIEW_LAYERS = Object.freeze({
+  network: LAYER_IDS,
+  flow: [],
+  tiers: [],
+  bus: [],
+})
 export const GROUP_MODES = ["auto", "none", "host", "session"]
 export const EDGE_STYLES = ["orthogonal", "straight", "curved"]
 const VIEW_CHANNEL_MODE = { flow: "inline", tiers: "node", bus: "node" }
@@ -68,7 +75,14 @@ function setupView() {
   const edgeStyle = ref(EDGE_STYLES.includes(saved.edgeStyle) ? saved.edgeStyle : "orthogonal")
   const layoutInfo = ref(null)
   const groupBy = ref(GROUP_MODES.includes(saved.groupBy) ? saved.groupBy : "auto")
-  const layers = ref({ ...DEFAULT_LAYERS, ...(saved.layers || {}) })
+  const layers = ref(
+    Object.fromEntries(
+      LAYER_IDS.map((id) => [
+        id,
+        typeof saved.layers?.[id] === "boolean" ? saved.layers[id] : DEFAULT_LAYERS[id],
+      ]),
+    ),
+  )
   const channelMode = ref(saved.channelMode === "inline" ? "inline" : "node")
   const minimap = ref(saved.minimap === true)
   const privilegedLinks = ref(
@@ -142,12 +156,19 @@ function setupView() {
     projectGraph(model.value, {
       sessionId: effectiveSessionId.value,
       groupBy: groupBy.value,
-      // Network follows the toggles; Flow, Tiers and Bus read channels and
-      // control links their own way, so they always receive both.
+      // Network follows every toggle; Flow, Tiers and Bus read channels and
+      // privileged memberships their own way and draw no direct links.
       layers:
         view.value === "network"
           ? layers.value
-          : { ...layers.value, channels: true, lineage: false, control: true },
+          : {
+              ...layers.value,
+              channels: true,
+              lineage: false,
+              privilegedListen: true,
+              privilegedSend: true,
+              direct: false,
+            },
       channelMode: VIEW_CHANNEL_MODE[view.value] || channelMode.value,
       collapsed: view.value === "bus" || view.value === "tiers" ? new Set() : collapsed.value,
       search: search.value,

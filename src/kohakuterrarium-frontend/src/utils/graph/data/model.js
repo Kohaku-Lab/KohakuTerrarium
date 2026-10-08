@@ -7,12 +7,19 @@
  *   channel  creature ↔ channel membership (`mode`: send | listen | both)
  *   wire     turn-end output wiring, creature → creature
  *   lineage  spawned-by link, parent creature → child creature
+ *   direct   direct message reach, creature → creature: a privileged
+ *            creature reaches every unprivileged member (`implicit`); any
+ *            creature that sends on another's direct channel reaches its
+ *            owner explicitly
+ *
+ * Channel edges of a privileged creature carry `control`: it listens on every
+ * channel, and its send memberships are the ones assigned to it.
  *
  * A channel named after a creature of the same session is that creature's
- * direct channel, an alias for messaging it. It is not a channel to show:
- * it is dropped from channels, edges and creature listen/send lists, and
- * kept only in `aliases` because the engine still counts it as a link when
- * predicting splits.
+ * direct channel, an alias for messaging it. It is not a channel node: it is
+ * dropped from channels, channel edges and creature listen/send lists, drawn
+ * as `direct` edges, and kept in `aliases` because the engine still counts
+ * it as a link when predicting splits.
  */
 
 export const HOST_SITE = "_host"
@@ -79,7 +86,6 @@ function addChannelEdges(creature, channelsByName, ensureChannel, edges) {
       target: channel.id,
       sessionId: creature.sessionId,
       channelName: name,
-      // A privileged creature can reach every channel; its memberships are access, not team design.
       control: creature.privileged,
     })
   }
@@ -105,6 +111,37 @@ function addWireEdges(graph, sessionId, creatureIdByName, creatureIds, privilege
       dispatch: privilegedIds.has(from) && !privilegedIds.has(to),
     })
   }
+}
+
+function addDirectEdges(members, aliasSenders, sessionId, edges) {
+  const byName = new Map(members.map((c) => [c.name, c]))
+  const pairs = new Map()
+  const add = (source, target, implicit) => {
+    if (source.id === target.id) return
+    const key = `${source.id}>${target.id}`
+    const prev = pairs.get(key)
+    if (prev) prev.implicit = prev.implicit && implicit
+    else pairs.set(key, { source: source.id, target: target.id, implicit })
+  }
+  for (const [name, senderIds] of aliasSenders) {
+    const owner = byName.get(name)
+    if (!owner) continue
+    for (const id of senderIds) {
+      const sender = members.find((c) => c.id === id)
+      if (sender) add(sender, owner, false)
+    }
+  }
+  for (const p of members.filter((c) => c.privileged))
+    for (const target of members.filter((c) => !c.privileged)) add(p, target, true)
+  for (const pair of pairs.values())
+    edges.push({
+      id: `direct:${pair.source}:${pair.target}`,
+      kind: "direct",
+      source: pair.source,
+      target: pair.target,
+      sessionId,
+      implicit: pair.implicit,
+    })
 }
 
 /** Build the full model from a snapshot. Unknown or partial fields degrade to defaults. */
@@ -138,6 +175,8 @@ export function buildGraphModel(snapshot) {
       rawCreatures.map((raw) => raw.name || raw.creature_id || raw.agent_id),
     )
     const aliasMembers = new Map()
+    const aliasSenders = new Map()
+    const members = []
     const channelsByName = new Map()
     const ensureChannel = (name, raw = {}) => {
       const channel = {
@@ -169,10 +208,14 @@ export function buildGraphModel(snapshot) {
         if (!creatureNames.has(name)) continue
         if (!aliasMembers.has(name)) aliasMembers.set(name, [])
         aliasMembers.get(name).push(creature.id)
+        if (!creature.send.includes(name)) continue
+        if (!aliasSenders.has(name)) aliasSenders.set(name, [])
+        aliasSenders.get(name).push(creature.id)
       }
       creature.listen = creature.listen.filter((name) => !creatureNames.has(name))
       creature.send = creature.send.filter((name) => !creatureNames.has(name))
       creatures.push(creature)
+      members.push(creature)
       creatureIds.add(creature.id)
       if (creature.privileged) privilegedIds.add(creature.id)
       creatureIdByName.set(creature.name, creature.id)
@@ -181,6 +224,7 @@ export function buildGraphModel(snapshot) {
       addChannelEdges(creature, channelsByName, ensureChannel, edges)
     }
     addWireEdges(graph, sessionId, creatureIdByName, creatureIds, privilegedIds, edges)
+    addDirectEdges(members, aliasSenders, sessionId, edges)
     for (const [name, memberIds] of aliasMembers) aliases.push({ sessionId, name, memberIds })
     session.hostIds = sortHosts([...sessionHosts])
     sessions.push(session)

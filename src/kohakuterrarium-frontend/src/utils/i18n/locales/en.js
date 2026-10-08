@@ -1866,7 +1866,11 @@ export default {
   "graph.flow.privilegedHint":
     "Privileged node: can reach every channel. Drawn links are where it sends work in and receives results",
   "graph.group.privileged": "Privileged nodes",
-  "graph.layer.control": "Control links",
+  "graph.layer.privilegedListen": "Privileged listens",
+  "graph.layer.privilegedSend": "Privileged sends",
+  "graph.layer.direct": "Direct links",
+  "graph.toolbar.links": "Links",
+  "graph.toolbar.linksHint": "Choose which kinds of links are drawn",
   "graph.tiers.user": "User",
   "graph.tiers.privileged": "privileged",
   "graph.tiers.listens": "listens",
@@ -1903,6 +1907,7 @@ export default {
   "graph.edge.kind.wire": "Output wire",
   "graph.edge.kind.via": "Through channels",
   "graph.edge.kind.lineage": "Spawned by",
+  "graph.edge.kind.direct": "Direct link",
   "graph.edge.bundled": ({ n }) => `${n} connections bundled; expand the group to edit them.`,
   "graph.edge.withContent": "Forward the turn's final text",
   "graph.edge.prompt": "Prompt template",
@@ -1910,6 +1915,9 @@ export default {
   "graph.edge.explain.via": ({ channels }) =>
     `Messages reach the target through: ${channels}. Edit membership on the creatures.`,
   "graph.edge.explain.lineage": "The target was spawned by the source. This link is informational.",
+  "graph.edge.explain.direct": "The source can message the target directly, as a privileged node.",
+  "graph.edge.explain.directAssigned":
+    "The source sends on the target's direct channel, so it messages the target directly.",
   "graph.confirm.splits": ({ n }) => `The session will split into ${n} sessions:`,
   "graph.confirm.removeCreature": ({ name }) => `Remove ${name}?`,
   "graph.confirm.removeCreatureBody": ({ name }) =>
@@ -1960,7 +1968,8 @@ export default {
   "graph.legend.title": "Legend",
   "graph.legend.membership": "Channel membership (arrow = message direction)",
   "graph.legend.handoff": "Handoff: work passing on a channel (label names it)",
-  "graph.legend.control": "Link to or from a privileged node (purple)",
+  "graph.legend.control": "Privileged node listening on or sending to a channel (purple)",
+  "graph.legend.direct": "Direct link: messages the creature it points at, no channel",
   "graph.legend.bundle": "Channel every arrow of a fan carries, named once",
   "graph.legend.wire": "Output wire: turn-end text to another creature",
   "graph.legend.ping": "Ping only: a wire without content",

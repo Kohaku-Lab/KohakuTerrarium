@@ -9,6 +9,8 @@ vi.mock("@/utils/uiPrefs", () => ({
   writeLocalJsonPref: vi.fn(),
 }))
 
+import { DEFAULT_LAYERS } from "@/utils/graph/data/projection"
+
 import { useGraphLiveStore } from "./live"
 import { quantizeAspect, useGraphViewStore } from "./view"
 
@@ -118,29 +120,44 @@ describe("graph view store", () => {
     expect(useGraphLiveStore().model.creatures.map((c) => c.id)).toEqual(["a", "b", "c", "solo"])
   })
 
-  it("hides control links in Network by default and always gives them to the other views", () => {
+  it("shows privileged listens, sends and direct links in Network, each toggled on its own", () => {
     useGraphLiveStore().snapshot = {
       graphs: [
         {
           graph_id: "g",
           creatures: [
-            creature("boss", { is_privileged: true, listen_channels: ["x"] }),
-            creature("w", { send_channels: ["x"] }),
+            creature("boss", { is_privileged: true, listen_channels: ["x"], send_channels: ["y"] }),
+            creature("w", { send_channels: ["x"], listen_channels: ["y"] }),
           ],
-          output_edges: [{ edge_id: "r", from: "w", to_creature_id: "boss" }],
         },
       ],
     }
     const view = useGraphViewStore(`t${key}`)
     view.setSession("g")
-    const reaches = () =>
-      view.projection.edges.some((e) => e.source === "boss" || e.target === "boss")
-    expect(reaches()).toBe(false)
-    view.toggleLayer("control")
-    expect(reaches()).toBe(true)
-    view.toggleLayer("control")
+    const ids = () => view.projection.edges.map((e) => `${e.id}/${e.mode || ""}`).sort()
+    expect(ids()).toEqual([
+      "chan:boss:ch:g:x/listen",
+      "chan:boss:ch:g:y/send",
+      "chan:w:ch:g:x/send",
+      "chan:w:ch:g:y/listen",
+      "direct:boss:w/",
+    ])
+    view.toggleLayer("privilegedListen")
+    expect(ids()).not.toContain("chan:boss:ch:g:x/listen")
+    expect(ids()).toContain("chan:boss:ch:g:y/send")
+    view.toggleLayer("privilegedSend")
+    view.toggleLayer("direct")
+    expect(ids()).toEqual(["chan:w:ch:g:x/send", "chan:w:ch:g:y/listen"])
     view.view = "tiers"
-    expect(reaches()).toBe(true)
+    expect(ids()).toContain("chan:boss:ch:g:x/listen")
+    expect(ids().some((id) => id.startsWith("direct:"))).toBe(false)
+  })
+
+  it("drops retired layer keys from saved prefs", async () => {
+    const { getHybridPrefSync } = await import("@/utils/uiPrefs")
+    getHybridPrefSync.mockReturnValueOnce({ layers: { control: true, wires: false, direct: "x" } })
+    const layers = useGraphViewStore(`t${key}-layers`).layers
+    expect(layers).toEqual({ ...DEFAULT_LAYERS, wires: false })
   })
 
   it("lets live drag positions win over stored ones and stores only on remember", () => {

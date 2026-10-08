@@ -156,8 +156,8 @@ function placeBlock(base, projection, ids, sizes, block, origin, routeSides) {
   const rect = { x: origin.x, y: origin.y, width: block.width, height: block.height }
   const members = new Set(ids)
   const routes = new Map(base.routes || [])
-  // One gutter lane per docked node and direction, stepping away from the block:
-  // only links sharing an end and a direction (a fan-out or a fan-in) share a run.
+  // One gutter lane per docked node, direction and link family, stepping away from the block:
+  // only channel links or only direct links sharing an end and a direction share a run.
   const lane = new Map()
   const away = { left: 1, top: 1, right: -1, bottom: -1 }
   const trunks = new Map()
@@ -166,7 +166,8 @@ function placeBlock(base, projection, ids, sizes, block, origin, routeSides) {
   const trunkOf = (e) => {
     const docked = members.has(e.source) ? e.source : e.target
     const other = docked === e.source ? e.target : e.source
-    return { docked, other, key: `${docked}>${docked === e.source ? "out" : "in"}` }
+    const family = e.kind === "direct" ? "direct>" : ""
+    return { docked, other, key: `${docked}>${family}${docked === e.source ? "out" : "in"}` }
   }
   for (const e of projection.edges) {
     if (members.has(e.source) === members.has(e.target)) continue

@@ -54,8 +54,9 @@ const strokeStyle = computed(() => {
     strokeWidth: emphasis ? width + 1 : width,
     strokeOpacity: emphasis ? 1 : kind === "wire" ? 0.85 : 0.45,
   }
-  // Channel links are always solid; dashes mean a ping wire (alone or folded into an arrow), dots lineage.
+  // Channel links are always solid; dashes mean a ping wire (alone or folded into an arrow), dots lineage, dash-dots a direct link.
   if (kind === "lineage") return { ...base, strokeDasharray: "2 5", strokeWidth: 1.5 }
+  if (kind === "direct") return { ...base, strokeDasharray: "9 3 2 3", strokeOpacity: emphasis ? 1 : 0.75 }
   const style = { ...base }
   if (kind === "authority") Object.assign(style, { strokeWidth: emphasis ? 2.5 : 1.5, strokeOpacity: emphasis ? 1 : 0.8 })
   if (props.data.control && kind === "channel" && !emphasis) style.strokeOpacity = 0.7
@@ -72,12 +73,14 @@ const label = computed(() => {
   if (!(props.selected || d.lit)) return ""
   if (d.kind === "wire") return d.prompt ? "wire · prompt" : d.withContent === false ? "wire · ping" : "wire"
   if (d.kind === "via") return d.labels?.join(", ") || d.channelName || ""
+  if (d.kind === "direct") return "direct"
   return ""
 })
 
 const labelClass = computed(() => {
   if (props.selected) return "text-iolite"
   if (props.data.kind === "wire") return "text-sapphire dark:text-sapphire-light"
+  if (props.data.kind === "direct") return "text-sage-shadow dark:text-sage-light"
   if (props.data.control) return "text-iolite dark:text-iolite-light"
   return "text-aquamarine-shadow dark:text-aquamarine-light"
 })

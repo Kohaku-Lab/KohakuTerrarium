@@ -174,22 +174,6 @@ html.dark .kt-graph-chip {
   color: var(--kt-color-iolite);
   background: rgb(90 79 207 / 0.08);
 }
-.kt-graph-chip--aqua {
-  border-color: var(--kt-color-aquamarine);
-  color: var(--kt-color-aquamarine-shadow);
-  background: rgb(76 153 137 / 0.12);
-}
-html.dark .kt-graph-chip--aqua {
-  color: var(--kt-color-aquamarine-light);
-}
-.kt-graph-chip--sapphire {
-  border-color: var(--kt-color-sapphire);
-  color: var(--kt-color-sapphire);
-  background: rgb(15 82 186 / 0.08);
-}
-html.dark .kt-graph-chip--sapphire {
-  color: var(--kt-color-sapphire-light);
-}
 .kt-graph-section {
   font-size: 0.65rem;
   text-transform: uppercase;

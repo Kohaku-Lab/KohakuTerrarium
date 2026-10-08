@@ -8,8 +8,8 @@ import { MarkerType } from "@vue-flow/core"
 import { EDGE_COLOR } from "@/components/graph/graphTheme"
 import { groupBackdrops } from "@/utils/graph/layout/place/elk"
 
-export function marker(color) {
-  return { type: MarkerType.ArrowClosed, color, width: 16, height: 16 }
+export function marker(color, type = MarkerType.ArrowClosed) {
+  return { type, color, width: 16, height: 16 }
 }
 
 /** Backdrop nodes for expanded groups, sized around their members' boxes. */
@@ -58,7 +58,10 @@ export function edgeElement(
     : e.control && e.kind === "channel"
       ? EDGE_COLOR.control
       : EDGE_COLOR[e.kind] || EDGE_COLOR.channel
-  const arrow = e.kind === "lineage" || e.kind === "authority" ? undefined : marker(color)
+  const arrow =
+    e.kind === "lineage" || e.kind === "authority"
+      ? undefined
+      : marker(color, e.kind === "direct" ? MarkerType.Arrow : MarkerType.ArrowClosed)
   // A layout-reversed edge is routed head-first, so its arrow sits at the start.
   const both = e.kind === "channel" && e.mode === "both"
   return {
@@ -81,6 +84,7 @@ export function edgeElement(
       prompt: e.prompt,
       back: !!e.back,
       control: !!e.control,
+      implicit: !!e.implicit,
       bend,
       points,
       labelPos,

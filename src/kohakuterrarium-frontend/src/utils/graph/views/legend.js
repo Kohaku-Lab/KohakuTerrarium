@@ -12,6 +12,7 @@ export const LEGEND_KEYS = [
   "membership",
   "handoff",
   "control",
+  "direct",
   "bundle",
   "wire",
   "ping",
@@ -40,6 +41,7 @@ function networkKeys(projection, out) {
   for (const e of projection.edges) {
     if (e.kind === "channel") out.add(e.control ? "control" : "membership")
     if (e.kind === "lineage") out.add("lineage")
+    if (e.kind === "direct") out.add("direct")
   }
   wireKeys(projection.edges, out)
   if (projection.groups.some((g) => g.kind === "control" && !g.collapsed)) out.add("group")

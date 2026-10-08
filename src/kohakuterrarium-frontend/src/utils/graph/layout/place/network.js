@@ -10,7 +10,7 @@ import { orthogonalRoute } from "@/utils/graph/layout/route/route"
 
 const BLOCK_GAP = 120
 
-/** Creature-only link list: two actors are linked when they share a channel or a wire. */
+/** Creature-only link list: two actors are linked when they share a channel or a wire; direct reach does not place them. */
 export function creatureSkeleton(projection) {
   const actors = projection.nodes.filter((n) => n.kind !== "channel")
   const ids = new Set(actors.map((n) => n.id))
@@ -20,7 +20,12 @@ export function creatureSkeleton(projection) {
     if (e.kind === "channel") {
       if (!membersOf.has(e.target)) membersOf.set(e.target, new Set())
       membersOf.get(e.target).add(e.source)
-    } else if (ids.has(e.source) && ids.has(e.target) && e.source !== e.target) {
+    } else if (
+      e.kind !== "direct" &&
+      ids.has(e.source) &&
+      ids.has(e.target) &&
+      e.source !== e.target
+    ) {
       links.add([e.source, e.target].sort().join("|"))
     }
   }

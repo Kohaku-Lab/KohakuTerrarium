@@ -84,7 +84,7 @@ const flowOf = (graph, mode = "bundle") =>
     projectGraph(buildGraphModel({ graphs: [graph] }), {
       sessionId: graph.graph_id,
       channelMode: "inline",
-      layers: { ...DEFAULT_LAYERS, control: true },
+      layers: DEFAULT_LAYERS,
     }),
     { privilegedLinks: mode },
   )
@@ -211,7 +211,7 @@ describe("labelling a drawing", () => {
         projectGraph(model, {
           sessionId: model.sessions.length === 1 ? model.sessions[0].id : null,
           channelMode: "inline",
-          layers: { ...DEFAULT_LAYERS, control: true },
+          layers: DEFAULT_LAYERS,
         }),
       )
       const result = await layoutGraph(input, "flow", { aspect: 1.6 })

@@ -48,12 +48,14 @@ describe("legend keys", () => {
     expect(flow).toEqual(expect.arrayContaining(["handoff", "control", "bundle", "back", "group"]))
     expect(flow).not.toContain("membership")
     expect(flow).not.toContain("privilegedChip")
-    // Network hides control links by default, so purple is not explained there until the layer is on.
-    expect(legendKeys("network", project())).not.toContain("control")
-    expect(legendKeys("network", project({ control: true }))).toContain("control")
     expect(legendKeys("network", project())).toEqual(
-      expect.arrayContaining(["membership", "ping", "sendPort", "wirePort"]),
+      expect.arrayContaining(["membership", "control", "direct", "ping", "sendPort", "wirePort"]),
     )
+    const listenOnly = legendKeys("network", project({ privilegedSend: false, direct: false }))
+    expect(listenOnly).toContain("control")
+    expect(listenOnly).not.toContain("direct")
+    const none = project({ privilegedListen: false, privilegedSend: false, direct: false })
+    expect(legendKeys("network", none)).not.toContain("control")
   })
 
   it("follows the Flow knob: chips instead of purple arrows, no bundle label per arrow", () => {

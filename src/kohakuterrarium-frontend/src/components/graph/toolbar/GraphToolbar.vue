@@ -15,12 +15,27 @@
       <option v-for="g in groupModes" :key="g" :value="g">{{ t(`graph.groupBy.${g}`) }}</option>
     </select>
 
-    <div v-if="view.view === 'network'" class="flex items-center gap-1">
-      <button v-for="layer in layerDefs" :key="layer.id" class="kt-graph-chip" :class="view.layers[layer.id] ? layer.on : ''" :aria-pressed="view.layers[layer.id]" @click="view.toggleLayer(layer.id)">{{ layer.label }}</button>
-      <button v-if="view.layers.channels" class="kt-graph-chip" :title="t('graph.toolbar.channelModeHint')" @click="view.channelMode = view.channelMode === 'node' ? 'inline' : 'node'">
+    <div v-if="layerDefs.length" class="flex items-center gap-1">
+      <div ref="linksEl" class="relative">
+        <button class="kt-graph-chip" :class="linksOpen ? 'kt-graph-chip--on' : ''" :aria-expanded="linksOpen" aria-haspopup="menu" :title="t('graph.toolbar.linksHint')" @click="linksOpen = !linksOpen">
+          <span class="i-carbon-connect" />{{ t("graph.toolbar.links") }}
+          <span class="text-warm-500 dark:text-warm-400 tabular-nums">{{ shownLayers }}/{{ layerDefs.length }}</span>
+          <span :class="linksOpen ? 'i-carbon-chevron-up' : 'i-carbon-chevron-down'" />
+        </button>
+        <div v-if="linksOpen" role="menu" class="absolute left-0 top-full mt-1 z-30 min-w-52 rounded-lg border border-warm-200 dark:border-warm-700 bg-white dark:bg-warm-900 shadow-lg p-1 flex flex-col" @keydown.escape.stop="linksOpen = false">
+          <button v-for="layer in layerDefs" :key="layer.id" role="menuitemcheckbox" :aria-checked="!!view.layers[layer.id]" :data-layer="layer.id" class="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left text-warm-700 dark:text-warm-200 hover:bg-warm-100 dark:hover:bg-warm-800" @click="view.toggleLayer(layer.id)">
+            <span class="shrink-0" :class="view.layers[layer.id] ? 'i-carbon-checkbox-checked text-iolite dark:text-iolite-light' : 'i-carbon-checkbox text-warm-400'" />
+            <svg width="24" height="10" class="shrink-0" aria-hidden="true">
+              <line x1="1" y1="5" x2="23" y2="5" :stroke="layer.color" stroke-width="2" :stroke-dasharray="layer.dash" />
+            </svg>
+            <span>{{ layer.label }}</span>
+          </button>
+        </div>
+      </div>
+      <button v-if="view.view === 'network' && view.layers.channels" class="kt-graph-chip" :title="t('graph.toolbar.channelModeHint')" @click="view.channelMode = view.channelMode === 'node' ? 'inline' : 'node'">
         {{ view.channelMode === "node" ? t("graph.toolbar.channelHubs") : t("graph.toolbar.channelInline") }}
       </button>
-      <select id="graph-edge-style" v-model="view.edgeStyle" class="kt-graph-select" :title="t('graph.toolbar.edgeStyle')">
+      <select v-if="view.view === 'network'" id="graph-edge-style" v-model="view.edgeStyle" class="kt-graph-select" :title="t('graph.toolbar.edgeStyle')">
         <option v-for="s in edgeStyles" :key="s" :value="s">{{ t(`graph.edgeStyle.${s}`) }}</option>
       </select>
     </div>
@@ -55,9 +70,10 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
-import { EDGE_STYLES, GROUP_MODES, useGraphViewStore } from "@/stores/graph/view"
+import { EDGE_COLOR } from "@/components/graph/graphTheme"
+import { EDGE_STYLES, GROUP_MODES, VIEW_LAYERS, useGraphViewStore } from "@/stores/graph/view"
 import { SAMPLE_PRESETS } from "@/utils/graph/data/sample"
 import { PRIVILEGED_LINK_MODES } from "@/utils/graph/views/flow"
 import { useI18n } from "@/utils/i18n"
@@ -98,12 +114,27 @@ const viewModes = computed(() => [
   { id: "bus", label: t("graph.view.bus"), icon: "i-carbon-table-split", hint: t("graph.view.busHint") },
 ])
 
-const layerDefs = computed(() => [
-  { id: "channels", label: t("graph.layer.channels"), on: "kt-graph-chip--aqua" },
-  { id: "wires", label: t("graph.layer.wires"), on: "kt-graph-chip--sapphire" },
-  { id: "lineage", label: t("graph.layer.lineage"), on: "kt-graph-chip--on" },
-  { id: "control", label: t("graph.layer.control"), on: "kt-graph-chip--on" },
-])
+const LAYER_LINES = {
+  channels: { color: EDGE_COLOR.channel },
+  wires: { color: EDGE_COLOR.wire },
+  lineage: { color: EDGE_COLOR.lineage, dash: "2 4" },
+  privilegedListen: { color: EDGE_COLOR.control },
+  privilegedSend: { color: EDGE_COLOR.control },
+  direct: { color: EDGE_COLOR.direct, dash: "6 2 2 2" },
+}
+
+const layerDefs = computed(() => (VIEW_LAYERS[view.view] || []).map((id) => ({ id, label: t(`graph.layer.${id}`), ...LAYER_LINES[id] })))
+const shownLayers = computed(() => layerDefs.value.filter((l) => view.layers[l.id]).length)
+
+const linksOpen = ref(false)
+const linksEl = ref(null)
+
+function closeLinksOutside(event) {
+  if (linksOpen.value && !linksEl.value?.contains(event.target)) linksOpen.value = false
+}
+
+onMounted(() => document.addEventListener("pointerdown", closeLinksOutside))
+onBeforeUnmount(() => document.removeEventListener("pointerdown", closeLinksOutside))
 
 const addItems = computed(() => [
   { id: "creature", label: t("graph.action.addCreature"), icon: "i-carbon-bot", disabled: !view.model.sessions.length || view.isSample },

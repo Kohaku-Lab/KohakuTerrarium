@@ -103,7 +103,10 @@ export function buildLayeredGraph(projection, direction, variant = {}) {
   const known = new Set([...projection.nodes.map((n) => n.id), ...containerIds])
   const laid = projection.edges.filter(
     (e) =>
-      known.has(e.source) && known.has(e.target) && (e.kind !== "lineage" || variant.withLineage),
+      known.has(e.source) &&
+      known.has(e.target) &&
+      e.kind !== "direct" &&
+      (e.kind !== "lineage" || variant.withLineage),
   )
   // ELK rejects a FIRST node with an incoming edge and a LAST node with an outgoing one.
   const hasIn = new Set(laid.map((e) => flowEndpoints(e)[1]))

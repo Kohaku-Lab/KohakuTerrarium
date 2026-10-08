@@ -134,6 +134,58 @@ describe("graph projection", () => {
     expect(lineage.edges.map((e) => e.kind)).toEqual(["lineage"])
   })
 
+  it("shows a privileged creature's listens, assigned sends and direct reach, each on its own layer", () => {
+    const team = buildGraphModel({
+      graphs: [
+        {
+          graph_id: "g",
+          creatures: [
+            creature("boss", {
+              is_privileged: true,
+              listen_channels: ["x", "y"],
+              send_channels: ["y"],
+            }),
+            creature("w", { send_channels: ["x"], listen_channels: ["y"] }),
+          ],
+        },
+      ],
+    })
+    const edges = (layers, channelMode = "node") =>
+      projectGraph(team, {
+        sessionId: "g",
+        groupBy: "none",
+        channelMode,
+        layers: { channels: true, wires: true, ...layers },
+      })
+        .edges.map((e) => `${e.kind}:${e.source}>${e.target}${e.mode ? `/${e.mode}` : ""}`)
+        .sort()
+    const x = channelNodeId("g", "x")
+    const y = channelNodeId("g", "y")
+    const all = { privilegedListen: true, privilegedSend: true, direct: true }
+    expect(edges(all)).toEqual([
+      `channel:boss>${x}/listen`,
+      `channel:boss>${y}/both`,
+      `channel:w>${x}/send`,
+      `channel:w>${y}/listen`,
+      "direct:boss>w",
+    ])
+    expect(edges({ ...all, privilegedSend: false, direct: false })).toEqual([
+      `channel:boss>${x}/listen`,
+      `channel:boss>${y}/listen`,
+      `channel:w>${x}/send`,
+      `channel:w>${y}/listen`,
+    ])
+    expect(edges({ ...all, privilegedListen: false })).toEqual([
+      `channel:boss>${y}/send`,
+      `channel:w>${x}/send`,
+      `channel:w>${y}/listen`,
+      "direct:boss>w",
+    ])
+    expect(edges({})).toEqual([`channel:w>${x}/send`, `channel:w>${y}/listen`])
+    expect(edges({ privilegedListen: true }, "inline")).toEqual(["via:w>boss"])
+    expect(edges({ privilegedSend: true }, "inline")).toEqual(["via:boss>w"])
+  })
+
   it("dims everything that does not match the search", () => {
     const p = projectGraph(model, { sessionId: "g1", groupBy: "none", search: "B" })
     expect(p.dimmed.has("b")).toBe(false)

@@ -171,6 +171,72 @@ describe("graph model", () => {
     expect(direct.creatures.find((c) => c.id === "a").send).toEqual(["x"])
     expect(direct.aliases).toEqual([{ sessionId: "g", name: "b", memberIds: ["a", "b"] }])
     expect(predictChannelRemoval(direct, channelNodeId("g", "x"))).toEqual([["a", "b"], ["c"]])
+    const links = direct.edges.filter((e) => e.kind === "direct")
+    expect(links).toEqual([
+      {
+        id: "direct:a:b",
+        kind: "direct",
+        source: "a",
+        target: "b",
+        sessionId: "g",
+        implicit: false,
+      },
+    ])
+  })
+
+  it("draws a privileged creature's direct reach to every other member, and nothing it does not have", () => {
+    const team = buildGraphModel({
+      graphs: [
+        {
+          graph_id: "g",
+          channels: [{ name: "w1" }, { name: "w2" }, { name: "boss" }],
+          creatures: [
+            creature("boss", {
+              is_privileged: true,
+              listen_channels: ["boss", "w1"],
+              send_channels: ["w2"],
+            }),
+            creature("w1", { listen_channels: ["w1"], send_channels: ["boss"] }),
+            creature("w2", { listen_channels: ["w2"] }),
+          ],
+        },
+      ],
+    })
+    const links = team.edges
+      .filter((e) => e.kind === "direct")
+      .map((e) => `${e.source}>${e.target}:${e.implicit ? "implicit" : "assigned"}`)
+      .sort()
+    // boss sends on w2's direct channel, so that link is assigned, not only implied by privilege.
+    expect(links).toEqual(["boss>w1:implicit", "boss>w2:assigned", "w1>boss:assigned"])
+    expect(team.edges.filter((e) => e.kind === "channel")).toEqual([])
+    expect(team.channels).toEqual([])
+  })
+
+  it("does not count a privileged creature's direct reach as a link when predicting splits", () => {
+    const loose = buildGraphModel({
+      graphs: [
+        {
+          graph_id: "g",
+          creatures: [
+            creature("boss", { is_privileged: true }),
+            creature("deputy", { is_privileged: true }),
+            creature("a", { send_channels: ["x"] }),
+            creature("b", { listen_channels: ["x"] }),
+          ],
+        },
+      ],
+    })
+    // Reach between two privileged creatures is implied by both, so it is not drawn.
+    const links = loose.edges
+      .filter((e) => e.kind === "direct")
+      .map((e) => `${e.source}>${e.target}`)
+    expect(links.sort()).toEqual(["boss>a", "boss>b", "deputy>a", "deputy>b"])
+    expect(predictChannelRemoval(loose, channelNodeId("g", "x"))).toEqual([
+      ["boss"],
+      ["deputy"],
+      ["a"],
+      ["b"],
+    ])
   })
 
   it("keeps a session whole when an output wire still bridges it", () => {

@@ -1,8 +1,9 @@
 /**
  * Visual roles for the graph view, drawn only from the gem palette:
- * channel = aquamarine, output wire = sapphire, sub-agent = taaffeite,
- * focus/selection and the control plane (privileged nodes, their channel links)
- * = iolite, status per StatusDot semantics, lineage = warm.
+ * channel = aquamarine, direct creature → creature reach = sage,
+ * output wire = sapphire, sub-agent = taaffeite, focus/selection and the
+ * control plane (privileged nodes, their channel links) = iolite, status per
+ * StatusDot semantics, lineage = warm.
  */
 
 import { GEM } from "@/utils/colors"
@@ -10,6 +11,7 @@ import { GEM } from "@/utils/colors"
 export const EDGE_COLOR = Object.freeze({
   channel: GEM.aquamarine.main,
   via: GEM.aquamarine.main,
+  direct: GEM.sage.main,
   wire: GEM.sapphire.main,
   lineage: "#A09A92",
   authority: "#8A8480",

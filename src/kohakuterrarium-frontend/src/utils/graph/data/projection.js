@@ -5,8 +5,9 @@
  * Options:
  *   sessionId    scope to one session, or null for every session
  *   groupBy      "auto" | "none" | "host" | "session"
- *   layers       { channels, wires, lineage, control } visibility; `control` shows a
- *                privileged creature's channel access and the reports wired to it
+ *   layers       visibility per link kind (LAYER_IDS): channel memberships, wires,
+ *                lineage, a privileged creature's listens and assigned sends,
+ *                and direct creature → creature reach
  *   channelMode  "node" (channels drawn as hubs) | "inline" (creature→creature edges labelled by channel)
  *   collapsed    Set of group ids rendered as one aggregate node
  *   search       case-insensitive name filter (non-matches are dimmed)
@@ -19,8 +20,21 @@ export const DEFAULT_LAYERS = Object.freeze({
   channels: true,
   wires: true,
   lineage: false,
-  control: false,
+  privilegedListen: true,
+  privilegedSend: true,
+  direct: true,
 })
+
+export const LAYER_IDS = Object.freeze(Object.keys(DEFAULT_LAYERS))
+
+/** A privileged creature's channel edge narrowed to the directions `layers` show, or null. */
+function controlEdge(e, layers) {
+  const send = layers.privilegedSend && (e.mode === "send" || e.mode === "both")
+  const listen = layers.privilegedListen && (e.mode === "listen" || e.mode === "both")
+  if (!send && !listen) return null
+  const mode = send && listen ? "both" : send ? "send" : "listen"
+  return mode === e.mode ? e : { ...e, mode }
+}
 
 export function groupIdFor(kind, key) {
   return `grp:${kind}:${key}`
@@ -123,13 +137,14 @@ function buildGroups(scoped, groupBy, collapsed) {
   return { groups: sorted, memberOf }
 }
 
-function inlineChannelEdges(scoped, showControl) {
+function inlineChannelEdges(scoped, layers) {
   const privileged = new Set(scoped.creatures.filter((c) => c.privileged).map((c) => c.id))
-  const visible = (id) => showControl || !privileged.has(id)
+  const sends = (id) => layers.privilegedSend || !privileged.has(id)
+  const listens = (id) => layers.privilegedListen || !privileged.has(id)
   const out = []
   for (const ch of scoped.channels) {
-    for (const s of ch.senders.filter(visible)) {
-      for (const l of ch.listeners.filter(visible)) {
+    for (const s of ch.senders.filter(sends)) {
+      for (const l of ch.listeners.filter(listens)) {
         if (s === l) continue
         out.push({
           id: `via:${s}:${l}:${ch.id}`,
@@ -228,15 +243,21 @@ export function projectGraph(model, options = {}) {
     nodes.push({ id: ch.id, kind: "channel", parent: groupId, channel: ch })
   }
 
-  const showControl = !!layers.control
-  let rawEdges = scoped.edges.filter((e) => {
-    if (e.kind === "channel") return showChannelNodes && (showControl || !e.control)
-    if (e.kind === "wire") return layers.wires && (showControl || !e.report)
-    if (e.kind === "lineage") return layers.lineage
-    return true
-  })
+  let rawEdges = []
+  for (const e of scoped.edges) {
+    if (e.kind === "channel") {
+      const shown = !showChannelNodes ? null : e.control ? controlEdge(e, layers) : e
+      if (shown) rawEdges.push(shown)
+    } else if (e.kind === "wire") {
+      if (layers.wires) rawEdges.push(e)
+    } else if (e.kind === "lineage") {
+      if (layers.lineage) rawEdges.push(e)
+    } else if (e.kind === "direct") {
+      if (layers.direct) rawEdges.push(e)
+    } else rawEdges.push(e)
+  }
   if (layers.channels && channelMode === "inline")
-    rawEdges = rawEdges.concat(inlineChannelEdges(scoped, showControl))
+    rawEdges = rawEdges.concat(inlineChannelEdges(scoped, layers))
 
   const remap = (id) => {
     if (hidden.has(id)) return null

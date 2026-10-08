@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col gap-4">
     <header class="flex flex-col gap-1">
-      <div class="text-xs uppercase tracking-wider" :class="edge.kind === 'wire' ? 'text-sapphire' : 'text-aquamarine-shadow dark:text-aquamarine-light'">{{ t(`graph.edge.kind.${edge.kind}`) }}</div>
+      <div class="text-xs uppercase tracking-wider" :class="edge.kind === 'wire' ? 'text-sapphire' : edge.kind === 'direct' ? 'text-sage-shadow dark:text-sage-light' : 'text-aquamarine-shadow dark:text-aquamarine-light'">{{ t(`graph.edge.kind.${edge.kind}`) }}</div>
       <div class="flex items-center gap-2 text-sm min-w-0">
         <button class="font-semibold truncate hover:underline" @click="selectEnd(fromId)">{{ fromName }}</button>
         <span class="text-warm-400">{{ edge.kind === "channel" && edge.mode === "both" ? "⇄" : "→" }}</span>
@@ -45,6 +45,7 @@
     </template>
 
     <div v-if="(edge.kind === 'via' && !members.length) || edge.kind === 'lineage'" class="text-xs text-warm-500">{{ t(`graph.edge.explain.${edge.kind}`, { channels: (edge.labels || []).join(", ") }) }}</div>
+    <div v-if="edge.kind === 'direct'" class="text-xs text-warm-500">{{ t(edge.implicit ? "graph.edge.explain.direct" : "graph.edge.explain.directAssigned") }}</div>
 
     <section v-if="editable" class="pt-2 border-t border-warm-200 dark:border-warm-700">
       <button class="kt-graph-action kt-graph-action--danger" @click="actions.removeEdge(edge)"><span class="i-carbon-unlink" />{{ t("graph.action.disconnect") }}</button>
