@@ -205,8 +205,11 @@ export function layoutBench(tanks, { width = 1200 } = {}) {
   return { ...laid, bounds }
 }
 
-/** Scale and offset that fit `bounds` into a `vw`×`vh` viewport, never enlarging past 1; centred across, from the top. */
+/**
+ * Scale and offset that fit `bounds` into a `vw`×`vh` viewport, never enlarging past 1;
+ * centred both ways, or from the top when even the smallest scale is taller than the view.
+ */
 export function fitView(bounds, vw, vh, pad = 32) {
   const k = Math.max(0.25, Math.min(1, (vw - 2 * pad) / bounds.w, (vh - 2 * pad) / bounds.h))
-  return { k, x: (vw - bounds.w * k) / 2, y: pad }
+  return { k, x: (vw - bounds.w * k) / 2, y: Math.max(pad, (vh - bounds.h * k) / 2) }
 }

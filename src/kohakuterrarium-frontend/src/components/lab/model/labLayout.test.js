@@ -138,11 +138,16 @@ describe("bench layout across machines", () => {
 })
 
 describe("fit", () => {
-  it("fits large benches by shrinking, never enlarges small ones, and centres across from the top", () => {
-    expect(fitView({ w: 400, h: 200 }, 1000, 800)).toEqual({ k: 1, x: 300, y: 32 })
+  it("fits large benches by shrinking, never enlarges small ones, and centres both ways", () => {
+    expect(fitView({ w: 400, h: 200 }, 1000, 800)).toEqual({ k: 1, x: 300, y: 300 })
     const big = fitView({ w: 2000, h: 1000 }, 1000, 800)
     expect(big.k).toBeCloseTo((1000 - 64) / 2000)
     expect(big.x).toBeCloseTo((1000 - 2000 * big.k) / 2)
+    expect(big.y).toBeCloseTo((800 - 1000 * big.k) / 2)
     expect(fitView({ w: 40000, h: 100 }, 1000, 800).k).toBe(0.25)
+  })
+
+  it("starts from the top when the bench is taller than the view even at the smallest scale", () => {
+    expect(fitView({ w: 400, h: 8000 }, 1000, 800)).toEqual({ k: 0.25, x: 450, y: 32 })
   })
 })
