@@ -23,6 +23,7 @@ from kohakuterrarium.api.schemas import (
     ImageUrlPayload,
     MessageEdit,
     ModelSwitch,
+    RecipeApply,
     RegenerateRequest,
     RenameRequest,
     SlashCommand,
@@ -52,6 +53,26 @@ class TestSimpleModels:
         m = CreatureAdd(name="alice", config_path="/p")
         assert m.listen_channels == []
         assert m.send_channels == []
+        assert m.config_yaml is None
+        assert not {"privileged", "start"} & set(CreatureAdd.model_fields)
+        inline = CreatureAdd(name="bob", config_yaml="system_prompt: hi")
+        assert inline.config_path is None
+
+    @pytest.mark.parametrize(
+        "sources",
+        [
+            {},
+            {"config_path": "", "config_yaml": ""},
+            {"config_path": "/p", "config_yaml": "a: 1"},
+        ],
+    )
+    def test_creature_add_needs_exactly_one_source(self, sources):
+        with pytest.raises(ValidationError, match="exactly one"):
+            CreatureAdd(name="x", **sources)
+
+    def test_recipe_apply(self):
+        m = RecipeApply(config_path="@pkg/team")
+        assert m.config_path == "@pkg/team"
 
     def test_channel_add_defaults(self):
         m = ChannelAdd(name="ch")

@@ -8,6 +8,7 @@ adapt the same session model for older clients.
 import asyncio
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -20,10 +21,14 @@ from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import (
     AgentCreate,
     CreatureAdd,
+    RecipeApply,
     RenameRequest,
     TerrariumCreate,
 )
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.studio.sessions import lifecycle, remote_meta
+from kohakuterrarium.studio.sessions.recipe_merge import apply_recipe_to_session
+from kohakuterrarium.studio.sessions.registry import session_pwd
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.service import TerrariumService
 
@@ -399,20 +404,54 @@ async def list_session_creatures(
 async def add_session_creature(
     session_id: str, req: CreatureAdd, service: TerrariumService = Depends(get_service)
 ):
-    # CreatureConfig accepts inherited config data rather than a path field, so
-    # preserve recipe parsing semantics by passing the request path as base_config.
+    # A path source becomes base_config so it resolves like a recipe entry;
+    # an inline document is the creature's own config data.
+    if req.config_path:
+        data = {"name": req.name, "base_config": req.config_path}
+    else:
+        try:
+            inline = yaml.safe_load(req.config_yaml)
+        except yaml.YAMLError as e:
+            raise HTTPException(400, f"config_yaml is not valid YAML: {e}")
+        if not isinstance(inline, dict):
+            raise HTTPException(400, "config_yaml must be a mapping")
+        if "channels" in inline:
+            raise HTTPException(
+                400,
+                "config_yaml: 'channels' is a recipe key; pass listen/send channels instead",
+            )
+        data = {**inline, "name": req.name}
+    pwd = session_pwd(service, session_id)
     cfg = CreatureConfig(
         name=req.name,
-        config_data={"name": req.name, "base_config": req.config_path},
-        base_dir=Path.cwd(),
+        config_data=data,
+        base_dir=Path(pwd) if pwd else Path.cwd(),
         listen_channels=req.listen_channels,
         send_channels=req.send_channels,
     )
     try:
-        cid = await lifecycle.add_creature(service, session_id, cfg)
-        return {"creature_id": cid, "status": "running"}
-    except (ValueError, KeyError) as e:
+        cid = await lifecycle.add_creature(service, session_id, cfg, is_privileged=True)
+    except NotFoundError as e:
+        raise HTTPException(404, str(e))
+    except (ValueError, KeyError, FileNotFoundError, TypeError, AttributeError) as e:
+        # TypeError / AttributeError: a mistyped field in user-written config.
         raise HTTPException(400, str(e))
+    return {"creature_id": cid, "status": "running"}
+
+
+@router.post("/{session_id}/recipes")
+async def apply_session_recipe(
+    session_id: str, req: RecipeApply, service: TerrariumService = Depends(get_service)
+):
+    try:
+        created = await apply_recipe_to_session(
+            service, session_id, config_path=req.config_path
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, str(e))
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(400, str(e))
+    return {"creature_ids": created}
 
 
 @router.delete("/{session_id}/creatures/{creature_id}")

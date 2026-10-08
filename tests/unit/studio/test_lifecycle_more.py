@@ -11,7 +11,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kohakuterrarium.errors import InvalidRequestError
 from kohakuterrarium.studio.sessions import lifecycle
+from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
@@ -310,28 +312,164 @@ class TestStopSessionSwallow:
 
 class TestAddCreatureSuccess:
     async def test_returns_creature_id(self):
-        from kohakuterrarium.terrarium.config import CreatureConfig
-
         t = await TestTerrariumBuilder().with_creature("alice").build()
         svc = LocalTerrariumService(t)
         try:
             gid = t.get_creature("alice").graph_id
+            calls = []
 
             async def _add(cfg, graph=None, **kw):
+                calls.append(("add", kw["start"], kw["is_privileged"], kw["pwd"]))
                 return Creature(
                     creature_id="cid-new",
                     name="new",
                     agent=_FakeAgent(name="new"),
                 )
 
+            async def _start(cid):
+                calls.append(("start", cid))
+
             t.add_creature = _add
+            t.start = _start
+            lifecycle.meta_for(svc)[gid] = {"pwd": "/work/team"}
             cfg = CreatureConfig(
                 name="new", config_data={"name": "new"}, base_dir=Path(".")
             )
-            out = await lifecycle.add_creature(svc, gid, cfg)
+            out = await lifecycle.add_creature(svc, gid, cfg, is_privileged=True)
             assert out == "cid-new"
+            # Added stopped in the session folder, store attached, then started.
+            assert calls == [("add", False, True, "/work/team"), ("start", "cid-new")]
         finally:
             await t.shutdown()
+
+    async def test_failed_start_removes_the_creature(self):
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        svc = LocalTerrariumService(t)
+        removed = []
+        try:
+            gid = t.get_creature("alice").graph_id
+
+            async def _add(cfg, graph=None, **kw):
+                return Creature(
+                    creature_id="cid-new", name="new", agent=_FakeAgent(name="new")
+                )
+
+            async def _start(cid):
+                raise RuntimeError("boom")
+
+            async def _remove(cid, **kw):
+                removed.append((cid, kw))
+
+            t.add_creature, t.start, t.remove_creature = _add, _start, _remove
+            cfg = CreatureConfig(
+                name="new", config_data={"name": "new"}, base_dir=Path(".")
+            )
+            with pytest.raises(RuntimeError, match="boom"):
+                await lifecycle.add_creature(svc, gid, cfg)
+            # Undoing the add never splits the session's other members apart.
+            assert removed == [("cid-new", {"split": False})]
+        finally:
+            await t.shutdown()
+
+    async def test_wires_listen_and_send_channels_before_start(self):
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        svc = LocalTerrariumService(t)
+        calls, removed = [], []
+        try:
+            gid = t.get_creature("alice").graph_id
+
+            async def _add(cfg, graph=None, **kw):
+                return Creature(
+                    creature_id="cid-new", name="new", agent=_FakeAgent(name="new")
+                )
+
+            async def _start(cid):
+                calls.append(("start", cid))
+
+            async def _wire(graph_id, cid, channel, direction, *, enabled=True):
+                if channel == "ghost":
+                    raise KeyError(f"channel {channel!r} not in session")
+                calls.append(("wire", graph_id, cid, channel, direction))
+
+            async def _remove(cid, **kw):
+                removed.append(cid)
+
+            t.add_creature, t.start, t.remove_creature = _add, _start, _remove
+            svc.wire_creature = _wire
+            cfg = CreatureConfig(
+                name="new",
+                config_data={"name": "new"},
+                base_dir=Path("."),
+                listen_channels=["team"],
+                send_channels=["out"],
+            )
+            assert await lifecycle.add_creature(svc, gid, cfg) == "cid-new"
+            assert calls == [
+                ("wire", gid, "cid-new", "team", "listen"),
+                ("wire", gid, "cid-new", "out", "send"),
+                ("start", "cid-new"),
+            ]
+            calls.clear()
+            cfg.listen_channels = ["ghost"]
+            with pytest.raises(KeyError, match="ghost"):
+                await lifecycle.add_creature(svc, gid, cfg)
+            assert calls == []
+            assert removed == ["cid-new"]
+        finally:
+            await t.shutdown()
+
+    async def test_worker_session_takes_path_form_only(self):
+        svc = LocalTerrariumService(Terrarium())
+        captured = {}
+
+        async def _remote_add(cfg, **kw):
+            captured["cfg"], captured["kw"] = cfg, kw
+            return CreatureInfo(
+                creature_id="cid-r",
+                name="r",
+                graph_id="remote-g",
+                is_running=True,
+                is_privileged=True,
+                parent_creature_id=None,
+                listen_channels=(),
+                send_channels=(),
+            )
+
+        svc.add_creature = _remote_add
+        lifecycle.meta_for(svc)["remote-g"] = {"on_node": "w1", "pwd": "/srv/team"}
+        try:
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(lifecycle, "host_engine_or_none", lambda _s: None)
+                path_cfg = CreatureConfig(
+                    name="r",
+                    config_data={"name": "r", "base_config": "@kt-biome/creatures/swe"},
+                    base_dir=Path("."),
+                )
+                out = await lifecycle.add_creature(
+                    svc, "remote-g", path_cfg, is_privileged=True
+                )
+                assert out == "cid-r"
+                assert captured["cfg"] == "@kt-biome/creatures/swe"
+                assert captured["kw"]["name"] == "r"
+                assert captured["kw"]["on_node"] == "w1"
+                assert captured["kw"]["pwd"] == "/srv/team"
+                inline = CreatureConfig(
+                    name="x",
+                    config_data={"name": "x", "system_prompt": "hi"},
+                    base_dir=Path("."),
+                )
+                with pytest.raises(InvalidRequestError, match="config path only"):
+                    await lifecycle.add_creature(svc, "remote-g", inline)
+                wired = CreatureConfig(
+                    name="y",
+                    config_data={"name": "y", "base_config": "/abs/y"},
+                    base_dir=Path("."),
+                    listen_channels=["team"],
+                )
+                with pytest.raises(InvalidRequestError):
+                    await lifecycle.add_creature(svc, "remote-g", wired)
+        finally:
+            await svc.engine.shutdown()
 
 
 # ── list_creatures KeyError continue (583-584, 587) ───────────

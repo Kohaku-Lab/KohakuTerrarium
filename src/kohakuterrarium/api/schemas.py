@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TerrariumCreate(BaseModel):
@@ -26,12 +26,30 @@ class TerrariumStatus(BaseModel):
 
 
 class CreatureAdd(BaseModel):
-    """Request body for adding a creature to a terrarium."""
+    """Request body for adding a creature to a running session.
+
+    The creature comes from exactly one source: ``config_path`` (a path or
+    ``@pkg/...`` ref) or ``config_yaml`` (an inline creature config document).
+    User-added creatures always join started and privileged.
+    """
 
     name: str
-    config_path: str
+    config_path: str | None = None
+    config_yaml: str | None = None
     listen_channels: list[str] = []
     send_channels: list[str] = []
+
+    @model_validator(mode="after")
+    def _one_source(self) -> "CreatureAdd":
+        if bool(self.config_path) == bool(self.config_yaml):
+            raise ValueError("provide exactly one of config_path or config_yaml")
+        return self
+
+
+class RecipeApply(BaseModel):
+    """Request body for merging a terrarium recipe into a running session."""
+
+    config_path: str
 
 
 class TextPartPayload(BaseModel):

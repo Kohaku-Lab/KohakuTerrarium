@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
 from kohakuterrarium.studio.sessions import (
@@ -30,6 +31,7 @@ from kohakuterrarium.studio.sessions.registry import (  # noqa: F401 — re-expo
     list_session_stores,
     meta_for,
     register_session_meta,
+    session_pwd,
     stores_for,
 )
 from kohakuterrarium.studio.sessions.store_attach import (
@@ -737,39 +739,70 @@ async def end_session(service: "TerrariumService", session_id: str) -> None:
 
 
 async def add_creature(
-    service: "TerrariumService", session_id: str, config: CreatureConfig
+    service: "TerrariumService",
+    session_id: str,
+    config: CreatureConfig,
+    *,
+    is_privileged: bool = False,
+    start: bool = True,
 ) -> str:
     """Hot-plug a creature into an existing session.  Returns creature_id.
 
-    The new creature is bound to the session's existing session store
-    so its turns / tool calls / events persist like every other
-    creature in the graph — without this it would run un-persisted and
-    its history would be lost on resume.
+    The creature runs in the session's working folder, is bound to the
+    session's store and wired onto its ``listen_channels`` /
+    ``send_channels`` (which must exist) before it starts, so every event
+    persists and resume keeps it; any failure removes it again.
 
-    Lab-host path: the session lives on a worker, so route the spawn
-    through ``service.add_creature(..., on_node=<worker>)``.  Without
-    this branch the helper would call ``as_engine(service)`` and 500
-    in lab-host mode (the host runs no agent engine).
+    Lab-host path: the session lives on a worker, so the spawn routes
+    through ``service.add_creature(..., on_node=<worker>)``. Only a
+    path-form config crosses the wire; inline config data or channel
+    wiring in the config raise ``InvalidRequestError``.
     """
-    # Local additions use the engine so graph membership and store attachment agree.
+    pwd = session_pwd(service, session_id)
     engine = host_engine_or_none(service)
     if engine is not None:
         if session_id not in {g.graph_id for g in engine.list_graphs()}:
-            raise KeyError(f"session {session_id!r} not found")
-        creature = await engine.add_creature(config, graph=session_id)
-        # The existing graph store is reused, and its config type must be resumable.
-        await attach_session_store_for_creature(service, creature, config_type="agent")
+            raise NotFoundError(f"session {session_id!r} not found")
+        creature = await engine.add_creature(
+            config, graph=session_id, is_privileged=is_privileged, start=False, pwd=pwd
+        )
+        try:
+            # The existing graph store is reused, and its config type must be resumable.
+            await attach_session_store_for_creature(
+                service, creature, config_type="agent"
+            )
+            for direction, channels in (
+                ("listen", config.listen_channels),
+                ("send", config.send_channels),
+            ):
+                for channel in channels or ():
+                    await service.wire_creature(
+                        session_id, creature.creature_id, channel, direction
+                    )
+            if start:
+                await engine.start(creature.creature_id)
+        except BaseException:
+            await engine.remove_creature(creature.creature_id, split=False)
+            raise
         return creature.creature_id
 
-    # Remote additions route to the worker recorded in session metadata.
     meta = meta_for(service).get(session_id)
     if meta is None or not meta.get("on_node"):
-        raise KeyError(f"session {session_id!r} not found")
-    on_node = meta["on_node"]
+        raise NotFoundError(f"session {session_id!r} not found")
+    data = getattr(config, "config_data", None) or {}
+    path_only = set(data) <= {"name", "base_config"} and data.get("base_config")
+    if not path_only or config.listen_channels or config.send_channels:
+        raise InvalidRequestError(
+            "a worker-hosted session takes a config path only; wire channels after adding"
+        )
     info = await service.add_creature(
-        config,
+        data["base_config"],
         graph_id=session_id,
-        on_node=on_node,
+        on_node=meta["on_node"],
+        name=config.name,
+        is_privileged=is_privileged,
+        start=start,
+        pwd=pwd,
     )
     return info.creature_id
 

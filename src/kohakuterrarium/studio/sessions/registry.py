@@ -95,6 +95,28 @@ def register_session_meta(
     return entry
 
 
+def session_pwd(runtime, session_id: str) -> str | None:
+    """The working folder creatures of ``session_id`` run in.
+
+    The recorded session ``pwd`` when present, else the build folder of a
+    live member on the host engine; ``None`` when neither is known.
+    """
+    recorded = (meta_for(runtime).get(session_id) or {}).get("pwd")
+    if recorded:
+        return recorded
+    engine = host_engine_or_none(runtime)
+    if engine is None:
+        return None
+    for graph in engine.list_graphs():
+        if graph.graph_id != session_id:
+            continue
+        for creature_id in sorted(graph.creature_ids):
+            build_pwd = getattr(engine.get_creature(creature_id), "build_pwd", "")
+            if build_pwd:
+                return build_pwd
+    return None
+
+
 def get_session_store(runtime, session_id: str) -> "SessionStore | None":
     """Return the SessionStore attached to ``session_id`` if any."""
     return stores_for(runtime).get(session_id)
@@ -113,5 +135,6 @@ __all__ = [
     "meta_for",
     "register_session_meta",
     "registry_for",
+    "session_pwd",
     "stores_for",
 ]

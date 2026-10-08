@@ -1,6 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.api.routes.sessions_v2.active`."""
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2 import active as active_mod
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.studio.sessions.handles import Session, SessionListing
 
 _SENTINEL = object()
@@ -685,11 +687,13 @@ class TestSessionCreatureCrud:
         # It now builds a valid CreatureConfig(config_data, base_dir).
         captured = {}
 
-        async def fake_add(svc, sid, cfg):
+        async def fake_add(svc, sid, cfg, **kw):
             captured["cfg"] = cfg
+            captured["kw"] = kw
             return "new-cid"
 
         monkeypatch.setattr(active_mod.lifecycle, "add_creature", fake_add)
+        monkeypatch.setattr(active_mod, "session_pwd", lambda svc, sid: "/work/team")
         client = TestClient(self._app())
         resp = client.post(
             "/active/g1/creatures",
@@ -702,18 +706,30 @@ class TestSessionCreatureCrud:
         cfg = captured["cfg"]
         assert cfg.name == "alice"
         assert cfg.config_data["base_config"] == "/x"
+        assert cfg.base_dir == Path("/work/team")
+        assert captured["kw"] == {"is_privileged": True}
 
-    def test_add_creature_value_error(self, monkeypatch):
-        async def boom(svc, sid, cfg):
-            raise ValueError("bad")
+    @pytest.mark.parametrize(
+        "error, status",
+        [
+            (ValueError("bad"), 400),
+            (TypeError("tools must be a list"), 400),
+            (AttributeError("'str' has no attribute 'get'"), 400),
+            (NotFoundError("session 'g1' not found"), 404),
+        ],
+    )
+    def test_add_creature_errors(self, monkeypatch, error, status):
+        async def boom(svc, sid, cfg, **kw):
+            raise error
 
         monkeypatch.setattr(active_mod.lifecycle, "add_creature", boom)
+        monkeypatch.setattr(active_mod, "session_pwd", lambda svc, sid: None)
         client = TestClient(self._app())
         resp = client.post(
             "/active/g1/creatures",
             json={"name": "alice", "config_path": "/x"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == status
 
     def test_remove_creature_success(self, monkeypatch):
         removed = []

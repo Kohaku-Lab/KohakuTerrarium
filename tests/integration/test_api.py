@@ -2062,12 +2062,12 @@ terrarium:
         bob_id = resp.json()["creature_id"]
         assert resp.json()["status"] == "running"
 
-        # Hot-plug into a session that does not exist → 400.
+        # Hot-plug into a session that does not exist → 404.
         resp = client.post(
             "/api/sessions/active/no-such-session/creatures",
             json={"name": "ghost", "config_path": str(creature_dir)},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
 
         # The session now reports two creatures.
         resp = client.get(f"/api/sessions/active/{session_id}/creatures")
@@ -2371,6 +2371,143 @@ terrarium:
         # Removing it again → 404.
         resp = client.delete(f"/api/sessions/active/{session_id}/creatures/{bob_id}")
         assert resp.status_code == 404
+
+        # ── Add dialog sources: inline config; user-added = privileged + running ──
+        add_url = f"/api/sessions/active/{session_id}/creatures"
+        assert client.post(add_url, json={"name": "x"}).status_code == 422
+        both = {"name": "x", "config_path": str(creature_dir), "config_yaml": "a: 1"}
+        assert client.post(add_url, json=both).status_code == 422
+        resp = client.post(add_url, json={"name": "x", "config_yaml": "a: [1"})
+        assert resp.status_code == 400
+        assert "YAML" in resp.json()["detail"]
+        resp = client.post(add_url, json={"name": "x", "config_yaml": "- a\n- b"})
+        assert resp.status_code == 400
+        assert "mapping" in resp.json()["detail"]
+        resp = client.post(
+            add_url,
+            json={
+                "name": "dora",
+                "config_yaml": (
+                    'system_prompt: "You are dora."\n'
+                    "input: {type: none}\noutput: {type: stdout}\n"
+                ),
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "running"
+        # The dialog wires channels after the add, through the topology route.
+        resp = client.post(
+            f"/api/sessions/topology/{session_id}/creatures/dora/wire",
+            json={"channel": "team", "direction": "listen"},
+        )
+        assert resp.status_code == 200, resp.text
+        resp = client.get(f"/api/sessions/active/{session_id}/creatures")
+        dora = next(c for c in resp.json() if c["name"] == "dora")
+        assert dora["is_privileged"] is True
+        assert dora["running"] is True
+        assert "team" in dora["listen_channels"]
+        # Body channels are wired for real: a known one subscribes, an unknown one rejects the add.
+        resp = client.post(
+            add_url,
+            json={
+                "name": "eve",
+                "config_yaml": 'system_prompt: "You are eve."\ninput: {type: none}\n',
+                "listen_channels": ["no-such-channel"],
+            },
+        )
+        assert resp.status_code == 400
+        resp = client.get(f"/api/sessions/active/{session_id}/creatures")
+        assert "eve" not in {c["name"] for c in resp.json()}
+        assert "dora" in {c["name"] for c in resp.json()}
+
+        # ── Merge a terrarium recipe into the running session ──────────
+        merge_dir = creature_dir.parent / "merge-team"
+        merge_dir.mkdir()
+        (merge_dir / "terrarium.yaml").write_text(
+            """\
+terrarium:
+  name: merge-team
+  channels:
+    link: {description: merged link}
+  creatures:
+    - name: rex
+      system_prompt: "You are rex."
+      input: {type: none}
+      output: {type: stdout}
+      channels: {listen: [link], can_send: [link]}
+    - name: sam
+      system_prompt: "You are sam."
+      input: {type: none}
+      output: {type: stdout}
+      channels: {listen: [link]}
+""",
+            encoding="utf-8",
+        )
+        recipes_url = f"/api/sessions/active/{session_id}/recipes"
+        resp = client.post(recipes_url, json={"config_path": str(merge_dir)})
+        assert resp.status_code == 200
+        assert len(resp.json()["creature_ids"]) == 2
+        merged_names = {"alice", "dora", "rex", "sam"}
+        resp = client.get(f"/api/sessions/active/{session_id}/creatures")
+        assert {c["name"] for c in resp.json()} == merged_names
+        resp = client.get(f"/api/sessions/topology/{session_id}/channels")
+        assert {"team", "link"} <= {c["name"] for c in resp.json()}
+        # Re-applying collides on creature names: rejected and rolled back.
+        resp = client.post(recipes_url, json={"config_path": str(merge_dir)})
+        assert resp.status_code == 400
+        resp = client.get(f"/api/sessions/active/{session_id}/creatures")
+        assert {c["name"] for c in resp.json()} == merged_names
+        resp = client.post(
+            "/api/sessions/active/no-such-session/recipes",
+            json={"config_path": str(merge_dir)},
+        )
+        assert resp.status_code == 404
+        resp = client.post(
+            recipes_url, json={"config_path": str(creature_dir.parent / "missing")}
+        )
+        assert resp.status_code == 400
+        # A creature file is not a recipe; broken recipe YAML is a 400, not a 500.
+        resp = client.post(
+            recipes_url, json={"config_path": str(creature_dir / "config.yaml")}
+        )
+        assert resp.status_code == 400
+        assert "defines no creatures" in resp.json()["detail"]
+        bad_dir = creature_dir.parent / "bad-recipe"
+        bad_dir.mkdir()
+        (bad_dir / "terrarium.yaml").write_text("terrarium: [1\n", encoding="utf-8")
+        resp = client.post(recipes_url, json={"config_path": str(bad_dir)})
+        assert resp.status_code == 400
+        # A recipe root cannot join a session that already has a privileged node.
+        rooted_dir = creature_dir.parent / "rooted-team"
+        rooted_dir.mkdir()
+        (rooted_dir / "terrarium.yaml").write_text(
+            """\
+terrarium:
+  name: rooted
+  root:
+    system_prompt: "You lead."
+    input: {type: none}
+    output: {type: stdout}
+  creatures:
+    - name: zed
+      system_prompt: "You are zed."
+      input: {type: none}
+      output: {type: stdout}
+""",
+            encoding="utf-8",
+        )
+        resp = client.post(recipes_url, json={"config_path": str(rooted_dir)})
+        assert resp.status_code == 400
+        assert "privileged node" in resp.json()["detail"]
+        resp = client.get(f"/api/sessions/active/{session_id}/creatures")
+        assert {c["name"] for c in resp.json()} == merged_names
+        # Inline YAML may not carry recipe-level channel wiring.
+        resp = client.post(
+            add_url,
+            json={"name": "eve", "config_yaml": "system_prompt: hi\nchannels: {}\n"},
+        )
+        assert resp.status_code == 400
+        assert "recipe key" in resp.json()["detail"]
 
         client.delete(f"/api/sessions/active/{session_id}")
 
