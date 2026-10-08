@@ -86,8 +86,8 @@ describe("MacroShell — render", () => {
     expect(wrapper.text()).not.toContain("Extensions")
     expect(wrapper.text()).toContain("Studio")
     expect(wrapper.text()).toContain("Settings")
-    // Pinned group placeholder
-    expect(wrapper.text()).toContain("No pinned tabs")
+    expect(wrapper.text()).toContain("Nothing running.")
+    expect(wrapper.text()).not.toContain("Pinned")
   })
 
   it("opens a default Dashboard tab on mount when none in URL", async () => {
@@ -151,8 +151,8 @@ describe("MacroShell — density branch", () => {
     await router.isReady()
     // CompactShell renders a hamburger + density-override button; the
     // regular shell renders the BrandMark with full "Kohaku Terrarium"
-    // text and rail group entries like "No pinned tabs".
-    expect(wrapper.text()).not.toContain("No pinned tabs")
+    // text and rail group entries like "Nothing running.".
+    expect(wrapper.text()).not.toContain("Nothing running.")
 
     // Restore for downstream tests.
     window.innerWidth = 1024
@@ -169,7 +169,7 @@ describe("MacroShell — density branch", () => {
       global: { plugins: [router] },
     })
     await router.isReady()
-    expect(wrapper.text()).toContain("No pinned tabs")
+    expect(wrapper.text()).toContain("Nothing running.")
   })
 })
 

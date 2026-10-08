@@ -9,13 +9,6 @@
 
       <div class="my-1 border-t border-warm-200 dark:border-warm-700" />
 
-      <button class="w-full text-left px-3 py-1.5 flex items-center gap-2" :class="isDashboard ? 'opacity-40 cursor-not-allowed' : 'hover:bg-warm-100 dark:hover:bg-warm-800'" :title="isDashboard ? t('shell.tab.dashboardPinned') : ''" :disabled="isDashboard" @click="!isDashboard && emitAndClose('togglePin')">
-        <span :class="isPinned ? 'i-carbon-pin-filled text-iolite' : 'i-carbon-pin'" />
-        {{ isPinned ? t("shell.tab.unpin") : t("shell.tab.pin") }}
-      </button>
-
-      <div class="my-1 border-t border-warm-200 dark:border-warm-700" />
-
       <button class="w-full text-left px-3 py-1.5 flex items-center gap-2" :class="isDashboard ? 'opacity-40 cursor-not-allowed' : 'hover:bg-warm-100 dark:hover:bg-warm-800'" :title="isDashboard ? t('shell.tab.dashboardLocked') : ''" :disabled="isDashboard" @click="!isDashboard && emitAndClose('closeTab')"><span class="i-carbon-close" /> {{ t("shell.tab.close") }}</button>
       <button class="w-full text-left px-3 py-1.5 flex items-center gap-2" :class="hasLeft ? 'hover:bg-warm-100 dark:hover:bg-warm-800' : 'opacity-40 cursor-not-allowed'" :disabled="!hasLeft" @click="hasLeft && emitAndClose('closeLeft')"><span class="i-carbon-arrow-left" /> {{ t("shell.tab.closeLeft") }}</button>
       <button class="w-full text-left px-3 py-1.5 flex items-center gap-2" :class="hasRight ? 'hover:bg-warm-100 dark:hover:bg-warm-800' : 'opacity-40 cursor-not-allowed'" :disabled="!hasRight" @click="hasRight && emitAndClose('closeRight')"><span class="i-carbon-arrow-right" /> {{ t("shell.tab.closeRight") }}</button>
@@ -34,7 +27,6 @@ const { t } = useI18n()
 
 const props = defineProps({
   tab: { type: Object, required: true },
-  isPinned: { type: Boolean, default: false },
   position: { type: Object, default: () => ({ x: 0, y: 0 }) },
   /** Index of ``tab`` within ``useTabsStore().tabs`` — drives the
    *  left/right enable/disable. Computed by the parent. */
@@ -42,7 +34,7 @@ const props = defineProps({
   /** Total tab count (so ``Close right`` knows when nothing's to do). */
   total: { type: Number, default: 0 },
 })
-const emit = defineEmits(["close", "refresh", "togglePin", "closeTab", "closeLeft", "closeRight", "closeOthers", "closeAll"])
+const emit = defineEmits(["close", "refresh", "closeTab", "closeLeft", "closeRight", "closeOthers", "closeAll"])
 
 const isDashboard = computed(() => props.tab.id === "dashboard")
 const hasLeft = computed(() => props.index > 0)

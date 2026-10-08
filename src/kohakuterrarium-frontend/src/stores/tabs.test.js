@@ -118,25 +118,25 @@ describe("tabs store — open/activate/close", () => {
     expect(tabs.activeId).toBe("attach:a")
   })
 
-  it("closeOthers preserves active + pinned + dashboard", () => {
+  it("closeOthers preserves the target and the dashboard only", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
     tabs.openTab({ kind: "attach", id: "attach:a", target: "a" })
     tabs.openTab({ kind: "settings", id: "settings" })
-    tabs.pinTab("settings")
     tabs.closeOthers("attach:a")
-    expect(tabs.tabs.map((t) => t.id).sort()).toEqual(["attach:a", "dashboard", "settings"])
+    expect(tabs.tabs.map((t) => t.id).sort()).toEqual(["attach:a", "dashboard"])
     expect(tabs.activeId).toBe("attach:a")
   })
 
-  it("closeAll preserves pinned + dashboard", () => {
+  it("closeAll preserves the dashboard only", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
     tabs.openTab({ kind: "attach", id: "attach:a", target: "a" })
     tabs.openTab({ kind: "settings", id: "settings" })
-    tabs.pinTab("settings")
     tabs.closeAll()
-    expect(tabs.tabs.map((t) => t.id).sort()).toEqual(["dashboard", "settings"])
+    expect(tabs.tabs.map((t) => t.id)).toEqual(["dashboard"])
+    expect("pinnedIds" in tabs).toBe(false)
+    expect(tabs.pinTab).toBeUndefined()
   })
 })
 
@@ -172,16 +172,7 @@ describe("tabs store — surface helpers", () => {
   })
 })
 
-describe("tabs store — pinning + reorder", () => {
-  it("pin/unpin tracks state and persists", () => {
-    const tabs = useTabsStore()
-    tabs.pinTab("dashboard")
-    expect(tabs.pinnedIds.has("dashboard")).toBe(true)
-    expect(localStorage.getItem("kt.tabs.pinned")).toContain("dashboard")
-    tabs.unpinTab("dashboard")
-    expect(tabs.pinnedIds.has("dashboard")).toBe(false)
-  })
-
+describe("tabs store — reorder", () => {
   it("reorderTabs respects given order", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
@@ -273,30 +264,28 @@ describe("tabs store — close protections", () => {
     expect(tabs.tabs.map((t) => t.id)).toEqual(["dashboard", "attach:a"])
   })
 
-  it("closeAll preserves dashboard + pinned + restores dashboard if missing", () => {
+  it("closeAll keeps the dashboard and makes it active", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
     tabs.openTab({ kind: "attach", id: "attach:a", target: "a" })
     tabs.openTab({ kind: "attach", id: "attach:b", target: "b" })
-    tabs.pinTab("attach:b")
     tabs.closeAll()
-    expect(tabs.tabs.map((t) => t.id)).toEqual(["dashboard", "attach:b"])
+    expect(tabs.tabs.map((t) => t.id)).toEqual(["dashboard"])
     expect(tabs.activeId).toBe("dashboard")
   })
 
-  it("closeOthers keeps target + dashboard + pinned", () => {
+  it("closeOthers keeps the target and the dashboard", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
     tabs.openTab({ kind: "attach", id: "attach:a", target: "a" })
     tabs.openTab({ kind: "attach", id: "attach:b", target: "b" })
     tabs.openTab({ kind: "attach", id: "attach:c", target: "c" })
-    tabs.pinTab("attach:c")
     tabs.closeOthers("attach:a")
-    expect(tabs.tabs.map((t) => t.id).sort()).toEqual(["attach:a", "attach:c", "dashboard"].sort())
+    expect(tabs.tabs.map((t) => t.id).sort()).toEqual(["attach:a", "dashboard"])
     expect(tabs.activeId).toBe("attach:a")
   })
 
-  it("closeLeft drops tabs to the left, keeping dashboard + pinned", () => {
+  it("closeLeft drops tabs to the left, keeping the dashboard", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
     tabs.openTab({ kind: "attach", id: "attach:a", target: "a" })
@@ -307,7 +296,7 @@ describe("tabs store — close protections", () => {
     expect(tabs.activeId).toBe("attach:c")
   })
 
-  it("closeRight drops tabs to the right, keeping dashboard + pinned", () => {
+  it("closeRight drops tabs to the right, keeping the dashboard", () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "dashboard", id: "dashboard" })
     tabs.openTab({ kind: "attach", id: "attach:a", target: "a" })

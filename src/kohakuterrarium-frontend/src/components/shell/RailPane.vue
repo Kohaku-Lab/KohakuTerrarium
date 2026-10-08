@@ -36,10 +36,6 @@
         <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
 
         <RailGroupAttached />
-
-        <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
-
-        <RailGroupPinned />
       </div>
 
       <!-- Footer -->
@@ -74,7 +70,6 @@ import { computed, ref } from "vue"
 import HostStatusChip from "@/components/host-picker/HostStatusChip.vue"
 import BrandMark from "@/components/shell/BrandMark.vue"
 import RailGroupAttached from "@/components/shell/RailGroupAttached.vue"
-import RailGroupPinned from "@/components/shell/RailGroupPinned.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import RailAppSwitch from "@/components/shell/rail/RailAppSwitch.vue"
 import RailNav from "@/components/shell/rail/RailNav.vue"

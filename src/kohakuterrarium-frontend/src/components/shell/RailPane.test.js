@@ -28,8 +28,9 @@ describe("RailPane scroll layout", () => {
     const viewport = viewports[0]
     expect(classes(viewport)).toEqual(expect.arrayContaining(["flex-1", "min-h-0"]))
     expect(descendants(viewport).map((node) => node.tag)).toEqual(
-      expect.arrayContaining(["RailNav", "RailGroupAttached", "RailGroupPinned"]),
+      expect.arrayContaining(["RailNav", "RailGroupAttached"]),
     )
+    expect(descendants(viewport).map((node) => node.tag)).not.toContain("RailGroupPinned")
     expect(descendants(viewport).map((node) => node.tag)).not.toContain("RailAppSwitch")
     expect(descendants(viewport).map((node) => node.tag)).not.toContain("HostStatusChip")
     expect(descendants(viewport).map((node) => node.tag)).not.toContain("BrandMark")

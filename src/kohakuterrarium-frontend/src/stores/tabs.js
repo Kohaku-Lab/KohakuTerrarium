@@ -1,7 +1,7 @@
 /**
  * Macro shell tabs store. Owns the open tabs, their arrangement into
  * **tab-groups** (a binary split tree — VS Code-style editor groups),
- * the focused group, pinned set, recently-closed ring buffer, and
+ * the focused group, recently-closed ring buffer, and
  * policy-hint cache.
  *
  * Pure window-manager — does NOT own per-tab content. Chat messages
@@ -54,7 +54,6 @@ import {
 } from "@/utils/splitTree"
 
 const RECENTLY_CLOSED_MAX = 10
-const PINNED_KEY = "kt.tabs.pinned"
 const MIGRATION_KEY = "kt.tabs.migrationV1"
 const SNAPSHOT_VERSION = 2
 
@@ -63,16 +62,6 @@ const DASHBOARD_ID = "dashboard"
 
 function isDashboard(id) {
   return id === DASHBOARD_ID
-}
-
-/** Read pinned ids from localStorage on store init. */
-function _loadPinned() {
-  try {
-    const raw = localStorage.getItem(PINNED_KEY)
-    return new Set(raw ? JSON.parse(raw) : [])
-  } catch {
-    return new Set()
-  }
 }
 
 export const useTabsStore = defineStore("tabs", {
@@ -96,8 +85,6 @@ export const useTabsStore = defineStore("tabs", {
     /** Monotonic group-id allocator → `tg_<n>`. */
     _groupCounter: 0,
 
-    /** @type {Set<string>} */
-    pinnedIds: _loadPinned(),
     /** Informational policy-hint cache. Not used to gate surfaces. */
     /** @type {Record<string, string[]>} */
     policyHints: {},
@@ -280,12 +267,10 @@ export const useTabsStore = defineStore("tabs", {
       }
     },
 
-    /** Close everything except `id` (and dashboard + pinned), across
-     *  all groups. Focuses `id`'s group. */
+    /** Close everything except `id` (and the dashboard), across all
+     *  groups. Focuses `id`'s group. */
     closeOthers(id) {
-      const victims = Object.keys(this.byId).filter(
-        (tid) => tid !== id && !isDashboard(tid) && !this.pinnedIds.has(tid),
-      )
+      const victims = Object.keys(this.byId).filter((tid) => tid !== id && !isDashboard(tid))
       this._dropTabs(victims)
       const gid = this._groupOf(id)
       if (gid) {
@@ -296,17 +281,15 @@ export const useTabsStore = defineStore("tabs", {
       this._dirty()
     },
 
-    /** Close tabs to the LEFT of `id` within its group. Dashboard +
-     *  pinned survive. */
+    /** Close tabs to the LEFT of `id` within its group. The dashboard
+     *  survives. */
     closeLeft(id) {
       const gid = this._groupOf(id)
       if (!gid) return
       const tabIds = this.tabGroups[gid].tabIds
       const idx = tabIds.indexOf(id)
       if (idx <= 0) return
-      const victims = tabIds
-        .slice(0, idx)
-        .filter((tid) => !isDashboard(tid) && !this.pinnedIds.has(tid))
+      const victims = tabIds.slice(0, idx).filter((tid) => !isDashboard(tid))
       this._dropTabs(victims)
       const g = this.tabGroups[gid]
       // The anchor always survives a directional close → focus it.
@@ -325,9 +308,7 @@ export const useTabsStore = defineStore("tabs", {
       const tabIds = this.tabGroups[gid].tabIds
       const idx = tabIds.indexOf(id)
       if (idx < 0 || idx === tabIds.length - 1) return
-      const victims = tabIds
-        .slice(idx + 1)
-        .filter((tid) => !isDashboard(tid) && !this.pinnedIds.has(tid))
+      const victims = tabIds.slice(idx + 1).filter((tid) => !isDashboard(tid))
       this._dropTabs(victims)
       const g = this.tabGroups[gid]
       if (g) {
@@ -338,12 +319,9 @@ export const useTabsStore = defineStore("tabs", {
       this._dirty()
     },
 
-    /** Close all tabs. Dashboard + pinned survive, collapsed into a
-     *  single group. */
+    /** Close all tabs. The dashboard survives, in a single group. */
     closeAll() {
-      const survivors = this._unionTabIds().filter(
-        (id) => isDashboard(id) || this.pinnedIds.has(id),
-      )
+      const survivors = this._unionTabIds().filter((id) => isDashboard(id))
       const victims = Object.keys(this.byId).filter((id) => !survivors.includes(id))
       this._pushRecentlyClosed(...victims.map((id) => this.byId[id]).filter(Boolean))
       for (const id of victims) {
@@ -402,16 +380,6 @@ export const useTabsStore = defineStore("tabs", {
     reopenLastClosed() {
       const last = this.recentlyClosed.shift()
       if (last) this.openTab(last)
-    },
-
-    pinTab(id) {
-      this.pinnedIds.add(id)
-      this._persistPinned()
-    },
-
-    unpinTab(id) {
-      this.pinnedIds.delete(id)
-      this._persistPinned()
     },
 
     /** Reorder tabs within a group by id list (missing ids trail).
@@ -498,14 +466,14 @@ export const useTabsStore = defineStore("tabs", {
       this._dirty()
     },
 
-    /** Close a whole group: drop its non-dashboard/non-pinned tabs,
-     *  relocate any survivors (dashboard / pinned) to a sibling, then
-     *  prune. Never removes the last group. */
+    /** Close a whole group: drop its tabs except the dashboard, move
+     *  the dashboard to a sibling, then prune. Never removes the last
+     *  group. */
     removeTabGroup(groupId) {
       const g = this.tabGroups[groupId]
       if (!g) return
       if (this.groupCount <= 1) return
-      const keep = g.tabIds.filter((id) => isDashboard(id) || this.pinnedIds.has(id))
+      const keep = g.tabIds.filter((id) => isDashboard(id))
       const victims = g.tabIds.filter((id) => !keep.includes(id))
       this._dropTabs(victims)
       // _dropTabs may already have pruned the group if it emptied.
@@ -842,14 +810,6 @@ export const useTabsStore = defineStore("tabs", {
     },
 
     // ─── persistence helpers ─────────────────────────────────
-
-    _persistPinned() {
-      try {
-        localStorage.setItem(PINNED_KEY, JSON.stringify([...this.pinnedIds]))
-      } catch {
-        /* swallow — quota / privacy mode */
-      }
-    },
 
     /**
      * One-time migration: copy `kt.layout.preset.<id>` →
