@@ -307,7 +307,7 @@ def reload_conversation_under_branch_view(
         agent._parent_branch_path = [
             (turn, branch)
             for turn, branch in sorted(selected.items())
-            if turn < max_turn
+            if 0 < turn < max_turn and branch > 0
         ]
     else:
         agent._turn_index = 0
