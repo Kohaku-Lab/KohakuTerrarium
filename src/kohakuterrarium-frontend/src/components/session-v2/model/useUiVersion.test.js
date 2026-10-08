@@ -41,38 +41,43 @@ afterEach(() => {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("useUiVersion", () => {
-  it("ignores the retired kt-ui-version key", () => {
-    storage.set("kt-ui-version", "v2")
-    expect(useUiVersion().uiVersion.value).toBe("v1")
+  it("defaults to v2 and ignores the retired kt-ui-version key", () => {
+    storage.set("kt-ui-version", "v1")
+    expect(useUiVersion().uiVersion.value).toBe("v2")
   })
 
   it("reads a stored pick and rejects unknown values", () => {
-    storage.set(UI_VERSION_KEY, "v2")
-    expect(useUiVersion().isV2.value).toBe(true)
+    storage.set(UI_VERSION_KEY, "v1")
+    expect(useUiVersion().isV2.value).toBe(false)
     _resetUiVersionForTests()
     storage.set(UI_VERSION_KEY, "v9")
-    expect(useUiVersion().uiVersion.value).toBe("v1")
+    expect(useUiVersion().uiVersion.value).toBe("v2")
   })
 
   it("adopts the backend pref when it arrives after first use", async () => {
     const { uiVersion } = useUiVersion()
-    expect(uiVersion.value).toBe("v1")
-    resolvePrefs({ values: { [UI_VERSION_KEY]: "v2" } })
-    await flush()
     expect(uiVersion.value).toBe("v2")
+    resolvePrefs({ values: { [UI_VERSION_KEY]: "v1" } })
+    await flush()
+    expect(uiVersion.value).toBe("v1")
   })
 
   it("keeps the user's pick over a late backend value", async () => {
     const { uiVersion, setUiVersion } = useUiVersion()
-    setUiVersion("v1")
+    setUiVersion("v2")
     storage.delete(UI_VERSION_KEY)
-    resolvePrefs({ values: { [UI_VERSION_KEY]: "v2" } })
+    resolvePrefs({ values: { [UI_VERSION_KEY]: "v1" } })
     await flush()
-    expect(uiVersion.value).toBe("v1")
+    expect(uiVersion.value).toBe("v2")
   })
 
-  it("persists a pick under the new key", () => {
-    useUiVersion().setUiVersion("v2")
+  it("toggles both ways and persists the pick under the new key", () => {
+    const { uiVersion, setUiVersion } = useUiVersion()
+    setUiVersion("v1")
+    expect(uiVersion.value).toBe("v1")
+    expect(storage.get(UI_VERSION_KEY)).toBe("v1")
+    setUiVersion("v2")
+    expect(uiVersion.value).toBe("v2")
     expect(storage.get(UI_VERSION_KEY)).toBe("v2")
     expect(storage.has("kt-ui-version")).toBe(false)
   })

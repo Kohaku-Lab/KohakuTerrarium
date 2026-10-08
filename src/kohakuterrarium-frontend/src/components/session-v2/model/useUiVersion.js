@@ -1,7 +1,7 @@
 /**
- * useUiVersion — which session shell the app uses: "v1" (the panel
- * workbench: split tree, presets, layout editing) or "v2" (fixed session
- * sections with a centered chat and a floating dock). Persisted to the
+ * useUiVersion — which session shell the app uses: "v2" (the default:
+ * fixed session sections with a centered chat and a floating dock) or
+ * "v1" (the panel workbench: split tree, presets, layout editing). Persisted to the
  * hybrid pref `kt-session-shell`; a module-level cell shared by every
  * consumer, synced across browser tabs, and refreshed once the backend
  * prefs arrive unless the user picked a shell first.
@@ -12,7 +12,7 @@ import { computed, ref } from "vue"
 import { ensureUIPrefsLoaded, getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 export const UI_VERSIONS = ["v1", "v2"]
-export const DEFAULT_UI_VERSION = "v1"
+export const DEFAULT_UI_VERSION = "v2"
 export const UI_VERSION_KEY = "kt-session-shell"
 
 const hasWindow = typeof window !== "undefined"
