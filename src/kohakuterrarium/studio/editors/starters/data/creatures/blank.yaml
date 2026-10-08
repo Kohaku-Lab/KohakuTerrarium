@@ -1,0 +1,13 @@
+label: Just talk
+summary: A creature with no tools. Give it a personality and a purpose, then add modules.
+order: 0
+form:
+  config:
+    tools: []
+    subagents: []
+  prompt: |
+    # {{ name }}
+
+    You are {{ name }}.{% if purpose %} {{ purpose }}{% endif %}
+
+    Keep replies clear and to the point. Ask when a request is ambiguous.

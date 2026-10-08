@@ -19,7 +19,7 @@ from kohakuterrarium.studio.editors.codegen_common import (
     read_property_string,
 )
 from kohakuterrarium.studio.editors.plugin_hooks import PLUGIN_HOOKS
-from kohakuterrarium.studio.editors.templates import render
+from kohakuterrarium.studio.editors.templates import import_block, render
 
 # Keep this set aligned with ``PLUGIN_HOOKS`` so parsing and rendering agree.
 _HOOK_NAMES = {
@@ -41,8 +41,19 @@ _HOOK_NAMES = {
 }
 
 
+_BASE_IMPORTS = [
+    "from typing import Any",
+    "from kohakuterrarium.modules.plugin.base import BasePlugin",
+    "from kohakuterrarium.utils.logging import get_logger",
+]
+_CONTEXT_IMPORT = "from kohakuterrarium.modules.plugin.base import PluginContext"
+
+
 def render_new(form: dict) -> str:
-    """Scaffold a plugin from identity, priority, hooks, and option metadata."""
+    """Scaffold a plugin from identity, priority, hooks, and option metadata.
+
+    ``imports`` adds module-level import lines to the standard ones.
+    """
     name = form.get("name", "my_plugin")
     class_name = form.get("class_name") or _to_class_name(name)
     priority = int(form.get("priority", 50))
@@ -50,6 +61,9 @@ def render_new(form: dict) -> str:
     enabled_hooks = form.get("enabled_hooks") or []
 
     hooks = [_hook_context(h) for h in enabled_hooks]
+    base = list(_BASE_IMPORTS)
+    if any("PluginContext" in h["args_signature"] for h in hooks):
+        base.append(_CONTEXT_IMPORT)
 
     return render(
         "plugin.py.j2",
@@ -58,7 +72,19 @@ def render_new(form: dict) -> str:
         priority=priority,
         description=description,
         enabled_hooks=hooks,
+        import_block=import_block(base, form.get("imports")),
     )
+
+
+def _module_imports(tree: cst.Module) -> list[str]:
+    """Every top-level import statement of ``tree``, as source lines."""
+    out: list[str] = []
+    for node in tree.body:
+        if isinstance(node, cst.SimpleStatementLine) and all(
+            isinstance(s, (cst.Import, cst.ImportFrom)) for s in node.body
+        ):
+            out.append(tree.code_for_node(node).strip())
+    return out
 
 
 def sidecar_files(form: dict) -> dict[str, str]:
@@ -126,6 +152,7 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
             **form,
             "class_name": klass.name.value,
             "enabled_hooks": merged,
+            "imports": [*_module_imports(tree), *(form.get("imports") or [])],
         }
     )
 

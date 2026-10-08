@@ -491,6 +491,42 @@ class TestCreaturesRoute:
         listed = {c["name"] for c in client.get(PREFIX).json()}
         assert "alice" in listed
 
+    def test_scaffold_from_a_starter_and_fork(self, _workspace, tmp_path):
+        client = _client(creatures_mod.router)
+        r = client.post(
+            PREFIX,
+            json={
+                "name": "dev",
+                "starter": "researcher",
+                "description": "finds things",
+                "purpose": "Tracks papers.",
+                "model": "m1",
+            },
+        )
+        assert r.status_code == 201
+        body = r.json()
+        assert body["config"]["description"] == "finds things"
+        assert body["config"]["controller"]["llm"] == "m1"
+        assert [t["name"] for t in body["config"]["tools"]][0] == "web_search"
+        assert "Tracks papers." in body["prompts"]["prompts/system.md"]
+
+        r = client.post(PREFIX, json={"name": "x", "starter": "nope"})
+        assert r.status_code == 400
+        assert r.json()["detail"]["code"] == "unknown_starter"
+
+        forked = client.post(
+            PREFIX,
+            json={"name": "dev2", "fork_from": str(tmp_path / "creatures" / "dev")},
+        )
+        assert forked.status_code == 201
+        assert forked.json()["config"]["name"] == "dev2"
+        assert forked.json()["config"]["tools"] == body["config"]["tools"]
+        missing = client.post(
+            PREFIX, json={"name": "dev3", "fork_from": str(tmp_path / "nowhere")}
+        )
+        assert missing.status_code == 404
+        assert missing.json()["detail"]["code"] == "source_not_found"
+
     def test_scaffold_duplicate(self, _workspace):
         client = _client(creatures_mod.router)
         first = client.post(PREFIX, json={"name": "dup", "description": ""})

@@ -1,0 +1,12 @@
+label: Append to a file
+summary: Writes what the creature says to a file, one block per turn; set path in the options.
+order: 0
+form:
+  description: Append each finished turn to the file at `path`.
+  imports:
+    - from pathlib import Path
+  body: |
+    path = Path(str(self.options.get("path", "transcript.md")))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(content.rstrip() + "\n\n")

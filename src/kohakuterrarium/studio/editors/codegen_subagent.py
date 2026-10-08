@@ -17,6 +17,8 @@ The editor maps managed keyword arguments to form state and rewrites only those
 arguments. An optional nearby ``SYSTEM_PROMPT`` assignment remains editable.
 """
 
+import re
+
 import libcst as cst
 
 from kohakuterrarium.studio.editors.codegen_common import RoundTripError, parse
@@ -37,7 +39,7 @@ _FORM_FIELDS = (
 def render_new(form: dict) -> str:
     """Scaffold a new sub-agent module."""
     name = form.get("name", "my_subagent")
-    config_var = f"{name.upper()}_CONFIG"
+    config_var = re.sub(r"\W", "_", name).upper() + "_CONFIG"
     system_prompt_var = "SYSTEM_PROMPT"
     return render(
         "subagent.py.j2",

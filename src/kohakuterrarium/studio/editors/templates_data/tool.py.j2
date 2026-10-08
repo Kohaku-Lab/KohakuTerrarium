@@ -2,14 +2,7 @@
 {{ description }}
 """
 
-from typing import Any
-
-from kohakuterrarium.modules.tool.base import (
-    BaseTool,
-    ExecutionMode,
-    ToolResult,
-)
-from kohakuterrarium.utils.logging import get_logger
+{{ import_block }}
 
 logger = get_logger(__name__)
 
@@ -17,19 +10,23 @@ logger = get_logger(__name__)
 class {{ class_name }}(BaseTool):
 {%- if needs_context %}
     needs_context = True
-{%- endif %}
-
+{% endif %}
     @property
     def tool_name(self) -> str:
-        return {{ tool_name | tojson }}
+        return {{ tool_name | pystr }}
 
     @property
     def description(self) -> str:
-        return {{ description | tojson }}
+        return {{ description | pystr }}
 
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.{{ execution_mode | upper }}
+{%- if parameters %}
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {{ parameters | pyrepr(8, 7) }}
+{%- endif %}
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
-{{ execute_body | indent(8, True) }}
+{{ execute_body | trim | indent(8, True) }}

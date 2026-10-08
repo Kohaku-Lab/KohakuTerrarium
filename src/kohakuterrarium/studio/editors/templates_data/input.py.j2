@@ -2,12 +2,15 @@
 {{ description }}
 """
 
-from kohakuterrarium.core.events import TriggerEvent
-from kohakuterrarium.modules.input.base import BaseInputModule
+{{ import_block }}
 
 
 class {{ class_name }}(BaseInputModule):
     """Input module: {{ name }}."""
 
+    def __init__(self, **options: Any):
+        super().__init__()
+        self.options = options
+
     async def get_input(self) -> TriggerEvent | None:
-{{ body | indent(8, True) }}
+{{ body | trim | indent(8, True) }}

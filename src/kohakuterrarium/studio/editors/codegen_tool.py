@@ -19,11 +19,25 @@ from kohakuterrarium.studio.editors.codegen_common import (
     replace_method_body,
     replace_string_property,
 )
-from kohakuterrarium.studio.editors.templates import render
+from kohakuterrarium.studio.editors.templates import import_block, render
+
+BASE_IMPORTS = [
+    "from typing import Any",
+    "from kohakuterrarium.modules.tool.base import (\n"
+    "    BaseTool,\n"
+    "    ExecutionMode,\n"
+    "    ToolResult,\n"
+    ")",
+    "from kohakuterrarium.utils.logging import get_logger",
+]
 
 
 def render_new(form: dict) -> str:
-    """Render a new tool from identity, execution metadata, and method body."""
+    """Render a new tool from identity, execution metadata, and method body.
+
+    ``imports`` adds module-level import lines; ``parameters`` (a JSON schema)
+    renders ``get_parameters_schema`` so native providers see the arguments.
+    """
     name = form.get("name") or form.get("tool_name") or "my_tool"
     class_name = form.get("class_name") or _to_class_name(name)
     ctx = {
@@ -33,6 +47,8 @@ def render_new(form: dict) -> str:
         "description": form.get("description", "TODO: describe this tool"),
         "execution_mode": (form.get("execution_mode") or "direct").lower(),
         "needs_context": bool(form.get("needs_context", False)),
+        "parameters": form.get("parameters") or None,
+        "import_block": import_block(BASE_IMPORTS, form.get("imports")),
         "execute_body": form.get("execute_body") or 'return ToolResult(output="TODO")',
     }
     return render("tool.py.j2", **ctx)

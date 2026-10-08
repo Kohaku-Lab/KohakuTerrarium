@@ -9,6 +9,7 @@ from pathlib import Path
 
 from kohakuterrarium.studio.editors.codegen_common import RoundTripError
 from kohakuterrarium.studio.editors.codegen_init import get_codegen
+from kohakuterrarium.studio.editors.starters import starter_form
 from kohakuterrarium.studio.editors.utils_paths import sanitize_name
 from kohakuterrarium.studio.editors.workspace_manifest import (
     save_sidecar_doc,
@@ -16,27 +17,34 @@ from kohakuterrarium.studio.editors.workspace_manifest import (
 )
 
 
-def scaffold_module(kind_dir: Path, kind: str, name: str, template: str | None) -> Path:
-    """Scaffold a new Python module and return its path.
+def _singular(kind: str) -> str:
+    return kind[:-1] if kind.endswith("s") else kind
 
-    Existing destinations raise ``FileExistsError``.
+
+def render_module(kind: str, name: str, template: str | None) -> str:
+    """The source a new ``kind`` module named ``name`` gets from a starter.
+
+    ``template`` is a starter id (see :mod:`..starters`); None is the default.
+    """
+    form = starter_form(kind, template)
+    form.update({"name": sanitize_name(name), "kind": _singular(kind)})
+    return get_codegen(kind).render_new(form)
+
+
+def scaffold_module(kind_dir: Path, kind: str, name: str, template: str | None) -> Path:
+    """Scaffold a new Python module from a starter and return its path.
+
+    Existing destinations raise ``FileExistsError``; an unknown starter raises
+    ``UnknownStarterError`` (a ``ValueError``) before anything is written.
     """
     name = sanitize_name(name)
-    kind_dir.mkdir(parents=True, exist_ok=True)
     path = kind_dir / f"{name}.py"
     if path.exists():
         raise FileExistsError(f"{kind}/{name}")
-
-    cg = get_codegen(kind)
-    singular = kind[:-1] if kind.endswith("s") else kind
-    source = cg.render_new(
-        {
-            "name": name,
-            "template": template,
-            "kind": singular,
-        }
-    )
+    source = render_module(kind, name, template)
+    kind_dir.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
+    write_codegen_sidecars(get_codegen(kind), starter_form(kind, template), path)
     return path
 
 
@@ -81,6 +89,7 @@ def save_module(
                 {
                     **form,
                     "name": name,
+                    "kind": _singular(kind),
                     "execute_body": exec_body,
                 }
             )

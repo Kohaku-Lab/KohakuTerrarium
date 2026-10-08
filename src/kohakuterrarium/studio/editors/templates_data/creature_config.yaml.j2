@@ -1,19 +1,22 @@
 name: {{ name }}
 version: "1.0"
 {% if base_config %}
-base_config: {{ base_config | tojson }}
+base_config: {{ base_config | pystr }}
 {% endif -%}
 {% if description %}
-description: {{ description | tojson }}
+description: {{ description | pystr }}
 {% endif %}
 system_prompt_file: prompts/system.md
 
 controller:
   reasoning_effort: high
+{%- if model %}
+  llm: {{ model | pystr }}
+{%- endif %}
 
-tools: []
+tools:{{ tools | yaml_list }}
 
-subagents: []
+subagents:{{ subagents | yaml_list }}
 
 output:
   type: stdout

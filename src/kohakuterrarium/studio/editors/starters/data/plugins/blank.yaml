@@ -1,0 +1,16 @@
+label: Watch tool calls
+summary: Runs around every tool call; this one logs each call and how long its result is.
+order: 0
+form:
+  description: Log every tool call and the size of its result.
+  priority: 50
+  enabled_hooks:
+    - name: post_tool_execute
+      body: |
+        text = getattr(result, "output", result)
+        logger.info(
+            "tool finished",
+            tool_name=kwargs.get("tool_name", ""),
+            result_chars=len(str(text)),
+        )
+        return None

@@ -1,0 +1,17 @@
+label: Wake when a file changes
+summary: Polls a file and wakes the creature when it is modified; set path in the options.
+order: 10
+form:
+  description: Wake the creature when the file at `path` changes.
+  imports:
+    - import asyncio
+    - from pathlib import Path
+  wait_for_trigger_body: |
+    path = Path(str(self.options.get("path", "notes.txt")))
+    last = path.stat().st_mtime if path.exists() else None
+    while self.is_running:
+        await asyncio.sleep(float(self.options.get("poll", 2)))
+        now = path.stat().st_mtime if path.exists() else None
+        if now != last:
+            return self._create_event("file_change", self.prompt or f"{path} changed.")
+    return None

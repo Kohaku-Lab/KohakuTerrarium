@@ -1,0 +1,17 @@
+label: Add to every model call
+summary: Runs before each model call; this one appends a note the model reads every turn.
+order: 20
+form:
+  description: Append the note option as a system message before each model call.
+  priority: 50
+  options_schema:
+    - name: note
+      type_hint: str
+      default: Answer briefly.
+      required: false
+      description: Text appended to every model call.
+  enabled_hooks:
+    - name: pre_llm_call
+      body: |
+        note = self.options.get("note", "Answer briefly.")
+        return [*messages, {"role": "system", "content": note}]

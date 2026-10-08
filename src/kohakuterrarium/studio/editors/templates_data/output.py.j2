@@ -2,11 +2,15 @@
 {{ description }}
 """
 
-from kohakuterrarium.modules.output.base import BaseOutputModule
+{{ import_block }}
 
 
 class {{ class_name }}(BaseOutputModule):
     """Output module: {{ name }}."""
 
+    def __init__(self, **options: Any):
+        super().__init__()
+        self.options = options
+
     async def write(self, content: str) -> None:
-{{ body | indent(8, True) }}
+{{ body | trim | indent(8, True) }}

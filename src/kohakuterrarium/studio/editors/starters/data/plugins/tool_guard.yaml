@@ -1,0 +1,22 @@
+label: Block some tools
+summary: Stops a tool call before it runs; the model gets the reason as the tool's result.
+order: 10
+form:
+  description: Refuse calls to the tools listed in the blocked_tools option.
+  priority: 10
+  imports:
+    - from kohakuterrarium.modules.plugin.base import PluginBlockError
+  options_schema:
+    - name: blocked_tools
+      type_hint: list[str]
+      default: [bash]
+      required: false
+      description: Tool names this plugin refuses.
+  enabled_hooks:
+    - name: pre_tool_execute
+      body: |
+        blocked = self.options.get("blocked_tools", ["bash"])
+        tool_name = kwargs.get("tool_name", "")
+        if tool_name in blocked:
+            raise PluginBlockError(f"{tool_name} is blocked in this creature")
+        return None

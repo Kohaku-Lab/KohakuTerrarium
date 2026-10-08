@@ -45,6 +45,9 @@ from kohakuterrarium.errors import (
 )
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
+from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.packages.locations import ensure_local_project
+from kohakuterrarium.studio.catalog.packages_scan import scan_creatures_in_dirs
 from kohakuterrarium.session.embedding import BaseEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.identity import grok_subscription
@@ -264,8 +267,10 @@ class TestStudioIntegration:
             scaffolded_mod = ws.scaffold_module("tools", "ping_tool", None)
             module_path = workspace_root / scaffolded_mod["path"]
             assert module_path.exists()
+            starter_description = scaffolded_mod["form"]["description"]
+            assert starter_description in scaffolded_mod["raw_source"]
             edited_source = scaffolded_mod["raw_source"].replace(
-                "TODO: describe this tool", "an integration-test ping tool"
+                starter_description, "an integration-test ping tool"
             )
             ws.save_module(
                 "tools", "ping_tool", {"mode": "raw", "raw_source": edited_source}
@@ -330,6 +335,75 @@ class TestStudioIntegration:
             # Scaffolding a duplicate name is a hard FileExistsError.
             with pytest.raises(FileExistsError):
                 ws.scaffold_module("tools", "ping_tool", None)
+
+            # --- local project: a starter creature with every kind of
+            #     starter module plugged in builds as a real agent --------
+            project_root = ensure_local_project()
+            assert (
+                project_root
+                == (isolated_paths["tmp_path"] / "kt-config" / "project").resolve()
+            )
+            project = LocalWorkspace.open(project_root)
+            assert project.summary()["is_project"] is True
+            project.scaffold_creature(
+                "hand", None, starter="coder", purpose="Integration helper."
+            )
+            plugged = [
+                ("tools", "blank", "echo"),
+                ("tools", "workspace_file", "lines"),
+                ("plugins", "tool_guard", "guard"),
+                ("triggers", "blank", "tick"),
+                ("subagents", "blank", "look"),
+                ("outputs", "blank", "log"),
+                ("inputs", "blank", "inbox"),
+            ]
+            for mkind, starter, mname in plugged:
+                project.scaffold_module(mkind, mname, starter, ["hand"])
+                assert project.module_users(mkind, mname) == ["hand"]
+            hand_dir = project.creatures_dir / "hand"
+            hand_config = project.load_creature("hand")["config"]
+            assert {
+                "name": "echo",
+                "type": "custom",
+                "module": "@/modules/tools/echo.py",
+                "class": "EchoTool",
+            } in hand_config["tools"]
+            assert hand_config["input"]["module"] == "@/modules/inputs/inbox.py"
+            # The scan sees the project creature under its portable ref.
+            scanned = {c["path"] for c in scan_creatures_in_dirs([])}
+            assert "@/creatures/hand" in scanned
+
+            agent = await Agent.build(
+                str(hand_dir), llm=ScriptedLLM(["ok"]), strict=True
+            )
+            try:
+                tools = set(agent.registry.list_tools())
+                assert {"echo", "lines", "read", "bash"} <= tools
+                echoed = await agent.registry.get_tool("echo").execute({"text": "hi"})
+                assert echoed.output == "hi"
+                assert "guard" in {p["name"] for p in agent.plugins.list_plugins()}
+                assert "look" in agent.registry.list_subagents()
+                assert (
+                    type(agent.output_router.named_outputs["log"]).__name__
+                    == "LogOutput"
+                )
+                assert type(agent.input).__name__ == "InboxInput"
+                assert len(agent.trigger_manager.list()) == 1
+            finally:
+                await agent.stop()
+
+            # Unplugging every module leaves a creature that still builds.
+            for mkind, _, mname in plugged:
+                assert project.unplug_module(mkind, mname, ["hand"]) == ["hand"]
+            bare = project.load_creature("hand")["config"]
+            assert "input" not in bare and "named_outputs" not in bare["output"]
+            agent = await Agent.build(
+                str(hand_dir), llm=ScriptedLLM(["ok"]), strict=True
+            )
+            try:
+                assert "echo" not in set(agent.registry.list_tools())
+            finally:
+                await agent.stop()
 
             # --- catalog: browse the workspace creature back ------------
             listing = studio.catalog.creatures.list(ws)

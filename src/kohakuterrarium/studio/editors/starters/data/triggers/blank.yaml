@@ -1,0 +1,12 @@
+label: Wake on a timer
+summary: Wakes the creature every few seconds with its prompt; set interval in the options.
+order: 0
+form:
+  description: Wake the creature every `interval` seconds.
+  imports:
+    - import asyncio
+  wait_for_trigger_body: |
+    await asyncio.sleep(float(self.options.get("interval", 60)))
+    if not self.is_running:
+        return None
+    return self._create_event("timer", self.prompt or "Time to check in.")

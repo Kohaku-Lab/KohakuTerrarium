@@ -1,0 +1,23 @@
+label: Work with the workspace
+summary: Gets the creature's context, so paths resolve against its working directory.
+order: 20
+form:
+  description: Count the lines of a file in the creature's working directory.
+  execution_mode: direct
+  needs_context: true
+  imports:
+    - from kohakuterrarium.modules.tool.base import resolve_tool_path
+  parameters:
+    type: object
+    properties:
+      path:
+        type: string
+        description: File path, relative to the working directory.
+    required: [path]
+  execute_body: |
+    context = kwargs.get("context")
+    path = resolve_tool_path(str(args.get("path", "")), context)
+    if not path.is_file():
+        return ToolResult(error=f"not a file: {path}")
+    lines = path.read_text(encoding="utf-8", errors="replace").count("\n")
+    return ToolResult(output=f"{path.name}: {lines} lines", exit_code=0)

@@ -1,0 +1,23 @@
+label: Call a web API
+summary: Fetches a URL over HTTP and hands the response body to the model.
+order: 10
+form:
+  description: Fetch a URL with an HTTP GET and return the response body.
+  execution_mode: direct
+  imports:
+    - import httpx
+  parameters:
+    type: object
+    properties:
+      url:
+        type: string
+        description: The URL to fetch.
+    required: [url]
+  execute_body: |
+    url = str(args.get("url", "")).strip()
+    if not url.startswith(("http://", "https://")):
+        return ToolResult(error="url must start with http:// or https://")
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        response = await client.get(url)
+    body = response.text[:20000]
+    return ToolResult(output=body, exit_code=0 if response.is_success else 1)

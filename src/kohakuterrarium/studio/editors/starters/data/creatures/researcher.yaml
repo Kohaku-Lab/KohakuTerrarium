@@ -1,0 +1,18 @@
+label: Research the web
+summary: Searches and reads the web, then writes up what it found with sources.
+order: 20
+form:
+  config:
+    tools:
+      - name: web_search
+      - name: web_fetch
+      - name: read
+      - name: write
+  prompt: |
+    # {{ name }}
+
+    You are {{ name }}, a careful researcher.{% if purpose %} {{ purpose }}{% endif %}
+
+    Search broadly, read the best sources in full, and answer with what you
+    found, citing each source by URL. Say plainly when sources disagree or
+    when you could not find something.

@@ -14,6 +14,7 @@ from kohakuterrarium.api.routes.catalog import manifest as catalog_manifest
 from kohakuterrarium.api.routes.catalog import modules as catalog_modules
 from kohakuterrarium.api.routes.catalog import schema as catalog_schema
 from kohakuterrarium.api.routes.catalog import skills as catalog_skills
+from kohakuterrarium.api.routes.catalog import starters as catalog_starters
 from kohakuterrarium.api.routes.catalog import templates as catalog_templates
 from kohakuterrarium.api.routes.catalog import validate as catalog_validate
 from kohakuterrarium.api.routes.catalog import workspace as catalog_workspace
@@ -59,6 +60,11 @@ def build_studio_router() -> APIRouter:
         catalog_templates.router,
         prefix="/templates",
         tags=["studio.templates"],
+    )
+    r.include_router(
+        catalog_starters.router,
+        prefix="/starters",
+        tags=["studio.starters"],
     )
     r.include_router(
         catalog_validate.router,

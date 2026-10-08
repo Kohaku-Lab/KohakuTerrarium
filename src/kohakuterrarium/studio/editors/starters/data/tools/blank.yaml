@@ -1,0 +1,16 @@
+label: Return a value
+summary: The model calls it with arguments and gets text back. Edit the body to do the work.
+order: 0
+form:
+  description: Echo the text argument back to the model.
+  execution_mode: direct
+  parameters:
+    type: object
+    properties:
+      text:
+        type: string
+        description: Text to echo back.
+    required: [text]
+  execute_body: |
+    text = str(args.get("text", ""))
+    return ToolResult(output=text, exit_code=0)

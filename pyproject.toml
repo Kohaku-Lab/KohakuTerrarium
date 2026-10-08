@@ -171,6 +171,7 @@ exclude = ["kohakuterrarium-frontend*"]
 "kohakuterrarium.builtin_skills" = ["**/*.md"]
 "kohakuterrarium.builtins.subagents" = ["*.md"]
 "kohakuterrarium.studio.editors" = ["templates_data/*.j2"]
+"kohakuterrarium.studio.editors.starters" = ["data/*/*.yaml"]
 "kohakuterrarium.packaging.systemd" = ["*.template"]
 "kohakuterrarium" = ["web_dist/**/*", "app_icons/*"]
 

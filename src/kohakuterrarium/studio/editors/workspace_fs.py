@@ -13,12 +13,17 @@ from typing import Any
 
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.packages.walk import package_snapshot
 from kohakuterrarium.studio.catalog.packages_scan import (
     invalidate_scan_caches,
     package_ref,
 )
-from kohakuterrarium.studio.editors import creatures_crud, modules_crud
+from kohakuterrarium.studio.editors import (
+    creatures_crud,
+    modules_crud,
+    workspace_wiring,
+)
 from kohakuterrarium.studio.editors.codegen_init import get_codegen
 from kohakuterrarium.studio.editors.utils_paths import ensure_in_root, sanitize_name
 from kohakuterrarium.studio.editors.workspace_manifest import (
@@ -153,8 +158,17 @@ class LocalWorkspace:
             "effective": compute_effective(cfg_path, data),
         }
 
-    def scaffold_creature(self, name: str, base: str | None) -> dict:
-        creatures_crud.scaffold_creature(self.creatures_dir, name, base)
+    def scaffold_creature(self, name: str, base: str | None, **seed: Any) -> dict:
+        """Create a creature; ``seed`` is starter / description / purpose / model."""
+        creatures_crud.scaffold_creature(self.creatures_dir, name, base, **seed)
+        invalidate_scan_caches()
+        return self.load_creature(name)
+
+    def fork_creature(self, name: str, source: str) -> dict:
+        """Copy the creature at ``source`` (a folder or ``@pkg/...``) in as ``name``."""
+        creatures_crud.fork_creature(
+            self.creatures_dir, name, resolve_any_path(source).expanduser().resolve()
+        )
         invalidate_scan_caches()
         return self.load_creature(name)
 
@@ -223,9 +237,36 @@ class LocalWorkspace:
         )
         return envelope
 
-    def scaffold_module(self, kind: str, name: str, template: str | None) -> dict:
+    def scaffold_module(
+        self,
+        kind: str,
+        name: str,
+        template: str | None,
+        plug_into: list[str] | None = None,
+    ) -> dict:
+        missing = [
+            c
+            for c in plug_into or []
+            if _find_config_file(self.creatures_dir / sanitize_name(c)) is None
+        ]
+        if missing:
+            raise FileNotFoundError(", ".join(missing))
         modules_crud.scaffold_module(self.module_kind_dir(kind), kind, name, template)
+        if plug_into:
+            self.plug_module(kind, name, plug_into)
         return self.load_module(kind, name)
+
+    def module_wiring(self, kind: str, name: str) -> dict:
+        return workspace_wiring.module_wiring(self, kind, name)
+
+    def module_users(self, kind: str, name: str) -> list[str]:
+        return workspace_wiring.module_users(self, kind, name)
+
+    def plug_module(self, kind: str, name: str, creatures: list[str]) -> list[str]:
+        return workspace_wiring.plug_module(self, kind, name, creatures)
+
+    def unplug_module(self, kind: str, name: str, creatures: list[str]) -> list[str]:
+        return workspace_wiring.unplug_module(self, kind, name, creatures)
 
     def save_module(self, kind: str, name: str, data: dict) -> dict:
         kind_dir = self.module_kind_dir(kind)

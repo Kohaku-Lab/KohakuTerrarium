@@ -1,0 +1,13 @@
+label: Post to a webhook
+summary: Sends what the creature says to a URL as JSON; set url in the options.
+order: 10
+form:
+  description: 'POST each finished turn as {"text": ...} to the URL in `url`.'
+  imports:
+    - import httpx
+  body: |
+    url = str(self.options.get("url", ""))
+    if not url:
+        return
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(url, json={"text": content})

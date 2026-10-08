@@ -1,0 +1,12 @@
+label: Look things up
+summary: A helper the creature hands a question to; it reads and searches, never edits.
+order: 0
+form:
+  description: Answers a question by reading and searching the working directory.
+  tools: [read, glob, grep, tree]
+  can_modify: false
+  stateless: true
+  system_prompt: |
+    You answer one question by reading the files in the working directory.
+    Search first, read only what matters, and reply with the answer and the
+    paths it came from.

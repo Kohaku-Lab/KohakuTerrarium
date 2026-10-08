@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.routes.catalog._deps import get_workspace
 from kohakuterrarium.studio.editors.codegen_init import RoundTripError
+from kohakuterrarium.studio.editors.starters import UnknownStarterError
 from kohakuterrarium.studio.editors.workspace_fs import KNOWN_KINDS
 from kohakuterrarium.studio.editors.workspace_manifest import Workspace
 
@@ -14,6 +15,11 @@ router = APIRouter()
 class ScaffoldBody(BaseModel):
     name: str
     template: str | None = None
+    plug_into: list[str] = Field(default_factory=list)
+
+
+class PlugBody(BaseModel):
+    creatures: list[str]
 
 
 class SaveBody(BaseModel):
@@ -72,7 +78,9 @@ async def scaffold_module(
 ) -> dict:
     _check_kind(kind)
     try:
-        return ws.scaffold_module(kind, body.name, body.template)  # type: ignore[attr-defined]
+        return ws.scaffold_module(  # type: ignore[attr-defined]
+            kind, body.name, body.template, body.plug_into
+        )
     except FileExistsError:
         raise HTTPException(
             409,
@@ -81,8 +89,59 @@ async def scaffold_module(
                 "message": f"{kind}/{body.name} already exists",
             },
         )
+    except FileNotFoundError as e:
+        raise HTTPException(
+            404, detail={"code": "creature_not_found", "message": str(e)}
+        )
+    except UnknownStarterError as e:
+        raise HTTPException(400, detail={"code": "unknown_starter", "message": str(e)})
     except ValueError as e:
         raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
+
+
+@router.get("/{kind}/{name}/wiring")
+async def module_wiring(
+    kind: str, name: str, ws: Workspace = Depends(get_workspace)
+) -> dict:
+    """How a creature config loads this module, and which creatures do."""
+    _check_kind(kind)
+    try:
+        info = ws.module_wiring(kind, name)  # type: ignore[attr-defined]
+        return {**info, "users": ws.module_users(kind, name)}  # type: ignore[attr-defined]
+    except FileNotFoundError:
+        raise HTTPException(
+            404, detail={"code": "not_found", "message": f"{kind}/{name} not found"}
+        )
+    except ValueError as e:
+        raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
+
+
+async def _edit_wiring(kind: str, name: str, body: PlugBody, ws, plug: bool) -> dict:
+    _check_kind(kind)
+    try:
+        edit = ws.plug_module if plug else ws.unplug_module
+        changed = edit(kind, name, body.creatures)
+        return {"changed": changed, "users": ws.module_users(kind, name)}
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(e)})
+    except ValueError as e:
+        raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
+
+
+@router.post("/{kind}/{name}/plug")
+async def plug_module(
+    kind: str, name: str, body: PlugBody, ws: Workspace = Depends(get_workspace)
+) -> dict:
+    """Wire the module into the named workspace creatures."""
+    return await _edit_wiring(kind, name, body, ws, plug=True)
+
+
+@router.post("/{kind}/{name}/unplug")
+async def unplug_module(
+    kind: str, name: str, body: PlugBody, ws: Workspace = Depends(get_workspace)
+) -> dict:
+    """Remove the module from the named workspace creatures."""
+    return await _edit_wiring(kind, name, body, ws, plug=False)
 
 
 @router.put("/{kind}/{name}")

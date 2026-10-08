@@ -1,0 +1,21 @@
+label: Work in a folder
+summary: Reads, edits and runs things in its working directory, with a helper that explores.
+order: 10
+form:
+  config:
+    tools:
+      - name: read
+      - name: write
+      - name: edit
+      - name: glob
+      - name: grep
+      - name: bash
+    subagents:
+      - name: explore
+  prompt: |
+    # {{ name }}
+
+    You are {{ name }}, working in the user's project folder.{% if purpose %} {{ purpose }}{% endif %}
+
+    Read before you change anything, keep each change small and focused, and
+    say what you changed and how you checked it.

@@ -1,19 +1,15 @@
 """
-{{ class_name }} — trigger module.
+{{ description or (class_name ~ " — trigger module.") }}
 """
 
-from typing import Any, ClassVar
-
-from kohakuterrarium.core.events import TriggerEvent
-from kohakuterrarium.modules.trigger.base import BaseTrigger
+{{ import_block }}
 
 
 class {{ class_name }}(BaseTrigger):
 {%- if universal %}
     universal: ClassVar[bool] = True
-    setup_tool_name: ClassVar[str] = {{ setup_tool_name | tojson }}
-    setup_description: ClassVar[str] = {{ setup_description | tojson }}
-{%- endif %}
-
+    setup_tool_name: ClassVar[str] = {{ setup_tool_name | pystr }}
+    setup_description: ClassVar[str] = {{ setup_description | pystr }}
+{% endif %}
     async def wait_for_trigger(self) -> TriggerEvent | None:
-{{ wait_for_trigger_body | indent(8, True) }}
+{{ wait_for_trigger_body | trim | indent(8, True) }}

@@ -4,12 +4,12 @@
 
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
-{{ system_prompt_var }} = {{ system_prompt | tojson }}
+{{ system_prompt_var }} = {{ system_prompt | pystr }}
 
 {{ config_var }} = SubAgentConfig(
-    name={{ name | tojson }},
-    description={{ description | tojson }},
-    tools={{ tools | tojson }},
+    name={{ name | pystr }},
+    description={{ description | pystr }},
+    tools={{ tools | pyrepr(4) }},
     system_prompt={{ system_prompt_var }},
     can_modify={{ can_modify }},
     stateless={{ stateless }},
@@ -17,6 +17,6 @@ from kohakuterrarium.modules.subagent.config import SubAgentConfig
     interactive=True,
 {%- endif %}
 {%- if model %}
-    model={{ model | tojson }},
+    model={{ model | pystr }},
 {%- endif %}
 )

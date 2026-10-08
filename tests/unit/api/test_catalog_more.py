@@ -181,6 +181,44 @@ class TestModulesRoute:
         r = _client(modules_mod.router).post(PREFIX + "/not-a-kind", json={"name": "x"})
         assert r.status_code == 400
 
+    def test_scaffold_plug_and_unplug_from_the_module_end(self, _workspace):
+        _workspace.scaffold_creature("a", None)
+        _workspace.scaffold_creature("b", None)
+        client = _client(modules_mod.router)
+        r = client.post(
+            PREFIX + "/plugins",
+            json={"name": "guard", "template": "tool_guard", "plug_into": ["a"]},
+        )
+        assert r.status_code == 201
+        assert "PluginBlockError" in r.json()["raw_source"]
+        wiring = client.get(PREFIX + "/plugins/guard/wiring").json()
+        assert wiring["users"] == ["a"]
+        assert wiring["entry"]["class"] == "GuardPlugin"
+        guard_file = _workspace.root_path / "modules" / "plugins" / "guard.py"
+        assert wiring["ref"] == str(guard_file.resolve())
+
+        r = client.post(PREFIX + "/plugins/guard/plug", json={"creatures": ["a", "b"]})
+        assert r.json() == {"changed": ["b"], "users": ["a", "b"]}
+        r = client.post(PREFIX + "/plugins/guard/unplug", json={"creatures": ["a"]})
+        assert r.json() == {"changed": ["a"], "users": ["b"]}
+        assert _workspace.load_creature("a")["config"].get("plugins") == []
+
+        r = client.post(PREFIX + "/plugins/guard/plug", json={"creatures": ["ghost"]})
+        assert r.status_code == 404
+        assert client.get(PREFIX + "/plugins/nope/wiring").status_code == 404
+        assert client.get(PREFIX + "/not-a-kind/x/wiring").status_code == 400
+
+    def test_scaffold_refuses_unknown_starters_and_creatures(self, _workspace):
+        client = _client(modules_mod.router)
+        r = client.post(PREFIX + "/tools", json={"name": "t", "template": "nope"})
+        assert (r.status_code, r.json()["detail"]["code"]) == (400, "unknown_starter")
+        r = client.post(PREFIX + "/tools", json={"name": "t", "plug_into": ["ghost"]})
+        assert (r.status_code, r.json()["detail"]["code"]) == (
+            404,
+            "creature_not_found",
+        )
+        assert client.get(PREFIX + "/tools").json() == []
+
     def test_save_unknown_kind(self, _workspace):
         r = _client(modules_mod.router).put(
             PREFIX + "/not-a-kind/foo", json={"mode": "simple", "form": {}}

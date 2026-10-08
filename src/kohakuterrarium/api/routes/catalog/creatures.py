@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.routes.catalog._deps import get_workspace
+from kohakuterrarium.studio.editors.starters import UnknownStarterError
 from kohakuterrarium.studio.editors.utils_paths import UnsafePath
 from kohakuterrarium.studio.editors.workspace_manifest import Workspace
 
@@ -13,9 +14,19 @@ router = APIRouter()
 
 
 class ScaffoldBody(BaseModel):
+    """A new creature: from a starter, extending ``base_config``, or a fork.
+
+    ``fork_from`` (a creature folder or ``@pkg/...`` ref) copies that creature
+    and ignores the other seed fields.
+    """
+
     name: str
     base_config: str | None = None
     description: str = ""
+    starter: str | None = None
+    purpose: str = ""
+    model: str = ""
+    fork_from: str | None = None
 
 
 class SaveBody(BaseModel):
@@ -53,9 +64,19 @@ async def scaffold_creature(
     body: ScaffoldBody, ws: Workspace = Depends(get_workspace)
 ) -> dict:
     try:
+        if body.fork_from:
+            return await asyncio.to_thread(
+                ws.fork_creature, body.name, body.fork_from  # type: ignore[attr-defined]
+            )
         return await asyncio.to_thread(
-            ws.scaffold_creature, body.name, body.base_config
-        )  # type: ignore[attr-defined]
+            ws.scaffold_creature,  # type: ignore[attr-defined]
+            body.name,
+            body.base_config,
+            starter=body.starter,
+            description=body.description,
+            purpose=body.purpose,
+            model=body.model,
+        )
     except FileExistsError:
         raise HTTPException(
             409,
@@ -64,6 +85,10 @@ async def scaffold_creature(
                 "message": f"creature {body.name!r} already exists",
             },
         )
+    except FileNotFoundError as e:
+        raise HTTPException(404, detail={"code": "source_not_found", "message": str(e)})
+    except UnknownStarterError as e:
+        raise HTTPException(400, detail={"code": "unknown_starter", "message": str(e)})
     except ValueError as e:
         raise HTTPException(400, detail={"code": "invalid_name", "message": str(e)})
 

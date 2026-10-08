@@ -18,20 +18,29 @@ from kohakuterrarium.studio.editors.codegen_common import (
     replace_method_body,
     replace_string_property,
 )
-from kohakuterrarium.studio.editors.templates import render
+from kohakuterrarium.studio.editors.templates import import_block, render
+
+_BASE_IMPORTS = [
+    "from kohakuterrarium.core.events import TriggerEvent",
+    "from kohakuterrarium.modules.trigger.base import BaseTrigger",
+]
 
 
 def render_new(form: dict) -> str:
     name = form.get("name", "my_trigger")
     class_name = form.get("class_name") or _to_class_name(name)
+    universal = bool(form.get("universal", False))
+    base = [*_BASE_IMPORTS, *(["from typing import ClassVar"] if universal else [])]
     return render(
         "trigger.py.j2",
         class_name=class_name,
         name=name,
-        universal=bool(form.get("universal", False)),
+        description=form.get("description", ""),
+        universal=universal,
         setup_tool_name=form.get("setup_tool_name", ""),
         setup_description=form.get("setup_description", ""),
         wait_for_trigger_body=form.get("wait_for_trigger_body") or "return None",
+        import_block=import_block(base, form.get("imports")),
     )
 
 

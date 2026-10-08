@@ -14,20 +14,32 @@ from kohakuterrarium.studio.editors.codegen_common import (
     replace_class_in_module,
     replace_method_body,
 )
-from kohakuterrarium.studio.editors.templates import render
+from kohakuterrarium.studio.editors.templates import import_block, render
+
+_BASE_IMPORTS = {
+    "input": [
+        "from typing import Any",
+        "from kohakuterrarium.core.events import TriggerEvent",
+        "from kohakuterrarium.modules.input.base import BaseInputModule",
+    ],
+    "output": [
+        "from typing import Any",
+        "from kohakuterrarium.modules.output.base import BaseOutputModule",
+    ],
+}
 
 
 def render_new(form: dict) -> str:
-    kind = form.get("kind", "input")
+    kind = "output" if form.get("kind") == "output" else "input"
     name = form.get("name", f"my_{kind}")
     class_name = form.get("class_name") or _to_class_name(name, kind)
-    template = "input.py.j2" if kind == "input" else "output.py.j2"
     return render(
-        template,
+        f"{kind}.py.j2",
         class_name=class_name,
         name=name,
         description=form.get("description", f"TODO: describe this {kind}"),
         body=form.get("body") or "raise NotImplementedError",
+        import_block=import_block(_BASE_IMPORTS[kind], form.get("imports")),
     )
 
 

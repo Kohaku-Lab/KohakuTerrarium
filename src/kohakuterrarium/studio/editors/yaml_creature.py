@@ -5,6 +5,7 @@ Merged saves recurse into mappings while replacing scalar and list values, which
 keeps existing comments anchored to their keys.
 """
 
+import io
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,16 @@ def save_creature_merged(path: Path, incoming: dict) -> None:
     with tmp.open("w", encoding="utf-8", newline="\n") as f:
         y.dump(doc, f)
     tmp.replace(path)
+
+
+def merge_yaml_text(text: str, incoming: dict) -> str:
+    """``text`` with the patch ``incoming`` merged in, comments kept."""
+    y = _yaml()
+    doc = y.load(text) or CommentedMap()
+    _deep_merge(doc, incoming)
+    out = io.StringIO()
+    y.dump(doc, out)
+    return out.getvalue()
 
 
 def _deep_merge(target: Any, incoming: Any) -> None:

@@ -1,0 +1,25 @@
+label: Read lines from a file
+summary: Feeds the creature one message per line appended to a file; set path in the options.
+order: 0
+form:
+  description: Turn each line appended to the file at `path` into a user message.
+  imports:
+    - import asyncio
+    - from pathlib import Path
+    - from kohakuterrarium.core.events import create_user_input_event
+  body: |
+    path = Path(str(self.options.get("path", "inbox.txt")))
+    if not hasattr(self, "_offset"):
+        self._offset = path.stat().st_size if path.exists() else 0
+    while self.is_running:
+        if path.exists() and path.stat().st_size > self._offset:
+            with path.open("rb") as f:
+                f.seek(self._offset)
+                line = f.readline()
+            self._offset += len(line)
+            text = line.decode("utf-8", errors="replace").strip()
+            if text:
+                return create_user_input_event(text, source="file")
+            continue
+        await asyncio.sleep(float(self.options.get("poll", 1)))
+    return None

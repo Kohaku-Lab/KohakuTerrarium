@@ -1,0 +1,19 @@
+label: Run a long job
+summary: Runs in the background; the creature keeps working and hears back when it ends.
+order: 30
+form:
+  description: Wait the given number of seconds in the background, then report.
+  execution_mode: background
+  imports:
+    - import asyncio
+  parameters:
+    type: object
+    properties:
+      seconds:
+        type: number
+        description: How long to wait.
+    required: [seconds]
+  execute_body: |
+    seconds = max(0.0, min(float(args.get("seconds", 1)), 3600.0))
+    await asyncio.sleep(seconds)
+    return ToolResult(output=f"waited {seconds:g}s", exit_code=0)
