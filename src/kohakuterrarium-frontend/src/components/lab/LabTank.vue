@@ -1,5 +1,5 @@
 <template>
-  <div class="kt-lab-tank absolute rounded-2xl border border-solid flex flex-col overflow-hidden cursor-pointer select-none" :class="[`kt-lab-tank--${tank.status}`, active ? 'kt-lab-tank--active' : '']" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }" role="button" tabindex="0" :aria-label="tank.name" :data-test="`lab-tank-${tank.id}`" @click="$emit('focus', tank.id)" @dblclick.stop="$emit('open', tank.id)" @keydown.enter="$emit('focus', tank.id)">
+  <div class="kt-lab-tank absolute rounded-2xl border border-solid flex flex-col overflow-hidden cursor-pointer select-none" :class="[`kt-lab-tank--${tank.status}`, active ? 'kt-lab-tank--active' : '']" :style="{ left: `${item.x}px`, top: `${item.y}px`, width: `${item.w}px`, height: `${item.h}px` }" role="button" tabindex="0" :aria-label="tank.name" :data-test="`lab-tank-${tank.id}`" @click="$emit('focus', tank.id)" @dblclick.stop="$emit('open', tank.id)" @contextmenu.prevent.stop="$emit('menu', { id: tank.id, x: $event.clientX, y: $event.clientY })" @keydown.enter="$emit('focus', tank.id)">
     <header class="h-10 shrink-0 flex items-center gap-2 px-3">
       <span class="w-2 h-2 rounded-full shrink-0" :class="statusStyle(tank.status).dot" />
       <span class="min-w-0 truncate text-[13px] font-semibold text-warm-800 dark:text-warm-100" :title="tank.name">{{ tank.name }}</span>
@@ -42,14 +42,14 @@ import { useI18n } from "@/utils/i18n"
  * One running session seen from outside: its creatures as glyphs in a glass
  * (one compartment per machine, under that machine's lane), what is busy or
  * failing, and the last thing said on its channels. Click to look inside;
- * double-click or ↗ to open it.
+ * double-click or ↗ to open it; right-click for its menu.
  */
 const props = defineProps({
   item: { type: Object, required: true },
   active: { type: Boolean, default: false },
   lastMessage: { type: Object, default: null },
 })
-defineEmits(["focus", "open"])
+defineEmits(["focus", "open", "menu"])
 
 const MAX_ROWS = 4
 // The glass sits 8px in from each side of the tank (mx-2); compartment x is already in glass coordinates.

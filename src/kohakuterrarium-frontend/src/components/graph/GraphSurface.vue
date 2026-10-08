@@ -73,7 +73,10 @@ const toolbarEl = ref(null)
 const canvasEl = ref(null)
 const dockEl = ref(null)
 const dockOpen = ref(!isCompact.value && props.embeddedChat)
-const dockWidth = ref(readLocalJsonPref(DOCK_WIDTH_KEY, 380) || 380)
+const DOCK_DEFAULT = 300
+const DOCK_MIN = 240
+const DOCK_MAX = 720
+const dockWidth = ref(readLocalJsonPref(DOCK_WIDTH_KEY, DOCK_DEFAULT) || DOCK_DEFAULT)
 const quickAdd = ref(null)
 const newSessionOpen = ref(false)
 const menu = ref(null)
@@ -215,7 +218,7 @@ function startResize(e) {
   const startX = e.clientX
   const startWidth = dockWidth.value
   const move = (ev) => {
-    dockWidth.value = Math.min(720, Math.max(280, startWidth + (startX - ev.clientX)))
+    dockWidth.value = Math.min(DOCK_MAX, Math.max(DOCK_MIN, startWidth + (startX - ev.clientX)))
   }
   const up = () => {
     window.removeEventListener("pointermove", move)

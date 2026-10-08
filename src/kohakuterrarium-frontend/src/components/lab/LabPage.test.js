@@ -3,10 +3,19 @@ import { createPinia, setActivePinia } from "pinia"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const statsAPI = vi.hoisted(() => ({ diskUsage: vi.fn(), metrics: vi.fn() }))
+const sessionApi = vi.hoisted(() => ({
+  list: vi.fn(async () => ({ sessions: [] })),
+  stopActive: vi.fn(async () => ({})),
+}))
+const messages = vi.hoisted(() => ({ confirm: vi.fn(), error: vi.fn() }))
 vi.mock("@/utils/api", () => ({
   runtimeGraphAPI: { snapshot: vi.fn(() => new Promise(() => {})) },
   statsAPI,
-  sessionAPI: { list: vi.fn(async () => ({ sessions: [] })) },
+  sessionAPI: sessionApi,
+}))
+vi.mock("element-plus", () => ({
+  ElMessage: { error: messages.error },
+  ElMessageBox: { confirm: messages.confirm },
 }))
 vi.mock("@/utils/i18n", () => ({
   useI18n: () => ({ t: (k, p) => (p ? `${k}:${JSON.stringify(p)}` : k) }),
@@ -118,17 +127,58 @@ describe("LabPage", () => {
     expect(w.find("[data-test='lab-empty']").exists()).toBe(true)
   })
 
-  it("opens a session's chat tab, a new-session dialog, and the full graph", async () => {
+  it("opens a session's chat tab and a new-session dialog", async () => {
     const tabs = useTabsStore()
     const openSurface = vi.spyOn(tabs, "openSurface").mockResolvedValue()
-    const openTab = vi.spyOn(tabs, "openTab")
     const { w } = await mountLab()
     await w.find("[data-test='lab-tank-g1'] [data-test='lab-tank-open']").trigger("click")
     expect(openSurface).toHaveBeenCalledWith("g1", "chat", { config_name: "alpha" })
     await w.find("[data-test='lab-new']").trigger("click")
     expect(w.find("[data-test='new-dialog']").exists()).toBe(true)
-    await w.find("[data-test='lab-open-graph']").trigger("click")
-    expect(openTab).toHaveBeenCalledWith({ kind: "graph", id: "graph" })
+  })
+
+  it("switches between the bench and the graph of every session in the same tab, and remembers it", async () => {
+    const tabs = useTabsStore()
+    const openTab = vi.spyOn(tabs, "openTab")
+    const { w } = await mountLab()
+    await w.find("[data-test='lab-view-graph']").trigger("click")
+    expect(w.find("[data-test='lab-graph'] [data-test='graph-surface']").exists()).toBe(true)
+    expect(w.find("[data-test='graph-surface']").attributes("data-session")).toBeUndefined()
+    expect(w.find("[data-test='lab-history']").exists()).toBe(false)
+    expect(localStorage.getItem("kt.lab.view")).toBe("graph")
+    expect(openTab).not.toHaveBeenCalled()
+    await w.find("[data-test='lab-view-bench']").trigger("click")
+    expect(w.find("[data-test='graph-surface']").exists()).toBe(false)
+    expect(localStorage.getItem("kt.lab.view")).toBe("bench")
+  })
+
+  it("offers a tank menu on right-click: look inside, open, inspector, and stop after confirming", async () => {
+    const tabs = useTabsStore()
+    const openSurface = vi.spyOn(tabs, "openSurface").mockResolvedValue()
+    const { w } = await mountLab()
+    const menuItem = (label) =>
+      [...document.querySelectorAll("[role='menuitem']")].find((b) => b.textContent.includes(label))
+    await w.find("[data-test='lab-tank-g1']").trigger("contextmenu", { clientX: 40, clientY: 50 })
+    expect(document.querySelector("[role='menu']").textContent).toContain("alpha")
+    menuItem("lab.menu.inspector").click()
+    await flushPromises()
+    expect(openSurface).toHaveBeenCalledWith("g1", "inspector", { config_name: "alpha" })
+    expect(document.querySelector("[role='menu']")).toBeNull()
+    await w.find("[data-test='lab-tank-g1']").trigger("contextmenu", { clientX: 40, clientY: 50 })
+    menuItem("lab.menu.inside").click()
+    await flushPromises()
+    expect(w.find("[data-test='graph-surface']").attributes("data-session")).toBe("g1")
+    await w.find("[data-test='lab-back']").trigger("click")
+    messages.confirm.mockRejectedValueOnce(new Error("cancel"))
+    await w.find("[data-test='lab-tank-g1']").trigger("contextmenu", { clientX: 40, clientY: 50 })
+    menuItem("graph.action.stopSession").click()
+    await flushPromises()
+    expect(sessionApi.stopActive).not.toHaveBeenCalled()
+    messages.confirm.mockResolvedValueOnce()
+    await w.find("[data-test='lab-tank-g1']").trigger("contextmenu", { clientX: 40, clientY: 50 })
+    menuItem("graph.action.stopSession").click()
+    await flushPromises()
+    expect(sessionApi.stopActive).toHaveBeenCalledWith("g1")
   })
 
   it("marks a tank active while its channel carries messages and shows the latest", async () => {

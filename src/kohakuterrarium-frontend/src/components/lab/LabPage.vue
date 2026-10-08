@@ -12,22 +12,28 @@
       <template v-else>
         <h1 class="text-[15px] font-semibold text-warm-800 dark:text-warm-100">{{ t("lab.title") }}</h1>
         <span class="text-[12px] text-warm-500">{{ t("lab.summary", { n: tanks.length }) }}</span>
+        <div class="kt-v2-edge ml-2 flex rounded-lg border overflow-hidden text-xs" role="radiogroup" :aria-label="t('lab.view.label')">
+          <button v-for="m in VIEWS" :key="m.id" type="button" role="radio" :aria-checked="view === m.id" class="h-7 px-2.5 flex items-center gap-1.5" :class="view === m.id ? 'bg-iolite text-white' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" :data-test="`lab-view-${m.id}`" @click="setView(m.id)"><span :class="m.icon" />{{ t(`lab.view.${m.id}`) }}</button>
+        </div>
         <span class="flex-1" />
-        <button type="button" :class="GHOST" data-test="lab-open-graph" @click="tabs.openTab({ kind: 'graph', id: 'graph' })"><span class="i-carbon-network-3" />{{ t("lab.openGraph") }}</button>
         <button type="button" class="h-8 px-3 rounded-lg text-xs bg-iolite text-white hover:bg-iolite-shadow flex items-center gap-1.5" data-test="lab-new" @click="newOpen = true"><span class="i-carbon-add-large" />{{ t("lab.new.title") }}</button>
       </template>
     </header>
 
     <div class="relative flex-1 min-h-0">
-      <LabCanvas v-show="!focused" ref="canvasEl" :layout="layout" :structure="structure" :active-ids="activeIds" :last-messages="messages" @focus="focusedId = $event" @open="openSession" @new="newOpen = true" @resize="canvasWidth = $event" />
-      <p v-if="!focused && !tanks.length && !live.loading" class="absolute left-1/2 top-6 -translate-x-1/2 text-[13px] text-warm-500 text-center pointer-events-none" data-test="lab-empty">{{ t("lab.empty") }}</p>
+      <LabCanvas v-show="onBench" ref="canvasEl" :layout="layout" :structure="structure" :active-ids="activeIds" :last-messages="messages" @focus="focusedId = $event" @open="openSession" @menu="menu = $event" @new="newOpen = true" @resize="canvasWidth = $event" />
+      <p v-if="onBench && !tanks.length && !live.loading" class="absolute left-1/2 top-6 -translate-x-1/2 text-[13px] text-warm-500 text-center pointer-events-none" data-test="lab-empty">{{ t("lab.empty") }}</p>
       <Transition name="kt-lab-zoom">
         <div v-if="focused" class="absolute inset-0" data-test="lab-focus">
           <GraphSurface :key="focused.id" store-key="lab-focus" :session-id="focused.id" lock-session />
         </div>
+        <div v-else-if="view === 'graph'" class="absolute inset-0" data-test="lab-graph">
+          <GraphSurface store-key="lab-graph" />
+        </div>
       </Transition>
-      <LabHistoryBubble v-if="!focused" class="absolute left-4 bottom-4" :refresh-key="runningKey" :default-open="!tanks.length" />
+      <LabHistoryBubble v-if="onBench" class="absolute left-4 bottom-4" :refresh-key="runningKey" :default-open="!tanks.length" />
     </div>
+    <GraphContextMenu v-if="menuTank" :x="menu.x" :y="menu.y" :title="menuTank.name" :items="menuItems" @pick="onMenuPick" @close="menu = null" />
 
     <LabStatsStrip :tanks="tanks" />
     <NewSessionDialog v-if="newOpen" @close="newOpen = false" />
@@ -36,7 +42,9 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { ElMessage, ElMessageBox } from "element-plus"
 
+import GraphContextMenu from "@/components/graph/canvas/GraphContextMenu.vue"
 import { statusStyle } from "@/components/graph/graphTheme"
 import GraphSurface from "@/components/graph/GraphSurface.vue"
 import LabCanvas from "@/components/lab/LabCanvas.vue"
@@ -48,15 +56,22 @@ import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useGraphLiveStore } from "@/stores/graph/live"
 import { useTabsStore } from "@/stores/tabs"
+import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
 /**
- * The lab: every running session as a tank on one bench. Click a tank to
- * look inside it (its graph, in place); Esc or ← comes back. Starting a
- * session, recent history and the numbers sit around the bench.
+ * The lab: every running session as a tank on one bench, or (Graph view) the
+ * graph of every session. Click a tank to look inside it (its graph, in
+ * place); Esc or ← comes back; right-click for its menu. Starting a session,
+ * recent history and the numbers sit around the bench.
  */
 const GHOST = "kt-v2-edge kt-v2-panel h-8 px-2.5 rounded-lg border text-xs text-warm-700 dark:text-warm-200 hover:border-iolite/50 flex items-center gap-1.5"
 const TICK_MS = 2000
+const VIEW_KEY = "kt.lab.view"
+const VIEWS = [
+  { id: "bench", icon: "i-carbon-grid" },
+  { id: "graph", icon: "i-carbon-network-3" },
+]
 
 const { t } = useI18n()
 const tabs = useTabsStore()
@@ -66,7 +81,27 @@ const canvasWidth = ref(1200)
 const focusedId = ref(null)
 const newOpen = ref(false)
 const now = ref(Date.now())
+const view = ref(readView())
+const menu = ref(null)
 let ticker = null
+
+function readView() {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "graph" ? "graph" : "bench"
+  } catch {
+    return "bench"
+  }
+}
+
+function setView(next) {
+  view.value = next
+  focusedId.value = null
+  try {
+    localStorage.setItem(VIEW_KEY, next)
+  } catch {
+    /* the view just isn't remembered */
+  }
+}
 
 const tanks = computed(() => buildTanks(live.model))
 const layout = computed(() => layoutBench(tanks.value, { width: canvasWidth.value }))
@@ -75,10 +110,47 @@ const runningKey = computed(() => tanks.value.map((tk) => tk.id).join(","))
 const activeIds = computed(() => activeTankIds(tanks.value, live.pulses, now.value))
 const messages = computed(() => latestMessages(tanks.value, live.lastMessages))
 const focused = computed(() => tanks.value.find((tk) => tk.id === focusedId.value) || null)
+const onBench = computed(() => !focused.value && view.value === "bench")
+const menuTank = computed(() => (menu.value ? tanks.value.find((tk) => tk.id === menu.value.id) || null : null))
+const menuItems = computed(() => [
+  { id: "inside", label: t("lab.menu.inside"), icon: "i-carbon-zoom-in" },
+  { id: "open", label: t("lab.tank.open"), icon: "i-carbon-launch" },
+  { id: "inspector", label: t("lab.menu.inspector"), icon: "i-carbon-radar" },
+  { id: "d1", divider: true },
+  { id: "stop", label: t("graph.action.stopSession"), icon: "i-carbon-power", danger: true },
+])
 
 function openSession(id) {
   const tank = tanks.value.find((tk) => tk.id === id)
   tabs.openSurface(id, "chat", tank ? { config_name: tank.name } : {})
+}
+
+async function stopSession(tank) {
+  try {
+    await ElMessageBox.confirm(t("graph.confirm.stopSessionBody", { n: tank.size }), t("graph.confirm.stopSession", { name: tank.name }), {
+      type: "warning",
+      confirmButtonText: t("graph.action.stopSession"),
+      cancelButtonText: t("graph.action.cancel"),
+    })
+  } catch {
+    return
+  }
+  try {
+    await sessionAPI.stopActive(tank.id)
+    await live.refresh()
+  } catch (err) {
+    ElMessage.error(err?.response?.data?.detail || err?.message || String(err))
+  }
+}
+
+function onMenuPick(id) {
+  const tank = menuTank.value
+  menu.value = null
+  if (!tank) return
+  if (id === "inside") focusedId.value = tank.id
+  else if (id === "open") openSession(tank.id)
+  else if (id === "inspector") tabs.openSurface(tank.id, "inspector", { config_name: tank.name })
+  else if (id === "stop") stopSession(tank)
 }
 
 // A session that ends while looked at returns to the bench.

@@ -9,7 +9,7 @@
           <span class="i-carbon-add-large text-2xl" />
           <span class="text-[13px] font-medium">{{ t("lab.new.title") }}</span>
         </button>
-        <LabTank v-else :item="item" :active="activeIds.has(item.tank.id)" :last-message="lastMessages[item.tank.id] || null" @focus="$emit('focus', $event)" @open="$emit('open', $event)" />
+        <LabTank v-else :item="item" :active="activeIds.has(item.tank.id)" :last-message="lastMessages[item.tank.id] || null" @focus="$emit('focus', $event)" @open="$emit('open', $event)" @menu="$emit('menu', $event)" />
       </template>
     </div>
 
@@ -38,7 +38,7 @@ const props = defineProps({
   activeIds: { type: Set, default: () => new Set() },
   lastMessages: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(["focus", "open", "new", "resize"])
+const emit = defineEmits(["focus", "open", "menu", "new", "resize"])
 
 const MIN_K = 0.25
 const MAX_K = 1.6
