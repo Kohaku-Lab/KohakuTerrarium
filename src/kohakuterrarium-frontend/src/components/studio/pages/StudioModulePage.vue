@@ -2,7 +2,7 @@
   <div class="h-full w-full">
     <EditorFrame frame-id="module-editor" :tabs="tabs" :active-tab="activeTab" @tab:select="onTabSelect" @tab:close="onTabClose">
       <template #head>
-        <ModuleHead :kind="kindParam" :name="nameParam" :dirty="mod.dirty || docDirty" :saving="mod.saving || docSaving" @back="goBack" @save="onSave" @discard="onDiscard" />
+        <ModuleHead :kind="kindParam" :name="nameParam" :dirty="mod.dirty || docDirty" :saving="mod.saving || docSaving" :checking="checking" :check="checkResult" @back="goBack" @save="onSave" @discard="onDiscard" @check="onCheck" />
       </template>
 
       <template #left>
@@ -64,6 +64,7 @@ import SkillDocEditor from "@/components/studio/module/SkillDocEditor.vue"
 import SourceGuard from "@/components/studio/module/SourceGuard.vue"
 import { useStudioModuleStore } from "@/stores/studio/module"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
+import { moduleAPI } from "@/utils/studio/api"
 import { useStudioNav, STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useI18n } from "@/utils/i18n"
 
@@ -281,6 +282,30 @@ async function onSave() {
     ws.refresh().catch(() => {})
   }
 }
+
+const checking = ref(false)
+const checkResult = ref(null)
+
+/** Check loads what is on disk, so unsaved edits are saved first. */
+async function onCheck() {
+  if (checking.value) return
+  checking.value = true
+  try {
+    if (mod.dirty) {
+      const res = await mod.save()
+      if (!res?.ok) return
+      introspectKey.value += 1
+      ws.refresh().catch(() => {})
+    }
+    checkResult.value = await moduleAPI.check(kindParam.value, nameParam.value)
+  } catch (err) {
+    checkResult.value = { ok: false, errors: [{ message: err?.message || String(err) }] }
+  } finally {
+    checking.value = false
+  }
+}
+
+watch([kindParam, nameParam], () => (checkResult.value = null))
 
 function openCreature(name) {
   studioNav.openCreature(name, { workspace: ws.root })

@@ -28,7 +28,8 @@ const ALLOWLIST = new Set([
   // bridge per the v1/v2 paradigm — Studio pages still own the surface,
   // we just embed them as tabs).
   path.join(SRC_ROOT, "components", "shell", "tabs", "StudioEditorTab.vue"),
-  // useOpenStudio only reads the studio workspace store to pick which Studio tab the rail opens.
+  // useOpenStudio is the shell's one bridge into the Studio app: the lazily loaded
+  // Studio surface and rail navigator shown in Studio mode, and Studio's route setter.
   path.join(SRC_ROOT, "components", "shell", "rail", "useOpenStudio.js"),
 ])
 

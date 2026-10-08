@@ -70,6 +70,11 @@ html.dark .kt-v2 .kt-conversation-host {
  */
 :where(.kt-v2-line, .kt-v2-edge, .kt-v2-b) {
   border-width: 0;
+}
+/* Class weight, so the global `button { border: none }` cannot drop the line of a v2 button. */
+.kt-v2-line,
+.kt-v2-edge,
+.kt-v2-b {
   border-style: solid;
 }
 .kt-v2-line {

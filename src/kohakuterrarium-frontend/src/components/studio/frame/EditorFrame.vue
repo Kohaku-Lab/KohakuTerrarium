@@ -1,17 +1,15 @@
 <template>
-  <div class="h-full w-full flex flex-col bg-warm-50 dark:bg-warm-950 overflow-hidden">
-    <!-- Page head strip -->
-    <header v-if="$slots.head" class="shrink-0 h-11 flex items-center gap-2 px-3 border-b border-warm-200 dark:border-warm-800 bg-warm-100/70 dark:bg-warm-950/70">
+  <div class="kt-v2 kt-v2-canvas h-full w-full flex flex-col overflow-hidden" :data-studio-frame="frameId">
+    <header v-if="$slots.head" class="kt-v2-line shrink-0 h-12 flex items-center gap-2 px-4 border-b">
       <slot name="head" />
     </header>
 
-    <!-- Tab strip (optional) -->
-    <TabStrip v-if="tabs && tabs.length" :tabs="tabs" :active="activeTab" @select="$emit('tab:select', $event)" @close="$emit('tab:close', $event)" />
+    <!-- Only a second open view (a module's doc beside its source) earns a strip. -->
+    <TabStrip v-if="tabs && tabs.length > 1" :tabs="tabs" :active="activeTab" @select="$emit('tab:select', $event)" @close="$emit('tab:close', $event)" />
 
-    <!-- 3-col body -->
     <Splitpanes class="flex-1 min-h-0" :dbl-click-splitter="false" @resized="onResize">
       <Pane :size="leftPct" :min-size="hasLeft ? minLeftPct : 0" :max-size="40">
-        <div class="h-full overflow-hidden flex flex-col border-r border-warm-200 dark:border-warm-800 bg-warm-100/30 dark:bg-warm-900/30">
+        <div class="kt-v2-panel kt-v2-edge h-full overflow-hidden flex flex-col border-r">
           <slot name="left" />
         </div>
       </Pane>
@@ -23,14 +21,13 @@
       </Pane>
 
       <Pane :size="rightPct" :min-size="hasRight ? minRightPct : 0" :max-size="45">
-        <div class="h-full overflow-hidden flex flex-col border-l border-warm-200 dark:border-warm-800 bg-warm-100/30 dark:bg-warm-900/30">
+        <div class="kt-v2-panel kt-v2-edge h-full overflow-hidden flex flex-col border-l">
           <slot name="right" />
         </div>
       </Pane>
     </Splitpanes>
 
-    <!-- Status bar -->
-    <footer v-if="$slots.status" class="shrink-0 h-6 flex items-center gap-2 px-3 text-[11px] text-warm-500 dark:text-warm-500 border-t border-warm-200 dark:border-warm-800 bg-warm-100/50 dark:bg-warm-950/70">
+    <footer v-if="$slots.status" class="kt-v2-chrome kt-v2-line shrink-0 h-7 flex items-center gap-2 px-4 text-[11px] text-warm-500 border-t">
       <slot name="status" />
     </footer>
   </div>
@@ -45,20 +42,15 @@ import { useStudioUiStore } from "@/stores/studio/ui"
 
 import TabStrip from "./TabStrip.vue"
 
+/** An editor page: a head, a left pool, the main column, a right detail column and a status line; column widths persist per `frameId`. */
 const props = defineProps({
-  /** Stable id used to persist column widths per frame. */
   frameId: { type: String, required: true },
-  /** Tabs array: [{ id, label, icon?, dirty?, pinned? }]. Empty hides the strip. */
+  /** Open views [{ id, label, icon?, dirty?, pinned? }]; the strip shows from two. */
   tabs: { type: Array, default: () => [] },
-  /** Active tab id. */
   activeTab: { type: String, default: "" },
-  /** Initial pixel widths; persisted across sessions. */
   defaultLeft: { type: Number, default: 220 },
-  /** Initial right-column width in pixels. */
   defaultRight: { type: Number, default: 320 },
-  /** Minimum widths enforced at the splitter level. */
   minLeft: { type: Number, default: 160 },
-  /** Right-side minimum. */
   minRight: { type: Number, default: 220 },
 })
 
@@ -70,28 +62,20 @@ const hasRight = computed(() => !!slots.right)
 
 const ui = useStudioUiStore()
 
-// Splitpanes is percentage-based. Convert our pixel defaults into
-// a reasonable starting percentage (recomputed on mount when we know
-// the container width).
+// Splitpanes sizes are percentages; pixel widths convert against the measured frame width.
 const containerWidth = ref(1280)
 const widths = ref({ left: props.defaultLeft, right: props.defaultRight })
 
 onMounted(() => {
-  const persisted = ui.getColumns(props.frameId, {
+  widths.value = ui.getColumns(props.frameId, {
     left: props.defaultLeft,
     right: props.defaultRight,
   })
-  widths.value = persisted
-  // Try to pick up the real container width once mounted
-  queueMeasure()
-})
-
-function queueMeasure() {
   requestAnimationFrame(() => {
     const el = document.querySelector(`[data-studio-frame="${props.frameId}"]`)
     if (el) containerWidth.value = el.clientWidth || 1280
   })
-}
+})
 
 const leftPct = computed(() => toPct(hasLeft.value ? widths.value.left : 0))
 const rightPct = computed(() => toPct(hasRight.value ? widths.value.right : 0))
@@ -105,19 +89,15 @@ function toPct(px) {
 }
 
 function onResize(event) {
-  // splitpanes emits an array with { size } for each pane
   if (!Array.isArray(event) || event.length !== 3) return
   const [l, , r] = event
   const w = Math.max(containerWidth.value, 400)
-  const leftPx = Math.round((l.size / 100) * w)
-  const rightPx = Math.round((r.size / 100) * w)
-  widths.value = { left: leftPx, right: rightPx }
+  widths.value = { left: Math.round((l.size / 100) * w), right: Math.round((r.size / 100) * w) }
   ui.setColumns(props.frameId, widths.value)
 }
 </script>
 
 <style scoped>
-/* Slim, unobtrusive splitter — matches warm-* tones */
 :deep(.splitpanes__splitter) {
   background: transparent;
   position: relative;

@@ -63,14 +63,6 @@
         <MonacoEditor language="markdown" :model-value="form.system_prompt || ''" @update:model-value="patch('system_prompt', $event)" @save="$emit('save')" />
       </div>
     </section>
-
-    <!-- Wiring preview -->
-    <section class="flex flex-col gap-2">
-      <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
-        {{ t("studio.module.form.wiring") }}
-      </h3>
-      <WiringPreview kind="subagents" :tool-name="form.name" :params="[]" />
-    </section>
   </div>
 </template>
 
@@ -84,7 +76,6 @@ import KInput from "@/components/studio/common/KInput.vue"
 import MonacoEditor from "@/components/studio/code/MonacoEditor.vue"
 import SkillDocSection from "@/components/studio/module/SkillDocSection.vue"
 import ToolsMultiSelect from "@/components/studio/module/ToolsMultiSelect.vue"
-import WiringPreview from "@/components/studio/module/WiringPreview.vue"
 import { catalogAPI } from "@/utils/studio/api"
 import { useI18n } from "@/utils/i18n"
 

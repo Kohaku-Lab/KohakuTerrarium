@@ -2,7 +2,8 @@
   <CompactShell v-if="isCompact" />
   <div v-else class="h-full flex overflow-hidden bg-[var(--color-bg)] dark:bg-warm-950">
     <RailPane />
-    <TabGroupContainer />
+    <StudioApp v-if="appMode === 'studio'" />
+    <TabGroupContainer v-else />
   </div>
 </template>
 
@@ -12,6 +13,8 @@ import { onMounted, onBeforeUnmount } from "vue"
 import CompactShell from "@/components/shell/CompactShell.vue"
 import RailPane from "@/components/shell/RailPane.vue"
 import TabGroupContainer from "@/components/shell/TabGroupContainer.vue"
+import { useAppMode } from "@/components/shell/rail/useAppMode"
+import { StudioApp } from "@/components/shell/rail/useOpenStudio"
 import { useDensity } from "@/composables/useDensity"
 import { useTabsStore } from "@/stores/tabs"
 import { useInstancesStore } from "@/stores/instances"
@@ -25,6 +28,7 @@ const instances = useInstancesStore()
 const conversations = useConversationsStore()
 const cluster = useClusterStore()
 const { isCompact } = useDensity()
+const { appMode } = useAppMode()
 
 // Register tab-kind components — only the kinds wired up at the
 // current phase. Phase 2 has none; Phase 3+ adds Inspector, Dashboard,

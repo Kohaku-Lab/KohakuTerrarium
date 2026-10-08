@@ -42,14 +42,6 @@
       </div>
       <ExecuteBodyEditor :model-value="executeBody" method-name="wait_for_trigger" method-signature="self" height="300px" @update:model-value="$emit('execute-body-change', $event)" @save="$emit('save')" />
     </section>
-
-    <!-- Wiring preview -->
-    <section class="flex flex-col gap-2">
-      <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
-        {{ t("studio.module.form.wiring") }}
-      </h3>
-      <WiringPreview kind="triggers" :tool-name="form.setup_tool_name || form.class_name" :params="[]" />
-    </section>
   </div>
 </template>
 
@@ -58,7 +50,6 @@ import KCheckbox from "@/components/studio/common/KCheckbox.vue"
 import KField from "@/components/studio/common/KField.vue"
 import KInput from "@/components/studio/common/KInput.vue"
 import ExecuteBodyEditor from "@/components/studio/module/ExecuteBodyEditor.vue"
-import WiringPreview from "@/components/studio/module/WiringPreview.vue"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()

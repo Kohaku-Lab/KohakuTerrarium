@@ -1,6 +1,6 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
-    <div class="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-warm-200 dark:border-warm-800 text-xs text-warm-600 dark:text-warm-300">
+    <div class="kt-v2-line shrink-0 flex items-center gap-2 px-3 py-2 border-b text-xs text-warm-600 dark:text-warm-300">
       <div class="i-carbon-view text-sm" />
       <span class="font-medium">{{ t("studio.module.preview.title") }}</span>
       <div class="flex-1" />
@@ -49,7 +49,7 @@
         <div class="text-[11px] uppercase tracking-wider text-warm-500 font-medium">
           {{ t("studio.module.preview.usedInTitle") }}
         </div>
-        <UsedInCreaturesList :kind="kind" :name="name" :refresh-key="refreshKey" @open="$emit('open-creature', $event)" @count-change="onUsedCount" />
+        <ModuleWiringPanel :kind="kind" :name="name" :refresh-key="refreshKey" @open="$emit('open-creature', $event)" @count-change="onUsedCount" />
       </section>
     </div>
   </div>
@@ -59,7 +59,7 @@
 import { computed, ref, watch } from "vue"
 
 import SchemaFormField from "@/components/studio/creature/SchemaFormField.vue"
-import UsedInCreaturesList from "@/components/studio/module/UsedInCreaturesList.vue"
+import ModuleWiringPanel from "@/components/studio/module/ModuleWiringPanel.vue"
 import { schemaAPI } from "@/utils/studio/api"
 import { useI18n } from "@/utils/i18n"
 

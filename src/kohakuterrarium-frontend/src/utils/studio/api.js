@@ -70,8 +70,16 @@ export const metaAPI = {
 
 export const workspaceAPI = {
   get: () => run(http.get("/workspace")),
+  /** `path` is a folder or an `@pkg` ref; "@" opens (and creates) the local project. */
   open: (path) => run(http.post("/workspace/open", { path })),
   close: () => run(http.post("/workspace/close")),
+  project: () => run(http.get("/workspace/project")),
+}
+
+export const starterAPI = {
+  list: (kind) => run(http.get("/starters", { params: kind ? { kind } : {} })),
+  /** What creating `{kind, id, name, ...}` would write: `{files, ref?, entry?}`. */
+  preview: (body) => run(http.post("/starters/preview", body)),
 }
 
 export const manifestAPI = {
@@ -101,6 +109,14 @@ export const moduleAPI = {
     run(http.put(`/modules/${kind}/${encodeURIComponent(name)}/doc`, { content })),
   del: (kind, name) =>
     run(http.delete(`/modules/${kind}/${encodeURIComponent(name)}?confirm=true`)),
+  /** `{ref, name, entry, users}`: how a creature loads it and which creatures do. */
+  wiring: (kind, name) => run(http.get(`/modules/${kind}/${encodeURIComponent(name)}/wiring`)),
+  /** Compile and load the saved module as a creature would: `{ok, errors, loaded}`. */
+  check: (kind, name) => run(http.post(`/modules/${kind}/${encodeURIComponent(name)}/check`)),
+  plug: (kind, name, creatures) =>
+    run(http.post(`/modules/${kind}/${encodeURIComponent(name)}/plug`, { creatures })),
+  unplug: (kind, name, creatures) =>
+    run(http.post(`/modules/${kind}/${encodeURIComponent(name)}/unplug`, { creatures })),
 }
 
 export const catalogAPI = {
@@ -145,6 +161,7 @@ export const schemaAPI = {
 export default {
   meta: metaAPI,
   workspace: workspaceAPI,
+  starters: starterAPI,
   manifest: manifestAPI,
   creatures: creatureAPI,
   modules: moduleAPI,

@@ -10,12 +10,10 @@
       {{ t("studio.creature.modules.empty") }}
     </div>
     <div v-else class="flex flex-col gap-0.5">
-      <ModuleSlotRow v-for="(slot, idx) in slots" :key="`${slot.kind}:${slot.name}:${idx}`" :kind="slot.kind" :name="slot.name" :type="slot.type" :inherited="slot.inherited" :entry="entryFor(slot) || {}" @hover="onHover(slot)" @leave="onLeave" @remove="$emit('remove', slot.kind, slot.name)" @patch="(key, value) => $emit('patchEntry', slot.kind, slot.name, key, value)" />
+      <ModuleSlotRow v-for="(slot, idx) in slots" :key="`${slot.kind}:${slot.name}:${idx}`" :kind="slot.kind" :name="slot.name" :type="slot.type" :inherited="slot.inherited" :entry="entryFor(slot) || {}" @hover="onHover(slot)" @leave="onLeave" @remove="$emit('remove', slot.kind, slot.name)" @override="$emit('override', slot.kind, slot.name)" @patch="(key, value) => $emit('patchEntry', slot.kind, slot.name, key, value)" />
     </div>
 
-    <div class="mt-3 px-3 py-2 rounded border border-dashed border-warm-300 dark:border-warm-700 text-[11px] text-warm-500 dark:text-warm-500 text-center">
-      {{ t("studio.creature.modules.addHint") }}
-    </div>
+    <p class="mt-3 text-[11px] text-warm-500">{{ t("studio.creature.modules.addHint") }}</p>
   </SectionCard>
 </template>
 
@@ -39,7 +37,7 @@ const props = defineProps({
   effective: { type: Object, default: null },
 })
 
-defineEmits(["remove", "patchEntry"])
+defineEmits(["remove", "patchEntry", "override"])
 
 const slots = computed(() => {
   const ownToolNames = new Set(props.tools.filter((t) => (t.type || "builtin") !== "trigger").map((t) => t.name))

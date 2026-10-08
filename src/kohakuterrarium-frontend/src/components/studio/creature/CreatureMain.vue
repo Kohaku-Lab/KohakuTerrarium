@@ -5,9 +5,9 @@
 
       <IdentitySection :config="config" :effective="effective" @patch="(path, value) => $emit('patch', path, value)" />
 
-      <SystemPromptSection :file-name="config.system_prompt_file || ''" :prompt="systemPromptText" :effective="effective" :prompt-mode="promptMode" />
+      <SystemPromptSection :file-name="config.system_prompt_file || ''" :prompt="systemPromptText" :effective="effective" :prompt-mode="promptMode" @edit="onPromptEdit" />
 
-      <ModuleSlotList :tools="config.tools || []" :subagents="config.subagents || []" :triggers="config.triggers || []" :plugins="config.plugins || []" :effective="effective" @remove="(kind, name) => $emit('remove', kind, name)" @patch-entry="(kind, name, key, value) => $emit('patchEntry', kind, name, key, value)" />
+      <ModuleSlotList :tools="config.tools || []" :subagents="config.subagents || []" :triggers="config.triggers || []" :plugins="config.plugins || []" :effective="effective" @remove="(kind, name) => $emit('remove', kind, name)" @override="(kind, name) => $emit('override', kind, name)" @patch-entry="(kind, name, key, value) => $emit('patchEntry', kind, name, key, value)" />
 
       <MemoryPanel :memory="config.memory || {}" @patch="(subPath, value) => patchUnder('memory', subPath, value)" />
       <McpPanel :servers="config.mcp_servers || []" @update="(servers) => $emit('patch', 'mcp_servers', servers)" />
@@ -41,7 +41,14 @@ const props = defineProps({
   validationErrors: { type: Array, default: () => [] },
 })
 
-const emit = defineEmits(["patch", "remove", "patchEntry"])
+const emit = defineEmits(["patch", "remove", "patchEntry", "prompt", "override"])
+
+/** A prompt edit goes to the prompt file the config names, else to the inline prompt. */
+function onPromptEdit(text) {
+  const file = props.config.system_prompt_file
+  if (file) emit("prompt", file, text)
+  else emit("patch", "system_prompt", text)
+}
 
 const systemPromptText = computed(() => {
   const f = props.config.system_prompt_file

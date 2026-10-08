@@ -31,8 +31,18 @@ vi.mock("@/utils/api", () => ({
   },
 }))
 
+vi.mock("@/components/studio/app/StudioApp.vue", () => ({
+  __esModule: true,
+  default: { template: "<div data-test='studio-app-stub' />" },
+}))
+vi.mock("@/components/studio/app/rail/StudioRailNav.vue", () => ({
+  __esModule: true,
+  default: { template: "<div data-test='studio-rail-stub' />" },
+}))
+
 import MacroShell from "./MacroShell.vue"
 import RailItem from "./RailItem.vue"
+import TabGroupContainer from "./TabGroupContainer.vue"
 import { useTabsStore } from "@/stores/tabs"
 import { useConversationsStore } from "@/stores/conversations"
 import { sessionAPI } from "@/utils/api"
@@ -136,6 +146,28 @@ describe("MacroShell — render", () => {
     expect(items).toHaveLength(1)
     expect(wrapper.text()).toContain("alice")
     expect(wrapper.text()).not.toContain("swe-graph")
+  })
+})
+
+describe("MacroShell — Studio mode", () => {
+  it("swaps the tabs for the Studio app and the rail for its navigator, and Settings returns to Terrarium", async () => {
+    storage.set("kt.appMode", "studio")
+    const { _resetAppModeForTests, useAppMode } = await import("@/components/shell/rail/useAppMode")
+    _resetAppModeForTests()
+    const router = makeRouter()
+    const wrapper = mount(MacroShell, { global: { plugins: [router] } })
+    await router.isReady()
+    await flushPromises()
+    expect(wrapper.find("[data-test='studio-app-stub']").exists()).toBe(true)
+    expect(wrapper.find("[data-test='studio-rail-stub']").exists()).toBe(true)
+    expect(wrapper.text()).not.toContain("Nothing running.")
+    expect(wrapper.findComponent(TabGroupContainer).exists()).toBe(false)
+    await wrapper.find("[data-test='rail-settings']").trigger("click")
+    await flushPromises()
+    expect(useAppMode().appMode.value).toBe("terrarium")
+    expect(useTabsStore().activeId).toBe("settings")
+    expect(wrapper.find("[data-test='studio-app-stub']").exists()).toBe(false)
+    expect(wrapper.text()).toContain("Nothing running.")
   })
 })
 

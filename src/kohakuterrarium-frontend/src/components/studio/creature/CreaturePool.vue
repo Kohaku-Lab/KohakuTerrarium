@@ -7,6 +7,9 @@
       {{ catalog.error.message || t("studio.common.error") }}
     </div>
     <div v-else class="flex flex-col py-1">
+      <PoolGroup v-if="ownModules.length" :title="t('studioApp.pool.workspace')" :count="ownModules.length" :expanded="expanded.workspace" data-test="pool-workspace" @toggle="expanded.workspace = !expanded.workspace">
+        <PoolItem v-for="m in ownModules" :key="`${m.kind}/${m.name}`" :label="m.name" :description="t(`studioApp.kind.${m.kind}.noun`)" :wired="(m.users || []).includes(creature.name)" :icon="kindMeta(m.kind).icon" source="workspace" :data-test="`pool-own-${m.kind}-${m.name}`" @hover="() => {}" @leave="() => {}" @click="toggleOwn(m)" />
+      </PoolGroup>
       <PoolGroup v-for="g in groups" :key="g.key" :title="g.label" :count="g.items.length" :empty-hint="g.emptyHint" :expanded="expanded[g.key]" @toggle="expanded[g.key] = !expanded[g.key]">
         <PoolItem v-for="item in g.items" :key="item.name" :label="item.name" :description="item.description" :wired="g.wired.has(item.name)" :icon="g.itemIcon" :source="item.source" @hover="onHover(g.key, item.name)" @leave="onLeave" @click="onClick(g.key, item)" />
       </PoolGroup>
@@ -16,11 +19,15 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue"
+import { ElMessage } from "element-plus"
 
+import { kindMeta, workspaceModules } from "@/components/studio/app/studioKinds"
 import ItemPool from "@/components/studio/frame/ItemPool.vue"
 import { useStudioCatalogStore } from "@/stores/studio/catalog"
 import { useStudioCreatureStore } from "@/stores/studio/creature"
 import { useStudioUiStore } from "@/stores/studio/ui"
+import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
+import { moduleAPI } from "@/utils/studio/api"
 import { useI18n } from "@/utils/i18n"
 
 import PoolGroup from "./PoolGroup.vue"
@@ -30,10 +37,12 @@ const { t } = useI18n()
 const catalog = useStudioCatalogStore()
 const creature = useStudioCreatureStore()
 const ui = useStudioUiStore()
+const ws = useStudioWorkspaceStore()
 
 const search = ref("")
 
 const expanded = reactive({
+  workspace: true,
   tools: true,
   subagents: true,
   triggers: true,
@@ -41,6 +50,27 @@ const expanded = reactive({
 })
 
 onMounted(() => catalog.fetchAll())
+
+const ownModules = computed(() => filter(workspaceModules(ws.summary)))
+
+/**
+ * A workspace module is plugged in on disk (any kind, I/O included), so the
+ * creature must have no unsaved edits; it is reloaded afterwards.
+ */
+async function toggleOwn(m) {
+  if (creature.dirty) {
+    ElMessage.warning(t("studioApp.pool.saveFirst"))
+    return
+  }
+  const plugged = (m.users || []).includes(creature.name)
+  try {
+    if (plugged) await moduleAPI.unplug(m.kind, m.name, [creature.name])
+    else await moduleAPI.plug(m.kind, m.name, [creature.name])
+    await Promise.all([ws.refresh(), creature.load(creature.name)])
+  } catch (err) {
+    ElMessage.error(err?.message || String(err))
+  }
+}
 
 const wiredTools = computed(() => new Set(creature.tools.filter((t) => (t.type || "builtin") !== "trigger").map((t) => t.name)))
 const wiredSubagents = computed(() => new Set(creature.subagents.map((s) => s.name)))

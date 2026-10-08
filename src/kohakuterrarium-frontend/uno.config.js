@@ -7,6 +7,15 @@ import {
 } from "unocss"
 
 export default defineConfig({
+  // Class names also live in component .js modules (icon and accent tables), not only in templates.
+  content: {
+    pipeline: {
+      include: [
+        /\.(vue|svelte|[jt]sx|mdx?|astro|html)($|\?)/,
+        /[\\/]src[\\/]components[\\/].*(?<!\.test)\.js($|\?)/,
+      ],
+    },
+  },
   presets: [
     presetWind(),
     presetAttributify(),

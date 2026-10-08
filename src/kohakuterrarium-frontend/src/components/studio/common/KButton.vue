@@ -31,14 +31,14 @@ const iconSizeClass = computed(() => (props.size === "sm" ? "text-sm" : "text-ba
 const variantClasses = computed(() => {
   switch (props.variant) {
     case "primary":
-      return "bg-iolite text-white hover:bg-iolite-shadow border border-transparent"
+      return "rounded-lg bg-iolite text-white hover:bg-iolite-shadow"
     case "danger":
-      return "bg-coral text-white hover:bg-coral-shadow border border-transparent"
+      return "rounded-lg bg-coral text-white hover:bg-coral-shadow"
     case "ghost":
-      return "bg-transparent text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800/60 border border-transparent"
+      return "rounded-lg bg-transparent text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800/60"
     case "secondary":
     default:
-      return "bg-warm-100 dark:bg-warm-900 text-warm-800 dark:text-warm-200 hover:bg-warm-200 dark:hover:bg-warm-800 border border-warm-200 dark:border-warm-700"
+      return "kt-v2-edge kt-v2-panel rounded-lg border text-warm-700 dark:text-warm-200 hover:border-iolite/50"
   }
 })
 </script>

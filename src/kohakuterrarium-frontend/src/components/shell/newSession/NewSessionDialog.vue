@@ -70,13 +70,15 @@ import { randomNameFor } from "@/utils/randomName"
  * The one way to start a session: a creature or a terrarium recipe, picked
  * from the catalog or given as a local / @package path, with a name, the
  * machine it runs on and its working directory. `silent` starts it without
- * opening any tab (the graph editor stays in view).
+ * opening any tab (the graph editor stays in view); `initialConfig` arrives
+ * with the config already chosen (Studio's Run). `started` fires once it runs.
  */
 const props = defineProps({
   mode: { type: String, default: "creature" },
   silent: { type: Boolean, default: false },
+  initialConfig: { type: String, default: "" },
 })
-const emit = defineEmits(["close"])
+const emit = defineEmits(["close", "started"])
 
 const INPUT = "kt-v2-edge kt-v2-panel px-3 rounded-lg border text-warm-800 dark:text-warm-100 placeholder-warm-400 focus:outline-none focus:border-iolite"
 const BUTTON = "kt-v2-edge kt-v2-panel h-9 px-3 rounded-lg border text-xs text-warm-700 dark:text-warm-200 hover:border-iolite/50 flex items-center gap-1.5"
@@ -96,7 +98,7 @@ const namePlaceholder = ref(randomNameFor(mode.value))
 const onNode = ref(initialNode(mode.value))
 const pwd = ref("")
 const pwdTouched = ref(false)
-const configPath = ref("")
+const configPath = ref(props.initialConfig)
 const attachMode = ref("chat")
 const starting = ref(false)
 const error = ref("")
@@ -160,6 +162,7 @@ async function submit() {
       attachMode: props.silent ? "none" : attachMode.value,
       onNode: onNode.value,
     })
+    emit("started")
     emit("close")
   } catch (err) {
     error.value = err?.response?.data?.detail || err?.message || String(err)

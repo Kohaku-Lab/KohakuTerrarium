@@ -62,14 +62,6 @@
         <ExecuteBodyEditor :model-value="hook.body || ''" :method-name="hook.name" :method-signature="hookSignatureFor(hook.name)" height="180px" @update:model-value="updateHookBody(idx, $event)" @save="$emit('save')" />
       </div>
     </section>
-
-    <!-- Wiring preview -->
-    <section class="flex flex-col gap-2">
-      <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
-        {{ t("studio.module.form.wiring") }}
-      </h3>
-      <WiringPreview kind="plugins" :tool-name="form.name" :params="[]" />
-    </section>
   </div>
 </template>
 
@@ -81,7 +73,6 @@ import KInput from "@/components/studio/common/KInput.vue"
 import ExecuteBodyEditor from "@/components/studio/module/ExecuteBodyEditor.vue"
 import HookChecklist from "@/components/studio/module/HookChecklist.vue"
 import OptionsSchemaEditor from "@/components/studio/module/OptionsSchemaEditor.vue"
-import WiringPreview from "@/components/studio/module/WiringPreview.vue"
 import { useStudioCatalogStore } from "@/stores/studio/catalog"
 import { useI18n } from "@/utils/i18n"
 

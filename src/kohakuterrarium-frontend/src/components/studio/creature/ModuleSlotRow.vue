@@ -23,7 +23,7 @@
       <button v-if="!inherited" class="w-9 h-9 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded text-warm-500 hover:bg-coral/20 hover:text-coral hover-only-action" :title="t('studio.creature.modules.remove')" @click.stop="$emit('remove')">
         <div class="i-carbon-close text-base sm:text-sm" />
       </button>
-      <button v-else class="w-9 h-9 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded text-warm-400 hover-only-action cursor-not-allowed" :title="t('studio.creature.modules.convertOverride')" disabled>
+      <button v-else class="w-9 h-9 sm:w-6 sm:h-6 inline-flex items-center justify-center rounded text-warm-500 hover:bg-iolite/15 hover:text-iolite hover-only-action" :title="t('studio.creature.modules.convertOverride')" data-test="slot-override" @click.stop="$emit('override')">
         <div class="i-carbon-edit text-base sm:text-sm" />
       </button>
     </div>
@@ -94,7 +94,7 @@ const props = defineProps({
   entry: { type: Object, default: () => ({}) },
 })
 
-const emit = defineEmits(["hover", "leave", "remove", "patch"])
+const emit = defineEmits(["hover", "leave", "remove", "patch", "override"])
 
 const expanded = ref(false)
 

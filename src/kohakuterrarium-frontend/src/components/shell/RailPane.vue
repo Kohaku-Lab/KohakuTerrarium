@@ -7,10 +7,10 @@
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.rail.expand')" data-test="rail-expand" @click="toggleCollapsed"><span class="i-carbon-side-panel-open" /></button>
       <div class="w-6 my-1 shrink-0 border-t border-warm-300 dark:border-warm-700" />
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.rail.commandPalette')" @click="openPalette"><span class="i-carbon-search" /></button>
-      <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md bg-iolite text-white hover:bg-iolite-shadow" :title="t('lab.new.title')" data-test="rail-strip-new" @click="newOpen = true"><span class="i-carbon-add-large" /></button>
-      <button v-for="item in STRIP" :key="item.id" class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="stripActive(item) ? 'text-iolite' : 'text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" :title="t(item.label)" @click="item.app ? goTo(item.app) : tabs.openTab(item.tab)"><span :class="item.icon" /></button>
+      <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md bg-iolite text-white hover:bg-iolite-shadow" :title="appMode === 'studio' ? t('studioApp.nav.new') : t('lab.new.title')" data-test="rail-strip-new" @click="onStripNew"><span class="i-carbon-add-large" /></button>
+      <button v-for="item in STRIP" :key="item.id" class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="stripActive(item) ? 'text-iolite' : 'text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" :title="t(item.label)" @click="item.app ? goTo(item.app) : openShellTab(item.tab)"><span :class="item.icon" /></button>
       <span class="flex-1" />
-      <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.quick.settings')" @click="tabs.openTab({ kind: 'settings', id: 'settings' })"><span class="i-carbon-settings" /></button>
+      <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.quick.settings')" @click="openShellTab({ kind: 'settings', id: 'settings' })"><span class="i-carbon-settings" /></button>
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-400 hover:text-warm-800 dark:hover:text-warm-200" :title="theme.dark ? t('shell.rail.themeToLight') : t('shell.rail.themeToDark')" @click="theme.toggle()"><span :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" /></button>
       <button class="shrink-0 text-[10px] uppercase tracking-wider text-warm-600 dark:text-warm-400 hover:text-warm-800 dark:hover:text-warm-200 py-1" :title="t('shell.rail.cycleLocale')" @click="cycleLocale">{{ locale.current ?? "en" }}</button>
     </nav>
@@ -30,18 +30,21 @@
       <RailAppSwitch class="shrink-0" />
 
       <div class="flex-1 min-h-0 overflow-y-auto">
-        <RailNav />
+        <StudioRailNav v-if="inStudio" />
+        <template v-else>
+          <RailNav />
 
-        <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
+          <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
 
-        <RailGroupAttached />
+          <RailGroupAttached />
+        </template>
       </div>
 
       <!-- Footer -->
       <div class="mx-2 shrink-0 border-t border-warm-200 dark:border-warm-700" />
       <div class="flex shrink-0 items-center gap-1 px-2 pt-1.5">
-        <button class="flex-1 min-w-0 flex items-center gap-2 px-1.5 py-1 rounded-md kt-text-body text-left hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="tabs.activeId === 'settings' ? 'text-warm-800 dark:text-warm-200 font-medium' : 'text-warm-600 dark:text-warm-400'" data-test="rail-settings" @click="tabs.openTab({ kind: 'settings', id: 'settings' })"><span class="i-carbon-settings shrink-0" />{{ t("shell.quick.settings") }}</button>
-        <button v-if="auth.isAdmin" class="w-7 h-7 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-400 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.quick.admin')" data-test="rail-admin" @click="tabs.openTab({ kind: 'admin', id: 'admin' })"><span class="i-carbon-user-admin" /></button>
+        <button class="flex-1 min-w-0 flex items-center gap-2 px-1.5 py-1 rounded-md kt-text-body text-left hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="tabs.activeId === 'settings' && appMode !== 'studio' ? 'text-warm-800 dark:text-warm-200 font-medium' : 'text-warm-600 dark:text-warm-400'" data-test="rail-settings" @click="openShellTab({ kind: 'settings', id: 'settings' })"><span class="i-carbon-settings shrink-0" />{{ t("shell.quick.settings") }}</button>
+        <button v-if="auth.isAdmin" class="w-7 h-7 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-400 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.quick.admin')" data-test="rail-admin" @click="openShellTab({ kind: 'admin', id: 'admin' })"><span class="i-carbon-user-admin" /></button>
       </div>
       <div class="flex shrink-0 items-center justify-between gap-2 px-3 py-1.5">
         <!-- Host-picker chip — clickable indicator of which backend
@@ -72,8 +75,8 @@ import RailGroupAttached from "@/components/shell/RailGroupAttached.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import RailAppSwitch from "@/components/shell/rail/RailAppSwitch.vue"
 import RailNav from "@/components/shell/rail/RailNav.vue"
-import { useAppMode } from "@/components/shell/rail/useAppMode"
-import { useGoToApp } from "@/components/shell/rail/useOpenStudio"
+import { setAppMode, useAppMode } from "@/components/shell/rail/useAppMode"
+import { StudioRailNav, goStudio, useGoToApp } from "@/components/shell/rail/useOpenStudio"
 import SitePill from "@/components/cluster/SitePill.vue"
 import SitePopover from "@/components/cluster/SitePopover.vue"
 import { COLLAPSED_RAIL_WIDTH, useRailWidth } from "@/composables/useRailWidth"
@@ -97,6 +100,8 @@ const { appMode } = useAppMode()
 const { t } = useI18n()
 const { width, collapsed, dragging, startDrag, resetWidth, toggleCollapsed } = useRailWidth()
 const isCollapsed = computed(() => props.collapsible && collapsed.value)
+// The phone drawer (not collapsible) sits in the compact shell, which has no Studio surface.
+const inStudio = computed(() => props.collapsible && appMode.value === "studio")
 const popoverOpen = ref(false)
 const newOpen = ref(false)
 const STRIP = [
@@ -107,8 +112,19 @@ const STRIP = [
 ]
 
 function stripActive(item) {
-  if (tabs.activeId !== item.tab.id) return false
-  return !item.app || item.app === appMode.value
+  if (item.app) return item.app === appMode.value && (item.app === "studio" || tabs.activeId === item.tab.id)
+  return appMode.value !== "studio" && tabs.activeId === item.tab.id
+}
+
+/** Shell tabs live in Terrarium mode; opening one from Studio goes there. */
+function openShellTab(tab) {
+  if (appMode.value === "studio") setAppMode("terrarium")
+  tabs.openTab(tab)
+}
+
+function onStripNew() {
+  if (appMode.value === "studio") goStudio({ view: "new" })
+  else newOpen.value = true
 }
 
 function togglePopover() {

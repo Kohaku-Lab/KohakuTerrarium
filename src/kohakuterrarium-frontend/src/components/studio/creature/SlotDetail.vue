@@ -20,14 +20,11 @@
       {{ t("studio.creature.detail.noDescription") }}
     </p>
 
-    <div class="pt-2 border-t border-warm-200/70 dark:border-warm-800/70 flex gap-2">
-      <KButton size="sm" variant="secondary" icon="i-carbon-settings-adjust" :disabled="true" :title="t('studio.creature.detail.optionsComingSoon')">
-        {{ t("studio.creature.detail.options") }}
-      </KButton>
+    <div class="kt-v2-line pt-2 border-t flex gap-2">
       <KButton v-if="!inherited" size="sm" variant="ghost" icon="i-carbon-trash-can" @click="onRemove">
         {{ t("studio.creature.detail.remove") }}
       </KButton>
-      <KButton v-else size="sm" variant="ghost" icon="i-carbon-edit" :disabled="true" :title="t('studio.creature.modules.convertOverride')">
+      <KButton v-else size="sm" variant="secondary" icon="i-carbon-edit" :title="t('studioApp.override.hint')" data-test="detail-override" @click="creature.addModule(kind, name)">
         {{ t("studio.creature.modules.convertOverride") }}
       </KButton>
     </div>

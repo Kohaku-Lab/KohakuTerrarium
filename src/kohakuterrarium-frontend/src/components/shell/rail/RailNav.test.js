@@ -51,7 +51,7 @@ describe("RailNav", () => {
 })
 
 describe("RailAppSwitch", () => {
-  it("flips the home tab between the lab and Studio, brings it forward, and remembers the mode", async () => {
+  it("switches to Studio without touching the tabs, back to the lab tab, and remembers the mode", async () => {
     const tabs = useTabsStore()
     tabs.openTab({ kind: "catalog", id: "catalog" })
     const w = mount(RailAppSwitch)
@@ -59,7 +59,7 @@ describe("RailAppSwitch", () => {
     const terrarium = () => w.find('[data-test="rail-app-terrarium"]')
     expect(terrarium().attributes("aria-checked")).toBe("true")
     await studio().trigger("click")
-    expect(tabs.activeId).toBe("dashboard")
+    expect(tabs.activeId).toBe("catalog")
     expect(tabs.tabs.some((t) => t.kind === "studio-editor")).toBe(false)
     expect(useAppMode().appMode.value).toBe("studio")
     expect(localStorage.getItem("kt.appMode")).toBe("studio")

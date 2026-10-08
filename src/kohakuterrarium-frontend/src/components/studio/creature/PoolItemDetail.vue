@@ -31,15 +31,12 @@
         <Tag v-if="entry.needs_context != null" :label="t('studio.creature.detail.needsContext')" :value="entry.needs_context ? 'yes' : 'no'" />
       </div>
 
-      <div class="pt-2 border-t border-warm-200/70 dark:border-warm-800/70 flex gap-2">
+      <div class="kt-v2-line pt-2 border-t flex gap-2">
         <KButton v-if="!isWired" size="sm" variant="primary" icon="i-carbon-add" @click="onAdd">
           {{ t("studio.creature.detail.add") }}
         </KButton>
         <KButton v-else size="sm" variant="secondary" icon="i-carbon-subtract" @click="onRemove">
           {{ t("studio.creature.detail.remove") }}
-        </KButton>
-        <KButton size="sm" variant="ghost" icon="i-carbon-settings-adjust" :disabled="true" :title="t('studio.creature.detail.customizeComingSoon')">
-          {{ t("studio.creature.detail.customize") }}
         </KButton>
       </div>
     </template>

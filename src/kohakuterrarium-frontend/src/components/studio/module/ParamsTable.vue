@@ -3,10 +3,10 @@
     <div v-if="!params.length" class="text-xs text-warm-500 italic px-1">
       {{ t("studio.module.params.empty") }}
     </div>
-    <div v-for="(p, i) in params" :key="i" class="flex flex-col gap-1 border border-warm-200 dark:border-warm-800 rounded-md px-2 py-2 bg-warm-50/40 dark:bg-warm-950/40">
+    <div v-for="(p, i) in params" :key="i" class="kt-v2-card flex flex-col gap-1 px-2 py-2">
       <div class="flex items-center gap-2">
         <KInput :model-value="p.name" class="flex-1" placeholder="param_name" @update:model-value="update(i, 'name', $event)" />
-        <KSelect :model-value="p.type_hint || 'str'" :options="TYPE_HINT_OPTIONS" @update:model-value="update(i, 'type_hint', $event)" />
+        <KSelect :model-value="p.type_hint || types[0].value" :options="types" @update:model-value="update(i, 'type_hint', $event)" />
         <KCheckbox :model-value="!!p.required" :label="t('studio.module.params.required')" @update:model-value="update(i, 'required', $event)" />
         <button class="w-7 h-7 inline-flex items-center justify-center rounded text-warm-500 hover:text-coral hover:bg-coral/10" :title="t('studio.module.params.remove')" @click="remove(i)">
           <div class="i-carbon-trash-can text-sm" />
@@ -32,6 +32,10 @@
   </div>
 </template>
 
+<script>
+const TYPE_HINT_OPTIONS = ["str", "int", "float", "bool", "list[str]", "dict", "Any"].map((v) => ({ value: v, label: v }))
+</script>
+
 <script setup>
 import KCheckbox from "@/components/studio/common/KCheckbox.vue"
 import KInput from "@/components/studio/common/KInput.vue"
@@ -40,19 +44,11 @@ import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
 
-const TYPE_HINT_OPTIONS = [
-  { value: "str", label: "str" },
-  { value: "int", label: "int" },
-  { value: "float", label: "float" },
-  { value: "bool", label: "bool" },
-  { value: "list[str]", label: "list[str]" },
-  { value: "dict", label: "dict" },
-  { value: "Any", label: "Any" },
-]
-
 const props = defineProps({
   /** Array of { name, type_hint, default, required, description }. */
   params: { type: Array, default: () => [] },
+  /** The type choices, [{value, label}]; Python hints unless the caller passes others (JSON types for tool arguments). */
+  types: { type: Array, default: () => TYPE_HINT_OPTIONS },
 })
 
 const emit = defineEmits(["update:params"])
@@ -62,7 +58,7 @@ function emitReplace(next) {
 }
 
 function add() {
-  emitReplace([...props.params, { name: "", type_hint: "str", default: null, required: false, description: "" }])
+  emitReplace([...props.params, { name: "", type_hint: props.types[0].value, default: null, required: false, description: "" }])
 }
 
 function remove(idx) {

@@ -45,9 +45,10 @@
         <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
           {{ t("studio.module.form.params") }}
         </h3>
-        <p class="text-[11px] text-warm-500 mt-0.5">{{ t("studio.module.form.paramsHint") }}</p>
+        <p class="text-[11px] text-warm-500 mt-0.5">{{ t("studioApp.params.hint") }}</p>
       </div>
-      <ParamsTable :params="form.params || []" @update:params="patch('params', $event)" />
+      <p v-if="form.params_editable === false" class="text-[11px] text-amber-shadow dark:text-amber-light" data-test="params-computed">{{ t("studioApp.params.computed") }}</p>
+      <ParamsTable v-else :params="form.params || []" :types="JSON_TYPES" @update:params="patch('params', $event)" />
     </section>
 
     <!-- Execute body -->
@@ -60,14 +61,6 @@
       </div>
       <ExecuteBodyEditor :model-value="executeBody" method-name="_execute" method-signature="self, args" height="300px" @update:model-value="$emit('execute-body-change', $event)" @save="$emit('save')" />
     </section>
-
-    <!-- Wiring preview -->
-    <section class="flex flex-col gap-2">
-      <h3 class="text-xs font-semibold uppercase tracking-wider text-warm-500">
-        {{ t("studio.module.form.wiring") }}
-      </h3>
-      <WiringPreview kind="tools" :tool-name="form.tool_name" :params="form.params || []" />
-    </section>
   </div>
 </template>
 
@@ -79,10 +72,11 @@ import KSelect from "@/components/studio/common/KSelect.vue"
 import ExecuteBodyEditor from "@/components/studio/module/ExecuteBodyEditor.vue"
 import ParamsTable from "@/components/studio/module/ParamsTable.vue"
 import SkillDocSection from "@/components/studio/module/SkillDocSection.vue"
-import WiringPreview from "@/components/studio/module/WiringPreview.vue"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
+
+const JSON_TYPES = ["string", "integer", "number", "boolean", "array", "object"].map((v) => ({ value: v, label: v }))
 
 const EXEC_MODE_OPTIONS = [
   { value: "direct", label: "direct" },

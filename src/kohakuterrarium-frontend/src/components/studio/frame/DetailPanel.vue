@@ -1,6 +1,6 @@
 <template>
   <div ref="root" class="h-full flex flex-col">
-    <div v-if="title" class="shrink-0 px-3 py-2 border-b border-warm-200 dark:border-warm-800 text-[11px] uppercase tracking-wider font-medium text-warm-500 dark:text-warm-400">
+    <div v-if="title" class="kt-v2-line shrink-0 px-3 py-2 border-b text-[11px] uppercase tracking-wider font-medium text-warm-500 dark:text-warm-400">
       {{ title }}
     </div>
     <div class="flex-1 min-h-0 overflow-y-auto p-3">

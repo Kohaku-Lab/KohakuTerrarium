@@ -1,6 +1,6 @@
 <template>
   <div class="relative">
-    <select :value="modelValue" :disabled="disabled" :class="['w-full px-2.5 py-1.5 pr-8 rounded-md text-sm appearance-none', 'bg-warm-50 dark:bg-warm-950', 'border border-warm-200 dark:border-warm-700', 'text-warm-800 dark:text-warm-200', 'focus:outline-none focus:border-iolite dark:focus:border-iolite-light', 'transition-colors', disabled && 'opacity-60 cursor-not-allowed']" @change="$emit('update:modelValue', $event.target.value)">
+    <select :value="modelValue" :disabled="disabled" :class="['kt-v2-edge w-full px-2.5 py-1.5 pr-8 rounded-lg text-sm appearance-none', 'bg-[var(--v2-card)]', 'border', 'text-warm-800 dark:text-warm-200', 'focus:outline-none focus:border-iolite dark:focus:border-iolite-light', 'transition-colors', disabled && 'opacity-60 cursor-not-allowed']" @change="$emit('update:modelValue', $event.target.value)">
       <option v-if="placeholder" value="" disabled>{{ placeholder }}</option>
       <option v-for="opt in normalizedOptions" :key="opt.value" :value="opt.value">
         {{ opt.label }}

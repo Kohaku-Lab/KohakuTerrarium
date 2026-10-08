@@ -4,7 +4,7 @@
     <StudioHomePage v-if="kind === 'home'" />
 
     <!-- workspace dashboard — entityKind === "workspace" -->
-    <StudioWorkspacePage v-else-if="kind === 'workspace'" :key="workspace" :workspace-path-prop="workspace" />
+    <StudioWorkspacePage v-else-if="kind === 'workspace'" :key="tab.workspace" :workspace-path-prop="tab.workspace" />
 
     <!-- creature editor — entityKind === "creature" -->
     <StudioCreaturePage v-else-if="kind === 'creature'" :creature-name-prop="tab.entity" />
@@ -19,7 +19,7 @@
 </template>
 
 <script setup>
-import { computed, provide, ref, watch } from "vue"
+import { computed, provide } from "vue"
 
 import StudioHomePage from "@/components/studio/pages/StudioHomePage.vue"
 import StudioWorkspacePage from "@/components/studio/pages/StudioWorkspacePage.vue"
@@ -30,36 +30,23 @@ import { useTabsStore } from "@/stores/tabs"
 import { buildStudioTabId } from "@/utils/tabsUrl"
 
 /**
- * A Studio page in a tab: the workspace picker, a workspace, a creature or a
- * module, by `tab.entityKind`. With `asHome` it is the shell's home in Studio
- * mode: the picker and the workspace swap in place instead of opening tabs.
+ * A Studio page in a shell tab — the workspace picker, a workspace, a
+ * creature or a module, by `tab.entityKind` — for Studio tabs a browser
+ * still holds; Studio itself is the app the rail switches to.
  */
 const props = defineProps({
   tab: { type: Object, required: true },
-  asHome: { type: Boolean, default: false },
 })
 
 const tabs = useTabsStore()
 
-const homeWorkspace = ref(props.tab.workspace || "")
-watch(
-  () => props.tab.workspace,
-  (root) => {
-    if (props.asHome && root) homeWorkspace.value = root
-  },
-)
-const workspace = computed(() => (props.asHome ? homeWorkspace.value : props.tab.workspace))
-const kind = computed(() => (props.asHome ? (homeWorkspace.value ? "workspace" : "home") : props.tab.entityKind || "home"))
+const kind = computed(() => props.tab.entityKind || "home")
 
 // v2 navigation — every router.push inside the studio pages becomes a
 // macro-shell tab.openTab call. Tab ids are stable so opening the
 // same workspace/creature/module twice activates the existing tab.
 provide(STUDIO_NAV_INJECT_KEY, {
   openHome() {
-    if (props.asHome) {
-      homeWorkspace.value = ""
-      return
-    }
     tabs.openTab({
       kind: "studio-editor",
       id: buildStudioTabId({ entityKind: "home" }),
@@ -69,10 +56,6 @@ provide(STUDIO_NAV_INJECT_KEY, {
     })
   },
   openWorkspace(rootPath) {
-    if (props.asHome) {
-      homeWorkspace.value = rootPath
-      return
-    }
     tabs.openTab({
       kind: "studio-editor",
       id: buildStudioTabId({ entityKind: "workspace", workspace: rootPath }),

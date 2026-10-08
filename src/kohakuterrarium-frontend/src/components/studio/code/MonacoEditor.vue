@@ -38,9 +38,12 @@ const theme = useThemeStore()
 let editor = null
 let suppressEmit = false
 let changeDebounce = null
+let unmounted = false
 
 onMounted(async () => {
   const monaco = await import("monaco-editor")
+  // The import is async: a page that re-renders while loading unmounts this first.
+  if (unmounted || !containerEl.value) return
 
   editor = monaco.editor.create(containerEl.value, {
     value: props.modelValue,
@@ -116,6 +119,7 @@ watch(
 )
 
 onUnmounted(() => {
+  unmounted = true
   if (changeDebounce) clearTimeout(changeDebounce)
   if (editor) {
     editor.dispose()

@@ -1,8 +1,8 @@
 <template>
   <div class="h-full w-full">
-    <EditorFrame frame-id="creature-editor" :tabs="tabs" :active-tab="activeTab" @tab:select="activeTab = $event">
+    <EditorFrame frame-id="creature-editor" :active-tab="activeTab">
       <template #head>
-        <CreatureHead :name="creature.name || displayName" :dirty="creature.dirty" :saving="creature.saving" @back="goBack" @save="onSave" @discard="onDiscard" />
+        <CreatureHead :name="creature.name || displayName" :dirty="creature.dirty" :saving="creature.saving" @back="goBack" @save="onSave" @discard="onDiscard" @run="onRun" />
       </template>
 
       <template #left>
@@ -22,7 +22,7 @@
             {{ t("studio.common.confirm") }}
           </KButton>
         </div>
-        <CreatureMain v-else :config="creature.config" :prompts="creature.prompts" :effective="creature.effective" :validation-errors="creature.validationErrors" @patch="onPatch" @remove="onRemove" @patch-entry="onPatchEntry" />
+        <CreatureMain v-else :config="creature.config" :prompts="creature.prompts" :effective="creature.effective" :validation-errors="creature.validationErrors" @patch="onPatch" @remove="onRemove" @patch-entry="onPatchEntry" @prompt="(file, text) => creature.setPromptFile(file, text)" @override="(kind, name) => creature.addModule(kind, name)" />
       </template>
 
       <template #right>
@@ -41,6 +41,7 @@
         <span class="opacity-60 ml-2">Ctrl/Cmd-S</span>
       </template>
     </EditorFrame>
+    <NewSessionDialog v-if="runConfig" :initial-config="runConfig" @started="setAppMode('terrarium')" @close="runConfig = ''" />
   </div>
 </template>
 
@@ -48,6 +49,8 @@
 import { computed, inject, onMounted, onUnmounted, ref, watch } from "vue"
 import { onBeforeRouteLeave, useRoute } from "vue-router"
 
+import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
+import { setAppMode } from "@/components/shell/rail/useAppMode"
 import KButton from "@/components/studio/common/KButton.vue"
 import CreatureDetail from "@/components/studio/creature/CreatureDetail.vue"
 import CreatureHead from "@/components/studio/creature/CreatureHead.vue"
@@ -81,15 +84,6 @@ const ui = useStudioUiStore()
 const displayName = computed(() => props.creatureNameProp ?? decodeURIComponent(String(route.params.name || "")))
 
 const activeTab = ref("creature")
-const tabs = computed(() => [
-  {
-    id: "creature",
-    label: displayName.value || "creature",
-    icon: "i-carbon-bot",
-    pinned: true,
-    dirty: creature.dirty,
-  },
-])
 
 // In v2 (host-injected studioNav) we never auto-redirect on
 // missing-workspace because that would spawn a Home tab as a side-
@@ -157,6 +151,19 @@ async function onSave() {
 
 function onDiscard() {
   creature.discard()
+}
+
+const runConfig = ref("")
+
+/** Run starts a session from what is on disk, so unsaved edits are saved first. */
+async function onRun() {
+  if (creature.dirty) {
+    const res = await creature.save()
+    if (!res?.ok) return
+    ws.refresh().catch(() => {})
+  }
+  const listed = ws.creatures.find((c) => c.name === creature.name)
+  runConfig.value = listed?.ref || creature.saved?.path || ""
 }
 
 function onKeyDown(e) {
