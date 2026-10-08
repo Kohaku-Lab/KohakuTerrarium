@@ -14,6 +14,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import TabContextMenu from "@/components/shell/TabContextMenu.vue"
+import { useAppMode } from "@/components/shell/rail/useAppMode"
 import { useSplitDrag } from "@/composables/useSplitDrag"
 import { attentionForScope, subscribeAttention } from "@/stores/attention"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
@@ -32,6 +33,7 @@ const props = defineProps({
 const emit = defineEmits(["activate", "close", "drop"])
 
 const tabs = useTabsStore()
+const { appMode } = useAppMode()
 const prefs = useAttentionPrefs()
 const drag = useSplitDrag()
 const attentionTick = ref(0)
@@ -105,7 +107,7 @@ function closeAll() {
 const iconClass = computed(
   () =>
     ({
-      dashboard: "i-carbon-home",
+      dashboard: appMode.value === "studio" ? "i-carbon-tool-box" : "i-carbon-home",
       attach: "i-carbon-chat",
       inspector: "i-carbon-radar",
       "session-viewer": "i-carbon-recently-viewed",
@@ -127,7 +129,7 @@ const label = computed(() => {
   const tab = props.tab
   switch (tab.kind) {
     case "dashboard":
-      return t("lab.rail.lab")
+      return t(appMode.value === "studio" ? "lab.rail.studio" : "lab.rail.lab")
     case "attach":
       return tab.config_name ?? tab.target ?? "attach"
     case "inspector":

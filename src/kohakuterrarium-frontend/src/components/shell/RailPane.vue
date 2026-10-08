@@ -8,8 +8,7 @@
       <div class="w-6 my-1 shrink-0 border-t border-warm-300 dark:border-warm-700" />
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.rail.commandPalette')" @click="openPalette"><span class="i-carbon-search" /></button>
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md bg-iolite text-white hover:bg-iolite-shadow" :title="t('lab.new.title')" data-test="rail-strip-new" @click="newOpen = true"><span class="i-carbon-add-large" /></button>
-      <button v-for="item in STRIP" :key="item.id" class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="tabs.activeId === item.tab.id ? 'text-iolite' : 'text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" :title="t(item.label)" @click="tabs.openTab(item.tab)"><span :class="item.icon" /></button>
-      <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('lab.rail.studio')" @click="openStudio"><span class="i-carbon-tool-box" /></button>
+      <button v-for="item in STRIP" :key="item.id" class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :class="stripActive(item) ? 'text-iolite' : 'text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" :title="t(item.label)" @click="item.app ? goTo(item.app) : tabs.openTab(item.tab)"><span :class="item.icon" /></button>
       <span class="flex-1" />
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 hover:bg-warm-300/50 dark:hover:bg-warm-700/50" :title="t('shell.quick.settings')" @click="tabs.openTab({ kind: 'settings', id: 'settings' })"><span class="i-carbon-settings" /></button>
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-400 hover:text-warm-800 dark:hover:text-warm-200" :title="theme.dark ? t('shell.rail.themeToLight') : t('shell.rail.themeToDark')" @click="theme.toggle()"><span :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" /></button>
@@ -73,7 +72,8 @@ import RailGroupAttached from "@/components/shell/RailGroupAttached.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import RailAppSwitch from "@/components/shell/rail/RailAppSwitch.vue"
 import RailNav from "@/components/shell/rail/RailNav.vue"
-import { useOpenStudio } from "@/components/shell/rail/useOpenStudio"
+import { useAppMode } from "@/components/shell/rail/useAppMode"
+import { useGoToApp } from "@/components/shell/rail/useOpenStudio"
 import SitePill from "@/components/cluster/SitePill.vue"
 import SitePopover from "@/components/cluster/SitePopover.vue"
 import { COLLAPSED_RAIL_WIDTH, useRailWidth } from "@/composables/useRailWidth"
@@ -92,17 +92,24 @@ const locale = useLocaleStore()
 const palette = usePaletteStore()
 const tabs = useTabsStore()
 const auth = useAuthStore()
-const openStudio = useOpenStudio()
+const goTo = useGoToApp()
+const { appMode } = useAppMode()
 const { t } = useI18n()
 const { width, collapsed, dragging, startDrag, resetWidth, toggleCollapsed } = useRailWidth()
 const isCollapsed = computed(() => props.collapsible && collapsed.value)
 const popoverOpen = ref(false)
 const newOpen = ref(false)
 const STRIP = [
-  { id: "lab", label: "lab.rail.lab", icon: "i-carbon-home", tab: { kind: "dashboard", id: "dashboard" } },
+  { id: "lab", label: "lab.rail.lab", icon: "i-carbon-home", app: "terrarium", tab: { id: "dashboard" } },
   { id: "history", label: "lab.history.title", icon: "i-carbon-recently-viewed", tab: { kind: "saved-sessions", id: "saved-sessions" } },
   { id: "library", label: "lab.library.title", icon: "i-carbon-catalog", tab: { kind: "catalog", id: "catalog" } },
+  { id: "studio", label: "lab.rail.studio", icon: "i-carbon-tool-box", app: "studio", tab: { id: "dashboard" } },
 ]
+
+function stripActive(item) {
+  if (tabs.activeId !== item.tab.id) return false
+  return !item.app || item.app === appMode.value
+}
 
 function togglePopover() {
   popoverOpen.value = !popoverOpen.value

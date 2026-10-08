@@ -11,7 +11,7 @@
 import { registerTabKind } from "@/stores/tabKindRegistry"
 
 import AgentInspectorTab from "@/components/shell/tabs/AgentInspectorTab.vue"
-import LabPage from "@/components/lab/LabPage.vue"
+import HomeTab from "@/components/shell/tabs/HomeTab.vue"
 import AttachTab from "@/components/shell/tabs/AttachTab.vue"
 import SessionViewerTab from "@/components/shell/tabs/SessionViewerTab.vue"
 import SavedSessionsTab from "@/components/shell/tabs/SavedSessionsTab.vue"
@@ -34,8 +34,8 @@ export function registerBuiltinTabKinds() {
   // session id (UXI-01); there are no separate inner tabs.
   registerTabKind({ kind: "inspector", component: AgentInspectorTab })
 
-  // The home tab: the lab bench of running sessions.
-  registerTabKind({ kind: "dashboard", component: LabPage })
+  // The home tab: the lab bench, or Studio in Studio mode.
+  registerTabKind({ kind: "dashboard", component: HomeTab })
 
   // ── Phase 5 — AttachTab + thin embeds ─────────────────────────
   registerTabKind({ kind: "attach", component: AttachTab })

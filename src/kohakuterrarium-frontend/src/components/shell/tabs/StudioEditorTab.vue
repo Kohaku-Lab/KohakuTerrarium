@@ -4,7 +4,7 @@
     <StudioHomePage v-if="kind === 'home'" />
 
     <!-- workspace dashboard — entityKind === "workspace" -->
-    <StudioWorkspacePage v-else-if="kind === 'workspace'" :workspace-path-prop="tab.workspace" />
+    <StudioWorkspacePage v-else-if="kind === 'workspace'" :key="workspace" :workspace-path-prop="workspace" />
 
     <!-- creature editor — entityKind === "creature" -->
     <StudioCreaturePage v-else-if="kind === 'creature'" :creature-name-prop="tab.entity" />
@@ -19,7 +19,7 @@
 </template>
 
 <script setup>
-import { computed, provide } from "vue"
+import { computed, provide, ref, watch } from "vue"
 
 import StudioHomePage from "@/components/studio/pages/StudioHomePage.vue"
 import StudioWorkspacePage from "@/components/studio/pages/StudioWorkspacePage.vue"
@@ -29,22 +29,37 @@ import { STUDIO_NAV_INJECT_KEY } from "@/composables/useStudioNav"
 import { useTabsStore } from "@/stores/tabs"
 import { buildStudioTabId } from "@/utils/tabsUrl"
 
-const props = defineProps({ tab: { type: Object, required: true } })
+/**
+ * A Studio page in a tab: the workspace picker, a workspace, a creature or a
+ * module, by `tab.entityKind`. With `asHome` it is the shell's home in Studio
+ * mode: the picker and the workspace swap in place instead of opening tabs.
+ */
+const props = defineProps({
+  tab: { type: Object, required: true },
+  asHome: { type: Boolean, default: false },
+})
 
 const tabs = useTabsStore()
 
-// Studio uses ``entityKind`` to pick which page to mount. The
-// "workspace selection + module/creature selection" surface is
-// ``entityKind: "home"`` (workspace picker) or ``entityKind:
-// "workspace"`` (within an opened workspace). Each creature/module
-// editor opens as its own tab via the studioNav provider below.
-const kind = computed(() => props.tab.entityKind || "home")
+const homeWorkspace = ref(props.tab.workspace || "")
+watch(
+  () => props.tab.workspace,
+  (root) => {
+    if (props.asHome && root) homeWorkspace.value = root
+  },
+)
+const workspace = computed(() => (props.asHome ? homeWorkspace.value : props.tab.workspace))
+const kind = computed(() => (props.asHome ? (homeWorkspace.value ? "workspace" : "home") : props.tab.entityKind || "home"))
 
 // v2 navigation — every router.push inside the studio pages becomes a
 // macro-shell tab.openTab call. Tab ids are stable so opening the
 // same workspace/creature/module twice activates the existing tab.
 provide(STUDIO_NAV_INJECT_KEY, {
   openHome() {
+    if (props.asHome) {
+      homeWorkspace.value = ""
+      return
+    }
     tabs.openTab({
       kind: "studio-editor",
       id: buildStudioTabId({ entityKind: "home" }),
@@ -54,6 +69,10 @@ provide(STUDIO_NAV_INJECT_KEY, {
     })
   },
   openWorkspace(rootPath) {
+    if (props.asHome) {
+      homeWorkspace.value = rootPath
+      return
+    }
     tabs.openTab({
       kind: "studio-editor",
       id: buildStudioTabId({ entityKind: "workspace", workspace: rootPath }),

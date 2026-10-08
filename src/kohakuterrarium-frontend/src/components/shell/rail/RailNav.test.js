@@ -15,12 +15,15 @@ vi.mock("@/components/shell/newSession/NewSessionDialog.vue", () => ({
 
 import RailAppSwitch from "./RailAppSwitch.vue"
 import RailNav from "./RailNav.vue"
+import { _resetAppModeForTests, setAppMode, useAppMode } from "./useAppMode"
 import { useTabsStore } from "@/stores/tabs"
 
 beforeEach(() => {
   setActivePinia(createPinia())
   workspace.isOpen = false
   workspace.root = ""
+  localStorage.removeItem("kt.appMode")
+  _resetAppModeForTests()
 })
 
 describe("RailNav", () => {
@@ -48,34 +51,31 @@ describe("RailNav", () => {
 })
 
 describe("RailAppSwitch", () => {
-  it("marks Studio while a Studio tab is active and crosses between the two apps", async () => {
+  it("flips the home tab between the lab and Studio, brings it forward, and remembers the mode", async () => {
     const tabs = useTabsStore()
+    tabs.openTab({ kind: "catalog", id: "catalog" })
     const w = mount(RailAppSwitch)
     const studio = () => w.find('[data-test="rail-app-studio"]')
     const terrarium = () => w.find('[data-test="rail-app-terrarium"]')
     expect(terrarium().attributes("aria-checked")).toBe("true")
     await studio().trigger("click")
-    expect(tabs.tabs.find((t) => t.id === tabs.activeId)?.kind).toBe("studio-editor")
-    expect(tabs.activeId).toContain("home")
+    expect(tabs.activeId).toBe("dashboard")
+    expect(tabs.tabs.some((t) => t.kind === "studio-editor")).toBe(false)
+    expect(useAppMode().appMode.value).toBe("studio")
+    expect(localStorage.getItem("kt.appMode")).toBe("studio")
     expect(studio().attributes("aria-checked")).toBe("true")
+    tabs.openTab({ kind: "catalog", id: "catalog" })
     await terrarium().trigger("click")
     expect(tabs.activeId).toBe("dashboard")
-    expect(terrarium().attributes("aria-checked")).toBe("true")
+    expect(useAppMode().appMode.value).toBe("terrarium")
   })
 
-  it("opens the open workspace instead of the picker", async () => {
-    workspace.isOpen = true
-    workspace.root = "/work/space"
-    const tabs = useTabsStore()
-    const openTab = vi.spyOn(tabs, "openTab")
-    const w = mount(RailAppSwitch)
-    await w.find('[data-test="rail-app-studio"]').trigger("click")
-    expect(openTab).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "studio-editor",
-        entityKind: "workspace",
-        workspace: "/work/space",
-      }),
-    )
+  it("the sidebar's Lab entry returns to Terrarium mode", async () => {
+    setAppMode("studio")
+    const w = mount(RailNav)
+    expect(w.find('[data-test="rail-nav-lab"]').classes()).not.toContain("font-medium")
+    await w.find('[data-test="rail-nav-lab"]').trigger("click")
+    expect(useAppMode().appMode.value).toBe("terrarium")
+    expect(w.find('[data-test="rail-nav-lab"]').classes()).toContain("font-medium")
   })
 })

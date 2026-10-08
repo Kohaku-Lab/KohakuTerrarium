@@ -1,32 +1,24 @@
 /**
- * Opening Studio from the shell: the open workspace's tab when one is open,
- * else the workspace picker. Read-only use of the Studio workspace store.
+ * Studio as the shell's home: the app switch moves the home tab to Studio,
+ * which opens on the open workspace when there is one, else the picker.
+ * Read-only use of the Studio workspace store.
  */
 
+import { setAppMode } from "@/components/shell/rail/useAppMode"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 import { useTabsStore } from "@/stores/tabs"
-import { buildStudioTabId } from "@/utils/tabsUrl"
 
-export function useOpenStudio() {
-  const tabs = useTabsStore()
+/** Root of the Studio workspace that is open now, or "". */
+export function useStudioWorkspaceRoot() {
   const ws = useStudioWorkspaceStore()
-  return function openStudio() {
-    if (ws.isOpen && ws.root) {
-      tabs.openTab({
-        kind: "studio-editor",
-        id: buildStudioTabId({ entityKind: "workspace", workspace: ws.root }),
-        workspace: ws.root,
-        entity: ws.root,
-        entityKind: "workspace",
-      })
-      return
-    }
-    tabs.openTab({
-      kind: "studio-editor",
-      id: buildStudioTabId({ entityKind: "home" }),
-      workspace: "",
-      entity: "home",
-      entityKind: "home",
-    })
+  return () => (ws.isOpen && ws.root ? ws.root : "")
+}
+
+/** Go to an app: switch the mode and bring the home tab forward. */
+export function useGoToApp() {
+  const tabs = useTabsStore()
+  return function goTo(mode) {
+    setAppMode(mode)
+    tabs.openTab({ kind: "dashboard", id: "dashboard" })
   }
 }
