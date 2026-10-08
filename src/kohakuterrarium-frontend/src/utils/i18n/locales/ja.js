@@ -206,7 +206,6 @@ export default {
   "registry.editDiscardConfirm": "未保存の変更を破棄しますか？",
   "registry.fileSaved": ({ path }) => `${path} を保存しました`,
 
-  "shell.quick.extensions": "拡張機能",
   "extensions.title": "拡張機能",
   "extensions.subtitle": "インストール済みパッケージが提供するプラグイン、ツール、トリガーなど。",
   "extensions.searchPlaceholder": "名前、パッケージ、説明で検索…",

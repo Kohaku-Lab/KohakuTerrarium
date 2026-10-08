@@ -209,7 +209,6 @@ export default {
   "registry.editDiscardConfirm": "Ungespeicherte Aenderungen verwerfen?",
   "registry.fileSaved": ({ path }) => `${path} gespeichert`,
 
-  "shell.quick.extensions": "Erweiterungen",
   "extensions.title": "Erweiterungen",
   "extensions.subtitle": "Plugins, Werkzeuge, Trigger und andere Module aus installierten Paketen.",
   "extensions.searchPlaceholder": "Nach Name, Paket oder Beschreibung suchen…",

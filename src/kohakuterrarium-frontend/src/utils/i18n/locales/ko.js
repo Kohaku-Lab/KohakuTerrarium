@@ -202,7 +202,6 @@ export default {
   "registry.editDiscardConfirm": "저장되지 않은 변경 사항을 버리시겠습니까?",
   "registry.fileSaved": ({ path }) => `${path} 저장됨`,
 
-  "shell.quick.extensions": "확장",
   "extensions.title": "확장",
   "extensions.subtitle": "설치된 패키지가 제공하는 플러그인, 도구, 트리거 등의 모듈.",
   "extensions.searchPlaceholder": "이름, 패키지, 설명으로 검색…",
