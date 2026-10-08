@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 
 import { buildGraphModel, channelNodeId } from "./model"
-import { groupIdFor, projectGraph, resolveGroupBy } from "./projection"
+import { controlGroupsOf, groupIdFor, projectGraph, resolveGroupBy } from "./projection"
+import { groupBackdrops } from "@/utils/graph/layout/place/elk"
 
 function creature(id, extra = {}) {
   return {
@@ -82,6 +83,45 @@ describe("graph projection", () => {
     const p = projectGraph(model, { sessionId: null })
     const parents = Object.fromEntries(p.nodes.map((n) => [n.id, n.parent]))
     expect(parents[channelNodeId("g2", "z")]).toBe(groupIdFor("session", "g2"))
+  })
+
+  it("keeps privileged nodes inside their session group when grouping by session", () => {
+    const teams = buildGraphModel({
+      graphs: ["g1", "g2"].map((g) => ({
+        graph_id: g,
+        name: g,
+        creatures: [creature(`${g}-boss`, { is_privileged: true }), creature(`${g}-w`)],
+      })),
+    })
+    const p = projectGraph(teams, { sessionId: null })
+    expect(p.groupBy).toBe("session")
+    expect(p.groups.map((g) => g.kind)).toEqual(["session", "session"])
+    const s1 = p.groups.find((g) => g.key === "g1")
+    expect(s1.creatureIds.sort()).toEqual(["g1-boss", "g1-w"])
+    expect(p.nodes.find((n) => n.id === "g1-boss").parent).toBe(groupIdFor("session", "g1"))
+    const boxes = new Map(
+      p.nodes.map((n, i) => [
+        n.id,
+        { x: i * 300, y: n.id.endsWith("boss") ? 0 : 200, width: 200, height: 70 },
+      ]),
+    )
+    const [back] = groupBackdrops([s1], boxes)
+    const boss = boxes.get("g1-boss")
+    expect(boss.x >= back.x && boss.y >= back.y).toBe(true)
+    expect(boss.x + boss.width <= back.x + back.width).toBe(true)
+    expect(controlGroupsOf(p).map((g) => [g.id, g.label, g.creatureIds])).toEqual([
+      [groupIdFor("control", "g1"), "g1", ["g1-boss"]],
+      [groupIdFor("control", "g2"), "g2", ["g2-boss"]],
+    ])
+    const collapsed = projectGraph(teams, {
+      sessionId: null,
+      collapsed: new Set([groupIdFor("session", "g1")]),
+    })
+    expect(controlGroupsOf(collapsed).map((g) => g.key)).toEqual(["g2"])
+
+    const one = projectGraph(teams, { sessionId: "g1" })
+    expect(one.groups.map((g) => [g.kind, g.creatureIds])).toEqual([["control", ["g1-boss"]]])
+    expect(controlGroupsOf(one)).toEqual(one.groups)
   })
 
   it("collapses a group into one aggregate node and bundles its edges with counts", () => {

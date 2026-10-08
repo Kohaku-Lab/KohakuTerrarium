@@ -2,9 +2,11 @@
  * Bus view model: creatures are columns (grouped by host or session), each
  * channel is a row whose cells hold that creature's membership, and each
  * output wire is a row running from its source column to its target column.
- * Privileged-node columns (the session's control group) keep their cells, but a
+ * Privileged-node columns (the session's control plane) keep their cells, but a
  * channel's rail spans only its worker members. Pure.
  */
+
+import { controlGroupsOf } from "@/utils/graph/data/projection"
 
 /** Membership cycle used by a cell click: none → listen → send → both → none. */
 export const MEMBERSHIP_CYCLE = ["none", "listen", "send", "both"]
@@ -26,6 +28,7 @@ function spanOf(indices) {
 /** Build {columns, bands, channelRows, wireRows} from a projection with channel nodes. */
 export function busModel(projection) {
   const groupOrder = new Map(projection.groups.map((g, i) => [g.id, i]))
+  const controlIds = new Set(controlGroupsOf(projection).flatMap((g) => g.creatureIds))
   const creatureNodes = projection.nodes.filter((n) => n.kind === "creature")
   const buckets = new Map()
   for (const n of creatureNodes) {
@@ -47,7 +50,7 @@ export function busModel(projection) {
         id: n.id,
         creature: n.creature,
         groupId: key || null,
-        control: group?.kind === "control",
+        control: controlIds.has(n.id),
       })
     if (key) {
       bands.push({

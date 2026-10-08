@@ -65,7 +65,8 @@ function scopeModel(model, sessionId) {
 /**
  * Privileged creatures form the control plane: when a session has both
  * privileged creatures and workers, the privileged ones share one
- * "privileged nodes" group per session, whatever the grouping.
+ * "privileged nodes" group per session. Grouped by session, they stay in
+ * their session's group instead, so the session boundary holds all of it.
  */
 function controlSessions(scoped) {
   const out = new Set()
@@ -76,12 +77,41 @@ function controlSessions(scoped) {
   return out
 }
 
+function controlLabel(sessions, sessionId) {
+  if (sessions.length < 2) return ""
+  return sessions.find((s) => s.id === sessionId)?.name || sessionId
+}
+
+/**
+ * The privileged-node groups of a projection, for views that lay the control
+ * plane out on its own (flow, bus). Grouped by session they are not render
+ * groups, so they are derived here from the expanded sessions.
+ */
+export function controlGroupsOf(projection) {
+  if (projection.groupBy !== "session") return projection.groups.filter((g) => g.kind === "control")
+  const present = new Set(projection.nodes.map((n) => n.id))
+  return [...controlSessions(projection)]
+    .map((sessionId) => ({
+      id: groupIdFor("control", sessionId),
+      kind: "control",
+      key: sessionId,
+      label: controlLabel(projection.sessions, sessionId),
+      creatureIds: projection.creatures
+        .filter((c) => c.sessionId === sessionId && c.privileged && present.has(c.id))
+        .map((c) => c.id),
+      channelIds: [],
+      busy: 0,
+      attention: 0,
+      collapsed: false,
+    }))
+    .filter((g) => g.creatureIds.length)
+}
+
 function buildGroups(scoped, groupBy, collapsed) {
   const groups = new Map()
   const memberOf = new Map()
   const sessionName = new Map(scoped.sessions.map((s) => [s.id, s.name]))
-  const withControl = controlSessions(scoped)
-  const multiSession = scoped.sessions.length > 1
+  const withControl = groupBy === "session" ? new Set() : controlSessions(scoped)
   const ensure = (kind, key, label) => {
     const id = groupIdFor(kind, key)
     if (!groups.has(id)) {
@@ -102,11 +132,7 @@ function buildGroups(scoped, groupBy, collapsed) {
   for (const c of scoped.creatures) {
     let group = null
     if (c.privileged && withControl.has(c.sessionId)) {
-      group = ensure(
-        "control",
-        c.sessionId,
-        multiSession ? sessionName.get(c.sessionId) || c.sessionId : "",
-      )
+      group = ensure("control", c.sessionId, controlLabel(scoped.sessions, c.sessionId))
     } else if (groupBy === "host") {
       group = ensure("host", c.hostId, c.hostId)
     } else if (groupBy === "session") {

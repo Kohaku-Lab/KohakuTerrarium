@@ -26,6 +26,7 @@
  * Pure.
  */
 
+import { controlGroupsOf } from "@/utils/graph/data/projection"
 import { NODE_SIZE, flowEndpoints } from "@/utils/graph/layout/place/elk"
 
 const CHIP_ROW = 18
@@ -71,7 +72,7 @@ export function isRoom(senders, listeners) {
 
 function controlSets(projection) {
   const privileged = new Set(projection.creatures.filter((c) => c.privileged).map((c) => c.id))
-  const controlGroups = projection.groups.filter((g) => g.kind === "control")
+  const controlGroups = controlGroupsOf(projection)
   const viaGroup = new Map()
   for (const g of projection.groups) {
     if (g.collapsed && g.kind !== "control") for (const id of g.creatureIds) viaGroup.set(id, g.id)
