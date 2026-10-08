@@ -24,7 +24,7 @@ export const VIEW_MODES = ["network", "flow", "tiers", "bus"]
 /** Layer toggles each view follows (the rest it reads its own way). */
 export const VIEW_LAYERS = Object.freeze({
   network: LAYER_IDS,
-  flow: [],
+  flow: ["direct"],
   tiers: [],
   bus: [],
 })
@@ -157,7 +157,7 @@ function setupView() {
       sessionId: effectiveSessionId.value,
       groupBy: groupBy.value,
       // Network follows every toggle; Flow, Tiers and Bus read channels and
-      // privileged memberships their own way and draw no direct links.
+      // privileged memberships their own way, and only Flow draws direct links.
       layers:
         view.value === "network"
           ? layers.value
@@ -167,7 +167,7 @@ function setupView() {
               lineage: false,
               privilegedListen: true,
               privilegedSend: true,
-              direct: false,
+              direct: view.value === "flow" && layers.value.direct,
             },
       channelMode: VIEW_CHANNEL_MODE[view.value] || channelMode.value,
       collapsed: view.value === "bus" || view.value === "tiers" ? new Set() : collapsed.value,

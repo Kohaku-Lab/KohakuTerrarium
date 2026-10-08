@@ -52,6 +52,7 @@ function flowKeys(flow, out) {
   for (const e of flow.edges) {
     if (e.layoutOnly) continue
     if (e.kind === "via") out.add("handoff")
+    if (e.kind === "direct") out.add("direct")
     if (e.kind === "channel" && e.control) out.add(e.ping ? "ping" : "control")
     if (e.back) out.add("back")
   }

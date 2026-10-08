@@ -50,8 +50,7 @@ const model = buildGraphModel({
 })
 // Docked links exist only in the arrow modes.
 const arrowFlow = (projection) => buildFlowInput(projection, { privilegedLinks: "bundle" })
-const project = (opts) =>
-  projectGraph(model, { sessionId: "g", layers: { ...DEFAULT_LAYERS, control: true }, ...opts })
+const project = (opts) => projectGraph(model, { sessionId: "g", layers: DEFAULT_LAYERS, ...opts })
 const box = (boxes) => {
   const list = [...boxes.values()]
   return {
@@ -149,9 +148,7 @@ describe("docking the privileged-node group", () => {
         },
       ],
     })
-    const flow = arrowFlow(
-      projectGraph(m, { sessionId: "d", layers: { ...DEFAULT_LAYERS, control: true } }),
-    )
+    const flow = arrowFlow(projectGraph(m, { sessionId: "d", layers: DEFAULT_LAYERS }))
     const pair = buildGraphModel({
       graphs: [
         {
@@ -163,9 +160,7 @@ describe("docking the privileged-node group", () => {
         },
       ],
     })
-    const both = arrowFlow(
-      projectGraph(pair, { sessionId: "e", layers: { ...DEFAULT_LAYERS, control: true } }),
-    )
+    const both = arrowFlow(projectGraph(pair, { sessionId: "e", layers: DEFAULT_LAYERS }))
     for (const input of [flow, both]) {
       const base = {
         boxes: new Map(
@@ -322,7 +317,11 @@ describe("docking the privileged-node group", () => {
         const s = labelSize(e.layoutLabel)
         rects.set(e.id, { x: c.x - s.width / 2, y: c.y - s.height / 2, ...s })
       }
-      for (const e of flow.edges.filter((x) => members.has(x.source) !== members.has(x.target))) {
+      const routed = flow.edges.filter(
+        (x) => !x.side && members.has(x.source) !== members.has(x.target),
+      )
+      expect(flow.edges.some((x) => x.side && !routes.has(x.id))).toBe(true)
+      for (const e of routed) {
         const pts = routes.get(e.id)
         for (const [id, box] of boxes)
           if (id !== e.source && id !== e.target)

@@ -151,6 +151,11 @@ describe("graph view store", () => {
     view.view = "tiers"
     expect(ids()).toContain("chan:boss:ch:g:x/listen")
     expect(ids().some((id) => id.startsWith("direct:"))).toBe(false)
+    // Flow follows only the direct toggle.
+    view.view = "flow"
+    expect(ids().some((id) => id.startsWith("direct:"))).toBe(false)
+    view.toggleLayer("direct")
+    expect(ids()).toContain("direct:boss:w/")
   })
 
   it("drops retired layer keys from saved prefs", async () => {

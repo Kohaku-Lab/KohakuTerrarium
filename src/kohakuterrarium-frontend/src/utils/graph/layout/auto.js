@@ -68,10 +68,14 @@ function routeList(projection, routes) {
  * memberIds}), the best plain candidates are also re-docked: the group
  * moved on that very layout, and laid out without it, each docked on every
  * side and in the best free slots; all variants compete on the same cost.
+ * `side` edges are routed by the view after placement and take no part here.
  * Resolves to
  * {boxes, routes, labels, chosen, metrics, tried: [{name, metrics}]}.
  */
-export async function layoutGraph(projection, mode = "network", { aspect = DEFAULT_ASPECT } = {}) {
+export async function layoutGraph(input, mode = "network", { aspect = DEFAULT_ASPECT } = {}) {
+  const projection = input.edges.some((e) => e.side)
+    ? { ...input, edges: input.edges.filter((e) => !e.side) }
+    : input
   const candidates = CANDIDATES[mode] || CANDIDATES.network
   const ctx = { aspect: aspect > 0 ? aspect : DEFAULT_ASPECT }
   const tried = []

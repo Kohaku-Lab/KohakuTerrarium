@@ -21,7 +21,9 @@
  *   entry arrows; a handoff back to an earlier or equal rank is a return.
  * - Host / session groups are not containers here: each stage names its host
  *   (`multiHost`). Collapsed groups stay single aggregate stages.
- * Direct creature channels never reach this module (see model.js). Pure.
+ * - Direct links (see model.js) are `side` edges: drawn into a card's side
+ *   across the flow, never ranking or placing anything.
+ * Pure.
  */
 
 import { NODE_SIZE, flowEndpoints } from "@/utils/graph/layout/place/elk"
@@ -274,6 +276,14 @@ export function buildFlowInput(projection, { privilegedLinks = DEFAULT_PRIVILEGE
     } else if (stageById.has(s) && stageById.has(t) && s !== t)
       wires.push({ ...e, source: s, target: t })
   }
+  const direct = new Map()
+  for (const e of projection.edges) {
+    if (e.kind !== "direct") continue
+    const s = pids.has(e.source) ? e.source : resolve(e.source)
+    const t = pids.has(e.target) ? e.target : resolve(e.target)
+    if (!s || !t || s === t || direct.has(`${s}>${t}`)) continue
+    direct.set(`${s}>${t}`, { ...e, source: s, target: t, side: true })
+  }
   for (const s of stages) s.size = stageSize(s)
 
   const hubNodes = [...hubs.values()].map((h) => h.node)
@@ -288,7 +298,13 @@ export function buildFlowInput(projection, { privilegedLinks = DEFAULT_PRIVILEGE
   for (const e of controlEdges) e.layoutLabel = flowLabel(e) || undefined
   const workEdges = [...handoffEdges, ...wires.filter((w) => !w.control)]
   const nodes = [...privilegedNodes, ...hubNodes, ...stages]
-  const edges = [...workEdges, ...controlEdges, ...wires.filter((w) => w.control), ...order]
+  const edges = [
+    ...workEdges,
+    ...controlEdges,
+    ...wires.filter((w) => w.control),
+    ...order,
+    ...direct.values(),
+  ]
   // Ranks follow work entering and passing along; collect arrows, control wires and layout-only edges do not set them.
   // A stage with an inlet chip is where work enters, as an entry arrow would say.
   const entries = new Set(
@@ -296,7 +312,9 @@ export function buildFlowInput(projection, { privilegedLinks = DEFAULT_PRIVILEGE
   )
   const rank = rankFlow(
     nodes.map((n) => n.id),
-    edges.filter((e) => !e.layoutOnly && !e.layoutReverse && !(e.kind === "wire" && e.control)),
+    edges.filter(
+      (e) => !e.layoutOnly && !e.layoutReverse && !e.side && !(e.kind === "wire" && e.control),
+    ),
     entries,
   )
   for (const n of nodes) n.rank = rank.get(n.id) ?? 0

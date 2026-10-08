@@ -56,7 +56,7 @@ const project = (opts = {}) =>
   projectGraph(model, {
     sessionId: "g",
     channelMode: "inline",
-    layers: { ...DEFAULT_LAYERS, control: true },
+    layers: DEFAULT_LAYERS,
     ...opts,
   })
 // These tests pin the arrow modes; chips mode draws no privileged arrows to test.
@@ -136,9 +136,7 @@ describe("flow input: privileged nodes", () => {
         },
       ],
     })
-    const flow = pairFlow(
-      projectGraph(m, { sessionId: "s", layers: { ...DEFAULT_LAYERS, control: true } }),
-    )
+    const flow = pairFlow(projectGraph(m, { sessionId: "s", layers: DEFAULT_LAYERS }))
     expect(flow.edges.find((e) => e.control && e.kind === "channel")).toMatchObject({
       id: "in:a:w",
       source: "a",
@@ -164,9 +162,7 @@ describe("flow input: privileged nodes", () => {
         },
       ],
     })
-    const flow = pairFlow(
-      projectGraph(m, { sessionId: "r", layers: { ...DEFAULT_LAYERS, control: true } }),
-    )
+    const flow = pairFlow(projectGraph(m, { sessionId: "r", layers: DEFAULT_LAYERS }))
     const out = edge(flow, "out:root:w")
     expect(out.labels).toEqual(["out"])
     // The channel beside the ping still delivers content, so the arrow stays solid.
@@ -233,7 +229,31 @@ describe("flow layout", () => {
     expect(Math.max(...orch.map((b) => b.y + b.height))).toBeLessThan(
       Math.min(...stages.map((b) => b.y)),
     )
-    for (const e of flow.edges.filter((x) => !x.layoutOnly))
+    for (const e of flow.edges.filter((x) => !x.layoutOnly && !x.side))
       expect(routes.get(e.id)?.length).toBeGreaterThan(1)
+    // Direct links are routed by the view into a card's side, not by the placement.
+    for (const e of flow.edges.filter((x) => x.side)) expect(routes.has(e.id)).toBe(false)
+  })
+})
+
+describe("flow input: direct links", () => {
+  it("draws each privileged node's direct reach as a side edge that ranks nothing", () => {
+    const flow = pairFlow(project())
+    const side = flow.edges.filter((e) => e.side)
+    expect(side.every((e) => e.kind === "direct")).toBe(true)
+    expect(side.map((e) => `${e.source}>${e.target}`).sort()).toEqual(
+      ["root", "lead"]
+        .flatMap((p) => ["critic", "planner", "researcher", "synthesizer"].map((w) => `${p}>${w}`))
+        .sort(),
+    )
+    const without = pairFlow(project({ layers: { ...DEFAULT_LAYERS, direct: false } }))
+    expect(without.edges.some((e) => e.side)).toBe(false)
+    for (const n of flow.nodes) expect(n.rank).toBe(without.nodes.find((x) => x.id === n.id).rank)
+  })
+
+  it("keeps one side edge per pair into a collapsed group", () => {
+    const flow = pairFlow(project({ groupBy: "host", collapsed: new Set(["grp:host:w1"]) }))
+    const into = flow.edges.filter((e) => e.side && e.target === "grp:host:w1")
+    expect(into.map((e) => e.source).sort()).toEqual(["lead", "root"])
   })
 })

@@ -17,7 +17,7 @@ import { useViewLayout } from "@/composables/graph/useViewLayout"
 import { neighbourhoodOf } from "@/utils/graph/data/projection"
 import { layoutGraph } from "@/utils/graph/layout/auto"
 import { flowEndpoints, labelSize, sizeOf } from "@/utils/graph/layout/place/elk"
-import { orthogonalRoute } from "@/utils/graph/layout/route/route"
+import { orthogonalRoute, sideRoute } from "@/utils/graph/layout/route/route"
 import { buildFlowInput, flowLabel } from "@/utils/graph/views/flow"
 
 const props = defineProps({
@@ -42,7 +42,10 @@ const nodeTypes = {
 const input = computed(() => buildFlowInput(props.view.projection, { privilegedLinks: props.view.privilegedLinks }))
 const structure = computed(() => {
   const i = input.value
-  return `${props.view.projection.groupBy}|${i.nodes.map((n) => `${n.id}@${n.parent || ""}:${n.size ? `${n.size.width}x${n.size.height}` : ""}`).join(",")}|${i.edges.map((e) => `${e.id}:${e.layoutLabel || ""}`).join(",")}|${i.bundles.map((b) => `${b.id}:${b.text}`).join(",")}|${props.view.layoutNonce}`
+  return `${props.view.projection.groupBy}|${i.nodes.map((n) => `${n.id}@${n.parent || ""}:${n.size ? `${n.size.width}x${n.size.height}` : ""}`).join(",")}|${i.edges
+    .filter((e) => !e.side)
+    .map((e) => `${e.id}:${e.layoutLabel || ""}`)
+    .join(",")}|${i.bundles.map((b) => `${b.id}:${b.text}`).join(",")}|${props.view.layoutNonce}`
 })
 const fitScope = computed(() => `${props.view.effectiveSessionId || "*"}|${props.view.projection.groupBy}|${props.view.layoutNonce}|${props.view.sample || ""}|${props.view.privilegedLinks}`)
 
@@ -109,13 +112,27 @@ const nodes = computed(() => {
   return out
 })
 
+// The axis work flows along in the chosen layout; direct links enter cards across it.
+const flowAxis = computed(() => (/^flow-down/.test(props.view.layoutInfo?.chosen || "") ? "down" : "right"))
+
+// Side routes depend only on the boxes and the axis, so hover and selection never recompute them.
+const sideRoutes = computed(() => {
+  const out = new Map()
+  const obstacles = [...boxes.value.values()]
+  for (const e of input.value.edges) {
+    if (!e.side || !boxes.value.has(e.source) || !boxes.value.has(e.target)) continue
+    out.set(e.id, sideRoute(boxes.value.get(e.source), boxes.value.get(e.target), flowAxis.value, obstacles))
+  }
+  return out
+})
+
 const edges = computed(() =>
   input.value.edges
     .filter((e) => !e.layoutOnly && boxes.value.has(e.source) && boxes.value.has(e.target))
     .map((e) => {
       const [source, target] = flowEndpoints(e)
       const moved = props.view.positionOverrides[source] || props.view.positionOverrides[target]
-      const points = (!moved && routes.value.get(e.id)) || orthogonalRoute(boxes.value.get(source), boxes.value.get(target))
+      const points = e.side ? sideRoutes.value.get(e.id) : (!moved && routes.value.get(e.id)) || orthogonalRoute(boxes.value.get(source), boxes.value.get(target))
       return edgeElement(e, {
         source,
         target,

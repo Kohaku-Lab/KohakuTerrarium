@@ -1,8 +1,11 @@
 /**
- * Orthogonal routing helpers: right-angle routes between two boxes, rounded
+ * Orthogonal routing helpers: right-angle routes between two boxes, side
+ * routes that enter a card across the flow, rounded
  * SVG paths for any polyline, and the label point halfway along a route.
  * Pure.
  */
+
+import { segmentHitsBox } from "@/utils/graph/layout/metrics"
 
 const CORNER = 8
 
@@ -67,6 +70,79 @@ export function orthogonalRoute(source, target, offset = 0) {
     { x: tx, y: mid },
     { x: tx, y: ty },
   ])
+}
+
+const SIDE_LANE = 18
+const SIDE_STUB = 12
+const SIDE_GAP = 10
+// Where a side link meets the card, as a fraction of the side: below the
+// left input port, between the right send and wire ports, mid top / bottom.
+const SIDE_PORT = { down: [0.8, 0.5], right: [0.5, 0.5] }
+
+const transpose = (b) => ({ x: b.y, y: b.x, width: b.height, height: b.width })
+
+function hitCount(points, walls) {
+  let n = 0
+  for (let i = 1; i < points.length; i++)
+    for (const w of walls) if (segmentHitsBox([points[i - 1], points[i]], w)) n += 1
+  return n
+}
+
+/** `sideRoute` for a downward flow: into the left or right side of `target`. */
+function sideRouteDown(source, target, walls, [nearPort, farPort]) {
+  const s = centre(source)
+  const t = centre(target)
+  const left = s.x <= t.x
+  const tx = left ? target.x : target.x + target.width
+  const ty = target.y + target.height * (left ? nearPort : farPort)
+  const lane = left ? tx - SIDE_LANE : tx + SIDE_LANE
+  const dir = lane >= s.x ? 1 : -1
+  const sx = dir > 0 ? source.x + source.width : source.x
+  const stub = sx + dir * SIDE_STUB
+  const lo = Math.min(stub, lane)
+  const hi = Math.max(stub, lane)
+  // The run goes at the source's middle, or just past a card it would cross.
+  const runs = new Set([s.y])
+  for (const w of walls)
+    if (w.x < hi && w.x + w.width > lo) runs.add(w.y - SIDE_GAP).add(w.y + w.height + SIDE_GAP)
+  let best = null
+  for (const y of runs) {
+    const inside = y >= source.y + 6 && y <= source.y + source.height - 6
+    const head = inside
+      ? [{ x: sx, y }]
+      : [
+          { x: sx, y: s.y },
+          { x: stub, y: s.y },
+          { x: stub, y },
+        ]
+    const points = dedupe([...head, { x: lane, y }, { x: lane, y: ty }, { x: tx, y: ty }])
+    const length = points.reduce(
+      (sum, p, i) =>
+        i ? sum + Math.abs(p.x - points[i - 1].x) + Math.abs(p.y - points[i - 1].y) : 0,
+      0,
+    )
+    const score = hitCount(points, walls) * 100000 + length
+    if (!best || score < best.score) best = { points, score }
+  }
+  return best.points
+}
+
+/**
+ * Right-angle route into the side of `target` across the flow `axis`
+ * ("down": the left / right side, "right": the top / bottom side), the side
+ * facing `source`. It ends in a lane just outside that side, so it never
+ * enters where the flow does, and picks the run that crosses the fewest of
+ * `obstacles` (boxes; the two ends may be among them), then the shortest.
+ */
+export function sideRoute(source, target, axis, obstacles = []) {
+  if (axis === "down") return sideRouteDown(source, target, obstacles, SIDE_PORT.down)
+  const points = sideRouteDown(
+    transpose(source),
+    transpose(target),
+    obstacles.map(transpose),
+    SIDE_PORT.right,
+  )
+  return points.map((p) => ({ x: p.y, y: p.x }))
 }
 
 /** SVG path through `points` with rounded corners. */
