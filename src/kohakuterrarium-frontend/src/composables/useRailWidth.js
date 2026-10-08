@@ -1,17 +1,36 @@
 /**
- * Persistent, resizable rail width for the macro shell.
+ * Persistent, resizable, collapsible rail for the macro shell.
  *
  * The rail's right edge gets a drag handle (per the LayoutNode pattern
  * used elsewhere in the app). Width is clamped to [MIN, MAX] and
- * persisted under ``kt.rail.width``.
+ * persisted under ``kt.rail.width``; the collapsed state (a
+ * COLLAPSED_RAIL_WIDTH icon strip) under ``kt.rail.collapsed``.
  */
 
 import { onBeforeUnmount, onMounted, ref } from "vue"
 
 const KEY = "kt.rail.width"
+const COLLAPSED_KEY = "kt.rail.collapsed"
 export const MIN_RAIL_WIDTH = 180
 export const MAX_RAIL_WIDTH = 480
 export const DEFAULT_RAIL_WIDTH = 240
+export const COLLAPSED_RAIL_WIDTH = 48
+
+function loadCollapsed() {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1"
+  } catch {
+    return false
+  }
+}
+
+function saveCollapsed(value) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, value ? "1" : "0")
+  } catch {
+    /* swallow */
+  }
+}
 
 function loadWidth() {
   try {
@@ -35,6 +54,7 @@ function saveWidth(w) {
 
 export function useRailWidth() {
   const width = ref(loadWidth())
+  const collapsed = ref(loadCollapsed())
   const dragging = ref(false)
   let pendingPersist = null
 
@@ -76,9 +96,15 @@ export function useRailWidth() {
     setWidth(DEFAULT_RAIL_WIDTH)
   }
 
+  function toggleCollapsed() {
+    collapsed.value = !collapsed.value
+    saveCollapsed(collapsed.value)
+  }
+
   // Cross-tab sync — another window writing the pref updates this one.
   function onStorage(e) {
     if (e.key === KEY) width.value = loadWidth()
+    if (e.key === COLLAPSED_KEY) collapsed.value = loadCollapsed()
   }
 
   onMounted(() => {
@@ -89,5 +115,5 @@ export function useRailWidth() {
     if (pendingPersist) clearTimeout(pendingPersist)
   })
 
-  return { width, dragging, startDrag, resetWidth }
+  return { width, collapsed, dragging, startDrag, resetWidth, toggleCollapsed }
 }

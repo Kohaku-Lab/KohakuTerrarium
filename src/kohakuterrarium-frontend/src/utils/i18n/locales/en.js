@@ -1393,6 +1393,8 @@ export default {
   "shell.rail.themeToLight": "Switch to light mode",
   "shell.rail.themeToDark": "Switch to dark mode",
   "shell.rail.cycleLocale": "Cycle locale",
+  "shell.rail.collapse": "Collapse sidebar",
+  "shell.rail.expand": "Expand sidebar",
 
   "shell.quick.newCreature": "+ New creature…",
   "shell.quick.newTerrarium": "+ New terrarium…",

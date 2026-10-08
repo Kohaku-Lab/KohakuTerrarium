@@ -10,7 +10,7 @@
            case without unmounting modal-spawning rail items (e.g.
            "+ Creature") before their modal has a chance to render. -->
       <div class="relative h-full w-72 max-w-[85vw] bg-warm-50 dark:bg-warm-950 shadow-xl">
-        <RailPane />
+        <RailPane :collapsible="false" />
       </div>
     </div>
   </Teleport>

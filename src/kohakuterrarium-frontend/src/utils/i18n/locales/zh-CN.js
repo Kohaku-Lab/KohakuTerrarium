@@ -1139,6 +1139,8 @@ export default {
   "shell.rail.themeToLight": "切换为浅色模式",
   "shell.rail.themeToDark": "切换为深色模式",
   "shell.rail.cycleLocale": "切换语言",
+  "shell.rail.collapse": "收起侧边栏",
+  "shell.rail.expand": "展开侧边栏",
 
   "shell.quick.newCreature": "+ 新建 creature…",
   "shell.quick.newTerrarium": "+ 新建 terrarium…",
