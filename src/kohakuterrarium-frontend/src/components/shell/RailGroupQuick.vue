@@ -12,14 +12,12 @@
 
     <!-- Modals (rendered here so they overlay the whole shell) -->
     <NewSessionDialog v-if="modal === 'new'" @close="modal = null" />
-    <ResumeSessionModal v-if="modal === 'resume'" @close="modal = null" />
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from "vue"
 
-import ResumeSessionModal from "@/components/shell/modals/ResumeSessionModal.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import { useAuthStore } from "@/stores/auth"
 import { useTabsStore } from "@/stores/tabs"
@@ -68,10 +66,10 @@ const entries = computed(() => [
     action: () => (modal.value = "new"),
   },
   {
-    id: "resume",
-    label: t("shell.quick.resume"),
-    icon: "i-carbon-restart",
-    action: () => (modal.value = "resume"),
+    id: "history",
+    label: t("lab.history.title"),
+    icon: "i-carbon-recently-viewed",
+    action: () => tabs.openTab({ kind: "saved-sessions", id: "saved-sessions" }),
   },
   {
     id: "catalog",
@@ -90,12 +88,6 @@ const entries = computed(() => [
     label: t("shell.quick.studio"),
     icon: "i-carbon-tool-box",
     action: openStudio,
-  },
-  {
-    id: "sessions",
-    label: t("shell.quick.sessions"),
-    icon: "i-carbon-list",
-    action: () => tabs.openTab({ kind: "saved-sessions", id: "saved-sessions" }),
   },
   {
     id: "stats",

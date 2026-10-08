@@ -1,13 +1,6 @@
 // Workspace resume is resolved before runtime creation. This helper is shared
 // by every resume entry point so cancel and history-only remain side-effect free.
 const workspaceResolverListeners = new Set()
-let lastWorkspaceResumeAction = null
-
-export function consumeWorkspaceResumeAction() {
-  const action = lastWorkspaceResumeAction
-  lastWorkspaceResumeAction = null
-  return action
-}
 
 export function installWorkspaceResumeResolver(listener) {
   workspaceResolverListeners.add(listener)
@@ -45,7 +38,6 @@ export async function prepareWorkspaceResume(sessionName, opts = {}) {
   const { sessionAPI } = await import("@/utils/api")
   const preflight = await sessionAPI.preflightResume(sessionName, opts)
   if (preflight?.ready !== false) {
-    lastWorkspaceResumeAction = "resume"
     return {
       action: "resume",
       workspaceOverrides: {},
@@ -87,14 +79,8 @@ export async function prepareWorkspaceResume(sessionName, opts = {}) {
       gap,
       label: describeGap(gap),
     })
-    if (!choice || choice.action === "cancel") {
-      lastWorkspaceResumeAction = "cancel"
-      return { action: "cancel", workspaceOverrides: {} }
-    }
-    if (choice.action === "history") {
-      lastWorkspaceResumeAction = "history"
-      return { action: "history", workspaceOverrides: {} }
-    }
+    if (!choice || choice.action === "cancel") return { action: "cancel", workspaceOverrides: {} }
+    if (choice.action === "history") return { action: "history", workspaceOverrides: {} }
     const directory = String(choice.path || "").trim()
     if (choice.action !== "choose" || !directory) {
       throw new Error("Workspace resume chooser returned an invalid selection")
@@ -117,11 +103,7 @@ export async function prepareWorkspaceResume(sessionName, opts = {}) {
     pwd,
   }
   const validated = await sessionAPI.preflightResume(sessionName, candidates)
-  if (validated?.ready === false) {
-    lastWorkspaceResumeAction = "cancel"
-    return { action: "cancel", workspaceOverrides: {} }
-  }
-  lastWorkspaceResumeAction = "resume"
+  if (validated?.ready === false) return { action: "cancel", workspaceOverrides: {} }
   return {
     action: "resume",
     workspaceOverrides,

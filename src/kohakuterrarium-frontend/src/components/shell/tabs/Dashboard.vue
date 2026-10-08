@@ -19,7 +19,7 @@
       <DashboardSection :title="t('shell.dashboard.quickStart')">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <QuickStartCard icon="i-carbon-add-large" :label="t('lab.new.title')" :subtitle="t('lab.new.subtitle')" @click="openModal('new')" />
-          <QuickStartCard icon="i-carbon-restart" :label="t('shell.dashboard.resumeQs')" :subtitle="t('shell.dashboard.resumeQsSub')" @click="openModal('resume')" />
+          <QuickStartCard icon="i-carbon-recently-viewed" :label="t('lab.history.title')" :subtitle="t('shell.dashboard.resumeQsSub')" @click="tabs.openTab({ kind: 'saved-sessions', id: 'saved-sessions' })" />
         </div>
       </DashboardSection>
 
@@ -49,7 +49,6 @@
 
     <!-- Real start modals (Phase 5) -->
     <NewSessionDialog v-if="modal === 'new'" @close="modal = null" />
-    <ResumeSessionModal v-if="modal === 'resume'" @close="modal = null" />
   </div>
 </template>
 
@@ -62,9 +61,9 @@ import DashboardRunningCard from "@/components/shell/tabs/DashboardRunningCard.v
 import DashboardRecentRow from "@/components/shell/tabs/DashboardRecentRow.vue"
 import DashboardStudioCard from "@/components/shell/tabs/DashboardStudioCard.vue"
 import DashboardStatsCard from "@/components/shell/tabs/DashboardStatsCard.vue"
-import ResumeSessionModal from "@/components/shell/modals/ResumeSessionModal.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import { useInstancesStore } from "@/stores/instances"
+import { useTabsStore } from "@/stores/tabs"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 import { ensureUIPrefsLoaded, getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
@@ -73,6 +72,7 @@ import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 const { t } = useI18n()
 
 const instances = useInstancesStore()
+const tabs = useTabsStore()
 const refreshPrefKey = "kt.dashboard.refreshIntervalMs"
 const refreshIntervalMs = ref(readRefreshInterval())
 const recentSessions = ref([])

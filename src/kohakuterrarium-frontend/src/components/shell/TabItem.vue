@@ -120,7 +120,7 @@ const iconClass = computed(
       attach: "i-carbon-chat",
       inspector: "i-carbon-radar",
       "session-viewer": "i-carbon-recently-viewed",
-      "saved-sessions": "i-carbon-list",
+      "saved-sessions": "i-carbon-recently-viewed",
       "studio-editor": "i-carbon-tool-box",
       catalog: "i-carbon-catalog",
       settings: "i-carbon-settings",
@@ -145,7 +145,7 @@ const label = computed(() => {
     case "session-viewer":
       return tab.config_name || tab.name || "session"
     case "saved-sessions":
-      return t("shell.rail.savedSessions")
+      return t("lab.history.title")
     case "studio-editor":
       if (tab.entityKind === "creature") return `${tab.entity} · ${t("shell.tab.suffix.creature")}`
       if (tab.entityKind === "module") return `${tab.entity} · ${t("shell.tab.suffix.module")}`
