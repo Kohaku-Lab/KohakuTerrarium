@@ -49,6 +49,62 @@ describe("session v2 context", () => {
     expect(ctx.addKind.value).toBe(null)
   })
 
+  it("keeps one phone sheet; a widget, a side view or the add dialog replaces it", () => {
+    const ctx = make()
+    ctx.openSheet("model", { agent: "lead" })
+    expect(ctx.sheet.value).toEqual({ kind: "model", payload: { agent: "lead" } })
+    ctx.openSheet("menu")
+    expect(ctx.sheet.value).toEqual({ kind: "menu", payload: {} })
+    ctx.openWidget("agents")
+    expect(ctx.sheet.value).toBe(null)
+    ctx.openSheet("menu")
+    ctx.openSide("terminal")
+    expect(ctx.sheet.value).toBe(null)
+    ctx.openSheet("menu")
+    ctx.openAdd("creature")
+    expect(ctx.sheet.value).toBe(null)
+    ctx.openSheet("conversations")
+    ctx.closeSheet()
+    expect(ctx.sheet.value).toBe(null)
+  })
+
+  it("on a phone shows a side view over the current tab", () => {
+    const ctx = createSessionV2({
+      instance: computed(() => ({ id: "p" })),
+      instanceId: ref("p"),
+      chat: {},
+      phone: ref(true),
+    })
+    ctx.setTab("status")
+    ctx.openSide("drive", { driveId: "d1" })
+    expect(ctx.tab.value).toBe("status")
+    expect(ctx.side.value).toEqual({ kind: "drive", payload: { driveId: "d1" } })
+  })
+
+  it("has no Workspace on a phone: picking it is ignored, a remembered one shows Chat until wide again", () => {
+    const phone = ref(false)
+    const ctx = createSessionV2({
+      instance: computed(() => ({ id: "w" })),
+      instanceId: ref("w"),
+      chat: {},
+      phone,
+    })
+    ctx.setTab("workspace")
+    phone.value = true
+    expect(ctx.tab.value).toBe("chat")
+    ctx.setTab("status")
+    ctx.setTab("workspace")
+    expect(ctx.tab.value).toBe("status")
+    ctx.setTab("workspace")
+    phone.value = false
+    expect(ctx.tab.value).toBe("status")
+    ctx.setTab("workspace")
+    phone.value = true
+    expect(ctx.tab.value).toBe("chat")
+    phone.value = false
+    expect(ctx.tab.value).toBe("workspace")
+  })
+
   it("remembers the tab per session", () => {
     make("a").setTab("debug")
     expect(make("a").tab.value).toBe("debug")

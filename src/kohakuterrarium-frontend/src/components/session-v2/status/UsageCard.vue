@@ -25,7 +25,7 @@
     </div>
     <div v-if="contexts.length" class="kt-v2-line mt-1 pt-2 border-t flex flex-col gap-2">
       <span class="text-[11px] text-warm-400">{{ t("status.contextPerAgent") }}</span>
-      <div class="flex flex-col gap-2 max-h-28 overflow-y-auto pr-1">
+      <div class="flex flex-col gap-2 max-h-28 max-md:max-h-none overflow-y-auto max-md:overflow-visible pr-1">
         <ContextBar v-for="row in contexts" :key="row.name" :row="row" :active="row.name === activeContext?.name" />
       </div>
     </div>

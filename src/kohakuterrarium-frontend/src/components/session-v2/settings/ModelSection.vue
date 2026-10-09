@@ -1,6 +1,18 @@
 <template>
-  <SectionShell :title="t('set.model.title')" :hint="t('set.model.hint')" :error="error" :status="status">
-    <div v-if="loading" class="text-sm text-warm-400">{{ t("loading") }}</div>
+  <SectionShell :title="t('set.model.title')" :hint="isCompact ? t('phone.modelHint') : t('set.model.hint')" :error="error" :status="status">
+    <div v-if="isCompact" class="-m-3" data-test="v2-settings-models">
+      <button v-for="row in rows" :key="row.name" type="button" class="kt-v2-line border-x-0 border-t-0 w-full min-h-14 flex items-center gap-3 px-4 py-2 border-b last:border-b-0 text-left active:bg-warm-200/60 dark:active:bg-warm-800" :data-test="`v2-settings-model-${row.name}`" @click="session.openSheet('model', { agent: row.name })">
+        <span class="flex-1 min-w-0">
+          <span class="block truncate text-[15px] font-medium text-warm-800 dark:text-warm-100">{{ row.name }}</span>
+          <span class="flex items-center gap-2 min-w-0 text-xs">
+            <span class="truncate font-mono text-iolite dark:text-iolite-light">{{ row.current || "—" }}</span>
+            <span v-if="row.context" class="shrink-0 font-mono text-warm-500">{{ formatTokens(row.context) }}</span>
+          </span>
+        </span>
+        <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
+      </button>
+    </div>
+    <div v-else-if="loading" class="text-sm text-warm-400">{{ t("loading") }}</div>
     <table v-else class="w-full text-sm" data-test="v2-settings-models">
       <thead>
         <tr class="text-left text-[11px] uppercase tracking-wider text-warm-400">
@@ -24,7 +36,7 @@
         </tr>
       </tbody>
     </table>
-    <template #actions>
+    <template v-if="!isCompact" #actions>
       <span class="flex-1 text-xs text-warm-400">{{ changed.length ? t("set.pending", { n: changed.length }) : "" }}</span>
       <button class="h-8 px-3 rounded-md text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800 disabled:opacity-40" :disabled="!changed.length || saving" @click="resetDrafts">{{ t("set.reset") }}</button>
       <button class="h-8 px-4 rounded-md text-sm bg-iolite text-white disabled:opacity-40" :disabled="!changed.length || saving" data-test="v2-settings-models-apply" @click="apply">{{ saving ? t("set.saving") : t("set.apply") }}</button>
@@ -41,11 +53,13 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
 import { onShownAgain } from "@/components/session-v2/settings/useSectionTarget"
+import { useDensity } from "@/composables/useDensity"
 import { configAPI, terrariumAPI } from "@/utils/api"
 
-/** Every creature's model in one table; picks are applied together. */
+/** Every creature's model in one table; picks are applied together. On phones a creature's row opens the model sheet, which switches it at once. */
 const t = useV2T()
 const session = useSessionV2()
+const { isCompact } = useDensity()
 const chat = session.chat
 
 const models = ref([])

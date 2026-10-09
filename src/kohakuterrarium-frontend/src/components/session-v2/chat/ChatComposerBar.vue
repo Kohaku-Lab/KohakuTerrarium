@@ -26,9 +26,10 @@
       <button class="ml-auto text-amber-shadow dark:text-amber-light hover:underline" @click="emit('show-pending', pending[pending.length - 1].id)">{{ t("composer.pendingShow") }}</button>
     </div>
 
-    <ChatComposer :ref="setComposerEl" v-model="inputText" v-model:attachments="attachments" :processing="composer.processing.value" :compact-mode="isCompact" :managed-submit="true" :max-attachment-bytes="MAX_ATTACHMENT_BYTES" :max-image-bytes="MAX_IMAGE_BYTES" :placeholder="composer.placeholder.value" :labels="composer.labels.value" aria-autocomplete="list" :aria-expanded="slash.open.value" aria-controls="v2-slash-menu" :aria-activedescendant="slash.activeDescendant.value" input-role="combobox" :attachment-transform="composer.transformAttachment" @update:attachments="composer.onAttachmentsChanged" @submit="composer.send" @interrupt="composer.interrupt" @compact="composer.compact" @clear="composer.clear" @error="composer.onAttachmentError" @input="composer.onInputChanged" @keydown="onKeydown" @focus="slash.reopen()">
+    <ChatComposer :ref="setComposerEl" v-model="inputText" v-model:attachments="attachments" :processing="composer.processing.value" :compact-mode="isCompact" :show-context-actions="!isCompact" :managed-submit="true" :max-attachment-bytes="MAX_ATTACHMENT_BYTES" :max-image-bytes="MAX_IMAGE_BYTES" :placeholder="composer.placeholder.value" :labels="composer.labels.value" aria-autocomplete="list" :aria-expanded="slash.open.value" aria-controls="v2-slash-menu" :aria-activedescendant="slash.activeDescendant.value" input-role="combobox" :attachment-transform="composer.transformAttachment" @update:attachments="composer.onAttachmentsChanged" @submit="composer.send" @interrupt="composer.interrupt" @compact="composer.compact" @clear="composer.clear" @error="composer.onAttachmentError" @input="composer.onInputChanged" @keydown="onKeydown" @focus="slash.reopen()">
       <template #toolbar>
-        <ComposerModelPicker />
+        <PhoneModelChip v-if="isCompact" />
+        <ComposerModelPicker v-else />
         <span class="flex-1" />
         <ComposerContextMeter />
       </template>
@@ -53,6 +54,7 @@ import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ComposerContextMeter from "@/components/session-v2/chat/ComposerContextMeter.vue"
 import ComposerModelPicker from "@/components/session-v2/chat/ComposerModelPicker.vue"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
+import PhoneModelChip from "@/components/session-v2/phone/PhoneModelChip.vue"
 import { useDensity } from "@/composables/useDensity"
 import { ChatComposer, handleSlashKeydown, shouldSendOnEnter } from "@kohakuterrarium/chat-ui"
 import { MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
@@ -61,7 +63,8 @@ import { useI18n } from "@/utils/i18n"
 /**
  * The v2 composer: queued messages, the pending-question banner, and the
  * chat-ui composer with the slash menu, the model pill and the context
- * meter in its toolbar. State and actions come from the
+ * meter in its toolbar. On phones the pill is the model chip and compact /
+ * clear live in the session menu. State and actions come from the
  * column's `useComposerSend` (the `composer` prop). Emits `show-pending`
  * with the newest unanswered question's message id.
  */

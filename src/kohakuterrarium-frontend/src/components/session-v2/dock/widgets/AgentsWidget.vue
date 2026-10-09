@@ -13,9 +13,9 @@
         </div>
         <div class="text-[11px] text-warm-500 truncate font-mono">{{ creatureModel(c) || t("widget.noModel") }}</div>
       </div>
-      <button class="h-6 px-2 rounded text-[11px] text-iolite dark:text-iolite-light hover:bg-iolite/10 shrink-0" :data-test="`v2-agent-chat-${c.name}`" @click="openChat(c)">{{ t("widget.openChat") }}</button>
-      <button v-if="creatureStatus(c) === 'running'" class="h-6 px-2 rounded text-[11px] text-coral hover:bg-coral/10 shrink-0 disabled:opacity-40" :disabled="!!pending[c.name]" @click="lifecycle(c, 'stop')">{{ t("widget.stop") }}</button>
-      <button v-else class="h-6 px-2 rounded text-[11px] text-aquamarine-shadow dark:text-aquamarine-light hover:bg-aquamarine/10 shrink-0 disabled:opacity-40" :disabled="!!pending[c.name]" @click="lifecycle(c, 'start')">{{ t("widget.start") }}</button>
+      <button class="h-6 max-md:h-10 px-2 max-md:px-3 rounded text-[11px] max-md:text-sm text-iolite dark:text-iolite-light hover:bg-iolite/10 shrink-0" :data-test="`v2-agent-chat-${c.name}`" @click="openChat(c)">{{ t("widget.openChat") }}</button>
+      <button v-if="creatureStatus(c) === 'running'" class="h-6 max-md:h-10 px-2 max-md:px-3 rounded text-[11px] max-md:text-sm text-coral hover:bg-coral/10 shrink-0 disabled:opacity-40" :disabled="!!pending[c.name]" @click="lifecycle(c, 'stop')">{{ t("widget.stop") }}</button>
+      <button v-else class="h-6 max-md:h-10 px-2 max-md:px-3 rounded text-[11px] max-md:text-sm text-aquamarine-shadow dark:text-aquamarine-light hover:bg-aquamarine/10 shrink-0 disabled:opacity-40" :disabled="!!pending[c.name]" @click="lifecycle(c, 'start')">{{ t("widget.start") }}</button>
     </div>
   </div>
 </template>

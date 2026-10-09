@@ -7,13 +7,13 @@
     </div>
     <div class="flex items-center gap-3">
       <span class="text-[11px] uppercase tracking-wider text-warm-400 flex-1">{{ t("set.env.vars", { n: entries.length }) }}</span>
-      <el-input v-model="query" size="small" clearable class="!w-64" :placeholder="t('set.filter')" />
+      <el-input v-model="query" size="small" clearable class="!w-64 max-md:!w-40" :placeholder="t('set.filter')" />
       <button class="i-carbon-renew text-warm-400 hover:text-warm-700 dark:hover:text-warm-200" :title="t('set.refresh')" @click="reload" />
     </div>
     <p class="text-xs text-amber-shadow dark:text-amber-light">{{ t("set.env.secrets") }}</p>
     <div v-if="loading" class="text-sm text-warm-400">{{ t("loading") }}</div>
     <div v-else class="rounded-lg border kt-v2-line" data-test="v2-settings-env">
-      <div v-for="([k, v], i) in filtered" :key="k" class="grid grid-cols-[minmax(10rem,18rem)_1fr] gap-4 px-3 py-1.5" :class="i ? 'kt-v2-line border-t' : ''">
+      <div v-for="([k, v], i) in filtered" :key="k" class="grid grid-cols-[minmax(10rem,18rem)_1fr] max-md:grid-cols-1 gap-4 max-md:gap-0.5 px-3 py-1.5 max-md:py-2" :class="i ? 'kt-v2-line border-t' : ''">
         <span class="font-mono text-xs text-iolite dark:text-iolite-light truncate" :title="k">{{ k }}</span>
         <span class="font-mono text-xs text-warm-600 dark:text-warm-300 break-all">{{ v }}</span>
       </div>

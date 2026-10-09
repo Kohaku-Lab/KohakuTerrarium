@@ -1,6 +1,6 @@
 <template>
   <div class="kt-v2-canvas h-full overflow-y-auto" data-test="v2-status-tab">
-    <div class="max-w-6xl mx-auto px-6 py-5 flex flex-col gap-4">
+    <div class="max-w-6xl mx-auto px-6 py-5 max-md:px-3 max-md:py-3 flex flex-col gap-4 max-md:gap-3">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <SessionCard />
         <UsageCard />

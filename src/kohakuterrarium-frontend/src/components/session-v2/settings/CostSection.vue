@@ -6,7 +6,22 @@
         <div class="mt-1 font-mono text-xl" :class="card.cls">{{ card.value }}</div>
       </div>
     </div>
-    <table class="w-full text-sm" data-test="v2-settings-cost">
+    <div v-if="isCompact" class="rounded-lg border kt-v2-line" data-test="v2-settings-cost">
+      <div v-for="row in rows" :key="row.key" class="kt-v2-line px-3 py-2.5 border-b last:border-b-0">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="flex-1 min-w-0 truncate text-sm text-warm-800 dark:text-warm-100">{{ row.label }}</span>
+          <span class="shrink-0 font-mono text-xs" :class="row.cost != null ? 'text-iolite dark:text-iolite-light' : 'text-warm-400'">{{ row.cost != null ? `$${row.cost.toFixed(4)}` : "—" }}</span>
+        </div>
+        <div class="truncate font-mono text-xs text-warm-500">{{ row.model || "—" }}</div>
+        <div class="flex gap-3 font-mono text-[11px] text-warm-500">
+          <span>{{ t("set.cost.in") }} {{ formatTokens(row.prompt) }}</span>
+          <span>{{ t("set.cost.out") }} {{ formatTokens(row.completion) }}</span>
+          <span class="text-aquamarine">{{ t("set.cost.cached") }} {{ formatTokens(row.cached) }}</span>
+        </div>
+      </div>
+      <div v-if="!rows.length" class="py-6 text-center text-sm text-warm-400">{{ t("set.cost.empty") }}</div>
+    </div>
+    <table v-else class="w-full text-sm" data-test="v2-settings-cost">
       <thead>
         <tr class="text-left text-[11px] uppercase tracking-wider text-warm-400">
           <th class="py-2 pr-4 font-medium">{{ t("set.cost.conversation") }}</th>
@@ -43,9 +58,11 @@ import { estimateCost, formatTokens } from "@/components/session-v2/model/settin
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
+import { useDensity } from "@/composables/useDensity"
 
-/** Token usage per conversation and in total, with a cost estimate (conversations only) where the model's price is known. */
+/** Token usage per conversation and in total, with a cost estimate (conversations only) where the model's price is known. Phones stack each conversation's figures. */
 const t = useV2T()
+const { isCompact } = useDensity()
 const session = useSessionV2()
 const chat = session.chat
 

@@ -1,7 +1,25 @@
 <template>
   <StatusSection id="agents" :title="t('status.agents')" icon="i-carbon-bot" :count="rows.length" :empty="!rows.length" :empty-label="t('status.none.agents')">
     <div v-if="error" class="px-4 py-2 text-xs text-coral">{{ error }}</div>
-    <table class="w-full text-xs">
+    <div v-if="isCompact" data-test="status-agents-phone">
+      <button v-for="row in rows" :key="row.name" type="button" class="kt-v2-line border-x-0 border-t-0 w-full min-h-14 flex items-center gap-3 px-4 py-2 border-b last:border-b-0 text-left active:bg-warm-200/60 dark:active:bg-warm-800" :data-test="`status-agent-${row.name}`" @click="ctx.openSheet('agent', { name: row.name })">
+        <span v-if="row.job" class="i-carbon-circle-dash animate-spin text-aquamarine shrink-0" />
+        <StatusDot v-else :status="row.status" />
+        <span class="flex-1 min-w-0">
+          <span class="flex items-center gap-1.5 min-w-0">
+            <span class="truncate text-sm font-medium text-warm-800 dark:text-warm-100">{{ row.name }}</span>
+            <span v-if="row.privileged" class="i-carbon-security text-iolite shrink-0" />
+            <span v-if="row.status !== 'running'" class="shrink-0 px-1.5 rounded bg-warm-100 dark:bg-warm-800 text-[10px] text-warm-500">{{ t(`status.state.${row.status}`) }}</span>
+          </span>
+          <span class="flex items-center gap-2 min-w-0 text-xs text-warm-500">
+            <span class="truncate font-mono">{{ row.model || "—" }}</span>
+            <span class="shrink-0 font-mono">{{ formatTokens(row.tokens) }}</span>
+          </span>
+        </span>
+        <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
+      </button>
+    </div>
+    <table v-else class="w-full text-xs">
       <thead class="text-warm-400 text-left">
         <tr class="border-b kt-v2-line">
           <th class="font-medium px-4 py-2">{{ t("status.col.name") }}</th>
@@ -58,11 +76,17 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { agentRows, formatTokens } from "@/components/session-v2/model/status/statusModel"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import StatusSection from "@/components/session-v2/status/StatusSection.vue"
+import { useDensity } from "@/composables/useDensity"
 import { configAPI, terrariumAPI } from "@/utils/api"
 
-/** Every creature of the session: status, model (switchable), tokens, current job, start/stop and a jump to its chat. */
+/**
+ * Every creature of the session: status, model (switchable), tokens,
+ * current job, start/stop and a jump to its chat. On phones each creature
+ * is a row that opens its agent sheet.
+ */
 const ctx = useSessionV2()
 const t = useV2T()
+const { isCompact } = useDensity()
 const chat = ctx.chat
 
 const busy = reactive({})

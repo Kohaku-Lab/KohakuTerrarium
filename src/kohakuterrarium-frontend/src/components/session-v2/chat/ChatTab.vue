@@ -2,16 +2,18 @@
   <div class="h-full min-h-0 flex overflow-hidden">
     <ConversationRail v-if="showRail" />
     <div class="flex-1 min-w-0 min-h-0 relative">
-      <ChatColumn :reserve-right="reserveForWidget" :strip="!showRail" />
+      <ChatColumn :reserve-right="reserveForWidget" :strip="false" />
       <button v-if="activeChannel && !isCompact && !membersOpen" class="kt-v2-float kt-v2-edge absolute top-3 right-4 z-20 h-8 px-2.5 rounded-lg border shadow-sm flex items-center gap-1.5 text-xs text-warm-600 dark:text-warm-300 hover:text-iolite" :title="t('members.show')" data-test="channel-members-show" @click="setMembersOpen(true)"><span class="i-carbon-user-multiple" />{{ t("members.title") }}</button>
-      <div class="absolute right-4 bottom-24 z-30 flex flex-col items-end gap-2 pointer-events-none">
+      <div v-if="!isCompact" class="absolute right-4 bottom-24 z-30 flex flex-col items-end gap-2 pointer-events-none">
         <div v-if="ctx.widget.value" class="pointer-events-auto"><WidgetFrame :id="ctx.widget.value" :key="ctx.widget.value" /></div>
         <div class="pointer-events-auto"><Dock /></div>
       </div>
     </div>
-    <ChannelMembers v-if="activeChannel && !isCompact && membersOpen" :channel="activeChannel" @hide="setMembersOpen(false)" />
-    <SideView v-if="ctx.side.value" :side="ctx.side.value" />
-    <AddDialog v-if="ctx.addKind.value" :key="ctx.addKind.value" :kind="ctx.addKind.value" />
+    <template v-if="!isCompact">
+      <ChannelMembers v-if="activeChannel && membersOpen" :channel="activeChannel" @hide="setMembersOpen(false)" />
+      <SideView v-if="ctx.side.value" :side="ctx.side.value" />
+      <AddDialog v-if="ctx.addKind.value" :key="ctx.addKind.value" :kind="ctx.addKind.value" />
+    </template>
   </div>
 </template>
 
@@ -36,8 +38,10 @@ import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
  * the chat column, the open channel's member list (shown by default,
  * hideable), the dock with its floating widget at the column's
  * bottom-right, the side view when one is open, and the "Add to session"
- * dialog. Phones get no rail. The first artifact of a session opens the
- * canvas side view once.
+ * dialog. Phones get only the chat column: the header's conversations
+ * sheet replaces the rail and the phone overlays host widgets, side views
+ * and the dialog. The first artifact of a session opens the canvas side
+ * view once.
  */
 const MEMBERS_KEY = "kt.v2.members.open"
 const ctx = useSessionV2()
@@ -71,7 +75,7 @@ watch(
     }
     if (!has || ctx.column.canvasAutoOpened) return
     ctx.column.canvasAutoOpened = true
-    if (!ctx.side.value) ctx.openSide("canvas", { index: 0 })
+    if (!ctx.side.value && !isCompact.value) ctx.openSide("canvas", { index: 0 })
   },
   { immediate: true },
 )

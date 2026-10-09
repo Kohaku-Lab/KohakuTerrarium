@@ -169,8 +169,16 @@ function onDrop(ev) {
 function onGlobalKeydown(e) {
   if (!e.defaultPrevented && e.key === "Escape" && ctx.focused.value && viewport.processing.value) chat.interrupt(tabKey.value)
 }
-const listen = () => window.addEventListener("keydown", onGlobalKeydown)
-const unlisten = () => window.removeEventListener("keydown", onGlobalKeydown)
+// The shown column's compact / clear serve the phone session menu.
+const columnActions = { compact: () => composer.compact(), clear: () => composer.clear() }
+const listen = () => {
+  window.addEventListener("keydown", onGlobalKeydown)
+  ctx.column.actions.value = columnActions
+}
+const unlisten = () => {
+  window.removeEventListener("keydown", onGlobalKeydown)
+  if (ctx.column.actions.value === columnActions) ctx.column.actions.value = null
+}
 onMounted(listen)
 onActivated(listen)
 onDeactivated(unlisten)

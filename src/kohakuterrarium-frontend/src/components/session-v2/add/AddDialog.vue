@@ -1,13 +1,13 @@
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-test="add-dialog" @pointerdown.self="close">
-    <section class="kt-v2-float kt-v2-edge w-[min(900px,100%)] h-[min(680px,100%)] rounded-2xl border shadow-2xl grid grid-cols-[210px_minmax(0,1fr)] overflow-hidden" role="dialog" aria-modal="true" :aria-label="t('add.title')">
-      <nav class="kt-v2-panel kt-v2-edge border-r flex flex-col gap-1 p-3">
-        <h2 class="px-2 pb-2 text-sm font-semibold text-warm-800 dark:text-warm-100">{{ t("add.title") }}</h2>
-        <button v-for="k in ADD_KINDS" :key="k.id" type="button" class="text-left px-2.5 py-2 rounded-lg flex items-start gap-2.5 disabled:cursor-not-allowed" :class="form.kind === k.id ? 'bg-iolite/12 text-iolite dark:text-iolite-light' : 'text-warm-700 dark:text-warm-200 hover:bg-warm-100 dark:hover:bg-warm-800'" :disabled="busy || !!resume" :data-test="`add-kind-${k.id}`" @click="setKind(k.id)">
+  <div class="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 p-4 max-sm:p-0" data-test="add-dialog" @pointerdown.self="close">
+    <section class="kt-v2-float kt-v2-edge w-[min(900px,100%)] h-[min(680px,100%)] max-sm:h-full rounded-2xl max-sm:rounded-none border shadow-2xl grid grid-cols-[210px_minmax(0,1fr)] max-sm:grid-cols-1 max-sm:grid-rows-[auto_minmax(0,1fr)] overflow-hidden" role="dialog" aria-modal="true" :aria-label="t('add.title')">
+      <nav class="kt-v2-panel kt-v2-edge border-r max-sm:border-r-0 max-sm:border-b flex flex-col max-sm:flex-row max-sm:overflow-x-auto max-sm:scrollbar-none gap-1 p-3 max-sm:p-2">
+        <h2 class="px-2 pb-2 text-sm font-semibold text-warm-800 dark:text-warm-100 max-sm:hidden">{{ t("add.title") }}</h2>
+        <button v-for="k in ADD_KINDS" :key="k.id" type="button" class="text-left px-2.5 py-2 max-sm:min-h-11 max-sm:shrink-0 rounded-lg flex items-start max-sm:items-center gap-2.5 disabled:cursor-not-allowed" :class="form.kind === k.id ? 'bg-iolite/12 text-iolite dark:text-iolite-light' : 'text-warm-700 dark:text-warm-200 hover:bg-warm-100 dark:hover:bg-warm-800'" :disabled="busy || !!resume" :data-test="`add-kind-${k.id}`" @click="setKind(k.id)">
           <span :class="k.icon" class="mt-0.5 shrink-0" />
           <span class="min-w-0">
             <span class="block text-[13px] font-medium">{{ t(`add.kind.${k.id}`) }}</span>
-            <span class="block text-[11px] text-warm-500 leading-snug">{{ t(`add.kind.${k.id}.hint`) }}</span>
+            <span class="block text-[11px] text-warm-500 leading-snug max-sm:hidden">{{ t(`add.kind.${k.id}.hint`) }}</span>
           </span>
         </button>
       </nav>
@@ -51,14 +51,14 @@
                 <span v-if="newChannelError" class="text-[11px] text-coral">{{ t(newChannelError) }}</span>
                 <span v-else-if="shown.newChannels" class="text-[11px] text-coral">{{ t(errors.newChannels) }}</span>
               </div>
-              <div class="grid grid-cols-[150px_minmax(0,1fr)] gap-x-3 gap-y-3 items-start text-xs">
+              <div class="grid grid-cols-[150px_minmax(0,1fr)] max-sm:grid-cols-1 gap-x-3 gap-y-3 max-sm:gap-y-1.5 items-start text-xs">
                 <span class="pt-1.5 text-warm-500">{{ t("add.listens") }}</span>
                 <ChipToggles v-model="form.listen" :options="channelOptions" :marked="form.newChannels" :mark-label="t('add.newTag')" prefix="#" :empty="t('add.noChannels')" :remove-label="t('add.remove')" @remove="removeNewChannel" />
                 <span class="pt-1.5 text-warm-500">{{ t("add.sends") }}</span>
                 <ChipToggles v-model="form.send" :options="channelOptions" :marked="form.newChannels" :mark-label="t('add.newTag')" prefix="#" :empty="t('add.noChannels')" :remove-label="t('add.remove')" @remove="removeNewChannel" />
                 <span class="pt-1.5 text-warm-500">{{ t("add.outputTo") }}</span>
                 <div class="flex flex-col gap-1">
-                  <el-select v-model="form.outputTo" size="default" class="!w-64" :placeholder="t('add.outputNone')" clearable data-test="add-output-to">
+                  <el-select v-model="form.outputTo" size="default" class="!w-64 max-sm:!w-full" :placeholder="t('add.outputNone')" clearable data-test="add-output-to">
                     <el-option v-for="c in creatures" :key="c" :label="c" :value="c" />
                   </el-select>
                   <span v-if="shown.outputTo" class="text-[11px] text-coral">{{ t(errors.outputTo) }}</span>
@@ -92,7 +92,7 @@
               <span class="text-xs font-medium text-warm-600 dark:text-warm-300">{{ t("add.description") }}</span>
               <input v-model="form.description" :class="INPUT" class="h-9 text-sm" />
             </label>
-            <div class="grid grid-cols-[150px_minmax(0,1fr)] gap-x-3 gap-y-3 items-start text-xs">
+            <div class="grid grid-cols-[150px_minmax(0,1fr)] max-sm:grid-cols-1 gap-x-3 gap-y-3 max-sm:gap-y-1.5 items-start text-xs">
               <span class="pt-1.5 text-warm-500">{{ t("add.listeners") }}</span>
               <ChipToggles v-model="form.listeners" :options="creatures" :empty="t('add.noCreatures')" />
               <span class="pt-1.5 text-warm-500">{{ t("add.senders") }}</span>

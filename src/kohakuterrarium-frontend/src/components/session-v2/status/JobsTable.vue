@@ -1,7 +1,18 @@
 <template>
   <StatusSection id="jobs" :title="t('status.jobs')" icon="i-carbon-in-progress" :count="rows.length" :empty="!rows.length" :empty-label="t('status.none.jobs')">
     <div v-if="error" class="px-4 py-2 text-xs text-coral" role="alert">{{ error }}</div>
-    <table class="w-full text-xs">
+    <div v-if="isCompact">
+      <div v-for="row in rows" :key="row.id" class="kt-v2-line min-h-14 flex items-center gap-3 pl-4 pr-2 py-2 border-b last:border-b-0" :data-test="`status-job-${row.id}`">
+        <span class="i-carbon-circle-dash animate-spin text-aquamarine shrink-0" />
+        <span class="flex-1 min-w-0">
+          <span class="block truncate text-sm font-medium text-warm-800 dark:text-warm-100">{{ row.name }}</span>
+          <span class="block truncate text-xs text-warm-500">{{ row.type }} · {{ row.tab ? tabLabel(row.tab, chat._rootSourceName) : "—" }} · {{ chat.getJobElapsed(chat.runningJobs[row.id]) || "—" }}</span>
+        </span>
+        <span v-if="row.cancelling" class="text-xs text-warm-500 shrink-0">{{ t("status.cancelling") }}</span>
+        <button v-else type="button" class="kt-v2-b h-10 px-3 shrink-0 rounded-lg border border-coral/30 text-sm text-coral active:bg-coral/10" @click="stopJob(row)">{{ t("status.stop") }}</button>
+      </div>
+    </div>
+    <table v-else class="w-full text-xs">
       <thead class="text-warm-500 text-left">
         <tr class="border-b kt-v2-line">
           <th class="font-medium px-4 py-2">{{ t("status.col.name") }}</th>
@@ -37,11 +48,13 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { jobOwnerTab, jobRows } from "@/components/session-v2/model/status/statusModel"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import StatusSection from "@/components/session-v2/status/StatusSection.vue"
+import { useDensity } from "@/composables/useDensity"
 import { terrariumAPI } from "@/utils/api"
 
-/** Running tools and sub-agents with elapsed time; stop one. */
+/** Running tools and sub-agents with elapsed time; stop one. Phones get one row per job. */
 const ctx = useSessionV2()
 const t = useV2T()
+const { isCompact } = useDensity()
 const chat = ctx.chat
 const error = ref("")
 

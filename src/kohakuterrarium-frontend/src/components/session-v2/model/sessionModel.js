@@ -7,15 +7,20 @@
 import { tabKeyFor } from "./creatureKeys"
 import { visibleChannels } from "./sessionChannels"
 
-/** The fixed session tabs, in display order. */
+/** The fixed session tabs, in display order; `desktop` tabs are left out on phones. */
 export const SESSION_TABS = [
   { id: "chat", icon: "i-carbon-chat" },
   { id: "graph", icon: "i-carbon-network-4" },
   { id: "status", icon: "i-carbon-dashboard" },
-  { id: "workspace", icon: "i-carbon-code" },
+  { id: "workspace", icon: "i-carbon-code", desktop: true },
   { id: "debug", icon: "i-carbon-debug" },
   { id: "settings", icon: "i-carbon-settings" },
 ]
+
+/** The session tabs shown on a phone (`phone`) or on a wider screen. */
+export function sessionTabs(phone) {
+  return phone ? SESSION_TABS.filter((s) => !s.desktop) : SESSION_TABS
+}
 
 /**
  * Conversations of a session: privileged nodes first, then the other

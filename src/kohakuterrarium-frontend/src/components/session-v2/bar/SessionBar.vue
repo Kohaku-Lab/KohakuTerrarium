@@ -4,7 +4,7 @@
       <span class="w-2 h-2 rounded-full shrink-0" :class="running ? 'bg-aquamarine' : 'bg-warm-400'" />
       <span class="text-sm font-semibold text-warm-800 dark:text-warm-100 truncate" :title="name">{{ name }}</span>
     </div>
-    <TabSwitcher v-if="!compact" />
+    <TabSwitcher />
     <span class="flex-1" />
     <button class="self-center w-7 h-7 flex items-center justify-center rounded-md text-warm-500 hover:text-coral hover:bg-coral/10" :title="t('stop')" data-test="v2-stop" @click="$emit('stop')"><span class="i-carbon-stop-filled-alt" /></button>
   </header>
@@ -17,8 +17,7 @@ import TabSwitcher from "@/components/session-v2/bar/TabSwitcher.vue"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 
-/** The session bar (chrome): status and name, the session tabs fused into the page below (desktop), stop. */
-defineProps({ compact: { type: Boolean, default: false } })
+/** The desktop session bar (chrome): status and name, the session tabs fused into the page below, stop. */
 defineEmits(["stop"])
 
 const ctx = useSessionV2()
