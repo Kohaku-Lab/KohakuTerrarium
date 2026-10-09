@@ -207,8 +207,10 @@ class TestProgStudioJourney:
             # the workspace root.
             module_path = workspace_root / scaffolded["path"]
             assert module_path.exists()
+            starter_description = scaffolded["form"]["description"]
+            assert starter_description in scaffolded["raw_source"]
             edited_source = scaffolded["raw_source"].replace(
-                "TODO: describe this tool", "an e2e-journey ping tool"
+                starter_description, "an e2e-journey ping tool"
             )
             ws.save_module(
                 "tools",
