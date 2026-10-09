@@ -19,13 +19,13 @@
             <span class="relative w-7 h-7 flex items-center justify-center text-[11px] font-semibold" :class="[o.kind === 'channel' ? 'rounded-md' : 'rounded-full uppercase', badgeTone(o)]">
               <template v-if="o.kind === 'channel'"><span class="opacity-60">#</span>{{ o.name.slice(0, 1) }}</template>
               <template v-else>{{ labelOf(o).slice(0, 1) }}</template>
-              <span v-if="o.kind === 'creature'" class="kt-v2-panel absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full flex items-center justify-center"><span v-if="chat.processingByTab[o.key]" class="i-carbon-circle-dash animate-spin text-[9px] text-aquamarine" /><StatusDot v-else :status="o.status" /></span>
+              <span v-if="o.kind === 'creature'" class="kt-v2-panel absolute -right-0.5 -bottom-0.5 w-2.5 h-2.5 rounded-full flex items-center justify-center"><span v-if="isBusy(o)" class="i-carbon-circle-dash animate-spin text-[9px] text-aquamarine" /><StatusDot v-else :status="o.status" /></span>
               <span v-if="unread(o)" class="absolute -right-0.5 -top-0.5 w-2 h-2 rounded-full bg-amber" />
             </span>
           </template>
           <template v-else>
             <span v-if="o.kind === 'channel'" class="w-3 text-center text-aquamarine">#</span>
-            <span v-else-if="chat.processingByTab[o.key]" class="w-3 i-carbon-circle-dash animate-spin text-aquamarine" />
+            <span v-else-if="isBusy(o)" class="w-3 i-carbon-circle-dash animate-spin text-aquamarine" />
             <span v-else class="w-3 flex justify-center"><StatusDot :status="o.status" /></span>
             <span class="truncate flex-1 text-left">{{ labelOf(o) }}</span>
             <span v-if="o.privileged" class="i-carbon-security text-iolite/80 shrink-0" />
@@ -115,5 +115,8 @@ function badgeTone(o) {
   if (o.kind === "channel") return "bg-aquamarine/15 text-aquamarine"
   return "bg-warm-200 dark:bg-warm-700 text-warm-700 dark:text-warm-200"
 }
+// Busy while streaming or while the turn waits on this agent's own background
+// jobs; untagged jobs belong to no single agent in the rail.
+const isBusy = (o) => !!chat.processingByTab[o.key] || Object.values(chat.runningJobs || {}).some((j) => j.tab === o.key)
 const unread = (o) => !!chat.unreadCounts[o.key] && o.key !== chat.activeTab
 </script>
