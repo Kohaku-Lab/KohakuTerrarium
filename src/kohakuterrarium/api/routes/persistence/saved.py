@@ -137,7 +137,8 @@ async def list_sessions(
 ):
     """List indexed sessions with search, sorting, facets, and pagination.
 
-    ``search`` covers name, preview, config path, agents, and working directory.
+    ``search`` covers name, title, summary, preview, latest exchange, config
+    path, agents, and working directory.
     ``sort=relevance`` uses BM25 order; other sort fields reorder the matching
     set. ``refresh`` reconciles changed fingerprints before listing, while
     ``full_rescan`` rereads every session file to account for external edits.

@@ -109,7 +109,7 @@ def rollback_remote_workspace_meta(snapshot: RemoteMirrorSnapshot) -> None:
         if snapshot.index_row is None:
             index.delete(snapshot.path.name)
         else:
-            index.upsert(SessionIndexEntry(**snapshot.index_row))
+            index.upsert(SessionIndexEntry.from_dict(snapshot.index_row))
         store.close(update_status=False)
         store = None
     except BaseException as exc:

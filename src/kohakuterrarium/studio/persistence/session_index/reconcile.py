@@ -8,20 +8,28 @@ Disk snapshots use selective read-only queries. Parallel reads retain the
 conservative CPU and descriptor budget used by the original store readers.
 """
 
+import os
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-import json
-import os
-import time
+from typing import Any
 
-from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
 from kohakuterrarium.session.errors import SessionNotReadyError
 from kohakuterrarium.session.readonly_view import SessionReadView
 from kohakuterrarium.session.store import SessionStore, iter_kv_keys
 from kohakuterrarium.studio.persistence.session_index.entry import (
     SessionIndexEntry,
     _max_mtime_with_wal,
+)
+from kohakuterrarium.studio.persistence.session_index.exchange import (
+    EMPTY_EXCHANGE,
+    flatten_text,
+    is_user_prompt,
+    latest_exchange,
+    messages_of,
+    primary_agent,
 )
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
 from kohakuterrarium.studio.persistence.viewer.paths import pick_canonical_per_session
@@ -62,35 +70,7 @@ class ReconcileReport:
     aborted: bool = False
 
 
-def _extract_text_preview(content, limit: int = 200) -> str:
-    """Flatten event content into a bounded listing preview.
-
-    Multimodal and unknown parts become bracketed markers so previews never
-    embed binary or base64 payloads.
-    """
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content[:limit]
-    if isinstance(content, list):
-        bits: list[str] = []
-        for part in content:
-            if isinstance(part, str):
-                bits.append(part)
-            elif isinstance(part, dict):
-                kind = part.get("type") or ""
-                if kind == "text":
-                    bits.append(str(part.get("text") or ""))
-                elif kind in ("image_url", "image"):
-                    bits.append("[image]")
-                elif kind == "file":
-                    bits.append("[file]")
-                else:
-                    bits.append(f"[{kind or 'attachment'}]")
-        return " ".join(b for b in bits if b)[:limit]
-    if isinstance(content, dict):
-        return _extract_text_preview([content], limit)
-    return str(content)[:limit]
+_extract_text_preview = flatten_text
 
 
 def _snapshot_user_preview(snapshot) -> str | None:
@@ -98,25 +78,27 @@ def _snapshot_user_preview(snapshot) -> str | None:
 
     An empty valid snapshot must not resurrect deleted inputs from events.
     """
-    if isinstance(snapshot, (str, bytes)):
-        try:
-            snapshot = json.loads(snapshot)
-        except (ValueError, UnicodeDecodeError):
-            return None
-    if isinstance(snapshot, dict):
-        snapshot = snapshot.get("messages")
-    if not isinstance(snapshot, list):
+    messages = messages_of(snapshot)
+    if messages is None:
         return None
-    for message in reversed(snapshot):
-        if not isinstance(message, dict) or message.get("role") != "user":
-            continue
-        metadata = message.get("metadata")
-        if isinstance(metadata, dict) and metadata.get("kind") == TOOL_FEEDBACK_KIND:
-            continue
-        preview = _extract_text_preview(message.get("content")).strip()
-        if preview:
-            return preview
+    for message in reversed(messages):
+        if is_user_prompt(message):
+            preview = flatten_text(message.get("content")).strip()
+            if preview:
+                return preview
     return ""
+
+
+def _listing_exchange(get_conversation: Callable[[str], Any], meta: dict) -> dict:
+    """The primary conversation's latest exchange; empty when unreadable."""
+    agent = primary_agent(meta)
+    if not agent:
+        return dict(EMPTY_EXCHANGE)
+    try:
+        return latest_exchange(messages_of(get_conversation(agent)))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Conversation exchange unavailable", error=str(exc))
+        return dict(EMPTY_EXCHANGE)
 
 
 def _listing_preview(store: SessionStore, meta: dict) -> str:
@@ -219,6 +201,9 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
                 has_vector_index=isinstance(dimensions, int) and dimensions > 0,
                 file_mtime=pre_mtime,
                 file_size=pre_size,
+                exchange=_listing_exchange(
+                    lambda name: reader.get("conversation", name), meta
+                ),
             )
     except SessionNotReadyError:
         logger.debug("session still opening; retry later", path=str(path))

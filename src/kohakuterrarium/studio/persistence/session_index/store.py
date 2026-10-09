@@ -18,6 +18,7 @@ from typing import Any
 
 from kohakuvault import KVault, TextVault
 
+from kohakuterrarium.session import run_state
 from kohakuterrarium.studio.persistence.session_index.entry import (
     SCHEMA_VERSION,
     SessionIndexEntry,
@@ -73,6 +74,10 @@ SEARCH_COLUMNS = (
     "pwd",
     "terrarium_name",
     "config_type",
+    "title",
+    "summary",
+    "last_user",
+    "last_reply",
 )
 
 # Unsupported sort keys fall back to ``last_active``.
@@ -316,9 +321,7 @@ class SessionIndex:
     def get(self, filename: str) -> dict[str, Any] | None:
         if filename not in self._entries:
             return None
-        d = dict(self._entries.get(filename))
-        d.pop("_search_rowid", None)
-        return d
+        return _strip_internal(self._entries.get(filename))
 
     def fingerprint(self, filename: str) -> tuple[float, int] | None:
         if filename not in self._entries:
@@ -339,9 +342,7 @@ class SessionIndex:
             entry = self._entries.get(fname)
             if entry is None:
                 continue
-            d = dict(entry)
-            d.pop("_search_rowid", None)
-            yield d
+            yield _strip_internal(entry)
 
     def count(self) -> int:
         # KVault has no cheap count; the safety cap bounds scans of malformed
@@ -535,7 +536,9 @@ class SessionIndex:
 
 
 def _strip_internal(e: dict[str, Any]) -> dict[str, Any]:
+    """A stored row as a public listing row, with ``stop_reason`` judged now."""
     e = dict(e)
     e.pop("_search_rowid", None)
     e.pop("_fts_score", None)
+    e["stop_reason"] = run_state.stop_reason(e.get("lifecycle") or {})
     return e

@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.session import run_state
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 
 
@@ -38,7 +39,8 @@ def _max_mtime_with_wal(path: Path, *, fallback: float | None = None) -> float:
 # fingerprints. Version 3 added the persisted conversation-open marker;
 # version 4 added stable conversation identities.
 # Version 5 refreshes listing previews from the saved active conversation.
-SCHEMA_VERSION = 5
+# Version 6 adds the title, summary, latest exchange and lifecycle.
+SCHEMA_VERSION = 6
 
 
 @dataclass
@@ -71,6 +73,13 @@ class SessionIndexEntry:
     fork_point: int | None = None
     forked_children: list[str] = field(default_factory=list)
     migrated_from_version: int | None = None
+    title: str = ""
+    summary: str = ""
+    summary_source: str = ""
+    last_user: str = ""
+    last_reply: str = ""
+    turn_count: int = 0
+    lifecycle: dict = field(default_factory=dict)
 
     _search_rowid: int = 0
 
@@ -84,11 +93,13 @@ class SessionIndexEntry:
         has_vector_index: bool,
         file_mtime: float | None = None,
         file_size: int | None = None,
+        exchange: dict | None = None,
     ) -> "SessionIndexEntry":
         """Build an entry from loaded metadata and an optional fingerprint.
 
         Missing fingerprint components are read from disk; supplied values let
         callers reuse an earlier stat and keep the indexed snapshot coherent.
+        ``exchange`` is the primary conversation's latest exchange.
         """
         if file_mtime is None or file_size is None:
             st = path.stat()
@@ -107,6 +118,8 @@ class SessionIndexEntry:
             if isinstance((lineage or {}).get("migration"), dict)
             else None
         )
+        summary = meta.get("summary") if isinstance(meta.get("summary"), dict) else {}
+        exchange = exchange or {}
         forked_raw = meta.get("forked_children") or []
         forked_children = [
             c.get("session_id") if isinstance(c, dict) else c
@@ -140,6 +153,13 @@ class SessionIndexEntry:
             migrated_from_version=(
                 (migration or {}).get("source_version") if migration else None
             ),
+            title=str(meta.get("name") or ""),
+            summary=str(summary.get("text") or ""),
+            summary_source=str(summary.get("source") or ""),
+            last_user=str(exchange.get("last_user") or ""),
+            last_reply=str(exchange.get("last_reply") or ""),
+            turn_count=int(exchange.get("turn_count") or 0),
+            lifecycle=dict(run_state.read_lifecycle(meta)),
         )
 
     @classmethod
@@ -177,6 +197,13 @@ class SessionIndexEntry:
             "fork_point",
             "forked_children",
             "migrated_from_version",
+            "title",
+            "summary",
+            "summary_source",
+            "last_user",
+            "last_reply",
+            "turn_count",
+            "lifecycle",
             "_search_rowid",
         ):
             if f in d:
@@ -193,6 +220,10 @@ class SessionIndexEntry:
             "pwd": self.pwd,
             "terrarium_name": self.terrarium_name,
             "config_type": self.config_type,
+            "title": self.title,
+            "summary": self.summary,
+            "last_user": self.last_user,
+            "last_reply": self.last_reply,
         }
 
     def to_dict(self) -> dict[str, Any]:
@@ -200,9 +231,14 @@ class SessionIndexEntry:
         return asdict(self)
 
     def to_listing_dict(self) -> dict[str, Any]:
-        """Serialize public listing fields without the FTS row ID."""
+        """Serialize public listing fields without the FTS row ID.
+
+        ``stop_reason`` (``user`` / ``shutdown`` / ``crash`` / None while live)
+        is judged now, against this server boot, not when the row was indexed.
+        """
         d = asdict(self)
         d.pop("_search_rowid", None)
+        d["stop_reason"] = run_state.stop_reason(self.lifecycle)
         return d
 
     def fingerprint(self) -> tuple[float, int]:

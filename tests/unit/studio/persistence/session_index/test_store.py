@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import pytest
 
+from kohakuterrarium.session import run_state
 from kohakuterrarium.studio.persistence.session_index.entry import (
     SCHEMA_VERSION,
     SessionIndexEntry,
@@ -786,7 +787,19 @@ class TestHelpers:
 
     def test_strip_internal_removes_underscore_keys(self):
         out = _strip_internal({"a": 1, "_search_rowid": 7, "_fts_score": 0.5})
-        assert out == {"a": 1}
+        assert out == {"a": 1, "stop_reason": None}
+
+    def test_strip_internal_judges_stop_reason_against_this_boot(self, monkeypatch):
+        monkeypatch.setattr(run_state, "BOOT_ID", "now")
+        live_here = {"live": True, "boot_id": "now", "stop_reason": None}
+        live_before = {"live": True, "boot_id": "earlier", "stop_reason": None}
+        drained = {"live": True, "boot_id": "earlier", "stop_reason": "shutdown"}
+        stopped = {"live": False, "boot_id": "now", "stop_reason": "user"}
+        reasons = [
+            _strip_internal({"lifecycle": lc})["stop_reason"]
+            for lc in (live_here, live_before, drained, stopped)
+        ]
+        assert reasons == [None, "crash", "shutdown", "user"]
 
 
 # ── SessionIndexPage ──────────────────────────────────────────────

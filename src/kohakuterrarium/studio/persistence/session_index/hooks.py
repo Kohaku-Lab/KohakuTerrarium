@@ -9,8 +9,9 @@ from pathlib import Path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.session_index.entry import SessionIndexEntry
 from kohakuterrarium.studio.persistence.session_index.reconcile import (
-    _listing_preview,
     _has_vector_index,
+    _listing_exchange,
+    _listing_preview,
 )
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
 from kohakuterrarium.utils.logging import get_logger
@@ -26,6 +27,7 @@ def _snapshot_entry(store: SessionStore) -> SessionIndexEntry:
         meta=meta,
         preview=_listing_preview(store, meta),
         has_vector_index=_has_vector_index(store),
+        exchange=_listing_exchange(store.conversation.get, meta),
     )
 
 

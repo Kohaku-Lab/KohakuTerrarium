@@ -761,3 +761,64 @@ def test_cleared_snapshot_does_not_resurrect_old_prompt(session_dir, snapshot):
 )
 def test_snapshot_preview_compatibility(snapshot, expected):
     assert reconcile_mod._snapshot_user_preview(snapshot) == expected
+
+
+def _labelled_session(session_dir: Path) -> Path:
+    path = session_dir / "labelled.kohakutr"
+    with closing(SessionStore(path)) as store:
+        store.init_meta("sid", "terrarium", "", "", ["worker", "root"])
+        store.meta["name"] = "Nightly triage"
+        store.meta["summary"] = {"text": "Triaging flaky CI jobs", "source": "llm"}
+        store.meta["lifecycle"] = {"live": False, "stop_reason": "user"}
+        store.save_conversation(
+            "worker", [{"role": "user", "content": "worker-only prompt"}]
+        )
+        store.save_conversation(
+            "root",
+            [
+                {"role": "user", "content": "Look at the CI board"},
+                {"role": "assistant", "content": "Three jobs are red."},
+                {"role": "user", "content": "Retry the windows job"},
+                {"role": "assistant", "content": "Retried; windows is green."},
+            ],
+        )
+        store.flush()
+    return path
+
+
+def test_entry_carries_title_summary_lifecycle_and_primary_exchange(session_dir):
+    entry = read_entry_from_disk(_labelled_session(session_dir))
+    assert (entry.title, entry.summary, entry.summary_source) == (
+        "Nightly triage",
+        "Triaging flaky CI jobs",
+        "llm",
+    )
+    assert (entry.last_user, entry.last_reply, entry.turn_count) == (
+        "Retry the windows job",
+        "Retried; windows is green.",
+        2,
+    )
+    assert entry.lifecycle == {"live": False, "stop_reason": "user"}
+    assert entry.to_listing_dict()["stop_reason"] == "user"
+    assert entry.preview == "worker-only prompt"
+
+
+def test_listing_rows_search_the_new_text_and_judge_stop_reason(idx, session_dir):
+    _labelled_session(session_dir)
+    _make_session(session_dir, "plain", preview_text="unrelated")
+    reconcile(idx, session_dir, full=True, workers=1)
+    assert idx.list(search="board").rows == []
+    for query in ("triage", "flaky", "windows", "retry"):
+        rows = idx.list(search=query).rows
+        assert [r["filename"] for r in rows] == ["labelled.kohakutr"], query
+    row = idx.get("labelled.kohakutr")
+    assert (row["title"], row["stop_reason"]) == ("Nightly triage", "user")
+    assert idx.get("plain.kohakutr")["stop_reason"] is None
+
+
+def test_listing_exchange_is_empty_when_the_snapshot_cannot_be_read():
+    def boom(_agent):
+        raise RuntimeError("closed")
+
+    assert reconcile_mod._listing_exchange(boom, {"agents": ["a"]})["turn_count"] == 0
+    assert reconcile_mod._listing_exchange(boom, {"agents": []})["last_user"] == ""

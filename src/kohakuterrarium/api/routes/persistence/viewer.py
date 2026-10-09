@@ -44,6 +44,9 @@ from kohakuterrarium.studio.persistence.viewer.diff import (
     merge_diff_payload,
 )
 from kohakuterrarium.studio.persistence.viewer.events import build_events_payload
+from kohakuterrarium.studio.persistence.viewer.exchanges import (
+    build_exchanges_payload,
+)
 from kohakuterrarium.studio.persistence.viewer.export import build_export
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.persistence.viewer.summary import build_summary_payload
@@ -196,6 +199,25 @@ async def get_session_summary(
         return await _build_single(service, members[0][0], members[0][1], _build)
     per_member = await asyncio.to_thread(_run_per_member, members, _build)
     return merge_summary(per_member, session_name)
+
+
+@router.get("/{session_name}/exchanges")
+async def get_session_exchanges(
+    session_name: str,
+    agent: str | None = None,
+    limit: int = 3,
+    service: TerrariumService = Depends(get_service),
+) -> dict[str, Any]:
+    """The last ``limit`` quoted exchanges of the primary (or given) agent.
+
+    A cluster reads its first resolved member, which holds the primary agent.
+    """
+    members = await _resolve_cluster_or_404(session_name, service)
+
+    def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
+        return build_exchanges_payload(store, canonical, agent=agent, limit=limit)
+
+    return await _build_single(service, members[0][0], members[0][1], _build)
 
 
 @router.get("/{session_name}/turns")

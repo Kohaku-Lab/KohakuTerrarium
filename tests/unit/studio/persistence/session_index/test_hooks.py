@@ -61,6 +61,7 @@ class TestPushIndexUpdate:
             s.close()
         row = idx.get("alice.kohakutr")
         assert row["preview"] == "latest request"
+        assert (row["last_user"], row["turn_count"]) == ("latest request", 1)
         assert idx.list(search="latest").total == 1
         assert idx.list(search="fresh").total == 0
         assert idx.list().total == 1  # not duplicated
