@@ -13,6 +13,7 @@ from kohakuterrarium.laboratory.protocols import LabNotifier
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.sync import SessionEventTee
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.store_observers import observe_session_stores
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
@@ -26,26 +27,6 @@ def _default_worker_session_dir() -> Path:
 
 # Retained for display compatibility; live paths honor current configuration.
 DEFAULT_WORKER_SESSION_DIR = Path.home() / ".kohakuterrarium" / "sessions"
-
-
-class _ObservingSessionStores(dict):
-    """Notify listeners when a session store is first registered."""
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._listeners: list = []
-
-    def __setitem__(self, key, value) -> None:
-        new = key not in self
-        super().__setitem__(key, value)
-        if new:
-            for cb in list(self._listeners):
-                try:
-                    cb(key, value)
-                except Exception:  # pragma: no cover - defensive
-                    logger.exception(
-                        "observing session-stores listener failed for %r", key
-                    )
 
 
 class WorkerSessionAttacher:
@@ -72,13 +53,7 @@ class WorkerSessionAttacher:
 
     def _wrap_engine_session_stores(self) -> None:
         """Observe store registration without wrapping an existing observer twice."""
-        existing = getattr(self._engine, "_session_stores", None)
-        if isinstance(existing, _ObservingSessionStores):
-            existing._listeners.append(self._on_store_registered)
-            return
-        observing = _ObservingSessionStores(existing or {})
-        observing._listeners.append(self._on_store_registered)
-        self._engine._session_stores = observing
+        observe_session_stores(self._engine, self._on_store_registered)
 
     def _on_store_registered(self, graph_id: str, store: SessionStore) -> None:
         """Install a tee for a newly registered graph if one is not active."""

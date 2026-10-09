@@ -14,12 +14,14 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import kohakuterrarium.session.run_state as _run_state
 import kohakuterrarium.terrarium.autosession as _autosession
 import kohakuterrarium.terrarium.channel_lifecycle as _lifecycle
 import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.engine_creature_add as _engine_creature_add
 import kohakuterrarium.terrarium.engine_observability as _observability
 import kohakuterrarium.terrarium.graph_checkpoint as _checkpoint
+import kohakuterrarium.terrarium.graph_identity_engine as _identity
 import kohakuterrarium.terrarium.recipe as _recipe
 import kohakuterrarium.terrarium.recipe_identity as _recipe_identity
 import kohakuterrarium.terrarium.recipe_transaction as _recipe_transaction
@@ -28,9 +30,6 @@ import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 import kohakuterrarium.terrarium.drive.runtime as _drive_runtime
-from kohakuterrarium.terrarium.drive.store import (
-    DriveRepositoryClosedError,
-)
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import (
@@ -46,7 +45,6 @@ from kohakuterrarium.terrarium.events import (
     EventKind,
     RootAssignment,
 )
-import kohakuterrarium.terrarium.graph_identity_engine as _identity
 from kohakuterrarium.terrarium.runtime_prompt import RuntimeGraphPrompt
 from kohakuterrarium.terrarium.tools_group import (
     force_register_basic_tools,
@@ -59,6 +57,7 @@ from kohakuterrarium.terrarium.topology import (
     TopologyState,
 )
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.terrarium.drive.store import DriveRepositoryClosedError
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium.config import TerrariumConfig
@@ -722,6 +721,9 @@ class Terrarium:
         # subscriber teardown in ``finally`` so a leaked writer lock (which
         # blocks any later adopt of the same file) can't outlive shutdown.
         try:
+            # Run records keep what was running at shutdown, not the teardown below.
+            for store in list(self._session_stores.values()):
+                _run_state.mark_shutdown(store)
             # Stop claiming new Drive deliveries + drain settlements BEFORE
             # creatures stop and owned stores close.
             if self._drive_runtime is not None:

@@ -62,7 +62,7 @@ async def test_path_form_spawn_persists_config_path_in_meta(tmp_path):
 
 @pytest.mark.asyncio
 async def test_meta_is_populated_before_session_store_publish(tmp_path):
-    """``_ObservingSessionStores`` triggers a Tee on store assignment.
+    """``ObservingSessionStores`` triggers a Tee on store assignment.
 
     If meta were written AFTER ``engine._session_stores[gid] = store``,
     the Tee's synchronous ``_meta_item`` snapshot would race the

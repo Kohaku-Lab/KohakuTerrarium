@@ -1232,6 +1232,7 @@ class TestEmitMatch:
                     payload={"url": "u"},
                 )
             )
+            await out.drain()
             store.flush()
             evts = [
                 e for e in store.get_events("alice") if e["type"] == "assistant_image"

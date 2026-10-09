@@ -11,8 +11,6 @@ import asyncio
 from concurrent.futures import Future
 from typing import Any, Callable
 
-from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.output_activity import (
     SessionActivityMixin,
@@ -20,11 +18,14 @@ from kohakuterrarium.session.output_activity import (
     _subagent_name as _subagent_name,  # noqa: F401
     _token_metadata as _token_metadata,  # noqa: F401
 )
+from kohakuterrarium.session.run_state import RunTracker
 from kohakuterrarium.session.text_buffer import (
     OpenTextSegment,
     last_persisted_turn_branch,
 )
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.modules.output.event import OutputEvent
 
 logger = get_logger(__name__)
 
@@ -71,6 +72,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         # turn boundaries. Populated before recovery so the constructor can
         # queue without an event loop.
         self._pending_writes: list[Future] = []
+        self._run = RunTracker(store, self._event_key_prefix, self._submit_store_write)
         # Recover immediately so read-only resumes expose interrupted text.
         self._recover_open_text()
 
@@ -126,6 +128,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         awaited at the next :meth:`drain`; stores without an affinity
         executor fall back to an inline append.
         """
+        self._run.touch()
         return self._submit_store_write(
             self._store.append_event,
             self._event_key_prefix,
@@ -207,6 +210,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         self._recover_open_text()
 
     async def stop(self) -> None:
+        self._run.stopped()
         await self.flush()
 
     async def write(self, text: str) -> None:
@@ -223,6 +227,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         """
         self._recover_open_text()
         if chunk:
+            self._run.touch()
             self._open_text.append(chunk)
 
     def _recover_open_text(self) -> None:
@@ -288,12 +293,14 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         self._chunk_seq = 0
         payload = {"request_id": request_id} if request_id is not None else {}
         self._record("processing_start", payload)
+        self._run.turn_started(turn_id=self._current_turn_branch()[0])
 
     async def on_processing_end(self) -> None:
         # The snapshot below must observe every event queued during the
         # turn, so drain before reading the store.
         await self.drain()
         self._record("processing_end", {})
+        self._run.turn_ended()
         # _record flushed the open text segment and queued processing_end
         # itself; drain again so the turn's final events are durable and
         # the snapshot watermark below cannot run ahead of the log.
