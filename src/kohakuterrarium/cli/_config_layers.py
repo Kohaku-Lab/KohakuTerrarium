@@ -40,6 +40,7 @@ _BUILTIN_DEFAULTS: dict[str, dict[str, Any]] = {
         "lab": {"bind": "127.0.0.1:8100", "token": ""},
         "home_dir": "",
         "log_level": "INFO",
+        "auto_resume": True,
     },
     "client": {
         "host_url": "",
@@ -68,6 +69,7 @@ _ENV_MAP: dict[str, dict[str, tuple[str, ...]]] = {
         "KT_HOST_TOKEN": ("lab", "token"),
         "KT_CONFIG_DIR": ("home_dir",),
         "KT_LOG_LEVEL": ("log_level",),
+        "KT_AUTO_RESUME": ("auto_resume",),
     },
     "client": {
         "KT_HOST_URL": ("host_url",),

@@ -199,6 +199,13 @@ def _default_isolated_config_dir(tmp_path, monkeypatch):
     # ``KT_CONFIG_DIR`` could itself point at the real config and
     # bypass the autouse intent.
     monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "kt-config-isolated"))
+    # Summaries default to the llm source, which would consume ScriptedLLM entries.
+    monkeypatch.setenv("KT_SESSION_SUMMARY_SOURCE", "heuristic")
+    yield
+    # The live-session list keeps one open file per config dir; close it so tmp cleanup can delete it.
+    live = sys.modules.get("kohakuterrarium.studio.sessions.live.registry")
+    if live is not None:
+        live.close_all()
 
 
 @pytest.fixture(autouse=True)

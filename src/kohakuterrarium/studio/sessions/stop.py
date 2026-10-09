@@ -8,6 +8,7 @@ from typing import Any
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.sessions import cluster_fold
+from kohakuterrarium.studio.sessions import live as _live
 from kohakuterrarium.terrarium.session_unload import unload_session_graph
 from kohakuterrarium.utils.logging import get_logger
 
@@ -370,6 +371,8 @@ async def stop_session(
             )
         raise
 
+    if store is not None:
+        _live.untrack_store(store)
     for member_id in cluster_session_ids:
         meta.pop(member_id, None)
     session_stores.pop(session_id, None)

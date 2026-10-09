@@ -18,6 +18,7 @@ import pytest
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import store as store_mod
+from kohakuterrarium.studio.sessions.live import live_sessions
 
 # ── _session_dir ──────────────────────────────────────────────
 
@@ -225,10 +226,14 @@ class TestDeleteSessionFiles:
     def test_deletes(self, tmp_path, monkeypatch):
         path = _make_session(tmp_path)
         monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+        live_sessions().add(
+            path, session_id="alice", session_dir=str(tmp_path), boot_id="b"
+        )
         deleted = store_mod.delete_session_files("alice")
         assert len(deleted) >= 1
-        # Path is gone.
+        # Path is gone, and so is its live-session row.
         assert not path.exists()
+        assert live_sessions().get(path) is None
 
     def test_deletes_wal_shm_sidecars(self, tmp_path, monkeypatch):
         # Bug #59: SQLite WAL mode writes ``-wal`` + ``-shm`` next to

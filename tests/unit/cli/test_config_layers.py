@@ -26,6 +26,7 @@ def _clean_env(monkeypatch):
         "KT_LOG_LEVEL",
         "KT_SESSION_DIR",
         "KT_HEARTBEAT_INTERVAL",
+        "KT_AUTO_RESUME",
     ):
         monkeypatch.delenv(key, raising=False)
     # KT_CONFIG_DIR is set by the autouse fixture in conftest.py to a
@@ -53,6 +54,16 @@ class TestDefaults:
     def test_unknown_role_raises(self):
         with pytest.raises(ValueError, match="unknown config role"):
             load_layered_config("worker-deluxe")
+
+    def test_host_auto_resume_defaults_on_and_follows_yaml_then_env(
+        self, tmp_path, monkeypatch
+    ):
+        assert load_layered_config("host")["auto_resume"] is True
+        (tmp_path / "host.yaml").write_text("auto_resume: false\n", encoding="utf-8")
+        monkeypatch.setenv("KT_CONFIG_FILE", str(tmp_path / "host.yaml"))
+        assert load_layered_config("host")["auto_resume"] is False
+        monkeypatch.setenv("KT_AUTO_RESUME", "1")
+        assert load_layered_config("host")["auto_resume"] == "1"
 
 
 class TestYamlLayer:

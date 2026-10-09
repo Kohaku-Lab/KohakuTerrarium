@@ -256,6 +256,8 @@ def _apply_host_layered_config(args: argparse.Namespace) -> None:
     home = cfg.get("home_dir") or ""
     if home and not getattr(args, "home_dir", ""):
         args.home_dir = home
+    if str(cfg.get("auto_resume", True)).strip().lower() in ("0", "false", "off", "no"):
+        args.no_resume = True
 
 
 def serve_start_cli(args: argparse.Namespace) -> int:
@@ -264,6 +266,8 @@ def serve_start_cli(args: argparse.Namespace) -> int:
     # Set the config home before spawning so the child inherits it.
     if getattr(args, "home_dir", ""):
         os.environ["KT_CONFIG_DIR"] = args.home_dir
+    if getattr(args, "no_resume", False):
+        os.environ["KT_AUTO_RESUME"] = "0"
     if getattr(args, "foreground", False):
         # Logging may already be initialized, so install stderr output directly.
         os.environ.setdefault("KT_LOG_STDERR", "1")
@@ -451,6 +455,7 @@ def serve_restart_cli(args: argparse.Namespace) -> int:
         lab_token=getattr(args, "lab_token", ""),
         home_dir=getattr(args, "home_dir", ""),
         foreground=getattr(args, "foreground", False),
+        no_resume=getattr(args, "no_resume", False),
     )
     return serve_start_cli(start_args)
 
@@ -540,6 +545,11 @@ def add_serve_subparser(subparsers) -> None:
         action="store_true",
         help="Run inline instead of spawning a daemon (Ctrl+C to stop)",
     )
+    start_parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Do not restore the sessions that were running when the server last stopped",
+    )
 
     stop_parser = serve_sub.add_parser("stop", help="Stop the web daemon")
     stop_parser.add_argument("--timeout", type=float, default=5.0)
@@ -561,6 +571,7 @@ def add_serve_subparser(subparsers) -> None:
     restart_parser.add_argument("--lab-token", default="")
     restart_parser.add_argument("--home-dir", default="")
     restart_parser.add_argument("-f", "--foreground", action="store_true")
+    restart_parser.add_argument("--no-resume", action="store_true")
 
     serve_sub.add_parser("status", help="Show daemon status")
 

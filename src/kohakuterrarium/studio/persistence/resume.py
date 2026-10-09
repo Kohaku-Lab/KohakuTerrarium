@@ -19,6 +19,12 @@ from kohakuterrarium.session.resume import _open_store_with_migration
 from kohakuterrarium.session.resume_target import resolve_resume_path
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
+from kohakuterrarium.studio.sessions import live as _live
+from kohakuterrarium.studio.sessions import summary as _summary
+from kohakuterrarium.studio.sessions.live.run_classes import (
+    apply_run_classes,
+    read_run_classes,
+)
 from kohakuterrarium.studio.sessions.lifecycle import (
     _build_session_handle,
     now_iso as _now_iso,
@@ -63,11 +69,13 @@ async def resume_session(
     pwd_override: str | None = None,
     workspace_overrides: dict[str, str] | None = None,
     llm: str | None = None,
+    restore_runs: bool = True,
 ) -> Session:
     """Adopt a saved session and register it with Studio lifecycle state.
 
     The returned handle is indistinguishable from a freshly started session to
-    Studio listing and lookup APIs.
+    Studio listing and lookup APIs. With ``restore_runs``, creatures whose run
+    record says ``stopped`` are stopped again after adoption.
     """
     engine = as_engine(service)
     path = Path(path)
@@ -76,6 +84,9 @@ async def resume_session(
     if not path.exists() and not discover_versions(path):
         raise SessionNotFoundError(f"Session not found: {path}")
     path = await asyncio.to_thread(resolve_resume_path, path)
+    classes = (
+        await asyncio.to_thread(_read_classes_or_empty, path) if restore_runs else {}
+    )
     sid = await engine.adopt_session(
         path,
         pwd=pwd_override,
@@ -90,7 +101,10 @@ async def resume_session(
     kind = _resolve_session_kind(meta)
     meta_for(service)[sid] = {
         "kind": kind,
-        "name": meta.get("terrarium_name") or _first_agent_name(meta) or sid,
+        "name": meta.get("name")
+        or meta.get("terrarium_name")
+        or _first_agent_name(meta)
+        or sid,
         "config_path": meta.get("config_path", ""),
         "pwd": meta.get("pwd", os.getcwd()),
         "created_at": _now_iso(),
@@ -103,6 +117,10 @@ async def resume_session(
         if index_dir.name == "mirror":
             index_dir = index_dir.parent
         await asyncio.to_thread(_index_hooks.attach, sid, store, index_dir)
+    _live.track(engine)
+    _summary.track(engine)
+    if classes:
+        await apply_run_classes(engine, sid, classes, nudge=False)
 
     logger.info(
         "Resumed session registered with studio",
@@ -111,6 +129,21 @@ async def resume_session(
         path=str(path),
     )
     return _build_session_handle(engine, sid, meta_for(service))
+
+
+def _read_classes_or_empty(path: Path) -> dict[str, str]:
+    """Run classes of a session file; ``{}`` when it has none or cannot be read (requires blocking)."""
+    try:
+        return read_run_classes(path)
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - resume proceeds with every creature running
+        logger.warning(
+            "run records unreadable; resuming every creature",
+            path=str(path),
+            error=str(exc),
+        )
+        return {}
 
 
 def _first_agent_name(meta: dict) -> str | None:

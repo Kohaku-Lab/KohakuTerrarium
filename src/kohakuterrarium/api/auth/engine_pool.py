@@ -35,6 +35,23 @@ def _user_session_dir(user_id: int | None) -> Path:
     return config_dir() / "users" / str(int(user_id)) / "sessions"
 
 
+def user_id_for_session_dir(path: str | Path) -> tuple[bool, int | None]:
+    """Invert :func:`_user_session_dir`: ``(True, user_id)`` for a pool directory, else ``(False, None)``."""
+    try:
+        target = Path(path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return False, None
+    if target == _user_session_dir(None).resolve(strict=False):
+        return True, None
+    users_root = (config_dir() / "users").resolve(strict=False)
+    if target.name == "sessions" and target.parent.parent == users_root:
+        try:
+            return True, int(target.parent.name)
+        except ValueError:
+            return False, None
+    return False, None
+
+
 class EnginePool:
     """Own per-user Terrarium instances from app startup through shutdown."""
 
@@ -208,4 +225,4 @@ async def _try_shutdown_async(engine: Terrarium) -> None:
         logger.exception("engine_pool: async shutdown raised")
 
 
-__all__ = ["EnginePool", "_user_session_dir"]
+__all__ = ["EnginePool", "_user_session_dir", "user_id_for_session_dir"]

@@ -11,7 +11,6 @@ from typing import Any
 
 from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
 from kohakuterrarium.studio.sessions import (
     cluster_fold,
     remote_meta,
@@ -19,12 +18,18 @@ from kohakuterrarium.studio.sessions import (
     stop as _stop,
 )
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
+from kohakuterrarium.studio.sessions import live as _live
+from kohakuterrarium.studio.sessions import summary as _summary
 from kohakuterrarium.studio.sessions.find import (
     apply_creature_name,
     apply_creature_name as _apply_creature_name,  # noqa: F401 — legacy alias
     find_creature,  # noqa: F401 — re-export for external callers
 )
 from kohakuterrarium.studio.sessions.handles import Session, SessionListing
+from kohakuterrarium.studio.sessions.naming import (  # noqa: F401 — re-exports
+    persist_session_name,
+    rename_creature,
+)
 from kohakuterrarium.studio.sessions.registry import (  # noqa: F401 — re-exports
     get_session_meta,
     get_session_store,
@@ -156,6 +161,10 @@ async def start_creature(
             "pwd": pwd or str(default_workdir()),
             "created_at": _now_iso(),
         }
+        if name and name.strip():
+            persist_session_name(service, sid, creature.name)
+        _live.track(engine)
+        _summary.track(engine)
         logger.info("Creature session started", session_id=sid, creature_id=cid)
         return _build_session_handle(engine, sid, meta_for(service))
 
@@ -362,6 +371,12 @@ async def start_terrarium(
         "created_at": _now_iso(),
         "has_root": cfg.root is not None,
     }
+    if name and name.strip():
+        persist_session_name(service, sid, name.strip())
+    # A lab host's coordination engine is not restored on boot; only local engines are tracked.
+    if not hasattr(service, "connected_nodes"):
+        _live.track(engine)
+    _summary.track(engine)
     logger.info("Terrarium session started", session_id=sid)
     return _build_session_handle(engine, sid, meta_for(service))
 
@@ -634,6 +649,7 @@ def rename_session(service: "TerrariumService", session_id: str, name: str) -> S
                     continue
                 apply_creature_name(creature, name)
                 break
+        persist_session_name(service, session_id, name)
         return _build_session_handle(engine, session_id, meta_registry)
     # Remote sessions can update only host-side metadata until rename is service-routed.
     meta = meta_registry.get(session_id)
@@ -641,71 +657,6 @@ def rename_session(service: "TerrariumService", session_id: str, name: str) -> S
         raise KeyError(f"session {session_id!r} not found")
     meta["name"] = name
     return get_session(service, session_id)
-
-
-def rename_creature(service: "TerrariumService", creature_id: str, name: str) -> dict:
-    """Rename a creature. Mirrors onto session meta name only when
-    the creature is the sole inhabitant of its session — otherwise
-    the rail still shows the session's display name and individual
-    creatures are addressed by name within the session.
-
-    Lab-host path: the creature lives on a worker. We do not have a
-    Protocol-level rename verb yet, so we update only the host-side
-    session ``_meta["name"]`` (which drives the rail label) when the
-    target session is solo-creature, and return a synthesised status
-    dict.  The worker-side agent keeps its config name until a
-    Protocol-level rename exists; this avoids 500-ing the route in
-    lab-host mode where the route used to crash on engine access.
-    """
-    name = (name or "").strip()
-    if not name:
-        raise ValueError("name must not be empty")
-    engine = host_engine_or_none(service)
-    meta_registry = meta_for(service)
-    if engine is not None:
-        creature = engine.get_creature(creature_id)
-        topology = getattr(engine, "_topology", None)
-        graph_id = (
-            topology.creature_to_graph.get(creature.creature_id)
-            if topology is not None
-            else None
-        )
-        if graph_id is not None:
-            ensure_graph_name_available(
-                engine._topology,
-                engine._creatures,
-                graph_id=graph_id,
-                name=name,
-                exclude_id=creature.creature_id,
-            )
-        apply_creature_name(creature, name)
-        sid = creature.graph_id
-        graph = next(
-            (g for g in engine.list_graphs() if g.graph_id == sid),
-            None,
-        )
-        if graph is not None and len(graph.creature_ids) == 1:
-            meta = meta_registry.get(sid)
-            if meta is not None:
-                meta["name"] = name
-        return creature.get_status()
-    # Remote rename updates host metadata after resolving ownership.
-    home_lookup = getattr(service, "_home", None)
-    if not isinstance(home_lookup, dict) or creature_id not in home_lookup:
-        raise KeyError(f"creature {creature_id!r} not found")
-    sid = None
-    for candidate_sid, meta in meta_registry.items():
-        if meta.get("creature_id") == creature_id:
-            sid = candidate_sid
-            break
-    if sid is not None:
-        meta_registry[sid]["name"] = name
-    return {
-        "creature_id": creature_id,
-        "name": name,
-        "graph_id": sid or "",
-        "home_node": home_lookup.get(creature_id, ""),
-    }
 
 
 def _persist_cluster_members_to_mirror(service, session_id):

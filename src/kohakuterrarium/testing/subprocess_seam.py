@@ -1,8 +1,10 @@
-"""Install a scripted LLM seam inside real subprocess workers for tests.
+"""Install a scripted LLM seam inside real subprocess workers and servers for tests.
 
 ``KT_TEST_LLM_SCRIPT`` points to a ``{"script": [...]}`` file read whenever a
 provider is created, allowing tests to change responses without restarting the
-worker. Production processes do not activate this seam.
+process. An entry is a reply string or a :class:`ScriptEntry` field mapping
+(``response``, ``match``, ``delay_per_chunk``, ``chunk_size``). Production
+processes do not activate this seam.
 """
 
 import json
@@ -11,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
-from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 _INSTALLED = False
 
@@ -24,7 +26,9 @@ def _load_script(path: Path) -> list[Any]:
     script = data.get("script") if isinstance(data, dict) else None
     if not isinstance(script, list):
         return ["OK"]
-    return script
+    return [
+        ScriptEntry(**entry) if isinstance(entry, dict) else entry for entry in script
+    ]
 
 
 def maybe_install_test_llm_seam() -> bool:

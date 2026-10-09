@@ -25,12 +25,14 @@ from kohakuterrarium.studio.persistence.session_index.reconcile import (
 from kohakuterrarium.studio.persistence.viewer import (
     diff as _viewer_diff,
     events as _viewer_events,
+    exchanges as _viewer_exchanges,
     export as _viewer_export,
     summary as _viewer_summary,
     tree as _viewer_tree,
     turns as _viewer_turns,
 )
 from kohakuterrarium.studio.sessions import handles as _session_handles
+from kohakuterrarium.studio.sessions.summary import edit as _summary_edit
 
 if TYPE_CHECKING:
     from kohakuterrarium.studio.studio import Studio
@@ -146,6 +148,18 @@ class _PersistenceNS:
     def resolve_path(self, name: str) -> Path | None:
         return _persistence_store.resolve_session_path_default(name)
 
+    async def set_summary(self, store: Any, text: str) -> dict[str, Any]:
+        """Hand-write a session's one-line summary; empty text returns it to automatic."""
+        record = await _summary_edit.set_user_summary(store, text)
+        await _summary_edit.reindex(store)
+        return record
+
+    async def refresh_summary(self, store: Any) -> dict[str, Any]:
+        """Regenerate a session's one-line summary from the configured source now."""
+        record = await _summary_edit.regenerate(store)
+        await _summary_edit.reindex(store)
+        return record
+
 
 class _PersistenceViewer:
     """Build read-only tree, summary, history, diff, and export payloads."""
@@ -157,6 +171,18 @@ class _PersistenceViewer:
         self, store: Any, session_name: str, agent: str | None = None
     ) -> dict[str, Any]:
         return _viewer_summary.build_summary_payload(store, session_name, agent)
+
+    def exchanges(
+        self,
+        store: Any,
+        session_name: str,
+        *,
+        agent: str | None = None,
+        limit: int = 3,
+    ) -> dict[str, Any]:
+        return _viewer_exchanges.build_exchanges_payload(
+            store, session_name, agent=agent, limit=limit
+        )
 
     def turns(
         self,

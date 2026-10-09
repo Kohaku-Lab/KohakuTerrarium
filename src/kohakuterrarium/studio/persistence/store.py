@@ -15,6 +15,7 @@ from typing import Any
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store_lock import acquire_writer_lock, release_writer_lock
+from kohakuterrarium.studio.sessions import live as _live
 from kohakuterrarium.studio.persistence.delete_family import (
     detach_file_family,
     remove_detached_family,
@@ -344,6 +345,8 @@ def delete_session_files(session_name: str) -> list[Path]:
         deleted = remove_detached_family(detached, _unlink_with_retry)
 
     _purge_index_entries(targets)
+    for path in targets:
+        _live.forget(path)
     return deleted
 
 

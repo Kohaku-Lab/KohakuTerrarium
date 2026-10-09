@@ -33,6 +33,7 @@ No shape asserts: every assertion pins an exact value or an observable
 side effect.
 """
 
+import asyncio
 import io
 import sys
 from pathlib import Path
@@ -57,7 +58,11 @@ from kohakuterrarium.studio.persistence import store as _persistence_store_mod
 from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
-from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.session import run_state
+from kohakuterrarium.studio.sessions.live import live_sessions
+from kohakuterrarium.studio.sessions.live.restore import restore_live_sessions
+from kohakuterrarium.studio.sessions.live.run_classes import CONTINUE_NUDGE
 
 from tests.helpers.antigravity_usage import install_quota_script, assert_quota
 from kohakuterrarium.studio.identity import antigravity
@@ -810,6 +815,227 @@ class TestStudioIntegration:
             with pytest.raises(SessionNotFoundError):
                 await studio.sessions.search_memory("no-such-session", "x")
             assert sorted(isolated_paths["session_dir"].glob("*.kohakutr*")) == before
+
+    @pytest.mark.timeout(120)
+    async def test_server_restart_restores_live_sessions(
+        self, scripted_llm, isolated_paths, monkeypatch
+    ):
+        """A clean server stop, then a new boot that restores what was running:
+
+        sessions.start_creature x3 + start_terrarium -> one turn, one user
+        stop, one creature stopped, one creature mid-turn -> engine shutdown
+        (run records frozen) -> a new boot restores the live list: idle
+        sessions run, the stopped creature stays stopped, the cut-off
+        creature is told to keep working; the user-stopped session stays
+        stopped.
+        """
+        scripted_llm["script"] = [
+            ScriptEntry("Quick answer.", match="quick question"),
+            ScriptEntry("Long work. " * 200, match="long task", delay_per_chunk=0.05),
+            ScriptEntry("Continuing the task.", match="server restarted"),
+            "OK",
+        ]
+        workspace_root = isolated_paths["tmp_path"] / "workspace"
+        workspace_root.mkdir()
+        recipe = workspace_root / "pair.yaml"
+
+        async with Studio() as studio:
+            creature_dir = _scaffold_creature(studio, workspace_root, "probe")
+            rel = Path(creature_dir).resolve().as_posix()
+            recipe.write_text(
+                "terrarium:\n  name: pair\n  creatures:\n"
+                f"    - {{ name: gamma, base_config: '{rel}' }}\n"
+                f"    - {{ name: delta, base_config: '{rel}' }}\n",
+                encoding="utf-8",
+            )
+            alpha = await studio.sessions.start_creature(
+                str(creature_dir), name="alpha"
+            )
+            alpha_cid = alpha.creatures[0]["creature_id"]
+            assert (
+                await _drain_chat(studio, alpha.session_id, alpha_cid, "quick question")
+                == "Quick answer."
+            )
+
+            gone = await studio.sessions.start_creature(str(creature_dir), name="gone")
+            gone_store = studio.engine._session_stores[gone.session_id]
+            gone_path = str(gone_store.path)
+            await studio.sessions.stop(gone.session_id)
+            assert live_sessions().get(gone_path) is None
+
+            doomed = await studio.sessions.start_creature(
+                str(creature_dir), name="doomed"
+            )
+            doomed_path = str(studio.engine._session_stores[doomed.session_id].path)
+
+            pair = await studio.sessions.start_terrarium(str(recipe), name="pair-run")
+            delta = next(c for c in pair.creatures if c["name"] == "delta")
+            await studio.service.stop_creature(delta["creature_id"])
+
+            beta = await studio.sessions.start_creature(str(creature_dir), name="beta")
+            beta_cid = beta.creatures[0]["creature_id"]
+            beta_store = studio.engine._session_stores[beta.session_id]
+            chat_task = asyncio.create_task(
+                _drain_chat(studio, beta.session_id, beta_cid, "long task")
+            )
+            for _ in range(200):
+                record = run_state.read_run(beta_store, "beta")
+                if record and record["state"] == run_state.STARTED:
+                    break
+                await asyncio.sleep(0.05)
+            assert run_state.read_run(beta_store, "beta")["state"] == run_state.STARTED
+
+            rows = {Path(r["path"]).name for r in live_sessions().rows()}
+            assert Path(gone_path).name not in rows
+            assert len(rows) == 4
+            assert run_state.read_lifecycle(beta_store)["live"] is True
+            alpha_store = studio.engine._session_stores[alpha.session_id]
+            alpha_path = str(alpha_store.path)
+            beta_path = str(beta_store.path)
+        chat_task.cancel()
+        await asyncio.gather(chat_task, return_exceptions=True)
+
+        # The shutdown froze the records: beta is still mid-turn, delta stopped.
+        for path, agent, state in (
+            (beta_path, "beta", run_state.STARTED),
+            (alpha_path, "alpha", run_state.IDLE),
+        ):
+            store = SessionStore.open_readonly(Path(path))
+            try:
+                assert run_state.read_run(store, agent)["state"] == state
+                assert (
+                    run_state.read_lifecycle(store)["stop_reason"]
+                    == run_state.STOP_SHUTDOWN
+                )
+            finally:
+                store.close(update_status=False)
+        gone_ro = SessionStore.open_readonly(Path(gone_path))
+        try:
+            assert (
+                run_state.stop_reason(run_state.read_lifecycle(gone_ro))
+                == run_state.STOP_USER
+            )
+        finally:
+            gone_ro.close(update_status=False)
+
+        # A session file deleted while the server was down drops out of the list.
+        for leftover in Path(doomed_path).parent.glob(Path(doomed_path).name + "*"):
+            leftover.unlink()
+
+        monkeypatch.setattr(run_state, "BOOT_ID", "next-boot")
+        async with Studio() as studio:
+            outcomes = await restore_live_sessions(lambda _dir: studio.service)
+            missing = [o for o in outcomes if o["status"] == "missing"]
+            assert [Path(o["path"]).name for o in missing] == [Path(doomed_path).name]
+            outcomes = [o for o in outcomes if o["status"] != "missing"]
+            assert [o["status"] for o in outcomes] == ["restored"] * 3
+            assert [r["claimed_by"] for r in live_sessions().rows()] == [
+                "next-boot"
+            ] * 3
+            by_session = {o["session_id"]: o for o in outcomes}
+            names = {s.session_id: s.name for s in studio.sessions.list()}
+            by_name = {names[sid]: o for sid, o in by_session.items()}
+            assert (by_name["alpha"]["stopped"], by_name["alpha"]["interrupted"]) == (
+                [],
+                [],
+            )
+            assert (by_name["beta"]["stopped"], by_name["beta"]["interrupted"]) == (
+                [],
+                ["beta"],
+            )
+            pair_name = next(n for n in by_name if n not in ("alpha", "beta"))
+            assert pair_name == "pair-run"
+            assert (
+                by_name[pair_name]["stopped"],
+                by_name[pair_name]["interrupted"],
+            ) == (["delta"], [])
+            assert "gone" not in set(names.values())
+
+            # History rows carry the persisted name, the first-turn summary,
+            # the latest exchange and why each session is not running.
+            rows = {
+                Path(r["filename"]).name: r
+                for r in studio.persistence.list(refresh=True)
+            }
+            alpha_row = rows[Path(alpha_path).name]
+            assert (
+                alpha_row["title"],
+                alpha_row["summary"],
+                alpha_row["summary_source"],
+            ) == (
+                "alpha",
+                "quick question",
+                "heuristic",
+            )
+            assert (
+                alpha_row["last_user"],
+                alpha_row["last_reply"],
+                alpha_row["turn_count"],
+            ) == (
+                "quick question",
+                "Quick answer.",
+                1,
+            )
+            assert alpha_row["stop_reason"] is None
+            assert rows[Path(gone_path).name]["stop_reason"] == run_state.STOP_USER
+            assert rows[Path(gone_path).name]["title"] == "gone"
+            assert any(r["title"] == "pair-run" for r in rows.values())
+            gone_store = SessionStore(Path(gone_path))
+            try:
+                quoted = studio.persistence.viewer.exchanges(
+                    gone_store, Path(gone_path).stem
+                )
+                assert (
+                    quoted["title"],
+                    quoted["exchanges"],
+                    quoted["stop_reason"],
+                ) == ("gone", [], "user")
+                written = await studio.persistence.set_summary(
+                    gone_store, "Abandoned probe"
+                )
+                assert written["source"] == "user"
+            finally:
+                gone_store.close(update_status=False)
+            found = studio.persistence.list(search="abandoned")
+            assert [Path(r["filename"]).name for r in found] == [Path(gone_path).name]
+
+            pair_sid = by_name[pair_name]["session_id"]
+            running = {
+                studio.engine.get_creature(cid)
+                .name: studio.engine.get_creature(cid)
+                .is_running
+                for g in studio.engine.list_graphs()
+                if g.graph_id == pair_sid
+                for cid in g.creature_ids
+            }
+            assert running == {"gamma": True, "delta": False}
+
+            beta_sid = by_name["beta"]["session_id"]
+            beta_cid2 = studio.sessions.get(beta_sid).creatures[0]["creature_id"]
+            for _ in range(200):
+                history = await studio.sessions.chat.history(beta_sid, beta_cid2)
+                users = [
+                    m["content"] for m in history["messages"] if m["role"] == "user"
+                ]
+                replies = [
+                    m["content"]
+                    for m in history["messages"]
+                    if m["role"] == "assistant"
+                ]
+                if replies and replies[-1] == "Continuing the task.":
+                    break
+                await asyncio.sleep(0.05)
+            assert users == ["long task", CONTINUE_NUDGE]
+            assert replies[-1] == "Continuing the task."
+
+            alpha_sid = by_name["alpha"]["session_id"]
+            alpha_cid2 = studio.sessions.get(alpha_sid).creatures[0]["creature_id"]
+            assert (
+                await _drain_chat(studio, alpha_sid, alpha_cid2, "quick question")
+                == "Quick answer."
+            )
+            # Rows restored by this boot are skipped by a second pass.
+            assert await restore_live_sessions(lambda _dir: studio.service) == []
 
     @pytest.mark.timeout(120)
     async def test_runtime_session_mutation(self, scripted_llm, isolated_paths):

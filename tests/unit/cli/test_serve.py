@@ -31,6 +31,37 @@ class TestServeLifecycle:
 
         assert serve.serve_restart_cli(args) == 0
         assert started[0].home_dir == "C:/kt-home"
+        assert started[0].no_resume is False
+        args.no_resume = True
+        assert serve.serve_restart_cli(args) == 0
+        assert started[1].no_resume is True
+
+    @pytest.mark.parametrize(
+        ("flag", "yaml_value", "expected"),
+        [
+            (False, None, None),
+            (True, None, "0"),
+            (False, "false", "0"),
+            (False, "true", None),
+        ],
+    )
+    def test_no_resume_reaches_the_server_through_the_environment(
+        self, monkeypatch, tmp_path, flag, yaml_value, expected
+    ) -> None:
+        monkeypatch.delenv("KT_AUTO_RESUME", raising=False)
+        if yaml_value is not None:
+            (tmp_path / "host.yaml").write_text(
+                f"auto_resume: {yaml_value}\n", encoding="utf-8"
+            )
+            monkeypatch.setenv("KT_CONFIG_FILE", str(tmp_path / "host.yaml"))
+        ran = []
+        monkeypatch.setattr(serve, "run_server_internal", lambda a: ran.append(a) or 0)
+        monkeypatch.setattr(serve, "enable_stderr_logging", lambda _level: None)
+        parser = argparse.ArgumentParser()
+        serve.add_serve_subparser(parser.add_subparsers(dest="command"))
+        argv = ["serve", "start", "-f"] + (["--no-resume"] if flag else [])
+        assert serve.serve_start_cli(parser.parse_args(argv)) == 0
+        assert ran and serve.os.environ.get("KT_AUTO_RESUME") == expected
 
     def test_spawn_closes_parent_log_handle_on_success_and_failure(
         self, monkeypatch, tmp_path

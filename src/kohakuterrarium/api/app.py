@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth import load_auth_config
 from kohakuterrarium.api.auth import router as auth_router
+from kohakuterrarium.api.boot_restore import auto_resume_enabled, restore_on_boot
 from kohakuterrarium.api.auth.db import ensure_migrated as ensure_auth_migrated
 from kohakuterrarium.api.auth.engine_pool import EnginePool
 from kohakuterrarium.api.auth.middleware import HostTokenMiddleware
@@ -81,6 +82,9 @@ from kohakuterrarium.api.routes.identity import antigravity as identity_antigrav
 from kohakuterrarium.api.routes.identity import config_files as identity_config_files
 from kohakuterrarium.api.routes.identity import llm as identity_llm
 from kohakuterrarium.api.routes.identity import mcp as identity_mcp
+from kohakuterrarium.api.routes.identity import (
+    session_summary as identity_session_summary,
+)
 from kohakuterrarium.api.routes.identity import settings as identity_settings
 from kohakuterrarium.api.routes.identity import ui_prefs as identity_ui_prefs
 from kohakuterrarium.api.routes.persistence import artifacts as persistence_artifacts
@@ -90,9 +94,15 @@ from kohakuterrarium.api.routes.persistence import (
     memory_index as persistence_memory_index,
 )
 from kohakuterrarium.api.routes.persistence import open_sessions as persistence_open
+from kohakuterrarium.api.routes.persistence import (
+    restore_state as persistence_restore_state,
+)
 from kohakuterrarium.api.routes.persistence import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import subagents as persistence_subagents
+from kohakuterrarium.api.routes.persistence import (
+    summary_edit as persistence_summary_edit,
+)
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
 from kohakuterrarium.api.routes.persistence import saved_drives as persistence_drives
 from kohakuterrarium.api.routes import runtime_graph as runtime_graph_route
@@ -244,9 +254,17 @@ async def lifespan(app: FastAPI):
         "api_lifespan_ready",
         surface=os.environ.get("KT_STARTUP_SURFACE", "web"),
     )
+    restore_task = None
+    app.state.restore_outcomes = []
+    if multi_node_service is None and auto_resume_enabled():
+        restore_task = asyncio.create_task(restore_on_boot(app))
+    app.state.restore_task = restore_task
     try:
         yield
     finally:
+        if restore_task is not None and not restore_task.done():
+            restore_task.cancel()
+            await asyncio.gather(restore_task, return_exceptions=True)
         # Loop-bound listeners must detach before a later lifespan uses another loop.
         if multi_node_service is None:
             try:
@@ -530,6 +548,9 @@ def create_app(
     # Session-facing and concern-specific prefixes mount the same router objects,
     # preserving the frontend contract without a forwarding shim.
     app.include_router(
+        persistence_restore_state.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
         persistence_open.router, prefix="/api/sessions", tags=["sessions"]
     )
     app.include_router(
@@ -549,6 +570,9 @@ def create_app(
     )
     app.include_router(
         persistence_viewer.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
+        persistence_summary_edit.router, prefix="/api/sessions", tags=["sessions"]
     )
     app.include_router(
         persistence_subagents.router, prefix="/api/sessions", tags=["sessions"]
@@ -732,6 +756,9 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     app.include_router(identity_mcp.router, prefix="/api/settings", tags=["identity"])
     app.include_router(
         identity_ui_prefs.router, prefix="/api/settings", tags=["identity"]
+    )
+    app.include_router(
+        identity_session_summary.router, prefix="/api/settings", tags=["identity"]
     )
     app.include_router(
         identity_settings.router, prefix="/api/settings", tags=["identity"]
