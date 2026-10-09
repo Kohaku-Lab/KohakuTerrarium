@@ -64,6 +64,38 @@ describe("LabRestoreBanner", () => {
     expect(w.emitted("restored")).toHaveLength(1)
   })
 
+  it("lists jobs the restart killed until dismissed in this browser", async () => {
+    const storage = new Map()
+    vi.stubGlobal("localStorage", {
+      getItem: (k) => storage.get(k) ?? null,
+      setItem: (k, v) => storage.set(k, String(v)),
+    })
+    const outcome = {
+      status: "restored",
+      session_id: "g1",
+      killed: {
+        epsilon: [
+          { job_id: "bash_1", kind: "tool", name: "bash" },
+          { job_id: "sa_1", kind: "subagent", name: "explore" },
+        ],
+      },
+    }
+    api.getRestoreState.mockResolvedValue({ running: false, rows: [okRow], outcomes: [outcome] })
+    const w = mount(LabRestoreBanner)
+    await flushPromises()
+    const block = w.find("[data-test='lab-restore-killed']")
+    expect(block.text()).toContain('lab.restore.killed:{"n":2}')
+    expect(block.text()).toContain("epsilon: bash, explore (sub-agent)")
+    expect(w.text()).not.toContain("lab.restore.failed")
+    await w.find("[data-test='lab-restore-killed-dismiss']").trigger("click")
+    expect(w.find("[data-test='lab-restore']").exists()).toBe(false)
+    expect(storage.get("kt.lab.killedJobsSeen")).toBe("bash_1,sa_1")
+    const again = mount(LabRestoreBanner)
+    await flushPromises()
+    expect(again.find("[data-test='lab-restore']").exists()).toBe(false)
+    vi.unstubAllGlobals()
+  })
+
   it("retries and dismisses a failed session, then re-reads", async () => {
     api.getRestoreState
       .mockResolvedValueOnce({ running: false, rows: [failedRow] })

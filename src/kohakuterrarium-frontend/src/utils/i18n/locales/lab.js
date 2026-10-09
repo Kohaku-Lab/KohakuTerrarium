@@ -68,6 +68,10 @@ export default {
       n === 1
         ? "1 session could not be brought back after the server restart"
         : `${n} sessions could not be brought back after the server restart`,
+    "lab.restore.killed": ({ n }) =>
+      n === 1
+        ? "1 background job was killed by the restart; its creature was told"
+        : `${n} background jobs were killed by the restart; their creatures were told`,
     "lab.restore.retry": "Retry",
     "lab.restore.dismiss": "Dismiss",
     "lab.restore.retried": "Session restored",
@@ -164,6 +168,7 @@ export default {
     "lab.history.summary.heuristic": "取自第一則提問",
     "lab.restore.restoring": "伺服器重啟後正在恢復 {n} 個工作階段…",
     "lab.restore.failed": "伺服器重啟後有 {n} 個工作階段無法恢復",
+    "lab.restore.killed": "重啟中止了 {n} 個背景工作；已通知對應的 Creature",
     "lab.restore.retry": "重試",
     "lab.restore.dismiss": "略過",
     "lab.restore.retried": "工作階段已恢復",
@@ -260,6 +265,7 @@ export default {
     "lab.history.summary.heuristic": "取自第一条提问",
     "lab.restore.restoring": "服务器重启后正在恢复 {n} 个会话…",
     "lab.restore.failed": "服务器重启后有 {n} 个会话无法恢复",
+    "lab.restore.killed": "重启中止了 {n} 个后台任务；已通知对应的 Creature",
     "lab.restore.retry": "重试",
     "lab.restore.dismiss": "忽略",
     "lab.restore.retried": "会话已恢复",
