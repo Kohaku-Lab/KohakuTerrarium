@@ -48,6 +48,18 @@ def test_write_run_records_each_state_and_keeps_the_turn(store):
     assert rs.read_runs(store, ["alice", "bob"]) == {"alice": idle, "bob": None}
 
 
+def test_hosted_at_holds_within_a_boot_and_resets_on_the_next(store, monkeypatch):
+    monkeypatch.setattr(rs, "BOOT_ID", "first")
+    first = rs.set_lifecycle(store, live=True)
+    time.sleep(0.01)
+    drained = rs.set_lifecycle(store, live=True, stop_reason=rs.STOP_SHUTDOWN)
+    assert drained["hosted_at"] == first["hosted_at"]
+    assert drained["updated_at"] > first["updated_at"]
+    monkeypatch.setattr(rs, "BOOT_ID", "second")
+    again = rs.set_lifecycle(store, live=True)
+    assert again["hosted_at"] > first["hosted_at"]
+
+
 def test_classify_reads_a_record_left_by_an_earlier_boot():
     old = {"state": rs.ACTIVE, "boot_id": "previous"}
     assert rs.classify(old) == "interrupted"

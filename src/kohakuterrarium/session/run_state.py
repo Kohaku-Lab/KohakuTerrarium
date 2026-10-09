@@ -4,8 +4,8 @@
 boot_id}; ``state`` is ``started`` / ``active`` (beat every
 :data:`BEAT_INTERVAL` s) / ``idle`` / ``stopped``. The ``state`` table writes
 straight to SQLite (WAL, no cache), so the last record survives a killed
-process. ``meta["lifecycle"]`` = {live, stop_reason, boot_id, updated_at} is
-the session's own record. A graceful shutdown :func:`freeze`\\ s the store
+process. ``meta["lifecycle"]`` = {live, stop_reason, boot_id, updated_at,
+hosted_at} is the session's own record. A graceful shutdown :func:`freeze`\\ s the store
 before its creatures stop, so records keep what was happening at shutdown
 rather than the teardown's ``idle`` / ``stopped``.
 """
@@ -125,11 +125,16 @@ def read_lifecycle(store_or_meta: Any) -> dict:
 
 
 def set_lifecycle(store: Any, *, live: bool, stop_reason: str | None = None) -> dict:
+    """Write the lifecycle record; ``hosted_at`` is when this boot began hosting."""
+    now = time.time()
+    prev = read_lifecycle(store)
+    same_boot = prev.get("boot_id") == BOOT_ID and prev.get("hosted_at")
     record = {
         "live": bool(live),
         "stop_reason": stop_reason,
         "boot_id": BOOT_ID,
-        "updated_at": time.time(),
+        "updated_at": now,
+        "hosted_at": prev["hosted_at"] if same_boot else now,
     }
     store.meta[LIFECYCLE_KEY] = record
     return record
