@@ -6,11 +6,14 @@ Terrarium engine populated with ``_FakeAgent`` creatures via
 """
 
 import asyncio
+import io
 import json
+import sys
 import threading
 
 import pytest
 
+from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium.engine import Terrarium
@@ -284,6 +287,21 @@ class TestLifecycle:
                 await svc.add_creature(None, on_node="other")
         finally:
             await svc.shutdown()
+
+    async def test_add_creature_never_boots_the_config_input(
+        self, tmp_path, monkeypatch
+    ):
+        console = io.StringIO("typed at the server console\n")
+        monkeypatch.setattr(sys, "stdin", console)
+        config = tmp_path / "config.yaml"
+        config.write_text("name: tty\ninput: {type: cli}\noutput: {type: none}\n")
+        async with Terrarium() as engine:
+            svc = LocalTerrariumService(engine)
+            info = await svc.add_creature(str(config), llm=ScriptedLLM(["unused"]))
+            creature = engine.get_creature(info.creature_id)
+            assert type(creature.agent.input) is NoneInput
+            await asyncio.sleep(0.2)
+            assert console.read() == "typed at the server console\n"
 
     async def test_remove_creature(self):
         svc = await _make_service()

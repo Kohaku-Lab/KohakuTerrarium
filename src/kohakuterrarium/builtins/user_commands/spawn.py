@@ -35,7 +35,7 @@ class SpawnCommand(BaseUserCommand):
                 error="/spawn requires a privileged focused creature"
             )
         try:
-            spawned = await engine.add_creature(recipe)
+            spawned = await engine.add_creature(recipe, io="none")
         except Exception as e:  # pragma: no cover
             return UserCommandResult(error=f"spawn failed: {e}")
         name = getattr(spawned, "name", recipe)

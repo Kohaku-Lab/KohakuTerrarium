@@ -579,6 +579,7 @@ class LocalTerrariumService(
             is_privileged=is_privileged,
             parent_creature_id=parent_creature_id,
             name=name,
+            io="none",
         )
         return creature_to_info(creature)
 

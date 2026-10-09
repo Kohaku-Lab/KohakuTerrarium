@@ -50,6 +50,7 @@ class _FakeEngine:
     def __init__(self, creatures):
         self._by_id = {c.creature_id: c for c in creatures}
         self.added: list[str] = []
+        self.add_kwargs: list[dict] = []
 
     def get_creature(self, cid):
         if cid not in self._by_id:
@@ -59,8 +60,9 @@ class _FakeEngine:
     def list_creatures(self):
         return list(self._by_id.values())
 
-    async def add_creature(self, recipe):
+    async def add_creature(self, recipe, **kwargs):
         self.added.append(recipe)
+        self.add_kwargs.append(kwargs)
         new = _FakeCreature(creature_id="spawned", name=recipe)
         self._by_id["spawned"] = new
         return new
@@ -254,6 +256,8 @@ class TestSpawn:
         )
         assert result.success
         assert eng.added == ["examples/worker"]
+        # The focus creature owns the terminal; the spawned one never reads it.
+        assert eng.add_kwargs == [{"io": "none"}]
 
     @pytest.mark.asyncio
     async def test_missing_recipe_arg(self):

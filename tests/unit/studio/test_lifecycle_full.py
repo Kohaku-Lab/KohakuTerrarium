@@ -4,13 +4,20 @@ Real ``Terrarium`` engine + ``LocalTerrariumService`` driven via
 ``TestTerrariumBuilder``; no LLM is involved.
 """
 
+import asyncio
+import io
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
+from kohakuterrarium.bootstrap import agent_init as _agent_init
+from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.studio.sessions import lifecycle
+from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
 from kohakuterrarium.testing.terrarium import (
@@ -77,6 +84,33 @@ class TestStartCreatureLocal:
             assert sess.session_id == "g1"
             assert sess.name == "alice"
             assert sess.home_node == "_host"
+        finally:
+            await engine.shutdown()
+
+    async def test_config_input_never_boots(self, monkeypatch, tmp_path):
+        console = io.StringIO("typed at the server console\n")
+        monkeypatch.setattr(sys, "stdin", console)
+        monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "sessions"))
+        scripted = ScriptedLLM(["unused"])
+        monkeypatch.setattr(
+            _bootstrap_llm, "create_llm_provider", lambda *a, **k: scripted
+        )
+        monkeypatch.setattr(
+            _agent_init, "create_llm_provider", lambda *a, **k: scripted
+        )
+        cdir = tmp_path / "tty"
+        cdir.mkdir()
+        (cdir / "config.yaml").write_text(
+            "name: tty\ninput: {type: cli}\noutput: {type: none}\n", encoding="utf-8"
+        )
+        engine = Terrarium(session_dir=str(tmp_path / "sessions"))
+        svc = LocalTerrariumService(engine)
+        try:
+            sess = await lifecycle.start_creature(svc, config_path=str(cdir))
+            creature = engine.get_creature(sess.creatures[0]["creature_id"])
+            assert type(creature.agent.input) is NoneInput
+            await asyncio.sleep(0.2)
+            assert console.read() == "typed at the server console\n"
         finally:
             await engine.shutdown()
 

@@ -33,6 +33,8 @@ No shape asserts: every assertion pins an exact value or an observable
 side effect.
 """
 
+import io
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -214,7 +216,7 @@ class TestStudioIntegration:
     """Each method runs one complete studio-tier lifecycle."""
 
     async def test_workspace_to_session_to_persistence_lifecycle(
-        self, scripted_llm, deterministic_embedder, isolated_paths
+        self, scripted_llm, deterministic_embedder, isolated_paths, monkeypatch
     ):
         """The headline flow, end-to-end through the Studio façade:
 
@@ -451,6 +453,10 @@ class TestStudioIntegration:
             assert [w["code"] for w in broken["warnings"]] == ["syntax_error"]
 
             # --- sessions: start a session from that creature -----------
+            # The scaffold carries the default ``cli`` input; host stdin has a line.
+            console_line = "typed at the server console\n"
+            console = io.StringIO(console_line)
+            monkeypatch.setattr(sys, "stdin", console)
             session = await studio.sessions.start_creature(str(creature_dir))
             assert session.name == "scout"
             assert len(session.creatures) == 1
@@ -476,6 +482,7 @@ class TestStudioIntegration:
                 m["content"] for m in history["messages"] if m["role"] == "user"
             ]
             assert user_msgs == ["ping one", "ping two"]
+            assert console.read() == console_line
             assert history["messages"][-1]["role"] == "assistant"
             assert "Second reply." in history["messages"][-1]["content"]
             assert any(e["type"] == "user_input" for e in history["events"])

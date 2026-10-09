@@ -32,7 +32,9 @@ observable state at every milestone. The call sequence mirrors
   ``sessionAPI.delete``.
 """
 
+import io
 import os
+import sys
 from collections.abc import Iterator
 from contextlib import closing
 from pathlib import Path
@@ -68,12 +70,14 @@ _REPLY_TRACE = "Live trace turn observed."
 _REPLY_RENAMED = "Reply after the rename."
 _REPLY_SECOND_APP = "Second app instance reply."
 
+# ``input: cli`` is what most real creatures declare (it is also the default);
+# a server-managed creature must still never read the server's stdin.
 _CREATURE_CONFIG = """\
 name: alice
 system_prompt: "You are a deterministic e2e-test creature."
 tool_format: bracket
 input:
-  type: none
+  type: cli
 output:
   type: stdout
 tools:
@@ -129,11 +133,23 @@ def creature_dir(tmp_path: Path) -> Path:
     return cdir
 
 
+_CONSOLE_LINE = "typed at the server console\n"
+
+
+@pytest.fixture
+def server_console(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
+    """The server process's stdin, holding one line a terminal user typed."""
+    console = io.StringIO(_CONSOLE_LINE)
+    monkeypatch.setattr(sys, "stdin", console)
+    return console
+
+
 @pytest.fixture
 def client(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     scripted_llm: ScriptedLLM,
+    server_console: io.StringIO,
 ) -> Iterator[TestClient]:
     """A TestClient over a real ``create_app()`` with a real service.
 
@@ -211,7 +227,11 @@ class TestApiCreatureJourney:
     """Fat end-to-end journeys over the real HTTP + WS API surface."""
 
     def test_chat_and_settings_journey(
-        self, client: TestClient, creature_dir: Path, scripted_llm: ScriptedLLM
+        self,
+        client: TestClient,
+        creature_dir: Path,
+        scripted_llm: ScriptedLLM,
+        server_console: io.StringIO,
     ) -> None:
         """One whole UI session: create → list → multi-turn WS chat →
         tool-call turn → settings round-trip → interrupt → history →
@@ -274,6 +294,15 @@ class TestApiCreatureJourney:
             assert "topic" in str(done.get("result") or done.get("output") or "")
 
         assert scripted_llm.call_count == 4  # 3 turns + 1 post-tool call
+        # The only user turns are the ones sent over the chat WS: the
+        # server console line was never read, so it never became a turn.
+        assert [
+            m["content"]
+            for m in _snapshot_messages(client, session_id, creature_id)
+            if m.get("role") == "user"
+            and not m["content"].startswith("[Tool batch completed]")
+        ] == ["hello creature", "second question please", "use the scratchpad now"]
+        assert server_console.read() == _CONSOLE_LINE
 
         # The tool's side effect is observable on the scratchpad GET.
         resp = client.get(
