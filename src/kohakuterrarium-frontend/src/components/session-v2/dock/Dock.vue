@@ -12,7 +12,7 @@
         <button class="h-7 px-2 rounded-full flex items-center text-xs hover:bg-warm-100 dark:hover:bg-warm-800" :class="moreOpen ? 'text-iolite' : 'text-warm-500'" :title="t('dock.more')" data-test="v2-dock-more" @click="moreOpen = !moreOpen"><span class="i-carbon-overflow-menu-horizontal" /></button>
         <button class="h-7 w-7 rounded-full flex items-center justify-center text-warm-400 hover:bg-warm-100 dark:hover:bg-warm-800" :title="t('dock.collapse')" @click="setExpanded(false)"><span class="i-carbon-chevron-right" /></button>
       </template>
-      <button v-else class="h-7 px-2 rounded-full flex items-center gap-1.5 text-xs text-warm-500 hover:text-warm-800 dark:hover:text-warm-200" :title="t('dock.expand')" data-test="v2-dock-pill" @click="setExpanded(true)">
+      <button v-else class="h-7 px-2 rounded-full flex items-center gap-1.5 text-xs text-warm-500 hover:text-warm-800 dark:hover:text-warm-200" :title="t('dock.expand')" data-test="v2-dock-pill" @click="onPill">
         <span class="i-carbon-apps" />
         <span v-for="item in items" :key="item.id" :class="item.icon" class="text-warm-500" />
         <span v-if="total" class="font-mono">{{ total }}</span>
@@ -75,6 +75,12 @@ function setExpanded(value) {
     moreOpen.value = false
     ctx.closeWidget()
   }
+}
+
+// A widget opened while the dock is collapsed (e.g. from the composer's context ring) closes on the pill.
+function onPill() {
+  if (ctx.widget.value) ctx.closeWidget()
+  else setExpanded(true)
 }
 
 function openMore(item) {
