@@ -1,6 +1,6 @@
 <template>
   <div v-if="options.length > 1" class="kt-v2-line shrink-0 border-b" data-test="conversation-strip">
-    <div class="flex items-center gap-1.5 px-3 py-2 overflow-x-auto scrollbar-none" :class="narrow ? '' : 'justify-center'">
+    <div class="flex items-center gap-1.5 px-3 py-2 overflow-x-auto scrollbar-none" :style="narrow ? null : { justifyContent: 'safe center' }">
       <template v-for="(o, i) in options" :key="o.key">
         <span v-if="i > 0 && o.kind !== options[i - 1].kind" class="kt-v2-edge mx-1 h-5 border-l shrink-0" />
         <button class="kt-v2-b h-7 px-3 rounded-full border flex items-center gap-1.5 text-xs shrink-0 transition-colors" :class="o.key === chat.activeTab ? 'bg-iolite/12 border-iolite/50 text-iolite dark:text-iolite-light font-medium' : 'kt-v2-panel kt-v2-line text-warm-600 dark:text-warm-300 hover:border-iolite/40 hover:text-warm-800 dark:hover:text-warm-100'" :title="o.privileged ? `${o.name} · ${t('privileged')}` : o.name" :data-test="`switch-${o.key}`" @click="chat.openTab(o.key)">
