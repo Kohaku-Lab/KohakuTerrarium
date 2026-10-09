@@ -99,7 +99,7 @@
         </section>
       </div>
     </div>
-    <NewSessionDialog v-if="runRecipe" mode="terrarium" :initial-config="runRecipe" @started="setAppMode('terrarium')" @close="runRecipe = ''" />
+    <NewSessionDialog v-if="runRecipe" mode="terrarium" :initial-config="runRecipe" @started="(run) => run.opened && setAppMode('terrarium')" @close="runRecipe = ''" />
   </div>
 </template>
 

@@ -20,13 +20,18 @@ vi.mock("@/utils/i18n", () => ({
 vi.mock("@/components/shell/newSession/NewSessionDialog.vue", () => ({
   default: {
     props: ["mode", "initialConfig"],
-    template: "<div data-test='run-dialog' :data-mode='mode' :data-config='initialConfig' />",
+    emits: ["started"],
+    template: `<div data-test='run-dialog' :data-mode='mode' :data-config='initialConfig'>
+      <button data-test='run-quiet' @click="$emit('started', { id: 's1', opened: false })" />
+      <button data-test='run-open' @click="$emit('started', { id: 's2', opened: true })" />
+    </div>`,
   },
 }))
 
 import StudioOverview from "./StudioOverview.vue"
 import { MODULE_KINDS, wiringSnippet, workspaceLabel } from "./studioKinds"
 import { _resetStudioRouteForTests, useStudioRoute } from "./useStudioRoute"
+import { _resetAppModeForTests, setAppMode, useAppMode } from "@/components/shell/rail/useAppMode"
 import { useStudioWorkspaceStore } from "@/stores/studio/workspace"
 
 const SUMMARY = {
@@ -55,6 +60,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   localStorage.clear()
   _resetStudioRouteForTests()
+  _resetAppModeForTests()
 })
 
 async function mountOverview(summary = SUMMARY) {
@@ -144,6 +150,12 @@ describe("StudioOverview", () => {
       "terrarium",
       "@kt-biome/terrariums/swe_team",
     ])
+    setAppMode("studio")
+    const { appMode } = useAppMode()
+    await w.find("[data-test='run-quiet']").trigger("click")
+    expect(appMode.value).toBe("studio")
+    await w.find("[data-test='run-open']").trigger("click")
+    expect(appMode.value).toBe("terrarium")
   })
 
   it("says what goes where when the workspace is empty", async () => {

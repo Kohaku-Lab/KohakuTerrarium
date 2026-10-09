@@ -35,7 +35,7 @@
         <span v-if="m.users && !m.users.length" class="ml-auto w-1.5 h-1.5 rounded-full bg-amber shrink-0" :title="t('studioApp.overview.unused')" />
       </button>
     </template>
-    <NewSessionDialog v-if="runRecipe" mode="terrarium" :initial-config="runRecipe" @started="setAppMode('terrarium')" @close="runRecipe = ''" />
+    <NewSessionDialog v-if="runRecipe" mode="terrarium" :initial-config="runRecipe" @started="(run) => run.opened && setAppMode('terrarium')" @close="runRecipe = ''" />
   </div>
 </template>
 

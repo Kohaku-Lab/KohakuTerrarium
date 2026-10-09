@@ -69,9 +69,11 @@ import { randomNameFor } from "@/utils/randomName"
 /**
  * The one way to start a session: a creature or a terrarium recipe, picked
  * from the catalog or given as a local / @package path, with a name, the
- * machine it runs on and its working directory. `silent` starts it without
- * opening any tab (the graph editor stays in view); `initialConfig` arrives
- * with the config already chosen (Studio's Run). `started` fires once it runs.
+ * machine it runs on and its working directory. By default nothing opens and
+ * the view stays put; the user may pick Chat or Chat + inspector instead.
+ * `silent` hides that choice (the graph editor stays in view); `initialConfig`
+ * arrives with the config already chosen (Studio's Run). `started` fires once
+ * it runs with `{id, opened}`.
  */
 const props = defineProps({
   mode: { type: String, default: "creature" },
@@ -86,7 +88,7 @@ const MODES = [
   { id: "creature", icon: "i-carbon-bot" },
   { id: "terrarium", icon: "i-carbon-network-4" },
 ]
-const OPEN_MODES = ["chat", "both"]
+const OPEN_MODES = ["none", "chat", "both"]
 
 const { t } = useI18n()
 const tabs = useTabsStore()
@@ -99,7 +101,7 @@ const onNode = ref(initialNode(mode.value))
 const pwd = ref("")
 const pwdTouched = ref(false)
 const configPath = ref(props.initialConfig)
-const attachMode = ref("chat")
+const attachMode = ref("none")
 const starting = ref(false)
 const error = ref("")
 let pwdRequest = 0
@@ -154,15 +156,16 @@ async function submit() {
   starting.value = true
   error.value = ""
   try {
-    await tabs.createSession({
+    const openMode = props.silent ? "none" : attachMode.value
+    const id = await tabs.createSession({
       kind: mode.value,
       configPath: configPath.value.trim(),
       pwd: pwd.value.trim(),
       name: name.value.trim() || namePlaceholder.value,
-      attachMode: props.silent ? "none" : attachMode.value,
+      attachMode: openMode,
       onNode: onNode.value,
     })
-    emit("started")
+    emit("started", { id, opened: openMode !== "none" })
     emit("close")
   } catch (err) {
     error.value = err?.response?.data?.detail || err?.message || String(err)

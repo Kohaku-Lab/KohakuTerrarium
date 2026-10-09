@@ -74,14 +74,16 @@ describe("NewSessionDialog: creature", () => {
     expect(submit(w).element.disabled).toBe(false)
     await submit(w).trigger("click")
     await flushPromises()
+    expect(w.find('[data-test="new-open-none"]').attributes("aria-checked")).toBe("true")
     expect(createSession).toHaveBeenCalledWith({
       kind: "creature",
       configPath: "@pkg/creatures/general",
       pwd: "/host",
       name: "random-creature",
-      attachMode: "chat",
+      attachMode: "none",
       onNode: "_host",
     })
+    expect(w.emitted("started")).toEqual([[{ id: "sid", opened: false }]])
     expect(w.emitted("close")).toHaveLength(1)
     w.unmount()
   })
@@ -97,6 +99,7 @@ describe("NewSessionDialog: creature", () => {
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({ configPath: "/my/creature", name: "alice", attachMode: "both" }),
     )
+    expect(w.emitted("started")).toEqual([[{ id: "sid", opened: true }]])
     w.unmount()
   })
 

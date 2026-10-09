@@ -41,7 +41,7 @@
         <span class="opacity-60 ml-2">Ctrl/Cmd-S</span>
       </template>
     </EditorFrame>
-    <NewSessionDialog v-if="runConfig" :initial-config="runConfig" @started="setAppMode('terrarium')" @close="runConfig = ''" />
+    <NewSessionDialog v-if="runConfig" :initial-config="runConfig" @started="(run) => run.opened && setAppMode('terrarium')" @close="runConfig = ''" />
   </div>
 </template>
 
