@@ -27,6 +27,11 @@
     </div>
 
     <ChatComposer :ref="setComposerEl" v-model="inputText" v-model:attachments="attachments" :processing="composer.processing.value" :compact-mode="isCompact" :managed-submit="true" :max-attachment-bytes="MAX_ATTACHMENT_BYTES" :max-image-bytes="MAX_IMAGE_BYTES" :placeholder="composer.placeholder.value" :labels="composer.labels.value" aria-autocomplete="list" :aria-expanded="slash.open.value" aria-controls="v2-slash-menu" :aria-activedescendant="slash.activeDescendant.value" input-role="combobox" :attachment-transform="composer.transformAttachment" @update:attachments="composer.onAttachmentsChanged" @submit="composer.send" @interrupt="composer.interrupt" @compact="composer.compact" @clear="composer.clear" @error="composer.onAttachmentError" @input="composer.onInputChanged" @keydown="onKeydown" @focus="slash.reopen()">
+      <template #toolbar>
+        <ComposerModelPicker />
+        <span class="flex-1" />
+        <ComposerContextMeter />
+      </template>
       <template #suggestions><SlashCommandMenu id="v2-slash-menu" :open="slash.open.value" :loading="slash.loading.value" :error="slash.error.value" :entries="slash.entries.value" :selected-index="slash.selectedIndex.value" @choose="slash.choose" @select-index="slash.selectedIndex.value = $event" /></template>
       <template #attachment-icon="{ attachment }"><span :class="attachment.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" /></template>
       <template #remove-icon><span class="i-carbon-close" /></template>
@@ -45,6 +50,8 @@
 import { computed, ref } from "vue"
 
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
+import ComposerContextMeter from "@/components/session-v2/chat/ComposerContextMeter.vue"
+import ComposerModelPicker from "@/components/session-v2/chat/ComposerModelPicker.vue"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import { useDensity } from "@/composables/useDensity"
 import { ChatComposer, handleSlashKeydown, shouldSendOnEnter } from "@kohakuterrarium/chat-ui"
@@ -53,7 +60,8 @@ import { useI18n } from "@/utils/i18n"
 
 /**
  * The v2 composer: queued messages, the pending-question banner, and the
- * chat-ui composer with the slash menu. State and actions come from the
+ * chat-ui composer with the slash menu, the model pill and the context
+ * meter in its toolbar. State and actions come from the
  * column's `useComposerSend` (the `composer` prop). Emits `show-pending`
  * with the newest unanswered question's message id.
  */
