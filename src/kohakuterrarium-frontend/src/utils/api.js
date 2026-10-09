@@ -995,6 +995,45 @@ export const sessionAPI = {
     return data
   },
 
+  /** The last `limit` quoted exchanges plus title / summary / stop reason. */
+  async getExchanges(sessionName, limit = 3) {
+    const { data } = await api.get(`/sessions/${sessionName}/exchanges`, { params: { limit } })
+    return data
+  },
+
+  /** Name a session; empty clears the name. */
+  async setTitle(sessionName, title) {
+    const { data } = await api.put(`/sessions/${sessionName}/title`, { title })
+    return data
+  },
+
+  /** Hand-write the one-line summary; empty hands it back to automatic writing. */
+  async setSummaryText(sessionName, text) {
+    const { data } = await api.put(`/sessions/${sessionName}/summary/text`, { text })
+    return data
+  },
+
+  async refreshSummary(sessionName) {
+    const { data } = await api.post(`/sessions/${sessionName}/summary/refresh`)
+    return data
+  },
+
+  /** Sessions the server brought back (or failed to) after a restart. */
+  async getRestoreState() {
+    const { data } = await api.get("/sessions/restore-state")
+    return data
+  },
+
+  async retryRestore(path) {
+    const { data } = await api.post("/sessions/restore-state/retry", { path })
+    return data
+  },
+
+  async dismissRestore(path) {
+    const { data } = await api.post("/sessions/restore-state/dismiss", { path })
+    return data
+  },
+
   // ── V1 Viewer / Trace Viewer endpoints ──────────────────────────
 
   /**
@@ -1117,6 +1156,15 @@ export const sessionAPI = {
  * behaviour). */
 const _nodeQuery = (node) => (node && node !== "_host" ? { params: { node } } : undefined)
 export const settingsAPI = {
+  /** Session one-line summary settings: `{source, every_n_turns, model, sources, source_override}`. */
+  async getSessionSummary() {
+    const { data } = await api.get("/settings/session-summary")
+    return data
+  },
+  async saveSessionSummary(values) {
+    const { data } = await api.put("/settings/session-summary", values)
+    return data
+  },
   async getKeys(node = "_host") {
     const { data } = await api.get("/settings/keys", _nodeQuery(node))
     return data

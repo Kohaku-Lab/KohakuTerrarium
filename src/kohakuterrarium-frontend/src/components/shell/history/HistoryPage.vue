@@ -38,20 +38,27 @@
 
       <ul v-else class="kt-v2-card !p-0 overflow-hidden" :class="loading ? 'opacity-60' : ''">
         <li v-for="r in rows" :key="r.key" class="kt-v2-line border-b last:border-b-0 grid grid-cols-[20px_minmax(0,1fr)_auto] sm:grid-cols-[20px_minmax(0,1fr)_88px_auto] items-center gap-x-3 px-4 py-2.5 hover:bg-warm-100/60 dark:hover:bg-warm-800/40" :data-test="`history-row-${r.key}`">
-          <span class="i-carbon-network-4 text-iolite dark:text-iolite-light" />
+          <button type="button" class="w-5 h-5 flex items-center justify-center rounded text-warm-500 hover:text-iolite hover:bg-iolite/10" :aria-expanded="expanded.has(r.key)" :title="expanded.has(r.key) ? t('lab.history.hideQuote') : t('lab.history.showQuote')" data-test="history-expand" @click="toggle(r.key)">
+            <span :class="expanded.has(r.key) ? 'i-carbon-chevron-down' : 'i-carbon-chevron-right'" />
+          </button>
           <div class="min-w-0">
             <div class="flex items-center gap-2 min-w-0">
-              <span class="text-[13px] font-medium text-warm-800 dark:text-warm-100 truncate">{{ r.label }}</span>
-              <span v-if="r.showKey" class="text-[11px] font-mono text-warm-400 truncate" :title="r.key">{{ r.key }}</span>
+              <span class="text-[13px] font-medium text-warm-800 dark:text-warm-100 truncate" :title="r.key" data-test="history-label">{{ r.label }}</span>
+              <span v-if="r.shortId" class="text-[11px] font-mono text-warm-400 shrink-0" :title="r.key">{{ r.shortId }}</span>
+              <span v-if="r.status" class="shrink-0 text-[10px] px-1.5 rounded flex items-center gap-1" :class="STATUS_CHIP[r.status]" :title="r.status === 'running' ? '' : t(`lab.history.status.${r.status}Hint`)" :data-test="`history-status-${r.status}`"><span class="w-1.5 h-1.5 rounded-full bg-current" />{{ t(`lab.history.status.${r.status}`) }}</span>
+              <span v-if="r.labelFrom !== 'recipe' && r.recipe" class="kt-v2-edge shrink-0 max-w-40 truncate text-[10px] px-1.5 rounded border font-mono text-warm-500" :title="r.recipe">{{ r.recipe }}</span>
               <span v-if="r.forkedFrom" class="shrink-0 text-[10px] px-1.5 rounded bg-iolite/10 text-iolite dark:text-iolite-light" :title="r.forkedFrom">{{ t("lab.history.fork") }}</span>
               <span v-if="r.forks" class="shrink-0 text-[10px] px-1.5 rounded bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light">{{ t("lab.history.forks", { n: r.forks }) }}</span>
               <span v-if="r.migratedFrom" class="shrink-0 text-[10px] px-1.5 rounded bg-amber/10 text-amber-shadow dark:text-amber-light">{{ t("lab.history.migrated", { v: r.migratedFrom }) }}</span>
             </div>
+            <div v-if="r.line" class="text-[12px] text-warm-600 dark:text-warm-300 truncate" :title="r.line" data-test="history-line">
+              {{ r.line }}<span v-if="r.line === r.summary && r.summaryFrom" class="text-[11px] text-warm-400"> · {{ t(`lab.history.summary.${r.summaryFrom}`) }}</span>
+            </div>
             <div class="flex items-center gap-1.5 min-w-0 text-[11px] text-warm-500">
               <span v-if="r.config" class="font-mono shrink-0">{{ r.config }}</span>
               <span v-if="r.agents" class="shrink-0">{{ r.config ? "· " : "" }}{{ t("sessions.agentCount", { count: r.agents }) }}</span>
-              <span v-if="r.pwdName" class="font-mono shrink-0" :title="r.pwd">{{ r.config || r.agents ? "· " : "" }}{{ r.pwdName }}</span>
-              <span v-if="r.preview" class="italic truncate text-warm-400" :title="r.preview">{{ r.config || r.agents || r.pwdName ? "· " : "" }}{{ r.preview }}</span>
+              <span v-if="r.turns" class="shrink-0">{{ r.config || r.agents ? "· " : "" }}{{ t("lab.history.turns", { n: r.turns }) }}</span>
+              <span v-if="r.pwdName" class="font-mono truncate" :title="r.pwd">{{ r.config || r.agents || r.turns ? "· " : "" }}{{ r.pwdName }}</span>
             </div>
           </div>
           <span class="hidden sm:block text-right text-[11px] text-warm-500 tabular-nums" :title="r.lastActive">{{ whenLabel(r.lastActive, t) }}</span>
@@ -65,12 +72,18 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="resumeInspector" :disabled="!!resuming"><span class="i-carbon-radar mr-1" />{{ t("lab.history.resumeInspector") }}</el-dropdown-item>
+                  <el-dropdown-item divided command="rename"><span class="i-carbon-edit mr-1" />{{ t("lab.history.rename") }}</el-dropdown-item>
+                  <el-dropdown-item command="editSummary"><span class="i-carbon-text-short-paragraph mr-1" />{{ t("lab.history.editSummary") }}</el-dropdown-item>
+                  <el-dropdown-item command="regenerate"><span class="i-carbon-magic-wand mr-1" />{{ t("lab.history.regenerate") }}</el-dropdown-item>
                   <el-dropdown-item command="buildEmbeddings" :disabled="r.hasVectorIndex"><span class="i-carbon-machine-learning-model mr-1" />{{ t("sessions.buildEmbeddings") }}</el-dropdown-item>
                   <el-dropdown-item command="rebuildEmbeddings" :disabled="!r.hasVectorIndex"><span class="i-carbon-renew mr-1" />{{ t("sessions.rebuildEmbeddings") }}</el-dropdown-item>
                   <el-dropdown-item divided command="delete"><span class="i-carbon-trash-can mr-1 text-coral" />{{ t("common.delete") }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
+          </div>
+          <div v-if="expanded.has(r.key)" class="col-start-2 col-span-2 sm:col-span-3 mt-2 mb-1 flex flex-col gap-2" data-test="history-detail">
+            <HistoryQuote :session-key="r.key" :reload-key="r.lastActive" />
           </div>
         </li>
       </ul>
@@ -90,7 +103,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import BuildEmbeddingsModal from "@/components/sessions/modals/BuildEmbeddingsModal.vue"
+import HistoryQuote from "@/components/shell/history/HistoryQuote.vue"
 import { historyRow, resumeNode, whenLabel } from "@/components/shell/history/historyRows"
+import { editSummary, regenerateSummary, renameSession } from "@/components/shell/history/sessionLabelActions"
 import { useClusterStore } from "@/stores/cluster"
 import { useInstancesStore } from "@/stores/instances"
 import { useTabsStore } from "@/stores/tabs"
@@ -100,10 +115,17 @@ import { useI18n } from "@/utils/i18n"
 /**
  * Every saved session: search, sort, then view its
  * history or resume it (on the machine it last ran on unless another is
- * picked). Also builds memory embeddings and deletes.
+ * picked). Each row shows the name, status, one-line summary and shape; its
+ * chevron quotes the latest exchanges. Also renames, edits or regenerates the
+ * summary, builds memory embeddings and deletes.
  */
 const PAGE = 30
 const GHOST = "kt-v2-edge kt-v2-panel h-8 px-2.5 rounded-lg border text-xs text-warm-700 dark:text-warm-200 hover:border-iolite/50 flex items-center gap-1.5 disabled:opacity-50"
+const STATUS_CHIP = {
+  running: "bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light",
+  crashed: "bg-coral/10 text-coral",
+  shutdown: "bg-amber/10 text-amber-shadow dark:text-amber-light",
+}
 const SORTS = [
   { value: "last_active", label: "lab.history.recent" },
   { value: "created_at", label: "lab.history.created" },
@@ -126,6 +148,7 @@ const resuming = ref("")
 const buildTarget = ref(null)
 const buildOpen = ref(false)
 const buildRebuild = ref(false)
+const expanded = ref(new Set())
 let generation = 0
 let searchTimer = null
 
@@ -203,9 +226,23 @@ async function remove(r) {
   }
 }
 
+function toggle(key) {
+  const next = new Set(expanded.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expanded.value = next
+}
+
+async function relabel(action) {
+  if (await action) await fetchSessions(true)
+}
+
 function onMore(cmd, r) {
   if (cmd === "resumeInspector") resume(r, "both")
   else if (cmd === "delete") remove(r)
+  else if (cmd === "rename") relabel(renameSession(t, r.key, r.labelFrom === "title" ? r.label : ""))
+  else if (cmd === "editSummary") relabel(editSummary(t, r.key, r.summary))
+  else if (cmd === "regenerate") relabel(regenerateSummary(t, r.key))
   else {
     buildTarget.value = r
     buildRebuild.value = cmd === "rebuildEmbeddings"

@@ -22,7 +22,10 @@
 
     <div class="relative flex-1 min-h-0">
       <LabCanvas v-show="onBench" ref="canvasEl" :layout="layout" :structure="structure" :active-ids="activeIds" :last-messages="messages" @focus="focusedId = $event" @open="openSession" @menu="menu = $event" @new="newOpen = true" @resize="canvasWidth = $event" />
-      <p v-if="onBench && !tanks.length && !live.loading" class="absolute left-1/2 top-6 -translate-x-1/2 text-[13px] text-warm-500 text-center pointer-events-none" data-test="lab-empty">{{ t("lab.empty") }}</p>
+      <div v-if="onBench" class="absolute left-1/2 top-6 -translate-x-1/2 w-[min(40rem,calc(100%-2rem))] flex flex-col items-center gap-3 pointer-events-none">
+        <p v-if="!tanks.length && !live.loading" class="m-0 text-[13px] text-warm-500 text-center" data-test="lab-empty">{{ t("lab.empty") }}</p>
+        <LabRestoreBanner class="pointer-events-auto" @restored="live.refresh()" />
+      </div>
       <Transition name="kt-lab-zoom">
         <div v-if="focused" class="absolute inset-0" data-test="lab-focus">
           <GraphSurface :key="focused.id" store-key="lab-focus" :session-id="focused.id" lock-session />
@@ -49,6 +52,7 @@ import { statusStyle } from "@/components/graph/graphTheme"
 import GraphSurface from "@/components/graph/GraphSurface.vue"
 import LabCanvas from "@/components/lab/LabCanvas.vue"
 import LabHistoryBubble from "@/components/lab/LabHistoryBubble.vue"
+import LabRestoreBanner from "@/components/lab/LabRestoreBanner.vue"
 import LabStatsStrip from "@/components/lab/LabStatsStrip.vue"
 import { activeTankIds, benchStructure, latestMessages } from "@/components/lab/model/labActivity"
 import { buildTanks, layoutBench } from "@/components/lab/model/labLayout"
@@ -63,7 +67,7 @@ import { useI18n } from "@/utils/i18n"
  * The lab: every running session as a tank on one bench, or (Graph view) the
  * graph of every session. Click a tank to look inside it (its graph, in
  * place); Esc or ← comes back; right-click for its menu. Starting a session,
- * recent history and the numbers sit around the bench.
+ * recent history, restart restores and the numbers sit around the bench.
  */
 const GHOST = "kt-v2-edge kt-v2-panel h-8 px-2.5 rounded-lg border text-xs text-warm-700 dark:text-warm-200 hover:border-iolite/50 flex items-center gap-1.5"
 const TICK_MS = 2000

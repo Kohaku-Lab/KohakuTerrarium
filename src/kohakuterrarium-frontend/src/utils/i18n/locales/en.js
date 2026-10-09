@@ -278,6 +278,21 @@ export default {
 
   "settings.languageHint": "Choose the interface language for the web UI.",
   "settings.tabs.advanced": "Advanced",
+  "settings.tabs.sessions": "Sessions",
+  "settings.sessionSummary.title": "Session summaries",
+  "settings.sessionSummary.hint":
+    "Every session gets a one-line summary for the history list. It is written after the first turn, again every few turns, and after each context compaction. The model writes it with one short background call; the other sources cost nothing.",
+  "settings.sessionSummary.source": "Written by",
+  "settings.sessionSummary.source.llm": "The model",
+  "settings.sessionSummary.source.compaction": "Compaction summary",
+  "settings.sessionSummary.source.heuristic": "First prompt",
+  "settings.sessionSummary.source.off": "Off",
+  "settings.sessionSummary.every": "Refresh every N turns",
+  "settings.sessionSummary.model": "Summary model",
+  "settings.sessionSummary.modelHint": "Empty uses each session's own model.",
+  "settings.sessionSummary.override":
+    "Overridden for this server by KT_SESSION_SUMMARY_SOURCE={value}.",
+  "settings.sessionSummary.saved": "Saved",
   "settings.tabs.about": "About",
   "advanced.description":
     "Raw access to the framework's top-level YAML / JSON config files. Edits are validated before saving and live caches reload immediately.",
@@ -1247,6 +1262,8 @@ export default {
   "sessionViewer.overview.actions.export": "Export",
   "sessionViewer.overview.actions.delete": "Delete",
   "sessionViewer.overview.empty": "No data captured for this session yet.",
+  "sessionViewer.overview.noSummary": "No summary yet.",
+  "sessionViewer.overview.latestExchange": "Latest exchange",
 
   "sessionViewer.trace.empty": "No turns recorded yet.",
   "sessionViewer.trace.loading": "Loading turns…",

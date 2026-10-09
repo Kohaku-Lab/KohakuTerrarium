@@ -1,11 +1,70 @@
 import { describe, expect, it } from "vitest"
 
-import { baseName, historyRow, originNode, resumeNode, whenLabel } from "./historyRows"
+import {
+  baseName,
+  historyRow,
+  originNode,
+  resumeNode,
+  sessionStatus,
+  shortId,
+  whenLabel,
+} from "./historyRows"
 
 const t = (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key)
 
 describe("history rows", () => {
-  it("shows the user-facing name, the storage key only when it differs, and the session's shape", () => {
+  it("labels by name, then summary, then recipe with a short id", () => {
+    const base = {
+      name: "pair_3d736342ab",
+      terrarium_name: "pair",
+      agents: ["a", "b"],
+      preview: "older prompt",
+      last_user: "latest prompt",
+    }
+    const named = historyRow({ ...base, title: "Nightly triage", summary: "Triaging CI" })
+    expect(named).toMatchObject({
+      label: "Nightly triage",
+      labelFrom: "title",
+      recipe: "pair",
+      shortId: "",
+      line: "Triaging CI",
+    })
+    const summarized = historyRow({ ...base, summary: "Triaging CI" })
+    expect(summarized).toMatchObject({
+      label: "Triaging CI",
+      labelFrom: "summary",
+      line: "latest prompt",
+    })
+    const bare = historyRow(base)
+    expect(bare).toMatchObject({
+      label: "pair",
+      labelFrom: "recipe",
+      shortId: "3d736342",
+      line: "latest prompt",
+    })
+    expect(historyRow({ name: "solo" })).toMatchObject({ label: "solo", shortId: "", line: "" })
+    expect(historyRow({ name: "x", preview: "p" }).line).toBe("p")
+    const cut = historyRow({
+      name: "x",
+      summary: "Refactor the session index…",
+      last_user: "Refactor the session  index reconcile loop",
+    })
+    expect(cut.line).toBe("")
+    expect(shortId("probe")).toBe("probe")
+  })
+
+  it("reads the status from stop reason and lifecycle", () => {
+    expect(sessionStatus({ stop_reason: "crash" })).toBe("crashed")
+    expect(sessionStatus({ stop_reason: "shutdown", lifecycle: { live: true } })).toBe("shutdown")
+    expect(sessionStatus({ stop_reason: null, lifecycle: { live: true } })).toBe("running")
+    expect(sessionStatus({ stop_reason: "user", lifecycle: { live: false } })).toBe("")
+    expect(sessionStatus({})).toBe("")
+    expect(
+      historyRow({ name: "s", turn_count: 4, last_reply: " ok ", stop_reason: "crash" }),
+    ).toMatchObject({ turns: 4, lastReply: "ok", status: "crashed" })
+  })
+
+  it("keeps the session's shape: config, members, folder, forks", () => {
     const row = historyRow({
       name: "team_ab12",
       terrarium_name: "My team",
@@ -20,7 +79,7 @@ describe("history rows", () => {
     expect(row).toMatchObject({
       key: "team_ab12",
       label: "My team",
-      showKey: true,
+      shortId: "ab12",
       config: "swe_team",
       agents: 3,
       pwdName: "project",
@@ -30,7 +89,7 @@ describe("history rows", () => {
     })
     expect(historyRow({ name: "solo", config_type: "agent" })).toMatchObject({
       label: "solo",
-      showKey: false,
+      shortId: "",
       config: "",
       agents: 0,
       preview: "",

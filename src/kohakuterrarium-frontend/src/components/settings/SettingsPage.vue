@@ -199,6 +199,13 @@
         </div>
       </el-tab-pane>
 
+      <!-- ════════════════════════ Sessions ════════════════════════ -->
+      <el-tab-pane :label="t('settings.tabs.sessions')" name="sessions">
+        <div class="settings-pane max-w-2xl">
+          <SessionSummaryPanel />
+        </div>
+      </el-tab-pane>
+
       <!-- ════════════════════════ Updates ════════════════════════ -->
       <el-tab-pane label="Updates" name="updates">
         <div class="settings-pane max-w-2xl">
@@ -386,6 +393,7 @@ import ProviderKeyRow from "@/components/settings/ProviderKeyRow.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
+import SessionSummaryPanel from "@/components/settings/SessionSummaryPanel.vue"
 import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
 import { requestAttentionAudioUnlock, requestNotificationPermission } from "@/composables/useAttentionEffects"

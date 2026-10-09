@@ -25,23 +25,71 @@ export function resumeNode(session, picked) {
   return picked || originNode(session) || "_host"
 }
 
+/** The short id part of a storage name (`probe_3d736342` → `3d736342`). */
+export function shortId(key) {
+  const tail =
+    String(key || "")
+      .split("_")
+      .pop() || ""
+  return tail.slice(0, 8)
+}
+
+/** Whether `line` only repeats `label` (a summary cut from that same prompt). */
+function repeats(line, label) {
+  const flat = (s) => s.replace(/\s+/g, " ").replace(/…$/, "").trim().toLowerCase()
+  const a = flat(line || "")
+  const b = flat(label || "")
+  return !!a && !!b && (a === b || a.startsWith(b))
+}
+
 /**
- * Display fields of one saved session: `label` (the user-facing name),
- * `key` (the storage name, shown when it differs), the config it started
- * from, member count, working directory and a one-line `preview`.
+ * Whether a saved session runs now: `running`, `crashed` (the server went
+ * down under it), `shutdown` (the server was stopped), or "" (stopped by
+ * the user, or a session too old to say).
+ */
+export function sessionStatus(session) {
+  const reason = session?.stop_reason
+  if (reason === "crash") return "crashed"
+  if (reason === "shutdown") return "shutdown"
+  if (!reason && session?.lifecycle?.live) return "running"
+  return ""
+}
+
+/**
+ * Display fields of one saved session. `label` is the session's name, else
+ * its one-line summary, else the recipe/creature it started from with a
+ * short id (`labelFrom` says which); `recipe` is shown as a chip when it is
+ * not the label. `line` is the summary when not already the label, else the
+ * latest prompt. Plus the config, member count, working directory, status,
+ * turn count and the latest exchange.
  */
 export function historyRow(session) {
-  const label = savedSessionLabel(session)
-  const agents = session?.agents?.length || 0
+  const recipe = savedSessionLabel(session)
+  const title = (session?.title || "").trim()
+  const summary = (session?.summary || "").trim()
+  const labelFrom = title ? "title" : summary ? "summary" : "recipe"
+  const label = title || summary || recipe
+  const preview = extractTextPreview(session?.preview, 200)
+  const lastUser = (session?.last_user || "").trim()
+  const line = (labelFrom !== "summary" && summary) || lastUser || preview
   return {
     key: session.name,
     label,
-    showKey: label !== session.name,
+    labelFrom,
+    recipe,
+    shortId: labelFrom === "recipe" && recipe !== session.name ? shortId(session.name) : "",
+    line: repeats(line, label) ? "" : line,
+    summary,
+    summaryFrom: session?.summary_source || "",
     config: baseName(session?.config_path),
-    agents,
+    agents: session?.agents?.length || 0,
     pwd: session?.pwd || "",
     pwdName: baseName(session?.pwd),
-    preview: extractTextPreview(session?.preview, 200),
+    preview,
+    lastUser,
+    lastReply: (session?.last_reply || "").trim(),
+    turns: session?.turn_count || 0,
+    status: sessionStatus(session),
     forkedFrom: session?.parent_session_id || "",
     forks: session?.forked_children?.length || 0,
     migratedFrom: session?.migrated_from_version || 0,

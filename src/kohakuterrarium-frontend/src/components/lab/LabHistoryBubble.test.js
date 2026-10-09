@@ -112,6 +112,27 @@ describe("LabHistoryBubble", () => {
     expect(again.find("[data-test='lab-history-all']").exists()).toBe(false)
   })
 
+  it("shows each session's name, summary line and a cut-off marker", async () => {
+    api.list.mockResolvedValue({
+      sessions: [
+        {
+          name: "pair_ab12",
+          terrarium_name: "pair",
+          title: "Nightly triage",
+          summary: "Triaging CI",
+          stop_reason: "crash",
+          agents: ["a"],
+        },
+      ],
+    })
+    const w = mount(LabHistoryBubble)
+    await flushPromises()
+    const row = w.find("[data-test='lab-history-pair_ab12']")
+    expect(row.text()).toContain("Nightly triage")
+    expect(row.find("[data-test='lab-history-line']").text()).toBe("Triaging CI")
+    expect(row.find("[title='lab.history.status.crashed']").exists()).toBe(true)
+  })
+
   it("re-reads when the running set changes", async () => {
     const w = mount(LabHistoryBubble, { props: { refreshKey: "a" } })
     await flushPromises()

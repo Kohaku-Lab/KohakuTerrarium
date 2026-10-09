@@ -8,10 +8,19 @@ const api = vi.hoisted(() => ({
   preflightResume: vi.fn(),
   resume: vi.fn(),
   delete: vi.fn(),
+  getExchanges: vi.fn(),
+  setTitle: vi.fn(),
+  setSummaryText: vi.fn(),
+  refreshSummary: vi.fn(),
 }))
 const instances = vi.hoisted(() => ({ fetchOne: vi.fn(), fetchAll: vi.fn() }))
 const cluster = vi.hoisted(() => ({ showPickers: false, sites: [] }))
-const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), confirm: vi.fn() }))
+const messages = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+  confirm: vi.fn(),
+  prompt: vi.fn(),
+}))
 
 vi.mock("@/utils/api", () => ({ attachAPI: { getCreaturePolicies: vi.fn() }, sessionAPI: api }))
 vi.mock("@/stores/instances", () => ({ useInstancesStore: () => instances }))
@@ -19,7 +28,7 @@ vi.mock("@/stores/cluster", () => ({ useClusterStore: () => cluster }))
 vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
 vi.mock("element-plus", () => ({
   ElMessage: { success: messages.success, error: messages.error },
-  ElMessageBox: { confirm: messages.confirm },
+  ElMessageBox: { confirm: messages.confirm, prompt: messages.prompt },
 }))
 vi.mock("@/components/sessions/modals/BuildEmbeddingsModal.vue", () => ({
   default: {
@@ -235,6 +244,89 @@ describe("HistoryPage: finding sessions", () => {
     await w.find('[role="alert"] button').trigger("click")
     await flushPromises()
     expect(w.text()).toContain("Saved team")
+  })
+})
+
+describe("HistoryPage: what each session is", () => {
+  const labelled = {
+    name: "pair_3d736342",
+    terrarium_name: "pair",
+    title: "Nightly triage",
+    summary: "Triaging flaky CI",
+    summary_source: "llm",
+    last_user: "Retry the windows job",
+    turn_count: 4,
+    stop_reason: "crash",
+    agents: ["a", "b"],
+  }
+
+  it("shows name, status, recipe chip, summary line and turns", async () => {
+    api.list.mockResolvedValue({
+      sessions: [labelled, { name: "probe_aa11bb22", agents: ["probe"], last_user: "hello" }],
+      total: 2,
+    })
+    const w = mountPage()
+    await flushPromises()
+    const r = row(w, "pair_3d736342")
+    expect(r.find('[data-test="history-label"]').text()).toBe("Nightly triage")
+    expect(r.find('[data-test="history-status-crashed"]').exists()).toBe(true)
+    expect(r.text()).toContain("pair")
+    expect(r.find('[data-test="history-line"]').text()).toContain("Triaging flaky CI")
+    expect(r.text()).toContain("lab.history.turns")
+    const bare = row(w, "probe_aa11bb22")
+    expect(bare.find('[data-test="history-label"]').text()).toBe("probe")
+    expect(bare.text()).toContain("aa11bb22")
+    expect(bare.find('[data-test="history-line"]').text()).toBe("hello")
+  })
+
+  it("expands to quote the latest exchanges, and collapses again", async () => {
+    api.list.mockResolvedValue({ sessions: [labelled], total: 1 })
+    api.getExchanges.mockResolvedValue({
+      exchanges: [
+        { turn: 3, user: "Look at the board", reply: "Three red." },
+        { turn: 4, user: "Retry the windows job", reply: "" },
+      ],
+    })
+    const w = mountPage()
+    await flushPromises()
+    const r = () => row(w, "pair_3d736342")
+    expect(r().find('[data-test="history-detail"]').exists()).toBe(false)
+    await r().find('[data-test="history-expand"]').trigger("click")
+    await flushPromises()
+    expect(api.getExchanges).toHaveBeenCalledWith("pair_3d736342", 3)
+    expect(r().find('[data-test="history-exchange-3"]').text()).toContain("Three red.")
+    expect(r().find('[data-test="history-exchange-4"]').text()).toContain("lab.history.noReply")
+    expect(r().find('[data-test="history-line"]').text()).toContain("lab.history.summary.llm")
+    await r().find('[data-test="history-expand"]').trigger("click")
+    expect(r().find('[data-test="history-detail"]').exists()).toBe(false)
+  })
+
+  it("renames, edits and regenerates the summary, then rescans", async () => {
+    api.list.mockResolvedValue({ sessions: [labelled], total: 1 })
+    const w = mountPage()
+    await flushPromises()
+    messages.prompt.mockResolvedValueOnce({ value: "Triage night" })
+    await row(w, "pair_3d736342").find('[data-cmd="rename"]').trigger("click")
+    await flushPromises()
+    expect(messages.prompt.mock.calls[0][2]).toMatchObject({ inputValue: "Nightly triage" })
+    expect(api.setTitle).toHaveBeenCalledWith("pair_3d736342", "Triage night")
+    expect(api.list).toHaveBeenLastCalledWith(expect.objectContaining({ refresh: true }))
+    messages.prompt.mockRejectedValueOnce(new Error("cancel"))
+    await row(w, "pair_3d736342").find('[data-cmd="editSummary"]').trigger("click")
+    await flushPromises()
+    expect(api.setSummaryText).not.toHaveBeenCalled()
+    messages.prompt.mockResolvedValueOnce({ value: "CI triage" })
+    await row(w, "pair_3d736342").find('[data-cmd="editSummary"]').trigger("click")
+    await flushPromises()
+    expect(api.setSummaryText).toHaveBeenCalledWith("pair_3d736342", "CI triage")
+    await row(w, "pair_3d736342").find('[data-cmd="regenerate"]').trigger("click")
+    await flushPromises()
+    expect(api.refreshSummary).toHaveBeenCalledWith("pair_3d736342")
+    api.setTitle.mockRejectedValueOnce({ response: { data: { detail: "locked" } } })
+    messages.prompt.mockResolvedValueOnce({ value: "x" })
+    await row(w, "pair_3d736342").find('[data-cmd="rename"]').trigger("click")
+    await flushPromises()
+    expect(messages.error).toHaveBeenCalledWith("locked")
   })
 })
 

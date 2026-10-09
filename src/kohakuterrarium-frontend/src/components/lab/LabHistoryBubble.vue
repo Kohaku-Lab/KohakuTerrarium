@@ -10,8 +10,12 @@
       <div v-else-if="!rows.length" class="px-3 py-3 text-[11px] text-warm-500">{{ loading ? t("sessions.loading") : t("sessions.noSaved") }}</div>
       <ul v-else>
         <li v-for="r in rows" :key="r.key" class="flex items-center gap-2 px-3 py-1.5 hover:bg-warm-100/60 dark:hover:bg-warm-800/40" :data-test="`lab-history-${r.key}`">
-          <button type="button" class="min-w-0 flex-1 text-left" :title="r.preview || r.key" @click="view(r)">
-            <span class="block text-[12px] text-warm-800 dark:text-warm-100 truncate">{{ r.label }}</span>
+          <button type="button" class="min-w-0 flex-1 text-left" :title="r.line || r.key" @click="view(r)">
+            <span class="flex items-center gap-1.5 min-w-0">
+              <span class="text-[12px] text-warm-800 dark:text-warm-100 truncate">{{ r.label }}</span>
+              <span v-if="r.status === 'crashed' || r.status === 'shutdown'" class="shrink-0 w-1.5 h-1.5 rounded-full" :class="r.status === 'crashed' ? 'bg-coral' : 'bg-amber'" :title="t(`lab.history.status.${r.status}`)" />
+            </span>
+            <span v-if="r.line" class="block text-[11px] text-warm-600 dark:text-warm-300 truncate" data-test="lab-history-line">{{ r.line }}</span>
             <span class="block text-[10px] text-warm-500 truncate"
               >{{ whenLabel(r.lastActive, t) }}<template v-if="r.agents"> · {{ t("sessions.agentCount", { count: r.agents }) }}</template></span
             >
@@ -34,8 +38,9 @@ import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
 /**
- * The last few saved sessions, floating on the bench: resume one where it
- * last ran, view its history, or go to the full History page. Re-reads when
+ * The last few saved sessions, floating on the bench, each with its
+ * one-line summary: resume one where it last ran, view its history, or go
+ * to the full History page. Re-reads when
  * `refreshKey` changes (a session started or ended). Starts open only on an
  * empty bench (`defaultOpen`) until the user opens or closes it; that choice
  * is remembered per browser.

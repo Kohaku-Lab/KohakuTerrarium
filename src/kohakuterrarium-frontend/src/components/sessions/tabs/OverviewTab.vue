@@ -4,6 +4,7 @@
     <div v-else-if="!detail.summary" class="card p-6 text-secondary text-sm">{{ t("sessionViewer.overview.empty") }}</div>
 
     <div v-else class="flex flex-col gap-3">
+      <SessionIdentityCard v-if="detail.name" :session-name="detail.name" />
       <!-- Header card: timestamps + lineage + status -->
       <div class="card p-4 flex flex-col gap-2">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px]">
@@ -92,6 +93,7 @@
 import { computed, h } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
+import SessionIdentityCard from "@/components/sessions/tabs/SessionIdentityCard.vue"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
