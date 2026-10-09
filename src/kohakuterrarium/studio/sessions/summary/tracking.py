@@ -42,13 +42,19 @@ def creature_agent(engine: Any, store: Any, name: str) -> Any:
 
 
 def summary_llm(agent: Any, settings: SummarySettings) -> Any:
-    """A provider for the ``llm`` source: the summary model, else the agent's model."""
+    """A separate provider for the ``llm`` source, or None.
+
+    The summary model when set, else a fresh instance of the agent's model.
+    The agent's live provider is never returned: when no separate instance
+    can be built, the summary falls back to a non-model source.
+    """
     if settings.model:
         return create_llm_from_profile_name(settings.model)
-    if agent is None:
-        return None
     build = getattr(agent, "_build_compact_llm", None)
-    return build(CompactConfig()) if callable(build) else getattr(agent, "llm", None)
+    if not callable(build):
+        return None
+    built = build(CompactConfig())
+    return None if built is getattr(agent, "llm", None) else built
 
 
 def hook_of(store: Any) -> SummaryHook | None:

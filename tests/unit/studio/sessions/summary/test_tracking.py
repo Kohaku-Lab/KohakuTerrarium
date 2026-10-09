@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from kohakuterrarium.core import agent_compact as _agent_compact
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.identity.session_summary import SummarySettings
 from kohakuterrarium.studio.sessions.lifecycle import start_creature
@@ -43,8 +44,19 @@ async def test_a_started_creature_session_is_summarized_after_its_turn(
         await engine.shutdown()
 
 
+def _profiled_creature(tmp_path):
+    folder = tmp_path / "creatures" / "probe"
+    folder.mkdir(parents=True)
+    (folder / "config.yaml").write_text(
+        "name: probe\nllm: test/session-model\nsystem_prompt: test\n"
+        "tools: []\nsubagents: []\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
 async def test_llm_source_calls_a_separate_provider_with_the_summary_prompt(
-    tmp_path, scripted, creature_dir, monkeypatch
+    tmp_path, scripted, monkeypatch
 ):
     monkeypatch.setenv("KT_SESSION_SUMMARY_SOURCE", "llm")
     scripted["script"] = [
@@ -54,7 +66,9 @@ async def test_llm_source_calls_a_separate_provider_with_the_summary_prompt(
     engine = Terrarium(session_dir=str(tmp_path / "sessions"))
     service = LocalTerrariumService(engine)
     try:
-        session = await start_creature(service, config_path=str(creature_dir))
+        session = await start_creature(
+            service, config_path=str(_profiled_creature(tmp_path))
+        )
         store = engine._session_stores[session.session_id]
         creature = engine.get_creature(session.creatures[0]["creature_id"])
         await _chat(service, creature.creature_id, "Draft the release notes")
@@ -72,6 +86,31 @@ async def test_llm_source_calls_a_separate_provider_with_the_summary_prompt(
             )
         ]
         assert summary_calls and creature.agent.llm not in summary_calls
+    finally:
+        await engine.shutdown()
+
+
+async def test_without_a_separate_provider_the_session_model_is_never_shared(
+    tmp_path, scripted, creature_dir, monkeypatch
+):
+    monkeypatch.setenv("KT_SESSION_SUMMARY_SOURCE", "llm")
+    monkeypatch.setattr(_agent_compact, "resolve_controller_llm", lambda *a, **k: None)
+    scripted["script"] = [ScriptEntry("Should not be used", match=LLM_MARKER), "OK."]
+    engine = Terrarium(session_dir=str(tmp_path / "sessions"))
+    service = LocalTerrariumService(engine)
+    try:
+        session = await start_creature(service, config_path=str(creature_dir))
+        store = engine._session_stores[session.session_id]
+        creature = engine.get_creature(session.creatures[0]["creature_id"])
+        await _chat(service, creature.creature_id, "Draft the release notes")
+        await tracking.hook_of(store).idle()
+        summary = read_summary(store)
+        assert (summary["text"], summary["source"]) == (
+            "Draft the release notes",
+            "heuristic",
+        )
+        sent = [m for log in creature.agent.llm.call_log for m in log]
+        assert not any(LLM_MARKER in str(m.get("content")) for m in sent)
     finally:
         await engine.shutdown()
 
@@ -94,10 +133,12 @@ def test_creature_agent_and_summary_llm_resolution(tmp_path, scripted):
         assert tracking.creature_agent(engine, store, "missing") is None
         assert tracking.creature_agent(engine, object(), "main") is None
         assert tracking.summary_llm(agent, SummarySettings()) == "isolated"
-        assert (
-            tracking.summary_llm(SimpleNamespace(llm="active"), SummarySettings())
-            == "active"
+        fallback = SimpleNamespace(
+            llm="active", _build_compact_llm=lambda cfg: "active"
         )
+        assert tracking.summary_llm(fallback, SummarySettings()) is None
+        bare = SimpleNamespace(llm="active")
+        assert tracking.summary_llm(bare, SummarySettings()) is None
         assert tracking.summary_llm(None, SummarySettings()) is None
         tracking.summary_llm(None, SummarySettings(model="profile/x"))
         assert len(scripted["built"]) == 1
