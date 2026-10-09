@@ -10,7 +10,7 @@
       </span>
     </div>
 
-    <div class="kt-chat-composer__shell" :class="{ 'is-active': active }">
+    <div class="kt-chat-composer__shell" :class="{ 'is-active': active, 'is-stacked': !!$slots.toolbar }">
       <template v-if="showAttachmentActions">
         <input ref="imageInput" class="kt-chat-composer__file-input" type="file" accept="image/*" :disabled="disabled" @change="onFileChange($event, 'image')" />
         <input ref="fileInput" class="kt-chat-composer__file-input" type="file" :disabled="disabled" @change="onFileChange($event, 'file')" />
@@ -21,6 +21,7 @@
         <button type="button" class="kt-chat-composer__action--file" :aria-label="label('attachFile')" :title="label('attachFile')" :disabled="disabled" @click="openFile"><slot name="file-icon">＋</slot></button>
         <button type="button" class="kt-chat-composer__action--image" :aria-label="label('attachImage')" :title="label('attachImage')" :disabled="disabled" @click="openImage"><slot name="image-icon">▧</slot></button>
       </template>
+      <div v-if="$slots.toolbar" class="kt-chat-composer__toolbar"><slot name="toolbar" /></div>
 
       <slot name="suggestions" />
       <textarea ref="textarea" :value="modelValue" rows="1" :placeholder="placeholder" :aria-label="label('message', {}, placeholder || 'Message')" :aria-autocomplete="ariaAutocomplete" :aria-expanded="ariaExpanded" :aria-controls="ariaControls" :aria-activedescendant="ariaActivedescendant" :role="inputRole" :disabled="disabled" @input="onInput" @keydown="onKeydown" @paste="onPaste" @focus="onFocus" @blur="onBlur" />

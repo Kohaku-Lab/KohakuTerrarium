@@ -24,6 +24,27 @@ function file(name, type, content = "x") {
 }
 
 describe("ChatComposer", () => {
+  it("stacks the input above a control row only when a toolbar is given", () => {
+    const plain = mountComposer()
+    expect(plain.find(".kt-chat-composer__shell").classes()).not.toContain("is-stacked")
+    expect(plain.find(".kt-chat-composer__toolbar").exists()).toBe(false)
+
+    const withBar = mount(ChatComposer, {
+      props: { modelValue: "", labels },
+      slots: { toolbar: '<span class="probe">model</span>' },
+    })
+    const shell = withBar.find(".kt-chat-composer__shell")
+    expect(shell.classes()).toContain("is-stacked")
+    expect(withBar.find(".kt-chat-composer__toolbar .probe").text()).toBe("model")
+    const order = [...shell.element.children].map((el) => el.className || el.tagName)
+    expect(order.indexOf("kt-chat-composer__toolbar")).toBeGreaterThan(
+      order.findIndex((c) => String(c).includes("action--image")),
+    )
+    expect(order.indexOf("kt-chat-composer__toolbar")).toBeLessThan(
+      order.findIndex((c) => String(c).includes("kt-chat-composer__primary")),
+    )
+  })
+
   it("is controlled and autoresizes multiline input up to 128px", async () => {
     const wrapper = mountComposer({ modelValue: "hello" })
     const textarea = wrapper.find("textarea")
