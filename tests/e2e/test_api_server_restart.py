@@ -3,12 +3,14 @@
 Three real ``python -m kohakuterrarium.api.main`` processes share one config
 and session directory; the only seam is the LLM (``KT_TEST_LLM_SCRIPT``).
 
-1. Server 1 hosts: ``alpha`` (idle after a turn), ``beta`` (mid-turn), a
-   terrarium whose ``delta`` the user stopped, and ``gamma-gone`` (stopped by
-   the user as a whole). Then the process is hard-killed — no shutdown.
+1. Server 1 hosts: ``alpha`` (idle after a turn), ``beta`` (mid-turn),
+   ``epsilon`` (idle, with a background bash job still running), a terrarium
+   whose ``delta`` the user stopped, and ``gamma-gone`` (stopped by the user
+   as a whole). Then the process is hard-killed — no shutdown.
 2. Server 2 boots and restores on its own: alpha and the terrarium come back
    running, delta stays stopped, beta is told the turn was cut off and keeps
-   working, the user-stopped session stays stopped; alpha chats again.
+   working, epsilon is told its background job was killed, the user-stopped
+   session stays stopped; alpha chats again.
 3. Server 3 boots with ``KT_AUTO_RESUME=0`` after a graceful stop of
    server 2: nothing is restored.
 """
@@ -36,7 +38,7 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _write_fixtures(root: Path) -> tuple[Path, Path, Path]:
+def _write_fixtures(root: Path) -> tuple[Path, Path, Path, Path]:
     creature = root / "creatures" / "probe"
     creature.mkdir(parents=True)
     (creature / "config.yaml").write_text(
@@ -44,6 +46,14 @@ def _write_fixtures(root: Path) -> tuple[Path, Path, Path]:
         "tools: []\nsubagents: []\n",
         encoding="utf-8",
     )
+    jobber = root / "creatures" / "jobber"
+    jobber.mkdir(parents=True)
+    (jobber / "config.yaml").write_text(
+        "name: jobber\nsystem_prompt: You run jobs.\ntool_format: bracket\n"
+        "tools:\n  - name: bash\n    type: builtin\n",
+        encoding="utf-8",
+    )
+    sleeper = f'"{Path(sys.executable).as_posix()}" -c "import time; time.sleep(90)"'
     recipe = root / "terrariums" / "pair"
     recipe.mkdir(parents=True)
     rel = os.path.relpath(creature, recipe).replace("\\", "/")
@@ -64,6 +74,12 @@ def _write_fixtures(root: Path) -> tuple[Path, Path, Path]:
                         "match": "long task",
                         "delay_per_chunk": 0.2,
                     },
+                    {
+                        "response": "[/bash]\n@@run_in_background=true\n"
+                        f"{sleeper}\n[bash/]",
+                        "match": "start the sleeper",
+                    },
+                    {"response": "Rerunning the sleeper.", "match": "were killed"},
                     {"response": "Continuing the task.", "match": "server restarted"},
                     "OK",
                 ]
@@ -71,7 +87,7 @@ def _write_fixtures(root: Path) -> tuple[Path, Path, Path]:
         ),
         encoding="utf-8",
     )
-    return creature, recipe, script
+    return creature, jobber, recipe, script
 
 
 class _Server:
@@ -158,7 +174,7 @@ def _sessions_by_name(client: httpx.Client) -> dict[str, dict]:
 
 
 def test_crashed_server_restores_running_sessions(tmp_path):
-    creature, recipe, script = _write_fixtures(tmp_path)
+    creature, jobber, recipe, script = _write_fixtures(tmp_path)
     pwd = str(tmp_path)
 
     # --- server 1: four sessions in four states, then a hard kill --------
@@ -197,6 +213,27 @@ def test_crashed_server_restores_running_sessions(tmp_path):
             == 200
         )
 
+        # epsilon's turn ends with a background job still running.
+        epsilon = s1.client.post(
+            "/api/sessions/active/agents",
+            json={"config_path": str(jobber), "pwd": pwd, "name": "epsilon"},
+        ).json()
+        s1.client.post(
+            f"/api/sessions/{epsilon['session_id']}/creatures/{epsilon['agent_id']}/chat",
+            json={"message": "start the sleeper"},
+        )
+        epsilon_history = _wait(
+            lambda: (
+                lambda h: (
+                    h
+                    if not h.get("is_processing")
+                    and any(m.get("role") == "assistant" for m in h["messages"])
+                    else None
+                )
+            )(_history(s1.client, epsilon["session_id"], epsilon["agent_id"]))
+        )
+        assert epsilon_history["messages"], epsilon_history
+
         beta = s1.client.post(
             "/api/sessions/active/agents",
             json={"config_path": str(creature), "pwd": pwd, "name": "beta"},
@@ -228,17 +265,45 @@ def test_crashed_server_restores_running_sessions(tmp_path):
             timeout=120,
         )
         assert state["enabled"] is True
-        assert [o["status"] for o in state["outcomes"]] == ["restored"] * 3, state[
+        assert [o["status"] for o in state["outcomes"]] == ["restored"] * 4, state[
             "outcomes"
         ]
         assert [(r["restored_this_boot"], r["failed"]) for r in state["rows"]] == [
             (True, None)
-        ] * 3
+        ] * 4
         sessions = _sessions_by_name(s2.client)
         names = {row["session_id"]: name for name, row in sessions.items()}
         by_name = {names[o["session_id"]]: o for o in state["outcomes"]}
-        pair_name = next(n for n in by_name if n not in ("alpha", "beta"))
-        assert set(by_name) == {"alpha", "beta", pair_name}
+        pair_name = next(n for n in by_name if n not in ("alpha", "beta", "epsilon"))
+        assert set(by_name) == {"alpha", "beta", "epsilon", pair_name}
+
+        # The hard kill took epsilon's background job down; epsilon is told.
+        killed = by_name["epsilon"]["killed"]["epsilon"]
+        assert [(job["kind"], job["name"]) for job in killed] == [("tool", "bash")]
+        assert by_name["epsilon"]["interrupted"] == []
+        assert by_name["alpha"]["killed"] == {}
+        epsilon2 = _creatures(s2.client, sessions["epsilon"]["session_id"])[0]
+
+        def _epsilon_told():
+            msgs = _history(
+                s2.client, sessions["epsilon"]["session_id"], epsilon2["creature_id"]
+            )["messages"]
+            told = [
+                m["content"]
+                for m in msgs
+                if m["role"] == "user" and "were killed" in str(m["content"])
+            ]
+            replied = any(
+                "Rerunning the sleeper." in str(m.get("content"))
+                for m in msgs
+                if m["role"] == "assistant"
+            )
+            return told if told and replied else None
+
+        told = _wait(_epsilon_told, timeout=60)
+        assert len(told) == 1
+        assert f"tool `bash` (command=" in told[0]
+        assert f"job {killed[0]['job_id']}" in told[0]
         assert (by_name["beta"]["interrupted"], by_name["beta"]["stopped"]) == (
             ["beta"],
             [],
@@ -305,7 +370,7 @@ def test_crashed_server_restores_running_sessions(tmp_path):
         state = s3.client.get("/api/sessions/restore-state").json()
         assert state["enabled"] is False and state["outcomes"] == []
         assert s3.client.get("/api/sessions/active").json() == []
-        assert len(state["rows"]) == 3
+        assert len(state["rows"]) == 4
 
         # History: persisted names, first-turn summaries, the latest exchange,
         # and why each session is down (server 2 stopped; gamma-gone by the user).

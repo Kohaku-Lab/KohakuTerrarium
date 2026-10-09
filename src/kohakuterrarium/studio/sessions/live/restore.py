@@ -2,8 +2,10 @@
 
 Each row left by an earlier boot is claimed, its creatures' run records are
 read before anything starts, and the session is resumed in place; then the
-stopped creatures are stopped again and the ones cut off mid-turn are told to
-keep working (a user message that never started a turn is not re-sent). A
+stopped creatures are stopped again, the ones cut off mid-turn are told to
+keep working (a user message that never started a turn is not re-sent), and
+any whose tool or sub-agent jobs the restart killed are told which. Drive
+work recovers through the Drive runtime's own reconcile on creature start. A
 row that fails keeps its error for the Lab to show with a Retry.
 """
 
@@ -18,6 +20,7 @@ from kohakuterrarium.studio.persistence.resume import resume_session
 from kohakuterrarium.studio.sessions.live.registry import live_sessions, path_key
 from kohakuterrarium.studio.sessions.live.run_classes import (
     apply_run_classes,
+    read_killed_jobs,
     read_run_classes,
 )
 from kohakuterrarium.utils.logging import get_logger
@@ -51,6 +54,7 @@ async def restore_row(service: Any, row: dict, target: Path | None = None) -> di
     registry.update(path, claimed_by=run_state.BOOT_ID, failed=None)
     try:
         classes = await asyncio.to_thread(read_run_classes, target)
+        jobs = await asyncio.to_thread(read_killed_jobs, target)
         session = await resume_session(service, target, restore_runs=False)
     except Exception as exc:  # noqa: BLE001 - recorded for the Lab's Retry
         logger.warning("session restore failed", path=str(target), error=str(exc))
@@ -59,7 +63,11 @@ async def restore_row(service: Any, row: dict, target: Path | None = None) -> di
     if path_key(target) != path_key(path):
         registry.remove(path)
     applied = await apply_run_classes(
-        host_engine_or_none(service), session.session_id, classes, nudge=True
+        host_engine_or_none(service),
+        session.session_id,
+        classes,
+        nudge=True,
+        jobs=jobs,
     )
     logger.info(
         "Session restored after restart",
@@ -67,6 +75,7 @@ async def restore_row(service: Any, row: dict, target: Path | None = None) -> di
         session_id=session.session_id,
         stopped=applied["stopped"],
         interrupted=applied["interrupted"],
+        killed=applied["killed"],
     )
     return {
         "path": path,

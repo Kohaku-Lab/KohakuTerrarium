@@ -59,7 +59,7 @@ from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
-from kohakuterrarium.session import run_state
+from kohakuterrarium.session import job_reaper, run_state
 from kohakuterrarium.studio.sessions.live import live_sessions
 from kohakuterrarium.studio.sessions.live.restore import restore_live_sessions
 from kohakuterrarium.studio.sessions.live.run_classes import CONTINUE_NUDGE
@@ -832,6 +832,13 @@ class TestStudioIntegration:
         scripted_llm["script"] = [
             ScriptEntry("Quick answer.", match="quick question"),
             ScriptEntry("Long work. " * 200, match="long task", delay_per_chunk=0.05),
+            ScriptEntry(
+                "[/bash]\n@@run_in_background=true\n"
+                f'"{Path(sys.executable).as_posix()}" -c "import time; time.sleep(60)"'
+                "\n[bash/]",
+                match="start the sleeper",
+            ),
+            ScriptEntry("Rerunning the sleeper.", match="were killed"),
             ScriptEntry("Continuing the task.", match="server restarted"),
             "OK",
         ]
@@ -872,6 +879,34 @@ class TestStudioIntegration:
             delta = next(c for c in pair.creatures if c["name"] == "delta")
             await studio.service.stop_creature(delta["creature_id"])
 
+            # epsilon's turn ends with a background job still running.
+            jobber_dir = workspace_root / "creatures" / "jobber"
+            jobber_dir.mkdir(parents=True)
+            (jobber_dir / "config.yaml").write_text(
+                "name: jobber\nsystem_prompt: You run jobs.\ntool_format: bracket\n"
+                "tools:\n  - name: bash\n    type: builtin\n",
+                encoding="utf-8",
+            )
+            epsilon = await studio.sessions.start_creature(
+                str(jobber_dir), name="epsilon"
+            )
+            epsilon_cid = epsilon.creatures[0]["creature_id"]
+            epsilon_store = studio.engine._session_stores[epsilon.session_id]
+            await _drain_chat(
+                studio, epsilon.session_id, epsilon_cid, "start the sleeper"
+            )
+            for _ in range(200):
+                calls = [
+                    e
+                    for e in epsilon_store.get_events("epsilon")
+                    if e.get("type") == "tool_call" and e.get("name") == "bash"
+                ]
+                if calls:
+                    break
+                await asyncio.sleep(0.05)
+            assert calls, "the background bash job never started"
+            sleeper_job = calls[0]["call_id"]
+
             beta = await studio.sessions.start_creature(str(creature_dir), name="beta")
             beta_cid = beta.creatures[0]["creature_id"]
             beta_store = studio.engine._session_stores[beta.session_id]
@@ -887,7 +922,7 @@ class TestStudioIntegration:
 
             rows = {Path(r["path"]).name for r in live_sessions().rows()}
             assert Path(gone_path).name not in rows
-            assert len(rows) == 4
+            assert len(rows) == 5
             assert run_state.read_lifecycle(beta_store)["live"] is True
             alpha_store = studio.engine._session_stores[alpha.session_id]
             alpha_path = str(alpha_store.path)
@@ -928,10 +963,10 @@ class TestStudioIntegration:
             missing = [o for o in outcomes if o["status"] == "missing"]
             assert [Path(o["path"]).name for o in missing] == [Path(doomed_path).name]
             outcomes = [o for o in outcomes if o["status"] != "missing"]
-            assert [o["status"] for o in outcomes] == ["restored"] * 3
+            assert [o["status"] for o in outcomes] == ["restored"] * 4
             assert [r["claimed_by"] for r in live_sessions().rows()] == [
                 "next-boot"
-            ] * 3
+            ] * 4
             by_session = {o["session_id"]: o for o in outcomes}
             names = {s.session_id: s.name for s in studio.sessions.list()}
             by_name = {names[sid]: o for sid, o in by_session.items()}
@@ -943,8 +978,41 @@ class TestStudioIntegration:
                 [],
                 ["beta"],
             )
-            pair_name = next(n for n in by_name if n not in ("alpha", "beta"))
+            pair_name = next(
+                n for n in by_name if n not in ("alpha", "beta", "epsilon")
+            )
             assert pair_name == "pair-run"
+
+            # The graceful shutdown cancelled epsilon's background job; epsilon
+            # is told so once, and the job is not reported on a later restore.
+            assert by_name["epsilon"]["interrupted"] == []
+            assert by_name["epsilon"]["killed"] == {
+                "epsilon": [{"job_id": sleeper_job, "kind": "tool", "name": "bash"}]
+            }
+            assert by_name["alpha"]["killed"] == {}
+            epsilon_sid = by_name["epsilon"]["session_id"]
+            epsilon_cid2 = studio.sessions.get(epsilon_sid).creatures[0]["creature_id"]
+            for _ in range(200):
+                history = await studio.sessions.chat.history(epsilon_sid, epsilon_cid2)
+                replies = [
+                    m["content"]
+                    for m in history["messages"]
+                    if m["role"] == "assistant"
+                ]
+                if replies and replies[-1] == "Rerunning the sleeper.":
+                    break
+                await asyncio.sleep(0.05)
+            nudges = [
+                m["content"]
+                for m in history["messages"]
+                if m["role"] == "user" and "were killed" in str(m["content"])
+            ]
+            assert len(nudges) == 1
+            assert "tool `bash` (command=" in nudges[0]
+            assert f"), job {sleeper_job}, started" in nudges[0]
+            assert replies[-1] == "Rerunning the sleeper."
+            epsilon_store2 = studio.engine._session_stores[epsilon_sid]
+            assert job_reaper.reaped_ids(epsilon_store2, "epsilon") == {sleeper_job}
             assert (
                 by_name[pair_name]["stopped"],
                 by_name[pair_name]["interrupted"],
