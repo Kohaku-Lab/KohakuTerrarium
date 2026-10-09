@@ -459,12 +459,18 @@ class TestDeepSeekSearch:
         monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
         monkeypatch.setattr(web_search, "codex_search_available", lambda: False)
 
-        schema = WebSearchTool().runtime_option_schema()
+        tool = WebSearchTool()
+        schema = tool.runtime_option_schema()
 
         assert "deepseek" in schema["backend"]["disabled_values"]
         assert "codex" in schema["backend"]["disabled_values"]
         assert schema["backend"]["default"] == "duckduckgo"
         assert schema["backend"]["values"] == ["duckduckgo", "codex", "deepseek"]
+        with pytest.raises(ValueError, match="Codex subscription is not connected"):
+            tool.validate_runtime_options(
+                {"backend": "codex", "codex_model": "gpt-6.1-sol"}
+            )
+        assert tool.backend == "duckduckgo"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -496,6 +502,7 @@ class TestDeepSeekSearch:
                 )
 
         monkeypatch.setattr(web_search, "CodexSubscriptionSearchBackend", _CodexBackend)
+        monkeypatch.setattr(web_search, "codex_search_available", lambda: True)
 
         tool = WebSearchTool()
         options = tool.validate_runtime_options(
