@@ -29,6 +29,10 @@ except ImportError:  # pragma: no cover - optional dependency boundary
 
 DEFAULT_CODEX_SEARCH_MODEL = "gpt-5.6-luna"
 CODEX_SEARCH_MODELS = (
+    "gpt-6.1-sol",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-6-astra",
     "gpt-5.6-luna",
     "gpt-5.6-terra",
     "gpt-5.6-sol",

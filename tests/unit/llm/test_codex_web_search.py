@@ -458,7 +458,12 @@ class TestCodexSubscriptionSearchBackend:
         assert refresh_calls == 1
 
     @pytest.mark.asyncio
-    async def test_sends_forced_live_search_with_cached_subscription(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "model", [None, "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra"]
+    )
+    async def test_sends_forced_live_search_with_cached_subscription(
+        self, monkeypatch, model
+    ):
         captured = {}
 
         async def valid_tokens():
@@ -500,14 +505,19 @@ class TestCodexSubscriptionSearchBackend:
         monkeypatch.setattr(search_mod, "_load_valid_tokens", valid_tokens)
         monkeypatch.setattr(search_mod, "AsyncOpenAI", lambda **kwargs: _Client())
 
-        result = await CodexSubscriptionSearchBackend().search("query", 3, "CN")
+        backend = (
+            CodexSubscriptionSearchBackend()
+            if model is None
+            else CodexSubscriptionSearchBackend(model)
+        )
+        result = await backend.search("query", 3, "CN")
 
         assert captured["tools"] == [
             {"type": "web_search", "external_web_access": True}
         ]
         assert captured["tool_choice"] == {"type": "web_search"}
         assert captured["include"] == ["web_search_call.action.sources"]
-        assert captured["model"] == "gpt-5.6-luna"
+        assert captured["model"] == (model or "gpt-5.6-luna")
         assert captured["closed"] is True
         assert result.metadata["backend"] == "codex"
         assert result.sources[0]["url"] == "https://example.com"

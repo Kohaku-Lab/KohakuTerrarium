@@ -699,6 +699,30 @@ class TestLlmIntegration:
         assert codex_profile.backend_type == "codex"
         # bootstrap/llm.py branches on backend_type == "codex" -> CodexOAuthProvider.
 
+        for model in ("gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"):
+            profile = resolve_controller_llm({}, llm=f"codex/{model}")
+            assert profile.model == model
+            assert profile.max_context == 272000
+            assert profile.reasoning_effort == "medium"
+            selected = resolve_controller_llm(
+                {}, llm=f"codex/{model}@reasoning=max,context=1m,speed=fast"
+            )
+            provider = _create_from_profile(selected)
+            assert isinstance(provider, CodexOAuthProvider)
+            assert provider.model == model
+            assert provider.reasoning_effort == "max"
+            assert provider.service_tier == "priority"
+            assert provider._websocket_mode is True
+            assert selected.max_context == 1000000
+            entry = next(
+                e for e in list_all() if e["provider"] == "codex" and e["name"] == model
+            )
+            assert entry["model"] == model
+        with pytest.raises(ValueError, match="ultra"):
+            resolve_controller_llm({}, llm="codex/gpt-6-luna@reasoning=ultra")
+        with pytest.raises(ValueError, match="none"):
+            resolve_controller_llm({}, llm="codex/gpt-6.1-sol@reasoning=none")
+
         daybreak_profile = resolve_controller_llm({}, llm="gpt-daybreak-blue-latest")
         assert daybreak_profile is not None
         assert daybreak_profile.name == "gpt-daybreak-blue-latest"

@@ -51,6 +51,27 @@ Or override at the command line for one run:
 kt run path/to/creature --llm gpt-5.4
 ```
 
+### GPT-6 through Codex OAuth
+
+After `kt login codex`, select `codex/gpt-6.1-sol`, `codex/gpt-6-sol`,
+`codex/gpt-6-luna`, or `codex/gpt-6-astra`. Model availability still depends
+on the account and rollout; a local preset does not grant access. See the
+[official Codex model documentation](https://learn.chatgpt.com/docs/models).
+
+```yaml
+controller:
+  llm: codex/gpt-6.1-sol@reasoning=high,speed=fast
+```
+
+The added Sol and Luna presets default to medium reasoning and a conservative
+272K operating context. `context=1m` opts into the existing larger-context
+variation. This operating limit controls KT's compaction threshold, not the
+model's advertised API context size. Astra's existing defaults are unchanged.
+GPT-6 Sol and GPT-6.1 Sol expose low through ultra reasoning; Luna stops at max.
+These are subscription controls, separate from direct OpenAI API settings.
+Existing aliases such as `sol` continue to resolve to their previous models;
+use the explicit provider/model identifiers to select the new presets.
+
 ### Daybreak Blue through Codex OAuth
 
 Accounts provisioned for [Daybreak Blue](https://developers.openai.com/api/docs/models/gpt-daybreak-blue-latest)
@@ -124,6 +145,20 @@ use `/module set web_search backend codex`; this is independent of the
 creature's active LLM. To use DeepSeek, run `kt config key set deepseek`, then
 select `backend: deepseek`. Set `fallback: duckduckgo` when a transient failure
 of an explicitly selected Codex or DeepSeek backend should fall back.
+
+The Codex search model can be selected independently, for example:
+
+```yaml
+tools:
+  - name: web_search
+    backend: codex
+    codex_model: gpt-6.1-sol
+```
+
+The search selector also includes `gpt-6-sol`, `gpt-6-luna`, and
+`gpt-6-astra`, alongside the existing 5.x choices. Its default remains
+`gpt-5.6-luna`; adding presets does not switch an existing creature's search
+backend or model.
 
 Custom (local module):
 

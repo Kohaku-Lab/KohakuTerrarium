@@ -459,15 +459,38 @@ class TestDeepSeekSearch:
         monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
         monkeypatch.setattr(web_search, "codex_search_available", lambda: False)
 
-        schema = WebSearchTool().runtime_option_schema()
+        tool = WebSearchTool()
+        schema = tool.runtime_option_schema()
 
         assert "deepseek" in schema["backend"]["disabled_values"]
         assert "codex" in schema["backend"]["disabled_values"]
         assert schema["backend"]["default"] == "duckduckgo"
         assert schema["backend"]["values"] == ["duckduckgo", "codex", "deepseek"]
+        with pytest.raises(ValueError, match="Codex subscription is not connected"):
+            tool.validate_runtime_options(
+                {"backend": "codex", "codex_model": "gpt-6.1-sol"}
+            )
+        assert tool.backend == "duckduckgo"
 
     @pytest.mark.asyncio
-    async def test_explicit_codex_backend_uses_subscription_search(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "gpt-6.1-sol",
+            "gpt-6-sol",
+            "gpt-6-luna",
+            "gpt-6-astra",
+            "gpt-5.6-luna",
+            "gpt-5.6-terra",
+            "gpt-5.6-sol",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+        ],
+    )
+    async def test_explicit_codex_backend_uses_subscription_search(
+        self, monkeypatch, model
+    ):
         class _CodexBackend:
             def __init__(self, model):
                 self.model = model
@@ -479,10 +502,16 @@ class TestDeepSeekSearch:
                 )
 
         monkeypatch.setattr(web_search, "CodexSubscriptionSearchBackend", _CodexBackend)
+        monkeypatch.setattr(web_search, "codex_search_available", lambda: True)
 
-        tool = WebSearchTool(ToolConfig(extra={"backend": "codex"}))
+        tool = WebSearchTool()
+        options = tool.validate_runtime_options(
+            {"backend": "codex", "codex_model": model}
+        )
+        tool.refresh_runtime_options(options)
         result = await tool._execute({"query": "anything"})
 
+        assert result.metadata["model"] == model
         assert result.output == "codex result"
         assert result.metadata["backend"] == "codex"
         assert result.metadata["requested_backend"] == "codex"
@@ -601,3 +630,13 @@ class TestDeepSeekSearch:
         assert response.sources == []
         assert "not-a-citation" not in response.output
         assert response.metadata["annotation_count"] == 1
+
+
+def test_codex_search_defaults_and_unknown_model_validation():
+    tool = WebSearchTool()
+    assert tool.backend == "duckduckgo"
+    assert tool.codex_model == "gpt-5.6-luna"
+    assert tool.fallback == "none"
+    with pytest.raises(ValueError, match="must be one of"):
+        tool.validate_runtime_options({"codex_model": "unrecognized-model"})
+    assert tool.codex_model == "gpt-5.6-luna"

@@ -10,6 +10,7 @@ may be lower than the vendor-advertised maximum for reliability.
 from typing import Any
 
 from kohakuterrarium.llm.antigravity_presets import PRESETS as AGY_PRESETS
+from kohakuterrarium.llm.codex_presets import PRESETS as GPT6_CODEX_PRESETS
 
 from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES, ALIASES
 from kohakuterrarium.llm.preset_groups import (
@@ -23,7 +24,6 @@ from kohakuterrarium.llm.preset_groups import (
     _GLM_EFFORT_GROUP,
     _GPT56_MODE_GROUP,
     _GPT56_REASONING_GROUP,
-    _GPT6_REASONING_GROUP,
     _GPT5X_CONTEXT_GROUP,
     _GROK_EFFORT_GROUP,
     _MIMO_THINKING_GROUP,
@@ -74,24 +74,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "provider_native_tools": [],
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
     },
-    # GPT-6 Astra. Codex's catalog marks it ``visibility: hide`` with
-    # ``priority: 1`` and ``minimal_client_version: 0.153.0`` — rolled out but
-    # not yet in the model picker. Same shape as the 5.6 family; the one
-    # difference is ``multi_agent_reasoning_effort: xhigh``, which the Codex
-    # app uses for its own delegation and does not put on the wire.
-    "gpt-6-astra": {
-        "provider": "codex",
-        "model": "gpt-6-astra",
-        "max_context": 1000000,
-        "max_output": 128000,
-        "reasoning_effort": "xhigh",
-        "extra_body": {"websocket_mode": True},
-        "variation_groups": {
-            "context": _GPT5X_CONTEXT_GROUP,
-            "reasoning": _GPT6_REASONING_GROUP,
-            "speed": _CODEX_SPEED_GROUP,
-        },
-    },
+    **GPT6_CODEX_PRESETS,
     "gpt-daybreak-blue-latest": {
         "provider": "codex",
         "model": "gpt-daybreak-blue-latest",
