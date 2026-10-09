@@ -119,6 +119,8 @@ class TestGetProfile:
     @pytest.mark.parametrize(
         ("preset", "model", "max_context"),
         [
+            ("grok-4.7-subscription", "grok-4.7", 500000),
+            ("grok-4.7-build-fast-subscription", "grok-4.7-build-fast", 500000),
             ("grok-4.6-subscription", "grok-4.6", 500000),
             ("grok-4.5-subscription", "grok-4.5", 500000),
         ],
@@ -132,6 +134,12 @@ class TestGetProfile:
         assert profile.provider == "grok-subscription"
         assert profile.backend_type == "grok-subscription"
         assert profile.max_context == max_context
+        assert profile.max_output == 65536
+        assert profile.base_url == ""
+        assert profile.api_key_env == ""
+        assert profile.backend_native_tools == ["grok_image_gen", "video_gen"]
+        assert get_profile(f"openrouter/{preset}") is None
+        assert resolve_controller_llm({"model": model}).provider == "grok-subscription"
 
     def test_provider_arg_disambiguates(self):
         profile = get_profile("gpt-5.4", provider="openrouter")
@@ -670,6 +678,8 @@ class TestLoadProfilesAndListAll:
             name for provider, name in keys if provider == "grok-subscription"
         }
         assert grok_names == {
+            "grok-4.7-subscription",
+            "grok-4.7-build-fast-subscription",
             "grok-4.6-subscription",
             "grok-4.5-subscription",
         }

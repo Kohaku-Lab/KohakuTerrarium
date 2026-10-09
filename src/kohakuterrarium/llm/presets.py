@@ -807,10 +807,19 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": {"reasoning": {"enabled": True}},
         "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
-    # ═══════════════════════════════════════════════════════
-    #  xAI Grok via a reusable local subscription login.
-    #  Keep this explicit suffix separate from OpenRouter/API billing.
-    # ═══════════════════════════════════════════════════════
+    # xAI Grok subscription models.
+    "grok-4.7-subscription": {
+        "provider": "grok-subscription",
+        "model": "grok-4.7",
+        "max_context": 500000,
+        "max_output": 65536,
+    },
+    "grok-4.7-build-fast-subscription": {
+        "provider": "grok-subscription",
+        "model": "grok-4.7-build-fast",
+        "max_context": 500000,
+        "max_output": 65536,
+    },
     "grok-4.6-subscription": {
         "provider": "grok-subscription",
         "model": "grok-4.6",
@@ -823,15 +832,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 500000,
         "max_output": 65536,
     },
-    # ═══════════════════════════════════════════════════════
-    #  xAI Grok series (OpenRouter).
-    #   - grok-4.5:      the agent-oriented flagship. Reasoning
-    #                    effort low/medium/high (default high),
-    #                    cannot be disabled.
-    #   - grok-4.1-fast: cheap 2M-context agentic/tool-calling
-    #                    model; reasoning is an on/off toggle.
-    #   - grok-code-fast: cheap coding model, reasoning mandatory.
-    # ═══════════════════════════════════════════════════════
+    # xAI Grok models via OpenRouter.
     "grok-4.5": {
         "provider": "openrouter",
         "model": "x-ai/grok-4.5",

@@ -73,7 +73,7 @@ from kohakuterrarium.llm.base import (
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
-from kohakuterrarium.llm.grok_auth import GrokToken, GrokTokens
+from kohakuterrarium.llm.grok_auth import GROK_CLI_BASE_URL, GrokToken, GrokTokens
 from kohakuterrarium.llm.grok_image_gen import GrokImageClient
 from kohakuterrarium.llm.grok_media import GrokMediaClient
 from kohakuterrarium.llm.message import (
@@ -1606,6 +1606,55 @@ class TestLlmIntegration:
             return None
 
         monkeypatch.setattr(GrokTokens, "ensure_fresh_cli", no_refresh)
+        subscription_token = GrokToken(
+            access_token="subscription-test",
+            source="grok-cli",
+            base_url=GROK_CLI_BASE_URL,
+        )
+        monkeypatch.setattr(GrokTokens, "load_candidates", lambda: [subscription_token])
+        subscription_requests = []
+
+        def subscription_response(request):
+            body = json.loads(request.content)
+            subscription_requests.append(
+                (
+                    str(request.url),
+                    body["model"],
+                    request.headers["x-grok-model-override"],
+                )
+            )
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                text='data: {"choices":[{"index":0,"delta":{"content":"ok"}}]}\n\n'
+                "data: [DONE]\n\n",
+            )
+
+        for model in ("grok-4.7", "grok-4.7-build-fast"):
+            selector = f"grok-subscription/{model}-subscription"
+            profile = resolve_controller_llm({"llm": selector})
+            subscription_provider = _create_from_profile(profile)
+            initial_client = subscription_provider._client
+            subscription_provider._client = initial_client.with_options(
+                http_client=httpx.AsyncClient(
+                    transport=httpx.MockTransport(subscription_response)
+                )
+            )
+            await initial_client.close()
+            try:
+                result = [
+                    chunk
+                    async for chunk in subscription_provider.chat([UserMessage("Hi")])
+                ]
+                assert "".join(result) == "ok"
+                assert subscription_requests[-1] == (
+                    f"{GROK_CLI_BASE_URL}/chat/completions",
+                    model,
+                    model,
+                )
+            finally:
+                await subscription_provider._client.close()
+
         monkeypatch.setattr(
             GrokTokens,
             "load_candidates",
