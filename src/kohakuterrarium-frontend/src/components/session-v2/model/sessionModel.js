@@ -10,6 +10,7 @@ import { visibleChannels } from "./sessionChannels"
 /** The fixed session tabs, in display order. */
 export const SESSION_TABS = [
   { id: "chat", icon: "i-carbon-chat" },
+  { id: "graph", icon: "i-carbon-network-4" },
   { id: "status", icon: "i-carbon-dashboard" },
   { id: "workspace", icon: "i-carbon-code" },
   { id: "debug", icon: "i-carbon-debug" },

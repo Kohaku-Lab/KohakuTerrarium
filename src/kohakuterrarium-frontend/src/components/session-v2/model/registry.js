@@ -32,6 +32,7 @@ export const SIDES = {
 
 /** Whole-page session tabs other than Chat. */
 export const TABS = {
+  graph: lazy(() => import("../graph/GraphTab.vue")),
   status: lazy(() => import("../status/StatusTab.vue")),
   workspace: lazy(() => import("../workspace/WorkspaceTab.vue")),
   debug: lazy(() => import("../debug/DebugTab.vue")),
