@@ -68,8 +68,8 @@ describe("models and cost", () => {
 
   it("formats tokens and errors", () => {
     expect(formatTokens(0)).toBe("0")
-    expect(formatTokens(1500)).toBe("1.5k")
-    expect(formatTokens(2_500_000)).toBe("2.50M")
+    expect(formatTokens(1500)).toBe("1.5K")
+    expect(formatTokens(2_500_000)).toBe("2.5M")
     expect(errorText({ response: { data: { detail: "nope" } } })).toBe("nope")
     expect(errorText(new Error("boom"))).toBe("boom")
   })

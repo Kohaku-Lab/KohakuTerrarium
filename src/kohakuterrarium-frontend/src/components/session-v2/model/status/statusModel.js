@@ -8,10 +8,12 @@ import { tabKeyFor } from "../creatureKeys"
 import { visibleChannels } from "../sessionChannels"
 import { creatureStatus, isPrivileged } from "../sessionModel"
 
+/** A token count as "950", "12.3K", "400K", "1M", "2.5M". */
 export function formatTokens(n) {
   const v = Number(n) || 0
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}K`
+  const scaled = (unit, suffix) => `${(v / unit).toFixed(1).replace(/\.0$/, "")}${suffix}`
+  if (v >= 999_950) return scaled(1_000_000, "M")
+  if (v >= 1000) return scaled(1000, "K")
   return String(v)
 }
 

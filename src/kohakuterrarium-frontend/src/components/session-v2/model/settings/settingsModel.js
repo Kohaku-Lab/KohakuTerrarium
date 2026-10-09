@@ -86,12 +86,7 @@ export function estimateCost(id, usage) {
   )
 }
 
-export function formatTokens(n) {
-  if (!n) return "0"
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M"
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + "k"
-  return String(n)
-}
+export { formatTokens } from "../status/statusModel"
 
 /** Error text of an API failure. */
 export function errorText(err) {
