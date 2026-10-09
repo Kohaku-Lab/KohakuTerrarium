@@ -500,6 +500,20 @@ Routed through the native Anthropic-compatible Messages API. Effort via
 - `glm-4.7`
 - `glm-4.5-air`
 
+### xAI Grok (subscription)
+
+Reuse a local Grok CLI subscription login with the `grok-subscription` backend:
+
+- `grok-subscription/grok-4.7-subscription` → `grok-4.7`
+- `grok-subscription/grok-4.7-build-fast-subscription` → `grok-4.7-build-fast`
+- `grok-subscription/grok-4.6-subscription` → `grok-4.6`
+- `grok-subscription/grok-4.5-subscription` → `grok-4.5`
+
+These presets use a 500,000-token context limit and a 65,536-token output
+limit. Model access depends on the subscription account. Fast uses the
+subscription's Fast model ID; it does not select an OpenRouter or API-key
+provider. Adding these presets does not change an existing default model.
+
 ### xAI Grok (OpenRouter)
 
 - `grok-4` (`grok`)
