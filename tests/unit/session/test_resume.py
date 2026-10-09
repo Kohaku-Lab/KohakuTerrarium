@@ -336,6 +336,27 @@ class TestRestoreTurnBranchState:
         finally:
             store.close()
 
+    def test_turn_zero_events_stay_out_of_parent_path(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice", "user_input_injected", {}, turn_index=0, branch_id=0
+            )
+            for ti in (1, 2, 3):
+                store.append_event(
+                    "alice", "user_message", {}, turn_index=ti, branch_id=1
+                )
+            store.append_event(
+                "alice", "turn_token_usage", {}, turn_index=0, branch_id=0
+            )
+            store.flush()
+            agent = _FakeAgent()
+            _restore_turn_branch_state(agent, store, "alice")
+            assert agent._turn_index == 3
+            assert agent._parent_branch_path == [(1, 1), (2, 1)]
+        finally:
+            store.close()
+
     def test_restores_one_coherent_ancestry_path(self, tmp_path):
         # Turn 1 has branches 1+2; turn 2 branch 1 exists ONLY under
         # turn1/branch1. Per-turn independent max produced
@@ -1011,6 +1032,51 @@ class TestSnapshotMismatchesBranch:
             }
             # agent landed on branch2 (sibling) -> snapshot must be rebuilt
             agent = _BranchAgent(turn_index=2, branch_id=2, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is True
+        finally:
+            store.close()
+
+    def test_turn_zero_entry_does_not_make_matching_snapshot_stale(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            }
+            restored = _BranchAgent(
+                turn_index=3, branch_id=1, parent_branch_path=[(0, 0), (1, 1), (2, 1)]
+            )
+            assert snapshot_mismatches_branch(store, restored, "alice") is False
+        finally:
+            store.close()
+
+    def test_turn_zero_in_old_tag_does_not_make_snapshot_stale(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 0), (1, 1), (2, 1)],
+            }
+            agent = _BranchAgent(
+                turn_index=3, branch_id=1, parent_branch_path=[(1, 1), (2, 1)]
+            )
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_sibling_branch_still_mismatches_despite_turn_zero(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            agent = _BranchAgent(
+                turn_index=2, branch_id=2, parent_branch_path=[(0, 0), (1, 1)]
+            )
             assert snapshot_mismatches_branch(store, agent, "alice") is True
         finally:
             store.close()

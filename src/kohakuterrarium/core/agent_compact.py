@@ -38,11 +38,17 @@ class AgentCompactMixin:
             )
 
     async def _compact_overflow_rescue(self) -> list[dict[str, Any]] | None:
-        """Wait out an in-flight compact and retry with the spliced
-        conversation instead of dropping tool data."""
+        """Compact (starting a round if none is running) and retry with the
+        spliced conversation instead of dropping tool data."""
         manager = getattr(self, "compact_manager", None)
-        if manager is None or not manager.is_compacting:
+        if manager is None:
             return None
+        # An overflowing request carries no usage, so usage-driven auto-compact
+        # never starts; the rescue itself must.
+        if not manager.is_compacting:
+            # Like auto-compact, the rescue honours compact.enabled=false.
+            if not manager.config.enabled or not manager.trigger_compact():
+                return None
         # When the compactor fell back to the ACTIVE provider, an
         # overflow inside the summarization call fires this hook from
         # within the compact task itself — waiting would deadlock on

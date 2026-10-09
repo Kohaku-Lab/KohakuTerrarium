@@ -317,10 +317,60 @@ class TestCompactOverflowRescue:
         a.config = types.SimpleNamespace(name="alice")
         return a
 
-    async def test_returns_none_when_no_compact_running(self):
+    async def test_starts_compact_when_none_running_and_returns_spliced(self):
         a = self._agent()
-        a.compact_manager = types.SimpleNamespace(is_compacting=False)
+        spliced = [{"role": "system", "content": "summary"}]
+        calls = []
+
+        def trigger():
+            calls.append("trigger")
+            manager.is_compacting = True
+            return True
+
+        async def wait():
+            calls.append("wait")
+            manager.is_compacting = False
+
+        manager = types.SimpleNamespace(
+            is_compacting=False,
+            config=types.SimpleNamespace(enabled=True),
+            trigger_compact=trigger,
+            wait_for_current=wait,
+        )
+        a.compact_manager = manager
+        a.controller = types.SimpleNamespace(
+            conversation=types.SimpleNamespace(to_messages=lambda: spliced)
+        )
+        assert await a._compact_overflow_rescue() == spliced
+        assert calls == ["trigger", "wait"]
+
+    async def test_returns_none_when_compact_cannot_start(self):
+        a = self._agent()
+        waited = []
+
+        async def wait():  # pragma: no cover - must not be awaited
+            waited.append(True)
+
+        a.compact_manager = types.SimpleNamespace(
+            is_compacting=False,
+            config=types.SimpleNamespace(enabled=True),
+            trigger_compact=lambda: False,
+            wait_for_current=wait,
+        )
         assert await a._compact_overflow_rescue() is None
+        assert waited == []
+
+    async def test_does_not_start_compact_when_compaction_disabled(self):
+        a = self._agent()
+        triggered = []
+        a.compact_manager = types.SimpleNamespace(
+            is_compacting=False,
+            config=types.SimpleNamespace(enabled=False),
+            trigger_compact=lambda: triggered.append(True) or True,
+            wait_for_current=None,
+        )
+        assert await a._compact_overflow_rescue() is None
+        assert triggered == []
 
     async def test_rescue_from_inside_compact_task_returns_none(self):
         # Compactor fell back to the ACTIVE provider: the overflow hook

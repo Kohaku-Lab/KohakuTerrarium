@@ -226,7 +226,9 @@ def _restore_turn_branch_state(
     agent._turn_index = max_turn
     agent._branch_id = selected[max_turn]
     agent._parent_branch_path = [
-        (t, selected[t]) for t in sorted(selected.keys()) if t < max_turn
+        (t, selected[t])
+        for t in sorted(selected.keys())
+        if 0 < t < max_turn and selected[t] > 0
     ]
     logger.debug(
         "Turn/branch state restored",

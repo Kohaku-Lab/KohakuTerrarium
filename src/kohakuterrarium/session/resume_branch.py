@@ -200,9 +200,18 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
     # snapshot rather than triggering an unnecessary replay.
     if not isinstance(a_ti, int) or not isinstance(a_bi, int) or a_ti <= 0 or a_bi <= 0:
         return False
-    snapshot_path = _safe_branch_path(branch.get("parent_branch_path")) + [(ti, bi)]
-    agent_path = _safe_branch_path(a_ppath) + [(a_ti, a_bi)]
-    return not is_path_prefix(snapshot_path, agent_path)
+    snapshot_path = _turn_path(_safe_branch_path(branch.get("parent_branch_path")))
+    agent_path = _turn_path(_safe_branch_path(a_ppath))
+    return not is_path_prefix(snapshot_path + [(ti, bi)], agent_path + [(a_ti, a_bi)])
+
+
+def _turn_path(path: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Branch path restricted to real turns, as live turns record it.
+
+    Turn 0 holds events from before the first user turn and is never part
+    of a live parent path, so it must not decide whether paths diverge.
+    """
+    return [(t, b) for t, b in path if t > 0 and b > 0]
 
 
 def replayed_messages_for(

@@ -143,5 +143,5 @@ def reload_raw_prefix_for_target(
     agent._parent_branch_path = [
         (turn, branch)
         for turn, branch in prefix.branch_view.items()
-        if turn < target.turn_index
+        if 0 < turn < target.turn_index and branch > 0
     ]
