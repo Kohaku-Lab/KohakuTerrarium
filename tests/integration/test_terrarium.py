@@ -38,6 +38,7 @@ from kohakuterrarium.core.config_types import (
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.studio.persistence.viewer.exchanges import build_exchanges_payload
 import kohakuterrarium.terrarium.session_coord as _session_coord
 from kohakuterrarium.terrarium.drive.store import (
     DriveRepositoryClosedError,
@@ -1179,6 +1180,15 @@ class TestTerrariumIntegration:
         assert {c["name"] for c in rg_graphs[gid]["channels"]} == {"relay"}
         # Each graph in the snapshot is tagged with the node id.
         assert rg_graphs[gid]["node_id"] == service.node_id
+        # It names the saved session the graph records into, and that name
+        # reads back the store's summary through the viewer payload.
+        assert rg_graphs[gid]["session_name"] == "hotplug-replaced"
+        replacement.meta["summary"] = {"text": "Relaying pings", "source": "llm"}
+        digest = build_exchanges_payload(replacement, rg_graphs[gid]["session_name"])
+        assert (digest["session_name"], digest["summary"]) == (
+            "hotplug-replaced",
+            "Relaying pings",
+        )
 
         # attach_policies — what live streams the host advertises. The
         # base policies are always present; with a wired channel in the

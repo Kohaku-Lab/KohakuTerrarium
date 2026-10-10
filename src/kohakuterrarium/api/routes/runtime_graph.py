@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.sessions import lifecycle
+from kohakuterrarium.terrarium.creature_ops import saved_session_name
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import TerrariumService
 from kohakuterrarium.terrarium.topology import GraphTopology
@@ -68,6 +69,7 @@ def _graph_to_dict(engine: Terrarium, graph: GraphTopology) -> dict[str, Any]:
         "config_path": meta.get("config_path", ""),
         "pwd": meta.get("pwd", ""),
         "has_root": bool(meta.get("has_root", False)),
+        "session_name": saved_session_name(engine, graph.graph_id),
         "creatures": creatures,
         "channels": channels,
         "output_edges": _output_edges_for_graph(engine, graph, creatures),

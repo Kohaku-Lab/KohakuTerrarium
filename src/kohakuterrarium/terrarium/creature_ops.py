@@ -19,6 +19,7 @@ No function in this module imports from ``studio`` or ``api``.
 
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import kohakuterrarium.terrarium.channels as _terrarium_channels
@@ -759,6 +760,23 @@ def build_runtime_graph_snapshot_for(
     }
 
 
+def saved_session_name(engine: Terrarium, graph_id: str) -> str:
+    """Saved-session name a graph records into, or "" when it records nothing.
+
+    The name is the store file's stem without format suffixes, the same key
+    the saved-sessions list and viewer routes use.
+    """
+    store = engine._session_stores.get(graph_id)
+    path = getattr(store, "path", "") if store is not None else ""
+    if not path:
+        return ""
+    name = Path(str(path)).name
+    for suffix in (".kohakutr", ".kt"):
+        if suffix in name:
+            return name[: name.index(suffix)]
+    return Path(name).stem
+
+
 def _graph_to_dict(
     engine: Terrarium,
     graph: GraphTopology,
@@ -774,6 +792,7 @@ def _graph_to_dict(
         "config_path": meta.get("config_path", ""),
         "pwd": meta.get("pwd", ""),
         "has_root": bool(meta.get("has_root", False)),
+        "session_name": saved_session_name(engine, graph.graph_id),
         "creatures": creatures,
         "channels": _channels_for_graph(engine, graph),
         "output_edges": _output_edges_for_graph(engine, graph, creatures),

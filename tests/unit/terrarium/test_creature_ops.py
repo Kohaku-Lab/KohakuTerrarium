@@ -677,3 +677,20 @@ class TestBuildRuntimeGraphSnapshot:
         meta = lambda gid: {"kind": "creature", "name": "alice"}
         out = co.build_runtime_graph_snapshot_for(eng, meta_lookup=meta)
         assert out["graphs"][0]["name"] == "alice"
+        assert out["graphs"][0]["session_name"] == ""
+
+    @pytest.mark.parametrize(
+        "path, name",
+        [
+            ("/s/night_ab12.kohakutr", "night_ab12"),
+            ("/s/night_ab12.kohakutr.v2", "night_ab12"),
+            ("/s/legacy_1.kt", "legacy_1"),
+            ("/s/plain.db", "plain"),
+            ("", ""),
+        ],
+    )
+    def test_saved_session_name_is_the_store_file_stem(self, path, name):
+        eng = _Engine()
+        eng._session_stores["g1"] = SimpleNamespace(path=path)
+        assert co.saved_session_name(eng, "g1") == name
+        assert co.saved_session_name(eng, "missing") == ""

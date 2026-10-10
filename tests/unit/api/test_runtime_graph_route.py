@@ -1,6 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.api.routes.runtime_graph`."""
 
 from datetime import datetime
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -57,11 +58,14 @@ class _FakeEnv:
 
 
 class _FakeEngine:
-    def __init__(self, graphs=None, creatures=None, envs=None, wiring=None):
+    def __init__(
+        self, graphs=None, creatures=None, envs=None, wiring=None, stores=None
+    ):
         self._graphs_list = graphs or []
         self._creatures = creatures or {}
         self._environments = envs or {}
         self._wiring = wiring or {}
+        self._session_stores = stores or {}
 
     def list_graphs(self):
         return list(self._graphs_list)
@@ -154,6 +158,16 @@ class TestGraphToDict:
         engine = _FakeEngine(graphs=[graph], creatures={"c1": c1, "c2": c2})
         out = rg_mod._graph_to_dict(engine, graph)
         assert out["kind"] == "terrarium"
+
+    def test_names_the_saved_session_the_graph_records_into(self, monkeypatch):
+        recorded = GraphTopology(graph_id="g1", creature_ids=set())
+        unrecorded = GraphTopology(graph_id="g2", creature_ids=set())
+        monkeypatch.setattr(rg_mod.lifecycle, "get_session_meta", lambda eng, gid: {})
+        store = SimpleNamespace(path="/sessions/night_ab12.kohakutr")
+        engine = _FakeEngine(graphs=[recorded, unrecorded], stores={"g1": store})
+        out = rg_mod.build_runtime_graph_snapshot(engine)
+        names = {g["graph_id"]: g["session_name"] for g in out["graphs"]}
+        assert names == {"g1": "night_ab12", "g2": ""}
 
 
 # ── _creatures_for_graph ───────────────────────────────────────
