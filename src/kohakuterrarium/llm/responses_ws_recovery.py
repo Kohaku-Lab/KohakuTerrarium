@@ -16,6 +16,9 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Seconds a cancelled request waits for its close handshake before propagating.
+CANCEL_CLOSE_GRACE = 1.0
+
 
 def event_field(value: Any, name: str) -> Any:
     """Read a wire field from SDK objects or JSON dictionaries."""
@@ -243,7 +246,7 @@ class WSRecovery:
                         await asyncio.sleep(delay)
                         await self.status("reconnecting")
         except (asyncio.CancelledError, GeneratorExit):
-            await session.close()
+            await session.close(grace=CANCEL_CLOSE_GRACE)
             raise
         finally:
             await self.status(None)

@@ -21,6 +21,9 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Longest a waiting close() blocks on handshakes; unfinished ones stay owned.
+SHUTDOWN_CLOSE_TIMEOUT = 10.0
+
 # Hosted tools accepted only on a connection whose first request declared them.
 CONNECTION_GATED_TOOLS = frozenset({"image_generation"})
 
@@ -52,6 +55,8 @@ class ResponsesWSSession:
         self._assistant_echo: list[dict[str, Any]] | None = None
         # Gated tools the current connection's first request declared; None before it.
         self._connection_tools: frozenset[str] | None = None
+        # Close handshakes still running, kept alive past a cancelled caller.
+        self._closing: set[asyncio.Task] = set()
 
     @property
     def busy(self) -> bool:
@@ -73,28 +78,46 @@ class ResponsesWSSession:
         if self._prev_id is not None:
             self._assistant_echo = deepcopy(items)
 
-    async def close(self) -> None:
-        """Close the connection and reset all state."""
+    async def close(self, *, grace: float | None = None) -> None:
+        """Close the connection, reset all state, and await pending handshakes.
+
+        Handshakes run as session-owned tasks, so a caller that stops waiting
+        (``grace`` elapsed, or cancellation) never orphans one; the wait is
+        capped at ``grace`` seconds, or ``SHUTDOWN_CLOSE_TIMEOUT`` by default.
+        """
         self.invalidate()
         connection = self._connection
         self._connection = None
         self._manager = None
         self._connection_tools = None
         if connection is not None:
-            receive = getattr(connection, "recv_bytes", None)
-            drain = (
-                asyncio.create_task(self._discard_during_close(receive))
-                if callable(receive)
-                else None
+            task = asyncio.create_task(self._close_connection(connection))
+            self._closing.add(task)
+            task.add_done_callback(self._closing.discard)
+        if self._closing:
+            limit = SHUTDOWN_CLOSE_TIMEOUT if grace is None else grace
+            _, pending = await asyncio.shield(
+                asyncio.wait(set(self._closing), timeout=limit)
             )
-            try:
-                await connection.close()
-            except Exception:
-                logger.debug("Responses WS close failed", exc_info=True)
-            finally:
-                if drain is not None:
-                    drain.cancel()
-                    await asyncio.gather(drain, return_exceptions=True)
+            if pending:
+                logger.debug("Responses WS close still pending", pending=len(pending))
+
+    async def _close_connection(self, connection: Any) -> None:
+        """Run one close handshake while draining the receive queue."""
+        receive = getattr(connection, "recv_bytes", None)
+        drain = (
+            asyncio.create_task(self._discard_during_close(receive))
+            if callable(receive)
+            else None
+        )
+        try:
+            await connection.close()
+        except Exception:
+            logger.debug("Responses WS close failed", exc_info=True)
+        finally:
+            if drain is not None:
+                drain.cancel()
+                await asyncio.gather(drain, return_exceptions=True)
 
     @staticmethod
     async def _discard_during_close(receive: Callable[[], Any]) -> None:

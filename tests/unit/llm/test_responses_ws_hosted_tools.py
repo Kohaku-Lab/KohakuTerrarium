@@ -1,10 +1,13 @@
 """Connection-level hosted-tool compatibility for Responses WebSocket sessions."""
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm import responses_ws, responses_ws_recovery
 from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.llm.responses_ws import (
     ResponsesWSError,
@@ -220,6 +223,69 @@ class TestHostedToolRejection:
         assert not h.conn.closed
         await h.run([USER1], base=HOSTED)
         assert h.factory_calls == 1
+
+
+class _SlowCloseConnection(FakeConnection):
+    """Close handshake that blocks until released, with a cancellable drain."""
+
+    def __init__(self):
+        super().__init__()
+        self.close_started = asyncio.Event()
+        self.close_allowed = asyncio.Event()
+        self.drain_cancelled_after_release: list[bool] = []
+
+    async def recv_bytes(self):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.drain_cancelled_after_release.append(self.close_allowed.is_set())
+            raise
+
+    async def close(self):
+        self.close_started.set()
+        await self.close_allowed.wait()
+        await super().close()
+
+
+class TestCancelSafeReconnect:
+    async def test_single_cancel_during_proactive_close_exits_promptly(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(responses_ws_recovery, "CANCEL_CLOSE_GRACE", 0.05)
+        old_conn = _SlowCloseConnection()
+        old_conn.scripts = [[completed("r1")]]
+        h = Harness()
+        h.connections = [old_conn, scripted(completed("r2"))]
+        await h.run([USER1], base=PLAIN)
+
+        task = asyncio.create_task(h.run([USER1], base=HOSTED))
+        await old_conn.close_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2)
+        assert not h.session.busy and h.session._connection is None
+        assert len(h.session._closing) == 1 and not old_conn.closed
+        assert old_conn.drain_cancelled_after_release == []
+
+        old_conn.close_allowed.set()
+        await h.session.close()
+        assert old_conn.closed and not h.session._closing
+        assert old_conn.drain_cancelled_after_release == [True]
+        events = await h.run([USER1], base=HOSTED)
+        assert events[-1].response.id == "r2"
+
+    async def test_waiting_close_is_bounded_and_keeps_ownership(self, monkeypatch):
+        monkeypatch.setattr(responses_ws, "SHUTDOWN_CLOSE_TIMEOUT", 0.05)
+        conn = _SlowCloseConnection()
+        conn.scripts = [[completed("r1")]]
+        h = Harness()
+        h.connections = [conn]
+        await h.run([USER1], base=PLAIN)
+        await asyncio.wait_for(h.session.close(), timeout=2)
+        assert len(h.session._closing) == 1 and not conn.closed
+        conn.close_allowed.set()
+        await h.session.close(grace=1)
+        assert conn.closed and not h.session._closing
 
 
 class _UpstreamConnection(_FakeWSConnection):
