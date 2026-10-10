@@ -165,6 +165,7 @@ export function buildGraphModel(snapshot) {
       kind: graph.kind || "",
       isCluster: !!graph.is_cluster,
       configPath: graph.config_path || "",
+      savedName: graph.session_name || "",
       creatureIds: [],
       channelIds: [],
       hostIds: [],

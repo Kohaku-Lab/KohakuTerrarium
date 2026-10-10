@@ -1,5 +1,5 @@
 <template>
-  <div v-if="running || failed.length || showKilled" class="kt-v2-float kt-v2-edge rounded-xl border shadow-lg w-full max-w-[26rem] overflow-hidden text-[12px]" role="status" data-test="lab-restore">
+  <div v-if="running || failed.length || showKilled" class="kt-v2-card !rounded-lg shrink-0 w-full overflow-hidden text-[12px]" role="status" data-test="lab-restore">
     <div v-if="running" class="px-3 py-2 flex items-center gap-2 text-warm-700 dark:text-warm-200"><span class="i-carbon-renew animate-spin text-iolite" />{{ t("lab.restore.restoring", { n: pending }) }}</div>
     <template v-else>
       <div v-if="showKilled" class="px-3 py-2 flex flex-col gap-1" data-test="lab-restore-killed">
