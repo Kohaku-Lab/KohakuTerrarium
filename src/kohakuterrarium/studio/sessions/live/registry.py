@@ -3,10 +3,11 @@
 One small KVault file, ``<config_dir>/runtime/live.kvault``, separate from
 the session files. A row is keyed by the session file's resolved path:
 
-    {path, session_id, session_dir, added_at, boot_id, claimed_by, failed}
+    {path, session_id, session_dir, server, added_at, boot_id, claimed_by, failed}
 
 ``session_dir`` is the hosting engine's session directory, which tells boot
-which engine (shared or per user) restores it. Rows are added when a session
+which engine (shared or per user) restores it, and ``server`` which server
+hosts it when several share one config dir. Rows are added when a session
 goes live and removed only by a user stop / end / delete, so a server
 shutdown or crash leaves them for the next boot.
 """
@@ -44,13 +45,20 @@ class LiveSessions:
         self._kv.enable_auto_pack()
 
     def add(
-        self, path: str | Path, *, session_id: str, session_dir: str, boot_id: str
+        self,
+        path: str | Path,
+        *,
+        session_id: str,
+        session_dir: str,
+        boot_id: str,
+        server: str | None = None,
     ) -> dict:
         key = path_key(path)
         row = {
             "path": str(Path(path).expanduser().resolve(strict=False)),
             "session_id": session_id,
             "session_dir": str(session_dir or ""),
+            "server": server,
             "added_at": time.time(),
             "boot_id": boot_id,
             "claimed_by": None,

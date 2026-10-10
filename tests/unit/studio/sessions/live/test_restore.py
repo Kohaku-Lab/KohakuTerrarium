@@ -10,6 +10,7 @@ from kohakuterrarium.studio.sessions.live.restore import (
 )
 from kohakuterrarium.studio.sessions.lifecycle import start_creature
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
+from kohakuterrarium.utils.file_lock import FileLock
 
 
 async def _saved_creature_session(tmp_path, creature_dir, name="alpha"):
@@ -134,3 +135,57 @@ async def test_restore_row_resolves_its_own_target(tmp_path):
     outcome = await restore_row(object(), row)
     assert outcome["status"] == "failed"
     assert registry.get(broken)["claimed_by"] == rs.BOOT_ID
+
+
+async def test_another_servers_rows_are_left_untouched(
+    tmp_path, scripted, creature_dir, monkeypatch
+):
+    path = await _saved_creature_session(tmp_path, creature_dir)
+    live_sessions().update(path, server="port:8849")
+    monkeypatch.setattr(rs, "BOOT_ID", "next")
+    monkeypatch.setattr(rs, "SERVER_KEY", "port:8848")
+    engine = Terrarium(session_dir=str(tmp_path / "sessions"))
+    service = LocalTerrariumService(engine)
+    try:
+        assert await restore_live_sessions(lambda d: service) == []
+        assert engine.list_graphs() == []
+        row = live_sessions().get(path)
+        assert (row["claimed_by"], row["failed"]) == (None, None)
+    finally:
+        await engine.shutdown()
+
+
+async def test_own_servers_rows_are_restored(
+    tmp_path, scripted, creature_dir, monkeypatch
+):
+    path = await _saved_creature_session(tmp_path, creature_dir)
+    live_sessions().update(path, server="port:8848")
+    monkeypatch.setattr(rs, "BOOT_ID", "next")
+    monkeypatch.setattr(rs, "SERVER_KEY", "port:8848")
+    engine = Terrarium(session_dir=str(tmp_path / "sessions"))
+    service = LocalTerrariumService(engine)
+    try:
+        outcomes = await restore_live_sessions(lambda d: service)
+        assert [o["status"] for o in outcomes] == ["restored"]
+    finally:
+        await engine.shutdown()
+
+
+async def test_session_held_by_another_process_is_skipped_not_failed(
+    tmp_path, scripted, creature_dir, monkeypatch
+):
+    path = await _saved_creature_session(tmp_path, creature_dir)
+    monkeypatch.setattr(rs, "BOOT_ID", "next")
+    monkeypatch.setattr(rs, "SERVER_KEY", "port:8848")
+    holder = FileLock(str(path) + ".lock")
+    holder.acquire()
+    engine = Terrarium(session_dir=str(tmp_path / "sessions"))
+    service = LocalTerrariumService(engine)
+    try:
+        assert await restore_live_sessions(lambda d: service) == []
+        assert engine.list_graphs() == []
+        row = live_sessions().get(path)
+        assert (row["claimed_by"], row["failed"]) == (None, None)
+    finally:
+        holder.release()
+        await engine.shutdown()

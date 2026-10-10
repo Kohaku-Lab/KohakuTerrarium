@@ -20,6 +20,9 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 BOOT_ID = uuid.uuid4().hex[:16]
+# Identity of the hosting server (``port:<requested port>``); None outside
+# a web server. Several servers can share one config dir and live list.
+SERVER_KEY: str | None = None
 BEAT_INTERVAL = 5.0
 RUN_PREFIX = "run:"
 LIFECYCLE_KEY = "lifecycle"

@@ -23,6 +23,7 @@ from kohakuterrarium.studio.sessions.live.run_classes import (
     read_killed_jobs,
     read_run_classes,
 )
+from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -85,6 +86,28 @@ async def restore_row(service: Any, row: dict, target: Path | None = None) -> di
     }
 
 
+def _hosted_by_another_server(row: dict) -> bool:
+    """Whether ``row`` belongs to a different server sharing this config dir."""
+    server = row.get("server")
+    return bool(server and run_state.SERVER_KEY and server != run_state.SERVER_KEY)
+
+
+def _held_elsewhere(path: str) -> bool:
+    """Whether a live process holds the session's writer lock (requires blocking).
+
+    That session is running elsewhere, so it is neither resumed nor failed.
+    """
+    lock = FileLock(str(path) + ".lock")
+    try:
+        lock.acquire()
+    except FileLockBusy:
+        return True
+    except OSError:
+        return False
+    lock.release()
+    return False
+
+
 async def restore_live_sessions(service_for_dir: ServiceForDir) -> list[dict]:
     """Restore every row an earlier boot left; ``service_for_dir`` maps a row's session dir to its service."""
     outcomes = []
@@ -94,6 +117,8 @@ async def restore_live_sessions(service_for_dir: ServiceForDir) -> list[dict]:
         if (
             row.get("claimed_by") == run_state.BOOT_ID
             or row.get("boot_id") == run_state.BOOT_ID
+            or _hosted_by_another_server(row)
+            or _held_elsewhere(row["path"])
         ):
             continue
         try:

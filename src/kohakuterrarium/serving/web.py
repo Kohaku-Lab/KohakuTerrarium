@@ -16,6 +16,7 @@ from pathlib import Path
 
 import uvicorn
 
+import kohakuterrarium.session.run_state as run_state
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.config_dir import config_dir
@@ -255,6 +256,8 @@ def run_web_server(
     )
     mark_startup("web_app_created", surface="web")
 
+    # The requested port names this server even if the bound port drifts.
+    run_state.SERVER_KEY = f"port:{port}"
     # Probe forward so direct web serving can tolerate a busy requested port.
     try:
         port = find_free_port(start=port, host=host)
