@@ -67,3 +67,14 @@ def test_untrack_and_forget_drop_rows_and_record_the_user_stop(tmp_path):
         untrack_store(None)
     finally:
         store.close(update_status=False)
+
+
+def test_mark_live_records_the_hosting_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(rs, "SERVER_KEY", "port:8848")
+    store = SessionStore(str(tmp_path / "s.kohakutr"))
+    try:
+        row = mark_live(None, "g", store)
+        assert row["server"] == "port:8848"
+        assert live_sessions().get(store.path)["server"] == "port:8848"
+    finally:
+        store.close(update_status=False)

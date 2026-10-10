@@ -41,6 +41,7 @@ def mark_live(engine: Any, graph_id: str, store: Any) -> dict | None:
         session_id=graph_id,
         session_dir=str(getattr(engine, "_session_dir", None) or Path(path).parent),
         boot_id=run_state.BOOT_ID,
+        server=run_state.SERVER_KEY,
     )
 
 
