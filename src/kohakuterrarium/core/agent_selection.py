@@ -61,6 +61,20 @@ def persist_plugin_selection(agent: Any, enabled_names: list[str]) -> None:
         logger.warning("plugin selection persist skipped", exc_info=True)
 
 
+def track_plugin_selection(agent: Any) -> None:
+    """Persist ``agent``'s enabled plugin set whenever any path toggles it."""
+    pm = getattr(agent, "plugins", None)
+    setter = getattr(pm, "set_selection_change_callback", None)
+    if not callable(setter):
+        return
+
+    def persist() -> None:
+        enabled = [p["name"] for p in pm.list_plugins() if p.get("enabled")]
+        persist_plugin_selection(agent, enabled)
+
+    setter(persist)
+
+
 def load_model_selection(agent: Any, store: Any | None = None) -> str | None:
     store = _store_of(agent, store)
     key = _state_key(agent, MODEL_SELECTION_STATE_KEY)
