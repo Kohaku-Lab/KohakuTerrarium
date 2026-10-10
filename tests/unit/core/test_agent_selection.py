@@ -2,6 +2,7 @@
 
 import json
 
+from kohakuterrarium import Agent
 from kohakuterrarium.core.agent_selection import (
     load_model_selection,
     load_plugin_selection,
@@ -9,6 +10,8 @@ from kohakuterrarium.core.agent_selection import (
     persist_plugin_selection,
     restore_selections,
 )
+from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.testing.llm import ScriptedLLM
 
 
 class _Store:
@@ -196,3 +199,33 @@ class TestRestore:
         restore_selections(agent)
         assert agent.switched == []
         assert agent.plugins.is_enabled("budget")
+
+
+class TestRuntimeToggleIsPersisted:
+    async def test_enabling_a_plugin_outside_the_toggle_api_survives_resume(
+        self, tmp_path
+    ):
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            "name: picker\nsystem_prompt: offline\ninput: {type: none}\n"
+            "output: {type: stdout}\n"
+        )
+        agent = await Agent.build(
+            str(config), llm=ScriptedLLM(["OK"]), io="headless", pwd=tmp_path
+        )
+        store = SessionStore(str(tmp_path / "s.kohakutr"))
+        try:
+            agent.attach_session_store(store)
+            name = next(
+                p["name"] for p in agent.plugins.list_plugins() if not p["enabled"]
+            )
+
+            agent.plugins.enable(name)
+            enabled, ok = load_plugin_selection(agent, store)
+            assert ok and name in enabled
+
+            agent.plugins.disable(name)
+            enabled, ok = load_plugin_selection(agent, store)
+            assert ok and name not in enabled
+        finally:
+            store.close(update_status=False)

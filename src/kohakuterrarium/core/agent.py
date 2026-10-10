@@ -28,6 +28,7 @@ from kohakuterrarium.core.agent_observability import (
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
 )
+from kohakuterrarium.core.agent_selection import track_plugin_selection
 from kohakuterrarium.core.agent_budget_recovery import (
     sync_emergency_drop_conversation,
 )
@@ -436,6 +437,7 @@ class Agent(
                 self.subagent_manager._parent_plugins = self.plugins
             if hasattr(self, "controller"):
                 self._apply_plugin_hooks()
+            track_plugin_selection(self)
             return
         plugin_cfgs = getattr(self.config, "plugins", []) or []
         self.plugins = init_plugins(
@@ -446,6 +448,7 @@ class Agent(
         )
         if not self.plugins:
             return
+        track_plugin_selection(self)
         if hasattr(self, "controller"):
             self.controller.plugins = self.plugins
         # Compact manager uses on_compact_start as a veto point + on_compact_end callback.

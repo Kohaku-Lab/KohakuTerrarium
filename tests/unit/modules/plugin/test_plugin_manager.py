@@ -1225,3 +1225,29 @@ class TestAtomicToggleRefresh:
         # ...and the command registry is NOT stale: it reflects the disabled
         # plugin (no "goal" command), even though the prompt refresh kept failing.
         assert host.commands == set()
+
+
+class TestSelectionChangeCallback:
+    def test_fires_once_per_effective_enable_or_disable(self):
+        pm = PluginManager()
+        pm.register(_CallbackPlugin())
+        name = pm.list_plugins()[0]["name"]
+        calls = []
+        pm.set_selection_change_callback(lambda: calls.append(1))
+
+        assert pm.disable(name) is True
+        assert pm.disable(name) is True
+        assert pm.enable(name) is True
+        assert pm.enable(name) is True
+
+        assert len(calls) == 2
+
+    def test_unknown_plugin_does_not_fire(self):
+        pm = PluginManager()
+        calls = []
+        pm.set_selection_change_callback(lambda: calls.append(1))
+
+        assert pm.disable("missing") is False
+        assert pm.enable("missing") is False
+
+        assert calls == []

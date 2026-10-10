@@ -56,6 +56,8 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
         self._unloaded: set[int] = set()
         # Timing remains optional so sessions without observers pay no callback cost.
         self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
+        # Fired after an enable/disable that changes which plugins are active.
+        self._on_selection_change: Callable[[], None] | None = None
 
     def set_hook_timing_callback(
         self, cb: Callable[[str, str, float, bool], None] | None
@@ -96,6 +98,21 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
             priority=getattr(plugin, "priority", 50),
         )
 
+    def set_selection_change_callback(
+        self, callback: Callable[[], None] | None
+    ) -> None:
+        """Call ``callback`` after every enable/disable that changes the active set."""
+        self._on_selection_change = callback
+
+    def _notify_selection_change(self) -> None:
+        callback = self._on_selection_change
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:  # noqa: BLE001 - an observer must never break a toggle
+            logger.warning("plugin selection callback failed", exc_info=True)
+
     def enable(self, name: str) -> bool:
         """Enable a plugin, rolling back state if host inventory refresh fails."""
         if name in self._disabled:
@@ -109,12 +126,14 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
                 self._restore_host_inventories()
                 raise
             logger.info("Plugin enabled", plugin_name=name)
+            self._notify_selection_change()
             return True
         return any(getattr(p, "name", "") == name for p in self._plugins)
 
     def disable(self, name: str) -> bool:
         for p in self._plugins:
             if getattr(p, "name", "") == name:
+                changed = name not in self._disabled
                 self._disabled.add(name)
                 try:
                     self._refresh_host_inventories()
@@ -123,6 +142,8 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
                     self._restore_host_inventories()
                     raise
                 logger.info("Plugin disabled", plugin_name=name)
+                if changed:
+                    self._notify_selection_change()
                 return True
         return False
 
