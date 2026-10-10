@@ -203,7 +203,7 @@ describe("HistoryPage: finding sessions", () => {
       sort: "created_at",
     })
     expect(w.text()).toContain("My project")
-    expect(w.text()).toContain("file-key")
+    expect(w.text()).not.toContain("file-key")
     expect(w.text()).toContain("recent work")
     w.unmount()
   })
@@ -275,7 +275,8 @@ describe("HistoryPage: what each session is", () => {
     expect(r.text()).toContain("lab.history.turns")
     const bare = row(w, "probe_aa11bb22")
     expect(bare.find('[data-test="history-label"]').text()).toBe("probe")
-    expect(bare.text()).toContain("aa11bb22")
+    expect(bare.text()).not.toContain("aa11bb22")
+    expect(bare.find('[data-test="history-label"]').attributes("title")).toBe("probe")
     expect(bare.find('[data-test="history-line"]').text()).toBe("hello")
   })
 

@@ -6,14 +6,13 @@ import {
   originNode,
   resumeNode,
   sessionStatus,
-  shortId,
   whenLabel,
 } from "./historyRows"
 
 const t = (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key)
 
 describe("history rows", () => {
-  it("labels by name, then summary, then recipe with a short id", () => {
+  it("labels by name, then summary, then recipe, never by the storage name's id", () => {
     const base = {
       name: "pair_3d736342ab",
       terrarium_name: "pair",
@@ -26,7 +25,6 @@ describe("history rows", () => {
       label: "Nightly triage",
       labelFrom: "title",
       recipe: "pair",
-      shortId: "",
       line: "Triaging CI",
     })
     const summarized = historyRow({ ...base, summary: "Triaging CI" })
@@ -39,10 +37,11 @@ describe("history rows", () => {
     expect(bare).toMatchObject({
       label: "pair",
       labelFrom: "recipe",
-      shortId: "3d736342",
       line: "latest prompt",
     })
-    expect(historyRow({ name: "solo" })).toMatchObject({ label: "solo", shortId: "", line: "" })
+    const shown = Object.entries(bare).filter(([k]) => k !== "key")
+    expect(shown.some(([, v]) => String(v).includes("3d736342"))).toBe(false)
+    expect(historyRow({ name: "solo" })).toMatchObject({ label: "solo", line: "" })
     expect(historyRow({ name: "x", preview: "p" }).line).toBe("p")
     const cut = historyRow({
       name: "x",
@@ -50,7 +49,6 @@ describe("history rows", () => {
       last_user: "Refactor the session  index reconcile loop",
     })
     expect(cut.line).toBe("")
-    expect(shortId("probe")).toBe("probe")
   })
 
   it("reads the status from stop reason and lifecycle", () => {
@@ -79,7 +77,6 @@ describe("history rows", () => {
     expect(row).toMatchObject({
       key: "team_ab12",
       label: "My team",
-      shortId: "ab12",
       config: "swe_team",
       agents: 3,
       pwdName: "project",
@@ -89,7 +86,6 @@ describe("history rows", () => {
     })
     expect(historyRow({ name: "solo", config_type: "agent" })).toMatchObject({
       label: "solo",
-      shortId: "",
       config: "",
       agents: 0,
       preview: "",

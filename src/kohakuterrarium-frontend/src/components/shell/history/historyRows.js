@@ -25,15 +25,6 @@ export function resumeNode(session, picked) {
   return picked || originNode(session) || "_host"
 }
 
-/** The short id part of a storage name (`probe_3d736342` → `3d736342`). */
-export function shortId(key) {
-  const tail =
-    String(key || "")
-      .split("_")
-      .pop() || ""
-  return tail.slice(0, 8)
-}
-
 /** Whether `line` only repeats `label` (a summary cut from that same prompt). */
 function repeats(line, label) {
   const flat = (s) => s.replace(/\s+/g, " ").replace(/…$/, "").trim().toLowerCase()
@@ -57,8 +48,8 @@ export function sessionStatus(session) {
 
 /**
  * Display fields of one saved session. `label` is the session's name, else
- * its one-line summary, else the recipe/creature it started from with a
- * short id (`labelFrom` says which); `recipe` is shown as a chip when it is
+ * its one-line summary, else the recipe/creature it started from
+ * (`labelFrom` says which); `key` is the storage name, never shown; `recipe` is shown as a chip when it is
  * not the label. `line` is the summary when not already the label, else the
  * latest prompt. Plus the config, member count, working directory, status,
  * turn count and the latest exchange.
@@ -77,7 +68,6 @@ export function historyRow(session) {
     label,
     labelFrom,
     recipe,
-    shortId: labelFrom === "recipe" && recipe !== session.name ? shortId(session.name) : "",
     line: repeats(line, label) ? "" : line,
     summary,
     summaryFrom: session?.summary_source || "",

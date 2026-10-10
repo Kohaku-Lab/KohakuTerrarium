@@ -6,11 +6,11 @@
     <div v-for="e in exchanges" :key="e.turn" class="flex flex-col gap-1" :data-test="`history-exchange-${e.turn}`">
       <div class="flex items-start gap-2">
         <span class="shrink-0 w-14 pt-0.5 text-[10px] font-mono text-warm-400">{{ t("lab.history.turnN", { n: e.turn }) }}</span>
-        <blockquote class="min-w-0 flex-1 m-0 pl-2 border-l-2 border-iolite/60 text-[12px] text-warm-800 dark:text-warm-100 whitespace-pre-wrap break-words line-clamp-3">{{ e.user }}</blockquote>
+        <blockquote class="min-w-0 flex-1 m-0 pl-2 border-0 border-l-2 border-solid border-iolite/60 text-[12px] text-warm-800 dark:text-warm-100 whitespace-pre-wrap break-words line-clamp-3">{{ e.user }}</blockquote>
       </div>
       <div class="flex items-start gap-2">
         <span class="shrink-0 w-14" />
-        <p class="min-w-0 flex-1 m-0 pl-2 border-l-2 border-warm-300 dark:border-warm-600 text-[12px] text-warm-600 dark:text-warm-300 whitespace-pre-wrap break-words line-clamp-4" :class="e.reply ? '' : 'italic text-warm-400'">{{ e.reply || t("lab.history.noReply") }}</p>
+        <p class="min-w-0 flex-1 m-0 pl-2 border-0 border-l-2 border-solid border-warm-300 dark:border-warm-600 text-[12px] text-warm-600 dark:text-warm-300 whitespace-pre-wrap break-words line-clamp-4" :class="e.reply ? '' : 'italic text-warm-400'">{{ e.reply || t("lab.history.noReply") }}</p>
       </div>
     </div>
   </div>

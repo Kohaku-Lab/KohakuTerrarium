@@ -43,8 +43,7 @@
           </button>
           <div class="min-w-0">
             <div class="flex items-center gap-2 min-w-0">
-              <span class="text-[13px] font-medium text-warm-800 dark:text-warm-100 truncate" :title="r.key" data-test="history-label">{{ r.label }}</span>
-              <span v-if="r.shortId" class="text-[11px] font-mono text-warm-400 shrink-0" :title="r.key">{{ r.shortId }}</span>
+              <span class="text-[13px] font-medium text-warm-800 dark:text-warm-100 truncate" :title="r.label" data-test="history-label">{{ r.label }}</span>
               <span v-if="r.status" class="shrink-0 text-[10px] px-1.5 rounded flex items-center gap-1" :class="STATUS_CHIP[r.status]" :title="r.status === 'running' ? '' : t(`lab.history.status.${r.status}Hint`)" :data-test="`history-status-${r.status}`"><span class="w-1.5 h-1.5 rounded-full bg-current" />{{ t(`lab.history.status.${r.status}`) }}</span>
               <span v-if="r.labelFrom !== 'recipe' && r.recipe" class="kt-v2-edge shrink-0 max-w-40 truncate text-[10px] px-1.5 rounded border font-mono text-warm-500" :title="r.recipe">{{ r.recipe }}</span>
               <span v-if="r.forkedFrom" class="shrink-0 text-[10px] px-1.5 rounded bg-iolite/10 text-iolite dark:text-iolite-light" :title="r.forkedFrom">{{ t("lab.history.fork") }}</span>
