@@ -55,6 +55,7 @@ class ResponsesWSError(Exception):
         last_event_type: str = "",
         retire_connection: bool = False,
         cache_miss: bool = False,
+        capability_mismatch: bool = False,
     ) -> None:
         super().__init__(message)
         self.mid_stream = mid_stream
@@ -67,6 +68,8 @@ class ResponsesWSError(Exception):
         self.body = {"code": code, "message": message}
         self.retire_connection = retire_connection or transport
         self.cache_miss = cache_miss
+        # The connection cannot serve the hosted tools this request declares.
+        self.capability_mismatch = capability_mismatch
 
 
 class WSRecovery:
@@ -160,7 +163,15 @@ class WSRecovery:
                         await session.close()
                     budget = self.submissions < 1 + max(0, self.policy.max_retries)
                     rejected = exc.cache_miss and not exc.mid_stream
-                    transient = exc.retire_connection and retryable_close(exc)
+                    transient = (
+                        exc.retire_connection
+                        and not exc.capability_mismatch
+                        and retryable_close(exc)
+                    )
+                    # Capability rejections replay only before any server event.
+                    capability_retry = (
+                        exc.capability_mismatch and not exc.mid_stream and replayable
+                    )
                     if not exc.submitted:
                         connect_failures += 1
                     permitted = (
@@ -169,6 +180,7 @@ class WSRecovery:
                         and not self.delivered
                         and (
                             rejected
+                            or capability_retry
                             or (
                                 transient
                                 and connect_failures < 2
@@ -184,7 +196,7 @@ class WSRecovery:
                             reason = "submission_budget_exhausted"
                         elif self.delivered:
                             reason = "content_delivered"
-                        elif not transient:
+                        elif not transient and not rejected and not capability_retry:
                             reason = "non_retryable_error"
                         elif connect_failures >= 2:
                             reason = "connection_attempts_exhausted"
@@ -209,7 +221,7 @@ class WSRecovery:
                             received_events=exc.mid_stream,
                         )
                         raise
-                    if not rejected and exc.submitted:
+                    if not (rejected or capability_retry) and exc.submitted:
                         self.uncertain_replays += 1
                     logger.warning(
                         "Responses WS recovering",

@@ -38,16 +38,14 @@ async def test_cache_rejection_shapes_resend_full_history(shape):
             event.message = None
     h = Harness()
     h.conn.scripts = [[completed("r1")], [event], [completed("r2")]]
-    await h.run([USER1])
+    base = {
+        "model": "m",
+        "background": True,
+        "tools": [{"type": "image_generation", "request_replay": "forbid"}],
+    }
+    await h.run([USER1], base=base)
     h.session.record_assistant_echo([ASSIST1])
-    await h.run(
-        [USER1, ASSIST1, USER2],
-        base={
-            "model": "m",
-            "background": True,
-            "tools": [{"type": "image_generation", "request_replay": "forbid"}],
-        },
-    )
+    await h.run([USER1, ASSIST1, USER2], base=base)
     assert h.conn.sent[-1]["input"] == ["PAIRED", USER1, ASSIST1, USER2]
     assert "previous_response_id" not in h.conn.sent[-1]
     assert len(h.conn.sent) == 3

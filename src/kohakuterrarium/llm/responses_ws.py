@@ -21,6 +21,23 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Hosted tools accepted only on a connection whose first request declared them.
+CONNECTION_GATED_TOOLS = frozenset({"image_generation"})
+
+
+def gated_tool_types(base_event: dict[str, Any]) -> frozenset[str]:
+    """Return the connection-gated hosted tool types a request declares."""
+    return frozenset(
+        tool.get("type")
+        for tool in base_event.get("tools") or ()
+        if isinstance(tool, dict) and tool.get("type") in CONNECTION_GATED_TOOLS
+    )
+
+
+def rejects_hosted_tool(code: str, message: str) -> bool:
+    """Whether an error says the connection cannot serve a declared hosted tool."""
+    return code == "unsupported_parameter" and "hosted tool" in message.lower()
+
 
 class ResponsesWSSession:
     """Connection + continuation state for Responses WebSocket mode."""
@@ -33,6 +50,8 @@ class ResponsesWSSession:
         self._prev_id: str | None = None
         self._sent_items: list[dict[str, Any]] = []
         self._assistant_echo: list[dict[str, Any]] | None = None
+        # Gated tools the current connection's first request declared; None before it.
+        self._connection_tools: frozenset[str] | None = None
 
     @property
     def busy(self) -> bool:
@@ -60,6 +79,7 @@ class ResponsesWSSession:
         connection = self._connection
         self._connection = None
         self._manager = None
+        self._connection_tools = None
         if connection is not None:
             receive = getattr(connection, "recv_bytes", None)
             drain = (
@@ -114,12 +134,25 @@ class ResponsesWSSession:
         delta: list[dict[str, Any]] | None,
         recovery: WSRecovery,
     ) -> AsyncIterator[Any]:
+        required = gated_tool_types(base_event)
         try:
             connection = await self._ensure_connection()
+            if self._connection_tools is not None and not (
+                required <= self._connection_tools
+            ):
+                logger.info(
+                    "Responses WS reconnecting for hosted tools",
+                    required=sorted(required),
+                    connection_tools=sorted(self._connection_tools),
+                )
+                await self.close()
+                connection = await self._ensure_connection()
         except Exception as exc:
             raise ResponsesWSError(
                 str(exc), mid_stream=False, transport=True, submitted=False
             ) from exc
+        if self._connection_tools is None:
+            self._connection_tools = required
         if self._prev_id is None:
             delta = None
         event: dict[str, Any] = {"type": "response.create", **base_event}
@@ -185,6 +218,8 @@ class ResponsesWSSession:
                     or event_field(server_event, "status"),
                     raw_event=server_event,
                     last_event_type=etype,
+                    retire_connection=rejects_hosted_tool(code, message),
+                    capability_mismatch=rejects_hosted_tool(code, message),
                 )
             if etype == "error":
                 self._handle_error_event(server_event, delta, yielded)
@@ -215,8 +250,10 @@ class ResponsesWSSession:
             status_code=fields["status"],
             raw_event=server_event,
             last_event_type="error",
-            retire_connection=code == "websocket_connection_limit_reached",
+            retire_connection=code == "websocket_connection_limit_reached"
+            or rejects_hosted_tool(code, message),
             cache_miss=delta is not None and code == "previous_response_not_found",
+            capability_mismatch=rejects_hosted_tool(code, message),
         )
 
     async def _ensure_connection(self) -> Any:
@@ -230,6 +267,7 @@ class ResponsesWSSession:
         if self._connection is None:
             self._manager = self._connect_factory()
             self._connection = await self._manager.enter()
+            self._connection_tools = None
             self.invalidate()
         return self._connection
 
