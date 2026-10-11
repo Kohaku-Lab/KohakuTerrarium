@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageChops, UnidentifiedImageError
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.llm.message import ImagePart, TextPart
@@ -217,6 +217,13 @@ class ReadTool(BaseTool):
         text_sections: list[str] = []
 
         dpi = int(self.config.extra.get("pdf_dpi", 100))
+        image_format = str(self.config.extra.get("pdf_image_format", "auto")).lower()
+        if image_format not in _PAGE_FORMATS:
+            doc.close()
+            return ToolResult(
+                error=f"pdf_image_format must be one of {sorted(_PAGE_FORMATS)}"
+            )
+        jpeg_quality = int(self.config.extra.get("pdf_jpeg_quality", 75))
         zoom = dpi / 72
         mat = fitz.Matrix(zoom, zoom)
 
@@ -243,12 +250,14 @@ class ReadTool(BaseTool):
             text_sections.extend(page_lines)
 
             try:
-                pix = page.get_pixmap(matrix=mat)
-                img_data = pix.tobytes("png")
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img_data, mime = encode_page(
+                    pix.width, pix.height, pix.samples, image_format, jpeg_quality
+                )
                 b64 = base64.b64encode(img_data).decode("ascii")
                 parts.append(
                     ImagePart(
-                        url=f"data:image/png;base64,{b64}",
+                        url=f"data:{mime};base64,{b64}",
                         detail="auto",
                         source_type="pdf_page",
                         source_name=f"{file_path.name} p{page_num + 1}",
@@ -398,6 +407,35 @@ _PIL_FORMAT_TO_MIME = {
     "GIF": "image/gif",
     "WEBP": "image/webp",
 }
+
+
+_PAGE_FORMATS = frozenset({"auto", "png", "jpeg"})
+
+
+def encode_page(
+    width: int, height: int, samples: bytes, image_format: str, jpeg_quality: int
+) -> tuple[bytes, str]:
+    """Encode an RGB page render; ``auto`` keeps the smaller of PNG and JPEG.
+
+    A page whose pixels are all neutral gray is encoded as one channel.
+    """
+    image = Image.frombytes("RGB", (width, height), samples)
+    red, green, blue = image.split()
+    if (
+        ImageChops.difference(red, green).getbbox() is None
+        and ImageChops.difference(green, blue).getbbox() is None
+    ):
+        image = red
+    candidates: list[tuple[bytes, str]] = []
+    if image_format in ("auto", "png"):
+        stream = io.BytesIO()
+        image.save(stream, "PNG", optimize=True)
+        candidates.append((stream.getvalue(), "image/png"))
+    if image_format in ("auto", "jpeg"):
+        stream = io.BytesIO()
+        image.save(stream, "JPEG", quality=jpeg_quality, optimize=True)
+        candidates.append((stream.getvalue(), "image/jpeg"))
+    return min(candidates, key=lambda candidate: len(candidate[0]))
 
 
 def _verify_image(data: bytes) -> str | None:

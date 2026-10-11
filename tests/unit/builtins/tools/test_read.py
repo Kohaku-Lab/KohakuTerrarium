@@ -1,9 +1,18 @@
 """Unit tests for :mod:`kohakuterrarium.builtins.tools.read`."""
 
-import pytest
+import base64
+import io
 
-from kohakuterrarium.builtins.tools.read import MAX_DEFAULT_LINES, ReadTool
-from kohakuterrarium.modules.tool.base import ToolContext
+import pymupdf
+import pytest
+from PIL import Image
+
+from kohakuterrarium.builtins.tools.read import (
+    MAX_DEFAULT_LINES,
+    ReadTool,
+    encode_page,
+)
+from kohakuterrarium.modules.tool.base import ToolConfig, ToolContext
 from kohakuterrarium.utils.file_guard import PathBoundaryGuard
 
 
@@ -59,6 +68,55 @@ class TestReadImage:
         policy = ReadTool().media_policy
         assert policy.persist is False
         assert policy.pinned is False
+
+
+def _pdf(path, color=(0, 0, 0)):
+    doc = pymupdf.open()
+    page = doc.new_page(width=300, height=400)
+    page.insert_text((40, 80), "Quarterly report: revenue grew", color=color)
+    page.draw_rect(pymupdf.Rect(40, 120, 260, 360), color=color, width=2)
+    doc.save(path)
+    doc.close()
+
+
+def _page_bytes(image):
+    return base64.b64decode(image.url.split(",", 1)[1])
+
+
+class TestReadPdfPages:
+    async def test_auto_keeps_the_smaller_encoding_of_a_gray_page(self, tmp_path):
+        path = tmp_path / "doc.pdf"
+        _pdf(path)
+        sizes = {}
+        for fmt in ("png", "jpeg", "auto"):
+            tool = ReadTool(config=ToolConfig(extra={"pdf_image_format": fmt}))
+            result = await tool.execute({"path": str(path)}, context=_ctx(tmp_path))
+            assert result.success is True
+            image = next(p for p in result.output if p.type == "image_url")
+            assert image.source_type == "pdf_page"
+            data = _page_bytes(image)
+            with Image.open(io.BytesIO(data)) as decoded:
+                assert decoded.mode == "L"
+                assert decoded.width in (416, 417) and decoded.height in (555, 556)
+                assert image.url.startswith(f"data:image/{decoded.format.lower()};")
+            sizes[fmt] = len(data)
+        assert sizes["auto"] == min(sizes["png"], sizes["jpeg"])
+
+    def test_color_page_keeps_rgb_and_gray_page_drops_to_one_channel(self):
+        gray = bytes([90, 90, 90]) * 16
+        color = bytes([200, 30, 30]) * 16
+        for samples, mode in ((gray, "L"), (color, "RGB")):
+            data, _ = encode_page(4, 4, samples, "png", 75)
+            with Image.open(io.BytesIO(data)) as decoded:
+                assert decoded.mode == mode
+
+    async def test_unknown_format_is_refused(self, tmp_path):
+        path = tmp_path / "doc.pdf"
+        _pdf(path)
+        tool = ReadTool(config=ToolConfig(extra={"pdf_image_format": "gif"}))
+        result = await tool.execute({"path": str(path)}, context=_ctx(tmp_path))
+        assert result.success is False
+        assert "pdf_image_format" in result.error
 
 
 class TestReadDefaultLineGuard:
