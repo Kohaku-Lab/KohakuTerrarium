@@ -4,6 +4,7 @@ import base64
 import binascii
 import hashlib
 import io
+import json
 import threading
 import time
 import warnings
@@ -12,6 +13,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from PIL import Image, ImageOps, UnidentifiedImageError
+
+DEFAULT_IMAGE_BYTES = 512_000
+MIN_IMAGE_BYTES = 1024
+
+
+def body_bytes(body: Any) -> int:
+    """Compact JSON size of a request body."""
+    return len(json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode())
 
 
 @dataclass
@@ -178,6 +187,36 @@ class ImagePreparer:
             stats.changed_count += 1
         return prepared if prepared is not None else url
 
+    def fit(self, body: dict[str, Any], *, max_bytes: int):
+        """Compress inline images until ``body`` fits ``max_bytes`` where possible.
+
+        Every image is first held to ``DEFAULT_IMAGE_BYTES``; when the body is
+        still over target, the per-image target is the byte room left after the
+        non-image content, halved up to three times. Returns
+        ``(body, stats, size, target)``; ``size`` may exceed ``max_bytes`` when
+        text alone does.
+        """
+        initial = body_bytes(body)
+        prepared, stats = self.prepare(body, max_image_bytes=DEFAULT_IMAGE_BYTES)
+        if not stats.image_count:
+            return body, stats, initial, DEFAULT_IMAGE_BYTES
+        size = body_bytes(prepared)
+        target = DEFAULT_IMAGE_BYTES
+        # Room left for images once the non-image content (base64 is 4/3) is counted.
+        available = max_bytes - (initial - stats.original_bytes * 4 // 3)
+        if size > max_bytes and available > 0:
+            estimate = int(available * 0.9 * 3 / 4 / stats.image_count)
+            target = max(MIN_IMAGE_BYTES, min(target, estimate // 1024 * 1024))
+            prepared, stats = self.prepare(body, max_image_bytes=target)
+            size = body_bytes(prepared)
+        for _ in range(3):
+            if size <= max_bytes or available <= 0 or target <= MIN_IMAGE_BYTES:
+                break
+            target = max(MIN_IMAGE_BYTES, target // 2 // 1024 * 1024)
+            prepared, stats = self.prepare(body, max_image_bytes=target)
+            size = body_bytes(prepared)
+        return prepared, stats, size, target
+
     @staticmethod
     def _encode(original, max_image_bytes=512_000):
         with warnings.catch_warnings():
@@ -225,3 +264,7 @@ class ImagePreparer:
                     if len(data) <= max_image_bytes:
                         return data, "image/jpeg"
                 return data, "image/jpeg"
+
+
+# Process-wide cache shared by every provider's outbound requests.
+IMAGE_PREPARER = ImagePreparer()

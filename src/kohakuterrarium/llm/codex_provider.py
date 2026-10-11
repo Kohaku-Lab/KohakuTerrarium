@@ -44,16 +44,20 @@ from kohakuterrarium.llm.codex_rate_limits import (
     capture_rate_limit_headers as _capture_rate_limit_headers,
 )
 from kohakuterrarium.llm.codex_stream import process_codex_event, stream_codex_ws_turn
+from kohakuterrarium.llm.codex_ws import CodexWSMixin
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.recovery import (
-    ErrorClass,
     RetryPolicy,
     backoff_delay,
     classify_openai_error,
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 from kohakuterrarium.llm.stream_replay import ReplayFilter
-from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
+from kohakuterrarium.llm.responses_ws_recovery import (
+    WSRecovery,
+    fresh_recovery,
+    server_rejected,
+)
 from kohakuterrarium.llm.responses_tools import prepare_request_tools
 from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 from kohakuterrarium.utils.logging import get_logger
@@ -61,7 +65,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-class CodexOAuthProvider(BaseLLMProvider):
+class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
     """Stream Codex Responses API output with tools, retries, and token refresh."""
 
     # Native-tool compatibility key; image generation is enabled unless opted out.
@@ -98,6 +102,8 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._ws_connection_options = ws_options.build_websocket_connection_options(
             self.extra_body.get("websocket_connection_options"), timeout=timeout
         )
+        self._ws_session_options = ws_options.build_ws_session_options(self.extra_body)
+        self._request_max_bytes = ws_options.request_max_bytes(self.extra_body)
         if websocket_mode is None:
             websocket_mode = bool(self.extra_body.get("websocket_mode"))
         self._websocket_mode = bool(websocket_mode)
@@ -153,6 +159,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             max_retries=self.max_retries,
             http_client=http_client,
         )
+        self._borrowed_client = False
 
     async def _ensure_valid_token(self) -> None:
         """Adopt a newer on-disk login or refresh the expired access token."""
@@ -245,6 +252,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             websocket_mode=self._websocket_mode,
         )
         clone._tokens = self._tokens
+        self.share_request_ceiling(clone)
         clone.extra_body = dict(self.extra_body)
         clone._token_lock = self._token_lock
         clone._client = self._client
@@ -265,7 +273,7 @@ class CodexOAuthProvider(BaseLLMProvider):
         provider_native_tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Stream with classified retries and two-stage overflow recovery."""
+        """Stream with classified retries plus overflow and content recovery."""
         current = deepcopy(messages) if self._websocket_mode else messages
         if self._websocket_mode:
             kwargs = deepcopy(kwargs)
@@ -310,15 +318,25 @@ class CodexOAuthProvider(BaseLLMProvider):
                             if self._ws_session is not None:
                                 self._ws_session.invalidate()
                             continue
-                    if recovery is not None and (
-                        recovery.delivered or not recovery.has_budget
-                    ):
+                    if recovery is not None and recovery.delivered:
+                        raise
+                    cls = classify_openai_error(exc)
+                    if not emitted and server_rejected(exc):
+                        replacement = await self._recover_context(
+                            cls, exc, current, overflow_state
+                        )
+                        if replacement is not None:
+                            current = replacement
+                            recovery = fresh_recovery(recovery, self._retry_policy)
+                            if recovery is not None:
+                                kwargs["_ws_recovery"] = recovery
+                            continue
+                    if recovery is not None and not recovery.has_budget:
                         raise
                     if isinstance(exc, ResponsesWSError) and (
                         exc.submitted or exc.mid_stream
                     ):
                         raise
-                    cls = classify_openai_error(exc)
                     if (
                         not auth_retry
                         and not emitted
@@ -331,13 +349,6 @@ class CodexOAuthProvider(BaseLLMProvider):
                                 "Codex credential rejected; retrying with refreshed token",
                                 error_class=cls.value,
                             )
-                            continue
-                    if cls is ErrorClass.OVERFLOW:
-                        replacement = await self._recover_from_overflow(
-                            current, overflow_state
-                        )
-                        if replacement is not None:
-                            current = replacement
                             continue
                     if (
                         cls in self._retry_policy.retry_classes
@@ -396,6 +407,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             model=self.model,
             replay_reasoning=self.extra_body.get("responses_reasoning_replay"),
         )
+        api_input = (await self._fit_request({"input": api_input}, "codex"))["input"]
 
         # Function tools precede provider-native tools in the outbound list.
         api_tools: list[dict[str, Any]] | None = None
@@ -481,9 +493,12 @@ class CodexOAuthProvider(BaseLLMProvider):
                 except ResponsesWSError as exc:
                     if exc.mid_stream or exc.submitted:
                         raise
+                    if not exc.oversize:
+                        session.note_http_fallback()
                     logger.warning(
                         "Codex WebSocket turn unavailable, using HTTP",
                         error=str(exc),
+                        oversize=exc.oversize,
                     )
         if recovery is not None:
             recovery.http = True
@@ -556,26 +571,6 @@ class CodexOAuthProvider(BaseLLMProvider):
         knobs = ws_options.FRAMEWORK_KNOBS | {"reasoning"}
         return {k: v for k, v in self.extra_body.items() if k not in knobs}
 
-    def _ws_session_for_turn(
-        self, session_headers: dict[str, str]
-    ) -> ResponsesWSSession | None:
-        """Return the WS session, or ``None`` when a turn is already in flight."""
-        self._ws_headers = dict(session_headers)
-        if self._ws_session is None:
-
-            def _factory() -> Any:
-                # Late-bound so credential reloads and header updates apply.
-                return self._client.responses.connect(
-                    max_retries=0,
-                    extra_headers=dict(self._ws_headers),
-                    websocket_connection_options=dict(self._ws_connection_options),
-                )
-
-            self._ws_session = ResponsesWSSession(_factory)
-        if self._ws_session.busy:
-            return None
-        return self._ws_session
-
     def _process_stream_event(
         self,
         event: Any,
@@ -584,17 +579,3 @@ class CodexOAuthProvider(BaseLLMProvider):
     ) -> str | None:
         """Fold one HTTP or WebSocket event into the current attempt."""
         return process_codex_event(self, event, collected_tool_calls, image_parts)
-
-    async def _reset_ws_session(self) -> None:
-        """Drop the WebSocket session so the next turn reconnects with fresh auth."""
-        session = self._ws_session
-        self._ws_session = None
-        if session is not None:
-            await session.close()
-
-    async def close(self) -> None:
-        """Close the WebSocket session and the underlying SDK client."""
-        await self._reset_ws_session()
-        if self._client:
-            await self._client.close()
-        self._client = None

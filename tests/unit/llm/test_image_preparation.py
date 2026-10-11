@@ -8,7 +8,11 @@ import random
 import pytest
 from PIL import Image, PngImagePlugin
 
-from kohakuterrarium.llm.image_preparation import ImagePreparer
+from kohakuterrarium.llm.image_preparation import (
+    DEFAULT_IMAGE_BYTES,
+    ImagePreparer,
+    body_bytes,
+)
 
 
 def encoded(image, format="PNG", **kwargs):
@@ -52,6 +56,42 @@ def test_large_photo_shrinks_with_stable_cached_copy_and_original_preserved():
     assert stats.changed_count == 1 and stats.cache_hits == 0
     assert cached.cache_hits == 1
     assert stats.prepared_bytes <= 512_000
+
+
+def _noise(seed, size=(700, 700)):
+    pixels = random.Random(seed).randbytes(size[0] * size[1] * 3)
+    return encoded(Image.frombytes("RGB", size, pixels))
+
+
+def test_fit_brings_a_many_image_request_under_its_byte_target():
+    urls = [_noise(seed) for seed in range(6)]
+    body = {
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": [{"type": "input_image", "image_url": u} for u in urls],
+            }
+        ]
+    }
+    initial = body_bytes(body)
+    target = initial // 4
+    saved = copy.deepcopy(body)
+    prepared, stats, size, image_target = ImagePreparer().fit(body, max_bytes=target)
+    assert body == saved
+    assert size == body_bytes(prepared) <= target
+    assert stats.image_count == 6 and stats.changed_count == 6
+    assert image_target < DEFAULT_IMAGE_BYTES
+    for part in prepared["input"][0]["output"]:
+        assert decoded(part["image_url"]).size == (700, 700)
+
+
+def test_fit_leaves_small_requests_and_text_only_bodies_alone():
+    small = request(encoded(Image.new("RGB", (64, 64), "white")))
+    prepared, stats, _, _ = ImagePreparer().fit(small, max_bytes=10**9)
+    assert prepared == small and stats.changed_count == 0
+    text = {"messages": [{"role": "user", "content": "hi"}]}
+    assert ImagePreparer().fit(text, max_bytes=1)[0] is text
 
 
 def test_small_text_and_transparency_are_not_reencoded():

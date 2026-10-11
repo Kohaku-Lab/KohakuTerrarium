@@ -1,13 +1,19 @@
 """Exercise Codex authentication, request projection, and streaming transports."""
 
 import asyncio
+import base64
+import io
 import json
+import random
 import time
 from copy import deepcopy
 from dataclasses import dataclass
 
 import pytest
+from PIL import Image
 from websockets import serve
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 from kohakuterrarium.llm import codex_provider as cp
 from kohakuterrarium.llm.codex_auth import CodexTokens
@@ -764,6 +770,21 @@ def _ws_completed(resp_id="r1"):
     )
 
 
+class _PayloadTooLarge(Exception):
+    status_code = 413
+
+    def __init__(self):
+        super().__init__("Error code: 413 - Payload Too Large")
+
+
+def _noise_image(seed):
+    pixels = random.Random(seed).randbytes(700 * 700 * 3)
+    stream = io.BytesIO()
+    Image.frombytes("RGB", (700, 700), pixels).save(stream, "PNG")
+    data = base64.b64encode(stream.getvalue()).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}
+
+
 class TestWebsocketMode:
     """websocket_mode drives turns over responses.connect with HTTP fallback."""
 
@@ -1011,3 +1032,127 @@ class TestWebsocketMode:
         assert clone._websocket_mode is True
         assert clone.extra_body == p.extra_body
         assert clone._ws_session is None
+
+    async def test_1009_sends_the_turn_over_http_and_keeps_it_there_while_too_big(
+        self,
+    ):
+        p = self._provider()
+        responses = p._client.responses
+        connection = responses.connection
+        connection.scripts = [
+            [ConnectionClosedError(Close(1009, "message too big"), None)]
+        ]
+        big = [{"role": "user", "content": "x" * 5000}]
+        assert [c async for c in p.chat(big)] == []
+        assert len(connection.sent) == 1
+        assert responses.kwargs is not None
+        ceiling = p._ws_session.max_message_bytes
+        assert ceiling is not None and ceiling < 6000
+        # The same oversized history goes straight to HTTP; nothing is resent on WS.
+        responses.kwargs = None
+        assert [c async for c in p.chat(big)] == []
+        assert len(connection.sent) == 1 and responses.kwargs is not None
+        assert not p._ws_session.disabled
+        # Once the conversation fits again (e.g. after compaction) WS resumes.
+        responses.kwargs = None
+        connection.scripts = [[_ws_completed("r9")]]
+        await self._drive(p)
+        assert responses.kwargs is None and len(responses.connection.sent) == 2
+
+    async def test_1009_then_http_413_refits_images_under_a_learned_ceiling(self):
+        p = self._provider()
+        responses = p._client.responses
+        connection = responses.connection
+        connection.scripts = [
+            [ConnectionClosedError(Close(1009, "message too big"), None)],
+            [_Ev(type="response.output_text.delta", delta="ok"), _ws_completed()],
+        ]
+        limit = 1_200_000
+        http_sizes = []
+        create = responses.create
+
+        async def guarded_create(**kwargs):
+            size = len(json.dumps(kwargs["input"]).encode())
+            http_sizes.append(size)
+            if size > limit:
+                raise _PayloadTooLarge()
+            return await create(**kwargs)
+
+        responses.create = guarded_create
+        repairs = []
+        p.on_context_repair(repairs.append)
+        messages = [{"role": "user", "content": [_noise_image(s) for s in range(3)]}]
+        assert [c async for c in p.chat(messages)] == ["ok"]
+        # WS refused the frame, HTTP refused the body; the refit fits both.
+        assert http_sizes and http_sizes[0] > limit
+        assert len(connection.sent) == 2
+        refit = len(json.dumps(connection.sent[1]["input"]).encode())
+        assert refit <= p.request_ceiling().max_bytes < http_sizes[0]
+        assert refit < p._ws_session.max_message_bytes
+        assert repairs == []
+        assert p.fork().request_ceiling() is p.request_ceiling()
+        assert p.with_model("m2").request_ceiling() is p.request_ceiling()
+
+    async def test_repeated_ws_failures_move_the_conversation_to_http(self):
+        p = self._provider()
+        p._client.responses.connect_exc = ConnectionError("no ws upgrade")
+        for _ in range(3):
+            await self._drive(p)
+        assert p._ws_session.disabled
+        p._client.responses.connect_exc = None
+        await self._drive(p)
+        assert p._client.responses.connect_kwargs is None
+
+    async def test_ws_image_rejection_strips_the_image_and_tells_the_model(self):
+        p = self._provider()
+        connection = p._client.responses.connection
+        connection.scripts = [
+            [
+                _Ev(
+                    type="error",
+                    error=_Ev(
+                        code="invalid_image",
+                        message="Invalid image: unsupported content",
+                        status=400,
+                    ),
+                )
+            ],
+            [_Ev(type="response.output_text.delta", delta="ok"), _ws_completed()],
+        ]
+        repairs = []
+        p.on_context_repair(repairs.append)
+        image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
+        messages = [
+            {"role": "user", "content": [{"type": "text", "text": "see"}, image]}
+        ]
+        assert [c async for c in p.chat(messages)] == ["ok"]
+        assert len(connection.sent) == 2
+        retried = connection.sent[1]["input"][0]["content"]
+        assert [part["type"] for part in retried] == ["input_text", "input_text"]
+        assert "Invalid image" in retried[1]["text"]
+        assert [(r.kind, r.scope) for r in repairs] == [("strip_media", "newest")]
+        assert messages[0]["content"][1] is image
+
+    async def test_ws_transport_failure_never_takes_the_repair_path(self):
+        p = self._provider(
+            extra_body={"websocket_mode": True},
+        )
+        p._retry_policy = cp.RetryPolicy(max_retries=0)
+        connection = p._client.responses.connection
+        connection.scripts = [[TimeoutError("invalid image while reading")]]
+        repairs = []
+        p.on_context_repair(repairs.append)
+        image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
+        with pytest.raises(ResponsesWSError):
+            async for _ in p.chat([{"role": "user", "content": [image]}]):
+                pass
+        assert repairs == []
+
+    def test_fork_has_its_own_session_and_keeps_the_client_open(self):
+        p = self._provider()
+        p._ws_session = object()
+        fork = p.fork()
+        assert fork._ws_session is None and fork._client is p._client
+        assert (
+            fork._borrowed_client and fork._ws_session_options == p._ws_session_options
+        )

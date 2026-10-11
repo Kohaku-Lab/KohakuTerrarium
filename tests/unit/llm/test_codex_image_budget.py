@@ -211,29 +211,51 @@ async def test_custom_backend_learns_rejected_limit_and_bounds_future_calls(
     )
 
 
-@pytest.mark.parametrize(
-    "failures, expected_requests",
-    [
-        (["invalid field"], 1),
-        (["Exceeded maximum number of images (50) allowed in the request"] * 2, 2),
-        (
-            [
-                "Exceeded maximum number of images (50) allowed in the request",
-                "Exceeded maximum number of images (25) allowed in the request",
-            ],
-            2,
-        ),
-    ],
-)
-async def test_unrelated_or_repeated_rejections_do_not_loop(
-    custom_backend, failures, expected_requests
-):
+async def test_unrelated_rejection_is_not_retried(custom_backend):
     provider, requests, pending = custom_backend
-    pending.extend(failures)
+    pending.append("invalid field")
     messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
     with pytest.raises(BadRequestError):
         await provider.chat_complete(messages)
-    assert len(requests) == expected_requests
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        "Exceeded maximum number of images (50) allowed in the request",
+        "Exceeded maximum number of images (25) allowed in the request",
+    ],
+)
+async def test_repeated_image_rejection_removes_the_images_and_says_so(
+    custom_backend, second
+):
+    provider, requests, pending = custom_backend
+    pending.extend(
+        ["Exceeded maximum number of images (50) allowed in the request", second]
+    )
+    repairs = []
+    provider.on_context_repair(repairs.append)
+    messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
+    assert (await provider.chat_complete(messages)).content == "ok"
+    assert len(requests) == 3
+    final = requests[-1]["input"][0]["content"]
+    assert not [p for p in final if p["type"] == "input_image"]
+    assert "56 image(s) removed" in final[-1]["text"]
+    assert "maximum number of images" in final[-1]["text"]
+    assert [(r.kind, r.scope) for r in repairs] == [("strip_media", "newest")]
+
+
+async def test_endless_image_rejection_stops_once_the_ladder_is_spent(custom_backend):
+    provider, requests, pending = custom_backend
+    pending.extend(
+        ["Exceeded maximum number of images (50) allowed in the request"] * 10
+    )
+    messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
+    with pytest.raises(BadRequestError):
+        await provider.chat_complete(messages)
+    # limit learned, then newest media stripped; nothing else is left to remove.
+    assert len(requests) == 3
 
 
 @pytest.mark.parametrize(
@@ -325,22 +347,26 @@ async def test_websocket_learning_respects_output_budget_and_continuation(
         original = deepcopy(messages)
         chunks = []
         try:
-            if budget == 0 or partial:
+            if partial:
                 with pytest.raises(ResponsesWSError):
                     async for chunk in provider.chat(messages):
                         chunks.append(chunk)
                 assert len(requests) == 1
-                assert chunks == (["partial"] if partial else [])
-            else:
-                assert (await provider.chat_complete(messages)).content == ""
-                assert len(requests) == 2
-            assert len(requests[0]["input"][0]["content"]) == 56
-            if partial:
+                assert chunks == ["partial"]
                 assert provider._request_image_limit is None
                 return
+            assert (await provider.chat_complete(messages)).content == ""
+            assert len(requests) == 2
+            assert len(requests[0]["input"][0]["content"]) == 56
             assert provider._request_image_limit == 50
             if budget == 0:
-                await provider.chat_complete(messages)
+                # No replay budget: the rejection is answered by removing the
+                # refused images, a reduced request rather than a retry.
+                sent = requests[-1]["input"][0]["content"]
+                assert [p["type"] for p in sent] == ["input_text"]
+                assert "56 image(s) removed" in sent[0]["text"]
+                assert messages == original
+                return
             expected = fix_tool_call_pairing(
                 to_responses_input(limit_codex_images(messages))
             )

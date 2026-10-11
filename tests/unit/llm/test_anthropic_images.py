@@ -275,7 +275,7 @@ def test_request_budget_keeps_all_individually_small_images_and_json_overhead():
         "tools": [{"name": "unchanged", "input_schema": {"type": "object"}}],
     }
     saved = deepcopy(body)
-    result = prepare_anthropic_request(body, max_bytes=1_000_000)
+    result, measure = prepare_anthropic_request(body, max_bytes=1_000_000)
     assert (
         len(json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode())
         <= 1_000_000
@@ -289,7 +289,11 @@ def test_request_budget_keeps_all_individually_small_images_and_json_overhead():
         with decode(image) as prepared:
             assert prepared.size == (384, 384)
             assert prepared.format == "JPEG"
-    assert prepare_anthropic_request(body, max_bytes=1_000_000) == result
+    assert measure.image_count == 12
+    assert measure.bytes == len(
+        json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode()
+    )
+    assert prepare_anthropic_request(body, max_bytes=1_000_000) == (result, measure)
 
 
 def test_budget_preserves_uncompressible_content_and_ignores_transport_options():
@@ -306,7 +310,7 @@ def test_budget_preserves_uncompressible_content_and_ignores_transport_options()
         "extra_headers": {"private": object()},
         "timeout": object(),
     }
-    prepared = prepare_anthropic_request(kwargs, max_bytes=1000)
+    prepared, _ = prepare_anthropic_request(kwargs, max_bytes=1000)
     assert prepared["extra_body"]["messages"] == messages
     assert prepared["extra_headers"] is kwargs["extra_headers"]
     assert prepared["timeout"] is kwargs["timeout"]
@@ -329,7 +333,9 @@ def test_text_only_request_identity_and_tool_argument_images_are_preserved():
             }
         ]
     }
-    assert prepare_anthropic_request(kwargs) is kwargs
+    prepared, measure = prepare_anthropic_request(kwargs)
+    assert prepared is kwargs
+    assert measure.image_count == 0
 
 
 def _tinted_photo(size, tint, seed):
@@ -377,7 +383,7 @@ def test_request_budget_compresses_large_mpo_photo():
         "messages": [{"role": "user", "content": [mpo_block((4032, 3024))]}],
     }
 
-    result = prepare_anthropic_request(body)
+    result, _ = prepare_anthropic_request(body)
 
     block = result["messages"][0]["content"][0]
     with decode(block) as image:

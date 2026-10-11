@@ -126,6 +126,7 @@ async def stream_ws_turn(
     base_event, items = build_ws_request(
         provider, messages, tools, kwargs, extra_body=extra_body
     )
+    items = (await provider._fit_request({"input": items}, "openai"))["input"]
     collected: list[NativeToolCall] = []
     output_text: list[str] = []
     reasoning = ResponsesReasoningCollector()

@@ -32,6 +32,9 @@ provides typed message structures compatible with the OpenAI API format.
 | `profiles.py`           | Profile resolution + management                                                                                           |
 | `variations.py`         | `name@group=option` variation-selector machinery                                                                          |
 | `recovery.py`           | Provider-boundary recovery helpers for LLM calls                                                                          |
+| `context_repair.py`     | `ContextRepair`: pure edits that remove refused media or a tool round, replayed on the request and the host conversation |
+| `image_preparation.py`  | Cached image compression toward a per-image and whole-body byte target                                                    |
+| `request_budget.py`     | `fit_request` (compress + measure a request body) and `RequestCeiling`, the byte ceiling learned from size refusals       |
 | `api_keys.py`           | API key storage and retrieval                                                                                             |
 
 ## Codex image limits
@@ -50,6 +53,67 @@ batches if the omitted images are needed. Projection runs before artifact reads,
 preserves text and tool pairing, and does not edit saved history. A changed image
 projection invalidates WebSocket prefix matching and causes a full resend;
 unchanged projections retain ordinary continuation and prompt-cache routing.
+
+## One provider per conversation
+
+`BaseLLMProvider.fork()` returns a sibling for an independent conversation:
+same model, credentials and SDK client; its own Responses WebSocket session,
+per-turn result state (tool calls, usage, reasoning) and host hooks. Sub-agents
+that inherit or override the parent model and the compaction fallback run on a
+fork, so a sub-agent never breaks the parent's continuation, never forces it
+onto HTTP while busy, and never reports recovery to the parent's conversation.
+Closing a fork closes its WebSocket session only; the borrowed client stays
+with the origin.
+
+## Request size and frame ceiling
+
+Codex, OpenAI (Chat Completions and Responses WebSocket) and Anthropic
+requests compress inline images toward a whole-request byte target,
+`extra_body.request_max_bytes` (default 15 MiB; 28 MB for Anthropic, whose
+documented limit is 32 MB; `0` disables it). Every request is measured; saved
+history is unchanged.
+
+A request the server or a proxy refuses for its byte size is
+`ErrorClass.OVERSIZE`: any HTTP 413 (JSON or an HTML proxy page) and the
+wordings `payload too large`, `entity too large`, `content too large`,
+`request_too_large`, `message too big`, OpenRouter's
+`metadata.error_type: payload_too_large`. Token wording on a 413 keeps it
+`OVERFLOW`. Before any output the provider answers it in order, each stage
+bounded:
+
+1. Lower the learned `RequestCeiling` to 3/4 of the refused request and refit
+   the images under it (at most 3 times, and only while the request carries
+   images and each refit came out smaller). The ceiling is shared by the
+   provider, its forks and its `with_model` siblings and applies from then on,
+   also when `request_max_bytes` is `0`; the target is the tighter of the two.
+2. The content-repair ladder below.
+3. Overflow recovery: host compaction, then an emergency tool-round drop.
+
+A Responses WebSocket server that closes with 1009 (message too big) refused
+the frame unread: the request was not submitted, the turn goes over HTTP, and
+the session remembers the refused size as its frame ceiling. Later events over
+the ceiling go straight to HTTP without touching the socket, until the
+conversation fits again. `extra_body.websocket_max_message_bytes` presets the
+ceiling. `extra_body.websocket_fallback_after` (default 3, `0` = never) is the
+number of consecutive WS turns abandoned for HTTP after which that
+conversation stays on HTTP; a completed WS turn resets the count.
+
+## Content rejection recovery
+
+`ErrorClass.CONTENT` covers rejections of request content that are neither
+token overflow nor body size: invalid, unsupported, too small, too large or too
+many images, image dimensions, a field over its length limit
+(`string_above_max_length`, `string_too_long`), and the matching OpenRouter
+`metadata.error_type` values. Codex, OpenAI-compatible and Anthropic
+providers answer it, before any output, with a ladder of `ContextRepair`
+edits, each tried once per request: strip the newest media-bearing message,
+strip all media, drop the newest tool round. Removed content is replaced by a
+note carrying the provider's error, so the model learns what happened and can
+read the file again smaller. Each applied edit is reported through
+`on_context_repair`; `Agent` and `SubAgent` replay it on their conversation,
+keeping message identity, so the next turn does not resend the refused
+content. WebSocket transport failures and failures after output began never
+take this path, since the request may already have run.
 
 ## Anthropic image dimensions
 

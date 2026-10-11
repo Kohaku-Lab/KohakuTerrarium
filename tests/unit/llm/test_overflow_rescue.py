@@ -5,7 +5,7 @@ from kohakuterrarium.llm.openai import OpenAIProvider
 
 
 class _OverflowErr(Exception):
-    status_code = 413
+    status_code = 400
 
 
 _BIG = [

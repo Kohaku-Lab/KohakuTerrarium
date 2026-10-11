@@ -1,11 +1,16 @@
 """OpenAI provider recovery through the real SDK and an in-memory HTTP transport."""
 
+import asyncio
+import base64
+import io
 import json
+import random
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from openai import APIStatusError
+from PIL import Image
 
 from kohakuterrarium.llm import openai as provider_module
 from kohakuterrarium.llm.openai import OpenAIProvider
@@ -71,6 +76,175 @@ def _success(streaming):
     )
 
 
+class TestContentRejection:
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_rejected_tool_image_is_removed_and_the_model_told(self, streaming):
+        requests = []
+
+        async def respond(request):
+            requests.append(json.loads(request.content))
+            if len(requests) == 1:
+                return _error(400, "Invalid image: the image could not be decoded")
+            return _success(streaming)
+
+        image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
+        messages = [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "read"}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": [image]},
+        ]
+        async with OpenAIProvider(api_key="test", model="test") as provider:
+            await _attach_transport(provider, respond)
+            repairs = []
+            provider.on_context_repair(repairs.append)
+            if streaming:
+                text = "".join([c async for c in provider.chat(messages)])
+            else:
+                text = (await provider.chat_complete(messages)).content
+        assert text == "ok"
+        assert len(requests) == 2
+        assert "image_url" in json.dumps(requests[0]["messages"])
+        retried = requests[1]["messages"][-1]["content"]
+        assert "image_url" not in json.dumps(retried)
+        assert "could not be decoded" in json.dumps(retried)
+        assert [(r.kind, r.scope) for r in repairs] == [("strip_media", "newest")]
+
+    async def test_unrelated_bad_request_is_raised_untouched(self):
+        requests = []
+
+        async def respond(request):
+            requests.append(request)
+            return _error(400, "Unrecognized request argument supplied: foo")
+
+        async with OpenAIProvider(api_key="test", model="test") as provider:
+            await _attach_transport(provider, respond)
+            repairs = []
+            provider.on_context_repair(repairs.append)
+            with pytest.raises(APIStatusError):
+                await provider.chat_complete(MESSAGES)
+        assert len(requests) == 1 and repairs == []
+
+
+def _noise_image_part(seed):
+    pixels = random.Random(seed).randbytes(700 * 700 * 3)
+    stream = io.BytesIO()
+    Image.frombytes("RGB", (700, 700), pixels).save(stream, "PNG")
+    url = "data:image/png;base64," + base64.b64encode(stream.getvalue()).decode()
+    return {"type": "image_url", "image_url": {"url": url}}
+
+
+def _proxy_413():
+    return httpx.Response(
+        413,
+        text="<html><head><title>413 Request Entity Too Large</title></head></html>",
+        headers={"content-type": "text/html"},
+    )
+
+
+def _image_tool_round(parts):
+    return [
+        {"role": "user", "content": "read the scans"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "read"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": parts},
+    ]
+
+
+class TestOversizeRejection:
+    @pytest.mark.parametrize("streaming", [False, True])
+    async def test_proxy_413_lowers_the_ceiling_and_keeps_the_images(self, streaming):
+        limit = 1_200_000
+        sizes = []
+
+        async def respond(request):
+            sizes.append(len(request.content))
+            return _proxy_413() if len(request.content) > limit else _success(streaming)
+
+        messages = _image_tool_round([_noise_image_part(seed) for seed in range(3)])
+        async with OpenAIProvider(api_key="test", model="test") as provider:
+            await _attach_transport(provider, respond)
+            repairs, drops = [], []
+            provider.on_context_repair(repairs.append)
+            provider.on_emergency_drop(drops.append)
+            if streaming:
+                text = "".join([c async for c in provider.chat(messages)])
+            else:
+                text = (await provider.chat_complete(messages)).content
+            ceiling = provider.request_ceiling().max_bytes
+            sibling = provider.with_model("other")
+            fork = provider.fork()
+        assert text == "ok"
+        assert len(sizes) >= 2 and sizes[0] > limit >= sizes[-1]
+        assert sizes == sorted(sizes, reverse=True)
+        assert repairs == [] and drops == []
+        assert ceiling is not None and ceiling < sizes[0]
+        assert sibling.request_ceiling() is provider.request_ceiling()
+        assert fork.request_ceiling() is provider.request_ceiling()
+
+    async def test_learned_ceiling_applies_to_the_next_turn_up_front(self):
+        limit = 1_200_000
+        sizes = []
+
+        async def respond(request):
+            sizes.append(len(request.content))
+            return _proxy_413() if len(request.content) > limit else _success(False)
+
+        messages = _image_tool_round([_noise_image_part(seed) for seed in range(3)])
+        async with OpenAIProvider(api_key="test", model="test") as provider:
+            await _attach_transport(provider, respond)
+            await provider.chat_complete(messages)
+            first_turn = len(sizes)
+            await provider.chat_complete(messages)
+        assert first_turn >= 2
+        assert len(sizes) == first_turn + 1 and sizes[-1] <= limit
+
+    async def test_text_only_413_drops_the_tool_round_with_a_note(self):
+        requests = []
+
+        async def respond(request):
+            requests.append(json.loads(request.content))
+            return _proxy_413() if len(requests) == 1 else _success(False)
+
+        messages = _image_tool_round([{"type": "text", "text": "x" * 5000}])
+        async with OpenAIProvider(api_key="test", model="test") as provider:
+            await _attach_transport(provider, respond)
+            repairs = []
+            provider.on_context_repair(repairs.append)
+            text = (await provider.chat_complete(messages)).content
+            ceiling = provider.request_ceiling().max_bytes
+        assert text == "ok" and len(requests) == 2
+        assert ceiling is None
+        assert [(r.kind, r.scope) for r in repairs] == [("drop_tool_round", "newest")]
+        retried = json.dumps(requests[1]["messages"])
+        assert "x" * 5000 not in retried
+        assert "413 Request Entity Too Large" in retried
+
+    async def test_endless_413_is_bounded_then_raised(self):
+        requests = []
+
+        async def respond(request):
+            requests.append(request)
+            return _proxy_413()
+
+        messages = _image_tool_round([_noise_image_part(seed) for seed in range(3)])
+        async with OpenAIProvider(api_key="test", model="test") as provider:
+            await _attach_transport(provider, respond)
+            with pytest.raises(APIStatusError):
+                await provider.chat_complete(messages)
+        # 1 original + 3 shrinks + 3 content stages; drop stages find nothing left.
+        assert len(requests) <= 1 + 3 + 3 + 1
+
+
 class TestOpenAIRetries:
     @pytest.mark.parametrize("streaming", [False, True])
     async def test_socket_options_are_removed_from_http_requests(self, streaming):
@@ -122,7 +296,11 @@ class TestOpenAIRetries:
                 )
             return _success(streaming)
 
-        monkeypatch.setattr(provider_module, "asyncio", SimpleNamespace(sleep=sleep))
+        monkeypatch.setattr(
+            provider_module,
+            "asyncio",
+            SimpleNamespace(sleep=sleep, to_thread=asyncio.to_thread),
+        )
         async with OpenAIProvider(
             api_key="test-key", model="test", retry_policy=RetryPolicy(jitter=0)
         ) as provider:

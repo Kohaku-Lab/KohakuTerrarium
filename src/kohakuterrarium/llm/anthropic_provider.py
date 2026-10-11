@@ -36,6 +36,7 @@ from kohakuterrarium.llm.anthropic_format import (
     usage_to_dict,
 )
 from kohakuterrarium.llm.anthropic_images import (
+    ANTHROPIC_REQUEST_BYTES,
     prepare_anthropic_images,
     prepare_anthropic_request,
 )
@@ -50,11 +51,11 @@ from kohakuterrarium.llm.base import (
 )
 from kohakuterrarium.llm.openai_sanitize import log_request_shape, strip_surrogates
 from kohakuterrarium.llm.recovery import (
-    ErrorClass,
     RetryPolicy,
     backoff_delay,
     classify_openai_error,
 )
+from kohakuterrarium.llm.responses_ws_options import request_max_bytes
 from kohakuterrarium.llm.stream_replay import ReplayFilter
 from kohakuterrarium.llm.turn_segments import inject_anthropic_segments
 from kohakuterrarium.utils.logging import get_logger
@@ -102,6 +103,9 @@ class AnthropicProvider(BaseLLMProvider):
             )
 
         self.extra_body = dict(extra_body or {})
+        self._request_max_bytes = request_max_bytes(
+            self.extra_body, ANTHROPIC_REQUEST_BYTES
+        )
         self._retry_policy = RetryPolicy.from_value(retry_policy)
         self._api_key = api_key
         self.base_url = base_url or ANTHROPIC_BASE_URL
@@ -140,7 +144,8 @@ class AnthropicProvider(BaseLLMProvider):
         )
 
     async def close(self) -> None:
-        await self._client.close()
+        if not self._borrowed_client:
+            await self._client.close()
 
     def with_model(self, name: str) -> "AnthropicProvider":
         """Return a sibling provider using the same SDK client."""
@@ -157,6 +162,8 @@ class AnthropicProvider(BaseLLMProvider):
             ),
         )
         clone.extra_body = dict(self.extra_body)
+        clone._request_max_bytes = self._request_max_bytes
+        self.share_request_ceiling(clone)
         clone._retry_policy = self._retry_policy
         clone._api_key = self._api_key
         clone.base_url = self.base_url
@@ -203,9 +210,11 @@ class AnthropicProvider(BaseLLMProvider):
             max_retries=self._max_retries,
             default_headers=default_headers,
         )
+        borrowed, self._borrowed_client = self._borrowed_client, False
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(old.close())
+            if not borrowed:
+                loop.create_task(old.close())
         except RuntimeError:
             pass
         logger.info(
@@ -238,13 +247,12 @@ class AnthropicProvider(BaseLLMProvider):
                 return
             except Exception as exc:
                 cls = classify_openai_error(exc)
-                if cls is ErrorClass.OVERFLOW:
-                    replacement = await self._recover_from_overflow(
-                        current, overflow_state
-                    )
-                    if replacement is not None:
-                        current = replacement
-                        continue
+                replacement = await self._recover_context(
+                    cls, exc, current, overflow_state
+                )
+                if replacement is not None:
+                    current = replacement
+                    continue
                 if (
                     cls in self._retry_policy.retry_classes
                     and attempt < self._retry_policy.max_retries
@@ -351,13 +359,12 @@ class AnthropicProvider(BaseLLMProvider):
                 return await self._raw_complete_chat(current, **kwargs)
             except Exception as exc:
                 cls = classify_openai_error(exc)
-                if cls is ErrorClass.OVERFLOW:
-                    replacement = await self._recover_from_overflow(
-                        current, overflow_state
-                    )
-                    if replacement is not None:
-                        current = replacement
-                        continue
+                replacement = await self._recover_context(
+                    cls, exc, current, overflow_state
+                )
+                if replacement is not None:
+                    current = replacement
+                    continue
                 if (
                     cls in self._retry_policy.retry_classes
                     and attempt < self._retry_policy.max_retries
@@ -506,4 +513,7 @@ class AnthropicProvider(BaseLLMProvider):
             create_kwargs = self._with_prompt_cache_markers(create_kwargs)
         if merged_extra:
             create_kwargs["extra_body"] = merged_extra
-        return prepare_anthropic_request(create_kwargs)
+        create_kwargs, self._last_request_measure = prepare_anthropic_request(
+            create_kwargs, max_bytes=self._request_byte_target()
+        )
+        return create_kwargs

@@ -228,7 +228,31 @@ fallback. Invalid values or unknown options fail during construction.
 | `ping_interval` | SDK default: `20` | Positive finite seconds or `null`. Interval between keepalive pings; `null` disables keepalive. |
 | `ping_timeout` | Provider timeout | Positive finite seconds or `null`. Time to await a pong; `null` disables this deadline while allowing pings. |
 | `close_timeout` | SDK default: `10` | Positive finite seconds or `null`. Deadline for the close handshake; `null` disables it. |
-| `compression` | SDK default: `"deflate"` | `"deflate"` or `null`; `null` disables compression. |
+| `compression` | `"deflate"` | `"deflate"` or `null`; `null` disables per-message compression. |
+
+Three more framework keys shape request size and transport choice. They are
+validated at construction and removed from outgoing request bodies:
+
+| Key | Default | Behavior |
+|---|---|---|
+| `request_max_bytes` | `15728640` (15 MiB); Anthropic `28000000` | Inline images are compressed until the request fits this many bytes (images over 512,000 bytes or 2000 px are always re-encoded). `0` or `null` disables proactive compression. Applies to Codex and OpenAI over HTTP and WebSocket, and to Anthropic. |
+| `websocket_max_message_bytes` | `null` | Largest `response.create` event sent over the socket; a larger turn goes over HTTP. A server close with code 1009 (message too big) lowers it to the refused size automatically. |
+| `websocket_fallback_after` | `3` | Consecutive WebSocket turns abandoned for HTTP after which that conversation stays on HTTP. A completed WebSocket turn resets the count; `0` keeps retrying the socket. |
+
+A request refused for its byte size (any HTTP 413, including a proxy's HTML
+page; "payload too large", "request_too_large", "message too big") first lowers
+a learned byte ceiling to 3/4 of the refused size and retries with the images
+compressed under it, up to three times while that keeps shrinking the request.
+The learned ceiling then holds for every later request of that provider, its
+sub-agents and its other models, even with `request_max_bytes: 0`.
+
+A request still refused after that, or refused for its content (an invalid,
+unsupported or excess image, a field over its length limit), is retried before
+any output with the refused content removed: first the images of the newest
+message carrying images, then all images, then the newest tool round. A note
+with the provider's error takes the removed content's place, and the agent's
+stored conversation receives the same edit, so later turns do not resend it.
+A size refusal that survives all of this falls back to context compaction.
 
 The provider timeout defaults to **120 seconds for OpenAI** and **300 seconds
 for Codex**, or the `timeout` passed to the provider's Python constructor.

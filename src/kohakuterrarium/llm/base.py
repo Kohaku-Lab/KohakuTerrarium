@@ -2,12 +2,22 @@
 Define the provider protocol, shared response types, and base implementation.
 """
 
+import asyncio
+import copy
 import json
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 from kohakuterrarium.llm.message import Message
-from kohakuterrarium.llm.recovery import RetryPolicy, drop_last_tool_round
+from kohakuterrarium.llm.context_repair import CONTENT_REPAIR_LADDER, ContextRepair
+from kohakuterrarium.llm.recovery import ErrorClass, RetryPolicy, drop_last_tool_round
+from kohakuterrarium.llm.request_budget import (
+    MAX_REQUEST_SHRINKS,
+    RequestCeiling,
+    RequestMeasure,
+    effective_target,
+    fit_request,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -133,12 +143,37 @@ class LLMProvider(Protocol):
         ...
 
 
+def fork_llm(llm: "LLMProvider") -> "LLMProvider":
+    """Give a new conversation its own provider sibling when the provider can fork.
+
+    A fork shares credentials and the HTTP client but owns its transport
+    session and per-turn state, so it never contends with its origin.
+    """
+    fork = getattr(llm, "fork", None)
+    return fork() if callable(fork) else llm
+
+
 @dataclass
 class OverflowRecoveryState:
-    """Track the independent single-shot stages of overflow recovery."""
+    """Track the bounded stages of overflow, oversize and content recovery for one request."""
 
     rescue_attempted: bool = False
     drop_attempted: bool = False
+    content_stage: int = 0
+    shrinks: int = 0
+    refused_bytes: int | None = None
+
+
+# Per-conversation attributes a fork starts empty instead of sharing.
+_FORK_FRESH_STATE: dict[str, Callable[[], Any]] = {
+    "_last_tool_calls": list,
+    "_last_usage": dict,
+    "_last_assistant_parts": list,
+    "_last_assistant_extra_fields": dict,
+    "_emergency_drop_callbacks": list,
+    "_context_repair_callbacks": list,
+    "_last_request_measure": lambda: None,
+}
 
 
 class BaseLLMProvider:
@@ -146,6 +181,13 @@ class BaseLLMProvider:
 
     # An empty name deliberately prevents provider-native tool compatibility.
     provider_name: str = ""
+
+    # A fork uses its origin's SDK client; closing the fork leaves it open.
+    _borrowed_client: bool = False
+
+    # Configured whole-request byte target for inline images; ``None`` disables it.
+    _request_max_bytes: int | None = None
+    _last_request_measure: RequestMeasure | None = None
 
     # Supported native tools auto-register unless the creature explicitly disables them.
     provider_native_tools: frozenset[str] = frozenset()
@@ -156,8 +198,33 @@ class BaseLLMProvider:
         self._emergency_drop_callbacks: list[Callable[[list[dict[str, Any]]], None]] = (
             []
         )
+        self._context_repair_callbacks: list[Callable[[ContextRepair], None]] = []
         # Host compaction gets one chance to shrink context before destructive recovery.
         self._overflow_rescue: Callable[[], Any] | None = None
+        self._request_ceiling = RequestCeiling()
+
+    def fork(self) -> "BaseLLMProvider":
+        """Return a sibling for an independent conversation.
+
+        The fork shares model, credentials and HTTP client, and owns its
+        transport session, per-turn result state and host hooks (none until
+        its host registers them), so concurrent conversations never see each
+        other's tool calls, continuation state or recovery callbacks.
+        """
+        clone = copy.copy(self)
+        for name, factory in _FORK_FRESH_STATE.items():
+            setattr(clone, name, factory())
+        clone._overflow_rescue = None
+        clone._borrowed_client = True
+        for name in ("extra_body", "_extra_headers"):
+            value = getattr(self, name, None)
+            if isinstance(value, dict):
+                setattr(clone, name, dict(value))
+        clone._reset_fork_state()
+        return clone
+
+    def _reset_fork_state(self) -> None:
+        """Drop transport state a fork must not share; providers with sessions override."""
 
     async def _try_overflow_rescue(
         self, current: list[dict[str, Any]] | None = None
@@ -206,6 +273,141 @@ class BaseLLMProvider:
                 )
                 return recovered
         return None
+
+    async def _recover_context(
+        self,
+        cls: ErrorClass,
+        exc: BaseException,
+        current: list[dict[str, Any]],
+        state: OverflowRecoveryState,
+    ) -> list[dict[str, Any]] | None:
+        """Return a reduced request for an overflow, oversize or content rejection.
+
+        ``None`` means no stage is left and the error should be raised.
+        """
+        if cls is ErrorClass.OVERFLOW:
+            return await self._recover_from_overflow(current, state)
+        if cls is ErrorClass.OVERSIZE:
+            return await self._recover_from_oversize(current, state, str(exc))
+        if cls is ErrorClass.CONTENT:
+            return self._recover_from_content_error(current, state, str(exc))
+        return None
+
+    def request_ceiling(self) -> RequestCeiling:
+        """The learned byte ceiling this provider shares with its forks and siblings."""
+        return self.__dict__.setdefault("_request_ceiling", RequestCeiling())
+
+    def share_request_ceiling(self, other: "BaseLLMProvider") -> None:
+        """Make ``other`` (a sibling on the same endpoint) use this provider's ceiling."""
+        other._request_ceiling = self.request_ceiling()
+
+    def _request_byte_target(self) -> int | None:
+        """The byte target the next request's images are compressed toward."""
+        return effective_target(
+            self._request_max_bytes, self.request_ceiling().max_bytes
+        )
+
+    def _fit_request_sync(
+        self, body: dict[str, Any], provider: str = ""
+    ) -> dict[str, Any]:
+        """Fit ``body`` to the byte target and record its size; blocking, CPU only."""
+        fitted, measure = fit_request(
+            body, self._request_byte_target(), provider=provider
+        )
+        self._last_request_measure = measure
+        return fitted
+
+    async def _fit_request(
+        self, body: dict[str, Any], provider: str = ""
+    ) -> dict[str, Any]:
+        """Fit ``body`` to the byte target off the event loop and record its size."""
+        return await asyncio.to_thread(self._fit_request_sync, body, provider)
+
+    def _shrink_request_budget(self, state: OverflowRecoveryState) -> bool:
+        """Lower the learned ceiling below the refused request when a refit can help.
+
+        It helps only while the request carries images (or was never scanned)
+        and each refit actually came out smaller than the last refused one.
+        """
+        measure = self._last_request_measure
+        if (
+            measure is None
+            or measure.image_count == 0
+            or state.shrinks >= MAX_REQUEST_SHRINKS
+            or (
+                state.refused_bytes is not None and measure.bytes >= state.refused_bytes
+            )
+        ):
+            return False
+        state.refused_bytes = measure.bytes
+        ceiling = self.request_ceiling().lower(measure.bytes)
+        if ceiling >= measure.bytes:
+            return False
+        state.shrinks += 1
+        logger.warning(
+            "provider_request_ceiling",
+            refused_bytes=measure.bytes,
+            ceiling_bytes=ceiling,
+            attempt=state.shrinks,
+        )
+        return True
+
+    async def _recover_from_oversize(
+        self,
+        current: list[dict[str, Any]],
+        state: OverflowRecoveryState,
+        reason: str,
+    ) -> list[dict[str, Any]] | None:
+        """Refit images under a lower ceiling, then repair content, then drop context."""
+        if self._shrink_request_budget(state):
+            return list(current)
+        repaired = self._recover_from_content_error(current, state, reason)
+        if repaired is not None:
+            return repaired
+        return await self._recover_from_overflow(current, state)
+
+    def _recover_from_content_error(
+        self,
+        current: list[dict[str, Any]],
+        state: OverflowRecoveryState,
+        reason: str,
+    ) -> list[dict[str, Any]] | None:
+        """Walk the repair ladder: newest media, all media, newest tool round.
+
+        Each stage runs at most once per request. The first stage that changes
+        the request is reported to the host so its conversation drops the same
+        content; the retry then carries the note instead of the refused part.
+        """
+        while state.content_stage < len(CONTENT_REPAIR_LADDER):
+            kind, scope = CONTENT_REPAIR_LADDER[state.content_stage]
+            state.content_stage += 1
+            repair = ContextRepair(kind=kind, scope=scope, reason=reason)
+            changed, repaired = repair.apply(current)
+            if not changed:
+                continue
+            logger.warning(
+                "provider_content_repair",
+                kind=kind,
+                scope=scope,
+                changed=changed,
+                error=reason[:300],
+            )
+            self._notify_context_repair(repair)
+            return repaired
+        return None
+
+    def on_context_repair(self, callback: Callable[[ContextRepair], None]) -> None:
+        """Register a callback that replays a content repair on the host conversation."""
+        self.__dict__.setdefault("_context_repair_callbacks", []).append(callback)
+
+    def _notify_context_repair(self, repair: ContextRepair) -> None:
+        for callback in list(getattr(self, "_context_repair_callbacks", ())):
+            try:
+                callback(repair)
+            except Exception as exc:  # pragma: no cover - callbacks are external
+                logger.warning(
+                    "Context-repair callback failed", error=str(exc), exc_info=True
+                )
 
     @property
     def last_tool_calls(self) -> list[NativeToolCall]:

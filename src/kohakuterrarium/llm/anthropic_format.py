@@ -17,7 +17,7 @@ __all__ = ["SYNTHETIC_TOOL_RESULT_TEXT", "fix_anthropic_tool_block_pairing"]
 
 KT_CONTENT_KEY = "_kt_anthropic_content"
 DATA_IMAGE_RE = re.compile(r"^data:(?P<mime>[^;,]+);base64,(?P<data>.*)$", re.S)
-INTERNAL_EXTRA_KEYS = {"auth_as_bearer", "disable_prompt_caching"}
+INTERNAL_EXTRA_KEYS = {"auth_as_bearer", "disable_prompt_caching", "request_max_bytes"}
 ANTHROPIC_KNOWN_BODY_FIELDS = {
     "metadata",
     "service_tier",

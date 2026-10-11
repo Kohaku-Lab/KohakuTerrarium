@@ -5,10 +5,17 @@ The SDK 1.x ``messages.create`` no longer accepts ``temperature``, ``top_p`` or
 ``extra_body`` and only for models that accept them.
 """
 
+import base64
+import io
+import json
+import random
+
 import httpx
 import pytest
+from PIL import Image
 
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
+from kohakuterrarium.llm.base import ChatResponse
 from kohakuterrarium.llm.recovery import RetryPolicy
 from tests.helpers.anthropic_stream import ANSWER, anthropic_provider
 
@@ -83,6 +90,114 @@ class TestProgrammingErrorsAreNotRetried:
     async def test_working_transport_returns_the_answer(self):
         provider = anthropic_provider("claude-sonnet-4-6", temperature=0.3)
         assert (await provider.chat_complete(MESSAGES)).content == ANSWER
+
+
+class _ImageRejected(Exception):
+    status_code = 400
+
+    def __init__(self):
+        super().__init__("messages.0.content.1.image.source.base64: image exceeds 5 MB")
+
+
+class TestContentRejection:
+    async def test_stream_and_complete_drop_the_refused_image(self):
+        image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
+        messages = [{"role": "user", "content": [{"type": "text", "text": "x"}, image]}]
+        for streaming in (True, False):
+            provider = anthropic_provider("claude-sonnet-4-6")
+            seen = []
+            repairs = []
+            provider.on_context_repair(repairs.append)
+
+            async def raw_stream(current, **kwargs):
+                seen.append(current)
+                if len(seen) == 1:
+                    raise _ImageRejected()
+                yield "ok"
+
+            async def raw_complete(current, **kwargs):
+                seen.append(current)
+                if len(seen) == 1:
+                    raise _ImageRejected()
+                return ChatResponse(
+                    content="ok", finish_reason="stop", usage={}, model="m"
+                )
+
+            provider._raw_stream_chat = raw_stream
+            provider._raw_complete_chat = raw_complete
+            if streaming:
+                text = "".join([c async for c in provider._stream_chat(messages)])
+            else:
+                text = (await provider._complete_chat(messages)).content
+            assert text == "ok" and len(seen) == 2
+            assert [p["type"] for p in seen[1][0]["content"]] == ["text", "text"]
+            assert "image exceeds 5 MB" in seen[1][0]["content"][1]["text"]
+            assert len(repairs) == 1
+
+
+class _RequestTooLarge(Exception):
+    status_code = 413
+
+    def __init__(self):
+        super().__init__(
+            "Error code: 413 - {'type': 'error', 'error': {'type': "
+            "'request_too_large', 'message': 'Request exceeds the maximum allowed "
+            "number of bytes.'}}"
+        )
+
+
+def _noise_block(seed):
+    pixels = random.Random(seed).randbytes(700 * 700 * 3)
+    stream = io.BytesIO()
+    Image.frombytes("RGB", (700, 700), pixels).save(stream, "PNG")
+    data = base64.b64encode(stream.getvalue()).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}
+
+
+class TestOversizeRejection:
+    async def test_413_refits_images_under_a_learned_ceiling(self):
+        limit = 1_200_000
+        provider = anthropic_provider("claude-sonnet-4-6")
+        create = provider._client.messages.create
+        sizes = []
+
+        async def guarded(**kwargs):
+            size = len(json.dumps(kwargs["messages"]).encode())
+            sizes.append(size)
+            if size > limit:
+                raise _RequestTooLarge()
+            return await create(**kwargs)
+
+        provider._client.messages.create = guarded
+        repairs = []
+        provider.on_context_repair(repairs.append)
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "scans"}]
+                + [_noise_block(seed) for seed in range(3)],
+            }
+        ]
+        assert (await provider.chat_complete(messages)).content == ANSWER
+        assert len(sizes) >= 2 and sizes[0] > limit >= sizes[-1]
+        assert repairs == []
+        assert provider.request_ceiling().max_bytes < sizes[0]
+        assert provider.with_model("claude-opus-4-8").request_ceiling() is (
+            provider.request_ceiling()
+        )
+
+    def test_request_max_bytes_is_a_framework_knob_not_a_wire_field(self):
+        create = build(extra_body={"request_max_bytes": 2_000_000})(
+            MESSAGES, stream=True
+        )
+        assert "extra_body" not in create
+        provider = AnthropicProvider(
+            api_key="k", model="m", extra_body={"request_max_bytes": 0}
+        )
+        assert provider._request_byte_target() is None
+        assert AnthropicProvider(api_key="k", model="m")._request_max_bytes == (
+            28_000_000
+        )
 
 
 class TestMidStreamFailure:

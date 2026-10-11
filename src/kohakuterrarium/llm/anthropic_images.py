@@ -3,18 +3,16 @@
 import base64
 import binascii
 import io
-import json
 from collections.abc import Iterator
 from typing import Any
 
 from PIL import Image, ImageOps
 
-from kohakuterrarium.llm.image_preparation import ImagePreparer
-from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.llm.image_preparation import body_bytes
+from kohakuterrarium.llm.request_budget import RequestMeasure, fit_request
 
-logger = get_logger(__name__)
-_IMAGE_PREPARER = ImagePreparer()
-_REQUEST_BYTES = 28_000_000
+# Anthropic's request limit is 32 MB; the target leaves room for headers and tools.
+ANTHROPIC_REQUEST_BYTES = 28_000_000
 
 _MIME_TYPES = {
     "JPEG": "image/jpeg",
@@ -111,63 +109,36 @@ def prepare_anthropic_images(messages: list[dict[str, Any]]) -> list[dict[str, A
 
 
 def prepare_anthropic_request(
-    kwargs: dict[str, Any], *, max_bytes: int = _REQUEST_BYTES
-) -> dict[str, Any]:
-    """Compress inline request images with router policy and a whole-body target."""
+    kwargs: dict[str, Any], *, max_bytes: int | None = ANTHROPIC_REQUEST_BYTES
+) -> tuple[dict[str, Any], RequestMeasure]:
+    """Compress inline request images toward a whole-body target and measure the body.
+
+    ``max_bytes`` of ``None`` only measures. Returns ``kwargs`` itself when
+    nothing changed.
+    """
     body = {
         key: value
         for key, value in kwargs.items()
         if key not in {"extra_body", "extra_headers", "extra_query", "timeout"}
     }
     body.update(kwargs.get("extra_body") or {})
-    blocks = [
-        block
-        for msg in body.get("messages", [])
-        for block in _media_blocks(msg.get("content"))
-        if block.get("type") == "image"
+    has_images = any(
+        block.get("type") == "image"
         and isinstance(block.get("source"), dict)
         and block["source"].get("type") == "base64"
         and isinstance(block["source"].get("data"), str)
-    ]
-    if not blocks:
-        return kwargs
-    initial_size = len(
-        json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
+        for msg in body.get("messages", [])
+        for block in _media_blocks(msg.get("content"))
     )
-    encoded_bytes = sum(len(block["source"]["data"]) for block in blocks)
-    available = max_bytes - (initial_size - encoded_bytes)
-    target = 512_000
-    if initial_size > max_bytes and available > 0:
-        estimate = int(available * 0.9 * 3 / 4 / len(blocks))
-        target = max(1024, min(target, estimate // 1024 * 1024))
-    prepared, stats = _IMAGE_PREPARER.prepare(body, max_image_bytes=target)
-    size = len(json.dumps(prepared, ensure_ascii=False, separators=(",", ":")).encode())
-    for _ in range(3):
-        if size <= max_bytes or available <= 0 or target <= 1024:
-            break
-        target = max(1024, target // 2 // 1024 * 1024)
-        prepared, stats = _IMAGE_PREPARER.prepare(body, max_image_bytes=target)
-        size = len(
-            json.dumps(prepared, ensure_ascii=False, separators=(",", ":")).encode()
-        )
-    logger.debug(
-        "Anthropic image preparation",
-        image_count=stats.image_count,
-        cache_hits=stats.cache_hits,
-        initial_request_bytes=initial_size,
-        prepared_request_bytes=size,
-        image_byte_target=target,
-    )
-    if size > max_bytes:
-        logger.warning(
-            "Anthropic request remains above image preparation target",
-            request_bytes=size,
-            target_bytes=max_bytes,
-        )
+    if not has_images:
+        return kwargs, RequestMeasure(body_bytes(body), 0)
+    prepared, measure = fit_request(body, max_bytes, provider="anthropic")
+    if prepared is body:
+        return kwargs, measure
     result = {**kwargs, "messages": prepared["messages"]}
     if "messages" in (kwargs.get("extra_body") or {}):
         result["extra_body"] = {
             **kwargs["extra_body"],
             "messages": prepared["messages"],
         }
-    return result
+    return result, measure

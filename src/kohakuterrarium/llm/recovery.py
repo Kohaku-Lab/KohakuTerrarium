@@ -21,6 +21,10 @@ class ErrorClass(Enum):
 
     USER_ERROR = "user_error"
     OVERFLOW = "overflow"
+    # The server or a proxy refused the request for its byte size (HTTP 413, WS 1009).
+    OVERSIZE = "oversize"
+    # The provider refused part of the request body (media, field length, encoding).
+    CONTENT = "content"
     RATE_LIMIT = "rate_limit"
     SERVER = "server"
     TRANSIENT = "transient"
@@ -89,6 +93,49 @@ _OVERFLOW_MARKERS = (
     # Anthropic Messages API wordings.
     "prompt is too long",
     "exceed context limit",
+    # OpenRouter ``error_type`` and Gemini wordings.
+    "token_limit_exceeded",
+    "input token count",
+    "exceeds the maximum number of tokens",
+)
+_CONTENT_MARKERS = (
+    # Media the provider could not accept.
+    "invalid_image",
+    "invalid image",
+    "image_parse_error",
+    "could not process image",
+    "unable to process image",
+    "unsupported image",
+    "unsupported_image_format",
+    "image too large",
+    "image_too_large",
+    "image is too large",
+    "image too small",
+    "image_too_small",
+    "image_download_failed",
+    "image exceeds",
+    "image dimensions",
+    "many-image requests",
+    "does not represent a valid image",
+    "maximum number of images",
+    "too many images",
+    "invalid base64",
+    # A single field over a schema length limit.
+    "string too long",
+    "string_too_long",
+    "string_above_max_length",
+)
+_OVERSIZE_MARKERS = (
+    "payload too large",
+    "payload_too_large",
+    "entity too large",
+    "content too large",
+    "body too large",
+    "message too big",
+    "request_too_large",
+    "exceeds the maximum allowed number of bytes",
+    "request size exceeds",
+    "maximum request size",
 )
 _RATE_LIMIT_MARKERS = (
     "rate_limit",
@@ -133,15 +180,31 @@ def classify_openai_error(exc: BaseException) -> ErrorClass:
 
     status = getattr(exc, "status_code", None)
     body = _extract_error_payload(exc)
-    code = str(body.get("code") or body.get("type") or "").lower()
+    metadata = body.get("metadata")
+    # OpenRouter puts the canonical category in ``metadata.error_type``.
+    error_type = metadata.get("error_type") if isinstance(metadata, dict) else None
+    code = " ".join(
+        str(value)
+        for value in (body.get("code"), body.get("type"), error_type)
+        if value
+    ).lower()
     message = _stringify_error(exc, body).lower()
 
-    if (
-        status == 413
-        or _contains_any(code, _OVERFLOW_MARKERS)
-        or _contains_any(message, _OVERFLOW_MARKERS)
+    if _contains_any(code, _OVERFLOW_MARKERS) or _contains_any(
+        message, _OVERFLOW_MARKERS
     ):
         return ErrorClass.OVERFLOW
+    if (
+        status == 413
+        or getattr(exc, "oversize", False) is True
+        or _contains_any(code, _OVERSIZE_MARKERS)
+        or _contains_any(message, _OVERSIZE_MARKERS)
+    ):
+        return ErrorClass.OVERSIZE
+    if _contains_any(code, _CONTENT_MARKERS) or _contains_any(
+        message, _CONTENT_MARKERS
+    ):
+        return ErrorClass.CONTENT
     if (
         status == 429
         or _contains_any(code, _RATE_LIMIT_MARKERS)

@@ -49,8 +49,94 @@ class TestClassifyOpenAIError:
         assert classify_openai_error(asyncio.TimeoutError()) == ErrorClass.TRANSIENT
         assert classify_openai_error(TimeoutError()) == ErrorClass.TRANSIENT
 
-    def test_413_status_is_overflow(self):
-        assert classify_openai_error(_HTTPError(status_code=413)) == ErrorClass.OVERFLOW
+    def test_bare_413_status_is_oversize(self):
+        assert classify_openai_error(_HTTPError(status_code=413)) == ErrorClass.OVERSIZE
+
+    @pytest.mark.parametrize(
+        "message, status, body",
+        [
+            ("<html><title>413 Request Entity Too Large</title></html>", 413, None),
+            ("received 1009 (message too big); then sent 1009", None, None),
+            ("Payload Too Large", 400, None),
+            ("413 Content Too Large", None, None),
+            (
+                "Error code: 413",
+                413,
+                {
+                    "type": "error",
+                    "error": {
+                        "type": "request_too_large",
+                        "message": "Request exceeds the maximum allowed number of bytes.",
+                    },
+                },
+            ),
+        ],
+    )
+    def test_byte_size_refusals_are_oversize(self, message, status, body):
+        exc = _HTTPError(message, status_code=status, body=body)
+        assert classify_openai_error(exc) == ErrorClass.OVERSIZE
+        assert ErrorClass.OVERSIZE not in RetryPolicy().retry_classes
+
+    @pytest.mark.parametrize(
+        "error_type, expected",
+        [
+            ("payload_too_large", ErrorClass.OVERSIZE),
+            ("context_length_exceeded", ErrorClass.OVERFLOW),
+            ("token_limit_exceeded", ErrorClass.OVERFLOW),
+            ("string_too_long", ErrorClass.CONTENT),
+            ("invalid_image", ErrorClass.CONTENT),
+            ("image_too_large", ErrorClass.CONTENT),
+            ("image_too_small", ErrorClass.CONTENT),
+            ("unsupported_image_format", ErrorClass.CONTENT),
+            ("image_download_failed", ErrorClass.CONTENT),
+            ("rate_limit_exceeded", ErrorClass.RATE_LIMIT),
+        ],
+    )
+    def test_openrouter_metadata_error_type_decides(self, error_type, expected):
+        # OpenRouter's message is generic; the category lives in metadata.error_type.
+        body = {
+            "error": {
+                "code": 400,
+                "message": "Provider returned error",
+                "metadata": {"error_type": error_type},
+            }
+        }
+        exc = _HTTPError("Error code: 400", status_code=400, body=body)
+        assert classify_openai_error(exc) == expected
+
+    @pytest.mark.parametrize(
+        "message, expected",
+        [
+            ("Request payload too large", ErrorClass.OVERSIZE),
+            ("Entity too large", ErrorClass.OVERSIZE),
+            (
+                "You uploaded an unsupported image. Please make sure your image is "
+                "below 20 MB in size",
+                ErrorClass.CONTENT,
+            ),
+            (
+                "At least one of the image dimensions exceed max allowed size for "
+                "many-image requests: 2000 pixels",
+                ErrorClass.CONTENT,
+            ),
+            (
+                "The input token count (1200000) exceeds the maximum number of "
+                "tokens allowed (1048576).",
+                ErrorClass.OVERFLOW,
+            ),
+        ],
+    )
+    def test_documented_provider_wordings(self, message, expected):
+        assert classify_openai_error(_HTTPError(message, status_code=400)) == expected
+
+    def test_oversize_flag_on_transport_error_is_oversize(self):
+        exc = _HTTPError("frame refused")
+        exc.oversize = True
+        assert classify_openai_error(exc) == ErrorClass.OVERSIZE
+
+    def test_413_with_token_wording_stays_overflow(self):
+        exc = _HTTPError("context_length_exceeded: too many tokens", status_code=413)
+        assert classify_openai_error(exc) == ErrorClass.OVERFLOW
 
     def test_context_length_marker_is_overflow(self):
         exc = _HTTPError("this model's maximum context length is 8192", status_code=400)
@@ -125,6 +211,34 @@ class TestClassifyOpenAIError:
     def test_error_payload_code_field_classifies(self):
         exc = _HTTPError(body={"error": {"code": "context_length_exceeded"}})
         assert classify_openai_error(exc) == ErrorClass.OVERFLOW
+
+    @pytest.mark.parametrize(
+        "message, body",
+        [
+            ("Invalid image data", None),
+            ("Error code: 400", {"error": {"code": "invalid_image_format"}}),
+            ("messages.3.content.1.image.source.base64: image exceeds 5 MB", None),
+            ("Could not process image", None),
+            ("Exceeded maximum number of images (50) allowed in the request", None),
+            (
+                "Invalid 'input[12].output': string too long. Expected a string "
+                "with maximum length 10485760",
+                None,
+            ),
+        ],
+    )
+    def test_refused_request_content_is_content(self, message, body):
+        exc = _HTTPError(message, status_code=400, body=body)
+        assert classify_openai_error(exc) == ErrorClass.CONTENT
+        assert ErrorClass.CONTENT not in RetryPolicy().retry_classes
+
+    def test_token_overflow_wins_over_content_wording(self):
+        exc = _HTTPError("request too large: image exceeds context", status_code=413)
+        assert classify_openai_error(exc) == ErrorClass.OVERFLOW
+
+    def test_plain_bad_request_stays_user_error(self):
+        exc = _HTTPError("Unrecognized request argument: temperature", status_code=400)
+        assert classify_openai_error(exc) == ErrorClass.USER_ERROR
 
     def test_class_name_marker_classifies_when_message_sparse(self):
         # a bare RemoteProtocolError-style exception with empty message

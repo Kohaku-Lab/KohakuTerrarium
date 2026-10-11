@@ -143,10 +143,15 @@ class GrokSubscriptionProvider(OpenAIProvider):
             extra_body=dict(self.extra_body),
         )
         clone._rejected_fingerprints = set(self._rejected_fingerprints)
+        self.share_request_ceiling(clone)
         clone._emergency_drop_callbacks = list(self._emergency_drop_callbacks)
         clone.prompt_cache_key = self.prompt_cache_key
         clone._profile_max_context = getattr(self, "_profile_max_context", None)
         return clone
+
+    def _reset_fork_state(self) -> None:
+        super()._reset_fork_state()
+        self._rejected_fingerprints = set(self._rejected_fingerprints)
 
     def _activate(self, token: GrokToken) -> None:
         fingerprint = _fingerprint(token)
@@ -169,11 +174,13 @@ class GrokSubscriptionProvider(OpenAIProvider):
         )
         self._active_source = token.source
         self._active_fingerprint = fingerprint
+        borrowed, self._borrowed_client = self._borrowed_client, False
         try:
             loop = asyncio.get_running_loop()
             if old_session is not None:
                 loop.create_task(old_session.close())
-            loop.create_task(old_client.close())
+            if not borrowed:
+                loop.create_task(old_client.close())
         except RuntimeError:
             pass
 
