@@ -224,12 +224,14 @@ class ImagePreparer:
             with Image.open(io.BytesIO(original)) as source:
                 # Camera MPO files are JPEGs whose first frame is the photo.
                 is_mpo = source.format == "MPO"
+                animated = getattr(source, "n_frames", 1) != 1 and not is_mpo
                 if (
-                    (source.format not in {"PNG", "JPEG", "WEBP"} and not is_mpo)
-                    or (getattr(source, "n_frames", 1) != 1 and not is_mpo)
+                    (source.format not in {"PNG", "JPEG", "WEBP", "GIF"} and not is_mpo)
+                    or (animated and len(original) <= max_image_bytes)
                     or source.mode not in {"1", "L", "LA", "P", "RGB", "RGBA", "CMYK"}
                 ):
                     return original, ""
+                # An over-budget animation is sent as its first frame, a still.
                 if source.width * source.height > 40_000_000:
                     return original, ""
                 if len(original) <= max_image_bytes and max(source.size) <= 2000:

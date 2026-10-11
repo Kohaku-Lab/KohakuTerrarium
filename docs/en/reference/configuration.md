@@ -1062,8 +1062,10 @@ source files and stored conversation history are unchanged.
 Compression can reduce image detail. Transparency is preserved; a transparent
 image keeps its original encoding if converting to PNG would increase its size.
 Opaque grayscale images may use JPEG when the image budget requires it.
-Animated, malformed, unsupported (including high-bit-depth modes), or
-over-40-megapixel images are left to the existing provider limits. The byte
+An animated image within the per-image target is sent unchanged; one over it
+is sent as its first frame, prepared like a static image. Malformed,
+unsupported (including high-bit-depth modes), or over-40-megapixel images are
+left to the existing provider limits. The byte
 target is best effort: large text, documents, or images that cannot be
 compressed enough can still cause a provider size error.
 
