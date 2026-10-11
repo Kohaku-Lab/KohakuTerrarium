@@ -85,6 +85,7 @@ async def test_default_options_use_provider_timeout(
         timeout = 300.0 if isinstance(provider, CodexOAuthProvider) else 120.0
         assert calls[0]["websocket_connection_options"] == {
             "max_size": None,
+            "compression": "deflate",
             "open_timeout": timeout,
             "ping_timeout": timeout,
         }
@@ -186,6 +187,7 @@ async def test_options_survive_client_rebuild(provider_type, monkeypatch):
         session_for(provider)._connect_factory()
         assert calls[0]["websocket_connection_options"] == {
             "max_size": None,
+            "compression": "deflate",
             "open_timeout": 37.0,
             "ping_timeout": None,
         }

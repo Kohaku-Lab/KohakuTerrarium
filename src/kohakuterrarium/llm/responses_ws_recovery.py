@@ -25,6 +25,21 @@ def event_field(value: Any, name: str) -> Any:
     return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
 
 
+MESSAGE_TOO_BIG = 1009
+
+
+def oversize_close(error: BaseException) -> bool:
+    """Whether the server closed the socket because a sent frame was too big."""
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, ConnectionClosed):
+            frame = error.rcvd
+            return frame is not None and frame.code == MESSAGE_TOO_BIG
+        error = error.__cause__ or error.__context__
+    return False
+
+
 def retryable_close(error: BaseException) -> bool:
     """Check both close frames through SDK exception wrappers."""
     seen: set[int] = set()
@@ -59,6 +74,7 @@ class ResponsesWSError(Exception):
         retire_connection: bool = False,
         cache_miss: bool = False,
         capability_mismatch: bool = False,
+        oversize: bool = False,
     ) -> None:
         super().__init__(message)
         self.mid_stream = mid_stream
@@ -73,6 +89,26 @@ class ResponsesWSError(Exception):
         self.cache_miss = cache_miss
         # The connection cannot serve the hosted tools this request declares.
         self.capability_mismatch = capability_mismatch
+        # The event exceeds the socket's frame ceiling; the server never ran it.
+        self.oversize = oversize
+
+
+def server_rejected(error: BaseException) -> bool:
+    """Whether the server answered with a rejection, so a reduced resend is safe.
+
+    WS transport failures and failures after output began are uncertain: the
+    request may have run, so they never take the context-recovery path.
+    """
+    if isinstance(error, ResponsesWSError):
+        return not error.mid_stream and not error.transport
+    return True
+
+
+def fresh_recovery(
+    recovery: "WSRecovery | None", policy: RetryPolicy
+) -> "WSRecovery | None":
+    """A new submission budget for a request whose content recovery changed."""
+    return None if recovery is None else WSRecovery(policy, recovery.notify)
 
 
 class WSRecovery:
@@ -149,6 +185,7 @@ class WSRecovery:
             while True:
                 if reset_attempt is not None:
                     reset_attempt()
+                charged = (self.submitted, self.submissions)
                 try:
                     async with aclosing(
                         session._run_turn(base_event, items, pairing_fix, delta, self)
@@ -160,6 +197,20 @@ class WSRecovery:
                             yield event
                     return
                 except ResponsesWSError as exc:
+                    if exc.oversize and not exc.mid_stream:
+                        # The server refused the frame unread: this attempt was
+                        # never submitted, and resending it on WS cannot succeed.
+                        self.submitted, self.submissions = charged
+                        exc.submitted = self.submitted
+                        if exc.retire_connection:
+                            await session.close()
+                        logger.warning(
+                            "Responses WS request exceeds the frame ceiling",
+                            request_id=self._request_id,
+                            ceiling=session.max_message_bytes,
+                            submitted=self.submitted,
+                        )
+                        raise
                     self.submitted |= exc.submitted
                     exc.submitted = self.submitted
                     if exc.retire_connection:

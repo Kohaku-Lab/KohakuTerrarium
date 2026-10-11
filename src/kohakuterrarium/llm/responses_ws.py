@@ -7,6 +7,7 @@ HTTP-path detour, or failed turn falls back to a full resend.
 """
 
 import asyncio
+import json
 from contextlib import aclosing
 from copy import deepcopy
 from typing import Any, AsyncIterator, Callable
@@ -16,10 +17,20 @@ from kohakuterrarium.llm.responses_ws_recovery import (
     ResponsesWSError,
     WSRecovery,
     event_field,
+    oversize_close,
 )
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Consecutive WS turns abandoned for HTTP before WS is disabled for a conversation.
+DEFAULT_FALLBACK_AFTER = 3
+
+
+def event_bytes(event: dict[str, Any]) -> int:
+    """Encoded size of a client event as the SDK serializes it."""
+    return len(json.dumps(event).encode())
+
 
 # Longest a waiting close() blocks on handshakes; unfinished ones stay owned.
 SHUTDOWN_CLOSE_TIMEOUT = 10.0
@@ -45,8 +56,18 @@ def rejects_hosted_tool(code: str, message: str) -> bool:
 class ResponsesWSSession:
     """Connection + continuation state for Responses WebSocket mode."""
 
-    def __init__(self, connect_factory: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        connect_factory: Callable[[], Any],
+        *,
+        max_message_bytes: int | None = None,
+        fallback_after: int = DEFAULT_FALLBACK_AFTER,
+    ) -> None:
         self._connect_factory = connect_factory
+        # Largest event the server accepts; set by config or learned from a 1009.
+        self.max_message_bytes = max_message_bytes
+        self._fallback_after = fallback_after
+        self._fallbacks = 0
         self._manager: Any = None
         self._connection: Any = None
         self._lock = asyncio.Lock()
@@ -62,6 +83,20 @@ class ResponsesWSSession:
     def busy(self) -> bool:
         """Whether a turn is in flight (one response per connection)."""
         return self._lock.locked()
+
+    @property
+    def disabled(self) -> bool:
+        """Whether repeated transport failures moved this conversation to HTTP."""
+        return 0 < self._fallback_after <= self._fallbacks
+
+    def note_http_fallback(self) -> None:
+        """Count a WS turn abandoned for HTTP; enough in a row disable WS here."""
+        self._fallbacks += 1
+        if self.disabled:
+            logger.warning(
+                "Responses WS disabled for this conversation; using HTTP",
+                consecutive_failures=self._fallbacks,
+            )
 
     def invalidate(self) -> None:
         """Drop continuation state so the next turn resends the full input.
@@ -174,8 +209,6 @@ class ResponsesWSSession:
             raise ResponsesWSError(
                 str(exc), mid_stream=False, transport=True, submitted=False
             ) from exc
-        if self._connection_tools is None:
-            self._connection_tools = required
         if self._prev_id is None:
             delta = None
         event: dict[str, Any] = {"type": "response.create", **base_event}
@@ -184,10 +217,21 @@ class ResponsesWSSession:
             event["input"] = delta
         else:
             event["input"] = pairing_fix(list(items))
+        if self.max_message_bytes is not None:
+            size = event_bytes(event)
+            if size > self.max_message_bytes:
+                raise ResponsesWSError(
+                    f"Responses WS event is {size} bytes, over the "
+                    f"{self.max_message_bytes}-byte frame ceiling",
+                    mid_stream=False,
+                    submitted=False,
+                    oversize=True,
+                )
         recovery.record_submission()
         try:
             await connection.send(event)
         except Exception as exc:
+            self._raise_if_oversize(exc, event, yielded=False)
             detail = exc
             if type(exc).__name__ == "WebSocketQueueFullError":
                 cause = exc.__cause__
@@ -198,6 +242,8 @@ class ResponsesWSSession:
             raise ResponsesWSError(
                 str(detail) or type(detail).__name__, mid_stream=False, transport=True
             ) from exc
+        if self._connection_tools is None:
+            self._connection_tools = required
 
         yielded = False
         last_event_type = ""
@@ -213,6 +259,7 @@ class ResponsesWSSession:
                     last_event_type=last_event_type,
                 )
             except Exception as exc:
+                self._raise_if_oversize(exc, event, yielded=yielded)
                 # Mid-turn transport failures must not trigger a resend that
                 # would duplicate already-yielded output.
                 raise ResponsesWSError(
@@ -251,6 +298,26 @@ class ResponsesWSSession:
             if etype == "response.completed":
                 self._record_completed(server_event, items)
                 return
+
+    def _raise_if_oversize(
+        self, exc: BaseException, event: dict[str, Any], *, yielded: bool
+    ) -> None:
+        """Turn a 1009 close into an oversize error and lower the frame ceiling."""
+        if not oversize_close(exc):
+            return
+        size = event_bytes(event)
+        ceiling = size - 1
+        if self.max_message_bytes is not None:
+            ceiling = min(ceiling, self.max_message_bytes)
+        self.max_message_bytes = ceiling
+        self.invalidate()
+        raise ResponsesWSError(
+            f"Responses WS server refused a {size}-byte event (1009 message too big)",
+            mid_stream=yielded,
+            transport=True,
+            submitted=False,
+            oversize=True,
+        ) from exc
 
     def _handle_error_event(
         self,
@@ -317,3 +384,4 @@ class ResponsesWSSession:
         self._prev_id = response_id
         self._sent_items = deepcopy(items)
         self._assistant_echo = None
+        self._fallbacks = 0

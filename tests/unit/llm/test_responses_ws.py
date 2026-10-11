@@ -11,7 +11,11 @@ from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 from openai.resources.responses import responses as sdk_responses
 
-from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
+from kohakuterrarium.llm.responses_ws import (
+    ResponsesWSError,
+    ResponsesWSSession,
+    event_bytes,
+)
 
 
 class Ev:
@@ -80,7 +84,7 @@ class FakeManager:
 class Harness:
     """Session + factory bookkeeping for one test scenario."""
 
-    def __init__(self):
+    def __init__(self, **session_options):
         self.connections = [FakeConnection()]
         self.factory_calls = 0
 
@@ -90,7 +94,7 @@ class Harness:
                 self.connections.append(FakeConnection())
             return FakeManager(self.connections[self.factory_calls - 1])
 
-        self.session = ResponsesWSSession(factory)
+        self.session = ResponsesWSSession(factory, **session_options)
 
     @property
     def conn(self):
@@ -110,6 +114,89 @@ ASSIST1 = {"role": "assistant", "content": [{"type": "output_text", "text": "yo"
 CALL1 = {"type": "function_call", "call_id": "c1", "name": "t", "arguments": "{}"}
 OUT1 = {"type": "function_call_output", "call_id": "c1", "output": "ok"}
 USER2 = {"role": "user", "content": [{"type": "input_text", "text": "next"}]}
+
+
+def _too_big():
+    return ConnectionClosedError(Close(1009, "message too big"), None)
+
+
+BIG = {"role": "user", "content": [{"type": "input_text", "text": "x" * 5000}]}
+
+
+class TestFrameCeiling:
+    async def test_server_1009_is_an_unsubmitted_oversize_and_lowers_the_ceiling(self):
+        h = Harness()
+        h.conn.iter_exc = _too_big()
+        with pytest.raises(ResponsesWSError) as caught:
+            await h.run([BIG])
+        exc = caught.value
+        assert exc.oversize and not exc.submitted and not exc.mid_stream
+        sent_size = event_bytes(h.conn.sent[0])
+        assert h.session.max_message_bytes == sent_size - 1
+        assert h.conn.closed
+        # The same payload never reaches a socket again; a small one does.
+        with pytest.raises(ResponsesWSError) as again:
+            await h.run([BIG])
+        assert again.value.oversize and not again.value.submitted
+        assert h.factory_calls == 2 and h.connections[1].send_attempts == 0
+        h.connections[1].scripts = [[completed("r1")]]
+        await h.run([USER1])
+        assert h.connections[1].sent[0]["input"] == ["PAIRED", USER1]
+
+    async def test_1009_while_sending_is_oversize_too(self):
+        h = Harness()
+        h.conn.send_exc = _too_big()
+        with pytest.raises(ResponsesWSError) as caught:
+            await h.run([BIG])
+        assert caught.value.oversize and not caught.value.submitted
+        assert h.session.max_message_bytes is not None
+
+    async def test_configured_ceiling_rejects_before_any_send(self):
+        h = Harness(max_message_bytes=1000)
+        with pytest.raises(ResponsesWSError) as caught:
+            await h.run([BIG])
+        assert caught.value.oversize and not caught.value.submitted
+        assert h.conn.send_attempts == 0 and not h.conn.closed
+
+    async def test_refused_preflight_does_not_count_as_the_connections_first_request(
+        self,
+    ):
+        h = Harness(max_message_bytes=1000)
+        hosted = {"model": "m", "tools": [{"type": "image_generation"}]}
+        h.conn.scripts = [[completed("r1")], [completed("r2")]]
+        with pytest.raises(ResponsesWSError):
+            await h.run([BIG], base=hosted)
+        await h.run([USER1])
+        assert h.factory_calls == 1
+        # The first request this socket really carried had no hosted tool, so a
+        # turn that declares one needs a fresh connection.
+        h.connections.append(FakeConnection())
+        h.connections[1].scripts = [[completed("r3")]]
+        await h.run([USER1], base=hosted)
+        assert h.factory_calls == 2
+
+    async def test_other_close_codes_are_not_oversize(self):
+        h = Harness()
+        h.conn.iter_exc = ConnectionClosedError(Close(1008, "policy"), None)
+        with pytest.raises(ResponsesWSError) as caught:
+            await h.run([USER1])
+        assert not caught.value.oversize
+        assert h.session.max_message_bytes is None
+
+    async def test_consecutive_fallbacks_disable_ws_and_a_completed_turn_resets(self):
+        h = Harness(fallback_after=2)
+        h.session.note_http_fallback()
+        assert not h.session.disabled
+        h.conn.scripts = [[completed("r1")]]
+        await h.run([USER1])
+        h.session.note_http_fallback()
+        assert not h.session.disabled
+        h.session.note_http_fallback()
+        assert h.session.disabled
+        never = Harness(fallback_after=0)
+        for _ in range(10):
+            never.session.note_http_fallback()
+        assert not never.session.disabled
 
 
 class TestFullAndIncrementalTurns:
