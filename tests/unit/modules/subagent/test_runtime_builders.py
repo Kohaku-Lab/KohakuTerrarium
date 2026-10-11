@@ -177,6 +177,50 @@ class TestResolveLLM:
         assert resolve_llm(parent, cfg) is parent
 
 
+class _ForkableLLM(_FakeLLM):
+    """Provider stand-in with ``fork``; each fork records where it came from."""
+
+    def __init__(self, model="parent-model", origin=None):
+        super().__init__(model)
+        self.origin = origin
+        self._borrowed_client = origin is not None
+        self.closed = False
+
+    def fork(self):
+        return _ForkableLLM(self.model, origin=self)
+
+    def with_model(self, name):
+        self.with_model_calls.append(name)
+        return _ForkableLLM(name)
+
+    async def close(self):
+        self.closed = True
+
+
+class TestSubAgentProviderFork:
+    def test_inherit_gets_a_fork_of_the_parent(self, monkeypatch):
+        _no_profiles(monkeypatch)
+        parent = _ForkableLLM()
+        for sentinel in ("inherit", "parent", "default", "subagent-default"):
+            child = resolve_llm(parent, SubAgentConfig(name="x", model=sentinel))
+            assert child is not parent and child.origin is parent
+
+    def test_raw_model_override_is_forked_too(self, monkeypatch):
+        _no_profiles(monkeypatch)
+        parent = _ForkableLLM()
+        child = resolve_llm(parent, SubAgentConfig(name="x", model="raw-model"))
+        assert child.model == "raw-model" and child.origin is not None
+        assert child.origin is not parent
+
+    async def test_release_closes_only_forks(self):
+        parent = _ForkableLLM()
+        fork = parent.fork()
+        await model_resolve.release_forked_llm(fork)
+        await model_resolve.release_forked_llm(parent)
+        await model_resolve.release_forked_llm(object())
+        assert fork.closed and not parent.closed
+
+
 class TestBuildCompactManager:
     def test_no_compact_config_returns_none(self):
         cfg = SubAgentConfig(name="x", compact=None)

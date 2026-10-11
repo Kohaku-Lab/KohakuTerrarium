@@ -6,6 +6,7 @@ Provide model switching and canonical LLM identifiers for agents.
 from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
+from kohakuterrarium.core.agent_budget_recovery import attach_recovery_hooks
 from kohakuterrarium.core.agent_selection import persist_model_selection
 from kohakuterrarium.core.provider_tools import sync_provider_tools
 from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
@@ -51,12 +52,9 @@ class AgentModelMixin:
         self.llm = new_llm
         self.controller.llm = new_llm
         sync_provider_tools(self)
-        # Fresh provider needs the same emergency-drop sync the boot
-        # provider got — without it a drop after a model switch leaves
-        # the controller holding the original oversized conversation.
-        drop_sync = getattr(self, "_on_provider_emergency_drop", None)
-        if drop_sync is not None and hasattr(new_llm, "on_emergency_drop"):
-            new_llm.on_emergency_drop(drop_sync)
+        # A fresh provider needs the boot provider's recovery sync, or a drop or
+        # repair after the switch leaves the controller holding refused content.
+        attach_recovery_hooks(self, new_llm)
         # Sub-agents resolve their LLM from the manager's ``llm`` at spawn
         # time — ``resolve_llm(self.subagent_manager.llm, config)`` for
         # task sub-agents, and ``llm=self.llm`` directly for interactive

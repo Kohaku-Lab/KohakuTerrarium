@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.agent_budget_recovery import apply_context_repair
 from kohakuterrarium.core.budget import (
     BudgetExhausted,
     IterationBudget,
@@ -89,6 +90,11 @@ class SubAgent:
                 self.executor.register_tool(tool)
 
         self.conversation = Conversation()
+        # The sub-agent's own provider fork reports refused content to this conversation.
+        if hasattr(llm, "on_context_repair"):
+            llm.on_context_repair(
+                lambda repair: apply_context_repair(self.conversation, repair)
+            )
 
         # Messages are admitted between turns without changing task completion semantics.
         self._inbox: asyncio.Queue = asyncio.Queue()

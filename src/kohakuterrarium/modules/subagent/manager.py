@@ -23,6 +23,7 @@ from kohakuterrarium.modules.subagent.interactive import (
     InteractiveSubAgent,
 )
 from kohakuterrarium.modules.subagent.interactive_mgr import InteractiveManagerMixin
+from kohakuterrarium.modules.subagent.model_resolve import release_forked_llm
 from kohakuterrarium.parsing.events import SubAgentCallEvent
 from kohakuterrarium.utils.logging import get_logger
 
@@ -380,6 +381,7 @@ class SubAgentManager(InteractiveManagerMixin):
         finally:
             if hasattr(job.subagent, "plugins") and job.subagent.plugins:
                 await job.subagent.plugins.unload_all()
+            await release_forked_llm(job.subagent.llm)
 
     async def wait_for(
         self,

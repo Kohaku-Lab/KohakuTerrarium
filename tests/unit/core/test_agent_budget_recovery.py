@@ -5,8 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.agent_budget_recovery import sync_emergency_drop_conversation
+from kohakuterrarium.core.agent_budget_recovery import (
+    apply_context_repair,
+    attach_recovery_hooks,
+    repair_controller,
+    sync_emergency_drop_conversation,
+)
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.llm.context_repair import ContextRepair
+from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.llm.recovery import drop_last_tool_round
 
 
@@ -83,6 +90,89 @@ def test_preserves_surviving_identity_and_snapshot_round_trip():
         expected[-1],
     ]
     assert all("metadata" not in msg for msg in conv.to_messages())
+
+
+def _media_conversation():
+    conv = Conversation()
+    conv.append("system", "sys", metadata={"kind": "system"})
+    conv.append(
+        "user",
+        [TextPart(text="look"), ImagePart(url="file:///a.png")],
+        metadata={"turn_index": 1, "branch_id": 1},
+    )
+    conv.append(
+        "assistant",
+        "",
+        tool_calls=[
+            {
+                "id": "c1",
+                "type": "function",
+                "function": {"name": "read", "arguments": "{}"},
+            }
+        ],
+        metadata={"turn_index": 1, "kind": "tool_feedback"},
+    )
+    conv.append(
+        "tool",
+        [TextPart(text="PDF: doc.pdf"), ImagePart(url="data:image/png;base64,AA")],
+        name="read",
+        tool_call_id="c1",
+        metadata={"turn_index": 1, "kind": "tool_feedback"},
+    )
+    return conv
+
+
+def test_context_repair_strips_newest_media_and_keeps_every_identity():
+    conv = _media_conversation()
+    identities = [msg.metadata for msg in conv.get_messages()]
+    repair = ContextRepair("strip_media", "newest", "invalid_image: page 3")
+    assert apply_context_repair(conv, repair) == 1
+    assert [msg.metadata for msg in conv.get_messages()] == identities
+    messages = conv.to_messages()
+    assert [p["type"] for p in messages[1]["content"]] == ["text", "image_url"]
+    tool = messages[3]["content"]
+    assert [p["type"] for p in tool] == ["text", "text"]
+    assert "invalid_image: page 3" in tool[1]["text"]
+    assert messages[3]["tool_call_id"] == "c1"
+    # The repaired request matches what the provider retried with.
+    assert repair.apply(_media_conversation().to_messages())[1] == messages
+
+
+def test_context_repair_that_changes_nothing_leaves_the_conversation():
+    conv = _media_conversation()
+    assert apply_context_repair(conv, ContextRepair("strip_media", "all", "x")) == 2
+    stripped = conv._messages
+    assert apply_context_repair(conv, ContextRepair("strip_media", "all", "x")) == 0
+    assert conv._messages is stripped
+
+
+def test_attached_hooks_route_drop_and_repair_to_the_agent_controller():
+    class _Provider:
+        def __init__(self):
+            self.drops, self.repairs = [], []
+
+        def on_emergency_drop(self, callback):
+            self.drops.append(callback)
+
+        def on_context_repair(self, callback):
+            self.repairs.append(callback)
+
+    conv = _media_conversation()
+    agent = SimpleNamespace(
+        _on_provider_emergency_drop=lambda m: None,
+        controller=SimpleNamespace(conversation=conv),
+    )
+    provider = _Provider()
+    attach_recovery_hooks(agent, provider)
+    assert provider.drops == [agent._on_provider_emergency_drop]
+    provider.repairs[0](ContextRepair("strip_media", "all", "too big"))
+    assert all(
+        part["type"] == "text"
+        for msg in conv.to_messages()
+        if isinstance(msg["content"], list)
+        for part in msg["content"]
+    )
+    assert repair_controller(SimpleNamespace(), ContextRepair("strip_media")) == 0
 
 
 @pytest.mark.parametrize("change", ["injection", "rewrite", "reorder"])

@@ -6,6 +6,7 @@ import pytest
 
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.llm.context_repair import ContextRepair
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager
@@ -111,6 +112,28 @@ class TestBasicRun:
         # The run itself succeeds even though the tool failed.
         assert result.success is True
         assert "failtool" in result.metadata["tools_used"]
+
+
+class TestContextRepairHook:
+    def test_provider_repair_rewrites_this_subagents_conversation(self):
+        class _RepairingLLM(ScriptedLLM):
+            def __init__(self):
+                super().__init__(["ok"])
+                self.callbacks = []
+
+            def on_context_repair(self, callback):
+                self.callbacks.append(callback)
+
+        llm = _RepairingLLM()
+        sa = SubAgent(SubAgentConfig(name="x"), _registry(), llm)
+        sa.conversation.append(
+            "user", [TextPart(text="see"), ImagePart(url="data:image/png;base64,AA")]
+        )
+        assert len(llm.callbacks) == 1
+        llm.callbacks[0](ContextRepair("strip_media", "newest", "invalid image"))
+        content = sa.conversation.to_messages()[0]["content"]
+        assert [p["type"] for p in content] == ["text", "text"]
+        assert "invalid image" in content[1]["text"]
 
 
 class TestLimits:

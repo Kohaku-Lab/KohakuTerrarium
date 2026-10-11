@@ -30,6 +30,7 @@ from kohakuterrarium.core.agent_observability import (
 )
 from kohakuterrarium.core.agent_selection import track_plugin_selection
 from kohakuterrarium.core.agent_budget_recovery import (
+    attach_recovery_hooks,
     sync_emergency_drop_conversation,
 )
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
@@ -215,8 +216,7 @@ class Agent(
         # Order matters: output before controller (need known_outputs for parser)
         with package_snapshot():
             self._init_llm()
-            if hasattr(self.llm, "on_emergency_drop"):
-                self.llm.on_emergency_drop(self._on_provider_emergency_drop)
+            attach_recovery_hooks(self, self.llm)
             self._init_registry()
             self._init_executor()
             # Instance-injected tools (E7) — registered BEFORE the

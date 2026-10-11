@@ -356,7 +356,7 @@ async def test_shared_codex_provider_worker_then_controller():
     assert len(pool.connections) == 2 and len(controller.sent) == 2
 
 
-async def test_inherited_subagent_on_fresh_connection_then_controller():
+async def test_inherited_subagent_runs_on_its_own_connection():
     parent = _codex_provider()
     pool = parent._client.responses
     registry = Registry()
@@ -367,7 +367,8 @@ async def test_inherited_subagent_on_fresh_connection_then_controller():
         tool_format="native",
         max_turns=1,
     )
-    assert resolve_subagent_llm(parent, config) is parent
+    child = resolve_subagent_llm(parent, config)
+    assert child is not parent and child._client is parent._client
     manager = SubAgentManager(registry, parent, tool_format="native")
     manager.register(config)
 
@@ -379,17 +380,24 @@ async def test_inherited_subagent_on_fresh_connection_then_controller():
 
     async def worker_turn():
         job_id = await manager.spawn("worker", "go", background=True)
-        assert manager._jobs[job_id].subagent.llm is parent
+        assert manager._jobs[job_id].subagent.llm is not parent
         result = await manager.wait_for(job_id, timeout=10)
         assert result is not None and result.success, result
 
     await controller_turn()
     await worker_turn()
-    await parent._reset_ws_session()
     await worker_turn()
     await controller_turn()
-    first, worker_conn, controller_conn = pool.connections
-    assert all("image_generation" not in str(e.get("tools")) for e in worker_conn.sent)
-    assert worker_conn.closed
-    assert gated_tool_types(controller_conn.sent[0]) == {"image_generation"}
-    assert len(controller_conn.sent) == 1
+    controller_conn, *worker_conns = pool.connections
+    # The controller keeps one socket across the workers' runs: no reconnect,
+    # no hosted-tool churn; each worker run opened and released its own.
+    assert not controller_conn.closed
+    assert len(controller_conn.sent) == 2
+    assert all(
+        gated_tool_types(e) == {"image_generation"} for e in controller_conn.sent
+    )
+    assert len(worker_conns) == 2
+    for conn in worker_conns:
+        assert conn.closed
+        assert all("image_generation" not in str(e.get("tools")) for e in conn.sent)
+    assert not parent._borrowed_client

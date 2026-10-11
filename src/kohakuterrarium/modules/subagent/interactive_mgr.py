@@ -7,7 +7,10 @@ from kohakuterrarium.modules.subagent.interactive import (
     InteractiveOutput,
     InteractiveSubAgent,
 )
-from kohakuterrarium.modules.subagent.model_resolve import resolve_subagent_llm
+from kohakuterrarium.modules.subagent.model_resolve import (
+    release_forked_llm,
+    resolve_subagent_llm,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -72,6 +75,7 @@ class InteractiveManagerMixin:
         agent = self._interactive.get(name)
         if agent:
             await agent.stop()
+            await release_forked_llm(agent.llm)
             del self._interactive[name]
             self._output_callbacks.pop(name, None)
 

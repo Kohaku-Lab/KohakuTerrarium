@@ -8,6 +8,7 @@ from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
+from kohakuterrarium.llm.base import fork_llm
 from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
 from kohakuterrarium.utils.logging import get_logger
 
@@ -64,8 +65,8 @@ class AgentCompactMixin:
     def _build_compact_llm(self, compact_cfg: CompactConfig) -> Any:
         """Build an isolated LLM instance for compaction.
 
-        Falls back to the active provider only when a separate provider
-        cannot be constructed.
+        Falls back to a fork of the active provider when a separate provider
+        cannot be constructed, so compaction never shares its transport session.
         """
         profile_name = (
             compact_cfg.compact_model or self._llm_selector or self.config.llm_profile
@@ -92,7 +93,7 @@ class AgentCompactMixin:
                     error=str(e),
                     exc_info=True,
                 )
-        return self.llm
+        return fork_llm(self.llm)
 
 
 def restore_compact_state_from_session(
