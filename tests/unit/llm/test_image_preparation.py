@@ -168,6 +168,71 @@ def test_animated_image_is_not_flattened():
     assert output(result) == original
 
 
+def noisy_frames(count, size=256):
+    rng = random.Random(7)
+    return [
+        Image.frombytes("RGB", (size, size), rng.randbytes(size * size * 3))
+        for _ in range(count)
+    ]
+
+
+def test_oversized_animation_is_sent_as_its_first_frame_within_budget():
+    frames = noisy_frames(4)
+    original = encoded(
+        frames[0], "GIF", save_all=True, append_images=frames[1:], duration=100
+    )
+    raw_size = len(base64.b64decode(original.split(",", 1)[1]))
+    target = 40_000
+    assert raw_size > target
+    body = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "canvas_image_1",
+                        "content": [
+                            {"type": "text", "text": "anim.gif"},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/gif",
+                                    "data": original.split(",", 1)[1],
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    result, stats = ImagePreparer().prepare(body, max_image_bytes=target)
+
+    source = result["messages"][0]["content"][0]["content"][1]["source"]
+    data = base64.b64decode(source["data"])
+    assert len(data) <= target
+    assert stats.changed_count == 1
+    with Image.open(io.BytesIO(data)) as sent:
+        assert getattr(sent, "n_frames", 1) == 1
+        assert sent.size == (256, 256)
+        assert source["media_type"] == Image.MIME[sent.format]
+    assert body["messages"][0]["content"][0]["content"][1]["source"]["data"] == (
+        original.split(",", 1)[1]
+    )
+
+
+def test_animation_within_budget_keeps_every_frame():
+    frames = noisy_frames(3, size=64)
+    original = encoded(
+        frames[0], "WEBP", save_all=True, append_images=frames[1:], duration=100
+    )
+    result, _ = ImagePreparer().prepare(request(original), max_image_bytes=10**7)
+    assert output(result) == original
+
+
 def test_metadata_is_removed_without_mutating_text_or_tool_results():
     info = PngImagePlugin.PngInfo()
     info.add_text("padding", "x" * 600_000)
