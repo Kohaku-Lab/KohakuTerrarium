@@ -61,6 +61,11 @@ input:
   type: none
 output:
   type: stdout
+tools:
+  - name: web_search
+    type: builtin
+  - name: web_fetch
+    type: builtin
 plugins:
   - name: budget
     options:
@@ -477,6 +482,54 @@ class TestApiSettingsJourney:
         modules = {(m["type"], m["name"]): m for m in resp.json()["modules"]}
         assert ("plugin", "budget") in modules
         assert modules[("plugin", "budget")]["enabled"] is True
+
+        for name, backend, baseline in (
+            ("web_search", "deepseek_api", "duckduckgo"),
+            ("web_fetch", "deepseek", "auto"),
+        ):
+            url = (
+                f"/api/sessions/{session_id}/creatures/{creature_id}"
+                f"/modules/tool/{name}/options"
+            )
+            assert modules[("tool", name)]["options"]["backend"] == baseline
+            resp = client.put(url, json={"values": {"backend": backend}})
+            assert resp.status_code == 400
+            assert "key" in resp.json()["detail"].lower()
+            assert client.get(url).json()["options"]["backend"] == baseline
+
+        resp = client.post(
+            "/api/settings/keys",
+            json={"provider": "deepseek", "key": "test-only-deepseek-key"},
+        )
+        assert resp.status_code == 200
+        for name, backend, baseline in (
+            ("web_search", "deepseek_api", "duckduckgo"),
+            ("web_fetch", "deepseek", "auto"),
+        ):
+            url = (
+                f"/api/sessions/{session_id}/creatures/{creature_id}"
+                f"/modules/tool/{name}/options"
+            )
+            resp = client.put(url, json={"values": {"backend": backend}})
+            assert resp.status_code == 200
+            assert client.get(url).json()["options"]["backend"] == backend
+            if name == "web_search":
+                resp = client.put(
+                    url, json={"values": {"deepseek_model": "deepseek-v4-flash"}}
+                )
+                assert resp.status_code == 200
+                current = client.get(url).json()
+                assert current["options"]["deepseek_model"] == "deepseek-flash"
+                assert current["schema"]["deepseek_model"]["values"] == [
+                    "deepseek-v4-pro",
+                    "deepseek-flash",
+                ]
+            resp = client.put(url, json={"values": {"backend": "invalid-backend"}})
+            assert resp.status_code == 400
+            assert client.get(url).json()["options"]["backend"] == backend
+            resp = client.put(url, json={"values": {}})
+            assert resp.status_code == 200
+            assert client.get(url).json()["options"]["backend"] == baseline
 
         # 7b. Read the plugin's option schema + current values.
         resp = client.get(

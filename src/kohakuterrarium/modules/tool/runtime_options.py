@@ -32,6 +32,7 @@ def _coerce_value(tool_name: str, key: str, value: Any, spec: dict[str, Any]) ->
     if kind == "enum":
         if not isinstance(value, str):
             raise ToolOptionError(f"{key!r} must be a string enum value")
+        value = (spec.get("aliases") or {}).get(value, value)
         allowed = [str(v) for v in (spec.get("values") or [])]
         if value not in allowed:
             raise ToolOptionError(

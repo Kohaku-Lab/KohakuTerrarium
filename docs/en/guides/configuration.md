@@ -135,7 +135,7 @@ tools:
   - name: web_search
     backend: duckduckgo
     codex_model: gpt-5.6-luna
-    deepseek_model: deepseek-v4-flash
+    deepseek_model: deepseek-v4-pro
     fallback: none
 ```
 
@@ -143,8 +143,42 @@ tools:
 Codex subscription search, run `kt login codex`, then set `backend: codex` or
 use `/module set web_search backend codex`; this is independent of the
 creature's active LLM. To use DeepSeek, run `kt config key set deepseek`, then
-select `backend: deepseek`. Set `fallback: duckduckgo` when a transient failure
-of an explicitly selected Codex or DeepSeek backend should fall back.
+select `backend: deepseek_api` for the model-independent Search API.
+The legacy `backend: deepseek` uses Responses and defaults to `deepseek-v4-pro`.
+Saved Flash selections remain readable but return a migration hint because Flash
+ignores Responses search. Set `fallback: duckduckgo` to allow transient provider
+failures to fall back; authentication and balance errors do not fall back.
+
+```yaml
+tools:
+  - name: web_search
+    backend: deepseek_api
+    need_content: false
+    fallback: none
+  - name: web_fetch
+    backend: deepseek
+    fallback: none
+```
+
+Use `/module set web_search backend deepseek_api` and
+`/module set web_fetch backend deepseek` to switch a running creature; options
+persist in its session. In the GUI, open the running creature's chat, then
+**Modules → Tools → web_search / web_fetch** in the right-hand status rail;
+changes save automatically. In the Textual TUI, press **F2 → Tools**, select the
+tool, and choose **Save**. The Rich CLI also offers `/module edit web_search`
+and `/module edit web_fetch`.
+
+Search accepts `max_results` (1–50), `need_content`, and
+optional `ori_question` (1–128 characters). Its optional `localization` setting
+is an IP address, not a region code. Fetch accepts `max_length` (1–100000).
+The default Fetch backend remains `auto` (the existing extractor chain).
+`fallback: auto` explicitly enables that chain after transient DeepSeek failures;
+policy refusals and missing-page errors do not trigger it.
+
+Direct requests have a 30-second total deadline, at most three attempts, and
+process-local pacing per endpoint. Other processes share the account's remote
+quota. Search and Fetch are billed per successful request with results; see the
+[DeepSeek guide](https://api-docs.deepseek.com/zh-cn/guides/search/).
 
 The Codex search model can be selected independently, for example:
 

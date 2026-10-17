@@ -47,6 +47,13 @@ class _Registry:
         return self.tool if name == "web_search" else None
 
 
+class _AliasTool(_Tool):
+    def runtime_option_schema(self):
+        schema = super().runtime_option_schema()
+        schema["backend"]["aliases"] = {"legacy-deepseek": "deepseek"}
+        return schema
+
+
 class _Store:
     def __init__(self):
         self.state = {}
@@ -62,6 +69,24 @@ def _agent(tool, store=None):
 
 
 class TestToolOptions:
+    def test_alias_from_yaml_and_saved_session_is_canonical_after_reset_and_resume(
+        self,
+    ):
+        tool = _AliasTool()
+        tool.config.extra["backend"] = "legacy-deepseek"
+        store = _Store()
+        store.state[f"a:{TOOL_OPTIONS_STATE_SUFFIX}"] = {
+            "web_search": {"backend": "legacy-deepseek"}
+        }
+        options = ToolOptions(_agent(tool, store))
+        assert options.get("web_search")["backend"] == "deepseek"
+        options.apply()
+        assert tool.applied["backend"] == "deepseek"
+        assert options.get("web_search")["backend"] == "deepseek"
+        assert options.set("web_search", {})["backend"] == "deepseek"
+        assert tool.applied["backend"] == "deepseek"
+        assert tool.config.extra["opaque"] == "keep"
+
     def test_patch_persists_only_override_and_refreshes_effective_values(self):
         tool = _Tool()
         store = _Store()

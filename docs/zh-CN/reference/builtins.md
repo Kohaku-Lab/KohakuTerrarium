@@ -83,18 +83,21 @@ KohakuTerrarium 随附的所有内置工具、子代理、输入、输出、用�
 
 ### Web
 
- **`web_fetch`**：将 URL 抓取为 Markdown。依序尝试 `crawl4ai` →
-`trafilatura` → Jina proxy → `httpx + html2text`。上限 100k 字符，超时 30 秒。直接执行。
+**`web_fetch`**：将 URL 抓取为 Markdown。默认 `backend: auto` 保持
+`crawl4ai` → `trafilatura` → Jina → `httpx + html2text` 链；
+`backend: deepseek` 使用直连 Fetch，`fallback: auto` 明确允许临时故障后回退。
 
-- 参数：`url`。
+- 参数：`url`、`max_length`（1–100000，默认 100000）。
 
-**`web_search`**：默认使用 DuckDuckGo，也可明确选择 Codex 订阅或
-DeepSeek Responses 后端。执行 `kt login codex` 后可设置
-`backend: codex`；此后端与当前 Creature 主模型无关。DeepSeek 需要先执行
-`kt config key set deepseek`，再设置 `backend: deepseek`。两个明确选择的
-Provider 后端均可配置 `fallback: duckduckgo` 处理临时故障。直接执行。
+**`web_search`**：默认 DuckDuckGo，可选 `codex`、`deepseek_api`（直连 Search）
+和 `deepseek`（旧 Responses，仅 Pro）。DeepSeek Key 通过 `kt config key set deepseek`
+配置。`fallback: duckduckgo` 仅处理临时故障。后端独立于 Creature 主模型。
+直连结果保留来源 URL，不标记为模型验证过的引用。
 
-- 参数：`query`、`max_results`（int）、`region`（str）。
+- 参数：`query`、`max_results`（兼容 `limit`）；直连另支持 `need_content`、
+  `ori_question`。直连 query 为 1–128 字符，结果数为 1–50；
+  `localization` 运行时配置填写 IP。
+
 
 ### 互动与记忆
 

@@ -26,6 +26,23 @@ class TestValidateToolOptions:
             self.schema,
         ) == {"backend": "duckduckgo", "limit": 3, "enabled": True}
 
+    def test_enum_alias_normalizes_before_membership_and_availability_checks(self):
+        schema = {
+            "model": {
+                "type": "enum",
+                "values": ["flash"],
+                "aliases": {"old-flash": "flash", "bad-alias": "missing"},
+            }
+        }
+        assert validate_tool_options("search", {"model": "old-flash"}, schema) == {
+            "model": "flash"
+        }
+        with pytest.raises(ToolOptionError, match="must be one of"):
+            validate_tool_options("search", {"model": "bad-alias"}, schema)
+        schema["model"]["disabled_values"] = {"flash": "unavailable"}
+        with pytest.raises(ToolOptionError, match="unavailable"):
+            validate_tool_options("search", {"model": "old-flash"}, schema)
+
     def test_rejects_disabled_enum_with_actionable_reason(self):
         with pytest.raises(ToolOptionError, match="configure the DeepSeek key"):
             validate_tool_options("search", {"backend": "deepseek"}, self.schema)

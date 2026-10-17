@@ -101,20 +101,23 @@ as needed. Direct.
 
 ### Web
 
-**`web_fetch`**: Fetch a URL as markdown. Tries `crawl4ai` →
-`trafilatura` → Jina proxy → `httpx + html2text`. 100k-char cap, 30s
-timeout. Direct.
+**`web_fetch`**: Fetch a URL as Markdown. Default `backend: auto` tries
+`crawl4ai` → `trafilatura` → Jina → `httpx + html2text`. Select `backend: deepseek`
+for the direct DeepSeek Fetch API. `fallback: auto` opts into the extractor chain
+only after transient failures. Content is capped at 100000 characters.
 
-- Args: `url`.
+- Args: `url`, `max_length` (1–100000).
 
-**`web_search`**: Web search with a DuckDuckGo default plus optional Codex
-subscription and DeepSeek Responses backends. After `kt login codex`, select
-`backend: codex`; this works independently of the creature's active LLM.
-DeepSeek requires `kt config key set deepseek` and `backend: deepseek`. Either
-explicit provider backend can use `fallback: duckduckgo` for transient
-failures. Direct.
+**`web_search`**: DuckDuckGo by default; optional `codex`, `deepseek_api` (direct
+Search), and `deepseek` (legacy Responses, Pro only). Configure a DeepSeek key
+with `kt config key set deepseek`. `fallback: duckduckgo` permits fallback only
+after transient failures. Search results retain their source URLs; they are not
+model-verified citations. Search is independent of the creature's active model.
 
-- Args: `query`, `max_results` (int), `region` (str).
+- Args: `query`, `max_results` (legacy alias `limit`); `need_content` and
+  `ori_question` for `deepseek_api`. Direct Search accepts 1–128 query characters
+  and 1–50 results. The optional `localization` runtime setting is an IP address.
+
 
 ### Provider-native media
 

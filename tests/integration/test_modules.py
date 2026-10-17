@@ -29,6 +29,7 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
 import pytest
 from PIL import Image
 
@@ -37,13 +38,14 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
-from kohakuterrarium.builtins.tools import web_search
+from kohakuterrarium.builtins.tools import deepseek_web, web_fetch, web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.edit import EditTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
+from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
     AgentConfig,
@@ -206,6 +208,25 @@ class _DeepSeekClient:
 
     async def post(self, url, **kwargs):
         self.capture.append((url, kwargs["json"]))
+        if url.endswith("/tools/search"):
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "title": "Direct source",
+                            "url": "https://example.com/source",
+                            "summary": "Direct summary",
+                            "snippet": "Snippet",
+                            "content": "Included body",
+                        }
+                    ]
+                },
+            )
+        if url.endswith("/tools/fetch"):
+            return httpx.Response(
+                200, json={"title": "Direct page", "content": "# Fetched page"}
+            )
         return _DeepSeekResponse()
 
 
@@ -1931,7 +1952,7 @@ class TestModulesIntegration:
         agent = make_agent(
             script=[
                 ScriptEntry(
-                    "[/web_search]@@query=kt search\n[web_search/]",
+                    "[/web_search]@@query=kt search\n@@need_content=false\n[web_search/]",
                     match="search now",
                 ),
                 ScriptEntry("search complete", match="Grounded answer"),
@@ -1961,7 +1982,7 @@ class TestModulesIntegration:
         try:
             await agent._process_event(create_user_input_event("search now"))
             assert capture
-            assert capture[0][1]["model"] == "deepseek-v4-flash"
+            assert capture[0][1]["model"] == "deepseek-v4-pro"
             assert "ds-secret" not in repr(capture[0][1])
         finally:
             await agent.stop()
@@ -1993,6 +2014,81 @@ class TestModulesIntegration:
         )
         assert reset.success
         assert resumed_tool.backend == "duckduckgo"
+
+        monkeypatch.setattr(deepseek_web, "get_api_key", lambda provider: "ds-secret")
+        monkeypatch.setattr(web_fetch, "has_api_key", lambda provider: True)
+        resumed_fetch = WebFetchTool()
+        resumed.registry.register_tool(resumed_fetch)
+        resumed.executor.register_tool(resumed_fetch)
+        changed = await resumed_command.execute(
+            "set web_search backend deepseek_api", resumed._user_command_context
+        )
+        assert changed.success
+        resumed.tool_options.set(
+            "web_search",
+            {
+                "need_content": True,
+                "localization": "203.0.113.1",
+                "deepseek_model": "deepseek-v4-flash",
+            },
+        )
+        changed = await resumed_command.execute(
+            "set web_fetch backend deepseek", resumed._user_command_context
+        )
+        assert changed.success
+
+        direct = make_agent(
+            script=[
+                ScriptEntry(
+                    "[/web_search]@@query=direct search\n@@max_results=2\n@@need_content=false\n[web_search/]",
+                    match="search direct",
+                ),
+                ScriptEntry(
+                    "[/web_fetch]@@url=https://example.com/source\n@@max_length=12\n[web_fetch/]",
+                    match="Direct summary",
+                ),
+                ScriptEntry("Direct workflow complete", match="[truncated]"),
+            ]
+        )
+        direct_search, direct_fetch = WebSearchTool(), WebFetchTool()
+        for item in (direct_search, direct_fetch):
+            direct.registry.register_tool(item)
+            direct.executor.register_tool(item)
+        direct.attach_session_store(store)
+        assert direct_search.backend == "deepseek_api"
+        assert direct_search.deepseek_model == "deepseek-flash"
+        assert direct_search.need_content is True
+        assert direct_search.localization == "203.0.113.1"
+        assert direct_fetch.backend == "deepseek"
+        await direct.start()
+        try:
+            await direct._process_event(create_user_input_event("search direct"))
+        finally:
+            await direct.stop()
+        assert capture[-2] == (
+            "https://api.deepseek.com/v1/tools/search",
+            {
+                "query": "direct search",
+                "count": 2,
+                "need_content": False,
+                "localization": "203.0.113.1",
+            },
+        )
+        assert capture[-1] == (
+            "https://api.deepseek.com/v1/tools/fetch",
+            {"url": "https://example.com/source"},
+        )
+        direct_events = [
+            e for e in store.get_events("modules_agent") if e["type"] == "tool_result"
+        ]
+        assert direct_events[-2]["tool_metadata"]["backend"] == "deepseek_api"
+        assert direct_events[-2]["tool_metadata"]["citation_status"] == "search_results"
+        assert direct_events[-1]["tool_metadata"]["title"] == "Direct page"
+        assert "ds-secret" not in repr(direct_events)
+        direct.tool_options.set("web_search", {})
+        direct.tool_options.set("web_fetch", {})
+        assert direct_search.backend == "duckduckgo"
+        assert direct_fetch.backend == "auto"
         store.close()
 
     async def test_drive_tools_injected_and_execute_through_engine(

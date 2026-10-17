@@ -92,7 +92,7 @@ tools:
   - name: web_search
     backend: duckduckgo
     codex_model: gpt-5.6-luna
-    deepseek_model: deepseek-v4-flash
+    deepseek_model: deepseek-v4-pro
     fallback: none
 ```
 
@@ -100,8 +100,35 @@ tools:
 訂閱託管搜尋，先執行 `kt login codex`，再設定 `backend: codex`，或透過
 `/module set web_search backend codex` 切換；此後端獨立於目前 Creature
 的主模型。若要使用 DeepSeek，先執行 `kt config key set deepseek`，再選擇
-`backend: deepseek`。為明確選擇的 Codex 或 DeepSeek 後端設定
-`fallback: duckduckgo`，可在暫時故障時回退。
+`backend: deepseek_api` 直連 Search，無需指定模型。舊 `backend: deepseek`
+保留 Responses 搜尋，預設模型為 `deepseek-v4-pro`；已儲存的 Flash 選項仍可讀取，
+但執行時會提示切換，因為 Flash 不執行 Responses 搜尋。
+`fallback: duckduckgo` 僅允許暫時故障回退，驗證與餘額錯誤不回退。
+
+```yaml
+tools:
+  - name: web_search
+    backend: deepseek_api
+    need_content: false
+    fallback: none
+  - name: web_fetch
+    backend: deepseek
+    fallback: none
+```
+
+可用 `/module set web_search backend deepseek_api` 與
+`/module set web_fetch backend deepseek` 即時切換，選項隨工作階段儲存。
+GUI 中開啟執行中 Creature 的聊天，在右側狀態列選擇
+**Modules → Tools → web_search / web_fetch**，修改後自動儲存。
+Textual TUI 按 **F2 → Tools**，選擇工具後編輯並按 **Save**；
+Rich CLI 也可用 `/module edit web_search` 或 `/module edit web_fetch` 開啟編輯器。
+
+搜尋支援 `max_results`（1–50）、`need_content` 與 `ori_question`（1–128 字元）；
+`localization` 設定需填寫 IP，不能使用地區碼。擷取支援 `max_length`（1–100000）。
+擷取預設仍為 `auto`；明確設定 `fallback: auto` 才在暫時故障後使用原擷取鏈，
+安全政策拒絕、無可用內文、驗證或餘額錯誤不觸發回退。
+直連請求總時限 30 秒、最多三次嘗試，程序內按介面限速；帳號額度仍與其他程序共用。
+計費以[官方說明](https://api-docs.deepseek.com/zh-cn/guides/search/)為準。
 
 本地 custom 模組：
 

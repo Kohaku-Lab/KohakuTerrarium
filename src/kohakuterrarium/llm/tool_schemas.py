@@ -330,9 +330,12 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
     "web_fetch": {
         "type": "object",
         "properties": {
-            "url": {
-                "type": "string",
-                "description": "URL to fetch and read",
+            "url": {"type": "string", "description": "URL to fetch and read"},
+            "max_length": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100000,
+                "description": "Maximum output characters (default 100000)",
             },
         },
         "required": ["url"],
@@ -342,11 +345,20 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Search query",
+                "description": "Search query; deepseek_api accepts 1-128 characters and site:/lang:/after:/before: operators",
             },
             "max_results": {
                 "type": "integer",
-                "description": "Max results (default: 10)",
+                "minimum": 1,
+                "description": "Max results (default 10; deepseek_api maximum 50)",
+            },
+            "need_content": {
+                "type": "boolean",
+                "description": "deepseek_api only: include bounded page content (default false)",
+            },
+            "ori_question": {
+                "type": "string",
+                "description": "deepseek_api only: optional original question, 1-128 characters",
             },
         },
         "required": ["query"],

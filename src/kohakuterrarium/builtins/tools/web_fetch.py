@@ -1,11 +1,21 @@
 """Fetch web pages through progressively simpler Markdown extractors."""
 
+import time
 from typing import Any
 
 import html2text
 import httpx
 
+from kohakuterrarium.builtins.tools.deepseek_web import (
+    DeepSeekWebClient,
+    DeepSeekWebError,
+    DeepSeekWebTransientError,
+    bounded_text,
+    integer_argument,
+    validate_url,
+)
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.llm.api_keys import has_api_key
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.utils.logging import DEFAULT_LOG_DIR, get_logger
 
@@ -22,6 +32,38 @@ class WebFetchTool(BaseTool):
 
     supports_background = True
 
+    def __init__(self, config=None):
+        super().__init__(config=config)
+        self.refresh_runtime_options(dict(self.config.extra))
+
+    def runtime_option_schema(self) -> dict[str, dict[str, Any]]:
+        disabled = (
+            {}
+            if has_api_key("deepseek")
+            else {
+                "deepseek": "DeepSeek API key is not configured. Run: kt config key set deepseek"
+            }
+        )
+        return {
+            "backend": {
+                "type": "enum",
+                "values": ["auto", "deepseek"],
+                "default": "auto",
+                "disabled_values": disabled,
+                "doc": "auto uses the existing extractor chain; deepseek uses Fetch API.",
+            },
+            "fallback": {
+                "type": "enum",
+                "values": ["none", "auto"],
+                "default": "none",
+                "doc": "Use the extractor chain only after transient DeepSeek failures.",
+            },
+        }
+
+    def refresh_runtime_options(self, options: dict[str, Any]) -> None:
+        self.backend = str(options.get("backend", "auto"))
+        self.fallback = str(options.get("fallback", "none"))
+
     @property
     def tool_name(self) -> str:
         return "web_fetch"
@@ -36,14 +78,53 @@ class WebFetchTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         url = args.get("url", "")
-        if not url:
+        if not isinstance(url, str) or not url.strip():
             return ToolResult(
                 error="No URL provided. Usage: web_fetch(url='https://...')"
             )
-
-        if not url.startswith(("http://", "https://")):
+        try:
+            limit = integer_argument(
+                args.get("max_length", MAX_CONTENT_SIZE), "max_length", MAX_CONTENT_SIZE
+            )
+        except DeepSeekWebError as exc:
+            return ToolResult(error=str(exc))
+        if "://" not in url:
             url = "https://" + url
+        started = time.monotonic()
+        selected, fallback = self.backend, self.fallback
+        metadata = {"requested_backend": selected, "url": url}
+        try:
+            validate_url(url)
+            if selected == "deepseek":
+                try:
+                    page = await DeepSeekWebClient().fetch(url)
+                    result = ToolResult(output=page["content"], exit_code=0)
+                    metadata.update(backend="deepseek", title=page["title"])
+                except DeepSeekWebTransientError as exc:
+                    if fallback != "auto":
+                        raise
+                    result = await self._fetch_auto(url)
+                    metadata.update(fallback_from="deepseek", fallback_reason=str(exc))
+            elif selected == "auto":
+                result = await self._fetch_auto(url)
+            else:
+                return ToolResult(error=f"Unknown web fetch backend: {selected!r}")
+        except DeepSeekWebError as exc:
+            return ToolResult(error=str(exc))
+        if not result.success:
+            return result
+        metadata.update(result.metadata)
+        content = result.get_text_output()
+        metadata.update(
+            content_chars=len(content),
+            truncated=len(content) > limit,
+            duration_ms=round((time.monotonic() - started) * 1000, 1),
+        )
+        result.output = bounded_text(content, limit)
+        result.metadata = {**metadata, "session_metadata": dict(metadata)}
+        return result
 
+    async def _fetch_auto(self, url: str) -> ToolResult:
         for backend_name, backend_fn in [
             ("crawl4ai", _fetch_crawl4ai),
             ("trafilatura", _fetch_trafilatura),
@@ -53,18 +134,15 @@ class WebFetchTool(BaseTool):
             try:
                 content = await backend_fn(url)
                 if content and content.strip():
-                    if len(content) > MAX_CONTENT_SIZE:
-                        content = (
-                            content[:MAX_CONTENT_SIZE]
-                            + f"\n\n... (truncated, {len(content)} chars total)"
-                        )
                     logger.info(
                         "Web fetch success",
                         url=url[:80],
                         backend=backend_name,
                         content_len=len(content),
                     )
-                    return ToolResult(output=content, exit_code=0)
+                    return ToolResult(
+                        output=content, exit_code=0, metadata={"backend": backend_name}
+                    )
             except _SkipBackend:
                 continue
             except Exception as e:

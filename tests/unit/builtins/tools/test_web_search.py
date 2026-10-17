@@ -3,9 +3,13 @@
 Network calls are replaced with fixed HTML or deterministic fakes.
 """
 
+import asyncio
+import json
+
+import httpx
 import pytest
 
-from kohakuterrarium.builtins.tools import web_search
+from kohakuterrarium.builtins.tools import deepseek_web, web_search
 from kohakuterrarium.builtins.tools.web_search import (
     DeepSeekSearchBackend,
     DuckDuckGoSearchBackend,
@@ -77,6 +81,16 @@ def test_codex_login_does_not_change_the_default_backend(monkeypatch):
 
     assert tool.backend == "duckduckgo"
     assert isinstance(tool._backend(), DuckDuckGoSearchBackend)
+
+
+def test_flash_alias_remains_valid_without_duplicate_model_choice():
+    tool = WebSearchTool(ToolConfig(extra={"deepseek_model": "deepseek-v4-flash"}))
+    assert tool.deepseek_model == "deepseek-flash"
+    assert tool.validate_runtime_options() == {"deepseek_model": "deepseek-flash"}
+    schema = tool.runtime_option_schema()
+    assert schema["deepseek_model"]["values"] == ["deepseek-v4-pro", "deepseek-flash"]
+    assert "direct" in schema["backend"]["labels"]["deepseek_api"]
+    assert "Responses" in schema["backend"]["labels"]["deepseek"]
 
 
 class TestParseDdgHtml:
@@ -296,7 +310,7 @@ class TestDeepSeekSearch:
             lambda **kwargs: _Client(_Response(data=data), capture),
         )
 
-        response = await DeepSeekSearchBackend("deepseek-v4-flash").search(
+        response = await DeepSeekSearchBackend("deepseek-v4-pro").search(
             "kt search", 3, "cn-zh"
         )
 
@@ -343,7 +357,7 @@ class TestDeepSeekSearch:
         )
 
         with pytest.raises(SearchBackendOperationalError, match="invalid response"):
-            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+            await DeepSeekSearchBackend("deepseek-v4-pro").search("q", 3, "")
 
     @pytest.mark.asyncio
     async def test_failed_response_status_is_not_reported_as_empty_success(
@@ -365,7 +379,7 @@ class TestDeepSeekSearch:
         )
 
         with pytest.raises(SearchBackendUnavailable, match="authentication_error"):
-            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+            await DeepSeekSearchBackend("deepseek-v4-pro").search("q", 3, "")
 
     @pytest.mark.asyncio
     async def test_transient_failed_response_status_is_fallback_eligible(
@@ -384,7 +398,7 @@ class TestDeepSeekSearch:
         )
 
         with pytest.raises(SearchBackendOperationalError, match="rate_limit_error"):
-            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+            await DeepSeekSearchBackend("deepseek-v4-pro").search("q", 3, "")
 
     @pytest.mark.asyncio
     async def test_incomplete_response_with_partial_output_is_explicit(
@@ -395,6 +409,9 @@ class TestDeepSeekSearch:
             "status": "incomplete",
             "incomplete_details": {"reason": "max_output_tokens"},
             "output_text": "Partial grounded answer.",
+            "output": [
+                {"type": "web_search_call", "action": {"type": "search", "query": "q"}}
+            ],
         }
         monkeypatch.setattr(
             web_search.httpx,
@@ -402,7 +419,7 @@ class TestDeepSeekSearch:
             lambda **kwargs: _Client(_Response(data=data), []),
         )
 
-        response = await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+        response = await DeepSeekSearchBackend("deepseek-v4-pro").search("q", 3, "")
 
         assert "Partial grounded answer" in response.output
         assert "Incomplete DeepSeek response: max_output_tokens" in response.output
@@ -426,7 +443,7 @@ class TestDeepSeekSearch:
         )
 
         with pytest.raises(SearchBackendUnavailable, match="content_filter"):
-            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+            await DeepSeekSearchBackend("deepseek-v4-pro").search("q", 3, "")
 
     @pytest.mark.asyncio
     async def test_operational_failure_uses_explicit_fallback(self, monkeypatch):
@@ -465,7 +482,12 @@ class TestDeepSeekSearch:
         assert "deepseek" in schema["backend"]["disabled_values"]
         assert "codex" in schema["backend"]["disabled_values"]
         assert schema["backend"]["default"] == "duckduckgo"
-        assert schema["backend"]["values"] == ["duckduckgo", "codex", "deepseek"]
+        assert schema["backend"]["values"] == [
+            "duckduckgo",
+            "codex",
+            "deepseek",
+            "deepseek_api",
+        ]
         with pytest.raises(ValueError, match="Codex subscription is not connected"):
             tool.validate_runtime_options(
                 {"backend": "codex", "codex_model": "gpt-6.1-sol"}
@@ -640,3 +662,224 @@ def test_codex_search_defaults_and_unknown_model_validation():
     with pytest.raises(ValueError, match="must be one of"):
         tool.validate_runtime_options({"codex_model": "unrecognized-model"})
     assert tool.codex_model == "gpt-5.6-luna"
+
+
+@pytest.mark.parametrize("model", ["deepseek-v4-flash", "deepseek-flash"])
+async def test_legacy_flash_does_not_masquerade_as_search(monkeypatch, model):
+    monkeypatch.setattr(
+        web_search,
+        "get_api_key",
+        lambda provider: pytest.fail("Flash reached key lookup"),
+    )
+    tool = WebSearchTool(
+        ToolConfig(
+            extra={
+                "backend": "deepseek",
+                "deepseek_model": model,
+                "fallback": "duckduckgo",
+            }
+        )
+    )
+    result = await tool._execute({"query": "query"})
+    assert "Flash does not execute" in result.error
+    assert "deepseek_api" in result.error
+    assert tool.deepseek_model == "deepseek-flash"
+
+
+async def test_legacy_plain_answer_without_search_call_is_an_error(monkeypatch):
+    monkeypatch.setattr(web_search, "get_api_key", lambda provider: "configured")
+    monkeypatch.setattr(
+        web_search.httpx,
+        "AsyncClient",
+        lambda **kw: _Client(
+            _Response(data={"status": "completed", "output_text": "Invented answer"}),
+            [],
+        ),
+    )
+    result = await WebSearchTool(ToolConfig(extra={"backend": "deepseek"}))._execute(
+        {"query": "query"}
+    )
+    assert "no web search call" in result.error
+
+
+@pytest.mark.parametrize(
+    "status,fallback",
+    [
+        (200, "none"),
+        (429, "none"),
+        (429, "duckduckgo"),
+        (401, "duckduckgo"),
+        (402, "duckduckgo"),
+    ],
+)
+async def test_direct_search_contract_and_fallback(monkeypatch, status, fallback):
+    captured, fallback_calls = [], []
+    original = httpx.AsyncClient
+
+    def handle(request):
+        captured.append(json.loads(request.content))
+        return httpx.Response(
+            status,
+            json={
+                "results": [
+                    {
+                        "title": "Source",
+                        "url": "https://example.com",
+                        "summary": "Summary",
+                        "snippet": "Snippet",
+                        "content": "Body",
+                    }
+                ]
+            },
+        )
+
+    async def ddg(query, count, region):
+        fallback_calls.append((query, count, region))
+        return [
+            {
+                "title": "Fallback",
+                "href": "https://fallback.example",
+                "body": "Fallback snippet",
+            }
+        ]
+
+    monkeypatch.setattr(deepseek_web, "get_api_key", lambda provider: "configured")
+    monkeypatch.setattr(deepseek_web, "MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(deepseek_web, "_NEXT_REQUEST", {})
+    monkeypatch.setattr(
+        deepseek_web.httpx,
+        "AsyncClient",
+        lambda **kw: original(transport=httpx.MockTransport(handle), **kw),
+    )
+    monkeypatch.setattr(web_search, "_has_ddg", lambda: True)
+    monkeypatch.setattr(web_search, "_search_ddg", ddg)
+    tool = WebSearchTool(
+        ToolConfig(
+            extra={
+                "backend": "deepseek_api",
+                "fallback": fallback,
+                "need_content": True,
+                "localization": "203.0.113.1",
+            }
+        )
+    )
+    result = await tool._execute(
+        {"query": "query", "limit": 2, "ori_question": "Original", "need_content": None}
+    )
+    assert captured == [
+        {
+            "query": "query",
+            "count": 2,
+            "need_content": True,
+            "localization": "203.0.113.1",
+            "ori_question": "Original",
+        }
+    ]
+    if status == 200:
+        assert result.success and "Body" in result.output
+        assert result.metadata["session_metadata"]["sources"] == [
+            {"title": "Source", "url": "https://example.com"}
+        ]
+        assert result.metadata["citation_status"] == "search_results"
+    elif status == 429 and fallback == "duckduckgo":
+        assert result.success and "Fallback snippet" in result.output
+        assert result.metadata["backend"] == "duckduckgo"
+        assert result.metadata["fallback_from"] == "deepseek_api"
+        assert fallback_calls == [("query", 2, "")]
+    else:
+        assert str(status) in result.error and fallback_calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"query": "q", "max_results": True},
+        {"query": "q", "max_results": 1.5},
+        {"query": "q", "max_results": 0},
+        {"query": "q", "max_results": 51},
+        {"query": "x" * 129},
+        {"query": "q", "region": "us-en"},
+    ],
+)
+async def test_invalid_direct_args_do_not_send(monkeypatch, args):
+    monkeypatch.setattr(
+        deepseek_web,
+        "get_api_key",
+        lambda provider: pytest.fail("invalid input reached key lookup"),
+    )
+    tool = WebSearchTool(ToolConfig(extra={"backend": "deepseek_api"}))
+    assert not (await tool._execute(args)).success
+
+
+async def test_inflight_search_keeps_original_fallback_policy(monkeypatch):
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = httpx.AsyncClient
+
+    async def handle(request):
+        entered.set()
+        await release.wait()
+        return httpx.Response(503)
+
+    async def unexpected(*args):
+        pytest.fail("in-flight request adopted a later fallback policy")
+
+    monkeypatch.setattr(deepseek_web, "get_api_key", lambda provider: "configured")
+    monkeypatch.setattr(deepseek_web, "MAX_ATTEMPTS", 1)
+    monkeypatch.setattr(
+        deepseek_web.httpx,
+        "AsyncClient",
+        lambda **kw: original(transport=httpx.MockTransport(handle), **kw),
+    )
+    monkeypatch.setattr(web_search, "_has_ddg", lambda: True)
+    monkeypatch.setattr(web_search, "_search_ddg", unexpected)
+    tool = WebSearchTool(
+        ToolConfig(extra={"backend": "deepseek_api", "fallback": "none"})
+    )
+    task = asyncio.create_task(tool._execute({"query": "query"}))
+    await entered.wait()
+    tool.refresh_runtime_options({"backend": "duckduckgo", "fallback": "duckduckgo"})
+    release.set()
+    result = await task
+    assert "503" in result.error
+
+
+@pytest.mark.parametrize("backend", ["duckduckgo", "codex", "deepseek"])
+@pytest.mark.parametrize(
+    "extra,accepted",
+    [
+        ({}, True),
+        ({"need_content": False}, True),
+        ({"ori_question": None}, True),
+        ({"need_content": False, "ori_question": None}, True),
+        ({"need_content": None, "ori_question": None}, True),
+        ({"need_content": "false", "ori_question": ""}, True),
+        ({"need_content": True}, False),
+        ({"ori_question": "Original question"}, False),
+        ({"need_content": 0}, False),
+        ({"need_content": "invalid"}, False),
+    ],
+)
+async def test_other_backends_accept_inactive_direct_options(
+    monkeypatch, backend, extra, accepted
+):
+    calls = []
+
+    async def search(self, query, count, region):
+        calls.append((query, count, region))
+        return web_search.SearchResponse(
+            "Existing search", metadata={"backend": backend}
+        )
+
+    tool = WebSearchTool(ToolConfig(extra={"backend": backend, "need_content": True}))
+    monkeypatch.setattr(type(tool._backend()), "search", search)
+    result = await tool._execute(
+        {"query": "query", "max_results": 3, "region": "us-en", **extra}
+    )
+    assert result.success is accepted
+    if accepted:
+        assert calls == [("query", 3, "us-en")]
+        assert result.output == "Existing search"
+        assert result.metadata["backend"] == backend
+    else:
+        assert result.error
+        assert calls == []

@@ -32,6 +32,7 @@
       <el-input v-else v-model="draft[entry.key]" size="small" :placeholder="String(entry.spec?.default ?? '')" />
 
       <p v-if="dictErrors[entry.key]" class="text-[10px] text-coral font-mono">{{ dictErrors[entry.key] }}</p>
+      <p v-if="entry.spec?.hint" class="text-[10px] text-warm-400">{{ entry.spec.hint }}</p>
       <p v-for="(reason, value) in entry.spec?.disabled_values || {}" :key="`${entry.key}-${value}`" class="text-[10px] text-warm-400">{{ value }} unavailable: {{ reason }}</p>
     </div>
 
@@ -119,7 +120,8 @@ function isWide(entry) {
 }
 
 function enumLabel(spec, value) {
-  return spec?.disabled_values?.[value] ? `${value} — unavailable` : value
+  const label = spec?.labels?.[value] || value
+  return spec?.disabled_values?.[value] ? `${label} — unavailable` : label
 }
 
 function deepClone(v) {

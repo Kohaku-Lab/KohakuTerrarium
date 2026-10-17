@@ -34,6 +34,10 @@ class ToolOptions:
         }
         effective.update(self._baseline_values(tool_name, tool, schema))
         effective.update(self._values.get(tool_name, {}))
+        for key, value in effective.items():
+            spec = schema.get(key) or {}
+            if spec.get("type") == "enum" and isinstance(value, str):
+                effective[key] = (spec.get("aliases") or {}).get(value, value)
         return effective
 
     def list(self) -> dict[str, dict[str, Any]]:
