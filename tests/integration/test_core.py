@@ -91,6 +91,7 @@ from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
+from tests.helpers.compact_capture_history import exercise_live_long_tool_journey
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 from tests.helpers.stable_compact_prefix import exercise_compact_prefix_history
 
@@ -3500,6 +3501,10 @@ class TestCoreIntegration:
             retained_store.close()
 
         await exercise_compact_media_history(tmp_path, monkeypatch)
+        for tightened in (False, True):
+            await exercise_live_long_tool_journey(
+                tmp_path, monkeypatch, tightened=tightened
+            )
         await exercise_compact_prefix_history(tmp_path)
         await _exercise_user_attachment_history(tmp_path)
         await _exercise_direct_media_history(tmp_path, monkeypatch)

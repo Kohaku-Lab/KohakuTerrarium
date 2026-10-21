@@ -1140,6 +1140,41 @@ class TestCompactTerminalGuarantee:
         await mgr._run_compact()
         assert [k for k, _ in self._terminals(router)] == ["compact_complete"]
 
+    async def test_ambiguous_recorded_capture_skips_without_installing(self, tmp_path):
+        conv = Conversation()
+        conv.append("user", "goal", metadata={"turn_index": 1, "branch_id": 1})
+        router, llm = _Router(), _LLM()
+        store = SessionStore(tmp_path / "ambiguous-capture.kohakutr")
+        try:
+            store.append_event(
+                "alice", "user_message", {"content": "goal"}, turn_index=1, branch_id=1
+            )
+            for _ in range(10):
+                message = conv.append("assistant", "identical response")
+                _, anchor = store.append_event(
+                    "alice", "assistant_round_start", {}, turn_index=1, branch_id=1
+                )
+                store.append_event(
+                    "alice",
+                    "assistant_message",
+                    {"round_start_event_id": anchor, "message": message.to_dict()},
+                    turn_index=1,
+                    branch_id=1,
+                )
+            mgr = _build_mgr(conversation=conv, llm=llm, router=router, store=store)
+            mgr._agent = types.SimpleNamespace(
+                _turn_index=1, _branch_id=1, _parent_branch_path=[]
+            )
+            before = conv.snapshot_messages()
+            await mgr._run_compact()
+            assert self._terminals(router) == [("compact_skipped", "capture_unproven")]
+            assert conv.snapshot_messages() == before
+            assert mgr._compact_count == 0
+            assert llm.calls == []
+            assert store.load_conversation("alice") is None
+        finally:
+            store.close()
+
     async def test_insufficient_boundary_emits_skipped(self):
         conv = _build_conversation(n_user=1)
         router = _Router()

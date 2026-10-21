@@ -2,13 +2,20 @@
 
 ## Scope and baseline
 
-- Implementation base: `11f0244d`; convergence baseline: `c4f27f41` on
-  `fix/stable-compact-prefix`, in `.worktrees/stable-compact-prefix`.
-- Slice 1 (proven legacy-checkpoint reuse/whole-round repair) and `/branch`
-  are committed. Slice 2 (precise capture binding for new compactions) is not done.
-- Current status: behavior-preserving convergence implemented and verified.
-- The user authorized a separate convergence commit after verification. No pushes,
-  history rewrites, dependency changes, or live-session operations are authorized.
+- Original implementation base: `11f0244d`; rebuilt base: `2923507c` (updated
+  `origin/main`). Worktree: `.worktrees/stable-compact-prefix`.
+- User authorized rebuilding `fix/stable-compact-prefix` and consolidating its
+  twelve commits. No push, dependency change, or live-session operation is authorized.
+- Original tip `b0e39f31` is preserved by `backup/stable-compact-prefix-b0e39f31`.
+- Rebuilt history has two slices: checkpoint reconstruction/branch mutations
+  (including convergence), followed by exact compaction capture binding.
+- Replay had no textual conflicts. The combined `session/history.py` retains
+  main's call-local `SelectionCompatibility` and this branch's compact-rule selection.
+- First consolidated slice focused checks: **267 passed**. Black/Ruff and staged
+  diff checks pass. Rebuilt-tree full regression: **18,804 unit passed / 40 skipped**
+  (423.27s), **179 integration passed** (178.75s), **84 e2e passed** (240.45s).
+  Independent merge-semantics review found no conflict or integrity issue. Frontend
+  dependencies remain absent in this worktree; Vitest was not run.
 - Earlier chronological investigations remain available in `c4f27f41:plan.md`.
   Their preliminary counts and completion claims are not current acceptance evidence.
 
@@ -24,6 +31,73 @@
   compact state and persisted selection coherent. Restoration does not execute tools.
 - Preparation must not install state. Installation is explicit and occurs under the
   existing caller's history-mutation guard; branch-specific elision remains distinct.
+
+## Slice 2 plan and acceptance
+
+- [x] Reproduce through real producer messages: added the long-tool journey to the
+  existing `test_history_ops`. Red at summary missing from replay; no event-ID hacks.
+- [x] Bind captured user messages, complete canonical assistant rounds and tool
+  results to recorded identities. Freeze capture and retained tail at one boundary;
+  reject ambiguity instead of broadening spans heuristically.
+- [x] Preserve retained/re-attached user and live tool rounds; cover inheritance
+  through subsequent compaction and branch compatibility without changing cutoff proof.
+- [x] Add focused negative tests for conflicting/duplicate identities, missing
+  canonical boundaries, incomplete results and capture-time concurrent appends.
+- [x] Verify public edit request, actual branch switches, cold resume, no old tool
+  execution and intact provider call/output pairs in the existing history workflow.
+- [x] Complete frozen-source full tiers and final independent diff audit.
+
+Design constraint: reuse canonical round identities and existing compact coverage
+where possible. Do not add a generic provenance layer or bypass replay proof.
+
+Implementation and evidence:
+- `compact_binding.py` resolves message identities; `compact_capture.py` owns
+  inherited coverage and interval validation. This split keeps both below 600 lines;
+  no producer protocol, persisted schema, migration or replay-rule change was added.
+- Captured/retained messages are copied before the store read. Known-source canonical
+  captures without a safe range emit `capture_unproven`, without a summarizer call,
+  counter increment, splice or snapshot install. Legacy non-canonical compatibility
+  is retained; malformed canonical records never opt into that fallback.
+- Pending ACKs cover only their dispatch; folded results cover uniquely named jobs.
+  Settled results may originate on a now-unselected consuming branch, preserving
+  the existing dispatch-based restoration contract. Inherited late results do not
+  expand an interval across a retained tail.
+- Unknown-origin no-job injections add no event coverage and leave source unknown;
+  any unrepresented persisted event inside the span still blocks it. Checkpoint-only
+  unknown summaries continue through the first-slice proof, not a fabricated source.
+- Audit additions were red-first: malformed canonical fallback, duplicate IDs,
+  reordered rounds, missing summary inheritance, conflicting pending identifiers,
+  and trailing reasoning beyond the last captured canonical end. Exact restated
+  reasoning is consumed with its canonical message; arbitrary reasoning is not noise.
+- Formal long-tool workflow uses real producer records and MockTransport, not hand-
+  stamped IDs. Both half-cap and token-tightened boundaries consume calls0..2, keep
+  calls3..5 paired, and preserve a re-attached goal only for the tightened boundary.
+  Public edit makes one new request; switches/resume make none and tools stay at six.
+- Cold standalone resume has a different runtime-owned system prompt from the warm
+  engine. Assertions retain full dictionary/metadata equality for history and assert
+  the cold system prompt itself is unchanged by switching; they do not strip metadata.
+- Focused compact + history workflow + file-size checks: **2,368 passed**. Black,
+  Ruff and diff checks pass (existing Python/Black target warning remains).
+- First full run: unit **18,657 passed / 40 skipped**, integration **178 passed /
+  1 failed**, e2e **84 passed**. The integration failure was real: Antigravity's
+  cold compact crossed a `scratchpad_write`, a non-conversational record incorrectly
+  treated as unproven content. Six operational record types now follow replay's
+  explicit non-content handling; their new parameterized cases failed before fixing.
+  Focused capture + multimodal workflow: **73 passed**. No replay safeguards removed.
+- Independent final source audit found no confirmed P1/P2 blockers; the six-type
+  follow-up was also source-reviewed. The reviewer raised an unproven contradictory
+  retained-result/inherited-result case outside the primary interval; no reachable
+  production history established it, so it remains a documented uncertainty.
+- Final frozen-production full rerun: **unit 18,663 passed / 40 skipped** (370.69s),
+  **integration 179 passed** (161.61s), **e2e 84 passed** (244.86s), all exits zero.
+- Coverage closeout added eleven identity-rejection/compatibility cases without
+  production changes: capture + branch unit **96 passed**, integration history/compact
+  **2 passed**. Measured binding coverage **96%** (348 statements / 13 missed), capture
+  **95%** (238 / 11). Remaining defensive guards are documented, not excluded.
+- Final unit-tier recheck after those test-only additions: **18,674 passed /
+  40 skipped** (377.73s). Black initially flagged the new test formatting; formatted
+  that file, then full Black/Ruff/diff checks and the unit tier passed. Integration
+  and e2e production code was unchanged after their green runs. No commit or push.
 
 ## Convergence checklist
 
@@ -100,13 +174,14 @@ Last committed baseline (`c4f27f41`):
 - Private DBs/pickles and request payloads are not committed. Anonymous public history
   integration and local MockTransport fixtures are the reproducible repository proof.
 
-## Deferred work (not part of convergence)
+## Historical second-slice failure and separate work
 
-1. **Slice 2:** bind captured user/assistant/result messages to canonical events,
-   preserving the unconsumed tail. On `c4f27f41`, the anonymous live long-tool probe
+1. **Baseline failure, now covered by slice 2's formal regression:** on `c4f27f41`,
+   the anonymous live long-tool probe
    still fails: capture7, result IDs10/15/20, replacement range absent; a fresh edit
    loses the summary and restores consumed text, while old tool executions stay6.
    Probe: main checkout `temp/stable-compact-takeover/test_takeover_probes.py`,
-   `test_live_long_tool_capture`. Full-suite green does not cover this open contract.
+   `test_live_long_tool_capture`. That old suite did not cover this contract;
+   `tests/helpers/compact_capture_history.py` now anchors it in `test_history_ops`.
 2. Investigate the Drive-store race separately if needed; no Drive changes here.
 3. Publication or further commits require explicit user authorization.

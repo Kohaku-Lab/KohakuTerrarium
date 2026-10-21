@@ -15,6 +15,7 @@ from kohakuterrarium.core.compact_capture import (
     compute_captured_range,
     compute_replaced_range as compute_replaced_range,
     matching_compact_complete,
+    uses_canonical_rounds,
 )
 from kohakuterrarium.core.compact_splice import (
     is_real_user_message,
@@ -317,6 +318,9 @@ async def capture_compact_metadata(
 ) -> dict:
     """Capture replacement coverage and summary inputs before generation."""
     messages = deepcopy(messages)
+    # The live tail keeps changing while generation awaits the store; freeze
+    # both sides of the boundary so coverage describes one consistent split.
+    retained_messages = deepcopy(retained_messages)
     captured_agent = SimpleNamespace(
         _turn_index=getattr(agent, "_turn_index", None),
         _branch_id=getattr(agent, "_branch_id", None),
@@ -329,7 +333,7 @@ async def capture_compact_metadata(
         else read_agent_events(store, agent_name)
     )
     source = summary_source_path(messages, origins=job_origin_pairs(events))
-    return build_compact_metadata(
+    metadata = build_compact_metadata(
         captured_agent,
         events,
         keep_count,
@@ -342,6 +346,12 @@ async def capture_compact_metadata(
         retained_messages=retained_messages,
         retain_latest_user=retain_latest_user,
     )
+    metadata["_capture_unproven"] = bool(
+        source
+        and uses_canonical_rounds(events)
+        and "replaced_from_event_id" not in metadata
+    )
+    return metadata
 
 
 def live_turn_window(

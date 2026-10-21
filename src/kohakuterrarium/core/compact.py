@@ -312,16 +312,21 @@ class CompactManager:
                 retained_messages=messages[boundary:],
                 retain_latest_user=boundary > preferred_boundary,
             )
+            if metadata.pop("_capture_unproven", False):
+                self._emit_compact_skipped(
+                    "capture_unproven",
+                    "Captured history could not be bound to saved events",
+                )
+                self._last_compact_time = time.time()
+                terminal_sent = True
+                return
             source_path = (
                 {tuple(pair) for pair in metadata["compact_source_path"]}
                 if metadata["compact_source_path"]
                 else None
             )
 
-            # Plugin veto: ``on_compact_start`` is a vetoable callback.
-            # Any plugin returning ``False`` skips this compaction cycle
-            # (e.g. a plugin that just injected critical context).
-            # ``on_compact_end`` will NOT fire in this case.
+            # A start-hook veto skips compaction without an end callback.
             context_length = conversation.get_context_length()
             if self._plugins is not None:
                 proceed = await self._plugins.should_proceed(
@@ -338,11 +343,7 @@ class CompactManager:
                         "Compact vetoed by plugin(s)",
                         agent=self._agent_name,
                     )
-                    # Cooldown applies to vetos too. Without this, the
-                    # next ``should_compact`` call would re-trigger
-                    # immediately on every turn while the conversation
-                    # stays above threshold — wasting LLM/plugin calls
-                    # and emitting a flood of ``compact_skipped`` events.
+                    # Vetoed attempts also enter cooldown.
                     self._last_compact_time = time.time()
                     return
 

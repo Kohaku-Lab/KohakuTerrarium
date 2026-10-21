@@ -1,41 +1,52 @@
 """Actual-capture compaction coverage.
 
 ``compute_replaced_range`` derives a summary's replacement span from the
-configured live-turn count. That is only correct while the live zone is a
-suffix of whole user turns. Token-tightened boundaries and long tool rounds
-can split a turn, folded inputs can move results away from their issuing
-turn, and then the persisted span no longer matches the messages that were
-actually summarized.
+configured live-turn count, which only holds while the live zone is a suffix
+of whole user turns. These helpers instead report a span only when every event
+it would swallow on the selected path is proven to belong to this capture: a
+fully captured turn, an event id carried by a captured message, or coverage
+inherited from the compact_complete of a consumed summary. Otherwise they
+return ``None`` rather than claim false coverage.
 
-These helpers read the captured and retained messages and report a span only
-when every event it would swallow on the selected path is proven to belong
-to this capture: a fully captured turn, an event id carried by a captured
-message, or coverage inherited from the compact_complete event whose summary
-was consumed. Otherwise they return ``None`` instead of claiming false
-coverage.
+Message identities themselves are resolved by
+:mod:`kohakuterrarium.core.compact_binding`; this module keeps the summary
+lineage helpers, merges inherited coverage, and validates the final span.
 """
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from kohakuterrarium.core.compact_binding import (
+    _event_id,
+    _is_summary,
+    _metadata,
+    _on_path,
+    _pair,
+    _restated_input,
+    _summary_body,
+    resolve_capture_ids,
+    uses_canonical_rounds as uses_canonical_rounds,
+)
 from kohakuterrarium.core.compact_splice import is_real_user_message
+from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS
 
-_SUMMARY_PREFIX = "[Previous context summary (compact round "
-
-
-def _metadata(msg: Any) -> Mapping[str, Any]:
-    metadata = getattr(msg, "metadata", None)
-    return metadata if isinstance(metadata, dict) else {}
-
-
-def _pair(metadata: Mapping[str, Any]) -> tuple[int, int] | None:
-    turn = metadata.get("turn_index")
-    branch = metadata.get("branch_id")
-    if type(turn) is not int or type(branch) is not int:
-        return None
-    if turn <= 0 or branch <= 0:
-        return None
-    return turn, branch
+# Events that carry no conversation content, so a span may pass over them.
+_OPERATIONAL_TYPES = frozenset(
+    {
+        "background_result",
+        "scratchpad_write",
+        "token_usage",
+        "turn_token_usage",
+        "cache_stats",
+        "compact_skipped",
+        "processing_complete",
+        "compact_decision",
+        "compact_start",
+        "plugin_hook_timing",
+        "processing_end",
+        "processing_start",
+    }
+)
 
 
 def message_pairs(messages: Sequence[Any]) -> set[tuple[int, int]]:
@@ -73,24 +84,6 @@ def _coerce_pairs(raw: Any) -> set[tuple[int, int]] | None:
     return pairs
 
 
-def _summary_body(msg: Any) -> tuple[int, str] | None:
-    content = getattr(msg, "content", None)
-    if not isinstance(content, str) or not content.startswith(_SUMMARY_PREFIX):
-        return None
-    head, sep, body = content[len(_SUMMARY_PREFIX) :].partition(")]")
-    if not sep:
-        return None
-    try:
-        round_no = int(head)
-    except ValueError:
-        return None
-    if body.startswith("\n\n"):
-        body = body[2:]
-    else:
-        body = body.lstrip("\n")
-    return round_no, body
-
-
 def _result_ids(metadata: Mapping[str, Any]) -> set[int]:
     raw = metadata.get("compact_result_event_ids")
     if not isinstance(raw, (list, tuple)):
@@ -115,9 +108,8 @@ def matching_compact_complete(
 ) -> dict | None:
     """The persisted compact_complete matching one consumed summary message.
 
-    Matching is exact (round *and* summary body). Duplicate copies are
-    tolerated only while they agree on coverage, inputs and result ids; an
-    ambiguous match proves nothing.
+    Matching is exact (round *and* body); duplicate copies count only while
+    they agree on coverage, inputs and result ids.
     """
     parsed = _summary_body(summary_message)
     if parsed is None:
@@ -167,12 +159,13 @@ def _inherited_coverage(
     captured_messages: Sequence[Any],
     events: Sequence[dict],
     path: set[tuple[int, int]],
+    *,
+    strict: bool = False,
 ) -> tuple[set[int], int, int] | None:
     """Coverage of consumed summaries, inherited from their own completion.
 
-    Only a summary whose recorded lineage is a subset of the current path can
-    be inherited: a pathless (legacy) or unprovably sourced completion never
-    borrows the caller's coverage.
+    Only a summary whose recorded lineage is a subset of the current path can be
+    inherited; ``strict`` mode refuses the span instead of skipping such a summary.
     """
     cover_ids: set[int] = set()
     low: int | None = None
@@ -184,13 +177,19 @@ def _inherited_coverage(
             continue
         event = matching_compact_complete(msg, events)
         if event is None:
+            if strict:
+                return None
             continue
         old_path = _coerce_pairs(event.get("compact_path"))
         if old_path is None or not old_path <= path:
+            if strict:
+                return None
             continue
         if "compact_source_path" in event:
             source = _coerce_pairs(event.get("compact_source_path"))
             if source is None or not (source | old_path) <= path:
+                if strict:
+                    return None
                 continue
         start = event["replaced_from_event_id"]
         end = event["replaced_to_event_id"]
@@ -207,6 +206,8 @@ def _inherited_coverage(
         }
         ids |= _result_ids(event)
         if not ids:
+            if strict:
+                return None
             continue
         cover_ids |= ids
         low = min(start, low) if low is not None else start
@@ -221,12 +222,9 @@ def compute_replaced_range(
     keep_count: int,
     path: set[tuple[int, int]],
 ) -> tuple[int, int] | None:
-    """Event id range a compaction covers, computed from the event log.
+    """Legacy event id range: the last ``keep_count`` path user turns stay live.
 
-    Legacy fallback: only events on the agent's current branch ``path`` are
-    considered; the live zone keeps the last ``keep_count`` user turns of
-    that path, so everything older is replaced by the summary. Used when the
-    captured messages carry no turn provenance at all.
+    Only used when the captured messages carry no turn provenance at all.
     """
     if not path:
         return None
@@ -283,8 +281,7 @@ def _partial_pairs(
         if retain_latest_user:
             partial.add(opened)
         elif retained_messages and not is_real_user_message(retained_messages[0]):
-            # The live zone starts mid-turn: the open user turn continues
-            # past the boundary and cannot be replaced as a whole.
+            # The live zone starts mid-turn: that open turn stays unproven.
             partial.add(opened)
     return partial & captured_pairs
 
@@ -300,15 +297,23 @@ def compute_captured_range(
 ) -> tuple[int, int] | None:
     """Replacement span matching the messages this compaction consumed.
 
-    Whole captured turns define the outer span. A turn split by the live
-    boundary contributes only events whose ids are explicitly carried by a
-    captured message, plus anything inherited from a consumed summary. Any
-    path event in the resulting span that is not proven to belong to the
-    capture aborts the whole span: a too-wide range would silently drop raw
-    history from replay.
+    Canonical sessions are bound exactly by
+    :func:`compute_exact_captured_range`; otherwise whole captured turns define
+    the outer span, a turn split by the live boundary contributes only ids
+    carried by a captured message plus inherited summary coverage, and any
+    unproven path event inside the span aborts it (a too-wide range would
+    silently drop raw history from replay).
     """
     if not path:
         return None
+    if uses_canonical_rounds(events):
+        return compute_exact_captured_range(
+            events,
+            path,
+            captured_messages,
+            retained_messages,
+            retain_latest_user=retain_latest_user,
+        )
     captured_pairs = message_pairs(captured_messages)
     if not captured_pairs:
         if keep_count is None:
@@ -356,6 +361,109 @@ def compute_captured_range(
             continue
         if pair == opened and not opened_retained:
             # Open-turn prefix captured before the boundary.
+            continue
+        return None
+    return low, high
+
+
+def _restated_reasoning(
+    event: dict, preceding: Sequence[dict], proven: set[int]
+) -> bool:
+    state = {
+        key: event[key]
+        for key in ASSISTANT_STATE_KEYS
+        if event.get(key) not in (None, "", [], {})
+    }
+    if not state:
+        return False
+    for previous in reversed(preceding):
+        if previous.get("type") in {"user_message", "assistant_round_start"}:
+            return False
+        if previous.get("type") == "assistant_message":
+            payload = previous.get("message") or {}
+            return (
+                previous.get("event_id") in proven
+                and _pair(previous) == _pair(event)
+                and previous.get("parent_branch_path")
+                == event.get("parent_branch_path")
+                and all(payload.get(key) == value for key, value in state.items())
+            )
+    return False
+
+
+def compute_exact_captured_range(
+    events: list[dict],
+    path: set[tuple[int, int]],
+    captured_messages: Sequence[Any] = (),
+    retained_messages: Sequence[Any] = (),
+    *,
+    retain_latest_user: bool = False,
+) -> tuple[int, int] | None:
+    """Replacement span proven message-by-message against persisted records.
+
+    Message identities are resolved by
+    :func:`kohakuterrarium.core.compact_binding.resolve_capture_ids`; consumed
+    summaries then contribute inherited coverage, and every remaining path
+    event inside the resulting span must be one of those proven ids, an
+    operational record, or a user-input echo of a proven user message.
+    """
+    if not path:
+        return None
+    resolved = resolve_capture_ids(
+        events,
+        path,
+        captured_messages,
+        retained_messages,
+        retain_latest_user=retain_latest_user,
+    )
+    if resolved is None:
+        return None
+    proven, excluded = resolved
+    for position, event in enumerate(events):
+        if (
+            event.get("type") == "assistant_reasoning"
+            and (event_id := _event_id(event)) is not None
+            and _on_path(event, path)
+            and _restated_reasoning(event, events[:position], proven)
+        ):
+            proven.add(event_id)
+    summaries = any(_is_summary(message) for message in captured_messages)
+    inherited = _inherited_coverage(captured_messages, events, path, strict=True)
+    if inherited is None and summaries:
+        # A captured summary that cannot prove its own lineage is not coverage.
+        return None
+    if not proven and inherited is None:
+        return None
+    low = min(proven) if proven else inherited[1]
+    high = max(proven) if proven else inherited[2]
+    if inherited is not None:
+        low, high = min(low, inherited[1]), max(high, inherited[2])
+        proven |= inherited[0]
+    if any(low <= event_id <= high for event_id in excluded):
+        return None
+    index: dict[int, dict] = {
+        event_id: event
+        for event in events
+        if (event_id := _event_id(event)) is not None
+    }
+    completions = {
+        matched["event_id"]
+        for message in captured_messages
+        if _is_summary(message)
+        and (matched := matching_compact_complete(message, events)) is not None
+    }
+    for position, event in enumerate(events):
+        event_id = _event_id(event)
+        if (
+            event_id is None
+            or not _on_path(event, path)
+            or not low <= event_id <= high
+            or event_id in proven
+        ):
+            continue
+        if event_id in completions or event.get("type") in _OPERATIONAL_TYPES:
+            continue
+        if event.get("type") == "user_input" and _restated_input(event, index, proven):
             continue
         return None
     return low, high

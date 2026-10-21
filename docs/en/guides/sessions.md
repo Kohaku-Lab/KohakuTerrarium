@@ -84,6 +84,8 @@ Compaction sends a textual projection to the summarizer, not the original images
 
 A checkpoint can contain already-elided tool output, while raw reconstruction may rehydrate that output before the current elision policy is reapplied. These representations need not be identical dictionaries. Compare effective context under the same summary, retained-user, and elision policy; legitimate rehydration is different from restoring media that the selected summary already consumed. Local-media availability is checked only for the final effective provider input, so excluded media do not block continuation and required missing media still fail explicitly. These rules apply to stable history, not history operations during active compaction or background work.
 
+Summaries are bound to canonical rounds and tool results at capture time. Reuse excludes the retained tail and any re-attached user message, so a summary covers only the rounds it actually replaced. When captured history points at a known source path but cannot be bound unambiguously, compaction is skipped with `capture_unproven`: no summarizer call runs and the live conversation is unchanged. A summary of unknown origin remains checkpoint-only; it is restored for its own branch but never receives fabricated provenance for another history.
+
 ### Older session formats
 
 Some older writers recorded canonical messages with event, turn, and branch IDs
