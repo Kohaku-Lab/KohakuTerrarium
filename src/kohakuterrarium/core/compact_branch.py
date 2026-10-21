@@ -11,7 +11,15 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any
 
-from kohakuterrarium.core.compact_splice import is_real_user_message
+from kohakuterrarium.core.compact_capture import (
+    compute_captured_range,
+    compute_replaced_range as compute_replaced_range,
+    matching_compact_complete,
+)
+from kohakuterrarium.core.compact_splice import (
+    is_real_user_message,
+    leading_system_count,
+)
 from kohakuterrarium.session.snapshot import snapshot_tag
 from kohakuterrarium.utils.logging import get_logger
 
@@ -85,19 +93,24 @@ class CompactRule:
         return (turn_index, branch_id) in self.path
 
     def inputs(self) -> set[tuple[int, int]] | None:
-        """Return recorded dependencies, with the full path as a legacy fallback."""
+        """Recorded dependencies, or the replacement path as a legacy fallback."""
+        return self.source_path if self.source_recorded else self.path
+
+    def compatibility(self, selected_pairs: set[tuple[int, int]]) -> int:
+        """Proven ancestry=2, legacy pathless=1, unprovable=0 (a null source
+        never borrows ``path``)."""
         if self.source_recorded:
-            return self.source_path
-        return self.path
+            if self.source_path is None:
+                return 0
+            return 2 if self.source_path <= selected_pairs else 0
+        if self.path is None:
+            return 1
+        return 2 if self.path.issubset(selected_pairs) else 0
 
     def priority(self, selected_pairs: set[tuple[int, int]]) -> tuple[int, int]:
-        """Rank summaries by how provable their reuse is for a selection."""
-        if self.path is None:
-            return (0, 0) if self.source_recorded else (1, 0)
-        inputs = self.inputs() if self.inputs() is not None else self.path
-        if inputs is None or not inputs.issubset(selected_pairs):
-            return (0, 0)
-        return (2, len(inputs))
+        """Rank by compatibility proof, then actual coverage width."""
+        span = self.replaced_to - self.replaced_from + 1
+        return (self.compatibility(selected_pairs), max(0, span))
 
 
 def compact_rule_from_event(evt: Mapping[str, Any]) -> CompactRule | None:
@@ -130,19 +143,32 @@ def compact_rule_from_event(evt: Mapping[str, Any]) -> CompactRule | None:
 
 
 def job_origin_pairs(events: list[dict]) -> dict[str, tuple[int, int]]:
-    """Map internal tool identities to their issuing turns and branches."""
-    origins: dict[str, tuple[int, int]] = {}
+    """Map internal job identities to their issuing turns and branches.
+
+    Both tool and sub-agent dispatches issue work. An identity that is reused
+    across different turn/branch pairs is ambiguous and is omitted rather
+    than resolved to whichever dispatch appeared first.
+    """
+    seen: dict[str, set[tuple[int, int]]] = {}
     for evt in events:
-        if evt.get("type") != "tool_call":
+        if evt.get("type") not in ("tool_call", "subagent_call"):
             continue
-        identity = evt.get("call_id") or evt.get("job_id")
         turn = evt.get("turn_index")
         branch = evt.get("branch_id")
-        if not identity or not isinstance(turn, int) or not isinstance(branch, int):
+        if not isinstance(turn, int) or not isinstance(branch, int):
             continue
-        if turn > 0 and branch > 0:
-            origins.setdefault(str(identity), (turn, branch))
-    return origins
+        if turn <= 0 or branch <= 0:
+            continue
+        identities = {
+            str(value) for value in (evt.get("call_id"), evt.get("job_id")) if value
+        }
+        for identity in identities:
+            seen.setdefault(identity, set()).add((turn, branch))
+    return {
+        identity: next(iter(pairs))
+        for identity, pairs in seen.items()
+        if len(pairs) == 1
+    }
 
 
 def _message_metadata(msg: Any) -> dict:
@@ -251,6 +277,10 @@ def summary_result_event_ids(messages: Sequence[Any], events: list[dict]) -> set
         metadata = _message_metadata(message)
         if is_summary_message(message):
             consumed.update(_result_ids(metadata))
+            if "compact_result_event_ids" not in metadata:
+                matched = matching_compact_complete(message, events)
+                if matched is not None:
+                    consumed.update(_result_ids(matched))
             continue
         if metadata.get("tool_result_phase") == "pending":
             continue
@@ -263,7 +293,7 @@ def summary_result_event_ids(messages: Sequence[Any], events: list[dict]) -> set
         elif (
             metadata.get("kind") == "tool_results"
             and metadata.get("tool_result_phase") == "final"
-        ):
+        ) or (metadata.get("kind") == "injected" and metadata.get("job_ids")):
             job_ids = metadata.get("job_ids") or []
         else:
             continue
@@ -281,6 +311,9 @@ async def capture_compact_metadata(
     messages: Sequence[Any],
     keep_count: int,
     compact_round: int,
+    *,
+    retained_messages: Sequence[Any] = (),
+    retain_latest_user: bool = False,
 ) -> dict:
     """Capture replacement coverage and summary inputs before generation."""
     messages = deepcopy(messages)
@@ -305,6 +338,9 @@ async def capture_compact_metadata(
         messages_compacted=len(messages),
         source_path=source,
         result_event_ids=summary_result_event_ids(messages, events),
+        captured_messages=messages,
+        retained_messages=retained_messages,
+        retain_latest_user=retain_latest_user,
     )
 
 
@@ -318,8 +354,9 @@ def live_turn_window(
     if boundary <= preferred_boundary:
         return keep_count
     retained = sum(1 for msg in messages[boundary:] if is_real_user_message(msg))
+    leading = leading_system_count(messages)
     return retained + int(
-        any(is_real_user_message(msg) for msg in reversed(messages[1:boundary]))
+        any(is_real_user_message(msg) for msg in reversed(messages[leading:boundary]))
     )
 
 
@@ -502,11 +539,23 @@ def build_compact_metadata(
     messages_compacted: int,
     source_path: set[tuple[int, int]] | None = None,
     result_event_ids: set[int] | None = None,
+    captured_messages: Sequence[Any] = (),
+    retained_messages: Sequence[Any] = (),
+    retain_latest_user: bool = False,
 ) -> dict:
     """Serialize replacement coverage and inputs; explicit null denotes unknown."""
     compact_path = current_path(agent)
     replaced = (
-        compute_replaced_range(events, keep_count, compact_path) if events else None
+        compute_captured_range(
+            events,
+            compact_path,
+            captured_messages,
+            retained_messages,
+            retain_latest_user=retain_latest_user,
+            keep_count=keep_count,
+        )
+        if events
+        else None
     )
     metadata = {
         "round": compact_round,
@@ -527,60 +576,6 @@ def build_compact_metadata(
         metadata["branch_id"] = getattr(agent, "_branch_id", None)
         metadata["parent_branch_path"] = getattr(agent, "_parent_branch_path", None)
     return metadata
-
-
-def compute_replaced_range(
-    events: list[dict],
-    keep_count: int,
-    path: set[tuple[int, int]],
-) -> tuple[int, int] | None:
-    """Event id range a compaction covers, computed from the event log.
-
-    Only events on the agent's current branch ``path`` are considered;
-    the live zone keeps the last ``keep_count`` user turns of that path,
-    so everything older is replaced by the summary.
-    """
-    if not path:
-        return None
-    # Deduplicate by turn so a duplicated user_message event (graph merge /
-    # migration) cannot shift the "first live" turn and over-replace.
-    user_turns: list[int] = []
-    seen_turns: set[int] = set()
-    for evt in events:
-        if evt.get("type") != "user_message":
-            continue
-        ti = evt.get("turn_index")
-        bi = evt.get("branch_id")
-        if (
-            isinstance(ti, int)
-            and isinstance(bi, int)
-            and (ti, bi) in path
-            and ti not in seen_turns
-        ):
-            seen_turns.add(ti)
-            user_turns.append(ti)
-    if len(user_turns) <= keep_count:
-        return None
-    first_live = user_turns[-keep_count] if keep_count > 0 else None
-    ids: list[int] = []
-    for evt in events:
-        eid = evt.get("event_id")
-        ti = evt.get("turn_index")
-        bi = evt.get("branch_id")
-        if (
-            not isinstance(eid, int)
-            or not isinstance(ti, int)
-            or not isinstance(bi, int)
-        ):
-            continue
-        if (ti, bi) not in path:
-            continue
-        if first_live is not None and ti >= first_live:
-            continue
-        ids.append(eid)
-    if not ids:
-        return None
-    return min(ids), max(ids)
 
 
 def read_agent_events(store: Any, agent_name: str) -> list[dict]:

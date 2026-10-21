@@ -153,10 +153,10 @@ class AgentMidTurnMixin:
                     combined = f"{combined}\n\n{hint}"
                 elif isinstance(combined, list):
                     combined.append({"type": "text", "text": f"\n\n{hint}"})
+        origin = self._message_origin([evt for evt, _ in pairs])
+        origin["kind"] = "injected"
         try:
-            controller.conversation.append(
-                "user", combined, metadata={"origin_known": False}
-            )
+            controller.conversation.append("user", combined, metadata=origin)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning(
                 "Mid-turn input injection failed", error=str(exc), exc_info=True

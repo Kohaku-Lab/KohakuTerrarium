@@ -1653,3 +1653,190 @@ class TestCompactCompleteReplacedRange:
         # (events 1..12) are replaced by the summary.
         assert metadata.get("replaced_from_event_id") == 1
         assert metadata.get("replaced_to_event_id") == 12
+
+
+# ── compact zone without a leading system message ────────────────
+
+
+def _build_systemless_conversation(n_user=10):
+    conv = Conversation()
+    for i in range(n_user):
+        conv.append("user", f"u{i}")
+        conv.append("assistant", f"a{i}")
+    return conv
+
+
+def _skip_reasons(router):
+    return [
+        data.get("reason")
+        for kind, _, data in router.calls
+        if kind == "compact_skipped" and isinstance(data, dict)
+    ]
+
+
+class TestCompactZoneWithoutLeadingSystem:
+    async def test_single_message_prefix_can_compact_without_a_system(self):
+        conv = Conversation()
+        conv.append("user", "old input" * 100)
+        conv.append("user", "tail")
+        conv.append("assistant", "reply")
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+        mgr.config.keep_recent_turns = 1
+        assert mgr.trigger_compact()
+        await mgr.wait_for_current()
+        assert mgr._compact_count == 1
+        assert "old input" in mgr._llm.calls[0][0][-1]["content"]
+        assert conv.get_messages()[0].metadata["compact_summary"]
+        assert [message.content for message in conv.get_messages()[1:]] == [
+            "tail",
+            "reply",
+        ]
+
+    async def test_first_message_is_summarized_not_pinned_as_system(self):
+        conv = _build_systemless_conversation()
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+
+        await mgr._run_compact()
+
+        assert mgr._compact_count == 1
+        prompt = mgr._llm.calls[0][0][-1]["content"]
+        assert "u0" in prompt
+        messages = conv.get_messages()
+        assert messages[0].metadata.get("compact_summary") is True
+        assert [m.role for m in messages].count("system") == 0
+        assert "u0" not in [m.content for m in messages]
+
+    async def test_old_summary_first_inherits_deps_and_result_ids(self):
+        conv = Conversation()
+        conv.append(
+            "assistant",
+            "[Previous context summary (compact round 1)]\n\nOLD",
+            metadata={
+                "compact_summary": True,
+                "compact_source_path": [[1, 1]],
+                "compact_result_event_ids": [4],
+            },
+        )
+        for index in range(10):
+            conv.append(
+                "user",
+                f"u{index}",
+                metadata={"turn_index": index + 2, "branch_id": 1},
+            )
+            conv.append("assistant", f"a{index}")
+        router = _Router()
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]), router=router)
+
+        await mgr._run_compact()
+
+        assert mgr._compact_count == 1
+        assert (
+            "Previous context summary (compact round 1)"
+            in mgr._llm.calls[0][0][-1]["content"]
+        )
+        summaries = [
+            m for m in conv.get_messages() if m.metadata.get("compact_summary")
+        ]
+        assert len(summaries) == 1
+        metadata = next(
+            data for kind, _, data in router.calls if kind == "compact_complete"
+        )
+        assert metadata["compact_source_path"] == [[1, 1], [2, 1], [3, 1]]
+        assert metadata["compact_result_event_ids"] == [4]
+
+    async def test_every_leading_system_message_survives(self):
+        conv = Conversation()
+        conv.append("system", "SYS-ONE")
+        conv.append("system", "SYS-TWO")
+        for index in range(10):
+            conv.append("user", f"u{index}")
+            conv.append("assistant", f"a{index}")
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+
+        await mgr._run_compact()
+
+        assert mgr._compact_count == 1
+        messages = conv.get_messages()
+        assert [m.content for m in messages if m.role == "system"] == [
+            "SYS-ONE",
+            "SYS-TWO",
+        ]
+        assert messages[2].metadata.get("compact_summary") is True
+        prompt = mgr._llm.calls[0][0][-1]["content"]
+        assert "SYS-ONE" not in prompt
+        assert "SYS-TWO" not in prompt
+
+    async def test_inplace_edit_of_first_message_aborts_splice(self):
+        conv = _build_systemless_conversation()
+        router = _Router()
+        plugins = _Plugins()
+        mgr = _build_mgr(
+            conversation=conv, llm=_LLM(chunks=["S"]), router=router, plugins=plugins
+        )
+
+        async def edit_first_message(hook, **kwargs):
+            conv.get_messages()[0].content = "u0-edited"
+            return True
+
+        plugins.should_proceed = edit_first_message
+        await mgr._run_compact()
+
+        assert mgr._compact_count == 0
+        assert "conversation_changed" in _skip_reasons(router)
+
+
+class TestTargetBoundaryWithoutLeadingSystem:
+    def test_huge_first_message_stays_compactable(self):
+        messages = [create_message("user", "goal:" + "x" * 100_000)]
+        for index in range(8):
+            messages.append(create_message("user", f"u{index}"))
+            messages.append(create_message("assistant", f"a{index}"))
+        assert select_compact_boundary(messages, 3) == len(
+            messages
+        ) - count_keep_messages(messages, 3)
+        boundary = select_compact_boundary(
+            messages,
+            3,
+            target_tokens=10_000,
+            prompt_tokens=30_000,
+            summary_tokens=1_000,
+        )
+        assert boundary == len(messages) - count_keep_messages(messages, 3)
+        assert boundary < len(messages)
+
+
+class TestSpliceWithoutLeadingSystem:
+    def test_retained_latest_user_survives_at_index_zero(self):
+        conv = Conversation()
+        conv.append("user", "goal")
+        conv.append("assistant", "plan")
+        conv.append("assistant", "work")
+        conv.append("user", "next")
+        conv.append("assistant", "reply")
+        mgr = CompactManager()
+
+        applied = mgr._splice_conversation(
+            conv, boundary=3, summary="S", retain_latest_user=True
+        )
+
+        assert applied is True
+        messages = conv.get_messages()
+        assert messages[0].metadata.get("compact_summary") is True
+        assert [m.content for m in messages[1:]] == ["goal", "next", "reply"]
+
+    def test_leading_system_is_the_only_pinned_prefix(self):
+        conv = Conversation()
+        conv.append("system", "SYS")
+        conv.append("user", "u1")
+        conv.append("assistant", "a1")
+        conv.append("user", "u2")
+        conv.append("assistant", "a2")
+        mgr = CompactManager()
+
+        applied = mgr._splice_conversation(conv, boundary=3, summary="S")
+
+        assert applied is True
+        messages = conv.get_messages()
+        assert messages[0].content == "SYS"
+        assert messages[1].metadata.get("compact_summary") is True
+        assert [m.content for m in messages[2:]] == ["u2", "a2"]

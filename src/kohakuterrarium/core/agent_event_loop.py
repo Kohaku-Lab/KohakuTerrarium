@@ -28,6 +28,20 @@ logger = get_logger(__name__)
 _COALESCE_HOPS = 3
 
 
+_RESULT_EVENT_TYPES = frozenset({"tool_complete", "subagent_output"})
+
+
+def _contributes_result_content(event) -> bool:
+    """Whether a result event adds message content (mirrors the renderer).
+
+    An internal wake with no job and no content is dropped before the user
+    message is built, so it must not decide anything about provenance.
+    """
+    if getattr(event, "type", None) not in _RESULT_EVENT_TYPES:
+        return False
+    return bool(getattr(event, "job_id", None)) or bool(event.get_text_content())
+
+
 def _is_fresh_user_input(event) -> bool:
     """A user_input that opens a NEW user turn (not a regen/edit rerun,
     whose branch was pre-incremented by its caller)."""
@@ -406,27 +420,30 @@ class AgentEventLoopMixin:
     def _message_origin(self, events: list) -> dict[str, Any]:
         """Branch provenance for the user message this batch produces.
 
-        A batch that mixes real user input with job results merges both into
-        one message without naming the jobs, so nothing proves which turns it
-        came from and it is marked unknown. A pure feedback round does name
-        them (``job_ids``), which is resolvable downstream.
+        The message is written at the agent's active ``(turn, branch)``, so
+        that position is always known. Folded results add content created on
+        the turn that issued the job, so they must name their ``job_ids`` for
+        the summary resolver to map them back to persisted tool calls. A
+        result that names no job (an internal wake) proves nothing beyond the
+        local position, so the whole batch is declared unknown instead of
+        getting a partial path. Typed input and peer content are first
+        materialised here, so no ancestry beyond the local position is
+        claimed for them.
         """
         turn_index = self._turn_index
         branch_id = self._branch_id
         if not isinstance(turn_index, int) or not isinstance(branch_id, int):
             return {}
-        pure_feedback = bool(events) and all(
-            getattr(evt, "type", None) == "tool_complete" for evt in events
-        )
-        carries_results = any(
-            getattr(evt, "type", None) in {"tool_complete", "subagent_output"}
-            for evt in events
-        )
-        return {
-            "turn_index": turn_index,
-            "branch_id": branch_id,
-            "origin_known": pure_feedback or not carries_results,
-        }
+        origin: dict[str, Any] = {"turn_index": turn_index, "branch_id": branch_id}
+        results = [evt for evt in events if _contributes_result_content(evt)]
+        if not results:
+            origin["origin_known"] = True
+            return origin
+        job_ids = [str(evt.job_id) for evt in results if evt.job_id]
+        origin["origin_known"] = len(job_ids) == len(results)
+        if origin["origin_known"]:
+            origin["job_ids"] = job_ids
+        return origin
 
     def _clear_rerun_execution_error(self, event) -> None:
         """Drop a prior accepted-rerun error once a new rerun starts executing."""

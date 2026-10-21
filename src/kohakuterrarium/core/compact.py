@@ -11,6 +11,7 @@ from kohakuterrarium.core.compact_branch import (
     persist_compacted_async,
 )
 from kohakuterrarium.core.compact_splice import (
+    leading_system_count,
     prefix_fingerprint,
     select_compact_boundary,
     splice_conversation,
@@ -156,7 +157,7 @@ class CompactManager:
         # or misleadingly showing a "compacting..." banner.
         messages = self._controller.conversation.get_messages()
         boundary = self._compact_boundary(messages)
-        if boundary <= 1:
+        if boundary <= leading_system_count(messages):
             if self._output_router:
                 self._output_router.notify_activity(
                     "compact_skipped",
@@ -273,7 +274,7 @@ class CompactManager:
             preferred_boundary = select_compact_boundary(
                 messages, self.config.keep_recent_turns
             )
-            if boundary <= 1:
+            if boundary <= leading_system_count(messages):
                 logger.debug("Not enough messages to compact")
                 self._emit_compact_skipped(
                     "nothing_to_compact",
@@ -282,9 +283,10 @@ class CompactManager:
                 terminal_sent = True
                 return
 
-            # Compact zone: messages[1:boundary] (skip system at index 0)
-            # Live zone: messages[boundary:]
-            compact_messages = messages[1:boundary]
+            # Compact zone: messages[leading:boundary] (leading system
+            # messages are pinned). Live zone: messages[boundary:].
+            leading = leading_system_count(messages)
+            compact_messages = messages[leading:boundary]
 
             live_turn_count = live_turn_window(
                 messages, boundary, preferred_boundary, self.config.keep_recent_turns
@@ -307,6 +309,8 @@ class CompactManager:
                 compact_messages,
                 live_turn_count,
                 self._compact_count + 1,
+                retained_messages=messages[boundary:],
+                retain_latest_user=boundary > preferred_boundary,
             )
             source_path = (
                 {tuple(pair) for pair in metadata["compact_source_path"]}
@@ -458,7 +462,7 @@ class CompactManager:
             logger.info(
                 "Auto-compact complete",
                 agent=self._agent_name,
-                messages_compacted=boundary - 1,
+                messages_compacted=boundary - leading,
                 compact_round=self._compact_count,
             )
 
@@ -468,7 +472,7 @@ class CompactManager:
                 await self._plugins.notify(
                     "on_compact_end",
                     summary=summary,
-                    messages_removed=boundary - 1,
+                    messages_removed=boundary - leading,
                 )
 
         except asyncio.CancelledError:

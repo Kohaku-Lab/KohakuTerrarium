@@ -1,6 +1,14 @@
 """List or switch the live response branch within the current session."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
+from kohakuterrarium.core.agent_message_history import apply_prepared_branch_view
+from kohakuterrarium.core.agent_raw_history import prepare_branch_view_candidate
+from kohakuterrarium.core.branch_continuation import (
+    persist_branch_view,
+    require_no_running_jobs,
+    selected_branch_view,
+)
+from kohakuterrarium.core.history_candidate import require_history_candidate
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,
@@ -11,14 +19,13 @@ from kohakuterrarium.session.history import (
     collect_branch_metadata,
     collect_user_groups,
     dedupe_adjacent_duplicate_events,
-    replay_conversation,
 )
-from kohakuterrarium.utils.logging import get_logger
-
-logger = get_logger(__name__)
+from kohakuterrarium.session.snapshot import save_agent_snapshot
 
 
-def _format_listing(meta: dict[int, dict], user_groups: dict[int, dict]) -> str:
+def _format_listing(
+    meta: dict[int, dict], user_groups: dict[int, dict], selected: dict[int, int]
+) -> str:
     """Format turns with alternatives, distinguishing edits from regenerations."""
     if not meta:
         return "No branches recorded yet."
@@ -37,13 +44,14 @@ def _format_listing(meta: dict[int, dict], user_groups: dict[int, dict]) -> str:
                 preview = (group["content"] or "").replace("\n", " ")[:40]
                 lines.append(
                     f"  turn {ti} edit {gi}/{edit_count}: branches "
-                    f"{group['branches']} — {preview!r}"
+                    f"{group['branches']} — {preview!r} "
+                    f"(selected: {selected.get(ti, 'none')})"
                 )
         else:
             branches = info["branches"]
             lines.append(
                 f"  turn {ti} regen 1..{len(branches)}: branches {branches} "
-                f"(latest: {info['latest_branch']})"
+                f"(selected: {selected.get(ti, 'none')})"
             )
     if not has_any:
         return "No multi-branch turns yet — every turn has a single live response."
@@ -67,78 +75,71 @@ class BranchCommand(BaseUserCommand):
         agent = context.agent
         if not agent or agent.session_store is None:
             return UserCommandResult(error="No agent / session store in context.")
-        events = dedupe_adjacent_duplicate_events(
-            agent.session_store.get_events(agent.config.name)
-        )
-        meta = collect_branch_metadata(events)
-        user_groups = collect_user_groups(events)
-
         tokens = (args or "").split()
         if not tokens:
-            return UserCommandResult(output=_format_listing(meta, user_groups))
-
-        if tokens[0] == "latest":
-            # An empty branch view makes replay select each turn's latest branch.
-            agent._branch_view = {}
-            replayed = replay_conversation(events, include_metadata=True)
-            agent.controller.conversation = _rebuild_conv(
-                replayed, agent.controller.conversation.__class__
+            events = dedupe_adjacent_duplicate_events(
+                agent.session_store.get_events(agent.config.name)
             )
             return UserCommandResult(
-                output=f"Switched every turn back to its latest branch ({len(replayed)} messages)."
-            )
-
-        if len(tokens) < 2:
-            return UserCommandResult(
-                error="Usage: /branch <turn_index> <branch_id>  |  /branch latest  |  /branch"
-            )
-        try:
-            turn_index = int(tokens[0])
-            branch_id = int(tokens[1])
-        except ValueError:
-            return UserCommandResult(error="turn_index and branch_id must be integers.")
-
-        info = meta.get(turn_index)
-        if not info:
-            return UserCommandResult(error=f"Turn {turn_index} has no recorded events.")
-        if branch_id not in info["branches"]:
-            return UserCommandResult(
-                error=(
-                    f"Turn {turn_index} has no branch {branch_id}. "
-                    f"Available: {info['branches']}"
+                output=_format_listing(
+                    collect_branch_metadata(events),
+                    collect_user_groups(events),
+                    selected_branch_view(agent),
                 )
             )
 
-        # The persisted view and rebuilt conversation must agree so subsequent
-        # turns use the selected history.
-        view = dict(getattr(agent, "_branch_view", {}) or {})
-        view[turn_index] = branch_id
-        agent._branch_view = view
+        latest = tokens == ["latest"]
+        view = {}
+        if not latest:
+            if len(tokens) != 2:
+                return UserCommandResult(
+                    error="Usage: /branch <turn_index> <branch_id>  |  /branch latest  |  /branch"
+                )
+            try:
+                turn_index, branch_id = map(int, tokens)
+            except ValueError:
+                return UserCommandResult(
+                    error="turn_index and branch_id must be integers."
+                )
+            view = {turn_index: branch_id}
 
-        replayed = replay_conversation(events, branch_view=view, include_metadata=True)
-        agent.controller.conversation = _rebuild_conv(
-            replayed, agent.controller.conversation.__class__
-        )
-        return UserCommandResult(
-            output=(
-                f"Switched turn {turn_index} → branch {branch_id} "
-                f"({len(replayed)} messages live)."
+        async with agent._get_message_mutation_lock():
+            await agent._wait_for_history_finalization()
+            agent._ensure_history_mutation_idle()
+            require_no_running_jobs(agent)
+            session_output = getattr(agent, "_session_output", None)
+            if session_output is not None:
+                await session_output.drain()
+            agent._ensure_history_mutation_idle()
+            require_no_running_jobs(agent)
+
+            candidate = prepare_branch_view_candidate(agent, view)
+            conversation = candidate["conversation"]
+            require_history_candidate(agent, conversation.get_messages())
+            prepared = candidate["prepared"]
+            persist_branch_view(
+                agent.session_store, agent.config.name, prepared["selected"]
             )
+            apply_prepared_branch_view(agent, prepared, candidate=conversation)
+            try:
+                save_agent_snapshot(
+                    agent.session_store,
+                    agent.config.name,
+                    agent,
+                    agent.controller.conversation.snapshot_messages(),
+                )
+            except Exception as exc:
+                return UserCommandResult(
+                    error=f"Branch switched, but saving its checkpoint failed: {exc}"
+                )
+            count = sum(
+                message.role != "system"
+                for message in agent.controller.conversation.get_messages()
+            )
+        if latest:
+            return UserCommandResult(
+                output=f"Switched to the latest compatible branches ({count} messages live)."
+            )
+        return UserCommandResult(
+            output=f"Switched turn {turn_index} → branch {branch_id} ({count} messages live)."
         )
-
-
-def _rebuild_conv(messages: list[dict], conv_cls):
-    """Rebuild a conversation instance from replayed message dictionaries."""
-    conv = conv_cls()
-    for msg in messages:
-        kwargs = {}
-        if msg.get("tool_calls"):
-            kwargs["tool_calls"] = msg["tool_calls"]
-        if msg.get("tool_call_id"):
-            kwargs["tool_call_id"] = msg["tool_call_id"]
-        if msg.get("name"):
-            kwargs["name"] = msg["name"]
-        if msg.get("metadata"):
-            kwargs["metadata"] = msg["metadata"]
-        conv.append(msg.get("role", "user"), msg.get("content", ""), **kwargs)
-    return conv

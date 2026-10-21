@@ -14,6 +14,20 @@ from kohakuterrarium.core.conversation_elide import (
 from kohakuterrarium.llm.message import create_message
 
 
+def leading_system_count(messages: list) -> int:
+    """Count the system messages that lead the conversation.
+
+    Only this run is pinned ahead of every compact zone; a conversation
+    without one starts its compact zone at index 0.
+    """
+    count = 0
+    for msg in messages:
+        if getattr(msg, "role", None) != "system":
+            break
+        count += 1
+    return count
+
+
 def prefix_fingerprint(messages: list) -> tuple:
     """Content fingerprint of the to-be-summarized prefix.
 
@@ -59,14 +73,15 @@ def splice_conversation(
     the gap.
     """
     messages = conversation.get_messages()
+    leading = leading_system_count(messages)
 
-    if boundary > len(messages) or boundary <= 1:
+    if boundary > len(messages) or boundary <= leading:
         return False
     if expected_last is not None and messages[boundary - 1] is not expected_last:
         return False
     if (
         expected_fingerprint is not None
-        and prefix_fingerprint(messages[1:boundary]) != expected_fingerprint
+        and prefix_fingerprint(messages[leading:boundary]) != expected_fingerprint
     ):
         return False
     # The boundary must already be tool-safe (computed BEFORE the
@@ -76,21 +91,21 @@ def splice_conversation(
     if boundary < len(messages) and getattr(messages[boundary], "role", None) == "tool":
         return False
 
-    system_msg = messages[0]  # The system prompt survives every compaction round.
+    pinned = messages[:leading]  # Leading system messages survive every round.
     live_zone = messages[boundary:]  # Messages after the boundary remain verbatim.
     retained_user = None
     if retain_latest_user:
         retained_user = next(
             (
                 msg
-                for msg in reversed(messages[1:boundary])
+                for msg in reversed(messages[leading:boundary])
                 if is_real_user_message(msg)
             ),
             None,
         )
 
     conversation._messages.clear()
-    conversation._messages.append(system_msg)
+    conversation._messages.extend(pinned)
 
     # Add summary as an assistant message with a marker
     summary_msg = create_message(
@@ -145,8 +160,14 @@ def select_compact_boundary(
 ) -> int:
     """Select the old turn boundary, tightening it only when over budget."""
     n = len(messages)
+    leading = leading_system_count(messages)
+    lowest_boundary = max(leading, 1)
     boundary = n - count_keep_messages(messages, keep_recent_turns)
-    while boundary > 1 and boundary < n and messages[boundary].role == "tool":
+    while (
+        boundary > lowest_boundary
+        and boundary < n
+        and messages[boundary].role == "tool"
+    ):
         boundary -= 1
 
     if target_tokens is None or prompt_tokens <= 0:
@@ -157,15 +178,16 @@ def select_compact_boundary(
     if fixed_tokens + summary_tokens >= target_tokens:
         return boundary
     live_budget = max(1, target_tokens - fixed_tokens - summary_tokens)
-    live_tokens = estimate_message_tokens(messages[0]) + sum(
+    pinned_tokens = sum(estimate_message_tokens(msg) for msg in messages[:leading])
+    live_tokens = pinned_tokens + sum(
         estimate_message_tokens(msg) for msg in messages[boundary:]
     )
     if live_tokens <= live_budget:
         return boundary
 
-    suffix_tokens = estimate_message_tokens(messages[0])
+    suffix_tokens = pinned_tokens
     token_boundary = n
-    for index in range(n - 1, 0, -1):
+    for index in range(n - 1, leading - 1, -1):
         message_tokens = estimate_message_tokens(messages[index])
         if suffix_tokens + message_tokens > live_budget:
             break

@@ -36,7 +36,7 @@ def user_message_indices_for_turn(
         if (
             getattr(msg, "role", None) == "user"
             and isinstance(metadata, dict)
-            and metadata.get("kind") != "tool_results"
+            and metadata.get("kind") not in {"tool_results", "injected"}
             and metadata.get("turn_index") == turn_index
         ):
             indices.append(idx)

@@ -2,7 +2,10 @@
 
 from copy import deepcopy
 
-from kohakuterrarium.session.assistant_history import project_assistant_rounds
+from kohakuterrarium.session.assistant_history import (
+    assistant_round_identities,
+    project_assistant_rounds,
+)
 
 
 def _evt(event_id, etype, **kwargs):
@@ -638,3 +641,207 @@ class TestProjectAssistantRounds:
         large = _scan_count(64)
         assert small > 0
         assert large < small * 3
+
+
+class TestAssistantRoundIdentities:
+    def test_pair_owns_start_display_pieces_and_end(self):
+        events = [
+            _evt(1, "assistant_round_start"),
+            _evt(2, "text_chunk", content="a"),
+            _evt(None, "text_chunk", content="no id"),
+            _evt(0, "text_chunk", content="zero id"),
+            _evt(3, "tool_call", call_id="job", tool_call_id="call"),
+            _evt(4, "assistant_image", url="https://img"),
+            _evt(
+                5,
+                "assistant_message",
+                round_start_event_id=1,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {1: (1, 2, 4, 5)}
+
+    def test_round_identity_requires_both_endpoints_eligible(self):
+        events = [
+            _evt(1, "assistant_round_start"),
+            _evt(2, "text_chunk", content="a"),
+            _evt(3, "assistant_message", round_start_event_id=1, message=_message()),
+        ]
+
+        assert assistant_round_identities(events, eligible_ids={1, 3}) == {1: (1, 3)}
+        assert assistant_round_identities(events, eligible_ids={1, 2}) == {}
+
+    def test_foreign_display_piece_is_not_round_owned(self):
+        """A display record on another branch is not this round's content."""
+        events = [
+            _evt(6, "assistant_round_start", branch_id=1),
+            _evt(7, "text_chunk", content="other", branch_id=2),
+            _evt(8, "text_chunk", content="other", turn_index=None, branch_id=3),
+            _evt(
+                9,
+                "assistant_message",
+                branch_id=1,
+                round_start_event_id=6,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {6: (6, 9)}
+        assert assistant_round_identities(events, eligible_ids={6, 7, 8, 9}) == {
+            6: (6, 9)
+        }
+
+    def test_same_lineage_display_pieces_stay_round_owned(self):
+        events = [
+            _evt(1, "assistant_round_start", turn_index=2, parent_branch_path=[[1, 1]]),
+            _evt(
+                2, "text_chunk", content="a", turn_index=2, parent_branch_path=[[1, 1]]
+            ),
+            _evt(
+                3,
+                "assistant_text",
+                content="b",
+                turn_index=2,
+                parent_branch_path=((1, 1),),
+            ),
+            _evt(
+                4, "assistant_image", url="https://img", turn_index=None, branch_id=None
+            ),
+            _evt(
+                5,
+                "assistant_message",
+                turn_index=2,
+                parent_branch_path=[[1, 1]],
+                round_start_event_id=1,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {1: (1, 2, 3, 4, 5)}
+
+    def test_display_piece_without_ancestry_stays_round_owned(self):
+        """A missing ``parent_branch_path`` is unknown, not another lineage."""
+        events = [
+            _evt(6, "assistant_round_start", turn_index=2, parent_branch_path=[[1, 1]]),
+            _evt(7, "text_chunk", content="chunk", turn_index=2, branch_id=1),
+            _evt(
+                10,
+                "assistant_message",
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[[1, 1]],
+                round_start_event_id=6,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {6: (6, 7, 10)}
+
+    def test_partial_display_metadata_stays_round_owned(self):
+        """An unknown turn or branch alone never excludes a display piece."""
+        events = [
+            _evt(6, "assistant_round_start", turn_index=2, parent_branch_path=[[1, 1]]),
+            _evt(7, "text_chunk", content="no turn", turn_index=None),
+            _evt(8, "text_chunk", content="no branch", turn_index=2, branch_id=None),
+            _evt(
+                10,
+                "assistant_message",
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[[1, 1]],
+                round_start_event_id=6,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {6: (6, 7, 8, 10)}
+
+    def test_display_piece_with_conflicting_ancestry_is_not_round_owned(self):
+        """Same turn/branch but a contradicting known parent coordinate is foreign."""
+        events = [
+            _evt(
+                6,
+                "assistant_round_start",
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[[1, 1]],
+            ),
+            _evt(7, "text_chunk", content="other", turn_index=2, branch_id=1),
+            _evt(
+                8,
+                "text_chunk",
+                content="sibling",
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[[1, 2]],
+            ),
+            _evt(
+                10,
+                "assistant_message",
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[[1, 1]],
+                round_start_event_id=6,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {6: (6, 7, 10)}
+
+    def test_display_piece_with_conflicting_deep_ancestry_is_not_round_owned(self):
+        """A contradicting coordinate below the shared prefix is still conflict."""
+        path = [[1, 1], [2, 1]]
+        events = [
+            _evt(
+                6,
+                "assistant_round_start",
+                turn_index=3,
+                branch_id=1,
+                parent_branch_path=path,
+            ),
+            _evt(
+                7,
+                "text_chunk",
+                content="other",
+                turn_index=3,
+                branch_id=1,
+                parent_branch_path=[[1, 1], [2, 2]],
+            ),
+            _evt(
+                10,
+                "assistant_message",
+                turn_index=3,
+                branch_id=1,
+                parent_branch_path=path,
+                round_start_event_id=6,
+                message=_message(content="full"),
+            ),
+        ]
+
+        assert assistant_round_identities(events) == {6: (6, 10)}
+
+    def test_sparse_ancestry_coordinates_are_not_positional_conflicts(self):
+        path = [[1, 1], [2, 1]]
+        events = [
+            _evt(6, "assistant_round_start", turn_index=3, parent_branch_path=path),
+            _evt(7, "text_chunk", turn_index=3, parent_branch_path=[[2, 1]]),
+            _evt(8, "text_chunk", turn_index=3, parent_branch_path=[[2, 2]]),
+            _evt(
+                10,
+                "assistant_message",
+                turn_index=3,
+                parent_branch_path=path,
+                round_start_event_id=6,
+                message=_message(),
+            ),
+        ]
+        assert assistant_round_identities(events) == {6: (6, 7, 10)}
+
+    def test_projected_round_owns_only_itself(self):
+        events = [
+            _evt(4, "assistant_message", round_start_event_id=9, message=_message()),
+        ]
+        events[0]["_assistant_projected"] = True
+
+        assert assistant_round_identities(events) == {4: (4,)}

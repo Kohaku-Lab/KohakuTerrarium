@@ -47,6 +47,36 @@ def _lineage(event: dict[str, Any]) -> tuple[Any, Any, tuple[tuple[int, int], ..
     return (event.get("turn_index"), event.get("branch_id"), tuple(path))
 
 
+def _conflicting_lineage(
+    left: tuple[Any, Any, tuple[tuple[int, int], ...]],
+    right: tuple[Any, Any, tuple[tuple[int, int], ...]],
+) -> bool:
+    """Compare shared, known turn/branch coordinates for lineage conflicts."""
+    left_turn, left_branch, left_path = left
+    right_turn, right_branch, right_path = right
+    if left_turn is not None and right_turn is not None and left_turn != right_turn:
+        return True
+    if (
+        left_branch is not None
+        and right_branch is not None
+        and left_branch != right_branch
+    ):
+        return True
+    right_ancestors = dict(right_path)
+    return any(
+        turn in right_ancestors and right_ancestors[turn] != branch
+        for turn, branch in left_path
+    )
+
+
+def _foreign_display(
+    event: dict[str, Any],
+    round_lineage: tuple[Any, Any, tuple[tuple[int, int], ...]],
+) -> bool:
+    """Return whether a display record contradicts the round's known lineage."""
+    return _conflicting_lineage(_lineage(event), round_lineage)
+
+
 def _eligible(event_id: int, eligible_ids: set[int] | None) -> bool:
     return eligible_ids is None or event_id in eligible_ids
 
@@ -169,6 +199,55 @@ def assistant_round_messages(
         }
     )
     return messages
+
+
+def assistant_round_identities(
+    events: list[dict], eligible_ids: set[int] | None = None
+) -> dict[int, tuple[int, ...]]:
+    """Map each round start to the event ids that carry that round.
+
+    A valid start/end pair owns its start, the eligible streamed display pieces
+    between them whose known coordinates do not contradict the round's, and the
+    canonical end. A round already projected into a single event owns only
+    itself.
+    """
+    pairs = _find_pairs(events, eligible_ids)
+    anchors: dict[int, int] = {}
+    ends: dict[int, int] = {}
+    for index, event in enumerate(events):
+        event_id = _positive_id(event.get("event_id"))
+        if event_id is None:
+            continue
+        if event.get("type") == "assistant_round_start":
+            anchors.setdefault(event_id, index)
+        elif event.get("type") == "assistant_message" and not event.get(
+            "_assistant_projected"
+        ):
+            ends.setdefault(event_id, index)
+    identities: dict[int, tuple[int, ...]] = {}
+    for start_id, end in pairs.items():
+        # ``_find_pairs`` only pairs positive-id starts with positive-id,
+        # non-projected ends, so both positions were recorded above.
+        end_id = _positive_id(end.get("event_id"))
+        round_lineage = _lineage(events[anchors[start_id]])
+        members = [start_id]
+        for event in events[anchors[start_id] + 1 : ends[end_id]]:
+            if event.get("type") not in _DISPLAY_TYPES:
+                continue
+            if _foreign_display(event, round_lineage):
+                continue
+            display_id = _positive_id(event.get("event_id"))
+            if display_id is not None and _eligible(display_id, eligible_ids):
+                members.append(display_id)
+        members.append(end_id)
+        identities[start_id] = tuple(members)
+    for event in events:
+        if not event.get("_assistant_projected"):
+            continue
+        event_id = _positive_id(event.get("event_id"))
+        if event_id is not None and _eligible(event_id, eligible_ids):
+            identities.setdefault(event_id, (event_id,))
+    return identities
 
 
 def project_assistant_rounds(

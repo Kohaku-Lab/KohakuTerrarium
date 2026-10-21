@@ -345,24 +345,6 @@ class TestResolveEditMessageIndex:
         assert msgs[idx].content == "u2"
 
 
-# ── _previous_branch_user_content ────────────────────────────────
-
-
-class TestPreviousBranchUserContent:
-    def test_no_store_returns_none(self, agent):
-        agent.session_store = None
-        assert agent._previous_branch_user_content() is None
-
-    def test_returns_latest_user_text(self, agent):
-        agent._apply_user_input("u1")
-        agent._emit_assistant("a1")
-        # Simulate a sibling branch about to be created: bump branch_id
-        # so the helper looks for branches BELOW it.
-        agent._branch_id = 2
-        out = agent._previous_branch_user_content()
-        assert out == "u1"
-
-
 # ── regenerate_last_response (tail path) ─────────────────────────
 
 
@@ -1154,13 +1136,6 @@ class TestEdgeBranches:
         monkeypatch.setattr(agent.session_store, "get_events", boom)
         assert agent._user_message_content_for_turn(1) is None
 
-    async def test_previous_branch_user_content_read_failure(self, agent, monkeypatch):
-        def boom(name):
-            raise RuntimeError("read")
-
-        monkeypatch.setattr(agent.session_store, "get_events", boom)
-        assert agent._previous_branch_user_content() is None
-
 
 class TestEditWithBranchView:
     async def test_edit_under_branch_view(self, agent):
@@ -1568,56 +1543,6 @@ class TestReloadConvBranchViewExtraMetadata:
         )
 
 
-class TestPreviousBranchSkips:
-    def test_other_turn_event_skipped(self, agent, monkeypatch):
-        """A user_message event with different turn_index hits line 562."""
-        events = [
-            {
-                "type": "user_message",
-                "event_id": 1,
-                "turn_index": 1,
-                "branch_id": 1,
-                "content": "u1",
-            },
-            {
-                "type": "user_message",
-                "event_id": 2,
-                "turn_index": 2,
-                "branch_id": 1,
-                "content": "u2",
-            },
-        ]
-        monkeypatch.setattr(agent.session_store, "get_events", lambda name: events)
-        agent._turn_index = 1
-        agent._branch_id = 2  # looking for branches BELOW 2 at turn 1.
-        out = agent._previous_branch_user_content()
-        assert out == "u1"
-
-    def test_non_int_branch_id_skipped(self, agent, monkeypatch):
-        """user_message with non-int branch_id hits line 565."""
-        events = [
-            {
-                "type": "user_message",
-                "event_id": 1,
-                "turn_index": 1,
-                "branch_id": "not_int",
-                "content": "u1",
-            },
-            {
-                "type": "user_message",
-                "event_id": 2,
-                "turn_index": 1,
-                "branch_id": 1,
-                "content": "u1-valid",
-            },
-        ]
-        monkeypatch.setattr(agent.session_store, "get_events", lambda name: events)
-        agent._turn_index = 1
-        agent._branch_id = 2
-        out = agent._previous_branch_user_content()
-        assert out == "u1-valid"
-
-
 def types_simplenamespace_user():
     import types as _types
 
@@ -1702,26 +1627,211 @@ class TestReloadConversationToolMessages:
         assert any(m.role == "user" for m in msgs)
 
 
-# ── _previous_branch_user_content unmatched conditions (562/565/573) ──
+# -- mutation admission: rejected rebuilds install nothing ----------
 
 
-class TestPreviousBranchUnmatched:
-    def test_no_user_message_for_turn_returns_none(self, agent):
-        # Set turn_index and branch_id to a value with no matching event.
-        agent._turn_index = 99
-        agent._branch_id = 2
-        out = agent._previous_branch_user_content()
-        assert out is None
+def _mutation_state(agent):
+    """Conversation, branch and persisted state a rejection must leave alone."""
+    return (
+        agent.controller.conversation,
+        agent.controller.conversation.snapshot_messages(),
+        agent._turn_index,
+        agent._branch_id,
+        list(agent._parent_branch_path),
+        (
+            deepcopy(agent.session_store.get_events("alice"))
+            if agent.session_store is not None
+            else None
+        ),
+    )
 
-    def test_non_int_branch_id_skipped(self, agent):
-        # Append a user_message event with branch_id=None to test the
-        # ``not isinstance(bi, int)`` branch (line 565).
-        agent.session_store.append_event(
-            "alice", "user_message", {"content": "valid"}, turn_index=5, branch_id=1
+
+def _small_budget(agent, *, max_tokens=10):
+    agent.compact_manager = SimpleNamespace(
+        config=SimpleNamespace(max_tokens=max_tokens, threshold=1.0),
+        _compact_count=4,
+        _last_compact_time=9.0,
+    )
+
+
+class TestEditAdmissionWithoutStore:
+    async def test_plain_in_memory_edit_is_not_budget_gated(self, agent):
+        agent.controller.conversation.append("system", "sys")
+        agent._apply_user_input("FIRST" * 200)
+        agent._emit_assistant("a1")
+        agent._apply_user_input("second")
+        # Drop the store only after the conversation and events exist.
+        agent.session_store = None
+        _small_budget(agent)
+        assert await agent.edit_and_rerun(3, "small edit") is True
+        assert agent._rerun_calls
+
+    async def test_plain_in_memory_edit_ignores_retention_limit(self, agent):
+        agent.controller.conversation.append("system", "sys")
+        agent._apply_user_input("u1")
+        agent._emit_assistant("a1")
+        agent._apply_user_input("u2")
+        agent.session_store = None
+        agent.controller.conversation.config.max_messages = 2
+        assert await agent.edit_and_rerun(3, "small edit") is True
+        assert agent._rerun_calls
+
+
+class TestRegenerateAdmission:
+    async def test_plain_regeneration_is_allowed_below_the_context_budget(self, agent):
+        agent.controller.conversation.append("system", "sys")
+        agent._apply_user_input("STEP" * 8_000)
+        agent._emit_assistant("a1")
+        agent.compact_manager = SimpleNamespace(
+            config=SimpleNamespace(max_tokens=10_000, threshold=0.8),
+            _compact_count=0,
+            _last_compact_time=0.0,
         )
-        # Force agent state to look at turn 5 with branch_id 5.
-        agent._turn_index = 5
-        agent._branch_id = 5
-        out = agent._previous_branch_user_content()
-        # Valid prior branch returned.
-        assert out == "valid"
+        assert await agent.regenerate_last_response() is None
+        assert agent._rerun_calls
+
+    async def test_plain_regeneration_keeps_the_live_branch_wording(self, agent):
+        large = "LIVE" * 900
+        agent._apply_user_input(large)
+        conv = agent.controller.conversation
+        conv.get_messages()[0].metadata.update(turn_index=1, branch_id=1)
+        conv.append("assistant", "reply")
+        agent._turn_index = 1
+        agent._branch_id = 1
+        agent.session_store.append_event(
+            "alice", "user_message", {"content": large}, turn_index=1, branch_id=1
+        )
+        agent.session_store.append_event(
+            "alice",
+            "user_message",
+            {"content": "sibling"},
+            turn_index=1,
+            branch_id=2,
+            parent_branch_path=[],
+        )
+        await agent.regenerate_last_response()
+        opened = [
+            event["content"]
+            for event in agent.session_store.get_events("alice")
+            if event["type"] == "user_message" and event["branch_id"] == 3
+        ]
+        assert opened == [large]
+
+    async def test_default_regeneration_targets_the_turn_root(self, agent):
+        agent._apply_user_input("root question")
+        conv = agent.controller.conversation
+        conv.get_messages()[0].metadata.update(turn_index=1, branch_id=1)
+        conv.append("assistant", "part one")
+        conv.append(
+            "user",
+            "folded feedback",
+            metadata={
+                "turn_index": 1,
+                "branch_id": 1,
+                "kind": "injected",
+                "origin_known": True,
+                "job_ids": ["job-1"],
+            },
+        )
+        conv.append("assistant", "part two")
+        agent._turn_index = 1
+        agent._branch_id = 1
+        await agent.regenerate_last_response()
+        users = [m for m in conv.get_messages() if m.role == "user"]
+        assert [m.get_text_content() for m in users] == ["root question"]
+        assert users[0].metadata["branch_id"] == 2
+
+    async def test_pending_result_refresh_rejection_does_not_install(self, agent):
+        agent._apply_user_input("first")
+        conv = agent.controller.conversation
+        conv.get_messages()[0].metadata.update(turn_index=1, branch_id=1)
+        conv.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "pending-call",
+                    "type": "function",
+                    "function": {"name": "echo", "arguments": "{}"},
+                }
+            ],
+        )
+        conv.append(
+            "tool",
+            "pending",
+            tool_call_id="pending-call",
+            metadata={"job_id": "pending-call", "tool_result_phase": "pending"},
+        )
+        agent.session_store.append_event(
+            "alice",
+            "tool_call",
+            {
+                "call_id": "pending-call",
+                "name": "echo",
+                "args": {},
+            },
+            turn_index=1,
+            branch_id=1,
+        )
+        agent._apply_user_input("second")
+        conv.get_messages()[-1].metadata.update(turn_index=2, branch_id=1)
+        agent.session_store.append_event(
+            "alice",
+            "tool_result",
+            {
+                "call_id": "pending-call",
+                "name": "echo",
+                "output": "LARGE_RESULT" * 200,
+            },
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[(1, 1)],
+        )
+        _small_budget(agent, max_tokens=100)
+        before = _mutation_state(agent)
+        with pytest.raises(ConflictError, match="context budget"):
+            await agent.regenerate_last_response()
+        assert _mutation_state(agent) == before
+        assert agent.compact_manager._compact_count == 4
+        assert agent._rerun_calls == []
+
+    async def test_plain_tail_regeneration_ignores_the_budget_rails(self, agent):
+        agent.controller.conversation.append("system", "sys")
+        agent._apply_user_input("LONG" * 200)
+        agent._emit_assistant("a1")
+        _small_budget(agent)
+        agent.controller.conversation.config.max_messages = 1
+        assert await agent.regenerate_last_response() is None
+        assert agent._rerun_calls
+        assert any(
+            event["type"] == "user_message" and event["branch_id"] == 2
+            for event in agent.session_store.get_events("alice")
+        )
+
+
+class TestBranchViewAdmission:
+    @pytest.mark.parametrize("limited_by", ["tokens", "retention"])
+    async def test_rejected_branch_view_edit_keeps_original_state(
+        self, agent, limited_by
+    ):
+        agent._apply_user_input("ANCESTOR" * 100)
+        agent._emit_assistant("a1")
+        agent._apply_user_input("TARGET" * 100)
+        agent._emit_assistant("a2")
+        view = {1: 1, 2: 1}
+        if limited_by == "tokens":
+            _small_budget(agent)
+        else:
+            agent.controller.conversation.config.max_messages = 2
+        persisted_before = deepcopy(agent.session_store.get_events("alice"))
+        before = _mutation_state(agent)
+        with pytest.raises(ConflictError, match="History reconstruction"):
+            await agent.edit_and_rerun(-1, "EDITED", turn_index=2, branch_view=view)
+        assert _mutation_state(agent) == before
+        assert agent._rerun_calls == []
+        events = agent.session_store.get_events("alice")
+        assert events == persisted_before
+        assert not any(
+            event["type"] in ("compact_complete", "compact_replace", "context_cleared")
+            for event in events
+        )

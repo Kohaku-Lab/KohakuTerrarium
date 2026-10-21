@@ -1,12 +1,15 @@
 """Regression tests for stable mutation prefixes containing completed background calls."""
 
 from contextlib import closing
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium.core.agent_message_history import apply_prepared_branch_view
+from kohakuterrarium.core.agent_raw_history import prepare_persisted_edit
 from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.core.settled_refresh import refresh_mutation_prefix
+from kohakuterrarium.core.settled_refresh import prepare_mutation_prefix
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.session.store import SessionStore
 
@@ -22,6 +25,7 @@ from kohakuterrarium.session.store import SessionStore
         (True, False, "untagged"),
         (True, False, "missing"),
         (True, False, "retention-drop"),
+        (True, True, "retention-trim"),
     ],
 )
 def test_refresh_pending_prefix_from_saved_structured_result(
@@ -137,16 +141,54 @@ def test_refresh_pending_prefix_from_saved_structured_result(
         if scenario == "retention-drop":
             conv.append("system", "second system")
             conv.config.max_messages = 1
+        elif scenario == "retention-trim":
+            conv.config.max_messages = 4
         original = conv.to_messages(include_metadata=True)
         if scenario == "bounded":
             agent._turn_index = 11
             agent._parent_branch_path = [(turn, 1) for turn in range(1, 11)]
-        if settled and scenario in {"untagged", "missing", "retention-drop"}:
+        if settled and scenario in {
+            "untagged",
+            "missing",
+            "retention-drop",
+            "retention-trim",
+        }:
             with pytest.raises(ConflictError):
-                refresh_mutation_prefix(agent, target_index)
+                prepare_mutation_prefix(agent, target_index)
             assert conv.to_messages(include_metadata=True) == original
             return
-        index = refresh_mutation_prefix(agent, target_index)
+        before = deepcopy(conv.snapshot_messages())
+        before_state = (
+            agent._turn_index,
+            agent._branch_id,
+            agent._parent_branch_path[:],
+        )
+        refreshed = prepare_mutation_prefix(agent, target_index)
+        assert conv.snapshot_messages() == before
+        assert (
+            agent._turn_index,
+            agent._branch_id,
+            agent._parent_branch_path,
+        ) == before_state
+        if settled and scenario is None:
+            prepared = prepare_persisted_edit(
+                agent, message_idx=target_index, replacement_content="edited"
+            )
+            assert conv.snapshot_messages() == before
+            assert (
+                agent._turn_index,
+                agent._branch_id,
+                agent._parent_branch_path,
+            ) == before_state
+            prepared.install(agent)
+            index = prepared.index
+        elif refreshed is not None:
+            index = refreshed["target_index"]
+            apply_prepared_branch_view(
+                agent, refreshed["prepared"], candidate=refreshed["conversation"]
+            )
+        else:
+            index = target_index
         assert conv.get_messages()[index].get_text_content() == "later"
         tool = next(
             message for message in conv.get_messages() if message.role == "tool"
@@ -166,8 +208,8 @@ def test_plain_prefix_and_unpersisted_history_need_no_store_read():
     agent = SimpleNamespace(
         controller=SimpleNamespace(conversation=conv), session_store=None
     )
-    assert refresh_mutation_prefix(agent, 0) == 0
+    assert prepare_mutation_prefix(agent, 0) is None
     conv.append("assistant", "answer")
-    assert refresh_mutation_prefix(agent, 1) == 1
+    assert prepare_mutation_prefix(agent, 1) is None
     agent.session_store = object()
-    assert refresh_mutation_prefix(agent, 0) == 0
+    assert prepare_mutation_prefix(agent, 0) is None

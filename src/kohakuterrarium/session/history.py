@@ -4,10 +4,8 @@ import json
 from collections.abc import Hashable
 from typing import Any, Iterable
 
-from kohakuterrarium.core.compact_branch import (
-    CompactRule,
-    compact_rule_from_event,
-)
+from kohakuterrarium.core.compact_branch import CompactRule
+from kohakuterrarium.session.compact_selection import select_compact_rules
 from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
 from kohakuterrarium.session.assistant_history import (
     _coerce_tool_args_to_json,
@@ -478,39 +476,17 @@ def _covered_by_replace(
     return any(rule.covers(eid, turn_index, branch_id) for rule in rules)
 
 
-def _rule_priority(
-    rule: CompactRule,
-    selected_pairs: set[tuple[int, int]],
-) -> tuple[int, int]:
-    """Rank current-lineage summaries above legacy and incompatible summaries."""
-    return rule.priority(selected_pairs)
-
-
 def compact_replacement_rules(
     events: list[dict[str, Any]],
     branch_view: dict[int, int] | None = None,
     *,
     parent_paths: dict[int, tuple[tuple[int, int], ...]] | None = None,
 ) -> list[CompactRule]:
-    """Select summary ranges; supplied paths must match unchanged events and order."""
+    """Select compatible non-dominated summary ranges on the requested lineage."""
     if parent_paths is None:
         parent_paths = index_parent_paths(events)
     selected = resolve_selected_branches(events, parent_paths, branch_view)
-    selected_pairs = set(selected.items())
-    rules = [
-        rule for evt in events if (rule := compact_rule_from_event(evt)) is not None
-    ]
-    eligible = [r for r in rules if _rule_priority(r, selected_pairs)[0] > 0]
-    return (
-        [
-            max(
-                enumerate(eligible),
-                key=lambda item: (*_rule_priority(item[1], selected_pairs), item[0]),
-            )[1]
-        ]
-        if eligible
-        else []
-    )
+    return select_compact_rules(events, selected)
 
 
 def compact_covered_event_ids(

@@ -12,6 +12,10 @@ from kohakuterrarium.core.conversation_elide import (
     elide_stale_tool_results,
     estimate_tokens,
 )
+from kohakuterrarium.core.history_candidate import (
+    HistoryCandidate,
+    install_candidate_state,
+)
 from kohakuterrarium.core.message_locator import (
     user_message_indices_for_content,
     user_message_indices_for_turn,
@@ -498,12 +502,21 @@ def apply_prepared_branch_view(
     conversation = agent.controller.conversation
     if candidate is None:
         candidate = build_branch_conversation(conversation, messages)
-    agent._context_cutoff_event_id = prepared.get("context_cutoff_event_id", 0)
-    manager = getattr(agent, "compact_manager", None)
-    if manager is not None:
-        state = prepared.get("compact_state") or replayed_compact_state(messages)
-        manager._compact_count = state["compact_count"]
-        manager._last_compact_time = state["last_compact_time"]
+    turn = max(selected, default=0)
+    install_candidate_state(
+        agent,
+        HistoryCandidate(
+            messages=candidate.get_messages(),
+            turn_index=turn,
+            branch_id=selected.get(turn, 0),
+            parent_branch_path=[
+                (t, b) for t, b in sorted(selected.items()) if 0 < t < turn and b > 0
+            ],
+            compact_state=prepared.get("compact_state")
+            or replayed_compact_state(messages),
+            context_cutoff_event_id=prepared.get("context_cutoff_event_id", 0),
+        ),
+    )
     conversation.adopt_contents(candidate)
 
     controller = agent.controller
@@ -521,47 +534,3 @@ def apply_prepared_branch_view(
             compact_max * compact.config.threshold
         ):
             elide_stale_tool_results(conversation)
-
-    if selected:
-        max_turn = max(selected)
-        agent._turn_index = max_turn
-        agent._branch_id = selected[max_turn]
-        agent._parent_branch_path = [
-            (turn, branch)
-            for turn, branch in sorted(selected.items())
-            if 0 < turn < max_turn and branch > 0
-        ]
-    else:
-        agent._turn_index = 0
-        agent._branch_id = 0
-        agent._parent_branch_path = []
-
-
-def previous_branch_user_content(agent: Any):
-    """Return user content from the nearest lower branch of the current turn."""
-    if agent.session_store is None:
-        return None
-    try:
-        events = agent.session_store.get_events(agent.config.name)
-    except Exception as exc:
-        logger.warning(
-            "Failed to read events for prev-branch user",
-            error=str(exc),
-            exc_info=True,
-        )
-        return None
-    latest_for_turn: dict | None = None
-    latest_branch = -1
-    for event in events:
-        if (
-            event.get("type") != "user_message"
-            or event.get("turn_index") != agent._turn_index
-        ):
-            continue
-        branch_id = event.get("branch_id")
-        if not isinstance(branch_id, int):
-            continue
-        if branch_id < agent._branch_id and branch_id > latest_branch:
-            latest_branch = branch_id
-            latest_for_turn = event
-    return latest_for_turn.get("content") if latest_for_turn is not None else None

@@ -37,6 +37,21 @@ The format is append-only for event data and versioned through KohakuVault's aut
 
 Compaction changes the live prompt and writes a fast-resume snapshot, but it does not erase the append-only event log. Studio identifies editable user messages with the persisted `event_id`, `turn_index`, and `branch_id`. Save & Rerun and Regenerate build a new branch from the target history, reusing only summaries and snapshots whose source history remains compatible. Representations that depend on modified content are not reused. The previous branch and every later event remain available for branch navigation and resume. If the locator is missing, ambiguous, points to injected mid-turn input, or conflicts with the selected branch, the operation fails without changing history.
 
+`/branch <turn_index> <branch_id>` selects a coherent recorded branch without generating a new turn. It reuses compatible checkpoints and summaries, restores branch coordinates and compaction state, and saves the selection for resume. `/branch latest` selects the latest **compatible** branches along one lineage, not independent maxima for every turn. Both use the existing reconstruction budget and retention checks, and refuse switching while a turn, compaction, or background job is active. `/branch` without arguments lists alternatives and the current selection.
+
+#### Local completion of older checkpoints
+
+A compatible checkpoint can lack some tool-call relationships without requiring the entire history to be expanded. When the selected prefix and summary are provably reusable, reconstruction can preserve them and append only missing complete canonical assistant rounds with their uniquely owned, settled results. It does not rerun those tools or claim that the summary consumed the restored records. Incomplete old consumption records may leave some factual overlap between the summary and these traceable additions; zero additional messages is not guaranteed.
+
+Local completion rejects a candidate when:
+
+- its source lineage conflicts with the selected branch or the target boundary;
+- a round owner, call/job identity, or settled result is ambiguous;
+- the original canonical round or its required result is missing;
+- a whole round cannot be restored without duplicating a present call, reviving explicitly covered or cleared content, or violating the target/order boundary.
+
+Other proven checkpoints may be tried before raw reconstruction. Once a rejected candidate carries a clear cutoff, an alternative must preserve that cutoff; a raw fallback cannot revive the cleared prefix. Reconstructed prompts are checked before installation against the existing retention limit and configured context budget (`compact.max_tokens`, not the auto-compaction threshold). Admission failure raises `ConflictError` without installing that candidate or opening its edit branch. The token check is a message-text estimate, not a provider-exact count. This is not an extra gate for ordinary turns or unexpanded reruns, nor a guarantee that a later provider call will succeed.
+
 ### Multimodal edit, regenerate, and branch
 
 When history is stable, editing and regenerating a user turn rebuild its original text, image, and file parts from the event log. Regenerating reuses those parts; an edit supplies the new part list and opens a sibling branch. Continuing an older branch uses that branch's history and compatible snapshots, including after resume. In Studio, editing only the text retains attachments; deleting or replacing one affects only the new branch.
