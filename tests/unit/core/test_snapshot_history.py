@@ -2543,6 +2543,24 @@ def test_prepare_snapshot_preserves_a_proven_reduced_round(
         )
         is None
     )
+    # Persist the accepted prefix and reload the same lineage.
+    store.save_branch_snapshot(
+        "alice",
+        copy.deepcopy(restored),
+        branch={
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+        watermark=max(event["event_id"] for event in events),
+        compact_state=outcome["compact_state"],
+    )
+    reloaded = _prepare(store, events, {1: 1, 2: 1, 3: 1})
+    assert reloaded is not None
+    assert reloaded["messages"] == restored
+    edited = _prepare(store, events, {1: 1, 2: 1, 3: 2}, before_turn=3)
+    assert edited is not None
+    assert edited["messages"] == restored
 
 
 @pytest.mark.parametrize(
@@ -2563,19 +2581,36 @@ def test_prepare_snapshot_refuses_unproven_reduced_round(
 
 
 @pytest.mark.parametrize("known_source", [False, True])
-@pytest.mark.parametrize("case", ["wrong-source", "missing-proof"])
+@pytest.mark.parametrize("case", ["wrong-source", "missing-proof", "future-result"])
 def test_prepare_snapshot_refuses_reduced_round_without_valid_proof(
     store: SessionStore, case: str, known_source: bool
 ) -> None:
     """A reduced round may only borrow a completion's proven consumption."""
     events, messages = _reduced_summary_events(known_source=known_source)
+    _save_unknown_summary(store, 11, messages)
+    accepted = _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3)
+    assert accepted is not None
+    store.save_branch_snapshot(
+        "alice",
+        copy.deepcopy(accepted["messages"]),
+        branch={
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+        watermark=max(event["event_id"] for event in events),
+        compact_state=accepted["compact_state"],
+    )
     completion = next(event for event in events if event["type"] == "compact_complete")
     if case == "wrong-source":
         completion["compact_source_path"] = [[1, 2]]
+    elif case == "future-result":
+        completion["compact_result_event_ids"] = [6, 11]
     else:
         events.remove(completion)
-    _save_unknown_summary(store, 11, messages)
+    # Neither targeted nor exact restore can borrow invalid consumption.
     assert _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3) is None
+    assert _prepare(store, events, {1: 1, 2: 1, 3: 1}) is None
 
 
 @pytest.mark.parametrize("case", ["banner", "repeated-input"])

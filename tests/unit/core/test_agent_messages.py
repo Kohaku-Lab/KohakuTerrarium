@@ -16,6 +16,7 @@ from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.compact_splice import splice_conversation
 from kohakuterrarium.core.controller_context import (
     JOB_CONTEXT_METADATA_KEY,
+    prepend_job_context,
     recorded_content_matches,
 )
 from kohakuterrarium.core.conversation import Conversation
@@ -451,6 +452,16 @@ class TestRegenerateLastResponse:
             "content"
         ]
         recorded = self._user_message_events(agent)
+        message = agent.controller.conversation.get_messages()[0]
+        banner = "## Running Jobs\n\n- slowbg"
+        message.content = prepend_job_context(message.content, banner)
+        message.metadata.update(
+            turn_index=1,
+            branch_id=1,
+            event_id=recorded[-1]["event_id"],
+            **{JOB_CONTEXT_METADATA_KEY: banner},
+        )
+        expected_live = message.to_dict()["content"]
         for branch in (2, 3):
             await agent.regenerate_last_response()
             rerun = self._user_message_events(agent)[-1]
@@ -463,9 +474,24 @@ class TestRegenerateLastResponse:
             assert (rerun["turn_index"], rerun["branch_id"]) == (1, branch)
             assert rerun["event_id"] > recorded[-1]["event_id"]
             assert rerun["content"] == expected_wire
-            assert retained.to_dict()["content"] == expected_wire
+            assert retained.to_dict()["content"] == expected_live
+            assert recorded_content_matches(
+                retained.metadata, retained.to_dict()["content"], rerun["content"]
+            )
             assert retained.metadata["event_id"] == rerun["event_id"]
             recorded.append(rerun)
+        retained.metadata["event_id"] = recorded[0]["event_id"]
+        conv = agent.controller.conversation
+        before = conv.snapshot_messages(), agent.session_store.get_events("alice")
+        dispatched = len(agent._rerun_calls)
+        with pytest.raises(ConflictError):
+            await agent.regenerate_last_response()
+        assert (
+            conv.snapshot_messages(),
+            agent.session_store.get_events("alice"),
+        ) == before
+        assert (agent._turn_index, agent._branch_id) == (1, 3)
+        assert len(agent._rerun_calls) == dispatched
 
     async def test_unrecorded_banner_input_is_resent_once(self, agent):
         job = "## Running Jobs\n\n- slowbg"

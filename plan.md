@@ -3,9 +3,9 @@
 ## Scope
 
 - Worktree `.worktrees/stable-compact-prefix`, branch `fix/stable-compact-prefix`.
-- Base `2923507c`; committed slices `ca5cc3b9`, `564e36b7`, `abf295a3`.
-- Current uncommitted work addresses `REVIEW_abf295a3.md`: reduced checkpoint
-  placement, internal metadata preservation, and default rerun after settlement.
+- Base `2923507c`; committed slices `ca5cc3b9`, `564e36b7`, `abf295a3`, `5dbc76be`.
+- Current uncommitted work fixes self-audit findings after `5dbc76be`: exact reload
+  of reduced checkpoints and incomplete downstream regression coverage.
 - No push, dependency change, live-session operation or budget increase. The
   frozen incident evidence is read offline; no private content is copied into tests.
 
@@ -59,12 +59,12 @@ Existing snapshot fixtures now exercise:
 - job-context and repeated-input identities surviving internal conversion.
 
 The existing background-tool block in `test_history_ops` now covers both with and
-without default rerun after settlement, then compaction. Its cold continuation
-uses the recorded rerun ancestry. Unit tail-rerun tests cover text and multimodal
+without default rerun after settlement, then compaction. Both scenarios now execute
+cold continuation, editing, branch switching and another cold resume. Unit tail-rerun tests cover text and multimodal
 content, two successive retries, fresh event identity and single banner composition.
 The earlier S1/S2/S3, repair→compact→edit and branch/cold workflows remain intact.
 
-## Current evidence
+## Verification recorded for 5dbc76be
 
 - Red-first: review metadata probe failed both cases; reduced-round preparation
   and rerun tests failed before their fixes. Independent audit's duplicate-body
@@ -97,6 +97,61 @@ The earlier S1/S2/S3, repair→compact→edit and branch/cold workflows remain i
   component naming conflicts, mixed static/dynamic imports and large chunks.
 - Commit preflight repeated snapshot/agent-message units and the history integration
   workflow: **211 passed**.
+
+## Self-audit after 5dbc76be
+
+Confirmed findings and corrections:
+
+1. **Continuation regression:** targeted restoration accepted the reduced checkpoint,
+   but saving it and reloading the exact path provided no consumption proof. The
+   settled-result check rejected it and raw fallback revived consumed calls/results.
+   The relevant exact-reload gap predated the patch, but accepting this new
+   representation exposed it. The earlier repeated-prepare assertion did not test
+   this transition. The extended existing success case failed all four variants
+   before the correction.
+2. **Integration coverage regression:** the False/True loop ended before cold resume,
+   overwriting the first scenario's saved path. Moving the existing downstream block
+   into that loop restores both journeys without adding a new function or matrix.
+3. **Weak rerun fixture:** its first retry lacked production turn/branch metadata,
+   so it entered the unrecorded fallback. The same text/multimodal cases now carry
+   real recorded identity and job context, verify two new branches, and reject a
+   stale branch identity without changing messages, events or dispatch count.
+
+The production fix is limited to `snapshot_history.py`: exact-path proof uses the
+exclusive path-end boundary and a watermark-bounded completion. Only validated
+consumption exemptions transfer to exact reload; unknown-source coverage widening
+remains restricted to the pre-existing nonexact path. Missing or invalid proof
+cannot lend consumption. Legacy exact checkpoints do not acquire a new mandatory
+proof requirement. No capture checks, raw replay rules or budgets were relaxed.
+
+Test size is kept bounded: no new test functions, helpers or files in the tracked
+patch. Existing success cases add persistence → exact reload → sibling preparation
+with full-message equality; existing proof negatives add exact reload and one
+future-result case for each source variant. This adds **two collected unit cases**,
+not another broad matrix. The integration diff is primarily indentation. Assertions
+about metadata, nonmutation, canonical identity and strict-capture refusal remain
+because they protect different contracts.
+
+Verification on the final uncommitted code:
+- Full unit: **18,842 passed / 40 skipped**; integration: **179 passed**;
+  e2e: **84 passed**; Vitest: **277 files / 2,553 passed** (single worker).
+- Reports: `temp/stable-compact-takeover/selfaudit-{unit,integration,e2e}.xml`
+  and `selfaudit-vitest.json` in the main checkout; detailed logs alongside.
+- Black, Ruff, file-size guard and diff whitespace checks passed. Black's existing
+  Python 3.14/3.15-target warning remains; no safety bypass.
+- Unmodified external review probes: **8 passed**.
+- Frozen incident remains **239 → 280**, **80,523 text tokens / 256,000 budget**,
+  round 11 retained, preparation nonmutating, installation identity-preserving and
+  repeated preparation idempotent. Output:
+  `%TEMP%/kt-selfaudit-incident-f_5pf4u0/incident-current.json`.
+- Final independent static review found no further confirmed defect; it did not
+  itself execute tests. Its two noted negative-test gaps (invalid consumed identity
+  and stale retry identity) were subsequently covered without changing production.
+
+The methodological correction is to test a newly accepted representation through
+its next consumer, not merely to repeat the same preparation or cite full-suite
+pass counts. Next review should continue to check prepare → persist → reload →
+mutation transitions, with unknown provenance left unknown.
 
 ## Evidence limits
 

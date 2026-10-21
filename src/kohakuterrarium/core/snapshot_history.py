@@ -92,13 +92,20 @@ def _proof_inputs(
         last = max(turn for turn, _ in record_pairs)
         if record_pairs != {pair for pair in canonical if pair[0] <= last}:
             return _INVALID_PROOF
+    target = selected_target_event_id(
+        events, selected, live_ids, before_turn, canonical
+    )
+    if (
+        target is None
+        and dict(record["path"]) == selected
+        and before_turn == max(selected, default=0) + 1
+    ):
+        target = record["watermark"] + 1
     return {
         "events": events,
         "path": record_pairs,
         "watermark": record["watermark"],
-        "target": selected_target_event_id(
-            events, selected, live_ids, before_turn, canonical
-        ),
+        "target": target,
         "selected": selected,
     }
 
@@ -106,16 +113,13 @@ def _proof_inputs(
 def _proof_boundary(
     record: dict, selected: dict[int, int], before_turn: int | None
 ) -> int | None:
-    """Turn an unknown-source proof must stop before.
-
-    A targeted restore answers this directly. An ordinary reload has no target:
-    the record simply covers the selected turns up to the last one it captured,
-    so the first turn it does not cover is the boundary its summaries must
-    precede.
-    """
+    """Exclusive turn bound: edit target, first uncovered turn, or exact-path end."""
     if before_turn is not None:
         return before_turn
-    covered = {turn for turn, _ in record["path"]}
+    path = dict(record["path"])
+    if path == selected:
+        return max(selected, default=0) + 1
+    covered = set(path)
     later = [turn for turn in selected if turn not in covered]
     return min(later) if later else None
 
@@ -224,31 +228,21 @@ def _prefix(
             )
         ):
             inputs = compact_source_path_from_event(metadata)
+            summary_proof = prove_unknown_summary(message, **proof) if proof else None
             if inputs is None and not exact:
-                summary_proof = (
-                    prove_unknown_summary(message, **proof) if proof else None
-                )
                 if summary_proof is INVALID_PROOF:
                     return _INVALID_PREFIX
                 if summary_proof is None:
                     return None
-                proven |= summary_proof.covered_event_ids
+            elif inputs is not None and not inputs.issubset(pairs):
+                return None
+            if isinstance(summary_proof, SummaryProof):
                 exemptions["result_ids"] |= summary_proof.consumed_result_ids
                 exemptions["call_ids"] |= summary_proof.consumed_call_ids
                 exemptions["call_event_ids"] |= summary_proof.consumed_call_event_ids
-                last_turn = max(last_turn, summary_proof.last_turn)
-            elif inputs is not None:
-                if not inputs.issubset(pairs):
-                    return None
-                # A known-source summary may still prove which dispatches it
-                # consumed, so a reduced round can borrow that identity. A
-                # missing or foreign proof does not invalidate the summary on
-                # its own; it only refuses if placement later needs reduction.
-                consumed = prove_unknown_summary(message, **proof) if proof else None
-                if isinstance(consumed, SummaryProof):
-                    exemptions["result_ids"] |= consumed.consumed_result_ids
-                    exemptions["call_ids"] |= consumed.consumed_call_ids
-                    exemptions["call_event_ids"] |= consumed.consumed_call_event_ids
+                if inputs is None and not exact:
+                    proven |= summary_proof.covered_event_ids
+                    last_turn = max(last_turn, summary_proof.last_turn)
             if inputs:
                 last_turn = max(last_turn, max(turn for turn, _ in inputs))
             kept.append(message)
