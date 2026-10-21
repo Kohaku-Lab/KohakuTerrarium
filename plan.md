@@ -1,187 +1,117 @@
-# Stable compact history: current status and convergence plan
+# Stable compact history: current contract and verification
 
-## Scope and baseline
+## Scope
 
-- Original implementation base: `11f0244d`; rebuilt base: `2923507c` (updated
-  `origin/main`). Worktree: `.worktrees/stable-compact-prefix`.
-- User authorized rebuilding `fix/stable-compact-prefix` and consolidating its
-  twelve commits. No push, dependency change, or live-session operation is authorized.
-- Original tip `b0e39f31` is preserved by `backup/stable-compact-prefix-b0e39f31`.
-- Rebuilt history has two slices: checkpoint reconstruction/branch mutations
-  (including convergence), followed by exact compaction capture binding.
-- Replay had no textual conflicts. The combined `session/history.py` retains
-  main's call-local `SelectionCompatibility` and this branch's compact-rule selection.
-- First consolidated slice focused checks: **267 passed**. Black/Ruff and staged
-  diff checks pass. Rebuilt-tree full regression: **18,804 unit passed / 40 skipped**
-  (423.27s), **179 integration passed** (178.75s), **84 e2e passed** (240.45s).
-  Independent merge-semantics review found no conflict or integrity issue. Frontend
-  dependencies remain absent in this worktree; Vitest was not run.
-- Earlier chronological investigations remain available in `c4f27f41:plan.md`.
-  Their preliminary counts and completion claims are not current acceptance evidence.
+- Worktree: `.worktrees/stable-compact-prefix`; branch: `fix/stable-compact-prefix`.
+- Base: `2923507c`. Committed slices: `ca5cc3b9` (checkpoint reconstruction and
+  branch mutations), `564e36b7` (precise capture binding).
+- Current work addresses the review of `564e36b7`, without commits, pushes,
+  dependency changes or operations on private/live sessions.
+- Earlier investigation and acceptance counts are historical, not evidence for
+  the current changes. The old pre-rebuild tip remains in
+  `backup/stable-compact-prefix-b0e39f31`.
 
-## Invariants to preserve
+## Continuous-use contract
 
-- Reuse requires compatible ancestry and proven coverage; unknown provenance alone
-  proves nothing. Restore complete canonical rounds with uniquely owned results,
-  never a covered/cutoff-crossing round or a partial call group.
-- A rejected cutoff-bearing candidate cannot fall back past its cutoff.
-- Reconstructed prompts pass retention/context admission before installation;
-  ordinary continuation and unexpanded reruns do not acquire an extra admission gate.
-- Keep system prompts, structured messages, conversation identity, branch counters,
-  compact state and persisted selection coherent. Restoration does not execute tools.
-- Preparation must not install state. Installation is explicit and occurs under the
-  existing caller's history-mutation guard; branch-specific elision remains distinct.
+- Editing an uncompressed tail retains its compatible summary. Editing consumed
+  input excludes the dependent summary. No restoration executes old tools.
+- Unknown input provenance stays unknown. A summary can inherit structural
+  replacement coverage only from a proven compatible completion; unknown source
+  does not imply either zero coverage or invented known provenance.
+- Missing dependencies are restored as complete canonical rounds with uniquely
+  owned settled results. Restored identities and placement must also be usable by
+  the next compaction, not merely the next model request.
+- Retained/re-attached user input and unconsumed results remain outside replacement
+  coverage. Late settlement does not change the call's ordering identity.
+- Preparation remains detached; installation occurs under the existing mutation
+  guard. Refusals cannot cross a clear cutoff or mutate the rejected candidate's
+  conversation, snapshots or selected branch. Configured budgets are not raised.
 
-## Slice 2 plan and acceptance
+## Review fixes
 
-- [x] Reproduce through real producer messages: added the long-tool journey to the
-  existing `test_history_ops`. Red at summary missing from replay; no event-ID hacks.
-- [x] Bind captured user messages, complete canonical assistant rounds and tool
-  results to recorded identities. Freeze capture and retained tail at one boundary;
-  reject ambiguity instead of broadening spans heuristically.
-- [x] Preserve retained/re-attached user and live tool rounds; cover inheritance
-  through subsequent compaction and branch compatibility without changing cutoff proof.
-- [x] Add focused negative tests for conflicting/duplicate identities, missing
-  canonical boundaries, incomplete results and capture-time concurrent appends.
-- [x] Verify public edit request, actual branch switches, cold resume, no old tool
-  execution and intact provider call/output pairs in the existing history workflow.
-- [x] Complete frozen-source full tiers and final independent diff audit.
+1. **Repeated unknown summary:** capture now reuses the existing checkpoint
+   completion proof. It validates identity, lineage, ordering bounds and consumed
+   results, while preserving `compact_source_path=None`. Earlier completion
+   markers whose coverage is already wholly represented are accounted for too.
+   Canonical captures with no safe range skip before summarization regardless of
+   source certainty; malformed source declarations do not become unknown provenance.
+2. **Default job context:** producer records its exact job-status prefix in message
+   metadata. Producer and binder share the content composition function; binding
+   still compares the complete reconstructed input and checks branch/event identity.
+   It does not strip guessed prefixes, accept substrings or bypass content checks
+   for an explicit id. Captured and retained messages use the same relation.
+3. **Repair identity and placement:** projected repairs name the canonical end, as
+   normal replay does. Repair placement and capture share `resolve_message_bindings`
+   instead of maintaining separate payload matching rules. Groups go before their
+   later kept neighbours even when results settled late; repeated replies are
+   disambiguated by the same neighbouring input identities as capture.
+4. **Ambiguity scope:** only recovered providers need unique provider/job mappings;
+   their result jobs still require unique ownership across the whole event log.
+   Unrelated future sibling aliases do not reject a valid group. Off-path settled
+   results of a retained ancestor call are not discarded.
 
-Design constraint: reuse canonical round identities and existing compact coverage
-where possible. Do not add a generic provenance layer or bypass replay proof.
+`compact_lineage.py` only extracts existing path readers to remove the import
+cycle between capture and checkpoint proof. No general provenance framework,
+persisted event type, database migration or frontend behavior was added.
 
-Implementation and evidence:
-- `compact_binding.py` resolves message identities; `compact_capture.py` owns
-  inherited coverage and interval validation. This split keeps both below 600 lines;
-  no producer protocol, persisted schema, migration or replay-rule change was added.
-- Captured/retained messages are copied before the store read. Known-source canonical
-  captures without a safe range emit `capture_unproven`, without a summarizer call,
-  counter increment, splice or snapshot install. Legacy non-canonical compatibility
-  is retained; malformed canonical records never opt into that fallback.
-- Pending ACKs cover only their dispatch; folded results cover uniquely named jobs.
-  Settled results may originate on a now-unselected consuming branch, preserving
-  the existing dispatch-based restoration contract. Inherited late results do not
-  expand an interval across a retained tail.
-- Unknown-origin no-job injections add no event coverage and leave source unknown;
-  any unrepresented persisted event inside the span still blocks it. Checkpoint-only
-  unknown summaries continue through the first-slice proof, not a fabricated source.
-- Audit additions were red-first: malformed canonical fallback, duplicate IDs,
-  reordered rounds, missing summary inheritance, conflicting pending identifiers,
-  and trailing reasoning beyond the last captured canonical end. Exact restated
-  reasoning is consumed with its canonical message; arbitrary reasoning is not noise.
-- Formal long-tool workflow uses real producer records and MockTransport, not hand-
-  stamped IDs. Both half-cap and token-tightened boundaries consume calls0..2, keep
-  calls3..5 paired, and preserve a re-attached goal only for the tightened boundary.
-  Public edit makes one new request; switches/resume make none and tools stay at six.
-- Cold standalone resume has a different runtime-owned system prompt from the warm
-  engine. Assertions retain full dictionary/metadata equality for history and assert
-  the cold system prompt itself is unchanged by switching; they do not strip metadata.
-- Focused compact + history workflow + file-size checks: **2,368 passed**. Black,
-  Ruff and diff checks pass (existing Python/Black target warning remains).
-- First full run: unit **18,657 passed / 40 skipped**, integration **178 passed /
-  1 failed**, e2e **84 passed**. The integration failure was real: Antigravity's
-  cold compact crossed a `scratchpad_write`, a non-conversational record incorrectly
-  treated as unproven content. Six operational record types now follow replay's
-  explicit non-content handling; their new parameterized cases failed before fixing.
-  Focused capture + multimodal workflow: **73 passed**. No replay safeguards removed.
-- Independent final source audit found no confirmed P1/P2 blockers; the six-type
-  follow-up was also source-reviewed. The reviewer raised an unproven contradictory
-  retained-result/inherited-result case outside the primary interval; no reachable
-  production history established it, so it remains a documented uncertainty.
-- Final frozen-production full rerun: **unit 18,663 passed / 40 skipped** (370.69s),
-  **integration 179 passed** (161.61s), **e2e 84 passed** (244.86s), all exits zero.
-- Coverage closeout added eleven identity-rejection/compatibility cases without
-  production changes: capture + branch unit **96 passed**, integration history/compact
-  **2 passed**. Measured binding coverage **96%** (348 statements / 13 missed), capture
-  **95%** (238 / 11). Remaining defensive guards are documented, not excluded.
-- Final unit-tier recheck after those test-only additions: **18,674 passed /
-  40 skipped** (377.73s). Black initially flagged the new test formatting; formatted
-  that file, then full Black/Ruff/diff checks and the unit tier passed. Integration
-  and e2e production code was unchanged after their green runs. No commit or push.
+## Repository regression coverage
 
-## Convergence checklist
+The existing `test_history_ops` workflow now includes:
+- known S1 → unknown S2 → S3 → tail edit → branch round trips → cold resume;
+- default `include_job_status=True` while a background job runs, followed by job
+  settlement, compaction and existing replay/cold-history checks;
+- public checkpoint repair → repeat edit → branch switch → compact → tail edit,
+  with original tool execution count and provider pairing unchanged.
 
-- [x] Make the ambiguous-owner negative reach the production repair call. The old
-  fixture bypassed it; the corrected fixture reaches gap10/target12 and admits only
-  when its second conflicting owner is removed in an in-memory mutation probe.
-- [x] Deep-copy materialized event/state payloads in refusal snapshots, preserving
-  conversation identity separately; pin refusal categories instead of any error.
-- [x] Merge duplicate round/agent constructors, cutoff staging, threshold and
-  final-prompt cases; remove the repeated bare-display case and deepcopy tautology.
-- [x] Remove the unused previous-branch wording lookup and its seven helper tests.
-  Keep current regenerate wording, canonical-target and branch-isolation tests.
-- [x] Replace the production raw-reload compatibility wrapper with direct preparation
-  and installation in its test harness; no production callers remained.
-- [x] Make settled refresh return an admitted detached candidate or `None`. Remove
-  the shadow agent/controller/compact-manager copies and serialization comparisons.
-- [x] Make `prepare_persisted_edit` pure; `PreparedEdit.install` consumes its candidate
-  explicitly at the guarded caller. Raw and branch candidate representations retain
-  their distinct installation/elision policies, not a new generic framework.
-- [x] Share the summary-dependency predicate and non-message state installer.
-- [x] Use a real Conversation in mid-turn append tests; retain the event-origin tests.
-- [x] Finish focused/full-tier verification and independent diff audit.
-- [x] Confirm public history workflows preserve request content, branch/cold
-  restoration and no-tool-rerun behavior; archived-copy public-entry checks also pass.
+Existing unit fixtures cover canonical-end identity, unrelated alias versus
+shared relevant-job rejection, ordering with late results/repeated replies,
+text/multimodal prefix equality and tampering, retained-user exclusion, malformed
+source rejection and known/unknown unproven-capture terminal behavior.
 
-## Verification
+Observed red tests preceded the fixes. In particular the new repair→compact
+workflow exposed an additional order reversal after the end-id fix; two placement
+regressions then exposed settlement-based ordering and repeated-text ambiguity.
+Those failures drove reuse of the capture resolver rather than new exemptions.
 
-Current convergence run:
-- Red-first: target and branch edit preparation changed live state before explicit
-  installation (2 failures); four settled-result scenarios also exposed mutation.
-- Corrected fingerprint materializes the real store's payloads before deepcopy;
-  copying the table adapter itself initially failed and was corrected.
-- Focused production/test convergence check: 178 passed, including public history
-  integration. Independent source/diff audit found no blocker; no coverage/proof/
-  repair/capture algorithm changes. Black, Ruff and diff checks pass.
-- In-memory probes now detect both checkpoint-message and event-payload mutations
-  that the old shallow refusal fingerprint missed.
-- Current reduction excluding this plan: production -92 lines; tests -97 lines.
-  No modules added; candidate-specific elision behavior remains explicit.
-- Final sequential tiers: unit **18,611 passed / 40 skipped** (410.52s), integration
-  **179 passed** (179.61s), e2e **84 passed** (235.92s); all exit codes zero.
-  Unit cases decreased by eight: seven tests of the removed helper and three
-  redundant cases removed/merged, with two explicit preparation-purity cases added.
-- Post-refactor archived COPY verification: public edit emitted one mocked provider
-  request and completed the reply, no execution error, no tool executions, unchanged
-  256,000 budget. Actual branch commands and cold resume still match the pre-refactor
-  full dictionaries: original239/digest65909c8b7a97356d and edited261/6e48d8faaa52375e.
-  All 33 harness checks pass; source/archive hashes unchanged. Private verification
-  report: `convergence-report.json` beside the existing temporary harness, not tracked.
-- This closes the bounded convergence task only. Slice 2 remains open below;
-  no commit, push, or new dependency installation was performed.
+## Verification status
 
-Last committed baseline (`c4f27f41`):
-- Unit: 18,619 passed / 40 skipped; integration: 179 passed; e2e: 84 passed.
-- Black, Ruff and diff checks passed; Black warned about Python 3.14 versus its
-  3.15 target. Frontend dependencies were absent, so Vitest did not run. The three
-  sessions guides have pre-existing whole-file Prettier failures.
-- Earlier unit Windows PermissionError and multi-node timeout passed later checks.
-  Drive graph merge previously failed both a full e2e run and isolated recheck with
-  `UNIQUE constraint failed: drive_meta.key`; the final run passed without Drive
-  changes. This is non-recurrence, not a claimed Drive fix.
+- Focused capture/repair/history workflow: **179 passed** before the final
+  malformed-source cases. Their two new negative cases failed, then were fixed.
+- Focused run including file-size guards: **2,384 passed, 1 failed** because the
+  shared resolver file reached 610 lines. Its obsolete module rationale was reduced
+  to a responsibility description; it is now 600 lines, without an allowlist change.
+- First full run: **18,822 unit passed / 40 skipped**, **179 integration passed**,
+  **84 e2e passed**, **2,553 Vitest passed** (277 files).
+- Independent audit found an earlier-completion identity borrowing bug despite
+  that green run. A public-range regression failed first; the proof now returns
+  its selected completion id and capture checks the exact candidate id. Both
+  cases and the existing history/proof tests pass (**114 passed**). Bounded
+  independent re-audit found no unresolved blocker in this delta.
+- Final full backend run after the identity fix: **18,824 unit passed / 40 skipped**,
+  **179 integration passed**, **84 e2e passed**. Reports are in
+  `temp/stable-compact-takeover/review-final-{unit,integration,e2e}.xml` in the main
+  checkout. Frontend source is unchanged; **2,553 Vitest tests**,
+  `npm run format:check` and `npm run build` passed in this review-fix pass.
+- Black check over `src/ tests/`, Ruff and `git diff --check` passed. Black reports
+  its Python 3.14/3.15 target safety warning; no formatter safety bypass was used.
+  No file-size allowlist or test timeout was relaxed.
+- Reviewer evidence scripts `composition-probes.py` and `job-banner-probe.py`:
+  **4 passed** against the modified worktree. Initial launches failed on Windows
+  path conversion and then missing project asyncio configuration; explicit
+  Windows PYTHONPATH and `-c pyproject.toml` resolved test discovery/configuration,
+  without editing the evidence scripts or assertions.
+- Focused coverage run: **362 passed**, aggregate **95%**. Binding and repair are
+  **96%** each, controller context **100%**; capture **94%**, prefix proof **91%**,
+  extracted lineage readers **85%** in this selection. These are not full-suite
+  coverage figures and do not replace the continuous-use assertions.
 
-## Incident evidence and limits
+## Evidence limits
 
-- Isolated archived-copy public edit/rerun: one new mocked provider wire request,
-  completed reply, no execution error and no old tool execution. Original configured
-  context budget 256,000 was retained, not increased.
-- Actual `/branch 113 1` / `/branch 113 4`, repeated: 239 / 261 messages, respectively.
-  Both cold resumes matched complete dictionaries including metadata; source hashes
-  stayed unchanged. These were commands, not substituted private reload calls.
-- Edited provider request had 244 input items; that is not the same representation
-  as 261 conversation messages. Prior 260/279 candidate counts used different setups;
-  the old 263/239 harness did not prove a generated rerun and is not acceptance evidence.
-- Private DBs/pickles and request payloads are not committed. Anonymous public history
-  integration and local MockTransport fixtures are the reproducible repository proof.
-
-## Historical second-slice failure and separate work
-
-1. **Baseline failure, now covered by slice 2's formal regression:** on `c4f27f41`,
-   the anonymous live long-tool probe
-   still fails: capture7, result IDs10/15/20, replacement range absent; a fresh edit
-   loses the summary and restores consumed text, while old tool executions stay6.
-   Probe: main checkout `temp/stable-compact-takeover/test_takeover_probes.py`,
-   `test_live_long_tool_capture`. That old suite did not cover this contract;
-   `tests/helpers/compact_capture_history.py` now anchors it in `test_history_ops`.
-2. Investigate the Drive-store race separately if needed; no Drive changes here.
-3. Publication or further commits require explicit user authorization.
+- No private incident database or full conversation was used or modified in this
+  review-fix pass. Prior incident results remain historical evidence only.
+- Historical banner-prefixed snapshots lacking captured prefix metadata are not
+  guessed or migrated; ambiguous histories still refuse exact capture.
+- Unknown-source summaries remain checkpoint-based, not generally eligible raw
+  replay replacements. Structural inheritance does not establish their input source.
+- Provider transport in repository workflows is scripted/MockTransport; successful
+  framework admission does not guarantee an external provider accepts every prompt.

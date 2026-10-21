@@ -1140,9 +1140,16 @@ class TestCompactTerminalGuarantee:
         await mgr._run_compact()
         assert [k for k, _ in self._terminals(router)] == ["compact_complete"]
 
-    async def test_ambiguous_recorded_capture_skips_without_installing(self, tmp_path):
+    @pytest.mark.parametrize("origin_known", [True, False])
+    async def test_ambiguous_recorded_capture_skips_without_installing(
+        self, tmp_path, origin_known
+    ):
         conv = Conversation()
-        conv.append("user", "goal", metadata={"turn_index": 1, "branch_id": 1})
+        conv.append(
+            "user",
+            "goal",
+            metadata={"turn_index": 1, "branch_id": 1, "origin_known": origin_known},
+        )
         router, llm = _Router(), _LLM()
         store = SessionStore(tmp_path / "ambiguous-capture.kohakutr")
         try:

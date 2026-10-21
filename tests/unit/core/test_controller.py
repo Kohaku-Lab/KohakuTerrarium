@@ -1631,9 +1631,14 @@ class TestBuildTurnContextJobStatus:
         )
         # event with text
         evt = create_user_input_event("hi")
-        user_content, combined = c._build_turn_context([evt])
-        # combined contains "hi" plus any job-status preface.
-        assert "hi" in combined
+        origin = {}
+        user_content, combined = c._build_turn_context([evt], origin)
+        assert user_content == combined == origin["job_context"] + "\n\nhi"
+        assert "## Running Jobs" in origin["job_context"]
+        c.config.include_job_status = False
+        fresh_origin = {}
+        assert c._build_turn_context([evt], fresh_origin) == ("hi", "hi")
+        assert fresh_origin == {}
 
 
 # ── _build_turn_context multimodal branch (lines 447-448) ───────

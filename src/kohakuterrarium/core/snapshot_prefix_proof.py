@@ -15,7 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from kohakuterrarium.core.compact_branch import (
+from kohakuterrarium.core.compact_lineage import (
     compact_path_from_event,
     compact_source_path_from_event,
 )
@@ -38,6 +38,7 @@ class SummaryProof:
     consumed_result_ids: frozenset[int] = field(default_factory=frozenset)
     consumed_call_ids: frozenset[str] = field(default_factory=frozenset)
     consumed_call_event_ids: frozenset[int] = field(default_factory=frozenset)
+    completion_event_id: int = 0
 
 
 def ancestor_path(
@@ -151,6 +152,7 @@ def prove_unknown_summary(
     result_ids, call_ids, call_event_ids = consumed
     return SummaryProof(
         covered_event_ids=_covered_ids(events, completion, path),
+        completion_event_id=completion["event_id"],
         last_turn=_completion_turn(completion),
         consumed_result_ids=result_ids,
         consumed_call_ids=call_ids,

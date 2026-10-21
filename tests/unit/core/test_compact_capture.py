@@ -36,6 +36,7 @@ from kohakuterrarium.core.compact_capture import (
     uses_canonical_rounds,
 )
 from kohakuterrarium.core.compact_binding import resolve_capture_ids
+from kohakuterrarium.core.controller_context import prepend_job_context
 from kohakuterrarium.llm.message import create_message
 
 
@@ -1341,7 +1342,80 @@ class TestOrphanReasoning:
         assert compute_captured_range(events, {(1, 1)}, captured, []) is None
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "GOAL",
+        [{"type": "text", "text": "GOAL"}, {"type": "image", "url": "https://x/a.png"}],
+    ],
+)
+@pytest.mark.parametrize("retained", [False, True])
+def test_job_decorated_user_keeps_exact_binding(content, retained):
+    events = _canonical_session(rounds=1)
+    events[0]["content"] = events[1]["content"] = content
+    banner = "## Running Jobs\n- worker: running"
+    user = _user(
+        prepend_job_context(content, banner), 1, event_id=2, job_context=banner
+    )
+    captured = [user, *_round_messages(0)]
+    assert compute_captured_range(
+        events, {(1, 1)}, captured, retain_latest_user=retained
+    ) == ((4, 8) if retained else (2, 8))
+    for wrong in ("different banner", None):
+        user.metadata["job_context"] = wrong
+        assert compute_captured_range(events, {(1, 1)}, captured) is None
+    user.metadata.pop("job_context")
+    assert compute_captured_range(events, {(1, 1)}, captured) is None
+    user.metadata["job_context"] = banner
+    user.content = "changed payload"
+    assert compute_captured_range(events, {(1, 1)}, captured) is None
+
+
 class TestRepeatedSummaryInheritance:
+    @pytest.mark.parametrize("foreign_marker", [False, True])
+    def test_subsumed_completion_requires_its_own_identity(self, foreign_marker):
+        old = _event(
+            5,
+            "compact_complete",
+            round=1,
+            summary="OLD",
+            replaced_from_event_id=1,
+            replaced_to_event_id=4,
+            compact_path=[[1, 1]],
+            compact_source_path=[[1, 1]],
+        )
+        events = [
+            _event(1, "user_message", content="GOAL"),
+            *_canonical_round(2, 0, call=False),
+            old,
+        ]
+        if foreign_marker:
+            events.append(
+                {
+                    **old,
+                    "event_id": 6,
+                    "compact_path": [[1, 2]],
+                    "compact_source_path": [[1, 2]],
+                }
+            )
+        events += [
+            {
+                **old,
+                "event_id": 7,
+                "round": 2,
+                "summary": "LATEST",
+                "compact_source_path": None,
+            },
+            *_canonical_round(8, 1, call=False),
+        ]
+        captured = [
+            _summary(2, "LATEST", compact_source_path=None),
+            create_message("assistant", "SEG_1"),
+        ]
+        assert compute_captured_range(events, {(1, 1)}, captured) == (
+            None if foreign_marker else (1, 10)
+        )
+
     def test_inherited_late_result_does_not_expand_across_retained_tail(self):
         events = [
             _event(1, "user_message", content="GOAL"),
@@ -1372,7 +1446,8 @@ class TestRepeatedSummaryInheritance:
     """A consumed summary keeps its lineage across a fresh compaction."""
 
     @pytest.mark.parametrize("completion_inside", [False, True])
-    def test_repeated_inheritance_adds_new_round(self, completion_inside):
+    @pytest.mark.parametrize("source", [[[1, 1]], None, []])
+    def test_repeated_inheritance_adds_new_round(self, completion_inside, source):
         events = [
             _event(1, "user_message", content="GOAL"),
             _event(2, "user_input", content="GOAL"),
@@ -1386,7 +1461,7 @@ class TestRepeatedSummaryInheritance:
                 "replaced_from_event_id": 1,
                 "replaced_to_event_id": 7,
                 "compact_path": [[1, 1]],
-                "compact_source_path": [[1, 1]],
+                "compact_source_path": source,
             },
         ]
         if completion_inside:
@@ -1395,8 +1470,7 @@ class TestRepeatedSummaryInheritance:
             events = events[:7] + [complete] + _canonical_round(9, 1)
         captured = [_summary(1, "OLD"), *_round_messages(1)]
         assert compute_captured_range(events, {(1, 1)}, captured, []) == (
-            1,
-            13 if completion_inside else 12,
+            None if source == [] else (1, 13 if completion_inside else 12)
         )
 
 

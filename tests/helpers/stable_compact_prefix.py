@@ -82,7 +82,8 @@ def _round_items(request):
 async def exercise_compact_prefix_history(tmp_path):
     """Reuse an unknown-source summary without expanding raw ancestors."""
     requests = []
-    saved_summary = ScriptedLLM([_SUMMARY_ONE, _SUMMARY_TWO])
+    latest_summary = "SUMMARY_ROUND_THREE"
+    saved_summary = ScriptedLLM([_SUMMARY_ONE, _SUMMARY_TWO, latest_summary])
     llm = await _provider(requests)
     path = tmp_path / "stable-prefix.kohakutr"
     async with Terrarium() as engine:
@@ -142,20 +143,33 @@ async def exercise_compact_prefix_history(tmp_path):
         assert _SUMMARY_ONE in digest
         assert _UNKNOWN in digest
 
+        for text in ("LIVE_EPSILON", "LIVE_ZETA"):
+            assert await agent.inject_input(text)
+        await agent._session_output.drain()
+        await _compact(agent, saved_summary)
+        third = next(
+            e
+            for e in reversed(store.get_events("stableprefix"))
+            if e["type"] == "compact_complete"
+        )
+        assert third["compact_source_path"] is None
+        assert third.get("replaced_from_event_id") == first["replaced_from_event_id"]
+        assert third["replaced_to_event_id"] > second["replaced_to_event_id"]
+
         assert await agent.inject_input("TARGET_ECHO")
         await agent._session_output.drain()
         original = dict(live_branch_path(agent))
         original_messages = deepcopy(agent.controller.conversation.snapshot_messages())
         baseline = deepcopy(requests[-1])
-        assert _SUMMARY_TWO in _request_text(baseline)
+        assert latest_summary in _request_text(baseline)
         assert "RAWANCESTOR_ALPHA" not in _request_text(baseline)
 
-        target = _user_event(store.get_events("stableprefix"), 5)
+        target = _user_event(store.get_events("stableprefix"), 7)
         before = len(requests)
         assert await agent.edit_and_rerun(
             -1,
             "EDITED_TARGET",
-            target=UserMessageSelector(target["event_id"], 5, 1),
+            target=UserMessageSelector(target["event_id"], 7, 1),
             branch_view=original,
         )
         assert len(requests) == before + 1
@@ -163,7 +177,7 @@ async def exercise_compact_prefix_history(tmp_path):
         assert "EDITED_TARGET" in edited
         assert "RAWANCESTOR_ALPHA" not in edited
         assert "RAWANCESTOR_BETA" not in edited
-        assert edited.count(_marker(2)) == 1
+        assert edited.count(_marker(3)) == 1
         assert len(requests[-1]["input"]) <= len(baseline["input"])
 
         await agent._session_output.drain()
@@ -177,7 +191,7 @@ async def exercise_compact_prefix_history(tmp_path):
             (original, original_messages),
             (edited_view, edited_messages),
         ):
-            assert await agent.inject_input(f"/branch 5 {view[5]}")
+            assert await agent.inject_input(f"/branch 7 {view[7]}")
             await agent._session_output.drain()
             assert agent.controller.conversation is conversation_identity
             assert agent.controller.conversation.snapshot_messages() == expected
@@ -185,9 +199,9 @@ async def exercise_compact_prefix_history(tmp_path):
             assert store.state["stableprefix:branch_view"] == {
                 str(turn): branch for turn, branch in view.items()
             }
-            assert agent.compact_manager._compact_count == 2
+            assert agent.compact_manager._compact_count == 3
             assert len(requests) == count_before_switch
-            assert saved_summary.call_count == 2
+            assert saved_summary.call_count == 3
 
         before = len(requests)
         await agent.regenerate_last_response()
@@ -206,9 +220,10 @@ async def exercise_compact_prefix_history(tmp_path):
         ancestor_text = _request_text(requests[-1])
         assert _SUMMARY_ONE not in ancestor_text
         assert _SUMMARY_TWO not in ancestor_text
+        assert latest_summary not in ancestor_text
 
         before = len(requests)
-        assert await agent.inject_input("/branch 5 1")
+        assert await agent.inject_input("/branch 7 1")
         assert live_branch_path(agent) == original
         assert agent.controller.conversation.snapshot_messages() == original_messages
         assert len(requests) == before
@@ -216,7 +231,7 @@ async def exercise_compact_prefix_history(tmp_path):
         await agent._session_output.drain()
         assert len(requests) == before + 1
         returned = _request_text(requests[-1])
-        assert _SUMMARY_TWO in returned
+        assert latest_summary in returned
         assert "RAWANCESTOR_ALPHA" not in returned
 
         conversation = deepcopy(agent.controller.conversation.to_messages())
@@ -226,12 +241,12 @@ async def exercise_compact_prefix_history(tmp_path):
         original_max = agent.compact_manager.config.max_tokens
         agent.compact_manager.config.max_tokens = 8
         try:
-            target = _user_event(state, 5)
+            target = _user_event(state, 7)
             try:
                 await agent.edit_and_rerun(
                     -1,
                     "OVERSIZED_EDIT",
-                    target=UserMessageSelector(target["event_id"], 5, 1),
+                    target=UserMessageSelector(target["event_id"], 7, 1),
                     branch_view=original,
                 )
             except ConflictError:
@@ -244,7 +259,7 @@ async def exercise_compact_prefix_history(tmp_path):
         assert agent.controller.conversation.to_messages() == conversation
         assert store.get_events("stableprefix") == state
         assert store.load_branch_snapshot("stableprefix", original) == checkpoint
-        assert saved_summary.call_count == 2
+        assert saved_summary.call_count == 3
         assert agent.compact_manager.config.max_tokens == budget
 
         await agent._session_output.drain()
@@ -257,20 +272,20 @@ async def exercise_compact_prefix_history(tmp_path):
     try:
         await restored.start()
         restored.controller.config.include_job_status = False
-        assert await restored.inject_input("/branch 5 2")
+        assert await restored.inject_input("/branch 7 2")
         assert restored.controller.conversation.snapshot_messages() == edited_messages
-        assert await restored.inject_input("/branch 5 1")
-        assert live_branch_path(restored)[5] == 1
+        assert await restored.inject_input("/branch 7 1")
+        assert live_branch_path(restored)[7] == 1
         previous = len(requests)
         completed = await restored.run("cold original", timeout=10)
         assert completed.ok
         assert len(requests) == previous + 1
         cold_text = _request_text(requests[-1])
         assert "cold original" in cold_text
-        assert _SUMMARY_TWO in cold_text
+        assert latest_summary in cold_text
         assert "RAWANCESTOR_ALPHA" not in cold_text
         assert "EDITED_ANCESTOR" not in cold_text
-        assert saved_summary.call_count == 2
+        assert saved_summary.call_count == 3
         await restored._session_output.drain()
         events = cold_store.get_events("stableprefix")
         assert events[: len(saved)] == saved
@@ -552,6 +567,33 @@ async def _exercise_tool_round_repair(tmp_path, requests):
         assert agent.controller.conversation.snapshot_messages() == switch_messages
         assert len(requests) == switch_requests
         assert tool.labels == ["OLD"]
+        await agent._session_output.drain()
+        repaired_summary = ScriptedLLM(["REPAIRED_ROUND_SUMMARY"])
+        await _compact(agent, repaired_summary)
+        completion = next(
+            e
+            for e in reversed(store.get_events("roundrepair"))
+            if e["type"] == "compact_complete"
+        )
+        assert completion["compact_result_event_ids"] == [tool_events[-1]["event_id"]]
+        assert _round_items(requests[-1]) == live_round
+        await creature.run("after repaired compact", timeout=10)
+        assert "REPAIRED_ROUND_SUMMARY" in _request_text(requests[-1])
+        assert _round_items(requests[-1]) == []
+        await agent._session_output.drain()
+        tail = _user_event(store.get_events("roundrepair"), agent._turn_index)
+        assert await agent.edit_and_rerun(
+            -1,
+            "EDITED_COMPACT_TAIL",
+            target=UserMessageSelector(
+                tail["event_id"], tail["turn_index"], tail["branch_id"]
+            ),
+            branch_view=dict(live_branch_path(agent)),
+        )
+        assert "REPAIRED_ROUND_SUMMARY" in _request_text(requests[-1])
+        assert _round_items(requests[-1]) == []
+        assert tool.labels == ["OLD"]
+        assert repaired_summary.call_count == 1
         await agent._session_output.drain()
         await engine.remove_creature(creature)
         store.close()

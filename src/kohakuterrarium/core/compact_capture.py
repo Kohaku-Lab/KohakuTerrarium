@@ -28,6 +28,10 @@ from kohakuterrarium.core.compact_binding import (
     uses_canonical_rounds as uses_canonical_rounds,
 )
 from kohakuterrarium.core.compact_splice import is_real_user_message
+from kohakuterrarium.core.snapshot_prefix_proof import (
+    SummaryProof,
+    prove_unknown_summary,
+)
 from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS
 
 # Events that carry no conversation content, so a span may pass over them.
@@ -187,7 +191,27 @@ def _inherited_coverage(
             continue
         if "compact_source_path" in event:
             source = _coerce_pairs(event.get("compact_source_path"))
-            if source is None or not (source | old_path) <= path:
+            if source is None and event["compact_source_path"] is not None:
+                if strict:
+                    return None
+                continue
+            if source is None:
+                watermark = max((_event_id(e) or 0 for e in events), default=0)
+                proof = prove_unknown_summary(
+                    {"content": getattr(msg, "content", None)},
+                    events=events,
+                    path=path,
+                    watermark=watermark,
+                    target=watermark + 1,
+                    selected=dict(path),
+                )
+                if not isinstance(
+                    proof, SummaryProof
+                ) or proof.completion_event_id != _event_id(event):
+                    if strict:
+                        return None
+                    continue
+            elif not (source | old_path) <= path:
                 if strict:
                     return None
                 continue
@@ -209,6 +233,31 @@ def _inherited_coverage(
             if strict:
                 return None
             continue
+        for previous in events:
+            previous_id = _event_id(previous)
+            if (
+                previous.get("type") != "compact_complete"
+                or previous_id is None
+                or previous_id >= (_event_id(event) or 0)
+            ):
+                continue
+            prior_proof = prove_unknown_summary(
+                {
+                    "content": f"[Previous context summary (compact round {previous.get('round')})]\n{previous.get('summary') or previous.get('summary_text') or ''}"
+                },
+                events=events,
+                path=old_path,
+                watermark=previous_id,
+                target=event["event_id"],
+                selected=dict(path),
+            )
+            if (
+                isinstance(prior_proof, SummaryProof)
+                and prior_proof.completion_event_id == previous_id
+                and prior_proof.covered_event_ids
+                and prior_proof.covered_event_ids <= ids
+            ):
+                cover_ids.add(previous_id)
         cover_ids |= ids
         low = min(start, low) if low is not None else start
         high = max(end, high) if high is not None else end

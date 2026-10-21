@@ -5,7 +5,10 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from kohakuterrarium.core.compact_branch import compact_source_path_from_event
-from kohakuterrarium.core.snapshot_repair import repair_gap_messages
+from kohakuterrarium.core.snapshot_repair import (
+    place_repaired_messages,
+    repair_gap_messages,
+)
 from kohakuterrarium.core.snapshot_prefix_proof import (
     INVALID as INVALID_PROOF,
     ancestor_path,
@@ -513,7 +516,12 @@ def prepare_snapshot(
                 )
                 if repaired is None:
                     continue
-                messages = [*messages, *repaired]
+                placed = place_repaired_messages(
+                    messages, repaired, events, eligible_ids=live_ids
+                )
+                if placed is None:
+                    continue
+                messages = placed
                 if _uncovered_calls(
                     events,
                     messages,

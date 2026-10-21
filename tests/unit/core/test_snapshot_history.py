@@ -11,8 +11,14 @@ from kohakuterrarium.core.agent_message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
 )
-from kohakuterrarium.core.snapshot_repair import repair_gap_messages
+from kohakuterrarium.core.compact_binding import resolve_capture_ids
+from kohakuterrarium.core.snapshot_repair import (
+    place_repaired_messages,
+    repair_gap_messages,
+)
 from kohakuterrarium.core.snapshot_history import prepare_snapshot
+from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.resume_build import build_conversation
 from kohakuterrarium.session.snapshot import load_records
 from kohakuterrarium.session.store import SessionStore
 
@@ -2146,3 +2152,208 @@ def test_sparse_repair_restores_a_round_whose_display_piece_is_unstamped() -> No
     assert repaired is not None
     assert [message["role"] for message in repaired] == ["assistant", "tool"]
     assert repaired[1]["tool_call_id"] == "call-9"
+
+
+def test_repaired_round_binds_the_same_canonical_identity_as_raw_replay(
+    store: SessionStore,
+) -> None:
+    """A restored round must capture exactly like the raw round it restates."""
+    events = _sparse_events([_two_call_round(6, 7, "call-9")], 9)
+    _save_unknown_summary(store, 9)
+    outcome = _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3)
+    assert outcome is not None
+    repaired = outcome["messages"][-2:]
+    raw = replay_with_settled_tools(
+        events[5:9], branch_view={1: 1}, include_metadata=True
+    )
+    assert [message.get("metadata", {}).get("event_id") for message in repaired] == [
+        message.get("metadata", {}).get("event_id") for message in raw
+    ]
+    bound = [
+        resolve_capture_ids(events, {(1, 1)}, build_conversation(prefix).get_messages())
+        for prefix in (repaired, raw)
+    ]
+    assert bound[0] is not None and bound[0] == bound[1]
+
+
+@pytest.mark.parametrize(
+    ("foreign", "admits"),
+    [
+        ([("reused-elsewhere", "other-a"), ("reused-elsewhere", "other-b")], True),
+        ([("call-other", "job-9")], False),
+    ],
+    ids=["unrelated-alias", "shared-relevant-job"],
+)
+def test_sparse_repair_scopes_result_ownership_to_relevant_groups(
+    foreign: list[tuple[str, str]], admits: bool
+) -> None:
+    """Only restored calls' jobs are ambiguous; a foreign owner still refuses."""
+    events = _repair_events(("call-9", "job-9", "RESULT_9"))
+    gaps = [event for event in events if event["type"] == "tool_call"]
+    live = {event["event_id"] for event in events}
+    first = repair_gap_messages(
+        gaps, events, target_event_id=99, present_call_ids=set(), eligible_ids=live
+    )
+    assert first is not None
+    events.extend(
+        {
+            "event_id": 20 + offset,
+            "type": "tool_call",
+            "call_id": job,
+            "tool_call_id": provider,
+            "name": "echo",
+            "args": {},
+            "turn_index": 2,
+            "branch_id": 2 + offset,
+        }
+        for offset, (provider, job) in enumerate(foreign)
+    )
+    again = repair_gap_messages(
+        gaps, events, target_event_id=99, present_call_ids=set(), eligible_ids=live
+    )
+    assert (again == first) is admits
+
+
+def _repaired_round_before_final_assistant() -> tuple[list[dict], list[dict]]:
+    """A completed tool round followed by the turn's canonical final assistant."""
+    lineage = {"turn_index": 1, "branch_id": 1}
+    events = [
+        {"event_id": 2, "type": "user_message", "content": "produce OLD", **lineage},
+        {"event_id": 6, "type": "assistant_round_start", **lineage},
+        {
+            "event_id": 7,
+            "type": "tool_call",
+            "call_id": "job-OLD",
+            "tool_call_id": "call-OLD",
+            "name": "echo",
+            "args": {},
+            **lineage,
+        },
+        {
+            "event_id": 8,
+            "type": "assistant_message",
+            "round_start_event_id": 6,
+            "message": {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call-OLD",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            },
+            **lineage,
+        },
+        {
+            "event_id": 9,
+            "type": "tool_result",
+            "call_id": "job-OLD",
+            "name": "echo",
+            "output": "RESULT_OLD",
+            **lineage,
+        },
+        {"event_id": 10, "type": "assistant_round_start", **lineage},
+        {
+            "event_id": 12,
+            "type": "assistant_message",
+            "round_start_event_id": 10,
+            "message": {"role": "assistant", "content": "tool reply"},
+            **lineage,
+        },
+    ]
+    gaps = [event for event in events if event["type"] == "tool_call"]
+    repaired = repair_gap_messages(
+        gaps, events, target_event_id=99, present_call_ids=set()
+    )
+    assert repaired is not None
+    return events, repaired
+
+
+def _kept_prefix_with_final_assistant() -> list[dict]:
+    return [
+        {"role": "system", "content": "plain", "metadata": {}},
+        {
+            "role": "user",
+            "content": "produce OLD",
+            "metadata": {"turn_index": 1, "branch_id": 1},
+        },
+        # The checkpoint kept the round's canonical end without positions.
+        {"role": "assistant", "content": "tool reply"},
+    ]
+
+
+def test_repaired_round_is_placed_before_its_later_kept_neighbour() -> None:
+    """A restored round returns to its raw position, not behind the whole prefix."""
+    events, repaired = _repaired_round_before_final_assistant()
+    kept = _kept_prefix_with_final_assistant()
+    merged = place_repaired_messages(kept, repaired, events)
+    assert merged is not None
+    raw = replay_conversation(events, branch_view={1: 1}, include_metadata=True)
+    assert [message["role"] for message in merged[1:]] == [
+        message["role"] for message in raw
+    ]
+    assert [message.get("content") for message in merged[1:]] == [
+        message.get("content") for message in raw
+    ]
+    # The restored span must bind exactly like the raw round it restates; the
+    # appended order is the reversal the binder rightly refuses.
+    bound = [
+        resolve_capture_ids(events, {(1, 1)}, build_conversation(order).get_messages())
+        for order in (merged[1:], raw)
+    ]
+    assert bound[0] is not None and bound[0] == bound[1]
+    assert (
+        resolve_capture_ids(
+            events,
+            {(1, 1)},
+            build_conversation([*kept, *repaired][1:]).get_messages(),
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("case", ["late-result", "repeated-reply"])
+def test_repair_placement_uses_call_order_and_contextual_identity(case):
+    events, repaired = _repaired_round_before_final_assistant()
+    kept = _kept_prefix_with_final_assistant()
+    path = {(1, 1)}
+    if case == "late-result":
+        events[4]["event_id"] = 13
+        events.sort(key=lambda e: e["event_id"])
+        repaired[-1]["metadata"]["result_event_id"] = 13
+    else:
+        lineage = {"turn_index": 2, "branch_id": 1, "parent_branch_path": [[1, 1]]}
+        events += [
+            {"event_id": 20, "type": "user_message", "content": "next", **lineage},
+            {"event_id": 21, "type": "assistant_round_start", **lineage},
+            {
+                "event_id": 22,
+                "type": "assistant_message",
+                "round_start_event_id": 21,
+                "message": {"role": "assistant", "content": "tool reply"},
+                **lineage,
+            },
+        ]
+        kept += [
+            {"role": "user", "content": "next", "metadata": lineage},
+            {"role": "assistant", "content": "tool reply"},
+        ]
+        path.add((2, 1))
+    merged = place_repaired_messages(kept, repaired, events)
+    assert merged == [*kept[:2], *repaired, *kept[2:]]
+    assert (
+        resolve_capture_ids(events, path, build_conversation(merged).get_messages())
+        is not None
+    )
+
+
+def test_repaired_round_refuses_an_unprovable_neighbour() -> None:
+    """A kept message with no recorded identity refuses instead of guessing order."""
+    events, repaired = _repaired_round_before_final_assistant()
+    kept = [
+        *_kept_prefix_with_final_assistant()[:-1],
+        {"role": "assistant", "content": "UNRECORDED_TAIL"},
+    ]
+    assert place_repaired_messages(kept, repaired, events) is None

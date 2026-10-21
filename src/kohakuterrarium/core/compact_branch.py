@@ -17,6 +17,10 @@ from kohakuterrarium.core.compact_capture import (
     matching_compact_complete,
     uses_canonical_rounds,
 )
+from kohakuterrarium.core.compact_lineage import (
+    compact_path_from_event as compact_path_from_event,
+    compact_source_path_from_event as compact_source_path_from_event,
+)
 from kohakuterrarium.core.compact_splice import (
     is_real_user_message,
     leading_system_count,
@@ -27,44 +31,8 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _coerce_pairs(raw: Any) -> set[tuple[int, int]] | None:
-    """Parse a persisted ``[[turn, branch], ...]`` list into a pair set."""
-    if not isinstance(raw, (list, tuple)):
-        return None
-    pairs: set[tuple[int, int]] = set()
-    for item in raw:
-        if isinstance(item, (list, tuple)) and len(item) == 2:
-            try:
-                pairs.add((int(item[0]), int(item[1])))
-            except (TypeError, ValueError):
-                continue
-    return pairs or None
-
-
 def _sorted_pairs(pairs: Sequence[tuple[int, int]] | set[tuple[int, int]]) -> list:
     return sorted([t, b] for (t, b) in pairs)
-
-
-def compact_path_from_event(evt: Mapping[str, Any]) -> set[tuple[int, int]] | None:
-    """Return the recorded branch lineage, or None for pathless legacy data."""
-    return _coerce_pairs(evt.get("compact_path"))
-
-
-def compact_source_path_from_event(
-    evt: Mapping[str, Any],
-) -> set[tuple[int, int]] | None:
-    """Return the recorded input lineage, or None when absent."""
-    raw = evt.get("compact_source_path")
-    if not isinstance(raw, (list, tuple)) or not raw:
-        return None
-    pairs = set()
-    for item in raw:
-        if not isinstance(item, (list, tuple)) or len(item) != 2:
-            return None
-        if any(type(value) is not int or value <= 0 for value in item):
-            return None
-        pairs.add(tuple(item))
-    return pairs
 
 
 @dataclass(frozen=True)
@@ -347,9 +315,7 @@ async def capture_compact_metadata(
         retain_latest_user=retain_latest_user,
     )
     metadata["_capture_unproven"] = bool(
-        source
-        and uses_canonical_rounds(events)
-        and "replaced_from_event_id" not in metadata
+        uses_canonical_rounds(events) and "replaced_from_event_id" not in metadata
     )
     return metadata
 

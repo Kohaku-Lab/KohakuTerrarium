@@ -3274,11 +3274,17 @@ class TestCoreIntegration:
                 start=True,
             )
             agent = creature.agent
-            agent.controller.config.include_job_status = False
+            assert agent.controller.config.include_job_status is True
             try:
                 await creature.run("launch", timeout=8)
                 await asyncio.wait_for(compact_bg.started.wait(), 2)
                 await creature.run("second", timeout=8)
+                second = next(
+                    m
+                    for m in agent.controller.conversation.get_messages()
+                    if m.role == "user" and "second" in str(m.content)
+                )
+                assert "## Running Jobs" in second.content
                 async with creature.attach() as stream:
                     compact_bg.release.set()
                     while True:
@@ -3321,6 +3327,8 @@ class TestCoreIntegration:
                 compact_event = [
                     event for event in raw if event["type"] == "compact_complete"
                 ][-1]
+                assert summary_llm.call_count == 1
+                assert "## Running Jobs" in str(summary_llm.last_messages)
                 assert compact_event["summary"] == "summary OLD_LAUNCH"
                 assert compact_event["compact_source_path"] == [
                     [t, 1] for t in range(1, 4)

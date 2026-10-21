@@ -35,8 +35,10 @@ from kohakuterrarium.core.controller_messages import (
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.core.controller_context import (
+    JOB_CONTEXT_METADATA_KEY,
     format_events_for_context,
     message_origin_metadata,
+    prepend_job_context,
     tool_feedback_metadata,
 )
 from kohakuterrarium.core.executor import Executor
@@ -379,17 +381,17 @@ class Controller:
         return format_events_for_context(events)
 
     def _build_turn_context(
-        self, events: list[TriggerEvent]
+        self, events: list[TriggerEvent], origin: dict[str, Any] | None = None
     ) -> tuple[str | list[ContentPart], str]:
-        """Build user content; combined_text is only for empty-input detection."""
+        """Build user content; ``origin`` is stamped with the exact job status."""
         job = self.job_store.format_context() if self.config.include_job_status else ""
-        content = self._format_events_for_context(events)
-        if isinstance(content, str):
-            combined = "\n\n".join([job, content] if job else [content])
-            return combined, combined
-        parts: list[ContentPart] = ([TextPart(text=job)] if job else []) + list(content)
-        combined = "\n\n".join(p.text for p in parts if isinstance(p, TextPart))
-        return parts, combined
+        composed = prepend_job_context(self._format_events_for_context(events), job)
+        if job and isinstance(origin, dict):
+            origin[JOB_CONTEXT_METADATA_KEY] = job
+        if isinstance(composed, str):
+            return composed, composed
+        combined = "\n\n".join(p.text for p in composed if isinstance(p, TextPart))
+        return composed, combined
 
     def _chat_with_recovery(
         self, messages: list[dict], **kwargs: Any
@@ -835,7 +837,7 @@ class Controller:
         logger.debug("Processing events", count=len(events))
 
         origin = message_origin_metadata(self)
-        user_content, combined_text = self._build_turn_context(events)
+        user_content, combined_text = self._build_turn_context(events, origin)
         # Tool continuations and unedited regeneration reuse existing context;
         # appending an empty user message would corrupt provider turn ordering.
         skip_empty = (

@@ -1,23 +1,14 @@
-"""Exact binding of captured messages to persisted event identities.
+"""Exact message identities and ordering for capture and checkpoint repair.
 
-A compaction's replacement span may only swallow events that the captured
-messages themselves prove. Binding is exact: a captured assistant payload must
-equal exactly one canonical round on the selected path, captured users must
-match one recorded user event, and captured tool results must resolve to one
-final result of their own call. Folded ``tool_results``/``injected`` envelopes
-bind each named job to its dispatch and its uniquely recorded final result; a
-pending acknowledgement binds only its dispatch. No text proximity, no guessed
-rounds, no out-of-order identities.
-
-``resolve_capture_ids`` only resolves message identities. The caller merges
-inherited summary coverage and validates the final span, so this module never
-imports the summary/inheritance helpers it would otherwise cycle through.
+Resolve users, canonical assistant rounds, pending dispatches and settled results.
+Summary inheritance and replacement-span validation belong to compact_capture.
 """
 
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from kohakuterrarium.core.controller_context import recorded_content_matches
 from kohakuterrarium.session.assistant_history import (
     assistant_round_identities,
     assistant_round_messages,
@@ -216,11 +207,12 @@ def _bind_user(message: Any, path_events: Sequence[dict]) -> int | None:
         return None
     hint = _pair(metadata)
     explicit = metadata.get("event_id")
+    live = payload.get("content")
     matches = [
         event
         for event in path_events
         if event.get("type") == "user_message"
-        and event.get("content") == payload.get("content")
+        and recorded_content_matches(metadata, live, event.get("content"))
         and (hint is None or (event.get("turn_index"), event.get("branch_id")) == hint)
         and (type(explicit) is not int or _event_id(event) == explicit)
     ]
@@ -379,12 +371,13 @@ def _bind_folded(
 
 def _candidate_user_ids(message: Any, path_events: Sequence[dict]) -> set[int]:
     """Every recorded user event whose content restates this message."""
+    metadata = _metadata(message)
     content = (_wire(message) or {}).get("content")
     return {
         event_id
         for event in path_events
         if event.get("type") == "user_message"
-        and event.get("content") == content
+        and recorded_content_matches(metadata, content, event.get("content"))
         and (event_id := _event_id(event)) is not None
     }
 
@@ -438,26 +431,19 @@ def _restated_input(
     )
 
 
-def resolve_capture_ids(
+def resolve_message_bindings(
     events: Sequence[dict],
     path: set[tuple[int, int]],
     captured_messages: Sequence[Any],
     retained_messages: Sequence[Any] = (),
     *,
     retain_latest_user: bool = False,
-) -> tuple[set[int], set[int]] | None:
-    """Event ids the captured messages prove, and ids retained ones keep live.
+) -> tuple[set[int], set[int], dict[int, int]] | None:
+    """Resolve consumed ids, retained ids and per-message ordering anchors.
 
-    Every captured message must resolve to exactly one recorded identity: the
-    one canonical round with the identical payload (all of its start, display
-    and end members are then proven), one recorded user event, one pending
-    dispatch, or one folded job's uniquely recorded final result and dispatch.
-    Resolved neighbours must additionally keep recorded order, so a repeated or
-    reordered payload refuses the span instead of widening it.
-
-    Returns ``(proven_ids, excluded_ids)`` or ``None`` when anything is
-    ambiguous. ``excluded_ids`` are identities a retained message must keep
-    live; the caller drops any span that would swallow them.
+    Canonical payloads and neighbouring user/tool identities must uniquely
+    identify ordered rounds. Result ordering follows dispatch, not settlement.
+    Summaries and system messages carry no ordering anchor here.
     """
     if not path:
         return None
@@ -587,8 +573,28 @@ def resolve_capture_ids(
         used.add(start)
         resolved_end = max(members)
         proven |= set(members)
+        anchors.append((position, members[-1]))
 
     if retain_latest_user and last_user is not None:
         retained_user.add(last_user)
     proven -= retained_user
-    return proven, retained_user | blocked
+    return proven, retained_user | blocked, dict(anchors)
+
+
+def resolve_capture_ids(
+    events: Sequence[dict],
+    path: set[tuple[int, int]],
+    captured_messages: Sequence[Any],
+    retained_messages: Sequence[Any] = (),
+    *,
+    retain_latest_user: bool = False,
+) -> tuple[set[int], set[int]] | None:
+    """Return proven captured ids and excluded retained ids, or refuse ambiguity."""
+    resolved = resolve_message_bindings(
+        events,
+        path,
+        captured_messages,
+        retained_messages,
+        retain_latest_user=retain_latest_user,
+    )
+    return resolved[:2] if resolved is not None else None

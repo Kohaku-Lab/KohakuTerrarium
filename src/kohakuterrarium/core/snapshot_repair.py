@@ -8,6 +8,8 @@ the whole checkpoint. Anything ambiguous stays a refusal.
 
 from typing import Any
 
+from kohakuterrarium.core.compact_binding import resolve_message_bindings
+from kohakuterrarium.llm.message import dicts_to_messages
 from kohakuterrarium.session.assistant_history import (
     assistant_round_identities,
     assistant_round_messages,
@@ -24,24 +26,27 @@ def _job_id(event: dict) -> str:
 
 
 def _result_index(
-    events: list[dict], jobs_by_provider: dict[str, set[str]]
+    events: list[dict],
+    jobs_by_provider: dict[str, set[str]],
+    relevant_calls: set[str],
 ) -> dict[str, list[dict]] | None:
-    """Map each canonical call to its uniquely owned settled result."""
+    """Map restored calls to settled results with globally unique job ownership."""
     results: dict[str, list[dict]] = {}
     for event in events:
         if event.get("type") == "tool_result" and _job_id(event):
             results.setdefault(_job_id(event), []).append(event)
-    by_call: dict[str, list[dict]] = {}
-    claimed: dict[str, str] = {}
+    owners: dict[str, set[str]] = {}
     for provider, jobs in jobs_by_provider.items():
+        for job in jobs:
+            owners.setdefault(job, set()).add(provider)
+    by_call: dict[str, list[dict]] = {}
+    for provider in relevant_calls:
+        jobs = jobs_by_provider.get(provider, set())
         if len(jobs) != 1:
             return None
         job = next(iter(jobs))
-        if job in claimed:
-            # Two providers naming one job share a single result; replay would
-            # pair it with one call and leave the other unanswered.
+        if len(owners[job]) != 1:
             return None
-        claimed[job] = provider
         by_call[provider] = results.get(job, [])
     return by_call
 
@@ -132,10 +137,11 @@ def repair_gap_messages(
         if event.get("type") == "tool_call" and _provider_id(event) and _job_id(event):
             jobs_by_provider.setdefault(_provider_id(event), set()).add(_job_id(event))
     rounds = assistant_round_messages(events, eligible_ids)
+    identities = assistant_round_identities(events, eligible_ids)
     groups = _group_rounds(
         gaps,
         rounds,
-        assistant_round_identities(events, eligible_ids),
+        identities,
         target_event_id,
         present_call_ids or set(),
         represented_event_ids or set(),
@@ -144,7 +150,11 @@ def repair_gap_messages(
     )
     if groups is None:
         return None
-    by_call = _result_index(events, jobs_by_provider)
+    by_call = _result_index(
+        events,
+        jobs_by_provider,
+        {call_id for calls in groups.values() for call_id in calls},
+    )
     if by_call is None:
         return None
     provider_by_job = {
@@ -157,12 +167,12 @@ def repair_gap_messages(
         anchor = anchors.get(start) or {}
         sub_events = [
             {
+                **anchor,
                 "event_id": start,
                 "type": "assistant_message",
                 "message": canonical,
                 "_assistant_projected": True,
-                "turn_index": anchor.get("turn_index"),
-                "branch_id": anchor.get("branch_id"),
+                "canonical_source_event_id": identities[start][-1],
             }
         ]
         for call_id in groups[start]:
@@ -181,3 +191,44 @@ def repair_gap_messages(
                 message["tool_call_id"] = provider
             repaired.append(message)
     return repaired
+
+
+def place_repaired_messages(
+    messages: list[dict],
+    repaired: list[dict],
+    events: list[dict],
+    *,
+    eligible_ids: set[int] | None = None,
+) -> list[dict] | None:
+    """Insert restored rounds using the same message identities as capture."""
+    if not repaired:
+        return list(messages)
+    path = {
+        _pair(event)
+        for event in events
+        if eligible_ids is None or event.get("event_id") in eligible_ids
+    }
+    kept = resolve_message_bindings(events, path, dicts_to_messages(messages))
+    restored = resolve_message_bindings(events, path, dicts_to_messages(repaired))
+    if kept is None or restored is None:
+        return None
+    anchors = kept[2]
+    groups: list[list[dict]] = []
+    for message in repaired:
+        if message.get("role") == "assistant" or not groups:
+            groups.append([])
+        groups[-1].append(message)
+    keys = [group[0]["metadata"]["event_id"] for group in groups]
+    merged: list[dict] = []
+    pending = 0
+    for position, message in enumerate(messages):
+        anchor = anchors.get(position)
+        while anchor is not None and pending < len(groups) and keys[pending] < anchor:
+            merged.extend(groups[pending])
+            pending += 1
+        merged.append(message)
+    for group in groups[pending:]:
+        merged.extend(group)
+    if resolve_message_bindings(events, path, dicts_to_messages(merged)) is None:
+        return None
+    return merged
