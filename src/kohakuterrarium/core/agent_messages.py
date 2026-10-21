@@ -10,6 +10,7 @@ from kohakuterrarium.core.agent_message_history import (
     apply_prepared_branch_view,
     live_user_turns as _live_user_turns,
     max_branch_id_for_turn as _max_branch_id_for_turn,
+    recorded_turn_input,
     reload_conversation_under_branch_view as _reload_branch_view,
     resolve_edit_message_index as _resolve_edit_message_index,
     turn_index_for_user_position as _turn_index_for_user_position,
@@ -28,6 +29,7 @@ from kohakuterrarium.core.branch_continuation import (
     require_no_active_compact,
     require_no_running_jobs,
 )
+from kohakuterrarium.core.controller_context import JOB_CONTEXT_METADATA_KEY
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.core.settled_refresh import prepare_mutation_prefix
 from kohakuterrarium.errors import ConflictError
@@ -177,11 +179,15 @@ class AgentMessagesMixin:
             last_user = refreshed["target_index"]
         conv = self.controller.conversation
         messages = conv.get_messages()
-        resent = messages[last_user].content if resent is None else resent
+        resent = recorded_turn_input(self, messages[last_user])
+        if resent is None:
+            resent = messages[last_user].content
+            # The live wording already carries any composed banner.
+            messages[last_user].metadata.pop(JOB_CONTEXT_METADATA_KEY, None)
         removed = conv.truncate_from(last_user + 1)
         # Open a new branch of the current turn.
         self._branch_id = next_branch
-        conv.get_messages()[last_user].metadata.update(
+        messages[last_user].metadata.update(
             turn_index=self._turn_index, branch_id=self._branch_id
         )
         logger.info(
@@ -201,18 +207,27 @@ class AgentMessagesMixin:
             # opening a sibling branch of the SAME turn, so the path
             # of prior turns is unchanged.
             ppath = [tuple(p) for p in getattr(self, "_parent_branch_path", [])]
-            await self.session_store.run(
+            recorded_event_id = await self.session_store.run(
                 append_user_event_pair,
                 self.session_store,
                 self.config.name,
                 {
-                    "content": resent,
+                    "content": (
+                        content_parts_to_dicts(resent)
+                        if isinstance(resent, list)
+                        else resent
+                    ),
                     **({"request_id": request_id} if request_id else {}),
                 },
                 self._turn_index,
                 self._branch_id,
                 ppath,
             )
+            # The retained message stands for this branch's own event.
+            if isinstance(recorded_event_id, int):
+                messages[last_user].metadata["event_id"] = recorded_event_id
+            else:
+                messages[last_user].metadata.pop("event_id", None)
         persist_branch_view(
             self.session_store, self.config.name, live_branch_path(self)
         )

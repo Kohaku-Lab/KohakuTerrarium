@@ -11,6 +11,7 @@ from kohakuterrarium.core.snapshot_repair import (
 )
 from kohakuterrarium.core.snapshot_prefix_proof import (
     INVALID as INVALID_PROOF,
+    SummaryProof,
     ancestor_path,
     prove_unknown_summary,
     selected_target_event_id,
@@ -236,8 +237,18 @@ def _prefix(
                 exemptions["call_ids"] |= summary_proof.consumed_call_ids
                 exemptions["call_event_ids"] |= summary_proof.consumed_call_event_ids
                 last_turn = max(last_turn, summary_proof.last_turn)
-            elif inputs is not None and not inputs.issubset(pairs):
-                return None
+            elif inputs is not None:
+                if not inputs.issubset(pairs):
+                    return None
+                # A known-source summary may still prove which dispatches it
+                # consumed, so a reduced round can borrow that identity. A
+                # missing or foreign proof does not invalidate the summary on
+                # its own; it only refuses if placement later needs reduction.
+                consumed = prove_unknown_summary(message, **proof) if proof else None
+                if isinstance(consumed, SummaryProof):
+                    exemptions["result_ids"] |= consumed.consumed_result_ids
+                    exemptions["call_ids"] |= consumed.consumed_call_ids
+                    exemptions["call_event_ids"] |= consumed.consumed_call_event_ids
             if inputs:
                 last_turn = max(last_turn, max(turn for turn, _ in inputs))
             kept.append(message)
@@ -517,7 +528,11 @@ def prepare_snapshot(
                 if repaired is None:
                     continue
                 placed = place_repaired_messages(
-                    messages, repaired, events, eligible_ids=live_ids
+                    messages,
+                    repaired,
+                    events,
+                    eligible_ids=live_ids,
+                    consumed_call_event_ids=exemptions["call_event_ids"],
                 )
                 if placed is None:
                     continue

@@ -6,10 +6,11 @@ still exist in raw history, the missing group is restored instead of refusing
 the whole checkpoint. Anything ambiguous stays a refusal.
 """
 
+from copy import deepcopy
 from typing import Any
 
 from kohakuterrarium.core.compact_binding import resolve_message_bindings
-from kohakuterrarium.llm.message import dicts_to_messages
+from kohakuterrarium.llm.message import Message, dicts_to_messages
 from kohakuterrarium.session.assistant_history import (
     assistant_round_identities,
     assistant_round_messages,
@@ -193,14 +194,113 @@ def repair_gap_messages(
     return repaired
 
 
+def _with_metadata(dicts: list[dict]) -> list[Any]:
+    """Deserialize persisted messages without pruning or discarding internal metadata."""
+    messages = dicts_to_messages(dicts)
+    for data, message in zip(dicts, messages):
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict):
+            message.metadata = deepcopy(metadata)
+    return messages
+
+
+def _reduced_payload(
+    payload: dict, dispatches: dict[str, list[dict]], consumed: frozenset[int]
+) -> dict | None:
+    """Remove only uniquely owned calls named by proven consumed dispatch ids."""
+    calls = payload.get("tool_calls") or []
+    if not calls or not all(isinstance(call, dict) for call in calls):
+        return None
+    kept_calls, removed = [], 0
+    for call in calls:
+        call_id = str(call.get("id") or "")
+        owners = dispatches.get(call_id, []) if call_id else []
+        if len(owners) == 1 and owners[0].get("event_id") in consumed:
+            removed += 1
+            continue
+        kept_calls.append(call)
+    if not removed:
+        return None
+    reduced = {key: value for key, value in payload.items() if key != "tool_calls"}
+    if kept_calls:
+        reduced["tool_calls"] = kept_calls
+    return reduced
+
+
+def _binding_projection(
+    messages: list[dict],
+    events: list[dict],
+    eligible_ids: set[int] | None,
+    consumed: frozenset[int],
+) -> list[Any] | None:
+    """Detached canonical presentations for placement, never coverage or installation.
+
+    A reduced payload must match exactly one eligible canonical round after
+    deleting only proven-consumed calls and checking its recorded end identity.
+    """
+    if not consumed or not messages:
+        return _with_metadata(messages)
+    dispatches: dict[str, list[dict]] = {}
+    for event in events:
+        if event.get("type") not in ("tool_call", "subagent_call"):
+            continue
+        if eligible_ids is not None and event.get("event_id") not in eligible_ids:
+            continue
+        if provider := _provider_id(event):
+            dispatches.setdefault(provider, []).append(event)
+    identities = assistant_round_identities(events, eligible_ids)
+    rounds = [
+        (Message.from_dict(payload).to_dict(), members)
+        for start, payload in assistant_round_messages(events, eligible_ids).items()
+        if isinstance(payload, dict) and (members := identities.get(start))
+    ]
+    converted = dicts_to_messages(messages)
+    records: list[dict] = []
+    for data, message in zip(messages, converted):
+        metadata = data.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        payload = message.to_dict()
+        if message.role != "assistant" or metadata.get("compact_summary"):
+            records.append(data)
+            continue
+        end = metadata.get("event_id")
+        candidates = [
+            (body, members)
+            for body, members in rounds
+            if type(end) is not int or end <= 0 or end == members[-1]
+        ]
+        if any(payload == round_payload for round_payload, _ in candidates):
+            records.append(data)
+            continue
+        reduced = [
+            round_payload
+            for round_payload, _ in candidates
+            if _reduced_payload(round_payload, dispatches, consumed) == payload
+        ]
+        if not reduced:
+            records.append(data)
+            continue
+        if len(reduced) != 1:
+            return None
+        records.append({**reduced[0], "metadata": metadata})
+    return _with_metadata(records)
+
+
 def place_repaired_messages(
     messages: list[dict],
     repaired: list[dict],
     events: list[dict],
     *,
     eligible_ids: set[int] | None = None,
+    consumed_call_event_ids: frozenset[int] | set[int] = frozenset(),
 ) -> list[dict] | None:
-    """Insert restored rounds using the same message identities as capture."""
+    """Insert restored rounds using the same message identities as capture.
+
+    ``consumed_call_event_ids`` are the dispatch events a retained summary's
+    proven consumption names; a kept round may then be reduced by exactly those
+    calls, which still proves its identity and order but is never restored.
+    Restored rounds stay fully strict, and the merged order is re-proven.
+    """
     if not repaired:
         return list(messages)
     path = {
@@ -208,8 +308,12 @@ def place_repaired_messages(
         for event in events
         if eligible_ids is None or event.get("event_id") in eligible_ids
     }
-    kept = resolve_message_bindings(events, path, dicts_to_messages(messages))
-    restored = resolve_message_bindings(events, path, dicts_to_messages(repaired))
+    consumed = frozenset(consumed_call_event_ids)
+    projection = _binding_projection(messages, events, eligible_ids, consumed)
+    if projection is None:
+        return None
+    kept = resolve_message_bindings(events, path, projection)
+    restored = resolve_message_bindings(events, path, _with_metadata(repaired))
     if kept is None or restored is None:
         return None
     anchors = kept[2]
@@ -229,6 +333,7 @@ def place_repaired_messages(
         merged.append(message)
     for group in groups[pending:]:
         merged.extend(group)
-    if resolve_message_bindings(events, path, dicts_to_messages(merged)) is None:
+    shadow = _binding_projection(merged, events, eligible_ids, consumed)
+    if shadow is None or resolve_message_bindings(events, path, shadow) is None:
         return None
     return merged

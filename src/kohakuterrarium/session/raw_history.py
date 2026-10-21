@@ -198,15 +198,18 @@ def append_user_event_pair(
     turn_index: int | None,
     branch_id: int | None,
     parent_branch_path: list[tuple[int, int]] | None,
-) -> None:
+) -> int | None:
     """Append the canonical ``user_input`` + ``user_message`` pair.
 
     Both records run as one affinity-thread unit so a cancelled turn can
     never persist half the pair (the raw-history editor and replay both
-    key off the ``user_message`` half).
+    key off the ``user_message`` half). Returns the recorded
+    ``user_message`` event id so a caller that already replayed the raw
+    prefix can keep its in-memory copy on the same identity.
     """
+    recorded_id: int | None = None
     for event_type in ("user_input", "user_message"):
-        store.append_event(
+        _, event_id = store.append_event(
             agent_name,
             event_type,
             dict(payload),
@@ -214,3 +217,6 @@ def append_user_event_pair(
             branch_id=branch_id,
             parent_branch_path=parent_branch_path,
         )
+        if event_type == "user_message":
+            recorded_id = event_id
+    return recorded_id

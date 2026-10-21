@@ -2,116 +2,109 @@
 
 ## Scope
 
-- Worktree: `.worktrees/stable-compact-prefix`; branch: `fix/stable-compact-prefix`.
-- Base: `2923507c`. Committed slices: `ca5cc3b9` (checkpoint reconstruction and
-  branch mutations), `564e36b7` (precise capture binding).
-- Current work addresses the review of `564e36b7`, without commits, pushes,
-  dependency changes or operations on private/live sessions.
-- Earlier investigation and acceptance counts are historical, not evidence for
-  the current changes. The old pre-rebuild tip remains in
-  `backup/stable-compact-prefix-b0e39f31`.
+- Worktree `.worktrees/stable-compact-prefix`, branch `fix/stable-compact-prefix`.
+- Base `2923507c`; committed slices `ca5cc3b9`, `564e36b7`, `abf295a3`.
+- Current uncommitted work addresses `REVIEW_abf295a3.md`: reduced checkpoint
+  placement, internal metadata preservation, and default rerun after settlement.
+- No push, dependency change, live-session operation or budget increase. The
+  frozen incident evidence is read offline; no private content is copied into tests.
 
-## Continuous-use contract
+## Contract
 
 - Editing an uncompressed tail retains its compatible summary. Editing consumed
-  input excludes the dependent summary. No restoration executes old tools.
-- Unknown input provenance stays unknown. A summary can inherit structural
-  replacement coverage only from a proven compatible completion; unknown source
-  does not imply either zero coverage or invented known provenance.
-- Missing dependencies are restored as complete canonical rounds with uniquely
-  owned settled results. Restored identities and placement must also be usable by
-  the next compaction, not merely the next model request.
-- Retained/re-attached user input and unconsumed results remain outside replacement
-  coverage. Late settlement does not change the call's ordering identity.
-- Preparation remains detached; installation occurs under the existing mutation
-  guard. Refusals cannot cross a clear cutoff or mutate the rejected candidate's
-  conversation, snapshots or selected branch. Configured budgets are not raised.
+  input excludes the dependent summary. Restoration never executes old tools.
+- Unknown input provenance stays unknown. Structural replacement coverage is
+  inherited only from a proven compatible completion, with exact completion identity.
+- Missing dependencies are restored as complete canonical rounds and uniquely
+  owned settled results; original canonical identities and ordering are retained.
+- **Placement is not coverage:** a checkpoint may legitimately omit calls whose
+  results its retained summary explicitly consumed. Such a reduced round must not
+  be expanded or rejected merely because it differs from complete raw history.
+- Placement may use a detached full-canonical presentation only after exact
+  remaining-payload equality, eligibility and end-identity checks, and only for
+  calls whose dispatch identities were validated by the retained summary proof.
+  This presentation is never installed or returned as newly consumed coverage.
+  The capture resolver's full-payload checks remain unchanged.
+- Persisted internal message metadata survives placement conversion; it does not
+  become provider wire. Event identity, job composition, turn/branch and settled
+  result identity must not disappear at this boundary.
+- Rerun reads the original input associated with the post-refresh retained message,
+  using the producer's existing exact content-composition relation. New branch
+  persistence returns its user-event identity and the retained message adopts it.
+  Unrecorded live wording is re-recorded without composing a banner twice.
+- Clear cutoffs, branch lineage, uniquely owned results and configured admission
+  limits remain enforced. Preparation stays detached; no alternate raw path can
+  resurrect cleared or explicitly consumed records.
 
-## Review fixes
+## Implementation boundaries
 
-1. **Repeated unknown summary:** capture now reuses the existing checkpoint
-   completion proof. It validates identity, lineage, ordering bounds and consumed
-   results, while preserving `compact_source_path=None`. Earlier completion
-   markers whose coverage is already wholly represented are accounted for too.
-   Canonical captures with no safe range skip before summarization regardless of
-   source certainty; malformed source declarations do not become unknown provenance.
-2. **Default job context:** producer records its exact job-status prefix in message
-   metadata. Producer and binder share the content composition function; binding
-   still compares the complete reconstructed input and checks branch/event identity.
-   It does not strip guessed prefixes, accept substrings or bypass content checks
-   for an explicit id. Captured and retained messages use the same relation.
-3. **Repair identity and placement:** projected repairs name the canonical end, as
-   normal replay does. Repair placement and capture share `resolve_message_bindings`
-   instead of maintaining separate payload matching rules. Groups go before their
-   later kept neighbours even when results settled late; repeated replies are
-   disambiguated by the same neighbouring input identities as capture.
-4. **Ambiguity scope:** only recovered providers need unique provider/job mappings;
-   their result jobs still require unique ownership across the whole event log.
-   Unrelated future sibling aliases do not reject a valid group. Off-path settled
-   results of a retained ancestor call are not discarded.
+- `snapshot_history.py` supplies only proof-validated consumed dispatch identities,
+  including validated consumption from known-source summaries.
+- `snapshot_repair.py` preserves internal metadata and recognizes the bounded
+  consumed-call reduction. Existing canonical round readers and strict binder
+  still validate identity/order. Unrelated identical bodies cannot override an
+  explicit canonical end identity.
+- `agent_message_history.py` owns recorded-input lookup; `agent_messages.py` invokes
+  it after settled-prefix restoration. `append_user_event_pair` returns the new
+  persisted `user_message` id without adding writes or event types.
+- No generic provenance system, database migration or new frontend behavior.
 
-`compact_lineage.py` only extracts existing path readers to remove the import
-cycle between capture and checkpoint proof. No general provenance framework,
-persisted event type, database migration or frontend behavior was added.
+## Regression coverage
 
-## Repository regression coverage
+Existing snapshot fixtures now exercise:
+- proven reduced body retained while a different missing round is restored;
+- no consumed call/result resurrection and repeated preparation without growth;
+- known/unknown source, wrong end identity, changed body, absent/foreign proof;
+- identical body elsewhere with an unambiguous recorded end;
+- job-context and repeated-input identities surviving internal conversion.
 
-The existing `test_history_ops` workflow now includes:
-- known S1 → unknown S2 → S3 → tail edit → branch round trips → cold resume;
-- default `include_job_status=True` while a background job runs, followed by job
-  settlement, compaction and existing replay/cold-history checks;
-- public checkpoint repair → repeat edit → branch switch → compact → tail edit,
-  with original tool execution count and provider pairing unchanged.
+The existing background-tool block in `test_history_ops` now covers both with and
+without default rerun after settlement, then compaction. Its cold continuation
+uses the recorded rerun ancestry. Unit tail-rerun tests cover text and multimodal
+content, two successive retries, fresh event identity and single banner composition.
+The earlier S1/S2/S3, repair→compact→edit and branch/cold workflows remain intact.
 
-Existing unit fixtures cover canonical-end identity, unrelated alias versus
-shared relevant-job rejection, ordering with late results/repeated replies,
-text/multimodal prefix equality and tampering, retained-user exclusion, malformed
-source rejection and known/unknown unproven-capture terminal behavior.
+## Current evidence
 
-Observed red tests preceded the fixes. In particular the new repair→compact
-workflow exposed an additional order reversal after the end-id fix; two placement
-regressions then exposed settlement-based ordering and repeated-text ambiguity.
-Those failures drove reuse of the capture resolver rather than new exemptions.
-
-## Verification status
-
-- Focused capture/repair/history workflow: **179 passed** before the final
-  malformed-source cases. Their two new negative cases failed, then were fixed.
-- Focused run including file-size guards: **2,384 passed, 1 failed** because the
-  shared resolver file reached 610 lines. Its obsolete module rationale was reduced
-  to a responsibility description; it is now 600 lines, without an allowlist change.
-- First full run: **18,822 unit passed / 40 skipped**, **179 integration passed**,
-  **84 e2e passed**, **2,553 Vitest passed** (277 files).
-- Independent audit found an earlier-completion identity borrowing bug despite
-  that green run. A public-range regression failed first; the proof now returns
-  its selected completion id and capture checks the exact candidate id. Both
-  cases and the existing history/proof tests pass (**114 passed**). Bounded
-  independent re-audit found no unresolved blocker in this delta.
-- Final full backend run after the identity fix: **18,824 unit passed / 40 skipped**,
-  **179 integration passed**, **84 e2e passed**. Reports are in
-  `temp/stable-compact-takeover/review-final-{unit,integration,e2e}.xml` in the main
-  checkout. Frontend source is unchanged; **2,553 Vitest tests**,
-  `npm run format:check` and `npm run build` passed in this review-fix pass.
-- Black check over `src/ tests/`, Ruff and `git diff --check` passed. Black reports
-  its Python 3.14/3.15 target safety warning; no formatter safety bypass was used.
-  No file-size allowlist or test timeout was relaxed.
-- Reviewer evidence scripts `composition-probes.py` and `job-banner-probe.py`:
-  **4 passed** against the modified worktree. Initial launches failed on Windows
-  path conversion and then missing project asyncio configuration; explicit
-  Windows PYTHONPATH and `-c pyproject.toml` resolved test discovery/configuration,
-  without editing the evidence scripts or assertions.
-- Focused coverage run: **362 passed**, aggregate **95%**. Binding and repair are
-  **96%** each, controller context **100%**; capture **94%**, prefix proof **91%**,
-  extracted lineage readers **85%** in this selection. These are not full-suite
-  coverage figures and do not replace the continuous-use assertions.
+- Red-first: review metadata probe failed both cases; reduced-round preparation
+  and rerun tests failed before their fixes. Independent audit's duplicate-body
+  finding failed both source variants, then passed after identity-first filtering.
+- Original frozen incident, watermark **60882**, target **60870 / 113 / 1**:
+  **239 original → 280 candidate/final messages**, **80,523 text tokens**, unchanged
+  **256,000** budget, **round 11** retained. Preparation leaves conversation/state/
+  events unchanged; installation preserves Conversation identity; repeated prepare
+  produces the same messages. No active database or external provider was used.
+  Output: `%TEMP%/kt-rereview-fix-check-uh_nmfgw/incident-current.json`.
+- New review probes plus previous composition/job probes: **8 passed**, unchanged
+  scripts against current source with explicit Windows PYTHONPATH and project
+  pytest configuration.
+- File-size guard initially caught `agent_messages.py` at 631 lines. Recorded-input
+  lookup was moved into the existing history-lookup module. No allowlist change.
+  Guard + snapshot/agent-message unit checks: **2,414 passed**.
+- Black check over `src/ tests/`, Ruff and `git diff --check` passed. Black retains
+  its Python 3.14/3.15-target warning; no safety bypass was used.
+- Final bounded independent review found no additional confirmed defect after the
+  duplicate-body correction. It was read-only and did not rerun test tiers.
+- Current full backend run: **18,840 unit passed / 40 skipped**, **179 integration
+  passed**, **84 e2e passed**. Reports: main checkout
+  `temp/stable-compact-takeover/rereview-{unit,integration,e2e}.xml`.
+- Initial Vitest run with four workers: **2,551 passed / 2 timed out** at the
+  unchanged palette scan and dynamic panel import (5 seconds). Isolated checks:
+  **9 passed**; complete single-worker run: **277 files / 2,553 passed**.
+  No assertions, timeouts, dependencies or frontend code changed. Reduced resource
+  contention is consistent with the results but is not a proven root cause.
+  Frontend `format:check` and production build passed. Build warnings include
+  component naming conflicts, mixed static/dynamic imports and large chunks.
+- Commit preflight repeated snapshot/agent-message units and the history integration
+  workflow: **211 passed**.
 
 ## Evidence limits
 
-- No private incident database or full conversation was used or modified in this
-  review-fix pass. Prior incident results remain historical evidence only.
-- Historical banner-prefixed snapshots lacking captured prefix metadata are not
-  guessed or migrated; ambiguous histories still refuse exact capture.
-- Unknown-source summaries remain checkpoint-based, not generally eligible raw
-  replay replacements. Structural inheritance does not establish their input source.
-- Provider transport in repository workflows is scripted/MockTransport; successful
-  framework admission does not guarantee an external provider accepts every prompt.
+- The original incident was checked at actual preparation/admission/installation,
+  not a complete public edit/cold-resume against that private conversation.
+- Reduced-round placement proves order, not arbitrary raw replacement coverage;
+  success does not itself make every legacy reduced checkpoint compactable.
+- Historical banner-prefixed messages without composition metadata are not guessed
+  or migrated during capture. Strict capture remains conservative.
+- Repository workflows use scripted providers/MockTransport; admission is not a
+  guarantee that every external provider accepts the resulting request.

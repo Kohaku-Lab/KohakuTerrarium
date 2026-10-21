@@ -2357,3 +2357,281 @@ def test_repaired_round_refuses_an_unprovable_neighbour() -> None:
         {"role": "assistant", "content": "UNRECORDED_TAIL"},
     ]
     assert place_repaired_messages(kept, repaired, events) is None
+
+
+_REDUCED_BODY = "reduced canonical body"
+
+
+def _reduced_summary_events(
+    *,
+    consumed_result_ids: tuple[int, ...] = (6,),
+    end_id: int = 3,
+    body: str = _REDUCED_BODY,
+    known_source: bool = False,
+) -> tuple[list[dict], list[dict]]:
+    """A summary that consumed one call, plus a missing round.
+
+    The retained checkpoint keeps the consumed round's canonical body without
+    its call, and the untouched second round still has to be restored. The
+    summary source path stays unknown unless ``known_source`` records it.
+    """
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "raw_u1",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 2,
+            "type": "assistant_round_start",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 3,
+            "type": "assistant_message",
+            "round_start_event_id": 2,
+            "message": {
+                "role": "assistant",
+                "content": _REDUCED_BODY,
+                "tool_calls": [
+                    {
+                        "id": "call-late",
+                        "type": "function",
+                        "function": {"name": "echo", "arguments": "{}"},
+                    }
+                ],
+            },
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 4,
+            "type": "tool_call",
+            "call_id": "late-job",
+            "tool_call_id": "call-late",
+            "name": "echo",
+            "args": {},
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 5,
+            "type": "user_message",
+            "content": "raw_u2",
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 6,
+            "type": "tool_result",
+            "call_id": "late-job",
+            "name": "echo",
+            "output": "consumed result",
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        _completion(7, replaced=(1, 6), result_ids=list(consumed_result_ids)),
+        *_two_call_round(8, 9, "call-9"),
+        *_call_pair(10, "call-9", "job-9", "RESULT_9"),
+        {
+            "event_id": 12,
+            "type": "user_message",
+            "content": "orig_u3",
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+        {
+            "event_id": 13,
+            "type": "text",
+            "content": "orig_a3",
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+        {
+            "event_id": 14,
+            "type": "user_message",
+            "content": "edited_u3",
+            "turn_index": 3,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+    ]
+    summary = copy.deepcopy(_SUMMARY_MESSAGE)
+    if known_source:
+        summary["metadata"]["compact_source_path"] = [[1, 1], [2, 1]]
+    messages = [
+        summary,
+        {
+            "role": "user",
+            "content": "raw_u1",
+            "metadata": {"event_id": 1, "turn_index": 1, "branch_id": 1},
+        },
+        {
+            "role": "assistant",
+            "content": body,
+            "metadata": {"event_id": end_id, "turn_index": 1, "branch_id": 1},
+        },
+    ]
+    return events, messages
+
+
+@pytest.mark.parametrize("known_source", [False, True])
+@pytest.mark.parametrize("same_body_elsewhere", [False, True])
+def test_prepare_snapshot_preserves_a_proven_reduced_round(
+    store: SessionStore, known_source: bool, same_body_elsewhere: bool
+) -> None:
+    """A summary-consumed call may be absent while its round stays recorded."""
+    events, messages = _reduced_summary_events(known_source=known_source)
+    if same_body_elsewhere:
+        events.extend(
+            [
+                {
+                    "event_id": 20,
+                    "type": "assistant_round_start",
+                    "turn_index": 2,
+                    "branch_id": 1,
+                },
+                {
+                    "event_id": 21,
+                    "type": "assistant_message",
+                    "round_start_event_id": 20,
+                    "turn_index": 2,
+                    "branch_id": 1,
+                    "message": {
+                        "role": "assistant",
+                        "content": messages[-1]["content"],
+                    },
+                },
+            ]
+        )
+    _save_unknown_summary(store, 21 if same_body_elsewhere else 11, messages)
+    outcome = _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3)
+    assert outcome is not None
+    restored = outcome["messages"]
+    contents = [message.get("content") for message in restored]
+    # The untouched missing round is restored with its result...
+    assert "CHUNKED ANSWER" in contents
+    assert "RESULT_9" in contents
+    # ...while the consumed call and its consumed result stay represented only
+    # by the retained summary.
+    assert "consumed result" not in contents
+    assert all(
+        "call-late" not in [call.get("id") for call in message.get("tool_calls") or []]
+        for message in restored
+    )
+    assert [message.get("content") for message in restored[:2]] == [
+        messages[0]["content"],
+        "raw_u1",
+    ]
+    # Repeating the preparation is stable and does not re-add the consumed call.
+    again = _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3)
+    assert again is not None and again["messages"] == restored
+    # Placement reconstructs the reduced round, but plain capture must not:
+    # the retained body does not by itself prove the consumed identity.
+    assert (
+        resolve_capture_ids(
+            events,
+            {(1, 1), (2, 1)},
+            build_conversation(copy.deepcopy(messages)).get_messages(),
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "case", ["changed-body", "wrong-end-id", "unproven-consumption"]
+)
+def test_prepare_snapshot_refuses_unproven_reduced_round(
+    store: SessionStore, case: str
+) -> None:
+    """Only a provably consumed call may be missing from a kept round."""
+    overrides = {
+        "changed-body": {"body": "EDITED BODY"},
+        "wrong-end-id": {"end_id": 9},
+        "unproven-consumption": {"consumed_result_ids": ()},
+    }[case]
+    events, messages = _reduced_summary_events(**overrides)
+    _save_unknown_summary(store, 11, messages)
+    assert _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3) is None
+
+
+@pytest.mark.parametrize("known_source", [False, True])
+@pytest.mark.parametrize("case", ["wrong-source", "missing-proof"])
+def test_prepare_snapshot_refuses_reduced_round_without_valid_proof(
+    store: SessionStore, case: str, known_source: bool
+) -> None:
+    """A reduced round may only borrow a completion's proven consumption."""
+    events, messages = _reduced_summary_events(known_source=known_source)
+    completion = next(event for event in events if event["type"] == "compact_complete")
+    if case == "wrong-source":
+        completion["compact_source_path"] = [[1, 2]]
+    else:
+        events.remove(completion)
+    _save_unknown_summary(store, 11, messages)
+    assert _prepare(store, events, {1: 1, 2: 1, 3: 1}, before_turn=3) is None
+
+
+@pytest.mark.parametrize("case", ["banner", "repeated-input"])
+def test_repair_placement_retains_internal_metadata(case: str) -> None:
+    """Placement keeps the metadata that proves an existing prefix message."""
+    events, repaired = _repaired_round_before_final_assistant()
+    kept = _kept_prefix_with_final_assistant()
+    kept[1]["metadata"]["event_id"] = 2
+    if case == "banner":
+        banner = "## Running Jobs\n- fixture task running"
+        kept[1]["content"] = f"{banner}\n\n{kept[1]['content']}"
+        kept[1]["metadata"]["job_context"] = banner
+    else:
+        events.extend(
+            [
+                {
+                    "event_id": 20,
+                    "type": "user_message",
+                    "content": "produce OLD",
+                    "turn_index": 2,
+                    "branch_id": 1,
+                    "parent_branch_path": [[1, 1]],
+                },
+                {
+                    "event_id": 21,
+                    "type": "assistant_round_start",
+                    "turn_index": 2,
+                    "branch_id": 1,
+                    "parent_branch_path": [[1, 1]],
+                },
+                {
+                    "event_id": 22,
+                    "type": "assistant_message",
+                    "round_start_event_id": 21,
+                    "turn_index": 2,
+                    "branch_id": 1,
+                    "parent_branch_path": [[1, 1]],
+                    "message": {"role": "assistant", "content": "second reply"},
+                },
+            ]
+        )
+        kept.extend(
+            [
+                {
+                    "role": "user",
+                    "content": "produce OLD",
+                    "metadata": {"event_id": 20, "turn_index": 2, "branch_id": 1},
+                },
+                {
+                    "role": "assistant",
+                    "content": "second reply",
+                    "metadata": {"event_id": 22, "turn_index": 2, "branch_id": 1},
+                },
+            ]
+        )
+    before = copy.deepcopy((events, kept, repaired))
+    merged = place_repaired_messages(kept, repaired, events)
+    assert merged == [*kept[:2], *repaired, *kept[2:]]
+    assert (events, kept, repaired) == before

@@ -14,8 +14,13 @@ from kohakuterrarium.core.agent_message_history import (
 )
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.compact_splice import splice_conversation
+from kohakuterrarium.core.controller_context import (
+    JOB_CONTEXT_METADATA_KEY,
+    recorded_content_matches,
+)
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.errors import ConflictError
+from kohakuterrarium.llm.message import ImagePart, TextPart, content_parts_to_dicts
 from kohakuterrarium.session.history import InvalidBranchViewError
 from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.session.store import SessionStore
@@ -426,6 +431,72 @@ class TestRegenerateLastResponse:
         assert agent._rerun_calls
         # branch_id bumped past existing.
         assert agent._branch_id >= 2
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "u1",
+            content_parts_to_dicts(
+                [TextPart(text="u1"), ImagePart(url="data:image/png;base64,QQ==")]
+            ),
+        ],
+        ids=["text", "multimodal"],
+    )
+    async def test_tail_rerun_records_the_resent_input_on_every_branch(
+        self, agent, content
+    ):
+        agent._apply_user_input(content)
+        agent._emit_assistant("a1")
+        expected_wire = agent.controller.conversation.get_messages()[0].to_dict()[
+            "content"
+        ]
+        recorded = self._user_message_events(agent)
+        for branch in (2, 3):
+            await agent.regenerate_last_response()
+            rerun = self._user_message_events(agent)[-1]
+            retained = next(
+                message
+                for message in agent.controller.conversation.get_messages()
+                if message.role == "user"
+                and message.metadata.get("branch_id") == branch
+            )
+            assert (rerun["turn_index"], rerun["branch_id"]) == (1, branch)
+            assert rerun["event_id"] > recorded[-1]["event_id"]
+            assert rerun["content"] == expected_wire
+            assert retained.to_dict()["content"] == expected_wire
+            assert retained.metadata["event_id"] == rerun["event_id"]
+            recorded.append(rerun)
+
+    async def test_unrecorded_banner_input_is_resent_once(self, agent):
+        job = "## Running Jobs\n\n- slowbg"
+        conv = agent.controller.conversation
+        agent._turn_index, agent._branch_id = 1, 1
+        message = conv.append("user", f"{job}\n\nsecond")
+        message.metadata.update(
+            turn_index=1, branch_id=1, **{JOB_CONTEXT_METADATA_KEY: job}
+        )
+        agent._emit_assistant("a1")
+        await agent.regenerate_last_response()
+        first = self._user_message_events(agent)[-1]
+        retained = conv.get_messages()[0]
+        assert retained.role == "user"
+        assert first["content"] == f"{job}\n\nsecond"
+        assert JOB_CONTEXT_METADATA_KEY not in retained.metadata
+        assert recorded_content_matches(
+            retained.metadata, retained.to_dict()["content"], first["content"]
+        )
+        await agent.regenerate_last_response()
+        second = self._user_message_events(agent)[-1]
+        assert second["content"] == first["content"]
+        assert second["event_id"] > first["event_id"]
+
+    @staticmethod
+    def _user_message_events(agent):
+        return [
+            event
+            for event in agent.session_store.get_events("alice")
+            if event["type"] == "user_message"
+        ]
 
     async def test_regenerate_unknown_turn_logs(self, agent):
         agent._apply_user_input("hi")

@@ -43,6 +43,8 @@ Compaction changes the live prompt and writes a fast-resume snapshot, but it doe
 
 A compatible checkpoint can lack some tool-call relationships without requiring the entire history to be expanded. When the selected prefix and summary are provably reusable, reconstruction can preserve them and insert only missing complete canonical assistant rounds with their uniquely owned, settled results at proven positions. Restored rounds use the same canonical identity and ordering rules as subsequent compaction. It does not rerun those tools or claim that the summary consumed the restored records. Incomplete old consumption records may leave some factual overlap between the summary and these traceable additions; zero additional messages is not guaranteed.
 
+Placement and replacement coverage have different proof requirements. A retained checkpoint message may omit a tool call whose result a retained summary explicitly consumed. Placement accepts that reduction only when the remaining full payload and canonical identity match after removing precisely those proven-consumed calls; it does not reinstall the removed calls or claim new compact coverage. Internal event, branch and job-context metadata is retained during this check and stays out of provider wire messages.
+
 Local completion rejects a candidate when:
 
 - its source lineage conflicts with the selected branch or the target boundary;
@@ -54,7 +56,7 @@ Other proven checkpoints may be tried before raw reconstruction. Once a rejected
 
 ### Multimodal edit, regenerate, and branch
 
-When history is stable, editing and regenerating a user turn rebuild its original text, image, and file parts from the event log. Regenerating reuses those parts; an edit supplies the new part list and opens a sibling branch. Continuing an older branch uses that branch's history and compatible snapshots, including after resume. In Studio, editing only the text retains attachments; deleting or replacing one affects only the new branch.
+When history is stable, editing and regenerating a user turn rebuild its original text, image, and file parts from the event log. Regenerating reuses those parts; an edit supplies the new part list and opens a sibling branch. A default tail retry after settled-history refresh records the input associated with the refreshed message and binds that message to the new branch's user-event identity; it does not persist a stale pre-refresh task banner as the original input. Continuing an older branch uses that branch's history and compatible snapshots, including after resume. In Studio, editing only the text retains attachments; deleting or replacing one affects only the new branch.
 
 Saved assistant messages and settled tool results retain their structured content and call/result pairing. A failed tool may return diagnostic media or partial files; its saved output remains structured, with error and exit status recorded separately. Replaying a settled result does not execute the tool again. Different generated image bytes use different artifact paths, so a new sibling does not overwrite the earlier generated image. A settled background result is available to compatible branches that retain its call, but not to a branch that excludes that call; saving a result does not itself continue an unselected branch.
 

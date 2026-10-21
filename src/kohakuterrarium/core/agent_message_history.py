@@ -5,6 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from kohakuterrarium.core.branch_conversation import build_branch_conversation
+from kohakuterrarium.core.controller_context import recorded_content_matches
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.conversation_elide import (
     ELISION_MARKER,
@@ -26,6 +27,7 @@ from kohakuterrarium.core.snapshot_history import (
     replayed_compact_state,
 )
 from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.session.history import (
     compact_covered_event_ids,
     normalize_resumable_events,
@@ -37,6 +39,38 @@ from kohakuterrarium.session.history import (
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def recorded_turn_input(agent: Any, message: Any) -> Any:
+    """Original input uniquely bound to a live turn root, or None if unrecorded."""
+    metadata = dict(getattr(message, "metadata", None) or {})
+    turn, branch = metadata.get("turn_index"), metadata.get("branch_id")
+    if agent.session_store is None or type(turn) is not int or type(branch) is not int:
+        return None
+    events = agent.session_store.get_events(agent.config.name)
+    explicit = metadata.get("event_id")
+    if type(explicit) is int:
+        named = [event for event in events if event.get("event_id") == explicit]
+        if named and (
+            len(named) != 1
+            or named[0].get("type") != "user_message"
+            or named[0].get("turn_index") != turn
+            or named[0].get("branch_id") != branch
+        ):
+            raise ConflictError(
+                f"Recorded event {explicit} is not the input of turn {turn} branch {branch}"
+            )
+    live = message.to_dict().get("content")
+    recorded = [
+        event
+        for event in events
+        if event.get("type") == "user_message"
+        and event.get("turn_index") == turn
+        and event.get("branch_id") == branch
+        and (type(explicit) is not int or event.get("event_id") == explicit)
+        and recorded_content_matches(metadata, live, event.get("content"))
+    ]
+    return recorded[0].get("content") if len(recorded) == 1 else None
 
 
 def resolve_edit_message_index(

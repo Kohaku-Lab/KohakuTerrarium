@@ -3250,113 +3250,163 @@ class TestCoreIntegration:
             assert echo.calls == 2
             assert bg.calls == 1
 
-        compact_bg = _SlowBackgroundTool(gated=True)
-        compact_bg.config.notify_controller_on_background_complete = True
-        compact_llm = _HistoryReplayLLM(
-            True,
-            plan=[
-                [NativeToolCall("b1", "slowbg", "{}")],
-                "launched",
-                "completion done",
-                "third done",
-                "fourth done",
-            ],
-        )
-        async with Terrarium(session_dir=tmp_path / "compact-cold") as engine:
-            creature = await engine.add_creature(
-                AgentConfig(
-                    name="compactcold", system_prompt="plain", tool_format="native"
-                ),
-                llm=compact_llm,
-                tools=[compact_bg],
-                io="headless",
-                pwd=tmp_path,
-                start=True,
+        # The default job banner is composed per request; a later retry after
+        # the job settles must still compact the settled history.
+        for rerun_after_settle in (False, True):
+            compact_bg = _SlowBackgroundTool(gated=True)
+            compact_bg.config.notify_controller_on_background_complete = True
+            compact_llm = _HistoryReplayLLM(
+                True,
+                plan=[
+                    [NativeToolCall("b1", "slowbg", "{}")],
+                    "launched",
+                    "completion done",
+                    *(["rerun done"] if rerun_after_settle else []),
+                    "third done",
+                    "fourth done",
+                ],
             )
-            agent = creature.agent
-            assert agent.controller.config.include_job_status is True
-            try:
-                await creature.run("launch", timeout=8)
-                await asyncio.wait_for(compact_bg.started.wait(), 2)
-                await creature.run("second", timeout=8)
-                second = next(
-                    m
-                    for m in agent.controller.conversation.get_messages()
-                    if m.role == "user" and "second" in str(m.content)
-                )
-                assert "## Running Jobs" in second.content
-                async with creature.attach() as stream:
-                    compact_bg.release.set()
-                    while True:
-                        event = await asyncio.wait_for(anext(stream), 8)
-                        if (
-                            isinstance(event, Activity)
-                            and event.kind == "processing_end"
-                        ):
-                            break
-                completion = agent._turn_completion
-                if completion is not None:
-                    await asyncio.wait_for(asyncio.shield(completion), 8)
-                assert (
-                    agent.controller.conversation.get_last_assistant_message().content
-                    == "completion done"
-                )
-                await creature.run("third", timeout=8)
-                await creature.run("fourth", timeout=8)
-                await agent._session_output.drain()
-
-                manager = agent.compact_manager
-                manager.config.keep_recent_turns = 1
-                summary_llm = ScriptedLLM(["summary OLD_LAUNCH"])
-                manager._llm = summary_llm
-                assert manager.trigger_compact()
-                await asyncio.wait_for(manager.wait_for_current(), 8)
-                await agent._session_output.drain()
-                assert manager._compact_count == 1
-                compacted = prefix(agent.controller.conversation.to_messages())
-                assert compacted == [
-                    (
-                        "assistant",
-                        "[Previous context summary (compact round 1)]\n\nsummary OLD_LAUNCH",
+            async with Terrarium(
+                session_dir=tmp_path / f"compact-cold-{rerun_after_settle}"
+            ) as engine:
+                creature = await engine.add_creature(
+                    AgentConfig(
+                        name="compactcold", system_prompt="plain", tool_format="native"
                     ),
-                    ("user", "fourth"),
-                    ("assistant", "fourth done"),
-                ]
-
-                raw = agent.session_store.get_events("compactcold")
-                compact_event = [
-                    event for event in raw if event["type"] == "compact_complete"
-                ][-1]
-                assert summary_llm.call_count == 1
-                assert "## Running Jobs" in str(summary_llm.last_messages)
-                assert compact_event["summary"] == "summary OLD_LAUNCH"
-                assert compact_event["compact_source_path"] == [
-                    [t, 1] for t in range(1, 4)
-                ]
-                tool_events = [
-                    event
-                    for event in raw
-                    if event["type"] in ("tool_call", "tool_result")
-                ]
-                assert [event["type"] for event in tool_events] == [
-                    "tool_call",
-                    "tool_result",
-                ]
-                for event in tool_events:
-                    assert (
-                        compact_event["replaced_from_event_id"]
-                        <= event["event_id"]
-                        <= compact_event["replaced_to_event_id"]
-                    ), event
-                assert compact_event["replaced_to_event_id"] < compact_event["event_id"]
-                assert (
-                    load_persisted_branch_view(agent.session_store, "compactcold")
-                    is None
+                    llm=compact_llm,
+                    tools=[compact_bg],
+                    io="headless",
+                    pwd=tmp_path,
+                    start=True,
                 )
-                compact_path = agent.session_store.path
-                raw_before_resume = list(raw)
-            finally:
-                compact_bg.release.set()
+                agent = creature.agent
+                assert agent.controller.config.include_job_status is True
+                try:
+                    await creature.run("launch", timeout=8)
+                    await asyncio.wait_for(compact_bg.started.wait(), 2)
+                    await creature.run("second", timeout=8)
+                    second = next(
+                        m
+                        for m in agent.controller.conversation.get_messages()
+                        if m.role == "user" and "second" in str(m.content)
+                    )
+                    assert "## Running Jobs" in second.content
+                    async with creature.attach() as stream:
+                        compact_bg.release.set()
+                        while True:
+                            event = await asyncio.wait_for(anext(stream), 8)
+                            if (
+                                isinstance(event, Activity)
+                                and event.kind == "processing_end"
+                            ):
+                                break
+                    completion = agent._turn_completion
+                    if completion is not None:
+                        await asyncio.wait_for(asyncio.shield(completion), 8)
+                    assert (
+                        agent.controller.conversation.get_last_assistant_message().content
+                        == "completion done"
+                    )
+                    turn2_raw = [
+                        event
+                        for event in agent.session_store.get_events("compactcold")
+                        if event["type"] == "user_message" and event["turn_index"] == 2
+                    ]
+                    assert [
+                        (event["branch_id"], event["content"]) for event in turn2_raw
+                    ] == [(1, "second")]
+                    if rerun_after_settle:
+                        # Retrying the settled turn must re-record the input the
+                        # live message and the refreshed prefix actually resend —
+                        # never the runtime job banner composed at request time —
+                        # and the new branch must carry its own event identity.
+                        await agent.regenerate_last_response()
+                        await agent._session_output.drain()
+                        retried_raw = [
+                            event
+                            for event in agent.session_store.get_events("compactcold")
+                            if event["type"] == "user_message"
+                            and event["turn_index"] == 2
+                        ][-1]
+                        retried = next(
+                            message
+                            for message in agent.controller.conversation.get_messages()
+                            if message.role == "user"
+                            and message.metadata.get("turn_index") == 2
+                        )
+                        assert retried_raw["branch_id"] == 2
+                        assert retried_raw["event_id"] > turn2_raw[0]["event_id"]
+                        assert retried_raw["content"] == "second"
+                        assert retried.content == retried_raw["content"]
+                        assert retried.metadata["event_id"] == retried_raw["event_id"]
+                        assert retried.metadata.get("job_context") is None
+                    await creature.run("third", timeout=8)
+                    await creature.run("fourth", timeout=8)
+                    await agent._session_output.drain()
+
+                    manager = agent.compact_manager
+                    manager.config.keep_recent_turns = 1
+                    summary_llm = ScriptedLLM(["summary OLD_LAUNCH"])
+                    manager._llm = summary_llm
+                    assert manager.trigger_compact()
+                    await asyncio.wait_for(manager.wait_for_current(), 8)
+                    await agent._session_output.drain()
+                    assert manager._compact_count == 1
+                    compacted = prefix(agent.controller.conversation.to_messages())
+                    assert compacted == [
+                        (
+                            "assistant",
+                            "[Previous context summary (compact round 1)]\n\nsummary OLD_LAUNCH",
+                        ),
+                        ("user", "fourth"),
+                        ("assistant", "fourth done"),
+                    ]
+
+                    raw = agent.session_store.get_events("compactcold")
+                    compact_event = [
+                        event for event in raw if event["type"] == "compact_complete"
+                    ][-1]
+                    assert summary_llm.call_count == 1
+                    assert "background-finished" in str(summary_llm.last_messages)
+                    # The runtime banner survives only while no settled-prefix
+                    # refresh has replaced it with the recorded input.
+                    assert ("## Running Jobs" in str(summary_llm.last_messages)) is (
+                        not rerun_after_settle
+                    )
+                    assert compact_event["summary"] == "summary OLD_LAUNCH"
+                    assert compact_event["compact_source_path"] == [
+                        [1, 1],
+                        [2, 2 if rerun_after_settle else 1],
+                        [3, 1],
+                    ]
+                    tool_events = [
+                        event
+                        for event in raw
+                        if event["type"] in ("tool_call", "tool_result")
+                    ]
+                    assert [event["type"] for event in tool_events] == [
+                        "tool_call",
+                        "tool_result",
+                    ]
+                    for event in tool_events:
+                        assert (
+                            compact_event["replaced_from_event_id"]
+                            <= event["event_id"]
+                            <= compact_event["replaced_to_event_id"]
+                        ), event
+                    assert (
+                        compact_event["replaced_to_event_id"]
+                        < compact_event["event_id"]
+                    )
+                    persisted_view = load_persisted_branch_view(
+                        agent.session_store, "compactcold"
+                    )
+                    expected_view = {1: 1, 2: 2} if rerun_after_settle else None
+                    assert persisted_view == expected_view
+                    compact_path = agent.session_store.path
+                    raw_before_resume = list(raw)
+                finally:
+                    compact_bg.release.set()
 
         resumed_llm = ScriptedLLM(
             [
@@ -3429,7 +3479,8 @@ class TestCoreIntegration:
             await restored.stop()
             await restored.start()
             assert restored.compact_manager._compact_count == 0
-            original_view = {turn: 1 for turn in range(1, 6)}
+            rerun_branches = {2: 2} if rerun_after_settle else {}
+            original_view = {turn: rerun_branches.get(turn, 1) for turn in range(1, 6)}
             checkpoint = restored_store.load_branch_snapshot(
                 "compactcold", original_view
             )
@@ -3472,9 +3523,9 @@ class TestCoreIntegration:
             )
             assert summary_llm.call_count == 1
             assert compact_bg.calls == 1
-            persist_branch_view(
-                restored_store, "compactcold", {turn: 1 for turn in range(1, 7)}
-            )
+            retained_view = {turn: 1 for turn in range(1, 7)}
+            retained_view.update(rerun_branches)
+            persist_branch_view(restored_store, "compactcold", retained_view)
         finally:
             await restored.stop()
             restored_store.close()
