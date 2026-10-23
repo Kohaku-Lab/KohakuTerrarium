@@ -15,6 +15,7 @@ from kohakuterrarium.core.agent_budget_recovery import (
 from kohakuterrarium.core.agent_compact import (
     AgentCompactMixin,
     restore_compact_state_from_session,
+    restore_resume_compact_state,
 )
 from kohakuterrarium.core.agent_construct import AgentConstructMixin
 from kohakuterrarium.core.agent_event_loop import AgentEventLoopMixin
@@ -428,6 +429,8 @@ class Agent(
             restore_compact_state_from_session(
                 self.compact_manager, self.session_store, self.config.name
             )
+        else:
+            restore_resume_compact_state(self.compact_manager, None, self.config.name)
 
     def _init_plugins(self) -> None:
         """Initialize plugins from config + discover from packages."""

@@ -885,6 +885,13 @@ class TestSessionIntegration:
         preparation_indexes = []
         prepare = _resume_mod.prepare_saved_snapshot
         index = _history_mod.index_parent_paths
+        compact_restore_reads = []
+        get_events = SessionStore.get_events
+
+        def observe_event_read(store, namespace, *args, **kwargs):
+            if namespace == "scribe":
+                compact_restore_reads.append(namespace)
+            return get_events(store, namespace, *args, **kwargs)
 
         def observe_index(events):
             if preparing:
@@ -909,8 +916,18 @@ class TestSessionIntegration:
             tracing.setattr(_resume_branch_mod, "index_parent_paths", observe_index)
             tracing.setattr(_history_mod, "index_parent_paths", observe_index)
             tracing.setattr(_message_history_mod, "index_parent_paths", observe_index)
+            tracing.setattr(SessionStore, "get_events", observe_event_read)
             fallback_agent, fallback_store = await resume_agent_async(session_path)
         try:
+            with monkeypatch.context() as tracing:
+                tracing.setattr(SessionStore, "get_events", observe_event_read)
+                fallback_agent.attach_session_store(None)
+                await fallback_agent.start()
+                assert fallback_agent.compact_manager._compact_count == 0
+                assert fallback_agent.compact_manager._last_compact_time == 0.0
+                fallback_agent.attach_session_store(fallback_store)
+                fallback_agent.attach_session_store(fallback_store)
+                assert compact_restore_reads == ["scribe"]
             wire = fallback_agent.controller.conversation.to_messages()
             assert [
                 m["content"]
@@ -932,7 +949,6 @@ class TestSessionIntegration:
             assert len(replay_indexes) == 2
             assert replay_indexes[0] != replay_indexes[1]
             assert preparation_indexes == [[event["event_id"] for event in raw]]
-            await fallback_agent.start()
             continuation_llm = ScriptedLLM(["continued after recovery"])
             fallback_agent.llm = fallback_agent.controller.llm = continuation_llm
             result = await fallback_agent.run("continue recovered history")

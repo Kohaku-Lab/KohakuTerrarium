@@ -4,12 +4,18 @@ Agent compaction helpers for overflow recovery and dedicated LLM selection.
 """
 
 import asyncio
+from dataclasses import dataclass
 from typing import Any
+from weakref import ReferenceType, ref
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.agent_message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
+)
+from kohakuterrarium.core.branch_continuation import (
+    live_branch_path,
+    load_persisted_branch_view,
 )
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.snapshot_history import (
@@ -22,6 +28,110 @@ from kohakuterrarium.session.snapshot import load_branch_snapshot
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _ResumeCompactState:
+    """Compact metadata for one restored conversation and manager lifetime."""
+
+    store: ReferenceType
+    namespace: str
+    conversation: ReferenceType
+    path: dict[int, int]
+    persisted_view: dict[int, int] | None
+    context_cutoff: int
+    count: int
+    cooldown: float
+    manager: ReferenceType | None = None
+
+
+def _matching_compact_snapshot(agent: Any, store: Any, namespace: str) -> dict | None:
+    """Return the current checkpoint when its messages match the live prefix."""
+    record = load_branch_snapshot(store, namespace, live_branch_path(agent))
+    if record is None or record["watermark"] > store.max_event_id(namespace):
+        return None
+    messages = agent.controller.conversation.snapshot_messages(
+        preserve_pending_tail=True
+    )
+    return record if record["messages"] == messages[: len(record["messages"])] else None
+
+
+def stage_resume_compact_state(
+    agent: Any, store: Any, namespace: str, prepared: dict | None
+) -> None:
+    """Stage selected compact metadata after installing the restored conversation."""
+    agent._resume_compact_state = None
+    conversation = agent.controller.conversation
+    try:
+        if prepared is not None:
+            compact = prepared["compact_state"]
+        elif f"{namespace}:branch_snapshots" in store.state:
+            matched = _matching_compact_snapshot(agent, store, namespace)
+            compact = (
+                matched["compact_state"]
+                if matched is not None
+                else replayed_compact_state(
+                    [
+                        {"role": message.role, "content": message.content}
+                        for message in conversation.get_messages()
+                    ]
+                )
+            )
+        else:
+            compact = {
+                "compact_count": store.state.get(f"{namespace}:compact_count", 0),
+                "last_compact_time": store.state.get(
+                    f"{namespace}:last_compact_time", 0.0
+                ),
+            }
+        agent._resume_compact_state = _ResumeCompactState(
+            ref(store),
+            namespace,
+            ref(conversation),
+            live_branch_path(agent),
+            load_persisted_branch_view(store, namespace),
+            getattr(agent, "_context_cutoff_event_id", 0),
+            int(compact["compact_count"]),
+            float(compact["last_compact_time"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return
+    manager = getattr(agent, "compact_manager", None)
+    if manager is not None:
+        restore_resume_compact_state(manager, store, namespace)
+
+
+def restore_resume_compact_state(
+    manager: CompactManager, store: Any, namespace: str
+) -> bool:
+    """Seed a restored manager once, or retain its newer live compact state."""
+    agent = getattr(manager, "_agent", None)
+    saved = getattr(agent, "_resume_compact_state", None)
+    if saved is None:
+        return False
+    source = saved.store()
+    path = live_branch_path(agent)
+    if (
+        source is None
+        or store is not None
+        and source is not store
+        or saved.namespace != namespace
+        or saved.conversation() is not agent.controller.conversation
+        or saved.persisted_view != load_persisted_branch_view(source, namespace)
+        or saved.context_cutoff != getattr(agent, "_context_cutoff_event_id", 0)
+        or any(path.get(turn) != branch for turn, branch in saved.path.items())
+        or saved.manager is None
+        and path != saved.path
+        or saved.manager is not None
+        and saved.manager() is not manager
+    ):
+        agent._resume_compact_state = None
+        return False
+    if saved.manager is None:
+        manager._compact_count = saved.count
+        manager._last_compact_time = saved.cooldown
+        saved.manager = ref(manager)
+    return True
 
 
 class AgentCompactMixin:
@@ -113,37 +223,32 @@ def restore_compact_state_from_session(
     Restoring both values prevents a quick resume from bypassing the cooldown
     while retaining display continuity for the compact count.
     """
+    if restore_resume_compact_state(manager, session_store, agent_name):
+        return
     state = getattr(session_store, "state", None)
     if state is None:
         return
     try:
         if f"{agent_name}:branch_snapshots" in state:
             agent = manager._agent
-            selected = dict(getattr(agent, "_parent_branch_path", None) or [])
-            if getattr(agent, "_turn_index", 0) > 0:
-                selected[agent._turn_index] = agent._branch_id
-            messages = agent.controller.conversation.snapshot_messages(
-                preserve_pending_tail=True
-            )
-            record = load_branch_snapshot(session_store, agent_name, selected)
-            matches = (
-                record is not None
-                and record["watermark"] <= session_store.max_event_id(agent_name)
-                and record["messages"] == messages[: len(record["messages"])]
-            )
-            if not matches:
+            record = _matching_compact_snapshot(agent, session_store, agent_name)
+            if record is None:
                 record = prepare_snapshot(
                     session_store,
                     agent_name,
                     session_store.get_events(agent_name),
-                    selected,
+                    live_branch_path(agent),
                     replay=replay_with_settled_tools,
                     needs_replay=snapshot_needs_settled_tool_replay,
                 )
             compact = (
                 record["compact_state"]
                 if record is not None
-                else replayed_compact_state(messages)
+                else replayed_compact_state(
+                    agent.controller.conversation.snapshot_messages(
+                        preserve_pending_tail=True
+                    )
+                )
             )
             manager._compact_count = compact["compact_count"]
             manager._last_compact_time = compact["last_compact_time"]

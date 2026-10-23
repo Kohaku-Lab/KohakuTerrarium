@@ -7,6 +7,7 @@ from typing import Any, NamedTuple
 from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.agent_compact import stage_resume_compact_state
 from kohakuterrarium.core.agent_message_history import replay_with_settled_tools
 from kohakuterrarium.core.agent_selection import restore_selections
 from kohakuterrarium.core.branch_continuation import load_persisted_branch_view
@@ -404,6 +405,8 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     except Exception:  # pragma: no cover - resume continues without selections
         logger.warning("selection restore failed", agent=agent_name, exc_info=True)
 
+    stage_resume_compact_state(agent, store, agent_name, prepared)
+
 
 def _rebuild_agent(
     *,
@@ -586,7 +589,6 @@ def _resume_agent_from_open_store(
         input_module=input_module,
         output_module=output_module,
     )
-
     inject_saved_state(agent, store, agent_name)
 
     return _attach_resumed_agent(

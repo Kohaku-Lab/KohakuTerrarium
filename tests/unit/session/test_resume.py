@@ -3417,15 +3417,17 @@ class TestResumeAgent:
                 CompactConfig(max_tokens=2000, cooldown_seconds=30)
             )
             agent.compact_manager._agent = agent
-            inject_saved_state(agent, store, "alice")
+            counting = _CountingStore(store)
+            inject_saved_state(agent, counting, "alice")
             if snapshot_kind == "branch":
                 for _ in range(2):
                     restore_compact_state_from_session(
-                        agent.compact_manager, store, "alice"
+                        agent.compact_manager, counting, "alice"
                     )
                     assert agent.compact_manager._compact_count == 2
                     assert agent.compact_manager._last_compact_time == cooldown
                     assert not agent.compact_manager.should_compact(2000)
+                assert counting.get_events_calls == 1
             from kohakuterrarium.core.conversation_elide import ELISION_MARKER
 
             contents = [
