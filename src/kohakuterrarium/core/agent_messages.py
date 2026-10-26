@@ -194,7 +194,7 @@ class AgentMessagesMixin:
             # opening a sibling branch of the SAME turn, so the path
             # of prior turns is unchanged.
             ppath = [tuple(p) for p in getattr(self, "_parent_branch_path", [])]
-            await self.session_store.run(
+            _, event_id = await self.session_store.run(
                 append_user_event_pair,
                 self.session_store,
                 self.config.name,
@@ -206,6 +206,7 @@ class AgentMessagesMixin:
                 self._branch_id,
                 ppath,
             )
+            conv.get_messages()[last_user].metadata["event_id"] = event_id
         persist_branch_view(
             self.session_store, self.config.name, live_branch_path(self)
         )

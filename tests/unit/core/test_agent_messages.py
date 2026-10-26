@@ -436,14 +436,33 @@ class TestRegenerateLastResponse:
         # No process_event call.
         assert agent._rerun_calls == []
 
-    async def test_regenerate_opens_new_branch(self, agent):
+    @pytest.mark.parametrize("existing_identity", [False, True])
+    async def test_regenerate_opens_new_branch(self, agent, existing_identity):
         agent._apply_user_input("hi")
         agent._emit_assistant("a1")
-        await agent.regenerate_last_response()
-        # _rerun event dispatched.
-        assert agent._rerun_calls
-        # branch_id bumped past existing.
-        assert agent._branch_id >= 2
+        original = deepcopy(agent.session_store.get_events("alice"))
+        user = agent.controller.conversation.get_messages()[0]
+        if existing_identity:
+            user.metadata["event_id"] = original[1]["event_id"]
+        previous_id = original[1]["event_id"]
+        for branch in (2, 3):
+            await agent.regenerate_last_response()
+            canonical = [
+                event
+                for event in agent.session_store.get_events("alice")
+                if event["type"] == "user_message"
+            ][-1]
+            assert canonical["event_id"] > previous_id
+            assert user.metadata["event_id"] == canonical["event_id"]
+            assert (user.metadata["turn_index"], user.metadata["branch_id"]) == (
+                1,
+                branch,
+            )
+            assert canonical["content"] == user.content == "hi"
+            assert agent._branch_id == branch
+            assert agent._rerun_calls[-1].context["rerun"] is True
+            previous_id = canonical["event_id"]
+        assert agent.session_store.get_events("alice")[: len(original)] == original
 
     async def test_regenerate_unknown_turn_logs(self, agent):
         agent._apply_user_input("hi")

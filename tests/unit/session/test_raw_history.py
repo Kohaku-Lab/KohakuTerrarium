@@ -11,8 +11,10 @@ from kohakuterrarium.session.raw_history import (
     TargetUserMessageLineageError,
     TargetUserMessageNotFoundError,
     UserMessageSelector,
+    append_user_event_pair,
     select_raw_history_prefix,
 )
+from kohakuterrarium.session.store import SessionStore
 
 
 def _event(
@@ -57,6 +59,52 @@ def _select(events, event_id=3, turn=2, branch=1, view=None):
         selector=UserMessageSelector(event_id, turn, branch),
         branch_view=view or {turn: branch},
     )
+
+
+@pytest.mark.parametrize("coordinates", [(None, None, None), (2, 3, [(1, 1)])])
+def test_pair_returns_canonical_identity_without_mutating_payload(
+    tmp_path, coordinates
+):
+    store = SessionStore(tmp_path / "pair.kohakutr")
+    turn, branch, path = coordinates
+    payload = {"content": "same wording", "request_id": "request"}
+    observed = []
+
+    def record(key, event):
+        observed.append((key, deepcopy(event)))
+        if event["type"] == "user_message":
+            store.append_event("other", "processing_end", {})
+
+    store.subscribe(record)
+    try:
+        identities = [
+            append_user_event_pair(store, "alice", payload, turn, branch, path)
+            for _ in range(2)
+        ]
+        canonical = [
+            (key, event) for key, event in observed if event["type"] == "user_message"
+        ]
+        assert identities == [(key, event["event_id"]) for key, event in canonical]
+        assert identities[0] != identities[1]
+        assert [event["type"] for _, event in observed] == [
+            "user_input",
+            "user_message",
+            "processing_end",
+            "user_input",
+            "user_message",
+            "processing_end",
+        ]
+        for (key, event_id), (_, expected) in zip(identities, canonical):
+            assert store.events[key] == expected
+            assert expected["event_id"] == event_id
+            assert expected["content"] == "same wording"
+            if turn is not None:
+                assert (expected["turn_index"], expected["branch_id"]) == (turn, branch)
+                assert expected["parent_branch_path"] == [[1, 1]]
+        assert payload == {"content": "same wording", "request_id": "request"}
+    finally:
+        store.unsubscribe(record)
+        store.close()
 
 
 def test_selects_plain_uncompacted_history_before_target():

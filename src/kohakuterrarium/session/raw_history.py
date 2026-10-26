@@ -198,19 +198,24 @@ def append_user_event_pair(
     turn_index: int | None,
     branch_id: int | None,
     parent_branch_path: list[tuple[int, int]] | None,
-) -> None:
-    """Append the canonical ``user_input`` + ``user_message`` pair.
+) -> tuple[str, int]:
+    """Append the input pair and return the canonical user-message key and ID.
 
-    Both records run as one affinity-thread unit so a cancelled turn can
-    never persist half the pair (the raw-history editor and replay both
-    key off the ``user_message`` half).
+    The returned identity does not acknowledge a cache flush or durable commit.
     """
-    for event_type in ("user_input", "user_message"):
-        store.append_event(
-            agent_name,
-            event_type,
-            dict(payload),
-            turn_index=turn_index,
-            branch_id=branch_id,
-            parent_branch_path=parent_branch_path,
-        )
+    store.append_event(
+        agent_name,
+        "user_input",
+        dict(payload),
+        turn_index=turn_index,
+        branch_id=branch_id,
+        parent_branch_path=parent_branch_path,
+    )
+    return store.append_event(
+        agent_name,
+        "user_message",
+        dict(payload),
+        turn_index=turn_index,
+        branch_id=branch_id,
+        parent_branch_path=parent_branch_path,
+    )
