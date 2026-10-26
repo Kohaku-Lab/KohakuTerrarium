@@ -16,8 +16,8 @@ from kohakuterrarium.core.agent_message_history import (
     user_message_content_for_turn as _user_message_content_for_turn,
 )
 from kohakuterrarium.core.agent_raw_history import (
+    prepare_raw_prefix_for_target,
     raw_target_content,
-    reload_raw_prefix_for_target,
 )
 from kohakuterrarium.core.branch_continuation import (
     live_branch_path,
@@ -30,7 +30,11 @@ from kohakuterrarium.core.compact_branch import (
     is_summary_message,
 )
 from kohakuterrarium.core.events import EventType, TriggerEvent
-from kohakuterrarium.core.settled_refresh import refresh_mutation_prefix
+from kohakuterrarium.core.history_source import (
+    PreparedHistorySource,
+    prepare_branch_source,
+)
+from kohakuterrarium.core.settled_refresh import prepare_mutation_prefix
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.llm.message import content_parts_to_dicts, normalize_content_parts
 from kohakuterrarium.session.history import replay_conversation
@@ -126,18 +130,18 @@ class AgentMessagesMixin:
             finally:
                 self._branch_request_id = None
 
-    def _restore_changed_summary_inputs(
-        self, turn_index: int | None, branch_id: int
-    ) -> bool:
-        """Rebuild a summary-dependent mutation prefix before editing its inputs."""
+    def _prepare_changed_summary_inputs(
+        self, source: PreparedHistorySource, turn_index: int | None, branch_id: int
+    ) -> PreparedHistorySource:
+        """Prepare a reconstructed source when a mutation changes summary inputs."""
         if not any(
             (inputs := compact_source_path_from_event(msg.metadata)) is None
             or turn_index is None
             or any(turn >= turn_index for turn, _ in inputs)
-            for msg in self.controller.conversation.get_messages()
+            for msg in source.conversation.get_messages()
             if is_summary_message(msg)
         ):
-            return False
+            return source
         if self.session_store is None or turn_index is None:
             raise ConflictError(
                 "Cannot reconstruct summarized history without a persisted target"
@@ -151,28 +155,34 @@ class AgentMessagesMixin:
         ]
         if len(targets) != 1:
             raise ConflictError("Cannot identify the summarized turn to mutate")
-        reload_raw_prefix_for_target(
+        return prepare_raw_prefix_for_target(
             self,
             UserMessageSelector(targets[0]["event_id"], turn_index, branch_id),
-            branch_view=live_branch_path(self),
+            branch_view=source.view,
+            source=source,
         )
-        return True
 
     async def _regenerate_tail_response(self, *, request_id: str | None) -> bool:
         """Commit a sibling branch of the current tail, then return whether to rerun."""
         await self._wait_for_history_finalization()
         self._ensure_history_mutation_idle()
         self._ensure_rerun_available()
-        self._restore_changed_summary_inputs(self._turn_index, self._branch_id)
-        conv = self.controller.conversation
-        last_user = conv.find_last_user_index()
+        source = PreparedHistorySource.capture(self)
+        source = self._prepare_changed_summary_inputs(
+            source, source.turn_index, source.branch_id
+        )
+        last_user = source.conversation.find_last_user_index()
         if last_user < 0:
             logger.warning("No user message to regenerate from")
             return False
-        last_user = refresh_mutation_prefix(self, last_user)
+        source, last_user = prepare_mutation_prefix(self, source, last_user)
+        next_branch = self._max_branch_id_for_turn(source.turn_index) + 1
+        prev_content = self._user_message_content_for_turn(
+            source.turn_index, branch_view=source.view
+        )
+        conv = source.adopt(self)
         removed = conv.truncate_from(last_user + 1)
-        # Open a new branch of the current turn.
-        self._branch_id = self._max_branch_id_for_turn(self._turn_index) + 1
+        self._branch_id = next_branch
         conv.get_messages()[last_user].metadata.update(
             turn_index=self._turn_index, branch_id=self._branch_id
         )
@@ -182,17 +192,7 @@ class AgentMessagesMixin:
             turn_index=self._turn_index,
             branch_id=self._branch_id,
         )
-        # Emit fresh user_input + user_message events for the new
-        # branch so replay (and the resume display surfaces that
-        # group by ``user_input``) see a self-contained branch.
-        # Pure regen mirrors the previous branch's wording — the
-        # in-memory conversation already has the original user
-        # message; the controller does NOT re-append on rerun.
-        prev_content = self._previous_branch_user_content()
         if self.session_store is not None and prev_content is not None:
-            # Pure regen keeps the existing parent path — we are
-            # opening a sibling branch of the SAME turn, so the path
-            # of prior turns is unchanged.
             ppath = [tuple(p) for p in getattr(self, "_parent_branch_path", [])]
             _, event_id = await self.session_store.run(
                 append_user_event_pair,
@@ -254,32 +254,27 @@ class AgentMessagesMixin:
         request_id: str | None = None,
         target: UserMessageSelector | None = None,
     ) -> bool:
-        """Replace a user message and re-run from there.
+        """Prepare the selected source, replace its user target, and open a sibling.
 
-        ``message_idx`` remains the raw in-memory conversation index for
-        CLI/back-compat callers. Frontend callers should pass a stable
-        ``turn_index`` or visible ``user_position`` so system/tool
-        messages cannot shift the target.
-
-        ``branch_view`` lets a caller edit on a NON-LATEST branch.
-        When provided, the agent's in-memory conversation is replayed
-        from events under the chosen view BEFORE the edit, so the
-        truncation target resolves correctly even when the user has
-        switched to an older subtree in the UI.
+        Accepts canonical targets, turn/user coordinates, or a legacy message index.
         """
         await self._wait_for_history_finalization()
         self._ensure_history_mutation_idle()
         self._ensure_rerun_available()
-        # Canonical targets reuse accepted context when applicable,
-        # otherwise reconstruct their prefix before the edit.
+        source = PreparedHistorySource.capture(self)
         if target is not None:
-            reload_raw_prefix_for_target(self, target, branch_view=branch_view)
+            source = prepare_raw_prefix_for_target(
+                self, target, branch_view=branch_view, source=source
+            )
             turn_index = target.turn_index
             user_position = None
-        elif branch_view:
-            self._reload_conversation_under_branch_view(branch_view)
+        elif branch_view and self.session_store is not None:
+            prepared = self._reload_conversation_under_branch_view(
+                branch_view, apply=False
+            )
+            source = prepare_branch_source(self, source, prepared)
 
-        conv = self.controller.conversation
+        conv = source.conversation
         msgs = conv.get_messages()
         resolved_idx = self._resolve_edit_message_index(
             msgs,
@@ -296,8 +291,8 @@ class AgentMessagesMixin:
                 user_position=user_position,
             )
             return False
-        resolved_idx = refresh_mutation_prefix(self, resolved_idx)
-        msgs = conv.get_messages()
+        source, resolved_idx = prepare_mutation_prefix(self, source, resolved_idx)
+        msgs = source.conversation.get_messages()
         target = msgs[resolved_idx]
         if target.role != "user":
             logger.warning("Can only edit user messages", role=target.role)
@@ -317,21 +312,19 @@ class AgentMessagesMixin:
                 resolved_user_position, branch_view=branch_view
             )
         resolved_branch = target.metadata.get("branch_id") or (branch_view or {}).get(
-            resolved_turn, self._branch_id
+            resolved_turn, source.branch_id
         )
-        if self._restore_changed_summary_inputs(resolved_turn, resolved_branch):
-            conv = self.controller.conversation
-            resolved_idx = conv.find_last_user_index()
+        reconstructed = self._prepare_changed_summary_inputs(
+            source, resolved_turn, resolved_branch
+        )
+        if reconstructed is not source:
+            resolved_idx = reconstructed.conversation.find_last_user_index()
+            if resolved_idx < 0:
+                raise ConflictError("Prepared history has no mutation target")
+            source, resolved_idx = prepare_mutation_prefix(
+                self, reconstructed, resolved_idx
+            )
         turn_index = resolved_turn
-        # Drop the old user message + everything after from the
-        # in-memory conversation. Do NOT append the new user message
-        # here — the rerun trigger carries it; the controller appends
-        # it via ``_build_turn_context``.
-        conv.truncate_from(resolved_idx)
-        # Resolve the turn_index of the edited user message and bump
-        # branch_id accordingly. If we cannot resolve it (no store, or
-        # legacy events without turn_index), keep the agent's current
-        # turn/branch state.
         target_turn_index = turn_index
         if target_turn_index is None:
             target_turn_index = self._turn_index_for_user_position(
@@ -343,14 +336,17 @@ class AgentMessagesMixin:
             # legacy in-memory agents). Position-based targeting still
             # found the right user message, so preserve old fallback
             # semantics and open a new branch on the current turn.
-            target_turn_index = self._turn_index if self._turn_index > 0 else None
+            target_turn_index = source.turn_index if source.turn_index > 0 else None
+        next_branch = (
+            self._max_branch_id_for_turn(target_turn_index) + 1
+            if target_turn_index is not None and self.session_store is not None
+            else max(source.branch_id, 1) + 1
+        )
+        conv = source.adopt(self)
+        conv.truncate_from(resolved_idx)
         if target_turn_index is not None:
             self._turn_index = target_turn_index
-        self._branch_id = (
-            self._max_branch_id_for_turn(self._turn_index) + 1
-            if target_turn_index is not None and self.session_store is not None
-            else max(self._branch_id, 1) + 1
-        )
+        self._branch_id = next_branch
         logger.info(
             "Edited and re-running",
             index=resolved_idx,

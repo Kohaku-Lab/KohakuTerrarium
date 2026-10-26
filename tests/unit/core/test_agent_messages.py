@@ -446,7 +446,11 @@ class TestRegenerateLastResponse:
             user.metadata["event_id"] = original[1]["event_id"]
         previous_id = original[1]["event_id"]
         for branch in (2, 3):
+            previous_user = agent.controller.conversation.get_messages()[0]
+            previous_metadata = deepcopy(previous_user.metadata)
             await agent.regenerate_last_response()
+            user = agent.controller.conversation.get_messages()[0]
+            assert previous_user.metadata == previous_metadata
             canonical = [
                 event
                 for event in agent.session_store.get_events("alice")
@@ -463,6 +467,36 @@ class TestRegenerateLastResponse:
             assert agent._rerun_calls[-1].context["rerun"] is True
             previous_id = canonical["event_id"]
         assert agent.session_store.get_events("alice")[: len(original)] == original
+
+    async def test_regenerate_selected_older_branch_records_its_own_input(self, agent):
+        agent._apply_user_input("selected original")
+        agent._emit_assistant("original reply")
+        agent.session_store.append_event(
+            "alice",
+            "user_input",
+            {"content": "newer sibling"},
+            turn_index=1,
+            branch_id=2,
+            parent_branch_path=[],
+        )
+        agent.session_store.append_event(
+            "alice",
+            "user_message",
+            {"content": "newer sibling"},
+            turn_index=1,
+            branch_id=2,
+            parent_branch_path=[],
+        )
+        await agent.regenerate_last_response()
+        canonical = [
+            event
+            for event in agent.session_store.get_events("alice")
+            if event["type"] == "user_message"
+        ][-1]
+        user = agent.controller.conversation.get_messages()[0]
+        assert canonical["content"] == user.content == "selected original"
+        assert user.metadata["event_id"] == canonical["event_id"]
+        assert (canonical["turn_index"], canonical["branch_id"]) == (1, 3)
 
     async def test_regenerate_unknown_turn_logs(self, agent):
         agent._apply_user_input("hi")
@@ -485,10 +519,122 @@ class TestEditAndRerun:
         await agent.edit_and_rerun(message_idx=0, new_content="edited")
         assert agent._rerun_calls
 
-    async def test_invalid_index_no_op(self, agent):
+    @pytest.mark.parametrize("index", [99, 1])
+    async def test_invalid_index_no_op(self, agent, index):
         agent._apply_user_input("first")
         agent._emit_assistant("a1")
-        await agent.edit_and_rerun(message_idx=99, new_content="x")
+        await agent.regenerate_last_response()
+        agent.controller.conversation.append("assistant", "current sibling reply")
+        agent._rerun_calls.clear()
+        conversation = agent.controller.conversation
+        before = deepcopy(conversation.to_messages(include_metadata=True))
+        coordinates = (
+            agent._turn_index,
+            agent._branch_id,
+            list(agent._parent_branch_path),
+        )
+        events = deepcopy(agent.session_store.get_events("alice"))
+        assert not await agent.edit_and_rerun(
+            message_idx=index, new_content="x", branch_view={1: 1}
+        )
+        assert agent._rerun_calls == []
+        assert agent.controller.conversation is conversation
+        assert conversation.to_messages(include_metadata=True) == before
+        assert (
+            agent._turn_index,
+            agent._branch_id,
+            agent._parent_branch_path,
+        ) == coordinates
+        assert agent.session_store.get_events("alice") == events
+
+    @pytest.mark.parametrize("operation", ["edit", "regen"])
+    async def test_failed_allocation_after_tool_refresh_preserves_live_source(
+        self, agent, monkeypatch, operation
+    ):
+        agent._apply_user_input("launch")
+        conv = agent.controller.conversation
+        call = {
+            "id": "provider1",
+            "type": "function",
+            "function": {"name": "read", "arguments": "{}"},
+        }
+        conv.append("assistant", "", tool_calls=[call])
+        conv.append(
+            "tool",
+            "pending",
+            tool_call_id="provider1",
+            name="read",
+            metadata={"job_id": "job1", "tool_result_phase": "pending"},
+        )
+        agent.session_store.append_event(
+            "alice",
+            "tool_call",
+            {
+                "name": "read",
+                "call_id": "job1",
+                "tool_call_id": "provider1",
+                "args": {},
+            },
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        agent._apply_user_input("target")
+        conv.get_messages()[-1].metadata.update(turn_index=2, branch_id=1)
+        agent.session_store.append_event(
+            "alice",
+            "tool_result",
+            {"name": "read", "call_id": "job1", "output": "settled"},
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[(1, 1)],
+        )
+        agent._context_cutoff_event_id = 0
+        agent.compact_manager = SimpleNamespace(
+            is_compacting=False, _compact_count=0, _last_compact_time=5.0
+        )
+        before = deepcopy(conv.to_messages(include_metadata=True))
+        old_objects = conv.get_messages()
+        raw = deepcopy(agent.session_store.get_events("alice"))
+        refreshed = []
+        prepare = agent_messages_module.prepare_mutation_prefix
+
+        def observe_refresh(*args):
+            result = prepare(*args)
+            refreshed.append(result[0].conversation.to_messages(include_metadata=True))
+            return result
+
+        def fail_allocation(turn):
+            assert any(
+                row["role"] == "tool" and row["content"] == "settled"
+                for row in refreshed[-1]
+            )
+            raise OSError("branch allocation unavailable")
+
+        monkeypatch.setattr(
+            agent_messages_module, "prepare_mutation_prefix", observe_refresh
+        )
+        monkeypatch.setattr(agent, "_max_branch_id_for_turn", fail_allocation)
+        with pytest.raises(OSError, match="allocation unavailable"):
+            if operation == "edit":
+                await agent.edit_and_rerun(3, "changed")
+            else:
+                await agent.regenerate_last_response()
+        assert refreshed
+        assert agent.controller.conversation is conv
+        assert conv.to_messages(include_metadata=True) == before
+        assert all(old is new for old, new in zip(old_objects, conv.get_messages()))
+        assert (agent._turn_index, agent._branch_id, agent._parent_branch_path) == (
+            2,
+            1,
+            [(1, 1)],
+        )
+        assert agent._context_cutoff_event_id == 0
+        assert (
+            agent.compact_manager._compact_count,
+            agent.compact_manager._last_compact_time,
+        ) == (0, 5.0)
+        assert agent.session_store.get_events("alice") == raw
         assert agent._rerun_calls == []
 
     async def test_edit_targeting_assistant_message_fails(self, agent):

@@ -2770,9 +2770,17 @@ class TestCoreIntegration:
             # A message_idx past the end resolves to None → returns False
             # and runs no LLM call.
             calls_pre = agent.llm.call_count
-            bad = await agent.edit_and_rerun(message_idx=999, new_content="nope")
+            context_before = agent.controller.conversation.to_json()
+            path_before = live_branch_path(agent)
+            events_before = store.get_events(agent.config.name)
+            bad = await agent.edit_and_rerun(
+                message_idx=999, new_content="nope", branch_view={1: 1}
+            )
             assert bad is False
             assert agent.llm.call_count == calls_pre
+            assert agent.controller.conversation.to_json() == context_before
+            assert live_branch_path(agent) == path_before
+            assert store.get_events(agent.config.name) == events_before
 
             # --- native_tool_options on a non-native tool is rejected --
             # ``echo``-style tools are NOT provider-native, so setting
