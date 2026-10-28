@@ -65,6 +65,7 @@ from kohakuterrarium.session.history import (
 )
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.memory_async import live_memory_for_store
+from kohakuterrarium.session.metadata_candidate import read_metadata_candidate
 from kohakuterrarium.session.migrations import (
     discover_versions,
     ensure_latest_version,
@@ -594,6 +595,13 @@ class TestSessionIntegration:
         source_mtime = session_path.stat().st_mtime_ns
         assert detect_format_version(session_path.as_uri()) == FORMAT_VERSION
         assert read_session_meta(session_path.as_uri())["agents"] == ["scribe"]
+        selected_meta = read_metadata_candidate(
+            session_path, eligible=True, keys=("agents", "format_version", "absent")
+        )
+        assert selected_meta.meta == {
+            "agents": ["scribe"],
+            "format_version": FORMAT_VERSION,
+        }
         with SessionReadView(session_path.as_uri()) as view:
             assert try_fast(session_path, eligible=True).reason == "legacy_enrolled"
             selected = view.items("events", prefix="scribe:e")

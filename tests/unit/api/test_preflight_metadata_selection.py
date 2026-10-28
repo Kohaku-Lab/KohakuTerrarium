@@ -51,9 +51,10 @@ def setup(tmp_path, monkeypatch):
 
     strict_read = version.read_strict_session_meta
 
-    def counted_strict(path):
+    def counted_strict(path, *, keys=None):
+        assert keys == ("format_version",)
         counts["strict"] += 1
-        return strict_read(path)
+        return strict_read(path, keys=keys)
 
     def selected(path):
         result = read_metadata_candidate(path, eligible=True)

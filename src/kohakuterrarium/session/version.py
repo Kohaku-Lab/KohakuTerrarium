@@ -20,7 +20,7 @@ def detect_format_version(path: str | Path) -> int:
     p = coerce_fs_path(path)
     p.stat()
     try:
-        meta = read_strict_session_meta(p)
+        meta = read_strict_session_meta(p, keys=("format_version",))
         value = meta.get("format_version", 1)
         if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
             value = int(value)

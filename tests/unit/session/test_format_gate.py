@@ -140,7 +140,7 @@ def test_read_and_close_failures_keep_both_causes(tmp_path, monkeypatch):
         real_dispose(handle)
         raise cleanup
 
-    monkeypatch.setattr(readonly_mod, "read_prefix", fail_read)
+    monkeypatch.setattr(readonly_mod.KVault, "__getitem__", fail_read)
     monkeypatch.setattr(readonly_mod, "dispose", fail_close)
     with pytest.raises(ResourceReleaseError) as caught:
         detect_format_version(path)
@@ -166,7 +166,7 @@ def test_interrupt_survives_close_failure(tmp_path, monkeypatch, interrupt):
         real_dispose(handle)
         raise cleanup
 
-    monkeypatch.setattr(readonly_mod, "read_prefix", fail_read)
+    monkeypatch.setattr(readonly_mod.KVault, "__getitem__", fail_read)
     monkeypatch.setattr(readonly_mod, "dispose", fail_close)
     with pytest.raises(type(interrupt)) as caught:
         detect_format_version(path)
@@ -205,7 +205,7 @@ def test_missing_table_from_read_does_not_trigger_legacy_exception(
     def fail_read(*args, **kwargs):
         raise KohakuVaultError("SQLite error: no such table: meta")
 
-    monkeypatch.setattr(readonly_mod, "read_prefix", fail_read)
+    monkeypatch.setattr(readonly_mod.KVault, "__getitem__", fail_read)
     with pytest.raises(SessionFormatError) as caught:
         detect_format_version(path)
     assert type(caught.value.__cause__) is KohakuVaultError
@@ -234,7 +234,9 @@ def test_decoded_boolean_is_rejected(tmp_path, monkeypatch):
     path = tmp_path / "bool.kohakutr"
     path.touch()
     monkeypatch.setattr(
-        version_mod, "read_strict_session_meta", lambda _: {"format_version": True}
+        version_mod,
+        "read_strict_session_meta",
+        lambda _, **kwargs: {"format_version": True},
     )
     with pytest.raises(SessionFormatError, match="Invalid format_version"):
         detect_format_version(path)

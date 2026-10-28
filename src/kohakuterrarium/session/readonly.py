@@ -21,6 +21,14 @@ class MetaDecodeError(ValueError):
     """A strict metadata read met a key or value it cannot decode."""
 
 
+def validate_metadata_keys(keys: tuple[str, ...] | None) -> None:
+    """Validate an optional selection of metadata keys."""
+    if keys is not None and (
+        not isinstance(keys, tuple) or any(not isinstance(key, str) for key in keys)
+    ):
+        raise TypeError("metadata keys must be a tuple of strings or None")
+
+
 def _strict_key(key: Any) -> str:
     if isinstance(key, bytes):
         try:
@@ -42,8 +50,15 @@ class MetaTableRead:
     """
 
     def __init__(
-        self, source: Path, *, missing_ok: bool, strict_open: bool = False
+        self,
+        source: Path,
+        *,
+        missing_ok: bool,
+        strict_open: bool = False,
+        keys: tuple[str, ...] | None = None,
     ) -> None:
+        validate_metadata_keys(keys)
+        self.keys = keys
         self.source = source
         self.missing_ok = missing_ok
         self.strict_open = strict_open
@@ -90,6 +105,14 @@ class MetaTableRead:
         try:
             if self.strict_open:
                 vault.enable_auto_pack()
+            if self.keys is not None:
+                selected = {}
+                for key in dict.fromkeys(self.keys):
+                    try:
+                        selected[key] = vault[key]
+                    except KeyError:
+                        pass
+                return selected
             rows = read_prefix(vault, what="session metadata", strict=True)
             return {_strict_key(key): value for key, value in rows}
         finally:
@@ -100,11 +123,14 @@ class MetaTableRead:
                 self.released = False
 
 
-def read_strict_session_meta(path: str | Path) -> dict[str, Any]:
+def read_strict_session_meta(
+    path: str | Path, *, keys: tuple[str, ...] | None = None
+) -> dict[str, Any]:
     """Read metadata for writable admission with strict resource cleanup."""
+    validate_metadata_keys(keys)
     source = coerce_fs_path(path).expanduser().resolve(strict=True)
     lease = acquire_legacy(source, "read_format")
-    read = MetaTableRead(source, missing_ok=False, strict_open=True)
+    read = MetaTableRead(source, missing_ok=False, strict_open=True, keys=keys)
     primary = None
     try:
         try:
@@ -137,14 +163,17 @@ def read_strict_session_meta(path: str | Path) -> dict[str, Any]:
         lease.finish(source_released=read.released)
 
 
-def read_session_meta(path: str | Path) -> dict[str, Any]:
+def read_session_meta(
+    path: str | Path, *, keys: tuple[str, ...] | None = None
+) -> dict[str, Any]:
     """Return metadata without creating WAL, SHM, schema, or status writes.
 
     A failed handle close is logged and leaves the file's occupancy uncertain.
     """
+    validate_metadata_keys(keys)
     source = coerce_fs_path(path).expanduser().resolve(strict=True)
     lease = acquire_legacy(source, "read_meta")
-    read = MetaTableRead(source, missing_ok=True)
+    read = MetaTableRead(source, missing_ok=True, keys=keys)
     try:
         meta = read.run()
         if read.close_error is not None:

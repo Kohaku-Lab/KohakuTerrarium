@@ -19,3 +19,8 @@ WAL/SHM bookkeeping; it does not intentionally change logical session data.
 General metadata readers retain their existing independent policies. This gate
 protects writes by versions containing it; older binaries do not gain protection.
 Format detection and a later writable open are not a cross-process transaction.
+
+Format admission reads only `format_version`. Native metadata readers also accept
+an optional tuple of selected keys, fetching each distinct key before decoding;
+missing keys are omitted and stored `None` values remain present. Full reads
+remain the default. Multiple selected-key reads are not an atomic snapshot.
