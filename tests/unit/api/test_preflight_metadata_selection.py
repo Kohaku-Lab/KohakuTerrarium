@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import kohakuterrarium.api.routes.persistence.preflight_metadata as preflight_metadata
 import kohakuterrarium.api.routes.persistence.resume as route
 import kohakuterrarium.api.routes.persistence.resume_cluster as cluster
+import kohakuterrarium.session.migrations as migrations
 import kohakuterrarium.session.readonly as readonly_mod
 import kohakuterrarium.session.version as version
 from kohakuterrarium.api.app import create_app
@@ -48,6 +49,12 @@ def setup(tmp_path, monkeypatch):
         counts[label] += 1
         return read_session_meta(path)
 
+    strict_read = version.read_strict_session_meta
+
+    def counted_strict(path):
+        counts["strict"] += 1
+        return strict_read(path)
+
     def selected(path):
         result = read_metadata_candidate(path, eligible=True)
         counts[result.reason] += 1
@@ -64,7 +71,10 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cluster, "read_session_meta", partial(copied, label="classification")
     )
-    monkeypatch.setattr(version, "read_session_meta", partial(copied, label="version"))
+    monkeypatch.setattr(version, "read_strict_session_meta", counted_strict)
+    monkeypatch.setattr(
+        migrations, "read_session_meta", partial(copied, label="version")
+    )
     app = create_app()
     client = TestClient(app, raise_server_exceptions=False)
     try:
@@ -181,6 +191,8 @@ def test_default_reader_falls_back_for_live_resources_then_returns_to_fast(
     with closing(
         SessionStore(path) if owner_kind == "store" else SessionMemory(str(path))
     ):
+        assert counts == {"strict": 1}
+        counts.clear()
         response = client.post("/api/sessions/saved/resume/preflight")
         assert response.status_code == 200 and response.json()["ready"]
         assert counts == {"classification": 2, "version": 1, "legacy_enrolled": 2}
