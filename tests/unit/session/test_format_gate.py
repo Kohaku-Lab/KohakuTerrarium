@@ -175,21 +175,37 @@ def test_interrupt_survives_close_failure(tmp_path, monkeypatch, interrupt):
     assert GATE.snapshot(path).legacy_uncertain
 
 
-def test_close_control_flow_exception_is_not_wrapped(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "interrupt_type", [KeyboardInterrupt, SystemExit, asyncio.CancelledError]
+)
+@pytest.mark.parametrize("read_fails", [False, True])
+def test_close_control_flow_exception_is_not_wrapped(
+    tmp_path, monkeypatch, interrupt_type, read_fails
+):
     path = tmp_path / "close-interrupt.kohakutr"
     _meta(path, 2)
-    interrupt = KeyboardInterrupt("stop close")
+    interrupt = interrupt_type("stop close")
+    primary = ValueError("read failed") if read_fails else None
     real_dispose = readonly_mod.dispose
+
+    def fail_read(*args, **kwargs):
+        raise primary
+
+    if read_fails:
+        monkeypatch.setattr(readonly_mod.KVault, "__getitem__", fail_read)
 
     def fail_close(handle):
         real_dispose(handle)
         raise interrupt
 
     monkeypatch.setattr(readonly_mod, "dispose", fail_close)
-    with pytest.raises(KeyboardInterrupt) as caught:
+    with pytest.raises(interrupt_type) as caught:
         detect_format_version(path)
     assert caught.value is interrupt
-    assert GATE.snapshot(path).legacy_uncertain
+    assert caught.value.__cause__ is primary
+    state = GATE.snapshot(path)
+    assert state.legacy_uncertain
+    assert state.legacy_active == state.legacy_pending == state.new_active == 0
 
 
 def test_missing_table_from_read_does_not_trigger_legacy_exception(

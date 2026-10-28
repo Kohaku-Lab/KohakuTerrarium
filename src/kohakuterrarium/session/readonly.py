@@ -142,12 +142,8 @@ def read_strict_session_meta(
                 () if read.close_error is None else (read.close_error,)
             )
             raise primary
-        if (
-            primary is None
-            and read.close_error is not None
-            and not isinstance(read.close_error, Exception)
-        ):
-            raise read.close_error
+        if read.close_error is not None and not isinstance(read.close_error, Exception):
+            raise read.close_error from primary
         if isinstance(primary, ResourceReleaseError) and read.close_error is None:
             raise primary
         if read.close_error is not None or not read.released:
