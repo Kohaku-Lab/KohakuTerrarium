@@ -2608,7 +2608,10 @@ class TestCoreIntegration:
                     for message in agent.llm.call_log[-1]
                     if message["role"] != "system"
                 ]
-                assert request == [{"role": "user", "content": "first question"}]
+                assert request == [
+                    {"role": "user", "content": "PINNED-PERSONA"},
+                    {"role": "user", "content": "first question"},
+                ]
                 await agent._session_output.drain()
                 saved_user = next(
                     message
