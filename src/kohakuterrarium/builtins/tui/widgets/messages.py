@@ -1,5 +1,6 @@
 from textual.widgets import Collapsible, Static
 
+from kohakuterrarium.builtins.kt_ui.inline_text import inline_ui_text
 from kohakuterrarium.builtins.tui._safe_text import escape_markup, plain
 
 
@@ -141,7 +142,7 @@ class StreamingText(Static):
 
     def append(self, chunk: str) -> None:
         self._chunks.append(chunk)
-        self.update(plain("".join(self._chunks)))
+        self.update(plain(inline_ui_text("".join(self._chunks), final=False)))
 
     def get_text(self) -> str:
         return "".join(self._chunks)

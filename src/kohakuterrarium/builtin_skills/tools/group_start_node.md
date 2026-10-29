@@ -1,6 +1,6 @@
 ---
 name: group_start_node
-description: 'Start a stopped member of your group. Not for adding a new one - use group_add_node.'
+description: 'Start a stopped member of your group. Use it to bring a stopped member back to work. Not for adding a new one - use group_add_node.'
 category: builtin
 tags: [group]
 ---

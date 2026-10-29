@@ -13,7 +13,10 @@ MEMORY_READ_SYSTEM_PROMPT = render_subagent_prompt(
 
 MEMORY_READ_CONFIG = SubAgentConfig(
     name="memory_read",
-    description="Search and retrieve from memory",
+    description=(
+        "Search session memory and report what it found. Dispatch it to recall earlier "
+        "notes and decisions. Not for searching files - use grep."
+    ),
     tools=["tree", "read", "grep"],
     system_prompt=MEMORY_READ_SYSTEM_PROMPT,
     can_modify=False,

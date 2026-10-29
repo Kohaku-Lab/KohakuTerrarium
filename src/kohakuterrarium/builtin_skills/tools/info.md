@@ -1,6 +1,6 @@
 ---
 name: info
-description: Load the full documentation for a tool, sub-agent, or procedural skill by name. Not for running a skill - use skill.
+description: 'Load the full documentation for a tool, sub-agent or skill by name. Use it before a first call you are unsure about. Not for running a skill - use skill.'
 category: builtin
 tags: [docs]
 ---
@@ -14,11 +14,14 @@ system prompt never carries.
 
 | Arg | Type | Req | Description |
 | --- | --- | --- | --- |
-| name | string | yes | Tool, sub-agent, or skill name |
+| name | string | yes | Tool, sub-agent, or skill name, or a plugin topic `prefix:topic` |
 
 ## Behavior
 
-- Resolution order: built-in tool docs, built-in sub-agent docs, the creature's
+- A name with a plugin's prefix (`ui:quiz`) loads that plugin's topic;
+  `prefix:` alone lists its topics. Plugins name their prefix in their own
+  prompt guidance.
+- Resolution order otherwise: built-in tool docs, built-in sub-agent docs, the creature's
   own `prompts/tools/` and `prompts/subagents/`, the tool instance, then
   procedural skills.
 - Reading a tool's docs here is what unlocks any tool that requires a manual

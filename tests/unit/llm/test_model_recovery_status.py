@@ -4,6 +4,8 @@ import asyncio
 from collections import deque
 from types import SimpleNamespace
 
+import pytest
+
 from kohakuterrarium.core.controller import Controller, ControllerConfig
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.model_recovery_status import (
@@ -16,6 +18,8 @@ from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.studio.attach.io import _session_info_frame
 from tests.unit.llm.test_openai_ws import Ev, MESSAGES, completed
 from tests.unit.llm.test_responses_ws_recovery import provider  # noqa: F401
+
+pytestmark = pytest.mark.real_llm_provider
 
 
 async def test_controller_recovery_is_transient_and_preserves_text(provider):

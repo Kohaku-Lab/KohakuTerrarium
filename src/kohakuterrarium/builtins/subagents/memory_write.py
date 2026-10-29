@@ -13,7 +13,10 @@ MEMORY_WRITE_SYSTEM_PROMPT = render_subagent_prompt(
 
 MEMORY_WRITE_CONFIG = SubAgentConfig(
     name="memory_write",
-    description="Store information to memory (can create files)",
+    description=(
+        "Record a durable note into session memory. Dispatch it to save decisions and "
+        "facts worth keeping. Not for files the user should see - use write."
+    ),
     tools=["tree", "read", "write"],
     system_prompt=MEMORY_WRITE_SYSTEM_PROMPT,
     can_modify=True,

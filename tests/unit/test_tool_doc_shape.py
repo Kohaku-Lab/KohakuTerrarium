@@ -2,8 +2,9 @@
 
 Three tiers of progressive disclosure, enforced so they cannot decay back:
 
-- **Tier 1** — frontmatter ``description``. Always loaded, so it is capped and
-  must carry a "Not for" clause wherever a confusable sibling exists.
+- **Tier 1** — frontmatter ``description``. Always loaded, so it is capped.
+  It leads with a positive trigger ("Use it when …"); a "Not for X - use Y"
+  clause may follow it, and must wherever a confusable sibling exists.
 - **Tier 2** — the body above ``## Reference``. Inlined only under
   ``doc_mode: full``, so it is capped and its section vocabulary is closed.
 - **Tier 3** — from ``## Reference`` on. Reachable only through ``info``.
@@ -13,6 +14,8 @@ description that no longer matches its file, and a doc file with no tool (or a
 tool with no doc file).
 """
 
+import re
+
 import pytest
 
 from kohakuterrarium.builtin_skills import (
@@ -20,6 +23,10 @@ from kohakuterrarium.builtin_skills import (
     list_builtin_subagent_docs,
     list_builtin_tool_docs,
     split_doc_tiers,
+)
+from kohakuterrarium.builtins.subagent_catalog import (
+    get_builtin_subagent_config,
+    list_builtin_subagents,
 )
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool, list_builtin_tools
 from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
@@ -50,11 +57,19 @@ CONFUSABLE = {
     "info",
     "canvas_image",
     "skill",
-    "explore",
-    "plan",
-    "worker",
-    "critic",
 }
+
+TRIGGER = re.compile(r"\b(Use it|Use to|Use when|Use for|Dispatch it)\b")
+NOT_FOR = re.compile(r"Not for [^.]+? - (use|dispatch) \S")
+DISCOURAGING = (
+    "only when",
+    "only if",
+    "sparingly",
+    "rarely",
+    "avoid using",
+    "do not use",
+    "keep it small",
+)
 
 TOOL_DOCS = sorted(list_builtin_tool_docs())
 SUBAGENT_DOCS = sorted(list_builtin_subagent_docs())
@@ -94,13 +109,53 @@ def test_description_carries_no_mode_instructions(name):
         assert banned not in desc, f"{name} description mentions {banned!r}"
 
 
+def _introductions():
+    """Every description and guidance block the model reads, by owner."""
+    get_builtin_tool("group_status")
+    for name in sorted(list_builtin_tools()):
+        tool = get_builtin_tool(name)
+        if tool is None:
+            continue
+        yield name, "description", tool.description
+        guidance = tool.prompt_contribution()
+        if guidance:
+            yield name, "guidance", guidance
+    for name in list_builtin_subagents():
+        yield name, "description", get_builtin_subagent_config(name).description
+    for kind, names in (("tools", TOOL_DOCS), ("subagents", SUBAGENT_DOCS)):
+        for name in names:
+            yield name, f"{kind} doc", _doc(kind, name).description
+
+
+def _params(rows):
+    return [pytest.param(n, w, t, id=f"{n}-{w}") for n, w, t in rows]
+
+
+def _descriptions():
+    return _params(row for row in _introductions() if row[1] != "guidance")
+
+
+@pytest.mark.parametrize(("name", "where", "text"), _descriptions())
+def test_description_leads_with_a_trigger(name, where, text):
+    # A tool introduced only by limits teaches the model never to call it.
+    trigger = TRIGGER.search(text)
+    assert trigger, f"{name} {where} has no 'Use it …' trigger: {text!r}"
+    if "Not for" in text:
+        assert text.index("Not for") > trigger.start(), f"{name}: Not for leads"
+        assert NOT_FOR.search(text), f"{name}: Not for names no tool: {text!r}"
+
+
 @pytest.mark.parametrize("name", sorted(CONFUSABLE))
-def test_confusable_tools_say_what_they_are_not_for(name):
-    kind = "tools" if name in TOOL_DOCS else "subagents"
-    if name not in TOOL_DOCS + SUBAGENT_DOCS:
-        pytest.skip(f"{name} has no packaged doc")
-    desc = _doc(kind, name).description
-    assert "Not for" in desc, f"{name} needs an exclusion clause"
+def test_confusable_tools_name_their_sibling(name):
+    desc = _doc("tools", name).description
+    assert NOT_FOR.search(desc), f"{name} needs 'Not for X - use <sibling>'"
+
+
+@pytest.mark.parametrize(("name", "where", "text"), _params(_introductions()))
+def test_no_discouraging_wording(name, where, text):
+    lowered = text.lower()
+    for phrase in DISCOURAGING:
+        assert phrase not in lowered, f"{name} {where} says {phrase!r}"
 
 
 @pytest.mark.parametrize("name", TOOL_DOCS + SUBAGENT_DOCS)

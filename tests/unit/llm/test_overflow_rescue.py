@@ -1,7 +1,11 @@
 """Unit tests for the provider overflow-rescue hook (``_overflow_rescue``)."""
 
+import pytest
+
 from kohakuterrarium.llm.base import ChatResponse
 from kohakuterrarium.llm.openai import OpenAIProvider
+
+pytestmark = pytest.mark.real_llm_provider
 
 
 class _OverflowErr(Exception):

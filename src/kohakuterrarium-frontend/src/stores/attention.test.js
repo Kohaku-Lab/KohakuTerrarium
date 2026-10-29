@@ -28,6 +28,86 @@ describe("chat attention", () => {
     expect(state.pending.size).toBe(0)
   })
 
+  it("treats interactive legacy widgets and awaiting widgets as waiting input", () => {
+    let state = createAttentionState()
+    const confirm = {
+      type: "widget",
+      event_id: "w1",
+      interactive: true,
+      payload: { renderer: "kt.confirm" },
+    }
+    const progress = {
+      type: "widget",
+      event_id: "w2",
+      interactive: true,
+      payload: { renderer: "kt.progress" },
+    }
+    const app = {
+      type: "widget",
+      event_id: "w3",
+      interactive: true,
+      payload: { renderer: "kt.app", awaiting: true },
+    }
+    const idleApp = {
+      type: "widget",
+      event_id: "w4",
+      interactive: true,
+      payload: { renderer: "kt.app" },
+    }
+    const displayCard = {
+      type: "widget",
+      event_id: "w5",
+      interactive: false,
+      payload: { renderer: "kt.card" },
+    }
+    for (const event of [confirm, progress, app, idleApp, displayCard])
+      state = reduceAttention(state, event)
+    expect(state.pending).toEqual(new Set(["w1", "w3"]))
+
+    const edge = reduceAttentionEdge(createAttentionState(), confirm, { scope: "s", tab: "t" }).edge
+    expect(edge).toMatchObject({ kind: "waiting-input", eventId: "w1" })
+
+    state = reduceAttention(state, {
+      type: "widget_ack",
+      event_id: "w1",
+      kind: "message",
+      status: "rate_limited",
+    })
+    state = reduceAttention(state, {
+      type: "widget_ack",
+      event_id: "w1",
+      kind: "state",
+      status: "accepted",
+    })
+    expect(state.pending.has("w1")).toBe(true)
+    state = reduceAttention(state, {
+      type: "widget_ack",
+      event_id: "w1",
+      kind: "message",
+      status: "accepted",
+    })
+    state = reduceAttention(state, {
+      type: "widget",
+      event_id: "w3",
+      update_target: "w3",
+      payload: { awaiting: false },
+    })
+    expect(state.pending.size).toBe(0)
+  })
+
+  it("rebuilds widget prompts from history rows", () => {
+    let state = createAttentionState()
+    const rows = [
+      { type: "widget", widget_id: "a", renderer: "kt.ask_text", interactive: true },
+      { type: "widget", widget_id: "b", renderer: "kt.selection", interactive: true },
+      { type: "widget_message", widget_id: "b", name: "submit" },
+      { type: "widget", widget_id: "c", renderer: "kt.card", interactive: true },
+      { type: "widget_close", widget_id: "c" },
+    ]
+    for (const row of rows) state = reduceAttention(state, { ...row, history: true })
+    expect(state.pending).toEqual(new Set(["a"]))
+  })
+
   it("rebuilds pending input from history without emitting an external edge", () => {
     const edges = []
     const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))

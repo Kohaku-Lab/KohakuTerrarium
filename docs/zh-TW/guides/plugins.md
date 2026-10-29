@@ -91,6 +91,12 @@ Fire-and-forget 回呼（沒有回傳值、也無法修改內容）：
 - `on_compact_start`, `on_compact_complete`
 - `on_event`
 
+### 固定上下文（pinned context）
+
+`context.pin_message(key, role, content)` 會把一則訊息放在每次請求的 system prompt 之後；`role` 為 `"user"` 或 `"system"`，`content` 可以是字串或內容片段清單（可含圖片）。同一個 key 再次 pin 會原地取代，`context.unpin_message(key)` 移除它。
+
+固定訊息不在對話歷史裡：壓縮（compaction）不會摘要或丟棄它們，壓縮後的順序是 system prompt、固定訊息、摘要、近期回合；edit、regenerate、rewind、切換分支與 `/clear` 都會保留它們，這些操作使用的訊息索引也不計入它們；它們存在 session state 中，resume 與 fork 後各恢復一次；fork 出來的子代理與旁支對話會繼承它們。詳見英文文件 [plugins.md](../../en/guides/plugins.md#pinned-context)。
+
 ## 範例：tool guard
 
 阻擋危險的 shell 命令。

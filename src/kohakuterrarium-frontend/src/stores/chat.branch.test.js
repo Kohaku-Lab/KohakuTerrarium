@@ -266,6 +266,45 @@ describe("chat store — branch-switch keeps consistent follow-ups", () => {
     const turns = messages.map((m) => m.turnIndex)
     expect(turns).toEqual([1, 1, 2, 2])
   })
+
+  it("every replayed assistant message carries the branch its turn ended on", () => {
+    const events = [
+      { type: "user_message", content: "u1", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", content: "a1", event_id: 2, turn_index: 1, branch_id: 1 },
+      { type: "processing_end", event_id: 3, turn_index: 1, branch_id: 1 },
+      { type: "text_chunk", content: "a1b", event_id: 4, turn_index: 1, branch_id: 2 },
+      { type: "processing_end", event_id: 5, turn_index: 1, branch_id: 2 },
+      {
+        type: "user_message",
+        content: "u2",
+        event_id: 6,
+        turn_index: 2,
+        branch_id: 1,
+        parent_branch_path: [[1, 2]],
+      },
+      {
+        type: "text_chunk",
+        content: "a2",
+        event_id: 7,
+        turn_index: 2,
+        branch_id: 1,
+        parent_branch_path: [[1, 2]],
+      },
+      {
+        type: "processing_end",
+        event_id: 8,
+        turn_index: 2,
+        branch_id: 1,
+        parent_branch_path: [[1, 2]],
+      },
+    ]
+    const { messages } = _replayEvents([], events)
+    const assistants = messages.filter((m) => m.role === "assistant")
+    expect(assistants.map((m) => [m.turnIndex, m.branchId])).toEqual([
+      [1, 2],
+      [2, 1],
+    ])
+  })
 })
 
 describe("chat store — regen vs edit navigator placement", () => {

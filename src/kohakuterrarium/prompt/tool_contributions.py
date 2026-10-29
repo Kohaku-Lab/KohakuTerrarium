@@ -4,6 +4,8 @@ Contributions use ``first``, ``normal``, and ``last`` buckets, then sort by tool
 name within each bucket to keep prompt prefixes cache-stable.
 """
 
+from collections.abc import Iterable
+
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool
 from kohakuterrarium.utils.logging import get_logger
@@ -27,13 +29,18 @@ def _resolve_bucket(tool: BaseTool) -> str:
     return raw
 
 
-def collect_tool_contributions(registry: Registry | None) -> list[tuple[str, str, str]]:
-    """Collect non-empty contributions from registered :class:`BaseTool` instances."""
+def collect_tool_contributions(
+    registry: Registry | None, names: Iterable[str] | None = None
+) -> list[tuple[str, str, str]]:
+    """Collect non-empty contributions from registered :class:`BaseTool` instances.
+
+    ``names`` limits collection to the model-visible tools; ``None`` takes all.
+    """
     if registry is None:
         return []
 
     triples: list[tuple[str, str, str]] = []
-    for name in registry.list_tools():
+    for name in registry.list_tools() if names is None else names:
         tool = registry.get_tool(name) if hasattr(registry, "get_tool") else None
         if tool is None or not isinstance(tool, BaseTool):
             continue
@@ -57,9 +64,11 @@ def collect_tool_contributions(registry: Registry | None) -> list[tuple[str, str
     return triples
 
 
-def build_tool_guidance_section(registry: Registry | None) -> str:
+def build_tool_guidance_section(
+    registry: Registry | None, names: Iterable[str] | None = None
+) -> str:
     """Build a cache-stable Markdown guidance section from tool contributions."""
-    triples = collect_tool_contributions(registry)
+    triples = collect_tool_contributions(registry, names)
     if not triples:
         return ""
 

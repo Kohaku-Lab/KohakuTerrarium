@@ -1,6 +1,6 @@
 ---
 name: search_memory
-description: Search this session's earlier events by keyword or meaning. Use to recall details already dropped from context. Not for searching files - use grep.
+description: 'Search this session''s earlier events by keyword or meaning. Use it to recall details dropped from context. Not for searching files - use grep.'
 category: builtin
 tags: [memory, search]
 ---

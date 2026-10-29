@@ -19,6 +19,8 @@ from kohakuterrarium.llm.base import ChatResponse
 from kohakuterrarium.llm.recovery import RetryPolicy
 from tests.helpers.anthropic_stream import ANSWER, anthropic_provider
 
+pytestmark = pytest.mark.real_llm_provider
+
 MESSAGES = [
     {"role": "system", "content": "sys"},
     {"role": "user", "content": "hi"},

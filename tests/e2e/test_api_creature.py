@@ -49,6 +49,7 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -69,6 +70,8 @@ _REPLY_SLOW = "x" * 200
 _REPLY_TRACE = "Live trace turn observed."
 _REPLY_RENAMED = "Reply after the rename."
 _REPLY_SECOND_APP = "Second app instance reply."
+_INLINE_BLOCK = '<ui><state tip={10}/><slider bind="tip" min={0} max={30}/></ui>'
+_REPLY_INLINE = f"Pick a tip:\n\n{_INLINE_BLOCK}"
 
 # ``input: cli`` is what most real creatures declare (it is also the default);
 # a server-managed creature must still never read the server's stdin.
@@ -110,6 +113,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
             ScriptEntry(_REPLY_TRACE, match="trace turn"),
             ScriptEntry(_REPLY_RENAMED, match="after rename"),
             ScriptEntry(_REPLY_SECOND_APP, match="second app turn"),
+            ScriptEntry(_REPLY_INLINE, match="inline ui turn"),
             # Persistence journey + regenerate/edit fall through to the
             # generic tail entry below.
             ScriptEntry(_REPLY_GREET),
@@ -204,6 +208,15 @@ def _stream_turn(ws, message: str) -> tuple[str, list[dict]]:
         elif ftype == "error":
             raise AssertionError(f"WS chat error frame: {frame!r}")
     return "".join(chunks), activities
+
+
+def _receive_until(ws, frame_type: str, limit: int = 50) -> dict:
+    """Read frames until one of ``frame_type`` arrives (bounded)."""
+    for _ in range(limit):
+        frame = ws.receive_json()
+        if frame.get("type") == frame_type:
+            return frame
+    raise AssertionError(f"no {frame_type} frame within {limit} frames")
 
 
 def _snapshot_messages(client: TestClient, session_id: str, creature: str) -> list:
@@ -871,6 +884,62 @@ class TestApiCreatureJourney:
         assert "user_input" in ev_types
         assert all(e.get("turn_index") == 1 for e in ev_payload["events"])
 
+        # Inline UI: a reply with a <ui> block; one client moves its slider,
+        # the other client sees it, a bad block is refused, and the state
+        # is in the history the frontend loads.
+        resp = client.post(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/chat",
+            json={"message": "inline ui turn"},
+        )
+        assert resp.json() == {"response": _REPLY_INLINE}
+        inline_turn = next(
+            e
+            for e in client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history"
+            ).json()["events"]
+            if e.get("type") == "assistant_message"
+            and _INLINE_BLOCK in str(e.get("message", {}).get("content"))
+        )
+        ((block, _),) = block_ids(_INLINE_BLOCK)
+        address = {
+            "ui_turn": inline_turn["turn_index"],
+            "ui_branch": inline_turn["branch_id"],
+            "block": block,
+        }
+        ws_url = f"/ws/sessions/{session_id}/creatures/{creature_id}/chat"
+        with (
+            client.websocket_connect(ws_url) as ws_a,
+            client.websocket_connect(ws_url) as ws_b,
+        ):
+            assert ws_a.receive_json()["activity_type"] == "session_info"
+            assert ws_b.receive_json()["activity_type"] == "session_info"
+            ws_a.send_json(
+                {"type": "inline_ui_state", **address, "state": {"tip": 18, "x": 1}}
+            )
+            seen = _receive_until(ws_b, "inline_ui_state")
+            assert {k: seen[k] for k in (*address, "state")} == {
+                **address,
+                "state": {"tip": 18},
+            }
+            ws_a.send_json(
+                {
+                    "type": "inline_ui_state",
+                    **address,
+                    "block": "deadbeef.0",
+                    "state": {"tip": 1},
+                }
+            )
+            ack = _receive_until(ws_a, "widget_ack")
+            assert (ack["kind"], ack["status"]) == ("inline_ui_state", "unknown")
+        recorded = [
+            e
+            for e in client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history"
+            ).json()["events"]
+            if e.get("type") == "inline_ui_state"
+        ]
+        assert [(e["block"], e["state"]) for e in recorded] == [(block, {"tip": 18})]
+
         # Stop the live session first — on Windows the SQLite handle
         # must be released before resume re-opens the same file.
         resp = client.delete(f"/api/sessions/active/{session_id}")
@@ -921,6 +990,12 @@ class TestApiCreatureJourney:
         resumed_blob = str(_snapshot_messages(client, resumed_id, "alice"))
         assert "persist this turn" in resumed_blob
         assert _REPLY_GREET in resumed_blob
+        # The inline block's state comes back with the resumed history.
+        assert [
+            (e["ui_turn"], e["block"], e["state"])
+            for e in resumed_history["events"]
+            if e.get("type") == "inline_ui_state"
+        ] == [(address["ui_turn"], block, {"tip": 18})]
         # The restored turn/branch counters carried over: the recorded
         # run had exactly one turn on branch 1.
         turn1_branches = {

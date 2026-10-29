@@ -76,6 +76,7 @@ import { useI18n } from "@/utils/i18n"
 
 import MarkdownRenderer from "../../public/chat/MarkdownRenderer.vue"
 import { usePlatformOrigin } from "../../public/chat/platformOrigin.js"
+import AssistantText from "../chat/shared/AssistantText.vue"
 import ConversationMessage from "../chat/shared/ConversationMessage.js"
 import "../chat/shared/chat-transcript-section.css"
 
@@ -102,7 +103,10 @@ const { t } = useI18n()
 const platformOrigin = usePlatformOrigin()
 const markdownOrigin = computed(() => (platformOrigin !== undefined ? platformOrigin : typeof window !== "undefined" ? window.location.origin : null))
 
-function renderText(content, breaks = false) {
+function renderText(content, breaks = false, options = null) {
+  if (options?.assistant) {
+    return h(AssistantText, { content, breaks, origin: markdownOrigin.value, streaming: options.streaming === true, sayBlocked: t("chat.inlineUi.sendMainChatOnly") })
+  }
   return h(MarkdownRenderer, { content, breaks, origin: markdownOrigin.value })
 }
 

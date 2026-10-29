@@ -66,7 +66,11 @@ class GroupChannelTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Create, delete, or rewire channels in your group. Not for output wires - use group_wire."
+        return (
+            "Create, delete or rewire channels in your group. Use it to set up "
+            "broadcast routes between creatures. Not for output wires - use "
+            "group_wire."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

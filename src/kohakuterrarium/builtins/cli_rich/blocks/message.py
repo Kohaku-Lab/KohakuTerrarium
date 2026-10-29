@@ -7,6 +7,7 @@ from rich.style import Style
 from rich.text import Text
 
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_AI, ICON_AI
+from kohakuterrarium.builtins.kt_ui.inline_text import inline_ui_text
 
 _MARKDOWN_HINTS = ("```", "**", "__", "##", "- ", "* ", "1. ", "> ", "[", "`")
 
@@ -72,15 +73,16 @@ class AssistantMessageBlock:
         if self.is_empty:
             return Text("")
         header = Text(f"{ICON_AI} ", style=COLOR_AI)
-        body = Text(self._buffer)
+        body = Text(inline_ui_text(self._buffer, final=self._finished))
         return Group(Text.assemble(header, body))
 
     def to_committed(self) -> RenderableType:
         """Render completed text with Markdown detection and aligned prefixing."""
         if self.is_empty:
             return Text("")
-        if _looks_like_markdown(self._buffer):
-            body: RenderableType = Markdown(self._buffer, code_theme="monokai")
+        shown = inline_ui_text(self._buffer)
+        if _looks_like_markdown(shown):
+            body: RenderableType = Markdown(shown, code_theme="monokai")
         else:
-            body = Text(self._buffer)
+            body = Text(shown)
         return PrefixedRenderable(f"{ICON_AI} ", COLOR_AI, body)

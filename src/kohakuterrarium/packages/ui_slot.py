@@ -31,6 +31,7 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "panel": ("plugin",),
     "tool-renderer": ("tool",),
     "trigger-renderer": ("trigger",),
+    "widget": ("package", "plugin", "tool", "trigger"),
 }
 UI_KINDS: tuple[str, ...] = tuple(MOUNT_OWNER_KINDS)
 OWNER_KINDS: tuple[str, ...] = ("package", "plugin", "tool", "trigger")
@@ -48,6 +49,10 @@ SCAN_WINDOW_SECONDS = 2.0
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _REF_RE = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
 _OWNER_NAME_RE = re.compile(r"^[A-Za-z0-9_][\w.\-]{0,127}$")
+_RENDERER_RE = re.compile(
+    r"^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31}){1,3}$"
+)
+RESERVED_RENDERER_PREFIXES: tuple[str, ...] = ("kt.", "mcp.")
 _COMPARATOR_RE = re.compile(r"^(>=|<=|>|<|=|\^|~)?\d+(\.\d+){0,2}$")
 
 _lock = threading.Lock()
@@ -72,6 +77,7 @@ class UIContribution:
     order: int = 100
     min_density: str = "compact"
     isolation: str = "inline"
+    renderer: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -84,6 +90,7 @@ class UIContribution:
             "order": self.order,
             "minDensity": self.min_density,
             "isolation": self.isolation,
+            "renderer": self.renderer,
         }
 
 
@@ -216,6 +223,7 @@ def _parse_contribution(
     order = raw.get("order", 100)
     if not isinstance(order, int) or isinstance(order, bool):
         raise _SlotError(f"{where}.order must be an integer")
+    renderer = _parse_renderer(raw.get("renderer"), kind, where)
     return UIContribution(
         kind=kind,
         id=cid,
@@ -226,7 +234,23 @@ def _parse_contribution(
         order=order,
         min_density=density,
         isolation=isolation,
+        renderer=renderer,
     )
+
+
+def _parse_renderer(raw: object, kind: str, where: str) -> str:
+    """The widget renderer id a ``widget`` contribution provides; empty otherwise."""
+    if kind != "widget":
+        if raw is not None:
+            raise _SlotError(f"{where}.renderer is only valid on a widget")
+        return ""
+    if not isinstance(raw, str) or not _RENDERER_RE.match(raw):
+        raise _SlotError(
+            f"{where}.renderer must be a dotted id like 'pkg.board' (got {raw!r})"
+        )
+    if raw.startswith(RESERVED_RENDERER_PREFIXES):
+        raise _SlotError(f"{where}.renderer {raw!r} uses a reserved prefix")
+    return raw
 
 
 def _parse_ref(raw: dict, key: str) -> str:

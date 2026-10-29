@@ -1,6 +1,6 @@
 ---
 name: notebook_read
-description: 'Read a Jupyter notebook as cells with outputs. Required before notebook_edit. Not for plain files - use read.'
+description: 'Read a Jupyter notebook as cells with outputs. Use it to inspect a notebook and before notebook_edit. Not for plain files - use read.'
 category: builtin
 tags: [notebook]
 ---
@@ -35,4 +35,4 @@ Returns a notebook as a list of cells rather than raw JSON.
 ### Output shape
 
 One block per cell: index, id, type, source, then outputs at the requested
-detail. Use plain `read` only when debugging the notebook file format itself.
+detail. Plain `read` shows the raw JSON, for debugging the notebook file format itself.

@@ -16,6 +16,7 @@ from kohakuterrarium.builtin_skills import (
 )
 from kohakuterrarium.commands.base import BaseCommand, CommandResult, parse_command_args
 from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.skill_docs import SkillDoc, load_skill_doc
 
 
@@ -103,6 +104,17 @@ class InfoCommand(BaseCommand):
 
         if not target_name:
             return CommandResult(error="No name provided. Use info(name=...).")
+
+        # A plugin owns every name under its doc prefix (``ui:table``).
+        plugins = getattr(getattr(context, "controller", None), "plugins", None)
+        lookup = getattr(plugins, "lookup_doc", None)
+        if callable(lookup):
+            try:
+                doc = lookup(target_name)
+            except NotFoundError as exc:
+                return CommandResult(error=str(exc))
+            if isinstance(doc, str) and doc:
+                return CommandResult(content=doc)
 
         # Creature-local documentation overrides every shared source.
         if hasattr(context, "agent_path") and context.agent_path:

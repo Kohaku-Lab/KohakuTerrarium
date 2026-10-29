@@ -1,7 +1,6 @@
 ---
 name: read
-description: 'Read a file: text with line numbers, images, or PDF pages. Required before write
-  or multi_edit. Not for notebooks - use notebook_read.'
+description: 'Read a file: text with line numbers, images or PDF pages. Use it to inspect any file, and before write or multi_edit. Not for notebooks - use notebook_read.'
 category: builtin
 tags: [file, io]
 ---

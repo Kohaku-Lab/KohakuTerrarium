@@ -19,6 +19,9 @@ from kohakuterrarium.laboratory.adapters.terrarium_attach import (
     _AttachSession,
 )
 from kohakuterrarium.laboratory.ws_proxy import WSFrameSink
+from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.widgets import WidgetRecord
+from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 
@@ -420,6 +423,58 @@ class TestConsumeInputTargetRouting:
                 consumer.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await consumer
+        finally:
+            adapter.detach()
+            await t.shutdown()
+
+    async def test_widget_frames_route_to_the_sibling_widget_service(self):
+        t = await (
+            TestTerrariumBuilder().with_creature("alice").with_creature("bob").build()
+        )
+        try:
+            adapter, node = await _build_adapter(t)
+            routers = {}
+            for cid in ("alice", "bob"):
+                creature = t.get_creature(cid)
+                router = OutputRouter(OutputRecorder())
+                router.widgets.registry.add(
+                    WidgetRecord(widget_id=f"w_{cid}", renderer="kt.ui")
+                )
+                creature.agent.output_router = router
+                routers[cid] = router
+            sink = _make_sink(node)
+            await adapter.on_start({"creature_id": "alice", "session_id": "_"}, sink)
+            _drain(sink)
+            await sink.inject_input(
+                {"type": "client_hello", "renderers": {"kt.app": 1}}
+            )
+            await sink.inject_input(
+                {
+                    "type": "widget_state",
+                    "target": "bob",
+                    "event_id": "w_bob",
+                    "state": {"k": 1},
+                }
+            )
+            await sink.inject_input(
+                {
+                    "type": "widget_msg",
+                    "target": "bob",
+                    "event_id": "w_bob",
+                    "name": "a",
+                }
+            )
+            for _ in range(50):
+                frames = [f for f in _drain(sink) if f["type"] == "widget_ack"]
+                if frames:
+                    break
+                await asyncio.sleep(0.01)
+            assert routers["alice"].ui_renderers() == {"kt.app": 1}
+            assert routers["bob"].ui_renderers() == {"kt.app": 1}
+            assert routers["bob"].widgets.registry.get("w_bob").state == {"k": 1}
+            (ack,) = frames
+            assert ack["source"] == "bob" and ack["status"] == "dropped"
+            await adapter.on_close("stream-1")
         finally:
             adapter.detach()
             await t.shutdown()

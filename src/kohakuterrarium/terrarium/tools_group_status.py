@@ -34,7 +34,11 @@ class GroupStatusTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Snapshot your group: members, channels, wires, and health. Not for changing it - use the other group tools."
+        return (
+            "Snapshot your group: members, channels, wires and health. Use it before "
+            "dispatching work and to check progress. Not for changing it - use the "
+            "other group tools."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -79,7 +79,10 @@ class SendMessageTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Send a message to a named channel."
+        return (
+            "Send a message to a named channel. Use it to publish results or updates "
+            "to the channels listed in your prompt."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

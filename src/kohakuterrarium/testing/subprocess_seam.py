@@ -12,8 +12,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.testing.llm_seam import forbid_real_providers, patch_factories
 
 _INSTALLED = False
 
@@ -41,34 +41,11 @@ def maybe_install_test_llm_seam() -> bool:
         return False
     script_path = Path(script_path_str)
 
-    def _fake_create(config, llm=None):
+    def _fake_build(*args, **kwargs):
         return ScriptedLLM(_load_script(script_path))
 
-    def _fake_from_profile(name):
-        return ScriptedLLM(_load_script(script_path))
-
-    _bootstrap_llm.create_llm_provider = _fake_create
-    _bootstrap_llm.create_llm_from_profile_name = _fake_from_profile
-
-    # Patch modules that may already hold imported factory references.
-    try:
-        from kohakuterrarium.bootstrap import agent_init as _agent_init
-
-        _agent_init.create_llm_provider = _fake_create
-    except ImportError:
-        pass
-    try:
-        from kohakuterrarium.core import agent_model as _agent_model
-
-        _agent_model.create_llm_from_profile_name = _fake_from_profile
-    except ImportError:
-        pass
-    try:
-        from kohakuterrarium.core import agent_compact as _agent_compact
-
-        _agent_compact.create_llm_from_profile_name = _fake_from_profile
-    except ImportError:
-        pass
+    patch_factories(setattr, _fake_build)
+    forbid_real_providers(setattr)
 
     _INSTALLED = True
     return True

@@ -141,6 +141,12 @@ class AgentCompactMixin:
     config: Any
     _llm_selector: str | None
 
+    @property
+    def compact_rounds(self) -> int:
+        """Compaction rounds completed on this agent's conversation."""
+        manager = getattr(self, "compact_manager", None)
+        return int(getattr(manager, "_compact_count", 0) or 0)
+
     def _wire_overflow_rescue(self) -> None:
         """Point the active provider's overflow hook at the compact manager.
 
@@ -179,7 +185,9 @@ class AgentCompactMixin:
         controller = getattr(self, "controller", None)
         if controller is None:
             return None
-        return controller.conversation.to_messages()
+        messages = controller.conversation.to_messages()
+        pins = getattr(controller, "pinned", None)
+        return pins.apply(messages) if pins is not None else messages
 
     def _build_compact_llm(self, compact_cfg: CompactConfig) -> Any:
         """Build an isolated LLM instance for compaction.

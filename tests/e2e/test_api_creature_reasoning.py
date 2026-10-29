@@ -27,7 +27,7 @@ from tests.helpers.reasoning_stream import (
     reasoning_segments,
 )
 
-pytestmark = pytest.mark.timeout(60)
+pytestmark = [pytest.mark.timeout(60), pytest.mark.real_llm_provider]
 
 _CREATURE_CONFIG = """\
 name: thinker

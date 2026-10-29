@@ -79,6 +79,7 @@ async def _build(tmp_path, llm, **kw):
 
 
 class TestRun:
+    @pytest.mark.real_llm_provider
     async def test_accepted_missing_media_records_failed_turn_without_transport(
         self, tmp_path
     ):

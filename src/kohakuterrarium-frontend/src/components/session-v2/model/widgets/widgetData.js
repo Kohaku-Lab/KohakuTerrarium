@@ -63,6 +63,7 @@ const TYPE_ICONS = {
   image: "i-carbon-image",
   diagram: "i-carbon-flow-connection",
   table: "i-carbon-data-table",
+  widget: "i-carbon-application-web",
 }
 
 export function artifactIcon(type) {
@@ -84,10 +85,17 @@ export function artifactFileName(art) {
   return `${(art?.name || "artifact").replace(/[^a-zA-Z0-9_.-]/g, "_")}.${ext}`
 }
 
-/** Which viewer shows an artifact: image, markdown, html, or code (everything else). */
+/** Which viewer shows an artifact: image, widget, ktui, markdown, html, or code (everything else). */
 export function artifactViewer(art) {
   const type = art?.type
-  if (type === "image" || type === "markdown" || type === "html") return type
+  if (
+    type === "image" ||
+    type === "widget" ||
+    type === "ktui" ||
+    type === "markdown" ||
+    type === "html"
+  )
+    return type
   return "code"
 }
 

@@ -1,14 +1,17 @@
 """Route parsed and typed events across default, named, and secondary outputs."""
 
-import asyncio
+from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.event import OutputEvent, UIReply
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.output.router_interactive import (
     OutputRouterInteractiveMixin,
 )
 from kohakuterrarium.modules.output.router_parsing import OutputRouterParseEventMixin
 from kohakuterrarium.modules.output.router_state import CompletedOutput, OutputState
+from kohakuterrarium.modules.output.router_widgets import OutputRouterWidgetsMixin
+from kohakuterrarium.modules.output.widgets import WIDGET_EVENT_TYPES, WidgetService
+from kohakuterrarium.modules.output.widgets_legacy import LEGACY_EVENT_TYPES
 from kohakuterrarium.parsing import (
     AssistantImageEvent,
     CommandEvent,
@@ -21,7 +24,11 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
+class OutputRouter(
+    OutputRouterParseEventMixin,
+    OutputRouterInteractiveMixin,
+    OutputRouterWidgetsMixin,
+):
     """Coordinate output state, typed events, lifecycle, and interactive replies."""
 
     def __init__(
@@ -49,15 +56,31 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
 
         self._secondary_outputs: list[OutputModule] = []
 
-        # Interactive reply futures are keyed by the originating event ID.
-        self._pending_replies: dict[str, asyncio.Future[UIReply]] = {}
-        self._closed_interactions: dict[str, None] = {}
+        self._init_widgets()
+        self.widgets = WidgetService(self)
+        # Inline <ui> block state (builtins.kt_ui.inline_state); set by agent construction.
+        self.inline_ui: Any = None
+        # Interactive reply futures, keyed by the originating event ID.
+        self._pending_replies = self.widgets.pending_replies
+        self._closed_interactions = self.widgets.closed_interactions
 
         # Interactive outputs need a back-reference for reply submission.
         for output in (default_output, *self._secondary_outputs):
             self._maybe_link_router(output)
         for output in (self.named_outputs or {}).values():
             self._maybe_link_router(output)
+
+    @property
+    def default_output(self) -> OutputModule:
+        """The primary output; replacing it links the new one and re-aggregates renderers."""
+        return self._default_output
+
+    @default_output.setter
+    def default_output(self, output: OutputModule) -> None:
+        self._default_output = output
+        if hasattr(self, "_renderers_listeners"):
+            self._maybe_link_router(output)
+            self.refresh_renderers()
 
     @property
     def state(self) -> OutputState:
@@ -120,6 +143,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         """Add a secondary output that receives copies of all text output."""
         self._secondary_outputs.append(output)
         self._maybe_link_router(output)
+        self.refresh_renderers()
 
     def _maybe_link_router(self, output: OutputModule) -> None:
         """Best-effort link an interactive output back to this router."""
@@ -134,12 +158,15 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         self._secondary_outputs = [
             o for o in self._secondary_outputs if o is not output
         ]
+        self.refresh_renderers()
 
     async def emit(self, event: OutputEvent) -> None:
         """Dispatch a typed event according to its output visibility contract."""
         match event.type:
             case "model_recovery":
                 self.model_recovery_status = dict(event.payload)
+                await self._fan_event_to_outputs(event)
+            case "tool_args_progress":
                 await self._fan_event_to_outputs(event)
             case "text":
                 content = event.content
@@ -166,17 +193,10 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
                 )
             case "resume_batch":
                 await self.on_resume(event.payload.get("events", []))
-            case (
-                "ask_text"
-                | "confirm"
-                | "selection"
-                | "progress"
-                | "notification"
-                | "card"
-                | "ui_supersede"
-            ):
-                # Rich UI events retain their typed payload through output emitters.
-                await self._fan_event_to_outputs(event)
+            case kind if kind in WIDGET_EVENT_TYPES:
+                await self.emit_widget(event)
+            case kind if kind in LEGACY_EVENT_TYPES:
+                await self.widgets.emit_legacy(event)
             case _:
                 self._dispatch_activity_event(event)
 

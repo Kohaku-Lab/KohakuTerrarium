@@ -4,12 +4,14 @@ import pytest
 from textual.widgets import Label, TabbedContent
 from textual.widgets._markdown import MarkdownFence
 
+from kohakuterrarium.builtins.tui import attention
 from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.builtins.tui.app import _safe_id
 from kohakuterrarium.builtins.tui.session import TUISession
 from kohakuterrarium.builtins.tui.widgets import ChatInput, UserMessage
 from kohakuterrarium.builtins.tui.widgets.blocks import ToolBlock
 from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.router import OutputRouter
 
 
 async def test_processing_tracks_active_tab_during_overlapping_turns():
@@ -325,3 +327,52 @@ async def test_resume_survives_slow_mount_without_raising(
         await output.on_resume([{"type": "user_input", "content": "turn"}])
         monkeypatch.setattr(session._app, "call_later", original_call_later)
         await pilot.pause()
+
+
+async def test_router_delivers_legacy_kinds_to_the_tui_through_on_widget():
+    tui = FakeTUI()
+    output = TUIOutput()
+    output._tui = tui
+    output._default_target = "alice"
+    router = OutputRouter(output)
+
+    await router.emit(
+        OutputEvent(type="notification", payload={"text": "built", "level": "ok"})
+    )
+    await router.emit(
+        OutputEvent(type="widget", id="w1", payload={"renderer": "kt.ui"})
+    )
+
+    assert tui.notices == [
+        {"text": "built", "command": "ok", "error": False, "target": "alice"}
+    ]
+
+
+class CardTUI(FakeTUI):
+    def __init__(self):
+        super().__init__()
+        self.cards = []
+
+    def add_card_block(self, payload, *, event_id, on_action, target):
+        self.cards.append((payload, event_id, on_action))
+
+
+async def test_tui_reports_kt_ui_and_draws_it_as_card_blocks(monkeypatch):
+    monkeypatch.setattr(attention, "add_pending", lambda *a: None)
+    monkeypatch.setattr(attention, "clear", lambda *a: None)
+    tui = CardTUI()
+    output = TUIOutput()
+    output._tui = tui
+    router = OutputRouter(output)
+    assert router.ui_renderers() == {"kt.ui": 1}
+    spec = {
+        "title": "Count",
+        "state": {"n": 1},
+        "root": {"type": "button", "label": "Add", "set": {"n": "n + 1"}},
+    }
+    handle = await router.widgets.open("kt.ui", spec, state={"n": 1}, title="Count")
+    payload, event_id, on_action = tui.cards[-1]
+    assert payload["actions"] == [{"id": "c0", "label": "Add"}]
+    on_action(event_id, "c0")
+    assert handle.state == {"n": 2}
+    assert len(tui.cards) == 2

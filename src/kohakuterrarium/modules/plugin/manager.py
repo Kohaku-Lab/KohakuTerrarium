@@ -18,6 +18,7 @@ from kohakuterrarium.modules.plugin.dispatch import (
     call_method as _call_method,
     has_override as _has_override,
 )
+from kohakuterrarium.modules.plugin.docs import PluginDocsMixin
 from kohakuterrarium.modules.plugin.manager_commands import (
     PluginCommandRefreshMixin,
 )
@@ -45,7 +46,9 @@ def _plugin_applies(plugin: BasePlugin, context: PluginContext | None) -> bool:
         return True
 
 
-class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
+class PluginManager(
+    PluginCommandRefreshMixin, PluginDocsMixin, ToolVisibilityCollectorMixin
+):
     """Manages plugin lifecycle, hook wrapping, and callback dispatch."""
 
     def __init__(self) -> None:
@@ -54,6 +57,8 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
         self._needs_load: set[str] = set()
         self._load_context: PluginContext | None = None
         self._unloaded: set[int] = set()
+        # Plugin id -> (plugin, tools): contribute_tools runs once per instance.
+        self._contributed_tools: dict[int, tuple[BasePlugin, list[Any]]] = {}
         # Timing remains optional so sessions without observers pay no callback cost.
         self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
         # Fired after an enable/disable that changes which plugins are active.
@@ -242,15 +247,32 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
             services.update(contributed)
         return services
 
+    def prompt_renderers(self) -> frozenset[str]:
+        """Renderer ids the active plugins' prompt content depends on."""
+        wanted: set[str] = set()
+        for plugin in self._applicable_plugins():
+            wanted |= set(getattr(plugin, "prompt_renderers", ()) or ())
+        return frozenset(wanted)
+
     def collect_prompt_contributions(self, context: PluginContext) -> list[str]:
         """Collect runtime prompt prose in plugin priority order."""
+        return self._collect_text("get_prompt_content", context)
+
+    def collect_presentation_contributions(self, context: PluginContext) -> list[str]:
+        """Collect ``## Presenting your answer`` parts in plugin priority order."""
+        return self._collect_text("presentation_contribution", context)
+
+    def _collect_text(self, hook: str, context: PluginContext) -> list[str]:
         out: list[str] = []
         for plugin in self._applicable_plugins():
+            method = getattr(plugin, hook, None)
+            if not callable(method):
+                continue
             try:
-                content = plugin.get_prompt_content(context)
+                content = method(context)
             except Exception as e:
                 logger.warning(
-                    "Plugin get_prompt_content raised",
+                    f"Plugin {hook} raised",
                     plugin_name=getattr(plugin, "name", "?"),
                     error=str(e),
                     exc_info=True,

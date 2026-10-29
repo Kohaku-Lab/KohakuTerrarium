@@ -1080,6 +1080,26 @@ class TestPendingInjections:
         # The injection should now be drained.
         assert c._pending_injections == []
 
+    async def test_pins_follow_system_and_injections_follow_pins(self):
+        env = TestAgentBuilder().with_llm_script(["resp", "again"]).build()
+        c = env.controller
+        c.pinned.pin("persona", "user", "PIN")
+        c._pending_injections = [{"role": "user", "content": "INJECTED"}]
+        await c.push_event(create_user_input_event("hi"))
+        async for _ in c.run_once():
+            pass
+        sent = env.llm.call_log[-1]
+        assert sent[0]["role"] == "system"
+        assert [m["content"] for m in sent[1:3]] == ["PIN", "INJECTED"]
+        assert sent[3]["content"] == "hi"
+        assert not any(m.metadata.get("pinned") for m in c.conversation.get_messages())
+        assert all("metadata" not in m for m in sent)
+        await c.push_event(create_user_input_event("next"))
+        async for _ in c.run_once():
+            pass
+        contents = [m["content"] for m in env.llm.call_log[-1]]
+        assert contents.count("PIN") == 1 and "INJECTED" not in contents
+
 
 # ── _handle_command ──────────────────────────────────────────────
 

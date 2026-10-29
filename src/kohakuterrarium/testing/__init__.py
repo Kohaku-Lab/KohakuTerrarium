@@ -3,6 +3,12 @@
 from kohakuterrarium.testing.agent import TestAgentBuilder
 from kohakuterrarium.testing.events import EventRecorder, RecordedEvent
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.testing.llm_seam import (
+    LLM_FACTORY_TARGETS,
+    RealProviderBlocked,
+    install_llm_seam,
+    real_llm_providers,
+)
 from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
@@ -14,4 +20,8 @@ __all__ = [
     "RecordedEvent",
     "TestAgentBuilder",
     "TestTerrariumBuilder",
+    "LLM_FACTORY_TARGETS",
+    "RealProviderBlocked",
+    "install_llm_seam",
+    "real_llm_providers",
 ]

@@ -4,6 +4,8 @@ import pytest
 
 from kohakuterrarium.llm.openai import OpenAIProvider
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 class _Delta:
     def __init__(self, content=None, tool_calls=None, model_extra=None):

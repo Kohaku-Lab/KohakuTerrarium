@@ -57,6 +57,7 @@ from kohakuterrarium.llm.recovery import (
 )
 from kohakuterrarium.llm.responses_ws_options import request_max_bytes
 from kohakuterrarium.llm.stream_replay import ReplayFilter
+from kohakuterrarium.llm.tool_call_progress import ToolCallProgress
 from kohakuterrarium.llm.turn_segments import inject_anthropic_segments
 from kohakuterrarium.utils.logging import get_logger
 
@@ -300,6 +301,7 @@ class AnthropicProvider(BaseLLMProvider):
         stream = await self._client.messages.create(**create_kwargs)
         blocks: dict[int, dict[str, Any]] = {}
         stop_reason = ""
+        progress = ToolCallProgress()
 
         async for event in stream:
             event_type = getattr(event, "type", "")
@@ -322,6 +324,11 @@ class AnthropicProvider(BaseLLMProvider):
                 )
                 if piece:
                     yield strip_surrogates(piece)
+                block = blocks[idx]
+                if block.get("type") == "tool_use":
+                    await progress.update(
+                        idx, block.get("name", ""), len(block.get("_partial_json", ""))
+                    )
                 continue
             if event_type == "message_delta":
                 delta = getattr(event, "delta", None)

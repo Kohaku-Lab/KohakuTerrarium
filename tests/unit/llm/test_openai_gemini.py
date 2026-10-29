@@ -11,6 +11,8 @@ from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.openai_helpers import TOOL_CALL_EXTRA_KEY
 from kohakuterrarium.llm.profiles import get_profile
 
+pytestmark = pytest.mark.real_llm_provider
+
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 SIGNATURE = {"google": {"thought_signature": "opaque-signature"}}
 

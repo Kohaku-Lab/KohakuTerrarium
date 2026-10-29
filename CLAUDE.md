@@ -141,9 +141,14 @@ different size. `tests/README.md` is the full spec; the summary:
 
 Tier discipline: **behavior asserts, not shape asserts** (every mutation
 test observes the side effect); **real collaborators, not mocks** (the
-only seam is the LLM: `kohakuterrarium.testing.llm.ScriptedLLM`,
-monkeypatched at BOTH `bootstrap.llm.create_llm_provider` and
-`bootstrap.agent_init.create_llm_provider`); **to raise integration/e2e
+only seam is the LLM: `kohakuterrarium.testing.llm.ScriptedLLM`, wired by
+`kohakuterrarium.testing.llm_seam`. `tests/conftest.py` applies it to every
+test: all provider factories in `LLM_FACTORY_TARGETS` return `ScriptedLLM`,
+constructing a real provider raises, non-loopback network is blocked, and
+HOME / CODEX_HOME / KT_CONFIG_DIR are tmp. Inject `llm=` where you can;
+tests that build provider classes against fake transports opt out with
+`@pytest.mark.real_llm_provider` or a scoped `with real_llm_providers():`);
+**to raise integration/e2e
 coverage, fatten the existing workflow functions; do NOT add more test
 functions.** Carve-out files (3rd-party providers, platform PTY,
 end-user CLI/UI, the pywebview boot path) are listed in
@@ -704,6 +709,10 @@ so prompt-size work that ignores `llm/tools.py` is optimizing the smaller one.
 is worse than a missing one — it teaches the model something false.
 
 1. **Base prompt from system.md** — always. Personality and domain judgment only.
+1b. **`## Presenting your answer`** — only when a plugin returns a part from
+   `BasePlugin.presentation_contribution()` (inline UI while a client draws
+   `kt.ui`, full-page apps while `show_app` is visible). Framework opening
+   and closing lines around the parts; `prompt_renderers` refreshes it.
 2. **`## Available Functions`** — only when `tool_format != "native"` or
    `tool_doc_mode == "full"`. Native providers already carry the inventory.
 3. **`## Function Documentation`** — only for tools resolved to `full`.
@@ -721,7 +730,9 @@ is worse than a missing one — it teaches the model something false.
 `tool_doc_mode` is `brief` | `standard` (default) | `full`, overridable per tool
 with `doc_mode` on a `tools:` entry. Files in `builtin_skills/` split at
 `## Reference`: above it is the **usage** tier that `full` inlines, below it is
-reachable only through `info`, in every mode.
+reachable only through `info`, in every mode. Plugins serve their own topics
+through `info("<doc_prefix>:<topic>")` (`BasePlugin.doc_prefix` / `doc_topic`);
+`ui.declarative` keeps its less common components there as `ui:<name>`.
 
 ### What Goes Where
 
@@ -729,7 +740,7 @@ reachable only through `info`, in every mode.
 |---------|----------|
 | Agent personality / role / domain judgment | `system.md` |
 | What is true about the runtime (dispatch, channels, graph) | framework blocks |
-| Tool name + one-line description (≤160 chars, with a "Not for" clause) | tool class, mirrored in the doc frontmatter |
+| Tool name + one-line description (≤160 chars): what it does, then a "Use it when/to …" trigger, then optionally "Not for X - use Y" | tool class, mirrored in the doc frontmatter |
 | Argument tables, behavior, limits | `builtin_skills/<tool>.md` above `## Reference` |
 | Output formats, edge cases, worked failures | below `## Reference` |
 | A procedure for a task | a skill, not a creature prompt |
@@ -746,6 +757,12 @@ reachable only through `info`, in every mode.
    `tests/unit/test_tool_doc_shape.py` enforces that.
 5. **NEVER add a framework section without asserting its gate in both
    directions** — present when true, absent when false.
+6. **NEVER introduce a tool by its prohibitions** — every description and
+   guidance block leads with a positive trigger ("Use it when …", "Dispatch it
+   to …"). A "Not for X - use Y" clause is optional, comes last, and names one
+   specific wrong use and the tool to use instead. Text that only says when a
+   tool is *allowed* ("only when", "sparingly", "do not use unless") teaches
+   the model that not calling it is safest.
 
 ### Budget
 

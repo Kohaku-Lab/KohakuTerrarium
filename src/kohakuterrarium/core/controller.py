@@ -9,7 +9,7 @@ from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 if TYPE_CHECKING:
     from kohakuterrarium.llm.base import ToolSchema
@@ -42,7 +42,9 @@ from kohakuterrarium.core.controller_context import (
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.inline_upload import materialize_upload
 from kohakuterrarium.core.job import JobResult, JobStatus, JobStore
+from kohakuterrarium.core.pinned import PinnedContext
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.tool_gate import visible_catalog
 from kohakuterrarium.core.tool_output import materialize_image_part
 from kohakuterrarium.errors import InvalidRequestError
 from kohakuterrarium.llm.base import LLMProvider
@@ -188,6 +190,7 @@ class Controller:
             sanitize_orphan_tool_calls=self.config.sanitize_orphan_tool_calls,
         )
         self.conversation = Conversation(conv_config)
+        self.pinned = PinnedContext()
 
         # Token usage tracking
         self._last_usage: dict[str, int] = {}
@@ -219,6 +222,8 @@ class Controller:
         # Post-LLM rewrites use the same router as streamed output so attached
         # consumers observe a coherent assistant turn.
         self.output_router: Any = None
+        # Called before each LLM request so deferred prompt refreshes land between calls.
+        self.before_llm_request: Callable[[], Any] | None = None
         # Capture the Message returned by append, not a later conversation tail.
         self._completed_assistant_message = None
 
@@ -279,14 +284,15 @@ class Controller:
         return self.config.tool_format == "native"
 
     def _get_tool_visibility(self) -> ToolVisibility | None:
-        """Collect active plugins' per-request tool catalog restrictions."""
-        plugins = getattr(self, "plugins", None)
-        if plugins is None:
-            return None
-        return plugins.collect_tool_visibility()
+        """Collect plugin restrictions and renderer availability for this request."""
+        return visible_catalog(
+            self.registry,
+            getattr(self, "plugins", None),
+            getattr(self, "output_router", None),
+        )
 
     def _get_native_tool_schemas(self) -> "list[ToolSchema]":
-        """Build callable schemas, applying plugin tool-visibility restrictions."""
+        """Build callable schemas, applying the visible tool catalog."""
         schemas = build_tool_schemas(
             self.registry, tool_doc_mode=self.config.tool_doc_mode
         )
@@ -858,23 +864,20 @@ class Controller:
                 msg.metadata.update(tool_feedback_metadata(events))
             msg.metadata.update(origin)
 
-        messages = self.conversation.to_messages()
+        if self.before_llm_request is not None:
+            self.before_llm_request()
+        messages = self.pinned.apply(self.conversation.to_messages())
         messages = await self._resolve_message_files(messages)
 
-        # Insert after all system messages so plugin context is early while
-        # remaining visible to every pre-LLM hook.
+        # Insert after the system block and pins so plugin context is early
+        # while remaining visible to every pre-LLM hook.
         injected = self._pending_injections
         self._pending_injections = []
         if self._skill_path_hint:
             # A fresh dict prevents a pre-hook from mutating the turn snapshot.
             injected = [{"role": "user", "content": self._skill_path_hint}, *injected]
         if injected:
-            insert_idx = 0
-            for i, msg in enumerate(messages):
-                if msg.get("role") == "system":
-                    insert_idx = i + 1
-                else:
-                    break
+            insert_idx = self.pinned.context_end(messages)
             messages = (
                 list(messages[:insert_idx])
                 + list(injected)

@@ -16,6 +16,7 @@ Discipline rules — every test in any tier must follow these:
 These rules are how we earn the right to claim "covered."
 """
 
+import ipaddress
 import os
 import sys
 import tempfile
@@ -45,6 +46,48 @@ os.environ["KT_CONFIG_DIR"] = str(_SESSION_CONFIG_DIR)
 os.environ.setdefault("KT_TEST_REAL_HOME", str(Path.home()))
 
 from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP  # noqa: E402
+from kohakuterrarium.testing.llm_seam import (  # noqa: E402
+    forbid_real_providers,
+    install_llm_seam,
+)
+
+_LOOPBACK_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", ""}
+_NETWORK_GUARD = {"blocked": False}
+
+
+def _is_loopback(host) -> bool:
+    if host is None:
+        return True
+    if isinstance(host, bytes):
+        host = host.decode("ascii", "ignore")
+    host = str(host).strip("[]").split("%", 1)[0].lower()
+    if host in _LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback or host in ("0.0.0.0", "::")
+    except ValueError:
+        return False
+
+
+def _network_audit(event, args):
+    """Refuse non-loopback connects and lookups while a test blocks the network."""
+    if not _NETWORK_GUARD["blocked"]:
+        return
+    if event == "socket.connect":
+        address = args[1]
+        host = address[0] if isinstance(address, tuple) and address else None
+    elif event == "socket.getaddrinfo":
+        host = args[0]
+    else:
+        return
+    if not _is_loopback(host):
+        raise OSError(
+            f"network is blocked in tests (to {host!r}); "
+            "mark the test @pytest.mark.allow_network if it must reach out"
+        )
+
+
+sys.addaudithook(_network_audit)
 
 # ``-n auto`` resolves to this many xdist workers unless KT_TEST_WORKERS is set.
 LOCAL_TEST_WORKERS = 16
@@ -173,6 +216,14 @@ def pytest_configure(config):
             config.option.timeout_method = "signal"
         except Exception:
             pass
+    config.addinivalue_line(
+        "markers",
+        "real_llm_provider: build real provider classes (against fakes); "
+        "lifts the LLM seam and the real-provider block",
+    )
+    config.addinivalue_line(
+        "markers", "allow_network: lift the non-loopback network block"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -231,6 +282,7 @@ def _isolated_home(tmp_path_factory, monkeypatch):
         ("XDG_CACHE_HOME", ".cache"),
     ):
         monkeypatch.setenv(name, str(home / sub))
+    monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     for name in ("TMPDIR", "TEMP", "TMP"):
         monkeypatch.setenv(name, str(temp))
     monkeypatch.setattr(tempfile, "tempdir", str(temp))
@@ -261,3 +313,23 @@ def _no_inherited_provider_keys(monkeypatch):
     """
     for name in PROVIDER_KEY_MAP.values():
         monkeypatch.delenv(name, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _llm_seam(request, monkeypatch):
+    """Route every provider factory to ``ScriptedLLM`` and refuse real providers.
+
+    ``@pytest.mark.real_llm_provider`` lifts both for a test that builds
+    provider classes against fake transports.
+    """
+    if request.node.get_closest_marker("real_llm_provider") is None:
+        install_llm_seam(monkeypatch)
+        forbid_real_providers(monkeypatch.setattr)
+
+
+@pytest.fixture(autouse=True)
+def _block_network(request):
+    """Block non-loopback sockets unless the test is marked ``allow_network``."""
+    _NETWORK_GUARD["blocked"] = request.node.get_closest_marker("allow_network") is None
+    yield
+    _NETWORK_GUARD["blocked"] = False

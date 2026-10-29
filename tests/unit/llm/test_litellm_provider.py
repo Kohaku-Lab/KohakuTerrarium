@@ -14,6 +14,8 @@ import pytest
 
 from kohakuterrarium.llm.media_reference import session_media_scope
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 class _FakeLitellm:
     acompletion = None

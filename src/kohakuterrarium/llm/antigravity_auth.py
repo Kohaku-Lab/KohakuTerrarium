@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 
 
@@ -142,7 +143,7 @@ def agy_executable() -> str | None:
 
 
 def refresh_lock_path() -> Path:
-    return Path.home() / ".kohakuterrarium/locks/agy-refresh.lock"
+    return config_dir() / "locks" / "agy-refresh.lock"
 
 
 async def run_agy_models() -> None:

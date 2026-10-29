@@ -2,22 +2,21 @@
  * Canvas store — artifact list derived from the chat stream.
  * Frontend-only: no backend endpoint.
  *
- * Detects long code / markdown / html chunks in assistant messages,
- * explicit ``##canvas##`` / ``##artifact##`` markers, and provider-
- * native image outputs; exposes them to the Canvas panel. Message-
- * derived artifacts are keyed by source-message id. Within one scan, a
- * new key whose content matches an artifact (or a closed block) whose own
- * key is gone from the scan takes that artifact (or its closed state)
- * over — message ids change when history reloads — and a new key
- * repeating a block another scanned message still shows adds nothing.
- * Tool previews are keyed by file path, so re-touching a file refreshes
- * it in place.
+ * The canvas holds generated images, canvas-surface widgets (``show_app``,
+ * page-mode ``show_ui``) and what the user pins with "Open in canvas".
+ * Sources: provider-native image outputs, ``canvas_image`` previews, widget
+ * messages whose surface is ``canvas``, user pins, and (read-only, for one
+ * release) ``##canvas##`` / ``##artifact##`` markers. Message-derived
+ * artifacts are keyed by source-message id. Within one scan, a new key whose
+ * content matches an artifact (or a closed block) whose own key is gone from
+ * the scan takes that artifact (or its closed state) over — message ids
+ * change when history reloads — and a new key repeating a block another
+ * scanned message still shows adds nothing. Image previews are keyed by file
+ * path, so re-touching a file refreshes it in place.
  *
  * **Per-scope** (scope = attach target). Two attach tabs each have
  * their own artifact list, active selection, and dismissed flag — no
- * race over a shared "currentScope" pointer. Pre-refactor the store
- * was a singleton with internal ``byScope`` maps; that indirection is
- * gone now (the Pinia scope IS the scope). Outside a provider, the
+ * race over a shared "currentScope" pointer. Outside a provider, the
  * default scope keeps the v1 singleton behaviour.
  */
 
@@ -28,21 +27,9 @@ import { injectScope, disposeScopeStore, registerScopeDisposer } from "@/composa
 import { mediaSourceUrl } from "@/utils/artifacts"
 import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 
-const MIN_LINES_FOR_HEURISTIC = 15
 /** Soft cap on the strip. Oldest tiles are hidden (and stay hidden on
  *  rescan) so a long attach does not grow an unbounded tab list. */
 export const MAX_CANVAS_ARTIFACTS = 12
-// Match fenced code blocks: opening ```lang\n ... closing ```
-// Uses \n``` on its own line (not $ anchor which is fragile with \r\n).
-const CODE_FENCE = /```(\w*)\n([\s\S]*?)\n```/g
-
-/** Best-effort language guess from the opening fence info string, or
- *  ``text`` when no hint is present. */
-function _langOrText(info) {
-  if (!info) return "text"
-  const s = String(info).trim().toLowerCase()
-  return s || "text"
-}
 
 function _guessTypeFromLang(lang) {
   if (!lang) return "code"
@@ -125,6 +112,7 @@ function _setupCanvasStore(scope) {
     const dismissed = ref(false)
     const hiddenSourceIds = ref(new Set(dismissedRevisions.keys()))
     const seenContentBySource = ref(new Map())
+    const pinnedWidgets = ref(new Set())
 
     const activeArtifact = computed(
       () => artifacts.value.find((a) => a.id === activeId.value) || null,
@@ -240,11 +228,21 @@ function _setupCanvasStore(scope) {
       return a
     }
 
-    /** Scan a single assistant message for image parts, file write /
-     *  edit tool previews, ``##canvas##`` markers, or long fenced code
-     *  blocks, upserting one artifact per match. Idempotent — running
-     *  twice on the same message produces the same set of artifacts. */
+    /** Scan one message: a canvas-surface widget, or an assistant
+     *  message's image parts, image previews and ``##canvas##`` markers;
+     *  one artifact per match. Idempotent — running twice on the same
+     *  message produces the same set of artifacts. */
     function scanMessage(msg, upsert = upsertArtifact) {
+      if (msg?.role === "widget" && msg.eventId && widgetOnCanvas(msg)) {
+        upsert({
+          sourceId: `widget:${msg.eventId}`,
+          content: msg.eventId,
+          lang: "widget",
+          type: "widget",
+          seedName: msg.title || msg.renderer || "widget",
+        })
+        return
+      }
       if (!msg || msg.role !== "assistant") return
 
       // Image parts (provider-native ``image_gen`` outputs etc.) become
@@ -270,31 +268,27 @@ function _setupCanvasStore(scope) {
         }
       }
 
-      // Tool parts carrying ``canvas_preview`` become artifacts keyed by
-      // file path. write / edit / multi_edit emit text previews; canvas_image
-      // emits ``kind: "image"`` whose ``content`` is a displayable URL.
-      // Re-touching the same path refreshes the existing artifact in place.
-      // ``content === null`` means the file exceeded the preview cap;
-      // skip those so the canvas doesn't show an empty bubble.
+      // Image previews (``canvas_image``) become artifacts keyed by file path,
+      // so re-publishing a path refreshes it in place. Text file previews
+      // from write / edit / multi_edit stay in their tool block.
       if (msg.parts && Array.isArray(msg.parts)) {
         for (const [partIndex, p] of msg.parts.entries()) {
           if (p.type !== "tool") continue
           const preview = _toolPreview(p)
-          if (!preview || preview.content == null) continue
+          if (!preview || preview.kind !== "image" || preview.content == null) continue
           if (!preview.file_path) continue
-          const isImage = preview.kind === "image"
           const raw = preview.content
           const revisionId = p.jobId || p.id || `${msg.id}:tool:${partIndex}`
-          let content = isImage ? mediaSourceUrl(raw) || raw : raw
-          if (isImage && raw.startsWith("file://") && content.startsWith("/api/files/raw?")) {
+          let content = mediaSourceUrl(raw) || raw
+          if (raw.startsWith("file://") && content.startsWith("/api/files/raw?")) {
             content += `&canvas_revision=${encodeURIComponent(revisionId)}`
           }
           upsert({
             sourceId: `file:${preview.file_path}`,
             revisionId,
             content,
-            lang: preview.lang || (isImage ? "png" : "text"),
-            type: isImage ? "image" : _guessTypeFromLang(preview.lang),
+            lang: preview.lang || "png",
+            type: "image",
             seedName: preview.file_path,
           })
         }
@@ -311,8 +305,8 @@ function _setupCanvasStore(scope) {
       }
       if (!text) return
 
-      // Explicit ``##canvas##`` / ``##artifact##`` markers take precedence.
-      // Syntax: ``##canvas name=foo lang=py##...##canvas##``
+      // ``##canvas##`` / ``##artifact##`` markers, kept read-only for one
+      // release. Syntax: ``##canvas name=foo lang=py##...##canvas##``
       const markerRe = /##(?:canvas|artifact)(?:\s+([^#]*))?##\n?([\s\S]*?)##(?:canvas|artifact)##/g
       let m
       while ((m = markerRe.exec(text)) !== null) {
@@ -326,22 +320,6 @@ function _setupCanvasStore(scope) {
           lang,
           type: _guessTypeFromLang(lang),
           seedName: name,
-        })
-      }
-
-      // Fallback: long fenced code blocks become artifacts.
-      CODE_FENCE.lastIndex = 0
-      let f
-      while ((f = CODE_FENCE.exec(text)) !== null) {
-        const lang = _langOrText(f[1])
-        const body = f[2] || ""
-        const lines = body.split("\n").length
-        if (lines < MIN_LINES_FOR_HEURISTIC) continue
-        upsert({
-          sourceId: `${msg.id}:fence:${f.index}`,
-          content: body,
-          lang,
-          type: _guessTypeFromLang(lang),
         })
       }
     }
@@ -403,6 +381,54 @@ function _setupCanvasStore(scope) {
       }
     }
 
+    /** Pin a code block the user chose with "Open in canvas". */
+    function pinBlock({ content, lang, name } = {}) {
+      if (typeof content !== "string" || !content) return null
+      const language = (lang || "text").toLowerCase()
+      const pinned = upsertArtifact({
+        sourceId: `pin:${_revisionFingerprint(content)}`,
+        content,
+        lang: language,
+        type: _guessTypeFromLang(language),
+        seedName: name || content,
+      })
+      if (pinned) activeId.value = pinned.id
+      return pinned
+    }
+
+    /** Show an inline <ui> block on the canvas (the user chose "Open in canvas"). */
+    function pinUi({ source, title } = {}) {
+      if (typeof source !== "string" || !source) return null
+      const pinned = upsertArtifact({
+        sourceId: `ui:${_revisionFingerprint(source)}`,
+        content: source,
+        lang: "ktui",
+        type: "ktui",
+        seedName: title || "UI",
+      })
+      if (pinned) activeId.value = pinned.id
+      return pinned
+    }
+
+    /** Show a widget message on the canvas (the user moved it there). */
+    function pinWidget(message) {
+      if (!message?.eventId) return null
+      pinnedWidgets.value = new Set([...pinnedWidgets.value, message.eventId])
+      const pinned = upsertArtifact({
+        sourceId: `widget:${message.eventId}`,
+        content: message.eventId,
+        lang: "widget",
+        type: "widget",
+        seedName: message.title || message.renderer || "widget",
+      })
+      if (pinned) activeId.value = pinned.id
+      return pinned
+    }
+
+    function widgetOnCanvas(message) {
+      return message.surface === "canvas" || pinnedWidgets.value.has(message.eventId)
+    }
+
     function setActive(id) {
       if (artifacts.value.some((a) => a.id === id)) {
         activeId.value = id
@@ -434,6 +460,7 @@ function _setupCanvasStore(scope) {
       dismissed.value = false
       hiddenSourceIds.value = new Set()
       seenContentBySource.value = new Map()
+      pinnedWidgets.value = new Set()
       dismissedRevisions.clear()
       persistDismissals()
     }
@@ -445,6 +472,10 @@ function _setupCanvasStore(scope) {
       activeVersion,
       dismissed,
       upsertArtifact,
+      pinBlock,
+      pinUi,
+      pinWidget,
+      widgetOnCanvas,
       scanMessage,
       scanMessages,
       setActive,

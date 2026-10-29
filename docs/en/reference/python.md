@@ -77,6 +77,8 @@ same failure historically raised (`FileNotFoundError` / `ValueError` /
 - Request-shaped (used by the studio tier; the HTTP adapter maps them
   to status codes): `NotFoundError(KTError, KeyError)`,
   `InvalidRequestError(KTError, ValueError)`, `ConflictError(KTError)`.
+- Plugins: `PluginToolConflictError(ConflictError, ValueError)`: a plugin
+  contributed a tool whose name is already registered.
 
 **Strict by default.** Programmatic constructors (`Agent.build`,
 `Agent.from_path`, `Terrarium.add_creature`, `Terrarium.apply_recipe`)

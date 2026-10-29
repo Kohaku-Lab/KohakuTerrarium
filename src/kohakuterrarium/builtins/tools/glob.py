@@ -30,7 +30,10 @@ class GlobTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Find files by path pattern, newest first. Use when you know the name or extension. Not for searching file contents - use grep."
+        return (
+            "Find files by path pattern, newest first. Use it when you know part of a "
+            "name or the extension. Not for searching file contents - use grep."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -256,7 +256,7 @@ def build_runtime_graph_section(engine: "Terrarium", creature: "Creature") -> st
         lines.append("")
     lines.append(
         "For channels above use `send_channel`. For one-shot point-to-point "
-        "messaging use `group_send`. Do not use `send_message` for graph traffic."
+        "messaging use `group_send`."
     )
     lines.append(
         "Output-wire arrivals are tagged `[output-wire from <source>]`; "

@@ -17,6 +17,8 @@ from kohakuterrarium.llm.codex_image_budget import (
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession, ResponsesWSError
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 def _image(index):
     return {

@@ -194,6 +194,33 @@ describe("ChatPanel disconnected sends", () => {
     wrapper.unmount()
   })
 
+  it("shows a tool call's arguments growing until the call starts", async () => {
+    const { chat, wrapper } = mountPanel({ wsOpen: true })
+    const at = { source: "kohaku", turn_index: 1, branch_id: 2 }
+    chat._onMessage({ type: "processing_start", ...at })
+    chat._onMessage({
+      type: "tool_args_progress",
+      name: "show_app",
+      index: 0,
+      chars: 12_800,
+      ...at,
+    })
+    await flushPromises()
+    const label = () => wrapper.find(".kt-transcript-processing").text()
+    expect(label()).toContain("Writing app… 12.5 KB")
+    chat._onMessage({ type: "tool_args_progress", name: "write", index: 1, chars: 300, ...at })
+    await flushPromises()
+    expect(label()).toContain("Writing write arguments… 300 B")
+    chat._onMessage({ type: "tool_args_progress", name: "", chars: 5, ...at })
+    await flushPromises()
+    expect(label()).toContain("Writing write arguments… 300 B")
+    chat._onMessage({ type: "activity", activity_type: "tool_start", name: "write", ...at })
+    await flushPromises()
+    expect(label()).not.toContain("Writing")
+    expect(chat.toolArgsProgressByTab.kohaku).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it("shows exactly one reconnecting banner while the socket is down", async () => {
     const label = "Disconnected — reconnecting…"
     const down = mountPanel({ wsOpen: false })

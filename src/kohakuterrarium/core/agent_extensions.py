@@ -44,6 +44,7 @@ class AgentExtensionsMixin:
         """
         if self.plugins is None:
             self.plugins = PluginManager()
+            self.plugins.bind_host(self)
             if hasattr(self, "controller") and self.controller is not None:
                 self.controller.plugins = self.plugins
                 self._apply_plugin_hooks()
@@ -60,6 +61,7 @@ class AgentExtensionsMixin:
             await self.plugins.load_pending()
         # Prompt and command updates are atomic so collisions leave no partial install.
         try:
+            self.refresh_plugin_tools()
             self.refresh_system_prompt()
             refresh_commands = getattr(self, "refresh_user_commands", None)
             if callable(refresh_commands):
@@ -67,6 +69,7 @@ class AgentExtensionsMixin:
         except Exception:
             if name:
                 self.plugins.unregister(name)
+            self.refresh_plugin_tools()
             self.refresh_system_prompt()
             raise
         logger.info("Plugin added at runtime", plugin_name=name or "?")
@@ -91,6 +94,8 @@ class AgentExtensionsMixin:
         """
         system_prompt = self._build_aggregated_prompt()
         self._controller_config.system_prompt = system_prompt
+        self._prompt_refresh_pending = False
+        self._prompt_tool_key = self._visible_tool_key()
         controller = getattr(self, "controller", None)
         conversation = getattr(controller, "conversation", None)
         if conversation is None:

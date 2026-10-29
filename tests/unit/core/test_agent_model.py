@@ -13,6 +13,7 @@ from kohakuterrarium.llm.backends import save_yaml_store
 from kohakuterrarium.llm.openai import OpenAIProvider
 
 
+@pytest.mark.real_llm_provider
 @pytest.mark.parametrize("fail_first_close", [False, True])
 async def test_replaced_clients_stay_open_for_borrowers_and_close_on_stop(
     tmp_path, monkeypatch, fail_first_close

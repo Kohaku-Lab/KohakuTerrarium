@@ -1,6 +1,6 @@
 ---
 name: show_card
-description: 'Display a styled card, optionally with buttons, and return the clicked action. Not for free-text answers - use ask_user.'
+description: 'Show a styled card, optionally with buttons, and return the clicked one. Use it for a pick-one choice or a confirmation. Not for free text - use ask_user.'
 category: builtin
 tags: [interaction, ui]
 ---

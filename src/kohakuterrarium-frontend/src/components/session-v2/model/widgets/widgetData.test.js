@@ -64,6 +64,7 @@ describe("artifacts", () => {
     expect(artifactFileName({ name: "a", type: "code", lang: "py" })).toBe("a.py")
     expect(artifactViewer({ type: "svg" })).toBe("code")
     expect(artifactViewer({ type: "markdown" })).toBe("markdown")
+    expect(artifactViewer({ type: "widget" })).toBe("widget")
   })
 })
 

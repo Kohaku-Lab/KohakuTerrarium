@@ -10,6 +10,7 @@ from kohakuterrarium.builtin_skills import (
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.commands.read import _render_skill_info
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -33,7 +34,11 @@ class InfoTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Load the full documentation for a tool, sub-agent, or procedural skill by name. Not for running a skill - use skill."
+        return (
+            "Load the full documentation for a tool, sub-agent or skill by name. Use "
+            "it before a first call you are unsure about. Not for running a skill - "
+            "use skill."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -47,8 +52,20 @@ class InfoTool(BaseTool):
 
         if not name:
             return ToolResult(
-                error="Provide the name of a tool, sub-agent, or procedural skill."
+                error="Provide the name of a tool, sub-agent, procedural skill, "
+                "or plugin topic (prefix:topic)."
             )
+
+        plugins = getattr(getattr(context, "agent", None), "plugins", None)
+        lookup = getattr(plugins, "lookup_doc", None)
+        if callable(lookup):
+            try:
+                doc = lookup(name)
+            except NotFoundError as exc:
+                return ToolResult(error=str(exc))
+            if isinstance(doc, str) and doc:
+                logger.debug("Loaded plugin doc", doc_name=name)
+                return ToolResult(output=doc, exit_code=0)
 
         doc = get_builtin_tool_doc(name)
         if doc:

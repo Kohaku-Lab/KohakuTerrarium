@@ -30,7 +30,11 @@ class DeleteTriggerTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Stop and remove an installed trigger by id. Not for cancelling a running job - use stop_task."
+        return (
+            "Stop and remove an installed trigger by id. Use it when a timer or "
+            "watcher has done its job. Not for cancelling a running job - use "
+            "stop_task."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

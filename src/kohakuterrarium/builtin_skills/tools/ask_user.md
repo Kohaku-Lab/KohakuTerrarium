@@ -1,6 +1,6 @@
 ---
 name: ask_user
-description: Ask the user a free-text question and wait for the answer. Not for a pick-one-of-N choice or a styled panel - use show_card.
+description: 'Ask the user a free-text question and wait for the answer. Use it whenever you need a fact or decision from the user. Not for a pick-one choice - use show_card.'
 category: builtin
 tags: [interaction]
 ---

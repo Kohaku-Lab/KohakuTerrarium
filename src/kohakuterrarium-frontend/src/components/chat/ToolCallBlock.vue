@@ -123,6 +123,7 @@ import { safeArtifactUrl, safeMediaParts } from "../../public/chat/mediaRefs.js"
 import { usePlatformOrigin } from "../../public/chat/platformOrigin.js"
 import { useI18n } from "../../utils/i18n"
 import SubagentConversationPanel from "../subagents/SubagentConversationPanel.vue"
+import { builtinToolBody } from "./toolBodies/builtinToolBodies.js"
 import VideoFilePreview from "./VideoFilePreview.vue"
 
 const props = defineProps({
@@ -133,7 +134,7 @@ const props = defineProps({
 
 const emit = defineEmits(["toggle"])
 const chat = inject("chatStore", null) || useChatStore()
-const toolRenderer = computed(() => toolRenderers.get(props.tc.name) || null)
+const toolRenderer = computed(() => toolRenderers.get(props.tc.name) || builtinToolBody(props.tc))
 const { t } = useI18n()
 // The shared platform-origin seam (installed by the host) owns the origin
 // tool-result Markdown links resolve against. It is left uninstalled by the

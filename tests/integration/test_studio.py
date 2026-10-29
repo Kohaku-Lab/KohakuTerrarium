@@ -64,6 +64,7 @@ from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.testing.llm_seam import real_llm_providers
 from kohakuterrarium.utils.file_lock import FileLock
 from kohakuterrarium.session import job_reaper, run_state
 from kohakuterrarium.studio.sessions.live import live_sessions
@@ -1230,9 +1231,10 @@ class TestStudioIntegration:
             # --- model switch: needs a key + a profile ------------------
             studio.identity.keys.set("openai", "sk-integration-test-key")
             studio.identity.llm.save_profile("rt-fast", "gpt-4o-mini", "openai")
-            new_model = studio.sessions.model.switch(
-                session_id, creature_id, "openai/rt-fast"
-            )
+            with real_llm_providers():
+                new_model = studio.sessions.model.switch(
+                    session_id, creature_id, "openai/rt-fast"
+                )
             assert new_model == "openai/rt-fast"
             # The live creature status reflects the swap.
             status = studio.sessions.list_creatures(session_id)[0]

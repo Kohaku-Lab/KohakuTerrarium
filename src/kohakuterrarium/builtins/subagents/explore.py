@@ -25,8 +25,9 @@ EXPLORE_SYSTEM_PROMPT = render_subagent_prompt(
 EXPLORE_CONFIG = SubAgentConfig(
     name="explore",
     description=(
-        "Investigate a bounded workspace question (read-only). Supply scope and "
-        "existing findings. Returns file evidence; not implementation or planning."
+        "Investigate a workspace question and return file evidence, read-only. "
+        "Dispatch it whenever an answer means reading across many files; hand it the "
+        "scope."
     ),
     tools=["glob", "grep", "read", "tree"],
     system_prompt=EXPLORE_SYSTEM_PROMPT,

@@ -389,6 +389,48 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["question"],
     },
+    "show_app": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "App title (required to open)"},
+            "html": {
+                "type": "string",
+                "description": "Full HTML document or body fragment",
+            },
+            "data": {
+                "type": "object",
+                "description": "JSON the app reads as kt.data",
+            },
+            "update": {"type": "string", "description": "App id to change"},
+            "read": {
+                "type": "string",
+                "description": "App id whose current document to return",
+            },
+            "patch": {
+                "type": "array",
+                "description": "With update: {find, replace} edits to the document",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "find": {"type": "string"},
+                        "replace": {"type": "string"},
+                    },
+                    "required": ["find", "replace"],
+                },
+            },
+            "surface": {
+                "type": "string",
+                "enum": ["canvas", "chat"],
+                "description": "Where to show it. Default canvas.",
+            },
+            "wait_for": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Message names to wait for; returns the first",
+            },
+            "timeout_s": {"type": "number", "description": "Bound the wait"},
+        },
+    },
     "show_card": {
         "type": "object",
         "properties": {

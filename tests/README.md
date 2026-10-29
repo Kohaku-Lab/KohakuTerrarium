@@ -110,13 +110,18 @@ protection on `main` come from the unit + integration tiers.
    `kohakuterrarium.testing.llm.ScriptedLLM`. **Prefer direct
    injection**: every construction entry point takes the instance via
    `llm=`, e.g. `Agent.build(cfg, llm=ScriptedLLM([...]))` /
-   `engine.add_creature(path, llm=...)`. The monkeypatch seam at
-   `kohakuterrarium.bootstrap.llm.create_llm_provider` +
-   `kohakuterrarium.bootstrap.agent_init.create_llm_provider` remains
-   for paths where the framework constructs agents internally (config
-   files, resume, recipes) and
-   `kohakuterrarium.core.agent_model.create_llm_from_profile_name` if
-   the test exercises a model switch), the filesystem (`tmp_path`), the
+   `engine.add_creature(path, llm=...)`. Where the framework builds a
+   provider itself (config files, resume, recipes, model switch,
+   compaction, summaries), the autouse seam from
+   `kohakuterrarium.testing.llm_seam` already routes every factory in
+   `LLM_FACTORY_TARGETS` to `ScriptedLLM`; a test that needs its own
+   doubles calls `install_llm_seam(monkeypatch, factory)`. Under the seam
+   constructing a real provider raises `RealProviderBlocked`: a test
+   that drives a provider class against a fake transport marks itself
+   `@pytest.mark.real_llm_provider`, or wraps just that construction in
+   `with real_llm_providers():`. Non-loopback sockets are blocked
+   (`@pytest.mark.allow_network` lifts it) and HOME, CODEX_HOME and
+   KT_CONFIG_DIR point at tmp), the filesystem (`tmp_path`), the
    network. **Never invent a method on a fake that the real class does
    not have**; that bakes a bug in as the expected behavior. Use the
    real engine, real `SessionStore`, real `InProcTransport`, real

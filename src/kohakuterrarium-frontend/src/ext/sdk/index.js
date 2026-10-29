@@ -24,6 +24,7 @@ import { useTabsStore } from "@/stores/tabs"
 import { useThemeStore } from "@/stores/theme"
 
 export { OwnerCallError } from "@/ext/ownerClient"
+export { useWidget } from "@/components/chat/widgets/useWidget"
 export { SDK_VERSION, satisfiesRange } from "@/ext/sdk/version"
 export {
   FRAME_MESSAGES,

@@ -12,7 +12,7 @@
       <div class="flex-1" />
 
       <!-- Copy + Download buttons (only when an artifact is active) -->
-      <template v-if="canvas.activeArtifact">
+      <template v-if="canvas.activeArtifact && canvas.activeArtifact.type !== 'widget'">
         <button class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors shrink-0" title="Copy to clipboard" @click="copyContent">
           <div class="i-carbon-copy text-[12px]" />
         </button>
@@ -30,23 +30,22 @@
       <div v-if="!canvas.activeArtifact" class="h-full flex items-center justify-center text-warm-400 text-xs">
         <div class="text-center">
           <div class="i-carbon-canvas text-3xl mb-2 mx-auto opacity-30" />
-          <p>Artifacts appear here automatically.</p>
-          <p class="text-[10px] mt-1 opacity-70">
-            Long code blocks (&gt;= 15 lines), generated images, or
-            <code class="font-mono">##canvas##</code> markers.
-          </p>
+          <p>Generated images and apps appear here.</p>
+          <p class="text-[10px] mt-1 opacity-70">Use "Open in canvas" on a code block or widget to pin it.</p>
         </div>
       </div>
 
+      <CanvasWidgetView v-else-if="viewerType === 'widget'" :store="chat" :canvas="canvas" :event-id="canvas.activeArtifact.content" />
+      <InlineUiBlock v-else-if="viewerType === 'ktui'" :key="canvas.activeArtifact.id" :source="canvas.activeArtifact.content" fill @say="(text) => sayToChat(chat, text)" />
       <ImageViewer v-else-if="viewerType === 'image'" :src="canvas.activeArtifact.content" :alt="canvas.activeArtifact.name" />
       <CodeViewer v-else-if="viewerType === 'code' || viewerType === 'svg' || viewerType === 'diagram'" :content="canvas.activeArtifact.content" :lang="canvas.activeArtifact.lang" />
       <MarkdownViewer v-else-if="viewerType === 'markdown'" :content="canvas.activeArtifact.content" />
-      <HtmlViewer v-else-if="viewerType === 'html'" :content="canvas.activeArtifact.content" />
+      <AppFrame v-else-if="viewerType === 'html'" :key="canvas.activeArtifact.id" :html="canvas.activeArtifact.content" :title="canvas.activeArtifact.name" fill />
       <CodeViewer v-else :content="canvas.activeArtifact.content" :lang="canvas.activeArtifact.lang" />
     </div>
 
     <!-- Bottom info strip -->
-    <div v-if="canvas.activeArtifact" class="flex items-center gap-2 px-2 h-6 border-t border-warm-200 dark:border-warm-700 text-[10px] text-warm-500 shrink-0">
+    <div v-if="canvas.activeArtifact && viewerType !== 'widget' && viewerType !== 'ktui'" class="flex items-center gap-2 px-2 h-6 border-t border-warm-200 dark:border-warm-700 text-[10px] text-warm-500 shrink-0">
       <span class="font-mono">{{ canvas.activeArtifact?.lang || "text" }}</span>
       <template v-if="viewerType !== 'image'">
         <span class="opacity-50">·</span>
@@ -59,13 +58,18 @@
 <script setup>
 import { computed } from "vue"
 
+import AppFrame from "@/components/chat/widgets/app/AppFrame.vue"
+import CanvasWidgetView from "@/components/chat/widgets/CanvasWidgetView.vue"
+import InlineUiBlock from "@/components/chat/widgets/ktui/InlineUiBlock.vue"
+import { sayToChat } from "@/components/chat/widgets/ktui/sayMessage.js"
 import CodeViewer from "@/components/panels/canvas/CodeViewer.vue"
-import HtmlViewer from "@/components/panels/canvas/HtmlViewer.vue"
 import ImageViewer from "@/components/panels/canvas/ImageViewer.vue"
 import MarkdownViewer from "@/components/panels/canvas/MarkdownViewer.vue"
 import { useCanvasStore } from "@/stores/canvas"
+import { useChatStore } from "@/stores/chat"
 
 const canvas = useCanvasStore()
+const chat = useChatStore()
 
 const viewerType = computed(() => canvas.activeArtifact?.type || "code")
 const lineCount = computed(() => {
@@ -83,6 +87,7 @@ function typeIcon(t) {
       image: "i-carbon-image",
       diagram: "i-carbon-flow-connection",
       table: "i-carbon-data-table",
+      widget: "i-carbon-application-web",
     }[t] || "i-carbon-document"
   )
 }

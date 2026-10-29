@@ -36,6 +36,8 @@ from tests.unit._fakes.package_backend import (
     kt_home,  # noqa: F401
 )
 
+pytestmark = pytest.mark.real_llm_provider
+
 # ── _agent_config_default ───────────────────────────────────────
 
 

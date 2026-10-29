@@ -20,7 +20,7 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from tests.helpers.anthropic_stream import ANSWER, anthropic_provider
 
-pytestmark = pytest.mark.timeout(60)
+pytestmark = [pytest.mark.timeout(60), pytest.mark.real_llm_provider]
 
 SAMPLING = {"temperature": 0.3, "extra_body": {"top_p": 0.9, "top_k": 5}}
 MODELS = {"older": "claude-sonnet-4-6", "newer": "claude-opus-4-8"}

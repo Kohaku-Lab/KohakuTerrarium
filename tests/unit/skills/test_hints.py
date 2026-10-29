@@ -142,6 +142,7 @@ class _InspectTool(BaseTool):
         return ToolResult(output="Result", exit_code=0)
 
 
+@pytest.mark.real_llm_provider
 async def test_native_tool_continuations_keep_hint_and_send_only_delta(tmp_path):
     provider = OpenAIProvider(api_key="test", model="synthetic", websocket_mode=True)
     connection = _Connection()

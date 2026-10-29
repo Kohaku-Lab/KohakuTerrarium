@@ -77,6 +77,12 @@ class ToolContext:
         """Backward-compatible accessor for session.scratchpad."""
         return self.session.scratchpad if self.session else None
 
+    @property
+    def widgets(self) -> Any:
+        """The agent's :class:`WidgetService`, or ``None`` without an output router."""
+        router = getattr(self.agent, "output_router", None)
+        return getattr(router, "widgets", None)
+
 
 def resolve_tool_path(path_str: str, context: ToolContext | None = None) -> Path:
     """Resolve a path against agent context when one is available."""
@@ -197,6 +203,9 @@ class BaseTool(UIOwnerMixin):
     # sandbox plugin checks each declared value (a path or a list of paths).
     path_arguments: ClassVar[dict[str, str]] = {}
 
+    # Widget renderer ids that must be attached for the model to see this tool.
+    requires_renderers: ClassVar[frozenset[str]] = frozenset()
+
     def __init__(self, config: ToolConfig | None = None):
         self.config = config or ToolConfig()
         self._manual_read = False
@@ -274,6 +283,13 @@ class BaseTool(UIOwnerMixin):
 
     def prompt_contribution(self) -> str | None:
         """Return brief system-prompt guidance, leaving full reference text to info."""
+        return None
+
+    def compact_arguments(self, args: dict[str, Any]) -> dict[str, Any] | None:
+        """Shorter arguments to keep for an old call of this tool after compaction.
+
+        ``None`` keeps the call's arguments unchanged.
+        """
         return None
 
 

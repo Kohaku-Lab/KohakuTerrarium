@@ -1,6 +1,6 @@
 ---
 name: send_channel
-description: 'Send a message to a channel in your group. Not for one creature in particular - use group_send.'
+description: 'Send a message to a channel in your group. Use it to broadcast a task or update to every listener. Not for one creature - use group_send.'
 category: builtin
 tags: [group]
 ---

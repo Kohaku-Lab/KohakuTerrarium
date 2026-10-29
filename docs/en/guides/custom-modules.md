@@ -100,6 +100,26 @@ the declaration the sandbox cannot see the path, so a package tool that
 touches files should always declare it. Plugins receive the tool
 instance as the `tool` keyword of `pre_tool_execute`.
 
+### Tools that need a UI renderer
+
+A tool that only makes sense while a client can draw its UI (a widget
+renderer such as `kt.app` or a package's own renderer id) declares it in
+`requires_renderers`:
+
+```python
+class ShowBoardTool(BaseTool):
+    requires_renderers = frozenset({"mypkg.board"})
+```
+
+While no attached output reports every listed renderer, the tool is hidden
+from the model: it is left out of the native tool schemas and of every
+prompt section that names tools (`## Available Functions`, `## Function
+Documentation`, `## Tool guidance`, `{{ tools }}`). When a client attaches
+or detaches and the visible tool set changes, the system prompt is rebuilt;
+during a turn the rebuild waits for the next LLM request. The tool stays
+registered, so a call that races a detach still reaches it; return a text
+fallback in that case.
+
 ### Media in tool results
 
 A tool that returns `ImagePart` / `FilePart` media declares a

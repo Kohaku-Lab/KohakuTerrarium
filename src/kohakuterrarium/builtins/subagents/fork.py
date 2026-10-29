@@ -4,7 +4,10 @@ from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
 FORK_CONFIG = SubAgentConfig(
     name="fork",
-    description="Answer a bounded side task using a snapshot of this conversation. Read-only; no implementation, graph coordination, or recursive delegation.",
+    description=(
+        "Run a side task on a snapshot of this conversation, read-only. Dispatch it to "
+        "check, inspect or look something up in parallel while you continue."
+    ),
     tools=["read", "glob", "grep", "tree"],
     system_prompt="""You are an isolated context fork. The preceding conversation is background,
 not a request to continue the parent's unfinished work. Answer only the new

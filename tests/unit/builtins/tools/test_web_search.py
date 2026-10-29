@@ -62,16 +62,18 @@ def test_session_metadata_preserves_codex_grounding_sources():
     assert metadata["consulted_sources"] == [source]
 
 
-def test_repeat_search_warning_is_backend_specific_guidance():
+def test_search_guidance_is_backend_specific_and_encouraging():
     # The description is canonical and must match the doc file, so
     # backend-specific advice moved to the tool-guidance slot.
     codex_tool = WebSearchTool(ToolConfig(extra={"backend": "codex"}))
 
-    assert "once per question" in codex_tool.prompt_contribution()
+    guidance = codex_tool.prompt_contribution()
+    assert guidance.startswith("Search whenever you need current or outside facts")
+    assert "search again with new terms" in guidance and "only if" not in guidance
     for backend in ("duckduckgo", "deepseek"):
         tool = WebSearchTool(ToolConfig(extra={"backend": backend}))
         assert tool.prompt_contribution() is None
-        assert "once per question" not in tool.description
+        assert "search again" not in tool.description
 
 
 def test_codex_login_does_not_change_the_default_backend(monkeypatch):

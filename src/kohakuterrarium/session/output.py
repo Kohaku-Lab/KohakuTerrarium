@@ -19,6 +19,7 @@ from kohakuterrarium.session.output_activity import (
     _token_metadata as _token_metadata,  # noqa: F401
 )
 from kohakuterrarium.session.output_assistant import AssistantOutputMixin
+from kohakuterrarium.session.output_widgets import SessionWidgetsMixin
 from kohakuterrarium.session.run_state import RunTracker
 from kohakuterrarium.session.snapshot import compact_state
 from kohakuterrarium.session.text_buffer import (
@@ -32,7 +33,9 @@ from kohakuterrarium.modules.output.event import OutputEvent
 logger = get_logger(__name__)
 
 
-class SessionOutput(AssistantOutputMixin, SessionActivityMixin, OutputModule):
+class SessionOutput(
+    AssistantOutputMixin, SessionActivityMixin, SessionWidgetsMixin, OutputModule
+):
     """Output module that records events to a SessionStore.
 
     Streamed text is coalesced into one durable segment and flushed at the
@@ -63,6 +66,8 @@ class SessionOutput(AssistantOutputMixin, SessionActivityMixin, OutputModule):
         )
         self._recovered_open_text: bool = False
         self._chunk_seq: int = 0
+        # Ids of display-only widgets whose updates and close are not recorded.
+        self._unrecorded_widgets: dict[str, None] = {}
         # Retain tasks for child runs that lack SubAgentManager persistence.
         self._subagent_tasks: dict[str, dict] = {}
         # Secondary outputs may skip ``start``, so totals restore lazily before use.
@@ -500,7 +505,7 @@ class SessionOutput(AssistantOutputMixin, SessionActivityMixin, OutputModule):
                 self._begin_assistant_round()
             case "assistant_message":
                 self._finish_assistant_round(event.payload["message"])
-            case "model_recovery":
+            case "model_recovery" | "tool_args_progress":
                 pass
             case "text":
                 content = event.content
@@ -527,25 +532,6 @@ class SessionOutput(AssistantOutputMixin, SessionActivityMixin, OutputModule):
             case "resume_batch":
                 # Replay batches are consumed by readers, not persisted again.
                 pass
-            case "ask_text" | "confirm" | "selection" | "card":
-                if not self._capture_activity:
-                    return
-                self._record(
-                    event.type,
-                    {
-                        "ui_event_id": event.id,
-                        "interactive": bool(event.interactive),
-                        "surface": event.surface,
-                        "payload": dict(event.payload),
-                    },
-                )
-            case "ui_supersede":
-                if not self._capture_activity:
-                    return
-                self._record(
-                    "ui_supersede",
-                    {"ui_event_id": event.payload.get("event_id")},
-                )
             case _:
                 if not self._capture_activity:
                     return

@@ -64,6 +64,7 @@ from kohakuterrarium.studio.sessions import memory_build as _memory_build
 from kohakuterrarium.studio.sessions import memory_search as _memory_search
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm_seam import real_llm_providers
 from tests.helpers.kt_biome import find_kt_biome_source
 from tests.helpers.resume_metadata_contention import resume_with_metadata_contention
 
@@ -1036,7 +1037,8 @@ class TestApiIntegration:
 
         async def missing_media_edit_provider():
             agent = get_service_legacy().engine.get_creature(creature_id).agent
-            provider = OpenAIProvider(api_key="test", model="test")
+            with real_llm_providers():
+                provider = OpenAIProvider(api_key="test", model="test")
             previous_client = provider._client
             provider._client = previous_client.with_options(
                 http_client=httpx.AsyncClient(

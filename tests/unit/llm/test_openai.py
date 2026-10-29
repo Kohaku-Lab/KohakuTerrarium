@@ -17,6 +17,8 @@ from kohakuterrarium.llm import openai as provider_module
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.recovery import RetryPolicy
 
+pytestmark = pytest.mark.real_llm_provider
+
 MESSAGES = [{"role": "user", "content": "inspect the image"}]
 LOCAL_MEDIA_ERROR = "Cannot load local files without --allowed-local-media-path"
 

@@ -49,6 +49,7 @@ from kohakuterrarium.studio.persistence import store as _persistence_store_mod
 from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm_seam import real_llm_providers
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -424,9 +425,10 @@ class TestProgStudioJourney:
             # --- sessions.model: flip the live model --------------------
             studio.identity.keys.set("openai", "sk-journey-test-key")
             studio.identity.llm.save_profile("journey-fast", "gpt-4o-mini", "openai")
-            new_model = studio.sessions.model.switch(
-                session_id, creature_id, "openai/journey-fast"
-            )
+            with real_llm_providers():
+                new_model = studio.sessions.model.switch(
+                    session_id, creature_id, "openai/journey-fast"
+                )
             assert new_model == "openai/journey-fast"
             status = studio.sessions.list_creatures(session_id)[0]
             assert status["model"] == "gpt-4o-mini"

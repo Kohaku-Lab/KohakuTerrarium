@@ -120,18 +120,6 @@
     "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
   },
   {
-    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
-    "function": "maybe_install_test_llm_seam",
-    "target": "kohakuterrarium.bootstrap",
-    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
-  },
-  {
-    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
-    "function": "maybe_install_test_llm_seam",
-    "target": "kohakuterrarium.core",
-    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
-  },
-  {
     "file": "src/kohakuterrarium/utils/file_lock.py",
     "function": "_acquire",
     "target": "msvcrt",

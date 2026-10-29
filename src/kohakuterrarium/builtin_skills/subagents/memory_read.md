@@ -1,6 +1,6 @@
 ---
 name: memory_read
-description: 'Search session memory and report what it found. Not for searching files - use grep.'
+description: 'Search session memory and report what it found. Dispatch it to recall earlier notes and decisions. Not for searching files - use grep.'
 category: subagent
 tags: [memory]
 ---

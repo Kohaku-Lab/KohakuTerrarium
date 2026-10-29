@@ -7,6 +7,7 @@ events and Textual widgets.
 
 from textual.widgets import Markdown
 
+from kohakuterrarium.builtins.kt_ui.inline_text import inline_ui_text
 from kohakuterrarium.builtins.tui.tool_args import (
     format_args_detail,
     format_args_preview,
@@ -160,7 +161,7 @@ def _build_turn_widgets(
             text = data if isinstance(data, str) else str(data)
             if text.strip():
                 # Markdown preserves selectable rendered history instead of a stream widget.
-                widgets.append(Markdown(text))
+                widgets.append(Markdown(inline_ui_text(text)))
 
         elif step_type == "tool_call":
             raw_name = data.get("name", "tool")

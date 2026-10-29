@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from kohakuvault import KVault
 
 from kohakuterrarium.session import migrations as mig_mod
 from kohakuterrarium.session.migrations import (
@@ -17,6 +18,17 @@ from kohakuterrarium.session.migrations import (
     migration_marker,
     path_for_version,
 )
+
+
+def _meta(path, version=None):
+    vault = KVault(path, table="meta")
+    try:
+        vault.enable_auto_pack()
+        if version is not None:
+            vault["format_version"] = version
+    finally:
+        vault.close()
+
 
 # ── path helpers ──────────────────────────────────────────────────
 
@@ -86,18 +98,15 @@ class TestDiscoverVersions:
 
     def test_returns_only_existing(self, tmp_path):
         bare = tmp_path / "alice.kohakutr"
-        bare.write_bytes(b"")
+        _meta(bare)
         v2 = tmp_path / "alice.kohakutr.v2"
         v2.write_bytes(b"")
-        # The bare file isn't a real KVault — detect_format_version
-        # returns 1 on failure. The v2 file has its version in the
-        # suffix.
         versions = discover_versions(bare)
         assert {v for v, _ in versions} == {1, 2}
 
     def test_descending_order(self, tmp_path):
         bare = tmp_path / "alice.kohakutr"
-        bare.write_bytes(b"")
+        _meta(bare)
         v2 = tmp_path / "alice.kohakutr.v2"
         v2.write_bytes(b"")
         v3 = tmp_path / "alice.kohakutr.v3"
@@ -105,18 +114,15 @@ class TestDiscoverVersions:
         versions = [v for v, _ in discover_versions(bare)]
         assert versions == sorted(versions, reverse=True)
 
-    def test_bare_probe_failure_defaults_to_v1(self, tmp_path, monkeypatch):
-        # If detect_format_version raises while probing the bare file,
-        # discover_versions defensively records it as v1.
+    def test_bare_readonly_probe_failure_defaults_to_v1(self, tmp_path, monkeypatch):
         bare = tmp_path / "alice.kohakutr"
-        bare.write_bytes(b"")
+        _meta(bare)
 
         def _boom(p):
             raise RuntimeError("probe exploded")
 
-        monkeypatch.setattr(mig_mod, "detect_format_version", _boom)
-        versions = dict(discover_versions(bare))
-        assert versions.get(1) == bare
+        monkeypatch.setattr(mig_mod, "read_session_meta", _boom)
+        assert dict(discover_versions(bare))[1] == bare
 
 
 # ── migrate ───────────────────────────────────────────────────────
@@ -129,23 +135,22 @@ class TestMigrateBasic:
 
     def test_already_at_target(self, tmp_path, monkeypatch):
         path = tmp_path / "a.kohakutr.v2"
-        path.write_bytes(b"")
+        _meta(path, 2)
         monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 2)
         out = migrate(path, 2)
         assert out == path
 
-    def test_above_target_also_returns_src(self, tmp_path, monkeypatch):
+    def test_above_supported_target_is_rejected(self, tmp_path):
         path = tmp_path / "a.kohakutr.v5"
-        path.write_bytes(b"")
-        monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 5)
-        out = migrate(path, 2)
-        assert out == path
+        _meta(path, 5)
+        with pytest.raises(ValueError, match="exceeds supported"):
+            migrate(path, 2)
 
     def test_destination_exists_is_reused(self, tmp_path, monkeypatch):
         src = tmp_path / "a.kohakutr"
-        src.write_bytes(b"")
+        _meta(src)
         existing = tmp_path / "a.kohakutr.v2"
-        existing.write_bytes(b"existing")
+        _meta(existing, 2)
         monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 1)
         called = []
 
@@ -160,7 +165,7 @@ class TestMigrateBasic:
 
     def test_runs_migrator_when_target_missing(self, tmp_path, monkeypatch):
         src = tmp_path / "a.kohakutr"
-        src.write_bytes(b"")
+        _meta(src)
         monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 1)
         called = []
 
@@ -175,7 +180,7 @@ class TestMigrateBasic:
 
     def test_migrator_failure_cleans_partial(self, tmp_path, monkeypatch):
         src = tmp_path / "a.kohakutr"
-        src.write_bytes(b"")
+        _meta(src)
         monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 1)
 
         def bad_migrator(s, d):
@@ -201,7 +206,7 @@ class TestEnsureLatestVersion:
 
     def test_already_latest(self, tmp_path, monkeypatch):
         v = tmp_path / "a.kohakutr.v2"
-        v.write_bytes(b"")
+        _meta(v, 2)
         out = ensure_latest_version(v)
         # Best on-disk version (2) ≥ MAX_SUPPORTED_VERSION (also 2).
         assert out == v
@@ -209,15 +214,14 @@ class TestEnsureLatestVersion:
     def test_all_files_too_new(self, tmp_path, monkeypatch):
         future = tmp_path / "a.kohakutr.v999"
         future.write_bytes(b"")
-        out = ensure_latest_version(future)
-        # Falls back to the newest candidate even though we can't read it.
-        assert out == future
+        with pytest.raises(ValueError):
+            ensure_latest_version(future)
 
     def test_runs_migration_and_returns_new_path(self, tmp_path, monkeypatch):
         # A v1 file below MAX_SUPPORTED_VERSION → ensure_latest_version
         # runs the registered migrator and returns the upgraded path.
         src = tmp_path / "a.kohakutr"
-        src.write_bytes(b"")
+        _meta(src)
         monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 1)
         migrated = []
 
@@ -242,7 +246,7 @@ class TestMigratePartialCleanupFailure:
         # fails, migrate still raises the *migration* error (not the
         # cleanup OSError) — the cleanup failure is logged + swallowed.
         src = tmp_path / "a.kohakutr"
-        src.write_bytes(b"")
+        _meta(src)
         monkeypatch.setattr(mig_mod, "detect_format_version", lambda p: 1)
 
         def bad_migrator(s, d):

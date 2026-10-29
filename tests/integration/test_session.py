@@ -35,6 +35,12 @@ from kohakuterrarium.core import agent_message_history as _message_history_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.branch_continuation import selected_branch_view
 from kohakuterrarium.core.events import create_user_input_event
+from kohakuterrarium.core.pinned import pin_message, unpin_message
+from kohakuterrarium.core.pinned import state_key as pinned_state_key
+from kohakuterrarium.errors import RendererUnavailable
+from kohakuterrarium.llm.message import ImagePart, TextPart
+from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
+from kohakuterrarium.modules.output.widgets import WidgetMessage
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.session import history as _history_mod
@@ -62,6 +68,7 @@ from kohakuterrarium.session.history import (
 )
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.memory_async import live_memory_for_store
+from kohakuterrarium.session.metadata_candidate import read_metadata_candidate
 from kohakuterrarium.session.migrations import (
     discover_versions,
     ensure_latest_version,
@@ -77,12 +84,17 @@ from kohakuterrarium.session.resume import detect_session_type, resume_agent
 from kohakuterrarium.session.resume_async import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
+from kohakuterrarium.studio.attach._event_stream import StreamOutput
+from kohakuterrarium.studio.attach.widget_frames import handle_widget_frame
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 pytestmark = pytest.mark.timeout(60)
 
 
 # ── deterministic collaborators ──────────────────────────────────
+
+
+INLINE_BLOCK = '<ui><state tip={10}/><slider bind="tip" min={0} max={30}/></ui>'
 
 
 class _HashEmbedder(BaseEmbedder):
@@ -154,6 +166,9 @@ def patched_llm(monkeypatch):
 CHILD = "tests.helpers.live_store_stress_child"
 
 
+_PIN_PIXEL = "data:image/png;base64,iVBORw0KGgo="
+
+
 def _write_agent_config(config_dir, name: str = "scribe") -> str:
     """Write a minimal but complete creature config dir. Returns the path."""
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -206,7 +221,7 @@ class TestSessionIntegration:
         # ---- phase 1: a live agent runs turns against a real store ----
         store = _new_store(session_path, config_path=config_path, agents=["scribe"])
         patched_llm["script"] = [
-            "Hello, I am the scribe.",
+            f"Hello, I am the scribe.\n\n{INLINE_BLOCK}",
             "[/echo]persisted[echo/]",
             "The echo tool ran and I recorded it.",
         ]
@@ -217,6 +232,12 @@ class TestSessionIntegration:
         agent.attach_session_store(store)
         await agent.start()
         try:
+            pin_message(
+                agent,
+                "persona",
+                "user",
+                [TextPart(text="PINNED-PERSONA"), ImagePart(url=_PIN_PIXEL)],
+            )
             await agent._process_event(create_user_input_event("introduce yourself"))
             await agent._process_event(create_user_input_event("use the echo tool"))
             # Drive the SessionOutput activity surface the runtime uses:
@@ -298,8 +319,121 @@ class TestSessionIntegration:
             agent.session.scratchpad.set("project", "terrarium")
             agent.compact_manager._compact_count = 3
             await agent._process_event(create_user_input_event("remember the project"))
+
+            # Widgets: a web client says hello, a widget opens, a waiter
+            # takes its message, an unclaimed message drives a turn, and
+            # client state is merged and recorded.
+            renderer_changes = []
+            router.add_renderers_listener(lambda old, new: renderer_changes.append(new))
+            web_frames = asyncio.Queue()
+            web = StreamOutput("scribe", web_frames, [], agent=agent)
+            router.add_secondary(web)
+            with pytest.raises(RendererUnavailable):
+                await router.widgets.open("kt.ui", {"root": {}})
+            web.set_client_renderers({"kt.ui": 1})
+            handle = await router.widgets.open(
+                "kt.ui",
+                {"root": {"type": "number", "bind": "tip"}},
+                state={"tip": 10},
+                title="Tip",
+                fallback="Tip calculator",
+            )
+            widget_id = handle.id
+            waiter = asyncio.create_task(handle.wait({"submit"}, timeout_s=5))
+            await asyncio.sleep(0)
+            submit = WidgetMessage(widget_id, "submit", {"tip": 12})
+            assert router.widgets.submit_message(submit) == "accepted"
+            assert (await waiter).data == {"tip": 12}
+            unclaimed = WidgetMessage(widget_id, "share", {"tip": 12}, origin="app")
+            assert router.widgets.submit_message(unclaimed) == "accepted"
+            await router.widgets.drain()
+            assert router.widgets.submit_state(widget_id, {"tip": 15}) == "accepted"
+            await router.widgets.drain()
+            widget_turn = str(agent.controller.conversation.to_messages())
+            assert f'<widget_event widget="{widget_id}"' in widget_turn
+            assert 'name="share"' in widget_turn and 'trust="untrusted"' in widget_turn
+            frames = [web_frames.get_nowait() for _ in range(web_frames.qsize())]
+            web_types = [frame["type"] for frame in frames]
+            opens = [
+                f
+                for f in frames
+                if f["type"] == "widget" and not f.get("update_target")
+            ]
+            assert len(opens) == 1
+            waits = [
+                f["payload"]["awaiting"]
+                for f in frames
+                if f["type"] == "widget" and "awaiting" in f.get("payload", {})
+            ]
+            assert waits == [True, False], "the client sees the tool wait start and end"
+            assert "widget_state" in web_types
+
+            # Inline UI: a client moves the slider of the <ui> block in the
+            # first reply; the state is checked against the recorded reply,
+            # reaches the other client and is recorded.
+            first = next(
+                e
+                for e in store.get_events("scribe")
+                if e["type"] == "assistant_message"
+                and INLINE_BLOCK in str(e["message"].get("content"))
+            )
+            address = (first["turn_index"], first["branch_id"])
+            ((block, _),) = block_ids(INLINE_BLOCK)
+            other_frames = asyncio.Queue()
+            other = StreamOutput("scribe", other_frames, [], agent=agent)
+            router.add_secondary(other)
+            acks = []
+            frame = {
+                "ui_turn": address[0],
+                "ui_branch": address[1],
+                "block": block,
+                "state": {"tip": 18, "ghost": 1},
+            }
+            handle_widget_frame(
+                "inline_ui_state", frame, agent, web, "scribe", acks.append
+            )
+            handle_widget_frame(
+                "inline_ui_state",
+                {**frame, "ui_branch": address[1] + 1},
+                agent,
+                web,
+                "scribe",
+                acks.append,
+            )
+            await asyncio.sleep(0)
+            assert [a["status"] for a in acks] == ["unknown"]
+            forwarded = [other_frames.get_nowait() for _ in range(other_frames.qsize())]
+            assert [
+                f["state"] for f in forwarded if f["type"] == "inline_ui_state"
+            ] == [{"tip": 18}]
+            assert all(
+                f.get("type") != "inline_ui_state"
+                for f in [web_frames.get_nowait() for _ in range(web_frames.qsize())]
+            ), "the sending client gets no echo"
+            router.remove_secondary(other)
+            router.remove_secondary(web)
+            assert renderer_changes == [{"kt.ui": 1}, {}]
         finally:
             await agent.stop()
+
+        inline_rows = [
+            (e["ui_turn"], e["ui_branch"], e["block"], e["state"])
+            for e in store.get_events("scribe")
+            if e["type"] == "inline_ui_state"
+        ]
+        assert inline_rows == [(*address, block, {"tip": 18})]
+
+        widget_rows = [
+            (e["type"], e.get("name"), e.get("routed_to"))
+            for e in store.get_events("scribe")
+            if e["type"].startswith("widget")
+        ]
+        assert widget_rows == [
+            ("widget", None, None),
+            ("widget_message", "submit", "waiter"),
+            ("widget_message", "share", "agent"),
+            ("widget_state", None, None),
+        ]
 
         # The SessionOutput sink restored cumulative token totals from
         # state and accumulated the live token_usage call on top.
@@ -582,6 +716,13 @@ class TestSessionIntegration:
         source_mtime = session_path.stat().st_mtime_ns
         assert detect_format_version(session_path.as_uri()) == FORMAT_VERSION
         assert read_session_meta(session_path.as_uri())["agents"] == ["scribe"]
+        selected_meta = read_metadata_candidate(
+            session_path, eligible=True, keys=("agents", "format_version", "absent")
+        )
+        assert selected_meta.meta == {
+            "agents": ["scribe"],
+            "format_version": FORMAT_VERSION,
+        }
         with SessionReadView(session_path.as_uri()) as view:
             assert try_fast(session_path, eligible=True).reason == "legacy_enrolled"
             selected = view.items("events", prefix="scribe:e")
@@ -704,6 +845,12 @@ class TestSessionIntegration:
             )
             # Scratchpad restored exactly.
             assert resumed_agent.session.scratchpad.get("project") == "terrarium"
+            # Inline UI state came back from the recorded rows, and the
+            # resumed agent still accepts edits for the same block.
+            inline = resumed_agent.output_router.inline_ui
+            assert inline.get(*address, block) == {"tip": 18}
+            assert inline.submit(*address, block, {"tip": 21}) == "accepted"
+            assert inline.get(*address, block) == {"tip": 21}
             assert resumed_agent.compact_manager._compact_count == 3
             # The store was re-attached and marked running for continued
             # recording.
@@ -714,6 +861,29 @@ class TestSessionIntegration:
             # the surviving timer is staged, never the removed one.
             staged = getattr(resumed_agent, "_pending_resume_triggers", None)
             assert staged and staged[0]["trigger_id"] == t2_id
+            # The pin came back once, from session state, outside the history.
+            pins = resumed_agent.controller.pinned
+            assert [key for key, _ in pins.pinned()] == ["persona"]
+            assert pins.image_count() == 1
+            assert "PINNED-PERSONA" not in str(resumed_messages)
+            wire = pins.apply(resumed_messages)
+            assert wire[1]["content"][0]["text"] == "PINNED-PERSONA"
+            assert str(wire).count("PINNED-PERSONA") == 1
+            pin_message(resumed_agent, "persona", "user", "PINNED-PERSONA v2")
+            saved = resumed_store.state[pinned_state_key("scribe")]
+            assert [e["message"]["content"] for e in saved] == ["PINNED-PERSONA v2"]
+            assert unpin_message(resumed_agent, "persona") is True
+            assert resumed_store.state[pinned_state_key("scribe")] == []
+            assert len(pins) == 0
+            # A message to the widget from before the restart rebuilds the
+            # widget registry from the store and reaches the resumed agent.
+            widgets = resumed_agent.output_router.widgets
+            recalc = WidgetMessage(widget_id, "recalc", {"tip": 18})
+            assert widgets.submit_message(recalc) == "accepted"
+            await widgets.drain()
+            assert widgets.registry.get(widget_id).state == {"tip": 15}
+            resumed_turn = str(resumed_agent.controller.conversation.to_messages())
+            assert 'name="recalc"' in resumed_turn and '"tip": 18' in resumed_turn
         finally:
             await resumed_agent.stop()
             resumed_store.close()
@@ -1578,6 +1748,7 @@ class TestSessionIntegration:
         agent.attach_session_store(store)
         await agent.start()
         try:
+            pin_message(agent, "persona", "user", "PINNED-PERSONA")
             await agent._process_event(create_user_input_event("turn one"))
             await agent._process_event(create_user_input_event("turn two"))
             await agent._process_event(create_user_input_event("turn three"))
@@ -1712,6 +1883,13 @@ class TestSessionIntegration:
             # truncated event log — the leaf is turn 2, branch 1.
             assert forked_agent._turn_index == 2
             assert forked_agent._branch_id == 1
+            # The fork carries the pin once, outside its replayed history.
+            assert [k for k, _ in forked_agent.controller.pinned.pinned()] == [
+                "persona"
+            ]
+            assert "PINNED-PERSONA" not in str(
+                forked_agent.controller.conversation.to_messages()
+            )
         finally:
             forked_store.close()
 

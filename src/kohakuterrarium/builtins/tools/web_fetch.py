@@ -70,7 +70,10 @@ class WebFetchTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Fetch one URL and return it as markdown. Use when you have the address. Not for finding pages - use web_search."
+        return (
+            "Fetch one URL and return it as markdown. Use it to read a page, doc or "
+            "API whose address you have. Not for finding pages - use web_search."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

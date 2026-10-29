@@ -15,6 +15,8 @@ from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.base import BaseLLMProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 @pytest.fixture
 def cfg_home(tmp_path, monkeypatch):

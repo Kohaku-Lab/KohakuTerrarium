@@ -125,13 +125,21 @@ class SubAgentManager(SideConversationMixin, InteractiveManagerMixin):
             return SubAgentInfo.from_config(config)
         return None
 
-    def get_subagents_prompt(self) -> str:
-        """Generate sub-agents section for system prompt."""
-        if not self._configs:
+    def get_subagents_prompt(self, visible: Callable[[str], bool] | None = None) -> str:
+        """Generate sub-agents section for system prompt.
+
+        ``visible`` filters sub-agents by name; the section is empty when none pass.
+        """
+        configs = [
+            (name, config)
+            for name, config in self._configs.items()
+            if visible is None or visible(name)
+        ]
+        if not configs:
             return ""
 
         lines = ["## Available Sub-Agents", ""]
-        for name, config in self._configs.items():
+        for name, config in configs:
             info = SubAgentInfo.from_config(config)
             lines.append(info.to_prompt_line())
 

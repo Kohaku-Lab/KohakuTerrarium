@@ -19,6 +19,7 @@ from kohakuterrarium.core.agent_compact import (
 )
 from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
+from kohakuterrarium.core.pinned import PinnedContext
 from kohakuterrarium.session.store import SessionStore
 
 # ── agent_lifecycle.AgentLifecycleMixin ──────────────────────────
@@ -437,6 +438,29 @@ class TestCompactOverflowRescue:
         )
         assert await a._compact_overflow_rescue() == spliced
         assert waited == [True]
+
+    async def test_rescue_retry_carries_the_pins(self):
+        a = self._agent()
+
+        async def wait():
+            return None
+
+        pins = PinnedContext()
+        pins.pin("persona", "user", "PIN")
+        a.compact_manager = types.SimpleNamespace(
+            is_compacting=True, wait_for_current=wait
+        )
+        a.controller = types.SimpleNamespace(
+            pinned=pins,
+            conversation=types.SimpleNamespace(
+                to_messages=lambda: [
+                    {"role": "system", "content": "s"},
+                    {"role": "user", "content": "summary"},
+                ]
+            ),
+        )
+        retried = await a._compact_overflow_rescue()
+        assert [m["content"] for m in retried] == ["s", "PIN", "summary"]
 
     def test_wire_overflow_rescue_attaches_hook(self):
         a = self._agent()

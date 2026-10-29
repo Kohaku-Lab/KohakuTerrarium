@@ -1,6 +1,6 @@
 ---
 name: mcp_call
-description: 'Call one tool on a connected MCP server. Not for discovering what exists - use mcp_list.'
+description: 'Call one tool on a connected MCP server. Use it to run any tool a server exposes. Not for discovering what exists - use mcp_list.'
 category: builtin
 tags: [mcp]
 ---

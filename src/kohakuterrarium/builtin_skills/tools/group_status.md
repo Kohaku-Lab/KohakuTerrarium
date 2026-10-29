@@ -1,6 +1,6 @@
 ---
 name: group_status
-description: 'Snapshot your group: members, channels, wires, and health. Not for changing it - use the other group tools.'
+description: 'Snapshot your group: members, channels, wires and health. Use it before dispatching work and to check progress. Not for changing it - use the other group tools.'
 category: builtin
 tags: [group]
 ---

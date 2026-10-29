@@ -27,7 +27,9 @@ Each method runs ONE complete workflow end-to-end.
 
 import asyncio
 import json
+from collections import deque
 from contextlib import closing
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -36,8 +38,11 @@ from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
+from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
+from kohakuterrarium.builtins.plugins.ui_declarative.plugin import UiDeclarativePlugin
 from kohakuterrarium.builtins.tools import deepseek_web, web_fetch, web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.edit import EditTool
@@ -54,10 +59,12 @@ from kohakuterrarium.core.config_types import (
     OutputConfigItem,
 )
 from kohakuterrarium.core.events import EventType, create_user_input_event
+from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
+from kohakuterrarium.modules.output.widgets import WidgetMessage
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
@@ -101,6 +108,8 @@ from kohakuterrarium.parsing import (
     ToolCallEvent,
 )
 from kohakuterrarium.skills.registry import Skill
+from kohakuterrarium.studio.attach._event_stream import StreamOutput
+from kohakuterrarium.studio.attach.widget_frames import handle_widget_msg
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.utils.file_guard import PathBoundaryGuard
@@ -179,6 +188,35 @@ class VisibilityProbeTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         return ToolResult(output="visibility probe ran")
+
+
+class _TerminalOverlay:
+    """Rich CLI bus overlay stand-in that records what it was asked to show."""
+
+    def __init__(self) -> None:
+        self.opened: list = []
+        self.pending_event_ids: set[str] = set()
+        self.on_reply = None
+
+    def open(self, event, *, router=None) -> None:
+        self.opened.append((event, router))
+
+    def on_supersede(self, event_id) -> None:
+        self.pending_event_ids.discard(event_id)
+
+
+class _TerminalApp:
+    """The parts of RichCLIApp that RichCLIOutput draws widgets through."""
+
+    def __init__(self) -> None:
+        self.bus_overlay = _TerminalOverlay()
+        self.cards: list[dict] = []
+
+    def _invalidate(self) -> None:
+        pass
+
+    def on_card_event(self, payload: dict) -> None:
+        self.cards.append(payload)
 
 
 class _DeepSeekResponse:
@@ -595,6 +633,14 @@ class TestModulesIntegration:
         assert [s.name for s in agent.controller._get_native_tool_schemas()] == [
             "recorder"
         ]
+        # The same restriction governs the text-format prompt the toggle
+        # rebuilt: hidden tools are not listed for the model either.
+        listing = agent.get_system_prompt().split("## Available Functions", 1)[1]
+        assert "`recorder`" in listing and "`visibility_probe`" not in listing
+        assert mgr.disable("tool_visibility") is True
+        listing = agent.get_system_prompt().split("## Available Functions", 1)[1]
+        assert "`visibility_probe`" in listing
+        assert mgr.enable("tool_visibility") is True
 
         await agent.start()
         # on_agent_start fired on agent.start().
@@ -1633,6 +1679,31 @@ class TestModulesIntegration:
             # 13. pending_outputs / completed_outputs property accessors.
             assert router.pending_outputs == []
             assert router.completed_outputs == []
+
+            # 14. Widgets: no attached output renders kt.ui until a web
+            #     client says hello; then a widget opens, plain recorders
+            #     get its fallback text, a message with no agent is dropped.
+            assert router.ui_renderers() == {}
+            with pytest.raises(RendererUnavailable):
+                await router.widgets.open("kt.ui", {})
+            web_frames = asyncio.Queue()
+            web = StreamOutput("modules_agent", web_frames, [])
+            router.add_secondary(web)
+            web.set_client_renderers({"kt.ui": 1})
+            assert router.ui_renderers() == {"kt.ui": 1}
+            handle = await router.widgets.open("kt.ui", {}, fallback="A chart")
+            assert web_frames.get_nowait()["event_id"] == handle.id
+            assert [(a.activity_type, a.detail) for a in secondary.activities][-1] == (
+                "widget",
+                "A chart",
+            )
+            stray = WidgetMessage(handle.id, "click")
+            assert router.widgets.submit_message(stray) == "dropped"
+            await handle.close()
+            assert router.widgets.submit_message(stray) == "unknown"
+            await router.widgets.drain()
+            router.remove_secondary(web)
+            assert router.ui_renderers() == {}
         finally:
             await router.stop()
 
@@ -1722,6 +1793,43 @@ class TestModulesIntegration:
             )
             assert timed_out.is_timeout is True
             assert timed_out.action_id == "__timeout__"
+
+            # The same interaction over the widget path: a web client gets a
+            # kt.confirm widget, answers with widget_msg, and sees the close;
+            # the plain recorder keeps receiving the legacy-typed event.
+            web_q: asyncio.Queue = asyncio.Queue()
+            web = StreamOutput("web", web_q, deque(maxlen=20))
+            ibus.add_secondary(web)
+            web_agent = SimpleNamespace(output_router=ibus)
+            acks: list[dict] = []
+            wait = asyncio.create_task(
+                ibus.emit_and_wait(
+                    OutputEvent(
+                        type="confirm",
+                        interactive=True,
+                        id="evt-3",
+                        payload={"prompt": "Ship?"},
+                    )
+                )
+            )
+            opened = await asyncio.wait_for(web_q.get(), 1)
+            assert opened["type"] == "widget" and opened["event_id"] == "evt-3"
+            assert opened["payload"]["renderer"] == "kt.confirm"
+            assert opened["payload"]["spec"] == {"prompt": "Ship?"}
+            assert ibus_default.events[-1].type == "confirm"
+            handle_widget_msg(
+                {"event_id": "evt-3", "name": "yes", "data": {"why": "ready"}},
+                web_agent,
+                "web",
+                acks.append,
+            )
+            answered = await wait
+            assert (answered.action_id, answered.values) == ("yes", {"why": "ready"})
+            assert acks[-1]["status"] == "accepted"
+            closed = await asyncio.wait_for(web_q.get(), 1)
+            assert closed["type"] == "widget_close"
+            assert closed["payload"] == {"reason": "replied", "action_id": "yes"}
+            ibus.remove_secondary(web)
         finally:
             await ibus.stop()
 
@@ -2087,6 +2195,72 @@ class TestModulesIntegration:
             )
             assert (await agent.executor.wait_for(bad_job)).error
             assert target.read_text() == "a\nNEW\nb\n"
+
+            # ── ui.apps: a plugin-contributed tool gated on the web client ──
+            # Hidden until a client says it renders kt.app; then show_app
+            # stores the document as a session artifact, the web client gets
+            # the widget frame, an app message the tool is not waiting for
+            # becomes an untrusted widget_event, and read + patch round-trip.
+            await agent.add_plugin(AppsPlugin(allowed_hosts=[]))
+            assert "show_app" in agent.registry.list_tools()
+            assert "show_app" not in agent.get_system_prompt(), "no client yet"
+            web_q: asyncio.Queue = asyncio.Queue()
+            web = StreamOutput("web", web_q, deque(maxlen=20), agent)
+            agent.output_router.add_secondary(web)
+            web.set_client_renderers({"kt.app": 1})
+            assert "show_app" in agent.get_system_prompt()
+            job = await agent.executor.submit(
+                "show_app",
+                {"title": "Tip", "html": "<p id=t>10%</p>", "data": {"bill": 40}},
+                is_direct=True,
+            )
+            shown = await agent.executor.wait_for(job)
+            assert shown.error is None and shown.output.startswith("app w_")
+            app_id = shown.output.split()[1]
+            frame = await asyncio.wait_for(web_q.get(), 1)
+            while frame.get("type") != "widget":
+                frame = await asyncio.wait_for(web_q.get(), 1)
+            spec = frame["payload"]["spec"]
+            assert frame["surface"] == "canvas" and spec["allowed_hosts"] == []
+            assert spec["data"] == {"bill": 40} and "html" not in spec
+            assert list((store.artifacts_dir / "apps" / "docs").glob("*.html"))
+            injected: list = []
+
+            async def _record(event, *args, **kwargs):
+                injected.append(event)
+                return True
+
+            agent.inject_event = _record
+            acks: list[dict] = []
+            handle_widget_msg(
+                {
+                    "event_id": app_id,
+                    "name": "tip",
+                    "data": {"pct": 15},
+                    "origin": "app",
+                },
+                agent,
+                "web",
+                acks.append,
+            )
+            await agent.output_router.widgets.drain()
+            assert acks[-1]["status"] == "accepted"
+            (event,) = injected
+            assert event.type == "widget_event"
+            assert 'trust="untrusted"' in event.get_text_content()
+            del agent.inject_event
+            read_job = await agent.executor.submit(
+                "show_app", {"read": app_id}, is_direct=True
+            )
+            assert "<p id=t>10%</p>" in (await agent.executor.wait_for(read_job)).output
+            patch_job = await agent.executor.submit(
+                "show_app",
+                {"update": app_id, "patch": [{"find": "10%", "replace": "15%"}]},
+                is_direct=True,
+            )
+            assert (await agent.executor.wait_for(patch_job)).error is None
+            agent.output_router.remove_secondary(web)
+            assert "show_app" not in agent.get_system_prompt()
         finally:
             await agent.stop()
             store.close()
@@ -2502,3 +2676,106 @@ class TestModulesIntegration:
             assert any(
                 r["kind"] == "goal" for r in await service.list_drive_registrations()
             )
+
+    async def test_ui_declarative_plugin_teaches_inline_ui(self, make_agent):
+        """plugin + prompt + output protocols — the built-in ``ui.declarative``
+        plugin teaches inline ``<ui>`` components, and only while a client
+        that draws ``kt.ui`` is attached.
+
+        Full workflow: enable the plugin → no client, no part → a web client
+        says hello → the inline part of ``## Presenting your answer`` appears
+        (with the ``show_app`` part once ``ui.apps`` is on and the client
+        draws ``kt.app``) → the
+        model replies with one valid and one broken block → the next request
+        carries one note about the broken block, the one after does not →
+        the client leaves and the section is gone → a Rich CLI output brings
+        it back without the ``show_app`` pointer. Only the LLM is scripted."""
+        good = (
+            '<ui title="Split">\n<state total={120} people={3}/>\n'
+            "<let each={total / people}/>\n"
+            '<number label="People" bind="people"/>\n'
+            '<stat label="Each">{fmt(each, 2)}</stat>\n</ui>'
+        )
+        broken = '<ui><stat label="Each"/><slider bind="ghost"/></ui>'
+        reply = f"Here you go:\n\n{good}\n\nAnd a second view:\n{broken}\n"
+        agent = make_agent(
+            script=[
+                ScriptEntry(reply, match="split the bill"),
+                ScriptEntry("fixed it", match="and now"),
+                ScriptEntry("plain answer", match="thanks"),
+            ]
+        )
+        await agent.start()
+        try:
+            await agent.add_plugin(UiDeclarativePlugin())
+            assert "### Inline components" not in agent.get_system_prompt()
+
+            frames: asyncio.Queue = asyncio.Queue()
+            web = StreamOutput("modules_agent", frames, deque(maxlen=50), agent)
+            agent.output_router.add_secondary(web)
+            web.set_client_renderers({"kt.ui": 1})
+            prompt = agent.get_system_prompt()
+            assert (
+                "## Presenting your answer" in prompt
+                and "### Inline components" in prompt
+            )
+            assert (
+                "- `chart`: kind*: bar|stacked|line|area|pie|scatter|radar|heatmap|gauge"
+                in prompt
+            )
+            assert "`show_app`" not in prompt
+            # Rare components are named once; ``info("ui:<name>")`` has them.
+            assert "call `info` with `ui:<name>`" in prompt
+            assert "`quiz`" in prompt and "- `quiz`:" not in prompt
+
+            await agent.add_plugin(AppsPlugin())
+            web.set_client_renderers({"kt.ui": 1, "kt.app": 1})
+            prompt = agent.get_system_prompt()
+            assert "When inline UI is not enough, use `show_app`: a full page" in prompt
+            assert "stays inline as `html`" in prompt
+
+            await agent._process_event(create_user_input_event("split the bill"))
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert '<stat label="Each">' in last.get_text_content()
+
+            await agent._process_event(create_user_input_event("and now?"))
+            request = " ".join(str(m.get("content")) for m in agent.llm.call_log[-1])
+            assert "[inline UI]" in request and "- block 2:" in request
+            assert "root.children[0].value: is required" in request
+            assert "'ghost' is not a key of 'state'" in request
+            assert "- block 1:" not in request
+            stored = " ".join(
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            )
+            assert "[inline UI]" not in stored, "the note is not kept in history"
+
+            await agent._process_event(create_user_input_event("thanks"))
+            request = " ".join(str(m.get("content")) for m in agent.llm.call_log[-1])
+            assert "[inline UI]" not in request, "one note per failing reply"
+            assert agent.llm.call_count == 3
+
+            agent.output_router.remove_secondary(web)
+            assert "### Inline components" not in agent.get_system_prompt()
+
+            previous = agent.output_router.default_output
+            agent.output_router.default_output = RichCLIOutput(_TerminalApp())
+            prompt = agent.get_system_prompt()
+            assert (
+                "## Presenting your answer" in prompt
+                and "### Inline components" in prompt
+            )
+            assert (
+                "When inline UI is not enough" not in prompt
+                and "show_app" not in prompt
+            )
+
+            agent.plugins.disable("ui.declarative")
+            assert "### Inline components" not in agent.get_system_prompt()
+            agent.plugins.enable("ui.declarative")
+            assert "### Inline components" in agent.get_system_prompt()
+
+            agent.output_router.default_output = previous
+            assert "### Inline components" not in agent.get_system_prompt()
+        finally:
+            await agent.stop()

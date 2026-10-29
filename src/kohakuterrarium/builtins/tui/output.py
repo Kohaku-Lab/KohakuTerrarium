@@ -7,6 +7,7 @@ from textual.containers import VerticalScroll
 
 from kohakuterrarium.builtins.tui import attention
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
+from kohakuterrarium.builtins.tui.kt_ui_output import TUIKtUiMixin
 from kohakuterrarium.builtins.tui.model_info import handle_session_info
 from kohakuterrarium.builtins.tui.reply_submit import submit_reply
 from kohakuterrarium.builtins.tui.resume import (
@@ -28,6 +29,7 @@ from kohakuterrarium.builtins.tui.widgets.ui_event_modals import (
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
+from kohakuterrarium.modules.output.widgets_legacy import render_widget_as_legacy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -37,7 +39,7 @@ logger = get_logger(__name__)
 RESUME_MOUNT_TIMEOUT = 10.0
 
 
-class TUIOutput(BaseOutputModule):
+class TUIOutput(TUIKtUiMixin, BaseOutputModule):
     """Render streamed output, activities, history, and interactive events in Textual."""
 
     def __init__(self, session_key: str | None = None, **options: Any):
@@ -54,6 +56,7 @@ class TUIOutput(BaseOutputModule):
         self._turn_started = False
         self._default_target: str = ""
         self._interactive_screens: dict[str, Any] = {}
+        self._init_kt_ui()
 
     @property
     def _tui(self) -> TUISession | None:
@@ -235,7 +238,9 @@ class TUIOutput(BaseOutputModule):
                 detail = event.content if isinstance(event.content, str) else ""
                 self._handle_activity(event.type, detail, event.payload or {})
 
-    async def _handle_confirm_event(self, event: OutputEvent) -> None:
+    async def _handle_confirm_event(
+        self, event: OutputEvent, reply_router: Any = None
+    ) -> None:
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
@@ -255,7 +260,9 @@ class TUIOutput(BaseOutputModule):
             def _on_dismissed(result: dict | None) -> None:
                 if event.id:
                     self._interactive_screens.pop(event.id, None)
-                self._submit_modal_reply(event, result, default_action="cancel")
+                self._submit_modal_reply(
+                    event, result, default_action="cancel", router=reply_router
+                )
 
             if event.id:
                 self._interactive_screens[event.id] = modal
@@ -263,7 +270,9 @@ class TUIOutput(BaseOutputModule):
 
         self._tui._safe_call(_build_and_push)
 
-    async def _handle_ask_text_event(self, event: OutputEvent) -> None:
+    async def _handle_ask_text_event(
+        self, event: OutputEvent, reply_router: Any = None
+    ) -> None:
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
@@ -283,7 +292,9 @@ class TUIOutput(BaseOutputModule):
             def _on_dismissed(result: dict | None) -> None:
                 if event.id:
                     self._interactive_screens.pop(event.id, None)
-                self._submit_modal_reply(event, result, default_action="cancel")
+                self._submit_modal_reply(
+                    event, result, default_action="cancel", router=reply_router
+                )
 
             if event.id:
                 self._interactive_screens[event.id] = modal
@@ -291,7 +302,9 @@ class TUIOutput(BaseOutputModule):
 
         self._tui._safe_call(_build_and_push)
 
-    async def _handle_selection_event(self, event: OutputEvent) -> None:
+    async def _handle_selection_event(
+        self, event: OutputEvent, reply_router: Any = None
+    ) -> None:
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
@@ -311,7 +324,9 @@ class TUIOutput(BaseOutputModule):
             def _on_dismissed(result: dict | None) -> None:
                 if event.id:
                     self._interactive_screens.pop(event.id, None)
-                self._submit_modal_reply(event, result, default_action="cancel")
+                self._submit_modal_reply(
+                    event, result, default_action="cancel", router=reply_router
+                )
 
             if event.id:
                 self._interactive_screens[event.id] = modal
@@ -324,9 +339,10 @@ class TUIOutput(BaseOutputModule):
         event: OutputEvent,
         result: dict | None,
         default_action: str,
+        router: Any = None,
     ) -> None:
         """Convert a modal result to a reply and submit it to the router."""
-        router = getattr(self, "_router", None)
+        router = router or getattr(self, "_router", None)
         if router is None or not event.id:
             return
         if result is None:
@@ -376,7 +392,7 @@ class TUIOutput(BaseOutputModule):
         except Exception as e:
             logger.warning("notification render failed", error=str(e), exc_info=True)
 
-    def _handle_card_event(self, event: OutputEvent) -> None:
+    def _handle_card_event(self, event: OutputEvent, reply_router: Any = None) -> None:
         if self._tui is None:
             return
         payload = event.payload or {}
@@ -386,7 +402,7 @@ class TUIOutput(BaseOutputModule):
         )
         if replyable:
             attention.add_pending(self._tui, event.id, self._target)
-        on_action = self._make_card_action_callback() if replyable else None
+        on_action = self._make_card_action_callback(reply_router) if replyable else None
         try:
             self._tui.add_card_block(
                 payload,
@@ -397,11 +413,11 @@ class TUIOutput(BaseOutputModule):
         except Exception as e:
             logger.warning("card render failed", error=str(e), exc_info=True)
 
-    def _make_card_action_callback(self):
+    def _make_card_action_callback(self, reply_router: Any = None):
         """Create a callback that submits card button replies."""
 
         def _on_action(event_id: str, action_id: str) -> None:
-            router = getattr(self, "_router", None)
+            router = reply_router or getattr(self, "_router", None)
             if router is None or not event_id:
                 return
             try:
@@ -416,6 +432,19 @@ class TUIOutput(BaseOutputModule):
                 logger.exception("card action submit failed", error=str(e))
 
         return _on_action
+
+    async def on_widget(self, event: OutputEvent) -> None:
+        """Draw ``kt.ui`` and the legacy kinds; other renderers show their fallback text."""
+        if self._kt_ui.handles(event):
+            self._kt_ui.on_widget(event)
+            return
+        await render_widget_as_legacy(self, event)
+
+    def on_widget_close(self, event: OutputEvent) -> None:
+        if self._kt_ui.handles(event):
+            self._kt_ui.on_widget(event)
+            return
+        self.on_supersede(event.update_target)
 
     def on_supersede(self, event_id: str | None) -> None:
         if not self._tui:

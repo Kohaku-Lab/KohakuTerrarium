@@ -22,6 +22,8 @@ from kohakuterrarium.llm.message import Message
 from kohakuterrarium.llm.recovery import ErrorClass
 from kohakuterrarium.llm.request_budget import MAX_REQUEST_SHRINKS, RequestMeasure
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 class TestToolSchema:
     def test_to_api_format_wraps_function_block(self):

@@ -34,12 +34,14 @@
 import { computed, h, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from "vue"
 
 import { ConversationMessage, MarkdownRenderer } from "@kohakuterrarium/chat-ui"
+import AssistantText from "@/components/chat/shared/AssistantText.vue"
 import { tabLabel } from "@/components/session-v2/model/creatureKeys"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import { subagentBlocks } from "@/components/session-v2/model/widgets/subagentBlocks"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { sessionAPI, terrariumAPI } from "@/utils/api"
+import { useI18n } from "@/utils/i18n"
 
 /**
  * One sub-agent run's full transcript beside the chat. `payload`: {parent,
@@ -50,6 +52,7 @@ const props = defineProps({ payload: { type: Object, default: () => ({}) } })
 
 const ctx = useSessionV2()
 const t = useV2T()
+const { t: tGlobal } = useI18n()
 const messages = ref([])
 const loading = ref(false)
 const error = ref("")
@@ -63,7 +66,10 @@ const blocks = computed(() => subagentBlocks(messages.value))
 // Running while its job is still in the chat store's running list.
 const running = computed(() => !!(props.payload.jobId && ctx.chat.runningJobs?.[props.payload.jobId]))
 
-function renderText(content, breaks = false) {
+function renderText(content, breaks = false, options = null) {
+  if (options?.assistant) {
+    return h(AssistantText, { content, breaks, streaming: options.streaming === true, sayBlocked: tGlobal("chat.inlineUi.sendMainChatOnly") })
+  }
   return h(MarkdownRenderer, { content, breaks })
 }
 

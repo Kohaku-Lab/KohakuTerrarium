@@ -13,6 +13,8 @@ from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.media_reference import session_media_scope
 
+pytestmark = pytest.mark.real_llm_provider
+
 AGY_CLI_USER_AGENT = (
     "antigravity/cli/1.3.4 (aidev_client; os_type=windows; arch=amd64; "
     "cl=998275202; auth_method=consumer)"

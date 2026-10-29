@@ -43,6 +43,7 @@ from kohakuterrarium.llm.backends import (
     validate_backend_type,
 )
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm_seam import real_llm_providers
 from kohakuterrarium.packages import locations
 from kohakuterrarium.packages.install import install_package, uninstall_package
 from kohakuterrarium.packages.locations import (
@@ -750,16 +751,18 @@ class TestPackagesIntegration:
             assert "kt_echo_backend" not in _sys.modules
             engine = Terrarium()
             try:
-                creature = await engine.add_creature(
-                    "@alpha/creatures/swe", llm="echo/echo-small"
-                )
+                with real_llm_providers():
+                    creature = await engine.add_creature(
+                        "@alpha/creatures/swe", llm="echo/echo-small"
+                    )
                 agent = creature.agent
                 assert type(agent.llm).__name__ == "EchoProvider"
                 assert agent.llm.config.model == "small-1"
                 result = await agent.run("ping")
                 assert "small-1 heard ping" in result.text
                 # Model switch goes through the same package dispatch.
-                assert agent.switch_model("echo/echo-large") == "echo/echo-large"
+                with real_llm_providers():
+                    assert agent.switch_model("echo/echo-large") == "echo/echo-large"
                 assert agent.llm.config.model == "large-1"
                 result = await agent.run("again")
                 assert "large-1 heard again" in result.text

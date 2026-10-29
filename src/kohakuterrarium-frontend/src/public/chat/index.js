@@ -110,6 +110,7 @@ export {
 } from "./platformLink.js"
 // Platform and site context for the shared message row.
 export { MESSAGE_ACTIONS_KEY, provideMessageActions, useMessageActions } from "./messageActions.js"
+export { provideCodePin, useCodePin } from "./codePin.js"
 // Shared link policy: the single safe resolver for model-authored card/link
 // targets. Both hosts (Dashboard and the VS Code webview) resolve a link through
 // this so relative-URL, hash, `javascript:` and unknown-origin handling can never

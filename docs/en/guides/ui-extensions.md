@@ -26,12 +26,18 @@ This guide covers:
 | `panel` | a dockable chat/session side panel | `plugin` | one creature |
 | `tool-renderer` | replaces the body of that tool's call/result block in chat | `tool` | one creature |
 | `trigger-renderer` | replaces the body of that trigger's event block in chat | `trigger` | one creature |
+| `widget` | draws every chat widget whose renderer id is the contribution's `renderer` | any | wherever the widget opens |
 
 A `panel` is shown only while the **focused creature has that plugin
 loaded and enabled**; otherwise it renders nothing. Renderers render past
 and live blocks of their tool or trigger. If two packages provide a
 renderer for the same tool, the first one registered wins and the other is
 reported in the browser console.
+
+A `widget` contribution names the renderer id it provides in `renderer:`
+(a dotted id such as `board.grid`; the `kt.` and `mcp.` prefixes are
+reserved). Every declared widget renderer is announced to the backend in the
+client's `client_hello`, so tools that require it become visible.
 
 Owner references are `<kind>:<name>`:
 
@@ -118,7 +124,7 @@ export default defineExtension((kt) => {
 | Member | Purpose |
 |---|---|
 | `kt.package`, `kt.sdkVersion` | identity |
-| `registerTab / registerPanel / registerRailGroup / registerSettingsSection / registerToolRenderer / registerTriggerRenderer (id, component, options?)` | provide the component for a declared contribution. An undeclared id is added on the fly; runtime-owned kinds then need `options.owner`. |
+| `registerTab / registerPanel / registerRailGroup / registerSettingsSection / registerToolRenderer / registerTriggerRenderer / registerWidgetRenderer (id, component, options?)` | provide the component for a declared contribution. An undeclared id is added on the fly; runtime-owned kinds then need `options.owner`, and an undeclared widget needs `options.renderer`. `registerWidgetRenderer` also takes `version` and `surfaces` (`chat`, `canvas`, `side-panel`, `modal`). |
 | `kt.t(key, params)` | message from the package's i18n bundles (`{name}` interpolation) |
 | `kt.assetUrl(path)` | URL of a file under the UI root, with a currently valid token (tokens are renewed before they expire) |
 | `kt.api.get/post/put/patch/delete/request` | raw-route fallback, `/api/ext/<pkg>/<path>` on the active host |
@@ -153,6 +159,12 @@ get `event` (`triggerName`, `triggerUiName`, `content`, `triggerContent`,
 `channel`, `sender`). A trigger renderer matches the trigger id or the
 trigger class's `ui_name`, so runtime-added triggers with generated ids
 still find their renderer.
+
+Widget renderers get `widget` (`id`, `renderer`, `version`, `title`,
+`spec`, `state`, `surface`, `interactive`, `awaiting`, `closed`,
+`fallback`) and `host` (`send(name, data)` sends a widget message,
+`setState(patch)` saves state, debounced). Nested components reach the same
+pair with `useWidget()`.
 
 Colors and sizes come from CSS variables (`THEME_TOKENS`, e.g.
 `--color-surface`, `--color-text`, `--kt-fs-body`); they follow dark mode.

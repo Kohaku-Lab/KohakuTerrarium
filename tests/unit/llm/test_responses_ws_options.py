@@ -11,6 +11,8 @@ from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 @pytest.fixture(params=[OpenAIProvider, CodexOAuthProvider])
 def provider_type(request):

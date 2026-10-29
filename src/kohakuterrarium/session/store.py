@@ -53,7 +53,7 @@ from kohakuterrarium.session.vault_io import (
     scan_keys,
 )
 from kohakuterrarium.session.vault_read import open_read_text
-from kohakuterrarium.session.version import FORMAT_VERSION
+from kohakuterrarium.session.version import FORMAT_VERSION, require_writable_format
 from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
@@ -91,6 +91,7 @@ class SessionStore(StoreAffinityMixin, StoreResourceMixin, BranchIndexMixin):
         if read_only:
             Path(self._path).resolve(strict=True)
         else:
+            require_writable_format(self._path)
             Path(self._path).parent.mkdir(parents=True, exist_ok=True)
 
         # Occupancy is enrolled before native open; the writer lock is optional.

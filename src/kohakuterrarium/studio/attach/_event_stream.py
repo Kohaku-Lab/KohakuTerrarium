@@ -23,6 +23,8 @@ _event_logs: dict[str, list] = {}
 # O(1) (list slicing would left-shift the whole buffer per frame).
 # Overridable for lab harnesses.
 _EVENT_LOG_MAX = int(os.environ.get("KT_EVENT_LOG_MAX", "5000"))
+MAX_CLIENT_RENDERERS = 256
+TRANSIENT_FRAMES = frozenset({"model_recovery", "tool_args_progress"})
 
 
 def get_event_log(key: str) -> deque:
@@ -131,6 +133,65 @@ class StreamOutput(OutputModule):
         self._log = log
         self._n = 0
         self._agent = agent
+        self._client_renderers: dict[str, int] = {}
+
+    def ui_renderers(self) -> dict[str, int]:
+        """Renderers the attached client announced in its ``client_hello``."""
+        return dict(self._client_renderers)
+
+    def set_client_renderers(self, renderers: Any) -> None:
+        """Replace the client's renderer map and let the router re-aggregate."""
+        clean: dict[str, int] = {}
+        if isinstance(renderers, dict):
+            for renderer, version in list(renderers.items())[:MAX_CLIENT_RENDERERS]:
+                if (
+                    isinstance(renderer, str)
+                    and renderer
+                    and isinstance(version, int)
+                    and not isinstance(version, bool)
+                    and version >= 1
+                ):
+                    clean[renderer] = version
+        self._client_renderers = clean
+        router = getattr(self, "_router", None)
+        if router is not None and hasattr(router, "refresh_renderers"):
+            router.refresh_renderers()
+
+    async def on_widget(self, event: OutputEvent) -> None:
+        """Forward widget-family events as client frames."""
+        match event.type:
+            case "widget":
+                msg: dict = {
+                    "type": "widget",
+                    "event_id": event.id,
+                    "surface": event.surface,
+                    "interactive": bool(event.interactive),
+                    "payload": dict(event.payload),
+                }
+                if event.update_target is not None:
+                    msg["update_target"] = event.update_target
+                if event.timeout_s is not None:
+                    msg["timeout_s"] = event.timeout_s
+                self._put(msg)
+            case "widget_close":
+                self.on_widget_close(event)
+            case "widget_state":
+                self._put(
+                    {
+                        "type": "widget_state",
+                        "event_id": event.update_target,
+                        "state": dict(event.payload.get("state") or {}),
+                    }
+                )
+            case "inline_ui_state":
+                self._put({"type": "inline_ui_state", **dict(event.payload)})
+
+    def on_widget_close(self, event: OutputEvent) -> None:
+        """Send ``widget_close``, with the reason a legacy interaction ended."""
+        msg: dict = {"type": "widget_close", "event_id": event.update_target}
+        if event.payload:
+            msg["payload"] = dict(event.payload)
+        self._put(msg)
 
     def _current_turn_branch(self) -> tuple[int | None, int | None]:
         """Return positive current turn and branch IDs when both are assigned."""
@@ -154,7 +215,7 @@ class StreamOutput(OutputModule):
         if bi is not None and "branch_id" not in msg:
             msg["branch_id"] = bi
         self._q.put_nowait(msg)
-        if msg.get("type") != "model_recovery":
+        if msg.get("type") not in TRANSIENT_FRAMES:
             self._log.append(msg)
 
     async def start(self) -> None:
@@ -277,14 +338,15 @@ class StreamOutput(OutputModule):
         """Convert a native output event without changing websocket compatibility.
 
         Legacy activity keys, metadata filtering, and ID sequencing remain stable.
-        Rich UI event kinds use their own top-level frame types so the client can
-        dispatch them directly.
+        UI kinds arrive through ``on_widget`` as widget frames.
         """
         match event.type:
             case "assistant_round_start" | "assistant_message":
                 pass
             case "model_recovery":
                 self._put({"type": "model_recovery", **event.payload})
+            case "tool_args_progress":
+                self._put({"type": "tool_args_progress", **event.payload})
             case "text":
                 content = event.content
                 if isinstance(content, str) and content:
@@ -318,35 +380,6 @@ class StreamOutput(OutputModule):
                 )
             case "resume_batch":
                 pass
-            case (
-                "ask_text"
-                | "confirm"
-                | "selection"
-                | "progress"
-                | "notification"
-                | "card"
-            ):
-                # Rich UI payloads remain nested and unfiltered for direct client dispatch.
-                msg: dict = {
-                    "type": event.type,
-                    "event_id": event.id,
-                    "interactive": bool(event.interactive),
-                    "surface": event.surface,
-                    "payload": dict(event.payload),
-                }
-                if event.update_target is not None:
-                    msg["update_target"] = event.update_target
-                if event.timeout_s is not None:
-                    msg["timeout_s"] = event.timeout_s
-                self._put(msg)
-                self._n += 1
-            case "ui_supersede":
-                self._put(
-                    {
-                        "type": "ui_supersede",
-                        "event_id": event.payload.get("event_id"),
-                    }
-                )
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 metadata = event.payload or {}

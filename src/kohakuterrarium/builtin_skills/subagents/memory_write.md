@@ -1,6 +1,6 @@
 ---
 name: memory_write
-description: 'Record a durable note into session memory. Not for files the user should see - use write.'
+description: 'Record a durable note into session memory. Dispatch it to save decisions and facts worth keeping. Not for files the user should see - use write.'
 category: subagent
 tags: [memory]
 ---

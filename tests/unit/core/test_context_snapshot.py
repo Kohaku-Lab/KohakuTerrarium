@@ -1,7 +1,14 @@
 """Detached context capture and provider-valid fork boundaries."""
 
-from kohakuterrarium.core.context_snapshot import ContextSnapshot, capture_context
+from types import SimpleNamespace
+
+from kohakuterrarium.core.context_snapshot import (
+    ContextSnapshot,
+    capture_agent_context,
+    capture_context,
+)
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.pinned import PinnedContext
 
 
 def test_snapshot_is_detached_and_roundtrips_provider_fields():
@@ -72,3 +79,21 @@ def test_settled_tool_pairs_and_multimodal_references_survive():
     )
     assert child.to_messages()[2]["tool_call_id"] == "a"
     assert child.to_messages() == conversation.to_messages()
+
+
+def test_agent_capture_carries_pins_right_after_system():
+    conversation = Conversation()
+    conversation.append("system", "S")
+    conversation.append("user", "hi")
+    pins = PinnedContext()
+    pins.pin("persona", "user", "PIN")
+    agent = SimpleNamespace(
+        controller=SimpleNamespace(conversation=conversation, pinned=pins),
+        config=SimpleNamespace(name="bot"),
+        session_store=None,
+        llm=SimpleNamespace(model="m"),
+    )
+    snapshot = capture_agent_context(agent)
+    assert [m["content"] for m in snapshot.messages] == ["S", "PIN", "hi"]
+    assert snapshot.messages[1]["metadata"] == {"pinned": "persona"}
+    assert len(conversation) == 2

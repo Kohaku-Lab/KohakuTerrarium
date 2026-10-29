@@ -1,6 +1,6 @@
 ---
 name: canvas_image
-description: Put a local image file on the Studio canvas. Not for inspecting a file - use read.
+description: 'Put a local image file on the Studio canvas. Use it to show the user a chart, render or screenshot you made. Not for inspecting a file - use read.'
 category: builtin
 tags: [media, canvas]
 ---

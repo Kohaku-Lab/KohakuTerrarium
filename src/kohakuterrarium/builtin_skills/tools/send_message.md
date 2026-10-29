@@ -1,6 +1,6 @@
 ---
 name: send_message
-description: Send a message to a named channel.
+description: 'Send a message to a named channel. Use it to publish results or updates to the channels listed in your prompt.'
 category: builtin
 tags: [channels]
 ---

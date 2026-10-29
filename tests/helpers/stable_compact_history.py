@@ -17,6 +17,7 @@ from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.session.resume import resume_agent
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm_seam import real_llm_providers
 
 
 def _parts(label):
@@ -66,12 +67,13 @@ async def _provider(requests, output=None):
             ),
         )
 
-    llm = CodexOAuthProvider(
-        model="gpt-5.4",
-        api_key="test-key",
-        base_url="https://compact.test/v1",
-        extra_body={"responses_reasoning_replay": True},
-    )
+    with real_llm_providers():
+        llm = CodexOAuthProvider(
+            model="gpt-5.4",
+            api_key="test-key",
+            base_url="https://compact.test/v1",
+            extra_body={"responses_reasoning_replay": True},
+        )
     await llm.ensure_authenticated()
     initial = llm._client
     llm._client = initial.with_options(

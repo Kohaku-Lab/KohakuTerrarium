@@ -7,6 +7,8 @@ from kohakuterrarium.llm.grok_auth import GROK_CLI_BASE_URL, GrokToken
 from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 class _AuthError(Exception):
     status_code = 401

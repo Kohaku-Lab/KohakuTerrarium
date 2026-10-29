@@ -18,8 +18,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, nextTick, provide, ref, watch } from "vue"
 
+import { WIDGET_SURFACE_KEY } from "@/components/chat/widgets/useWidget"
 import AddDialog from "@/components/session-v2/add/AddDialog.vue"
 import ChannelMembers from "@/components/session-v2/chat/ChannelMembers.vue"
 import ChatColumn from "@/components/session-v2/chat/ChatColumn.vue"
@@ -30,6 +31,7 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import SideView from "@/components/session-v2/side/SideView.vue"
 import { useDensity } from "@/composables/useDensity"
+import { provideCodePin } from "@/public/chat/codePin"
 import { useCanvasStore } from "@/stores/canvas"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 
@@ -53,6 +55,25 @@ const activeChannel = computed(() => {
   return tab.startsWith("ch:") ? tab.slice(3) : ""
 })
 const membersOpen = ref(readLocalPref(MEMBERS_KEY) !== "0")
+
+function openCanvasAt(sourceId) {
+  const index = canvas.artifacts.findIndex((a) => a.sourceId === sourceId)
+  if (index >= 0) ctx.openSide("canvas", { index })
+}
+
+// Chat stubs reveal side-panel widgets in the side view and canvas widgets in the canvas.
+provide(WIDGET_SURFACE_KEY, {
+  surfaces: ["side-panel", "canvas"],
+  open(surface, widgetId) {
+    if (surface === "side-panel") ctx.openSide("widgets", { eventId: widgetId })
+    if (surface === "canvas") openCanvasAt(`widget:${widgetId}`)
+  },
+})
+// "Open in canvas" on a code block pins it and shows the canvas.
+provideCodePin((block) => {
+  const pinned = canvas.pinBlock(block)
+  if (pinned) openCanvasAt(pinned.sourceId)
+})
 function setMembersOpen(value) {
   membersOpen.value = value
   writeLocalPref(MEMBERS_KEY, value ? "1" : "0")

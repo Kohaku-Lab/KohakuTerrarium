@@ -10,9 +10,11 @@ import markdownItKatex from "@vscode/markdown-it-katex"
 import markdownItCjkFriendly from "markdown-it-cjk-friendly"
 import hljs from "highlight.js"
 
+import { useCodePin } from "./codePin.js"
 import { applyExternalLinkRule, resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
 import { IncrementalMarkdownRenderer } from "./markdownIncremental.js"
 import { createMarkdownMediaResolver, useMediaResolver } from "./mediaResolver.js"
+import { cachedMermaid, hydrateMermaid, mermaidFailure } from "./mermaidRender.js"
 import { usePlatformLinkOpener } from "./platformLink.js"
 
 const props = defineProps({
@@ -23,9 +25,12 @@ const props = defineProps({
   // user-typed messages preserve their line breaks. Off by default to
   // keep the assistant render strictly CommonMark.
   breaks: { type: Boolean, default: false },
+  // ``false`` hides "Open in canvas" even when the host provides a pin handler.
+  canPin: { type: Boolean, default: true },
 })
 
 const rootEl = ref(null)
+const pinHandler = props.canPin ? useCodePin() : null
 
 // A host that owns a backend URL installs a platform link opener (see
 // ``platformLink.js``); a Markdown link click is then handed to it instead of
@@ -40,13 +45,16 @@ const platformLinkOpener = usePlatformLinkOpener()
 // Extension-only DOM MutationObserver, so both hosts share one implementation.
 const mediaImages = createMarkdownMediaResolver(useMediaResolver())
 function syncMedia() {
-  nextTick(() => mediaImages.resolve(rootEl.value))
+  nextTick(() => {
+    mediaImages.resolve(rootEl.value)
+    hydrateMermaid(rootEl.value)
+  })
 }
 
 function codeBlockHtml(lang, fenceHtml) {
   const displayLang = md.utils.escapeHtml(lang || "text")
   const styledFenceHtml = fenceHtml.replace("<pre>", '<pre class="hljs">')
-  return `<div class="code-block">` + `<div class="code-header">` + `<span class="code-lang">${displayLang}</span>` + `<button class="code-copy-btn" title="Copy">Copy</button>` + `</div>` + styledFenceHtml + `</div>`
+  return `<div class="code-block">` + `<div class="code-header">` + `<span class="code-lang">${displayLang}</span>` + (pinHandler ? `<button class="code-pin-btn" title="Open in canvas">Open in canvas</button>` : "") + `<button class="code-copy-btn" title="Copy">Copy</button>` + `</div>` + styledFenceHtml + `</div>`
 }
 
 const md = new MarkdownIt({
@@ -140,6 +148,15 @@ md.renderer.rules.fence = (tokens, idx, options, env, renderer) => {
       .unescapeAll(token.info || "")
       .trim()
       .split(/[ \t]+/, 1)[0] || ""
+  if (lang === "mermaid" && !token.meta?.unclosedFence && token.content.trim()) {
+    const source = token.content.replace(/\n$/, "")
+    const svg = cachedMermaid(source)
+    const attr = md.utils.escapeHtml(source)
+    if (svg) return `<div class="kt-mermaid" data-state="done" data-source="${attr}">${svg}</div>`
+    if (!mermaidFailure(source)) {
+      return `<div class="kt-mermaid" data-source="${attr}">${codeBlockHtml(lang, originalFenceRule(tokens, idx, options, env, renderer))}</div>`
+    }
+  }
   let fenceHtml
   if (token.meta?.unclosedFence) {
     fenceHtml = originalFenceRule(tokens, idx, { ...options, highlight: null }, env, renderer)
@@ -162,6 +179,14 @@ if (typeof katexPlugin === "function") {
 applyExternalLinkRule(md, props.origin)
 
 function onClick(e) {
+  const pin = e.target.closest(".code-pin-btn")
+  if (pin && pinHandler) {
+    const block = pin.closest(".code-block")
+    const content = block?.querySelector("pre code")?.textContent || ""
+    const lang = block?.querySelector(".code-lang")?.textContent || "text"
+    if (content) pinHandler({ content: content.replace(/\n$/, ""), lang })
+    return
+  }
   const btn = e.target.closest(".code-copy-btn")
   if (btn) {
     const code = btn.closest(".code-block")?.querySelector("pre code")
@@ -448,6 +473,16 @@ html.dark .md-content code {
   border: 1px dashed rgba(165, 126, 174, 0.35);
   white-space: pre-wrap;
 }
+.md-content .kt-mermaid[data-state="done"] {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.md-content .kt-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
 .md-content .code-block {
   margin: 0.6em 0;
   border-radius: 8px;
@@ -472,7 +507,12 @@ html.dark .md-content .code-block {
   text-transform: lowercase;
   letter-spacing: 0.02em;
 }
-.md-content .code-copy-btn {
+.md-content .code-pin-btn {
+  margin-left: auto;
+  margin-right: 0.4em;
+}
+.md-content .code-copy-btn,
+.md-content .code-pin-btn {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #c0c0d0;
@@ -485,7 +525,8 @@ html.dark .md-content .code-block {
     background 0.15s,
     border-color 0.15s;
 }
-.md-content .code-copy-btn:hover {
+.md-content .code-copy-btn:hover,
+.md-content .code-pin-btn:hover {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.25);
 }

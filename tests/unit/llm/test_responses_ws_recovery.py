@@ -24,6 +24,8 @@ from tests.unit.llm.test_responses_ws import (
     completed,
 )
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 @pytest.mark.parametrize("shape", ["dict", "object", "flat", "mixed"])
 async def test_cache_rejection_shapes_resend_full_history(shape):

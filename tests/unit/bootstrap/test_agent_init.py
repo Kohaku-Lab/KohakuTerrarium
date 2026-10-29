@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
-from kohakuterrarium.modules.plugin.base import BasePlugin
+from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config_types import AgentConfig
@@ -378,6 +378,7 @@ class TestInitInputOutput:
         # An OutputRouter is constructed; no named outputs declared → empty set.
         assert isinstance(fake.output_router, OutputRouter)
         assert fake._known_outputs == set()
+        assert fake.output_router.widgets.agent is fake
 
     def test_init_output_uses_custom_override(self):
         cfg = AgentConfig(name="a")
@@ -684,7 +685,9 @@ class TestInitController:
             registry=registry,
             executor=executor,
             llm=_FakeLLM(),
-            subagent_manager=SimpleNamespace(get_subagents_prompt=lambda: ""),
+            subagent_manager=SimpleNamespace(
+                get_subagents_prompt=lambda visible=None: ""
+            ),
             _known_outputs=set(),
         )
         defaults.update(overrides)
@@ -706,7 +709,7 @@ class TestInitController:
         agent = self._agent(
             config=AgentConfig(name="ctrl-agent", tool_format="bracket"),
             subagent_manager=SimpleNamespace(
-                get_subagents_prompt=lambda: "SUBAGENT-SECTION-MARKER"
+                get_subagents_prompt=lambda visible=None: "SUBAGENT-SECTION-MARKER"
             ),
         )
         AgentInitMixin._init_controller(agent)
@@ -715,17 +718,39 @@ class TestInitController:
         native = self._agent(
             config=AgentConfig(name="ctrl-agent", tool_format="native"),
             subagent_manager=SimpleNamespace(
-                get_subagents_prompt=lambda: "SUBAGENT-SECTION-MARKER"
+                get_subagents_prompt=lambda visible=None: "SUBAGENT-SECTION-MARKER"
             ),
         )
         AgentInitMixin._init_controller(native)
         assert "SUBAGENT-SECTION-MARKER" not in native._controller_config.system_prompt
 
+    def test_subagents_section_follows_plugin_visibility(self):
+        class HideSubagents(BasePlugin):
+            name = "hide_subagents"
+
+            def get_tool_visibility(self, context):
+                return ToolVisibility(allowed_subagents=frozenset({"critic"}))
+
+        def section(visible=None):
+            names = [n for n in ("explore", "critic") if visible is None or visible(n)]
+            return "SUBAGENTS:" + ",".join(names)
+
+        plugins = PluginManager()
+        plugins.register(HideSubagents())
+        agent = self._agent(
+            config=AgentConfig(name="ctrl-agent", tool_format="bracket"),
+            subagent_manager=SimpleNamespace(get_subagents_prompt=section),
+            plugins=plugins,
+            _apply_plugin_hooks=lambda: None,
+        )
+        AgentInitMixin._init_controller(agent)
+        assert "SUBAGENTS:critic" in agent._controller_config.system_prompt
+
     def test_tools_prompt_opt_out_excludes_subagent_instructions(self):
         agent = self._agent(
             config=AgentConfig(name="ctrl-agent", include_tools_in_prompt=False),
             subagent_manager=SimpleNamespace(
-                get_subagents_prompt=lambda: "SUBAGENT-SECTION-MARKER"
+                get_subagents_prompt=lambda visible=None: "SUBAGENT-SECTION-MARKER"
             ),
         )
         AgentInitMixin._init_controller(agent)

@@ -1,6 +1,6 @@
 ---
 name: explore
-description: Investigate a bounded workspace question. Supply scope and existing findings. Returns file evidence. Not for implementation or planning.
+description: 'Investigate a workspace question and return file evidence, read-only. Dispatch it whenever an answer means reading across many files; hand it the scope.'
 category: subagent
 tags: [search, exploration, analysis]
 ---

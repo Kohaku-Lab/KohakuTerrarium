@@ -59,10 +59,14 @@ from kohakuterrarium.skills.discovery import load_skill_from_path
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.output import OutputRecorder
+from kohakuterrarium.builtins.plugins.ui_declarative.plugin import (
+    UiDeclarativePlugin,
+)
 from kohakuterrarium.builtins.tools.info import InfoTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.user_commands.skill import SkillUserCommand
+from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -105,6 +109,20 @@ class _MyEchoTool(BaseTool):
 # seam. Mirrors how tests/unit/core/test_agent_real.py constructs an agent,
 # patching BOTH bootstrap LLM-factory import sites.
 # --------------------------------------------------------------------------
+
+
+class _GlossaryPlugin(BasePlugin):
+    """A third-party plugin that serves its own ``gloss:<term>`` topics."""
+
+    name = "glossary"
+    doc_prefix = "gloss"
+    TERMS = {"creature": "A configured agent.", "terrarium": "The runtime engine."}
+
+    def doc_topics(self, context):
+        return list(self.TERMS)
+
+    def doc_topic(self, topic, context):
+        return self.TERMS.get(topic)
 
 
 class _ScriptHandle:
@@ -276,9 +294,17 @@ class TestCommandsIntegration:
                 "[/info]explore[info/]\n"
                 "[/info]deploy_routine[info/]\n"
                 "[/info]definitely_not_a_real_thing[info/]\n"
+                "[/info]ui:quiz[info/]\n"
+                "[/info]gloss:[info/]\n"
+                "[/info]gloss:ghost[info/]\n"
+                "[/info]nobody:thing[info/]\n"
                 "Done.",
             ]
         )
+        # Plugins that own a doc prefix: the built-in inline UI and a
+        # third-party glossary.
+        await agent.add_plugin(UiDeclarativePlugin())
+        await agent.add_plugin(_GlossaryPlugin())
         # Register a real procedural skill on the agent's SkillRegistry —
         # the controller wired ``skills_registry`` into the command context
         # at construction, so ``InfoCommand`` step #5 (_render_skill_info)
@@ -310,12 +336,40 @@ class TestCommandsIntegration:
         # which the controller splices in as a bracketed command-error note.
         # No exception, no crash, the turn still completed.
         assert "[Command Error: Not found: definitely_not_a_real_thing]" in asst
+        # A plugin topic resolves through its doc prefix: props and an example.
+        assert "# ui:quiz" in asst and "- `quiz`: question*: text" in asst
+        assert '<quiz options={["O(n)", "O(log n)", "O(1)"]}' in asst
+        # An empty topic lists the topics; an unknown one errors with them.
+        assert "# gloss: topics\n\n`gloss:creature`, `gloss:terrarium`" in asst
+        assert (
+            "[Command Error: No documentation for 'gloss:ghost'. Topics: "
+            "`gloss:creature`, `gloss:terrarium`]" in asst
+        )
+        # A prefix no plugin owns falls through to the usual sources.
+        assert "[Command Error: Not found: nobody:thing]" in asst
 
         recorder: OutputRecorder = agent._recorder
         activity_kinds = recorder.activity_types()
-        # Two successes (subagent skill + procedural skill) and one error.
-        assert activity_kinds.count("command_done") == 2
-        assert activity_kinds.count("command_error") == 1
+        # Successes: subagent skill, procedural skill, ui:quiz, gloss:.
+        assert activity_kinds.count("command_done") == 4
+        assert activity_kinds.count("command_error") == 3
+
+        # The native ``info`` tool resolves the same names.
+        context = ToolContext(
+            agent_name=agent.config.name,
+            session=None,
+            working_dir=tmp_path,
+            agent=agent,
+        )
+        tool = InfoTool()
+        found = await tool.execute({"name": "gloss:terrarium"}, context)
+        assert found.output == "The runtime engine." and not found.error
+        missing = await tool.execute({"name": "gloss:ghost"}, context)
+        assert missing.error.startswith("No documentation for 'gloss:ghost'")
+        # A disabled plugin no longer owns its prefix.
+        agent.plugins.disable("glossary")
+        gone = await tool.execute({"name": "gloss:terrarium"}, context)
+        assert gone.error.startswith("No documentation found for 'gloss:terrarium'")
 
         skill_dir = tmp_path / "global skills" / "resource-probe"
         skill_dir.mkdir(parents=True)

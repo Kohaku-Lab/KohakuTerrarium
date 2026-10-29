@@ -6,20 +6,25 @@ into the session store, declarative ``applies_to`` gating works, and
 option set/get round-trips through validation.
 """
 
+import types
 from contextlib import closing
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.core.pinned import PinnedContext
+from kohakuterrarium.core.pinned import state_key as pinned_state_key
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
     ToolVisibility,
 )
+from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.plugin.option_validation import PluginOptionError
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.testing.output import OutputRecorder
 
 
 class _FakeStore:
@@ -78,6 +83,11 @@ class TestPluginContextNoAgent:
     def test_inject_message_before_llm_noop_without_controller(self):
         ctx = PluginContext(agent_name="a")
         ctx.inject_message_before_llm("user", "hi")  # must not raise
+
+    def test_pin_message_noop_without_agent(self):
+        ctx = PluginContext(agent_name="a")
+        assert ctx.pin_message("persona", "user", "hi") is False
+        assert ctx.unpin_message("persona") is False
 
     def test_get_state_returns_none_without_store(self):
         ctx = PluginContext(agent_name="a", _plugin_name="p")
@@ -148,6 +158,21 @@ class TestPluginContextWithAgent:
             {"role": "user", "content": "first"},
             {"role": "system", "content": "second"},
         ]
+
+    def test_pin_message_reaches_the_controller_and_the_store(self):
+        store = _FakeStore()
+        ctrl = types.SimpleNamespace(pinned=PinnedContext())
+        agent = _FakeAgent(
+            controller=ctrl,
+            session_store=store,
+            config=types.SimpleNamespace(name="a"),
+        )
+        ctx = PluginContext(agent_name="a", _host_agent=agent)
+        assert ctx.pin_message("persona", "user", "look") is True
+        assert [k for k, _ in ctrl.pinned.pinned()] == ["persona"]
+        assert store.state[pinned_state_key("a")][0]["key"] == "persona"
+        assert ctx.unpin_message("persona") is True
+        assert len(ctrl.pinned) == 0 and store.state[pinned_state_key("a")] == []
 
     def test_plugin_scoped_state_is_namespaced(self):
         store = _FakeStore()
@@ -265,6 +290,15 @@ class TestPluginContextEmit:
         ctx = PluginContext(agent_name="a", _host_agent=agent)
         result = await ctx.emit_and_wait(object(), timeout_s=5.0)
         assert result == ("reply", 5.0)
+
+    def test_widgets_is_the_routers_service_or_none(self):
+        router = OutputRouter(OutputRecorder())
+        ctx = PluginContext(
+            agent_name="a", _host_agent=_FakeAgent(output_router=router)
+        )
+        assert ctx.widgets is router.widgets
+        assert PluginContext(agent_name="a").widgets is None
+        assert PluginContext(agent_name="a", _host_agent=_FakeAgent()).widgets is None
 
 
 # ── BasePlugin: gating ─────────────────────────────────────────────

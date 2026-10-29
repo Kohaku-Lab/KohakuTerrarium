@@ -55,6 +55,14 @@ class TestRegistration:
     def test_subagents_prompt_empty_when_none_registered(self):
         assert _manager().get_subagents_prompt() == ""
 
+    def test_subagents_prompt_lists_only_visible_names(self):
+        mgr = _manager()
+        mgr.register(SubAgentConfig(name="explore", description="finds"))
+        mgr.register(SubAgentConfig(name="critic", description="critiques"))
+        prompt = mgr.get_subagents_prompt(lambda name: name == "critic")
+        assert "- critic: critiques" in prompt and "explore" not in prompt
+        assert mgr.get_subagents_prompt(lambda name: False) == ""
+
     def test_subagents_prompt_does_not_repeat_framework_guidance(self):
         # Sub-agent isolation is stated once in the execution-model block, not
         # here and not in every task-parameter description.

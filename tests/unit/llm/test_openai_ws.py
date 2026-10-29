@@ -11,6 +11,8 @@ from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.openai_ws import build_ws_request
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
+pytestmark = pytest.mark.real_llm_provider
+
 
 class Ev:
     def __init__(self, **kwargs):

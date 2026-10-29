@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.core.settled_refresh import refresh_mutation_prefix
+from kohakuterrarium.core.history_source import PreparedHistorySource
+from kohakuterrarium.core.settled_refresh import (
+    prepare_mutation_prefix,
+    refresh_mutation_prefix,
+)
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.session.store import SessionStore
 
@@ -146,7 +150,14 @@ def test_refresh_pending_prefix_from_saved_structured_result(
                 refresh_mutation_prefix(agent, target_index)
             assert conv.to_messages(include_metadata=True) == original
             return
+        source = PreparedHistorySource.capture(agent)
+        prepared, prepared_index = prepare_mutation_prefix(agent, source, target_index)
+        assert conv.to_messages(include_metadata=True) == original
+        assert source.conversation.to_messages(include_metadata=True) == original
+        expected = prepared.conversation.to_messages(include_metadata=True)
         index = refresh_mutation_prefix(agent, target_index)
+        assert index == prepared_index
+        assert conv.to_messages(include_metadata=True) == expected
         assert conv.get_messages()[index].get_text_content() == "later"
         tool = next(
             message for message in conv.get_messages() if message.role == "tool"

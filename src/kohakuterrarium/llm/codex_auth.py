@@ -41,7 +41,15 @@ DEVICE_REDIRECT_URI = f"{ISSUER}/deviceauth/callback"
 SCOPE = "openid email profile offline_access"
 AUDIENCE = "https://api.openai.com/v1"
 
+# Import-time display value; live reads use :func:`codex_cli_token_path`.
 CODEX_CLI_TOKEN_PATH = Path.home() / ".codex" / "auth.json"
+
+
+def codex_cli_token_path() -> Path:
+    """Resolve the Codex CLI credential file from ``CODEX_HOME`` or the home dir."""
+    codex_home = os.environ.get("CODEX_HOME")
+    base = Path(codex_home).expanduser() if codex_home else Path.home() / ".codex"
+    return base / "auth.json"
 
 
 def _default_token_path() -> Path:
@@ -115,7 +123,7 @@ class CodexTokens:
         if path is not None:
             candidates = [path]
         else:
-            candidates = [_default_token_path(), CODEX_CLI_TOKEN_PATH]
+            candidates = [_default_token_path(), codex_cli_token_path()]
         for p in candidates:
             if p and p.exists():
                 try:

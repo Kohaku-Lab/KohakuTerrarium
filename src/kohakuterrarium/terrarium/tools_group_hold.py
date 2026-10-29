@@ -24,9 +24,8 @@ class GroupPauseNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Warm-pause a non-privileged creature: it stops admitting new "
-            "turns but stays live (resume with group_resume_node). Not a "
-            "teardown — use group_stop_node to force-stop"
+            "Warm-pause a non-privileged creature: no new turns, still live. Use it to "
+            "hold a member briefly. Not for a teardown - use group_stop_node."
         )
 
     @property
@@ -68,7 +67,10 @@ class GroupResumeNodeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Resume a warm-paused non-privileged creature (undoes group_pause_node)"
+        return (
+            "Resume a warm-paused non-privileged creature. Use it to let a paused "
+            "member take turns again, starting with what queued while it was paused."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -108,9 +110,8 @@ class GroupKillNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Force-stop a non-privileged creature and mark it killed. Hard "
-            "kill is NOT supported in a shared process — this is an honest "
-            "force-stop, not a fake SIGKILL"
+            "Force-stop a non-privileged creature and mark it killed. Use it when a "
+            "member is stuck. Not for a clean stop - use group_stop_node."
         )
 
     @property

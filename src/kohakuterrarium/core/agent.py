@@ -33,7 +33,9 @@ from kohakuterrarium.core.agent_observability import (
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
 )
+from kohakuterrarium.core.agent_plugin_tools import AgentPluginToolsMixin
 from kohakuterrarium.core.agent_selection import track_plugin_selection
+from kohakuterrarium.core.agent_tool_gate import AgentToolGateMixin
 from kohakuterrarium.core.agent_turn import AgentTurnMixin
 from kohakuterrarium.core.branch_continuation import (
     continue_on_branch,
@@ -47,6 +49,7 @@ from kohakuterrarium.core.event_inbox import EventInbox, TurnOutcome
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.job import JobState
 from kohakuterrarium.core.loader import ModuleLoader
+from kohakuterrarium.core.pinned import sync_with_store as sync_pinned_with_store
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.core.token_ledger import context_window
 from kohakuterrarium.core.trigger_manager import TriggerManager
@@ -82,6 +85,8 @@ class Agent(
     AgentModelMixin,
     AgentCompactMixin,
     AgentLifecycleMixin,
+    AgentToolGateMixin,
+    AgentPluginToolsMixin,
 ):
     """Main agent orchestrator. Wires LLM, controller, executor, I/O.
 
@@ -237,6 +242,7 @@ class Agent(
             self._init_plugins()
             for plugin_instance in plugins or []:
                 self.plugins.register(plugin_instance)
+            self.refresh_plugin_tools()
             self._init_subagents()
             for subagent_cfg in subagents or []:
                 self.subagent_manager.register(subagent_cfg)
@@ -249,9 +255,12 @@ class Agent(
                 self._known_outputs.add(output_name)
             self._init_skills()  # Before controller so skill index is in prompt
             self._init_controller()
+            self.watch_renderers()
             self._init_input(input_module)
             self._init_user_commands()
             self._init_triggers()
+            if self.plugins is not None:
+                self.plugins.bind_host(self)
 
         logger.info(
             "Agent initialized",
@@ -860,6 +869,7 @@ class Agent(
             self.compact_manager._session_store = store
         if store is None:
             return
+        sync_pinned_with_store(self, store)
         if self.compact_manager:
             restore_compact_state_from_session(
                 self.compact_manager, store, self.config.name

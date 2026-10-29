@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+from kohakuterrarium.core.pinned import pin_message, unpin_message
 from kohakuterrarium.modules.ui_owner import UIOwnerMixin
 from kohakuterrarium.modules.plugin.option_validation import (
     validate_plugin_options,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from kohakuterrarium.core.registry import Registry
     from kohakuterrarium.core.scratchpad import Scratchpad
     from kohakuterrarium.modules.subagent.manager import SubAgentManager
+    from kohakuterrarium.modules.tool.base import BaseTool
     from kohakuterrarium.session.memory import SessionMemory
     from kohakuterrarium.session.store import SessionStore
 
@@ -176,6 +178,12 @@ class PluginContext:
             raise RuntimeError("Agent has no output_router")
         return await router.emit_and_wait(event, timeout_s=timeout_s)
 
+    @property
+    def widgets(self) -> Any:
+        """The host agent's :class:`WidgetService`, or ``None`` when unattached."""
+        router = getattr(self._host_agent, "output_router", None)
+        return getattr(router, "widgets", None)
+
     def inject_message_before_llm(self, role: str, content: str | list) -> None:
         """Queue a message before pre-call hooks so every plugin observes it."""
         controller = self.controller
@@ -186,6 +194,23 @@ class PluginContext:
             queue = []
             controller._pending_injections = queue
         queue.append({"role": role, "content": content})
+
+    def pin_message(self, key: str, role: str, content: str | list) -> bool:
+        """Pin a message right after the system prompt; compaction keeps it.
+
+        Replaces an existing pin with the same key. Returns False when the
+        context is not bound to an agent.
+        """
+        agent = self._host_agent
+        if agent is None:
+            return False
+        pin_message(agent, key, role, content)
+        return True
+
+    def unpin_message(self, key: str) -> bool:
+        """Remove the pin ``key``; return whether it existed."""
+        agent = self._host_agent
+        return unpin_message(agent, key) if agent is not None else False
 
     def _state_key(self, key: str) -> str:
         if not self.agent_name:
@@ -231,6 +256,10 @@ class BasePlugin(UIOwnerMixin):
 
     # An empty applicability filter enables the plugin for every context.
     applies_to: dict[str, list[str]] = {}
+    # Renderer ids whose attach or detach changes get_prompt_content.
+    prompt_renderers: frozenset[str] = frozenset()
+    # Names ``<doc_prefix>:<topic>`` that ``info`` resolves through doc_topic.
+    doc_prefix: str = ""
 
     def __init__(self) -> None:
         # Compile once because applicability is evaluated for every hook.
@@ -314,6 +343,28 @@ class BasePlugin(UIOwnerMixin):
         """Return optional runtime prompt prose collected in plugin priority order."""
         return None
 
+    def presentation_contribution(self, context: PluginContext) -> str | None:
+        """Return this plugin's part of ``## Presenting your answer``, or ``None``.
+
+        The section sits right after the base prompt and teaches the forms an
+        answer can take in the attached clients (inline components, apps).
+        Declare the renderers the part depends on in ``prompt_renderers``.
+        """
+        return None
+
+    def doc_topics(self, context: PluginContext | None) -> list[str]:
+        """Topic names ``info`` can load as ``<doc_prefix>:<topic>``."""
+        return []
+
+    def doc_topic(self, topic: str, context: PluginContext | None) -> str | None:
+        """Documentation for one topic under ``doc_prefix``, or ``None`` if unknown.
+
+        ``info("<doc_prefix>:<topic>")`` returns it, through the tool and the
+        text-format ``info`` command alike. Advertise the prefix in the
+        plugin's own prompt content.
+        """
+        return None
+
     def get_tool_visibility(self, context: PluginContext) -> ToolVisibility | None:
         """Return per-request tool catalog restrictions, or None for no opinion."""
         return None
@@ -329,6 +380,15 @@ class BasePlugin(UIOwnerMixin):
     def contribute_user_commands(self) -> dict[str, Any]:
         """Return human-facing slash commands subject to the collision policy."""
         return {}
+
+    def contribute_tools(self) -> "list[BaseTool]":
+        """Return tool instances registered while this plugin is enabled.
+
+        Called once per plugin instance; the tools join the registry, executor
+        and prompt on load or enable and leave on disable or removal. A name
+        that clashes with another tool fails the load.
+        """
+        return []
 
     def contribute_termination_check(
         self,

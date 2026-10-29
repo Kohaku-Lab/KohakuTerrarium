@@ -28,8 +28,8 @@ whole system is correct. Explicitly identify partial or blocked reviews.""",
 CRITIC_CONFIG = SubAgentConfig(
     name="critic",
     description=(
-        "Review a bounded target for concrete problems (read-only). Supply scope, "
-        "requirements, and any diff. Not for fixing, full audits, or test suites."
+        "Review code, a diff or a plan for concrete problems, read-only. Dispatch it "
+        "after a change or before you ship; hand it the scope, requirements and diff."
     ),
     tools=["read", "glob", "grep", "tree"],
     system_prompt=CRITIC_SYSTEM_PROMPT,

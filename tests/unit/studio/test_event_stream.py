@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.studio.attach import _event_stream as es_mod
 from kohakuterrarium.studio.attach._event_stream import (
     StreamOutput,
@@ -13,6 +14,7 @@ from kohakuterrarium.studio.attach._event_stream import (
     get_event_log,
     session_info_frame,
 )
+from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 # ── _parse_detail / get_event_log ────────────────────────────
@@ -391,30 +393,51 @@ class TestStreamOutputEmit:
         "kind",
         ["ask_text", "confirm", "selection", "progress", "notification", "card"],
     )
-    async def test_phase_b_kinds_passed_through(self, kind, _stream):
+    async def test_legacy_kinds_go_out_as_widget_frames(self, kind, _stream):
         so, q, _log = _stream
-        await so.emit(
+        router = OutputRouter(so)
+        await router.emit(
             _evt(
                 kind,
                 id="evt-1",
                 interactive=True,
-                surface="inline",
+                surface="modal",
                 payload={"prompt": "?"},
-                update_target=None,
                 timeout_s=10,
             )
         )
         msg = q.get_nowait()
-        assert msg["type"] == kind
-        assert msg["event_id"] == "evt-1"
-        assert msg["timeout_s"] == 10
+        assert msg["type"] == "widget" and msg["event_id"] == "evt-1"
+        assert msg["timeout_s"] == 10 and msg["surface"] == "modal"
+        assert msg["interactive"] is True
+        assert msg["payload"] == {
+            "renderer": f"kt.{kind}",
+            "version": 1,
+            "title": "",
+            "spec": {"prompt": "?"},
+            "state": {},
+            "fallback": "?",
+            "routing": "drop",
+        }
 
-    async def test_ui_supersede(self, _stream):
+    async def test_progress_update_sends_the_merged_spec(self, _stream):
         so, q, _log = _stream
-        await so.emit(_evt("ui_supersede", payload={"event_id": "e1"}))
+        router = OutputRouter(so)
+        await router.emit(_evt("progress", id="p1", payload={"label": "a", "value": 1}))
+        await router.emit(_evt("progress", update_target="p1", payload={"value": 2}))
+        q.get_nowait()
         msg = q.get_nowait()
-        assert msg["type"] == "ui_supersede"
-        assert msg["event_id"] == "e1"
+        assert msg["type"] == "widget" and msg["event_id"] == "p1"
+        assert msg["update_target"] == "p1"
+        assert msg["payload"]["spec"] == {"label": "a", "value": 2}
+
+    async def test_ui_supersede_becomes_widget_close(self, _stream):
+        so, q, _log = _stream
+        router = OutputRouter(so)
+        await router.emit(_evt("ui_supersede", payload={"event_id": "e1"}))
+        msg = q.get_nowait()
+        assert msg["type"] == "widget_close" and msg["event_id"] == "e1"
+        assert msg["payload"] == {"reason": "superseded"}
 
     async def test_unknown_kind_no_metadata(self, _stream):
         so, q, _log = _stream
@@ -610,3 +633,64 @@ class TestStreamOutputAwaitingBackground:
         msg = q.get_nowait()
         assert msg["type"] == "processing_start"
         assert "awaiting_background" not in msg
+
+
+class TestStreamOutputWidgets:
+    def test_hello_replaces_renderers_and_refreshes_the_router(self):
+        so = StreamOutput("src", asyncio.Queue(), [])
+        assert so.ui_renderers() == {}, "nothing before a hello"
+        router = OutputRouter(OutputRecorder())
+        changes = []
+        router.add_renderers_listener(lambda old, new: changes.append(new))
+        router.add_secondary(so)
+        so.set_client_renderers({"kt.ui": 1, "kt.app": 1})
+        assert router.ui_renderers() == {"kt.ui": 1, "kt.app": 1}
+        so.set_client_renderers({"kt.app": 2, "": 1, "x": 0, "y": True, 3: 1})
+        assert so.ui_renderers() == {"kt.app": 2}, "replace, not merge"
+        so.set_client_renderers("garbage")
+        assert so.ui_renderers() == {}
+        assert changes == [{"kt.ui": 1, "kt.app": 1}, {"kt.app": 2}, {}]
+
+    async def test_widget_frames(self, _stream):
+        so, q, log = _stream
+        await so.on_widget(
+            OutputEvent(
+                type="widget",
+                id="w1",
+                surface="canvas",
+                interactive=True,
+                payload={"renderer": "kt.app", "spec": {}},
+            )
+        )
+        await so.on_widget(
+            OutputEvent(
+                type="widget", id="w1", update_target="w1", payload={"title": "T"}
+            )
+        )
+        await so.on_widget(
+            OutputEvent(
+                type="widget_state",
+                id="w1",
+                update_target="w1",
+                payload={"state": {"a": 1}},
+            )
+        )
+        await so.on_widget(
+            OutputEvent(type="widget_message", id="w1", update_target="w1")
+        )
+        await so.on_widget(
+            OutputEvent(type="widget_close", id="w1", update_target="w1")
+        )
+        frames = [q.get_nowait() for _ in range(q.qsize())]
+        assert [f["type"] for f in frames] == [
+            "widget",
+            "widget",
+            "widget_state",
+            "widget_close",
+        ], "widget_message has no client frame"
+        assert frames[0]["surface"] == "canvas" and frames[0]["interactive"] is True
+        assert "update_target" not in frames[0]
+        assert frames[1]["update_target"] == "w1"
+        assert frames[2]["state"] == {"a": 1}
+        assert all(f["source"] == "src" and f["event_id"] == "w1" for f in frames)
+        assert len(log) == 4

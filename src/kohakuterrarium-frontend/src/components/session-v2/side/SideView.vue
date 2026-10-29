@@ -47,6 +47,7 @@ const SIDE_ICONS = {
   terminal: "i-carbon-terminal",
   graph: "i-carbon-network-3",
   widget: "i-carbon-apps",
+  widgets: "i-carbon-apps",
 }
 const icon = computed(() => SIDE_ICONS[props.side.kind] || "i-carbon-side-panel-open")
 

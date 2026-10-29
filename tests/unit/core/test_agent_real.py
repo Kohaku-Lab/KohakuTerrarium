@@ -253,6 +253,7 @@ class TestLLMInstanceInjection:
         agent = Agent(self._cfg(tmp_path), llm="ghost/selector", strict=False)
         assert agent._llm_selector == "ghost/selector"
 
+    @pytest.mark.real_llm_provider
     async def test_unresolvable_selector_raises_when_strict(self, tmp_path):
         # Strict (default): a bad model selector is a caller bug —
         # raise at construction, never a silent DeferredLLMProvider.

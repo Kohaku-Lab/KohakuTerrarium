@@ -8,6 +8,7 @@ from kohakuterrarium.session.readonly import (
     MetaDecodeError,
     MetaTableRead,
     read_session_meta,
+    validate_metadata_keys,
 )
 from kohakuterrarium.session.resource_gate import try_fast
 from kohakuterrarium.utils.fs_path import coerce_fs_path
@@ -37,18 +38,24 @@ class MetadataRead:
 
 
 def read_metadata_candidate(
-    path: str | Path, *, eligible: bool = False
+    path: str | Path, *, eligible: bool = False, keys: tuple[str, ...] | None = None
 ) -> MetadataRead:
     """Read under a sole-occupant admission, or enrolled alongside other occupants.
 
     Both paths read through a read-only handle; admission only decides which
     occupancy the read holds while that handle is open.
     """
+    validate_metadata_keys(keys)
     source = coerce_fs_path(path).expanduser().resolve(strict=True)
     admission = try_fast(source, eligible=eligible)
     if admission.lease is None:
-        return MetadataRead(read_session_meta(source), admission.reason)
-    read = MetaTableRead(source, missing_ok=False)
+        meta = (
+            read_session_meta(source)
+            if keys is None
+            else read_session_meta(source, keys=keys)
+        )
+        return MetadataRead(meta, admission.reason)
+    read = MetaTableRead(source, missing_ok=False, keys=keys)
     primary: BaseException | None = None
     meta: dict[str, Any] = {}
     try:

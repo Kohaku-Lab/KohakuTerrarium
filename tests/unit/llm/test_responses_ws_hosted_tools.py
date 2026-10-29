@@ -30,6 +30,8 @@ from tests.unit.llm.test_responses_ws import (
     completed,
 )
 
+pytestmark = pytest.mark.real_llm_provider
+
 FUNC = {"type": "function", "name": "read", "parameters": {}}
 IMAGE = {"type": "image_generation"}
 PLAIN = {"model": "m", "tools": [FUNC]}

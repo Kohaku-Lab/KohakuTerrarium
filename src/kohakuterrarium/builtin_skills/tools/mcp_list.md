@@ -1,6 +1,6 @@
 ---
 name: mcp_list
-description: 'List connected MCP servers and the tools they expose. Not for calling one - use mcp_call.'
+description: 'List connected MCP servers and the tools they expose. Use it to discover what you can call. Not for calling one - use mcp_call.'
 category: builtin
 tags: [mcp]
 ---

@@ -1,6 +1,6 @@
 ---
 name: scratchpad
-description: Read or write session working memory as key-value pairs.
+description: 'Read or write session working memory as key-value pairs. Use it to keep plans, findings and progress notes across turns.'
 category: builtin
 tags: [memory]
 ---

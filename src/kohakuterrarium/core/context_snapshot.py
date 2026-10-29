@@ -97,9 +97,9 @@ def capture_context(
 
 
 def capture_agent_context(agent: Any) -> ContextSnapshot:
-    """Capture a creature's current effective branch without changing its state."""
+    """Capture a creature's effective branch, pins included, without changing it."""
     store = getattr(agent, "session_store", None)
-    return capture_context(
+    snapshot = capture_context(
         agent.controller.conversation,
         provenance={
             "agent": agent.config.name,
@@ -112,4 +112,20 @@ def capture_agent_context(agent: Any) -> ContextSnapshot:
             "conversation_id": store.meta.get("conversation_id") if store else None,
             "model": getattr(agent.llm, "model", None),
         },
+    )
+    pins = getattr(agent.controller, "pinned", None)
+    if not pins:
+        return snapshot
+    messages = snapshot.messages
+    start = next(
+        (i for i, m in enumerate(messages) if m.get("role") != "system"),
+        len(messages),
+    )
+    pinned = [
+        {**message.to_dict(), "metadata": dict(message.metadata)}
+        for _, message in pins.pinned()
+    ]
+    messages[start:start] = pinned
+    return ContextSnapshot(
+        json.dumps(messages, ensure_ascii=False), snapshot.provenance_json
     )

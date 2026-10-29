@@ -23,6 +23,8 @@ import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useDensity } from "@/composables/useDensity"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { provideScope } from "@/composables/useScope"
+import { provideCodePin } from "@/public/chat/codePin"
+import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 import { useEditorStore } from "@/stores/editor"
 import { useInstancesStore } from "@/stores/instances"
@@ -76,6 +78,7 @@ const isKeyboardTarget = computed(() => {
 // default chat store. Pass active state so returning to this macro tab
 // forces a catch-up scan for artifacts that arrived while hidden.
 useArtifactDetector(target.value, { active: isActiveAttachTab })
+provideCodePin((block) => useCanvasStore(target.value).pinBlock(block))
 
 const loadedInstance = ref(null)
 const loading = ref(true)

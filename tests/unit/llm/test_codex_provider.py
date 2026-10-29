@@ -20,7 +20,10 @@ from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.codex_provider import CODEX_BASE_URL, CodexOAuthProvider
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
-pytestmark = pytest.mark.skipif(not cp.HAS_OPENAI, reason="openai SDK not installed")
+pytestmark = [
+    pytest.mark.skipif(not cp.HAS_OPENAI, reason="openai SDK not installed"),
+    pytest.mark.real_llm_provider,
+]
 
 
 @dataclass

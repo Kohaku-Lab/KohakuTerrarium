@@ -133,3 +133,26 @@ class TestBuildToolGuidanceSection:
         out = build_tool_guidance_section(reg)
         # first bucket entry must precede normal, which precedes last.
         assert out.index("f_tool") < out.index("n_tool") < out.index("l_tool")
+
+
+class TestNameFilter:
+    def _reg(self):
+        reg = Registry()
+        reg.register_tool(_make_tool("alpha", "a hint"))
+        reg.register_tool(_make_tool("beta", "b hint"))
+        return reg
+
+    def test_names_limit_collected_contributions(self):
+        assert collect_tool_contributions(self._reg(), ["beta"]) == [
+            ("normal", "beta", "b hint")
+        ]
+
+    def test_unknown_names_are_skipped(self):
+        assert collect_tool_contributions(self._reg(), ["ghost"]) == []
+
+    def test_empty_name_list_yields_no_section(self):
+        assert build_tool_guidance_section(self._reg(), []) == ""
+
+    def test_none_names_keeps_every_tool(self):
+        out = build_tool_guidance_section(self._reg(), None)
+        assert "alpha" in out and "beta" in out

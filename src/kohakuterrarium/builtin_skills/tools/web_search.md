@@ -1,6 +1,6 @@
 ---
 name: web_search
-description: Search the web and return titles, URLs, and snippets. Use to find sources. Not for reading one - use web_fetch.
+description: 'Search the web and return titles, URLs and snippets. Use it whenever you need current or outside facts. Not for reading one page - use web_fetch.'
 category: builtin
 tags: [web, search]
 ---

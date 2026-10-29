@@ -208,7 +208,10 @@ class EditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Edit one file by unified diff, or by one search/replace. Use for patch application and text tool-call formats. Not for several edits - use multi_edit."
+        return (
+            "Edit one file by unified diff or one search/replace. Use it to apply a "
+            "patch or a single change. Not for several edits - use multi_edit."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
