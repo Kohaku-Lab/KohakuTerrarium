@@ -104,6 +104,11 @@ async def _monitor(store, record, server, serving, snapshot, management, health)
             snapshot["local_ready"] = bool(server.started)
             if record.tunnel != "external":
                 if tunnel is not None and tunnel.poll() is not None:
+                    if probing is not None:
+                        probing.cancel()
+                        await asyncio.gather(probing, return_exceptions=True)
+                        probing = None
+                    next_probe = 0.0
                     snapshot.update(
                         tunnel_state="reconnecting",
                         public_ready=False,

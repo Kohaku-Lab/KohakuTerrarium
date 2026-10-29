@@ -105,6 +105,7 @@ def main() -> int:
     if record.tunnel == "external":
         raise ValueError("External entry points have no owned tunnel process")
     env = dict(os.environ)
+    stage = "configuration"
     try:
         if record.tunnel == "ngrok":
             for key in list(env):
@@ -114,8 +115,13 @@ def main() -> int:
         else:
             env = cloudflare_environment(env)
             command = cloudflare_command(record, store.directory / "cloudflared.json")
+        stage = "process"
         return run_owned(command, sys.stdin.buffer, env=env)
-    except OSError:
+    except OSError as exc:
+        sys.stderr.write(
+            f"Owned {record.tunnel} tunnel {stage} failed: {type(exc).__name__} "
+            f"(errno={exc.errno})\n"
+        )
         return 1
 
 

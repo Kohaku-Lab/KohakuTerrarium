@@ -81,6 +81,8 @@ def test_probe_proxy_explicit_only_and_cleared(tmp_path):
         "http://localhost:7897/path",
         "http://127.0.0.1:0",
         "http://localhost:7897",
+        "http://127.0.0.\t1:7897",
+        "http://127.0.0.1:7897\n",
     ):
         with pytest.raises(ValueError):
             SetupSession.open(store).prepare(probe_proxy=invalid)
