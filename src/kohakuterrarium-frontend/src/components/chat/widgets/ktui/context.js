@@ -1,4 +1,7 @@
-/** Injection key for the kt.ui actions (``setVar``, ``setVars``, ``send``, ``disabled``). */
+/**
+ * Injection key for the kt.ui actions: ``setVar``, ``setVars``, ``send``, ``say``,
+ * ``uiState(path)`` / ``setUiState(path, patch)``, ``disabled``, ``streaming``, ``sayBlocked``.
+ */
 
 import { inject } from "vue"
 

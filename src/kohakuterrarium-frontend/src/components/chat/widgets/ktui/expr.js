@@ -15,7 +15,7 @@ export const MAX_RANGE = 1000
 
 export const KEYWORDS = new Set(["true", "false", "null", "and", "or", "not"])
 const TWO_CHAR_OPS = new Set(["**", "==", "!=", "<=", ">="])
-const ONE_CHAR_OPS = "+-*/%<>?:()[],."
+const ONE_CHAR_OPS = "+-*/%<>?:()[],.{}"
 const ESCAPES = { n: "\n", t: "\t", r: "\r", "\\": "\\", '"': '"', "'": "'" }
 const CMP_OPS = new Set(["==", "!=", "<", "<=", ">", ">="])
 const NUMBER_TEXT = /^\s*-?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?\s*$/
@@ -241,7 +241,24 @@ class Parser {
       return inner
     }
     if (tk === "op" && tv === "[") return ["list", this.items("]")]
+    if (tk === "op" && tv === "{") return ["obj", this.entries()]
     throw new ExprError("syntax", "unexpected token")
+  }
+  entries() {
+    const entries = []
+    const seen = new Set()
+    while (!this.at("op", "}")) {
+      const [tk, tv] = this.take()
+      if (tk !== "name" && tk !== "str") throw new ExprError("syntax", "expected an object key")
+      if (seen.has(tv)) throw new ExprError("syntax", `duplicate key ${JSON.stringify(tv)}`)
+      seen.add(tv)
+      this.expect("op", ":")
+      entries.push([tv, this.ternary()])
+      if (this.at("op", ",")) this.take()
+      else if (!this.at("op", "}")) throw new ExprError("syntax", "expected ',' or '}'")
+    }
+    this.take()
+    return entries
   }
   items(close) {
     const items = []
@@ -353,6 +370,18 @@ class Evaluator {
         return this.scope[node[1]] ?? null
       case "list":
         return node[1].map((item) => this.run(item))
+      case "obj": {
+        const out = {}
+        for (const [key, item] of node[1]) {
+          Object.defineProperty(out, key, {
+            value: this.run(item),
+            enumerable: true,
+            writable: true,
+            configurable: true,
+          })
+        }
+        return out
+      }
       case "neg":
       case "pos": {
         const value = this.run(node[1])
@@ -642,6 +671,9 @@ export function freeNames(node, out = new Set()) {
       break
     case "list":
       node[1].forEach((a) => freeNames(a, out))
+      break
+    case "obj":
+      node[1].forEach(([, a]) => freeNames(a, out))
       break
     case "member":
       freeNames(node[1], out)

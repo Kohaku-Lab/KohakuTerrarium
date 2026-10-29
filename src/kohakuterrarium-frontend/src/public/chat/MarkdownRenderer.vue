@@ -14,6 +14,7 @@ import { useCodePin } from "./codePin.js"
 import { applyExternalLinkRule, resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
 import { IncrementalMarkdownRenderer } from "./markdownIncremental.js"
 import { createMarkdownMediaResolver, useMediaResolver } from "./mediaResolver.js"
+import { cachedMermaid, hydrateMermaid, mermaidFailure } from "./mermaidRender.js"
 import { usePlatformLinkOpener } from "./platformLink.js"
 
 const props = defineProps({
@@ -44,7 +45,10 @@ const platformLinkOpener = usePlatformLinkOpener()
 // Extension-only DOM MutationObserver, so both hosts share one implementation.
 const mediaImages = createMarkdownMediaResolver(useMediaResolver())
 function syncMedia() {
-  nextTick(() => mediaImages.resolve(rootEl.value))
+  nextTick(() => {
+    mediaImages.resolve(rootEl.value)
+    hydrateMermaid(rootEl.value)
+  })
 }
 
 function codeBlockHtml(lang, fenceHtml) {
@@ -144,6 +148,15 @@ md.renderer.rules.fence = (tokens, idx, options, env, renderer) => {
       .unescapeAll(token.info || "")
       .trim()
       .split(/[ \t]+/, 1)[0] || ""
+  if (lang === "mermaid" && !token.meta?.unclosedFence && token.content.trim()) {
+    const source = token.content.replace(/\n$/, "")
+    const svg = cachedMermaid(source)
+    const attr = md.utils.escapeHtml(source)
+    if (svg) return `<div class="kt-mermaid" data-state="done" data-source="${attr}">${svg}</div>`
+    if (!mermaidFailure(source)) {
+      return `<div class="kt-mermaid" data-source="${attr}">${codeBlockHtml(lang, originalFenceRule(tokens, idx, options, env, renderer))}</div>`
+    }
+  }
   let fenceHtml
   if (token.meta?.unclosedFence) {
     fenceHtml = originalFenceRule(tokens, idx, { ...options, highlight: null }, env, renderer)
@@ -459,6 +472,16 @@ html.dark .md-content code {
   color: var(--color-text-muted);
   border: 1px dashed rgba(165, 126, 174, 0.35);
   white-space: pre-wrap;
+}
+.md-content .kt-mermaid[data-state="done"] {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.md-content .kt-mermaid svg {
+  max-width: 100%;
+  height: auto;
 }
 .md-content .code-block {
   margin: 0.6em 0;

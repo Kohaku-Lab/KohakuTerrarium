@@ -17,8 +17,9 @@ function plainText(content) {
   return h("div", { class: "kt-conversation-text" }, content || "")
 }
 
-function renderedText(renderer, content, breaks = false) {
-  return renderer ? renderer(content, breaks) : plainText(content)
+// ``options`` marks assistant text (``{assistant, streaming}``) for hosts that draw inline UI.
+function renderedText(renderer, content, breaks = false, options = null) {
+  return renderer ? renderer(content, breaks, options) : plainText(content)
 }
 
 function compactLabel(message) {
@@ -96,11 +97,16 @@ export default defineComponent({
       })
     }
 
-    function renderPart(part, index, textBreaks = false) {
+    function renderPart(part, index, textBreaks = false, assistant = false) {
       const key = expansionKey(part, index)
       let content = props.renderContentPart ? props.renderContentPart(part) : null
       if (!content && part.type === "text")
-        content = renderedText(props.renderText, part.content || part.text, textBreaks)
+        content = renderedText(
+          props.renderText,
+          part.content || part.text,
+          textBreaks,
+          assistant ? { assistant: true, streaming: part._streaming === true } : null,
+        )
       else if (!content && part.type === "reasoning") {
         const reasoningKey = part.id ?? `reasoning_${index}`
         const text = part.text || ""
@@ -234,9 +240,12 @@ export default defineComponent({
           ? h(
               "div",
               { class: "kt-conversation-parts" },
-              parts.map((part, index) => renderPart(part, index)),
+              parts.map((part, index) => renderPart(part, index, false, true)),
             )
-          : renderedText(props.renderText, message.content)
+          : renderedText(props.renderText, message.content, false, {
+              assistant: true,
+              streaming: message._streaming === true,
+            })
       } else if (role === "user") {
         const userContent = message.contentParts?.length
           ? h(

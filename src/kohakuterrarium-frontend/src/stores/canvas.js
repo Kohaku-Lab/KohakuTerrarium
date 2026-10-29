@@ -396,6 +396,20 @@ function _setupCanvasStore(scope) {
       return pinned
     }
 
+    /** Show an inline <ui> block on the canvas (the user chose "Open in canvas"). */
+    function pinUi({ source, title } = {}) {
+      if (typeof source !== "string" || !source) return null
+      const pinned = upsertArtifact({
+        sourceId: `ui:${_revisionFingerprint(source)}`,
+        content: source,
+        lang: "ktui",
+        type: "ktui",
+        seedName: title || "UI",
+      })
+      if (pinned) activeId.value = pinned.id
+      return pinned
+    }
+
     /** Show a widget message on the canvas (the user moved it there). */
     function pinWidget(message) {
       if (!message?.eventId) return null
@@ -459,6 +473,7 @@ function _setupCanvasStore(scope) {
       dismissed,
       upsertArtifact,
       pinBlock,
+      pinUi,
       pinWidget,
       widgetOnCanvas,
       scanMessage,

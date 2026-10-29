@@ -1,5 +1,6 @@
 <template>
   <CanvasWidgetView v-if="viewer === 'widget'" :store="ctx.chat" :canvas="canvas" :event-id="artifact.content" />
+  <InlineUiBlock v-else-if="viewer === 'ktui' && !source" :source="artifact.content" fill @say="(text) => sayToChat(ctx.chat, text)" />
   <div v-else class="h-full min-h-0 overflow-auto" :class="viewer === 'image' ? 'flex items-center justify-center bg-warm-100 dark:bg-warm-950 p-4' : ''">
     <img v-if="viewer === 'image'" :src="artifact.content" :alt="artifact.name" class="max-w-full max-h-full object-contain rounded shadow-sm" />
     <AppFrame v-else-if="viewer === 'html' && !source" :html="artifact.content" :title="artifact.name" fill />
@@ -14,6 +15,8 @@ import { computed } from "vue"
 import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
 import AppFrame from "@/components/chat/widgets/app/AppFrame.vue"
 import CanvasWidgetView from "@/components/chat/widgets/CanvasWidgetView.vue"
+import InlineUiBlock from "@/components/chat/widgets/ktui/InlineUiBlock.vue"
+import { sayToChat } from "@/components/chat/widgets/ktui/sayMessage.js"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { artifactViewer } from "@/components/session-v2/model/widgets/widgetData"
 import { useCanvasStore } from "@/stores/canvas"

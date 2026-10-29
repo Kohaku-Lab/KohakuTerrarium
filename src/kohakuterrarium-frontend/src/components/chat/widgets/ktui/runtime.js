@@ -108,12 +108,93 @@ export function safeImageSrc(src) {
   return ""
 }
 
-/** Columns as ``{key, label, align}``. */
+const NUMERIC_FORMATS = new Set(["number", "percent", "currency"])
+
+/** Columns as ``{key, label, align, format, digits, currency}``. */
 export function tableColumns(columns) {
-  return (Array.isArray(columns) ? columns : []).map((c, i) =>
-    c && typeof c === "object"
-      ? { key: c.key, label: c.label ?? String(c.key), align: c.align || "left", index: i }
-      : { key: c, label: String(c), align: "left", index: i },
+  return (Array.isArray(columns) ? columns : []).map((c, i) => {
+    if (!c || typeof c !== "object")
+      return { key: c, label: String(c), align: "left", format: "text", index: i }
+    const format = typeof c.format === "string" ? c.format : "text"
+    const align = c.align || (NUMERIC_FORMATS.has(format) ? "right" : "left")
+    return {
+      key: c.key,
+      label: c.label ?? String(c.key),
+      align,
+      format,
+      digits: c.digits,
+      currency: c.currency,
+      index: i,
+    }
+  })
+}
+
+/** A cell as text in its column's ``format`` (number, percent, currency, date). */
+export function formatCell(value, column) {
+  const format = column?.format || "text"
+  if (format === "date" && typeof value === "string" && value) {
+    const date = new Date(value)
+    return Number.isNaN(date.getTime())
+      ? value
+      : date.toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+          timeZone: /T/.test(value) ? undefined : "UTC",
+        })
+  }
+  if (!NUMERIC_FORMATS.has(format) || typeof value !== "number" || !Number.isFinite(value))
+    return toDisplay(value)
+  const fallback = format === "currency" ? 2 : 0
+  const digits =
+    Number.isInteger(column.digits) && column.digits >= 0 && column.digits <= 10
+      ? column.digits
+      : fallback
+  const options = { minimumFractionDigits: digits, maximumFractionDigits: digits }
+  try {
+    if (format === "percent")
+      return new Intl.NumberFormat(undefined, { ...options, style: "percent" }).format(value)
+    if (format === "currency")
+      return new Intl.NumberFormat(undefined, {
+        ...options,
+        style: "currency",
+        currency: String(column.currency || "USD").toUpperCase(),
+      }).format(value)
+    return new Intl.NumberFormat(undefined, options).format(value)
+  } catch {
+    return toDisplay(value)
+  }
+}
+
+function sortKey(value) {
+  if (typeof value === "number") return [0, value]
+  if (value === null || value === undefined || value === "") return [2, ""]
+  return [1, toDisplay(value).toLowerCase()]
+}
+
+/** ``rows`` ordered by ``column`` (empty cells last), stable; ``dir`` is ``asc`` or ``desc``. */
+export function sortRows(rows, column, dir) {
+  if (!column) return rows
+  const sign = dir === "desc" ? -1 : 1
+  return rows
+    .map((row, i) => ({ row, i, key: sortKey(tableCell(row, column)) }))
+    .sort((a, b) => {
+      if (a.key[0] !== b.key[0]) return a.key[0] - b.key[0]
+      if (a.key[1] < b.key[1]) return -sign
+      if (a.key[1] > b.key[1]) return sign
+      return a.i - b.i
+    })
+    .map((entry) => entry.row)
+}
+
+/** ``rows`` whose shown cells contain ``query`` (case-insensitive). */
+export function filterRows(rows, columns, query) {
+  const needle = String(query || "")
+    .trim()
+    .toLowerCase()
+  if (!needle) return rows
+  return rows.filter((row) =>
+    columns.some((col) => formatCell(tableCell(row, col), col).toLowerCase().includes(needle)),
   )
 }
 

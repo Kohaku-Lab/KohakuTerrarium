@@ -1,5 +1,5 @@
 <template>
-  <!-- Small SVG chart for kt.ui: bar, line, area, pie, scatter. -->
+  <!-- Small SVG chart for kt.ui: bar, stacked, line, area, pie, scatter. -->
   <figure class="ktui-chart" data-test="ktui-chart" :data-kind="kind">
     <figcaption v-if="title" class="ktui-section-title">{{ title }}</figcaption>
     <svg :viewBox="`0 0 ${W} ${height}`" :height="height" width="100%" :preserveAspectRatio="kind === 'pie' ? 'xMidYMid meet' : 'none'" role="img" :aria-label="title || `${kind} chart`">
@@ -11,6 +11,11 @@
         <template v-if="kind === 'bar'">
           <template v-for="(s, si) in numericSeries" :key="si">
             <rect v-for="(v, i) in s.data" :key="i" :x="barX(i, si)" :y="Math.min(yOf(v), yOf(0))" :width="barWidth" :height="Math.abs(yOf(v) - yOf(0))" :fill="color(si)" class="ktui-chart-mark" />
+          </template>
+        </template>
+        <template v-else-if="kind === 'stacked'">
+          <template v-for="(s, si) in stackedBars" :key="si">
+            <rect v-for="(bar, i) in s" :key="i" :x="barX(i, 0)" :y="Math.min(yOf(bar.from), yOf(bar.to))" :width="barWidth" :height="Math.abs(yOf(bar.to) - yOf(bar.from))" :fill="color(si)" class="ktui-chart-mark" data-test="ktui-stacked-bar" />
           </template>
         </template>
         <template v-else-if="kind === 'scatter'">
@@ -26,8 +31,11 @@
         </template>
       </template>
     </svg>
-    <div v-if="kind !== 'scatter' && labels.length" class="ktui-chart-labels">
-      <span v-for="(label, i) in labels" :key="i" class="ktui-chart-label"> <i v-if="kind === 'pie'" class="ktui-chart-swatch" :style="{ background: color(i) }" />{{ toDisplay(label) }} </span>
+    <div v-if="kind === 'pie' && labels.length" class="ktui-chart-labels">
+      <span v-for="(label, i) in labels" :key="i" class="ktui-chart-label"><i class="ktui-chart-swatch" :style="{ background: color(i) }" />{{ toDisplay(label) }}</span>
+    </div>
+    <div v-else-if="kind !== 'scatter' && labels.length" class="ktui-chart-axis-labels" data-test="ktui-chart-axis-labels">
+      <span v-for="(label, i) in labels" :key="i" class="ktui-chart-axis-tick" :style="{ left: `${tickPercent(i)}%` }">{{ toDisplay(label) }}</span>
     </div>
     <div v-if="kind !== 'pie' && series.length > 1" class="ktui-chart-legend">
       <span v-for="(s, i) in series" :key="i" class="ktui-chart-label"><i class="ktui-chart-swatch" :style="{ background: color(i) }" />{{ s.name || `series ${i + 1}` }}</span>
@@ -64,7 +72,25 @@ const pointSeries = computed(() =>
 )
 const count = computed(() => Math.max(props.labels.length, ...numericSeries.value.map((s) => s.data.length), 1))
 
-const yValues = computed(() => (props.kind === "scatter" ? pointSeries.value.flatMap((s) => s.points.map((p) => p[1])) : numericSeries.value.flatMap((s) => s.data)))
+// Each stacked segment runs from the running total of its sign to that total plus the value.
+const stackedBars = computed(() => {
+  const up = []
+  const down = []
+  return numericSeries.value.map((s) =>
+    s.data.map((v, i) => {
+      const base = v >= 0 ? (up[i] ?? 0) : (down[i] ?? 0)
+      if (v >= 0) up[i] = base + v
+      else down[i] = base + v
+      return { from: base, to: base + v }
+    }),
+  )
+})
+
+const yValues = computed(() => {
+  if (props.kind === "scatter") return pointSeries.value.flatMap((s) => s.points.map((p) => p[1]))
+  if (props.kind === "stacked") return stackedBars.value.flatMap((s) => s.map((b) => b.to))
+  return numericSeries.value.flatMap((s) => s.data)
+})
 const yMin = computed(() => Math.min(0, ...yValues.value))
 const yMax = computed(() => {
   const max = Math.max(0, ...yValues.value)
@@ -92,10 +118,16 @@ function xOfValue(x) {
 }
 
 const slot = computed(() => (W - 2 * PAD) / count.value)
-const barWidth = computed(() => Math.max(1, (slot.value * 0.8) / Math.max(1, numericSeries.value.length)))
+const barWidth = computed(() => Math.max(1, (slot.value * 0.8) / (props.kind === "stacked" ? 1 : Math.max(1, numericSeries.value.length))))
 
 function barX(i, si) {
   return PAD + i * slot.value + slot.value * 0.1 + si * barWidth.value
+}
+
+// Horizontal position of category ``i`` under its bar or point, as a percentage of the width.
+function tickPercent(i) {
+  const x = props.kind === "bar" || props.kind === "stacked" ? PAD + (i + 0.5) * slot.value : xOf(i)
+  return Number(((x / W) * 100).toFixed(3))
 }
 
 function linePoints(data) {

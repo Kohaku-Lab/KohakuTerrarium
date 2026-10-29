@@ -22,10 +22,21 @@ const props = defineProps({
 const spec = computed(() => (props.widget.spec && typeof props.widget.spec === "object" ? props.widget.spec : {}))
 const layout = computed(() => (spec.value.layout === "page" ? "page" : "inline"))
 const order = computed(() => computedOrder(spec.value.computed))
+const UI_KEY = "__ui"
 const local = reactive({})
+// UI-only state by node path (table sort, open tree nodes …), saved beside the block state.
+const ui = reactive({})
 
 function adopt(source) {
-  for (const [key, value] of Object.entries(source || {})) local[key] = value
+  for (const [key, value] of Object.entries(source || {})) {
+    if (key === UI_KEY) adoptUi(value)
+    else local[key] = value
+  }
+}
+
+function adoptUi(source) {
+  if (!source || typeof source !== "object") return
+  for (const [path, entry] of Object.entries(source)) if (entry && typeof entry === "object") ui[path] = { ...entry }
 }
 
 adopt(spec.value.state)
@@ -46,6 +57,12 @@ provide(KTUI_KEY, {
   get disabled() {
     return disabled.value
   },
+  get streaming() {
+    return props.widget.streaming === true
+  },
+  get sayBlocked() {
+    return typeof props.host.sayBlocked === "string" ? props.host.sayBlocked : ""
+  },
   setVar(name, value) {
     if (disabled.value) return
     local[name] = value
@@ -59,6 +76,19 @@ provide(KTUI_KEY, {
   send(name, data) {
     if (disabled.value) return
     props.host.send(name, data || {})
+  },
+  uiState(path) {
+    return ui[path] || {}
+  },
+  setUiState(path, patch) {
+    if (disabled.value || !path || !patch || typeof patch !== "object") return
+    ui[path] = { ...(ui[path] || {}), ...patch }
+    props.host.setState({ [UI_KEY]: JSON.parse(JSON.stringify(ui)) })
+  },
+  say(text) {
+    if (disabled.value || typeof props.host.say !== "function") return
+    const message = String(text ?? "").trim()
+    if (message) props.host.say(message)
   },
 })
 </script>

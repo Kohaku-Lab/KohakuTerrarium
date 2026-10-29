@@ -3,6 +3,7 @@ import { getCurrentInstance, markRaw, toRaw } from "vue"
 import { snapshotContent } from "@/public/chat/contentSnapshot"
 import { extractReasoning, mergeReasoningSegments } from "@/utils/chatReasoning"
 import { reduceModelRecovery } from "./chatRecovery"
+import { inlineUiActions } from "./chatInlineUi"
 
 import {
   injectScope,
@@ -100,6 +101,12 @@ const ATTENTION_SUMMARY_MAX = 200
 // ATTENTION_SUMMARY_MAX characters, so the retained copy stays bounded no
 // matter how long the turn streams.
 const ATTENTION_ACCUMULATOR_CEILING = ATTENTION_SUMMARY_MAX * 2
+
+/** A frame after which no tool call is still streaming its arguments. */
+function endsToolArgsProgress(data) {
+  if (["processing_end", "idle", "text", "processing_error"].includes(data.type)) return true
+  return data.type === "activity" && ["tool_start", "subagent_start"].includes(data.activity_type)
+}
 
 function _truncateAttentionSummary(text) {
   const flat = String(text || "")
@@ -1838,6 +1845,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
   // role=user message per (turn, branch).
   const userTurnsForResult = []
   const assistantTurnsForResult = []
+  const assistantBranchesForResult = []
   const seenUserKey = new Set()
   for (const evt of events) {
     const eid = evt?.event_id
@@ -1852,6 +1860,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       userTurnsForResult.push(ti)
     } else if (evt.type === "processing_end") {
       assistantTurnsForResult.push(ti)
+      assistantBranchesForResult.push(typeof bi === "number" ? bi : null)
     }
   }
 
@@ -1908,9 +1917,11 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       }
     } else if (msg.role === "assistant") {
       const ti = assistantTurnsForResult[assistantMsgIdx]
+      const bi = assistantBranchesForResult[assistantMsgIdx]
       assistantMsgIdx += 1
       if (typeof ti === "number") {
         msg.turnIndex = ti
+        if (typeof bi === "number") msg.branchId = bi
         _attachAssistantNav(msg, ti)
       }
     }
@@ -2097,6 +2108,8 @@ const _chatStoreOptions = {
   state: () => ({
     /** @type {Object<string, import('@/utils/api').ChatMessage[]>} */
     messagesByTab: {},
+    /** @type {Record<string, Record<string, object>>} Per-tab inline ``<ui>`` block state by ``turn:branch:block`` */
+    inlineUiStateByTab: {},
     /** @type {string | null} */
     activeTab: null,
     /** @type {string[]} */
@@ -2114,6 +2127,7 @@ const _chatStoreOptions = {
      */
     processingByTab: {},
     modelRecoveryByTab: {},
+    toolArgsProgressByTab: {},
     /** @type {Object<string, {prompt: number, completion: number, total: number, cached: number}>} Per-source token usage */
     tokenUsage: {},
     /**
@@ -2444,6 +2458,7 @@ const _chatStoreOptions = {
   },
 
   actions: {
+    ...inlineUiActions,
     _setEvents(tab, events) {
       if (!tab) return
       this.eventsByTab[tab] = markRaw(Array.isArray(events) ? events : [])
@@ -2514,6 +2529,7 @@ const _chatStoreOptions = {
       this._autoReconnect = autoReconnect
       this.tabs = []
       this.messagesByTab = {}
+      this.inlineUiStateByTab = {}
       this.tokenUsage = {}
       this.subagentUsageByJob = {}
       this.runningJobs = {}
@@ -2524,6 +2540,7 @@ const _chatStoreOptions = {
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this.modelRecoveryByTab = {}
+      this.toolArgsProgressByTab = {}
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
       this._pendingBranchPathByTab = {}
@@ -3080,6 +3097,7 @@ const _chatStoreOptions = {
         const wasOpen = this.wsStatus === "open"
         this.wsStatus = "reconnecting"
         this.modelRecoveryByTab = {}
+        this.toolArgsProgressByTab = {}
         for (const tab of Object.keys(this.branchOperationByTab)) {
           this._failBranchOperation(tab, "Connection closed before the operation completed.")
         }
@@ -3311,6 +3329,13 @@ const _chatStoreOptions = {
       const source = this._tabForSource(data.source || "")
       if (source) this._updateModelRecovery(source, data)
       if (data.type === "model_recovery") return
+      if (data.type === "tool_args_progress") {
+        if (source) this._updateToolArgsProgress(source, data)
+        return
+      }
+      if (source && this.toolArgsProgressByTab[source] && endsToolArgsProgress(data)) {
+        delete this.toolArgsProgressByTab[source]
+      }
       if (source) {
         if (
           [
@@ -3422,6 +3447,8 @@ const _chatStoreOptions = {
         this._handleWidgetClose(source, data)
       } else if (data.type === "widget_state") {
         this._handleWidgetState(source, data)
+      } else if (data.type === "inline_ui_state") {
+        this._handleInlineUiState(source, data)
       } else if (data.type === "widget_ack") {
         this._handleWidgetAck(source, data)
       } else if (data.type === "input_queued") {
@@ -4533,6 +4560,23 @@ const _chatStoreOptions = {
       }
     },
 
+    _updateToolArgsProgress(tab, frame) {
+      const chars = Number(frame.chars)
+      if (typeof frame.name !== "string" || !frame.name || !Number.isFinite(chars)) return
+      this.toolArgsProgressByTab[tab] = {
+        name: frame.name,
+        chars,
+        turn_index: frame.turn_index,
+        branch_id: frame.branch_id,
+      }
+    },
+
+    /** ``{name, chars}`` of the tool call whose arguments are streaming in ``tab``, or null. */
+    toolArgsProgressForTab(tab) {
+      const state = this.toolArgsProgressByTab[tab]
+      return state && this._frameMatchesViewedBranch(tab, state) ? state : null
+    },
+
     modelRecoveryForTab(tab) {
       const state = this.modelRecoveryByTab[tab]
       return state?.phase && this._frameMatchesViewedBranch(tab, state) ? state.phase : null
@@ -5468,6 +5512,7 @@ const _chatStoreOptions = {
         if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
         const prepared = _prepareReplayEvents(data.events, this.branchViewByTab[tab])
         this._setEvents(tab, prepared.events)
+        this._adoptInlineUiStates(tab, prepared.events)
         this._restoreTokenUsage(tab, prepared.events, true)
         if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
         this._rebuildMessages(tab, fetchedAt, prepared)
@@ -6220,6 +6265,7 @@ const _chatStoreOptions = {
       this._instanceType = null
       this.tabs = []
       this.messagesByTab = {}
+      this.inlineUiStateByTab = {}
       this.tokenUsage = {}
       this.subagentUsageByJob = {}
       this.runningJobs = {}
@@ -6231,6 +6277,7 @@ const _chatStoreOptions = {
       this.processingByTab = {}
       this.eventsByTab = {}
       this.modelRecoveryByTab = {}
+      this.toolArgsProgressByTab = {}
       this._localCommandResultsByTab = {}
       this._pendingCommandResultContextsByTab = {}
       this._commandResultDispatchSeq = 0
@@ -6279,6 +6326,7 @@ const _chatStoreOptions = {
       this.branchOperationByTab = {}
       this._browsedBranchByTab = {}
       this.modelRecoveryByTab = {}
+      this.toolArgsProgressByTab = {}
       this.branchOperationErrorByTab = {}
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
@@ -6297,6 +6345,7 @@ const _chatStoreOptions = {
       this._helloWatchStop = null
       for (const { timer } of this._widgetStateTimers?.values() || []) clearTimeout(timer)
       this._widgetStateTimers?.clear()
+      this._clearInlineUiTimers()
       this._reconnectDelay = 500
       this._autoReconnect = true
       this.wsStatus = "closed"
@@ -6804,6 +6853,7 @@ const _chatStoreOptions = {
           tab,
         )
         this._setEvents(tab, payload.events || [])
+        this._adoptInlineUiStates(tab, payload.events || [])
         const selection = replay.branchMetadata?.branchSelection || new Map()
         adoptLocalCommandResultSelections(
           this._pendingCommandResultContextsByTab[tab],
@@ -6852,6 +6902,7 @@ const _chatStoreOptions = {
       this._adoptAuthoritativeBranchView(tab, payload.branch_view)
       const prepared = _prepareReplayEvents(events, this.branchViewByTab[tab] || null)
       this._setEvents(tab, prepared.events)
+      this._adoptInlineUiStates(tab, prepared.events)
       if (
         !this.tokenUsage[tab] ||
         this.tokenUsage[tab].partial ||

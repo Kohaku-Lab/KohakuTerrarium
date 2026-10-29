@@ -36,6 +36,32 @@ describe("SubagentConversationPanel Markdown links", () => {
   })
 })
 
+describe("SubagentConversationPanel inline UI", () => {
+  it("draws a block in a sub-agent reply with its send buttons disabled", async () => {
+    vi.spyOn(sessionAPI, "getSubagentConversation").mockResolvedValue({
+      live: false,
+      can_receive: false,
+      messages: [
+        {
+          role: "assistant",
+          content:
+            '<ui><state n={1}/><button set={{n: n + 1}}>Add</button><button send="Pick {n}">Pick</button></ui>',
+        },
+      ],
+    })
+    const wrapper = mount(SubagentConversationPanel, {
+      props: { sessionId: "session-a", parent: "root", name: "explore", live: false },
+      global: { stubs: { ToolCallBlock: true } },
+    })
+    await flushPromises()
+    const [add, pick] = wrapper.findAll('[data-test="ktui-button"]')
+    expect(add.attributes("disabled")).toBeUndefined()
+    expect(pick.attributes("disabled")).toBeDefined()
+    expect(pick.element.parentElement.getAttribute("title")).toBe("chat.inlineUi.sendMainChatOnly")
+    vi.restoreAllMocks()
+  })
+})
+
 describe("SubagentConversationPanel ambiguity selector", () => {
   beforeEach(() => {
     // Individual tests also restore locally; this guards against an

@@ -2,30 +2,36 @@
   <!-- One kt.ui node; layout nodes recurse into UiNode for their children. -->
   <template v-if="visible">
     <div v-if="type === 'stack'" class="ktui-stack" :class="[`ktui-gap-${node.gap || 'md'}`, `ktui-align-${node.align || 'stretch'}`, { 'ktui-row': node.direction === 'row', 'ktui-wrap': flag(node.wrap) }]">
-      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" />
+      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" :path="`${path}.children[${i}]`" />
     </div>
     <div v-else-if="type === 'grid'" class="ktui-grid" :class="`ktui-gap-${node.gap || 'md'}`" :style="{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }">
-      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" />
+      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" :path="`${path}.children[${i}]`" />
     </div>
     <div v-else-if="type === 'card'" class="ktui-card">
       <div v-if="node.title || node.subtitle" class="ktui-card-header">
         <span class="font-semibold text-sm">{{ text(node.title) }}</span>
         <span v-if="node.subtitle" class="text-xs text-warm-500">{{ text(node.subtitle) }}</span>
       </div>
-      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" />
+      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" :path="`${path}.children[${i}]`" />
     </div>
     <section v-else-if="type === 'section'" class="ktui-section">
       <div v-if="node.title" class="ktui-section-title">{{ text(node.title) }}</div>
-      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" />
+      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" :path="`${path}.children[${i}]`" />
     </section>
     <el-tabs v-else-if="type === 'tabs'" v-model="activeTab" class="ktui-tabs">
       <template v-for="(tab, i) in children" :key="i">
         <el-tab-pane v-if="isShown(tab)" :label="text(tab.label)" :name="String(i)">
-          <UiNode v-for="(child, j) in tab.children || []" :key="j" :node="child" :scope="scope" />
+          <UiNode v-for="(child, j) in tab.children || []" :key="j" :node="child" :scope="scope" :path="`${path}.children[${i}].children[${j}]`" />
         </el-tab-pane>
       </template>
     </el-tabs>
     <hr v-else-if="type === 'divider'" class="ktui-divider" />
+    <details v-else-if="type === 'accordion'" class="ktui-accordion" :open="accordionOpen" data-test="ktui-accordion" @toggle="onAccordionToggle">
+      <summary class="ktui-accordion-title">{{ text(node.title) }}</summary>
+      <div class="ktui-accordion-body">
+        <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" :path="`${path}.children[${i}]`" />
+      </div>
+    </details>
 
     <div v-else-if="type === 'text'" class="ktui-text" :class="[`ktui-text-${node.size || 'md'}`, { 'text-warm-500': flag(node.muted) }]">
       <MarkdownRenderer :content="text(node.value)" :breaks="true" :origin="markdownOrigin" />
@@ -34,9 +40,20 @@
     <span v-else-if="type === 'badge'" class="ktui-badge" :class="`ktui-tone-${node.tone || 'neutral'}`">{{ text(node.value) }}</span>
     <div v-else-if="type === 'stat'" class="ktui-stat" :class="`ktui-tone-${node.tone || 'neutral'}`">
       <div v-if="node.label" class="ktui-stat-label">{{ text(node.label) }}</div>
-      <div class="ktui-stat-value" data-test="ktui-stat-value">{{ text(node.value) }}</div>
+      <div class="ktui-stat-value" data-test="ktui-stat-value">{{ text(node.value) }}<UiSparkline v-if="node.trend !== undefined" :data="listOf(node.trend)" /></div>
       <div v-if="node.hint" class="ktui-stat-hint">{{ text(node.hint) }}</div>
     </div>
+    <aside v-else-if="type === 'callout'" class="ktui-callout" :class="`ktui-callout-${calloutTone}`" role="note" data-test="ktui-callout">
+      <div v-if="node.title" class="ktui-callout-title">{{ text(node.title) }}</div>
+      <MarkdownRenderer :content="text(node.value)" :breaks="true" :origin="markdownOrigin" />
+    </aside>
+    <figure v-else-if="type === 'quote'" class="ktui-quote" data-test="ktui-quote">
+      <blockquote><MarkdownRenderer :content="text(node.value)" :breaks="true" :origin="markdownOrigin" /></blockquote>
+      <figcaption v-if="node.cite" class="ktui-quote-cite">— {{ text(node.cite) }}</figcaption>
+    </figure>
+    <UiSteps v-else-if="type === 'steps' || type === 'timeline'" :mode="type" :items="listOf(node.items)" :current="num(node.current, null)" :display="display" />
+    <UiProgress v-else-if="type === 'progress'" :value="num(node.value, 0)" :max="num(node.max, 100)" :label="node.label ? text(node.label) : ''" :tone="node.tone || 'info'" :variant="node.style || 'bar'" />
+    <UiTreeList v-else-if="type === 'tree'" :items="listOf(node.items)" :open="node.open === undefined ? true : flagValue(node.open)" :display="display" :toggled="uiOpen" @toggle="(key, value) => setUi({ open: { ...uiOpen, [key]: value } })" />
     <dl v-else-if="type === 'kv'" class="ktui-kv">
       <template v-for="(field, i) in listOf(node.fields)" :key="i">
         <dt>{{ display(field?.label) }}</dt>
@@ -46,30 +63,15 @@
     <component :is="flag(node.ordered) ? 'ol' : 'ul'" v-else-if="type === 'list'" class="ktui-list">
       <li v-for="(item, i) in listOf(node.items)" :key="i">{{ display(item) }}</li>
     </component>
-    <div v-else-if="type === 'table'" class="ktui-table-wrap">
-      <table class="ktui-table">
-        <thead>
-          <tr>
-            <th v-for="col in columns" :key="col.index" :style="{ textAlign: col.align }">{{ display(col.label) }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, r) in listOf(node.rows)" :key="r">
-            <td v-for="col in columns" :key="col.index" :style="{ textAlign: col.align }">{{ display(tableCell(row, col)) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <UiTable v-else-if="type === 'table'" :columns="columns" :rows="listOf(node.rows)" :sortable="flagValue(node.sortable)" :filter="flagValue(node.filter)" :display="display" :ui-state="ui" @ui="setUi" />
     <img v-else-if="type === 'image' && imageSrc" class="ktui-image" :src="imageSrc" :alt="text(node.alt || '')" :style="node.width ? { maxWidth: `${node.width}px` } : {}" />
     <div v-else-if="type === 'image'" class="ktui-note">image not shown: {{ text(node.alt || "unsupported source") }}</div>
     <pre v-else-if="type === 'code'" class="ktui-code"><code>{{ text(node.value) }}</code></pre>
 
+    <UiChartSpecial v-else-if="type === 'chart' && SPECIAL_CHARTS.has(node.kind)" :kind="node.kind" :labels="listOf(node.labels)" :series="seriesOf(node.series)" :title="node.title ? text(node.title) : ''" :height="num(node.height, 240)" :min="num(node.min, null)" :max="num(node.max, null)" />
     <UiChart v-else-if="type === 'chart'" :kind="node.kind" :labels="listOf(node.labels)" :series="seriesOf(node.series)" :title="node.title ? text(node.title) : ''" :height="num(node.height, 200)" />
-    <div v-else-if="type === 'diagram'" class="ktui-diagram">
-      <div v-if="node.title" class="ktui-section-title">{{ text(node.title) }}</div>
-      <pre class="ktui-code"><code>{{ text(node.source) }}</code></pre>
-      <div class="ktui-note">diagram source (rendering is not available here)</div>
-    </div>
+    <UiDiagram v-else-if="type === 'diagram'" :source="text(node.source)" :title="node.title ? text(node.title) : ''" />
+    <UiExtra v-else-if="EXTRA_TYPES.has(type)" :node="node" :scope="scope" :path="path" />
 
     <label v-else-if="isInput" class="ktui-field" :class="`ktui-field-${type}`">
       <span v-if="node.label" class="ktui-label">{{ text(node.label) }}</span>
@@ -90,17 +92,21 @@
       <el-date-picker v-else-if="type === 'date'" :model-value="bound || ''" type="date" value-format="YYYY-MM-DD" :disabled="ctx.disabled" size="small" @update:model-value="set" />
     </label>
 
-    <el-button v-else-if="type === 'button'" :type="buttonType" :disabled="ctx.disabled || flagValue(node.disabled)" size="small" data-test="ktui-button" @click="press">{{ text(node.label) }}</el-button>
+    <span v-else-if="type === 'button'" class="ktui-button-wrap" :title="sayBlocked || undefined">
+      <el-button :type="buttonType" :disabled="ctx.disabled || flagValue(node.disabled) || Boolean(sayBlocked)" size="small" data-test="ktui-button" @click="press">{{ text(node.label) }}</el-button>
+    </span>
     <form v-else-if="type === 'form'" class="ktui-form" @submit.prevent="submit">
-      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" />
+      <UiNode v-for="(child, i) in children" :key="i" :node="child" :scope="scope" :path="`${path}.children[${i}]`" />
       <div>
-        <el-button type="primary" native-type="submit" size="small" :disabled="ctx.disabled" data-test="ktui-submit">{{ text(node.submit || "Submit") }}</el-button>
+        <span class="ktui-button-wrap" :title="sayBlocked || undefined">
+          <el-button type="primary" native-type="submit" size="small" :disabled="ctx.disabled || Boolean(sayBlocked)" data-test="ktui-submit">{{ text(node.submit || "Submit") }}</el-button>
+        </span>
       </div>
     </form>
 
     <template v-else-if="type === 'each'">
       <div v-if="each.error" class="ktui-note" :title="each.error">⚠ {{ each.error }}</div>
-      <UiNode v-for="(item, i) in each.items" :key="i" :node="node.child" :scope="{ ...scope, [node.as || 'item']: item, index: i }" />
+      <UiNode v-for="(item, i) in each.items" :key="i" :node="node.child" :scope="{ ...scope, [node.as || 'item']: item, index: i }" :path="`${path}.child[${i}]`" />
     </template>
     <div v-else class="ktui-note">unsupported component: {{ type }}</div>
   </template>
@@ -114,17 +120,30 @@ import MarkdownRenderer from "../../../../public/chat/MarkdownRenderer.vue"
 import { usePlatformOrigin } from "../../../../public/chat/platformOrigin.js"
 import { useKtUi } from "./context.js"
 import { evaluate, toDisplay, truthy } from "./expr.js"
-import { boundNames, eachItems, isVisible, normalizeOptions, resolve, resolveDeep, resolveText, safeImageSrc, tableCell, tableColumns } from "./runtime.js"
+import { boundNames, eachItems, isVisible, normalizeOptions, resolve, resolveDeep, resolveText, safeImageSrc, tableColumns } from "./runtime.js"
 import UiChart from "./UiChart.vue"
+import UiChartSpecial from "./UiChartSpecial.vue"
+import UiDiagram from "./UiDiagram.vue"
+import UiExtra from "./UiExtra.vue"
+import UiProgress from "./UiProgress.vue"
+import UiSparkline from "./UiSparkline.vue"
+import UiSteps from "./UiSteps.vue"
+import UiTable from "./UiTable.vue"
+import UiTreeList from "./UiTreeList.vue"
 
 defineOptions({ name: "UiNode" })
 
 const props = defineProps({
   node: { type: Object, required: true },
   scope: { type: Object, required: true },
+  // Where this node sits in the spec; the key of its UI-only state.
+  path: { type: String, default: "root" },
 })
 
 const INPUTS = new Set(["number", "slider", "text_input", "select", "radio", "toggle", "checkbox", "date"])
+const EXTRA_TYPES = new Set(["html", "math", "link", "icon", "gallery", "compare", "copy", "timer", "quiz", "rating"])
+const SPECIAL_CHARTS = new Set(["radar", "heatmap", "gauge"])
+const CALLOUT_TONES = new Set(["info", "tip", "success", "warning", "danger"])
 
 const ctx = useKtUi()
 const markdownOrigin = usePlatformOrigin()
@@ -144,6 +163,11 @@ const headingLevel = computed(() => {
   return Math.min(4, Math.max(1, Math.round(level)))
 })
 const gridColumns = computed(() => Math.min(12, Math.max(1, Math.round(num(props.node.columns, 2)))))
+const sayBlocked = computed(() => (typeof props.node.message === "string" ? ctx.sayBlocked || "" : ""))
+const calloutTone = computed(() => (CALLOUT_TONES.has(props.node.tone) ? props.node.tone : "info"))
+const ui = computed(() => ctx.uiState?.(props.path) || {})
+const uiOpen = computed(() => (ui.value.open && typeof ui.value.open === "object" ? ui.value.open : {}))
+const accordionOpen = computed(() => (typeof ui.value.open === "boolean" ? ui.value.open : flagValue(props.node.open)))
 const buttonType = computed(() => ({ primary: "primary", danger: "danger" })[props.node.style] || "")
 
 function valueOf(value) {
@@ -186,6 +210,15 @@ function flagValue(value) {
   return !error && truthy(out)
 }
 
+function setUi(patch) {
+  ctx.setUiState?.(props.path, patch)
+}
+
+function onAccordionToggle(event) {
+  const open = Boolean(event?.target?.open)
+  if (open !== accordionOpen.value) setUi({ open })
+}
+
 function isShown(node) {
   return node && typeof node === "object" && isVisible(node, props.scope)
 }
@@ -207,10 +240,15 @@ function press() {
     }
     ctx.setVars(updates)
   }
-  if (typeof node.send === "string") ctx.send(node.send, resolveDeep(node.data || {}, props.scope))
+  if (typeof node.message === "string") ctx.say(text(node.message))
+  else if (typeof node.send === "string") ctx.send(node.send, resolveDeep(node.data || {}, props.scope))
 }
 
 function submit() {
+  if (typeof props.node.message === "string") {
+    ctx.say(text(props.node.message))
+    return
+  }
   const values = {}
   for (const name of boundNames(props.node)) values[name] = props.scope[name] ?? null
   const extra = resolveDeep(props.node.data || {}, props.scope)

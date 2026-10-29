@@ -216,6 +216,9 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.ktui-button-wrap {
+  display: inline-flex;
+}
 .ktui-form {
   display: flex;
   flex-direction: column;
@@ -245,4 +248,524 @@
   width: 0.625rem;
   height: 0.625rem;
   border-radius: 2px;
+}
+.ktui-diagram-svg {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+.ktui-diagram-svg svg {
+  max-width: 100%;
+  height: auto;
+}
+.ktui-callout {
+  --ktui-callout: #5b8def;
+  border-left: 3px solid var(--ktui-callout);
+  background: color-mix(in srgb, var(--ktui-callout) 9%, transparent);
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.75rem;
+}
+.ktui-callout-tip {
+  --ktui-callout: #9b6dd6;
+}
+.ktui-callout-success {
+  --ktui-callout: #4cb782;
+}
+.ktui-callout-warning {
+  --ktui-callout: #e8a33d;
+}
+.ktui-callout-danger {
+  --ktui-callout: #d9534f;
+}
+.ktui-callout-title {
+  font-weight: 600;
+  color: var(--ktui-callout);
+  margin-bottom: 0.125rem;
+}
+.ktui-quote {
+  margin: 0;
+}
+.ktui-quote blockquote {
+  margin: 0;
+  padding: 0.25rem 0.75rem;
+  border-left: 3px solid var(--color-border, rgba(160, 160, 160, 0.35));
+  font-style: italic;
+}
+.ktui-quote-cite {
+  font-size: 0.75rem;
+  opacity: 0.75;
+  padding: 0.25rem 0.75rem 0;
+}
+.ktui-accordion {
+  border: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  border-radius: 0.375rem;
+}
+.ktui-accordion-title {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0.375rem 0.625rem;
+}
+.ktui-accordion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0 0.625rem 0.5rem;
+}
+.ktui-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ktui-step {
+  display: flex;
+  gap: 0.625rem;
+  position: relative;
+  padding-bottom: 0.625rem;
+}
+.ktui-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 0.6875rem;
+  top: 1.5rem;
+  bottom: 0;
+  border-left: 2px solid var(--color-border, rgba(160, 160, 160, 0.3));
+}
+.ktui-step-mark {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border: 2px solid var(--color-border, rgba(160, 160, 160, 0.45));
+  background: var(--color-bg, transparent);
+}
+.ktui-step-done .ktui-step-mark {
+  border-color: #4cb782;
+  background: #4cb782;
+  color: #fff;
+}
+.ktui-step-current .ktui-step-mark {
+  border-color: #5b8def;
+  color: #5b8def;
+}
+.ktui-step-current .ktui-step-title {
+  font-weight: 600;
+}
+.ktui-steps-timeline .ktui-step-mark {
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: 0.25rem 0.3125rem 0;
+  border-color: currentColor;
+}
+.ktui-steps-timeline .ktui-step:not(:last-child)::before {
+  top: 1.125rem;
+}
+.ktui-step-date,
+.ktui-step-detail {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+.ktui-progress-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.ktui-progress-track {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--color-border, rgba(160, 160, 160, 0.2));
+  overflow: hidden;
+}
+.ktui-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+}
+.ktui-progress-neutral {
+  color: #8a8f98;
+}
+.ktui-progress-ring {
+  display: flex;
+  align-items: center;
+}
+.ktui-ring-svg {
+  flex: none;
+  width: 4rem;
+  height: 4rem;
+}
+.ktui-progress-ring-track {
+  fill: none;
+  stroke: var(--color-border, rgba(160, 160, 160, 0.25));
+  stroke-width: 4;
+}
+.ktui-progress-ring-fill {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+.ktui-progress-ring-text {
+  fill: var(--color-text, currentColor);
+  font-size: 0.5625rem;
+  font-weight: 600;
+}
+.ktui-progress-ring-label {
+  margin-left: 0.5rem;
+  font-size: 0.8125rem;
+}
+.ktui-tree {
+  list-style: none;
+  margin: 0;
+  padding-left: 1rem;
+}
+.ktui-tree-root {
+  padding-left: 0;
+}
+.ktui-tree-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: none;
+  border: 0;
+  padding: 0.0625rem 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.ktui-tree-leaf {
+  cursor: default;
+  padding-left: 1rem;
+}
+.ktui-tree-caret {
+  width: 0.75rem;
+  opacity: 0.7;
+}
+.ktui-tree-badge {
+  margin-left: 0.375rem;
+  font-size: 0.6875rem;
+  opacity: 0.8;
+}
+.ktui-table-filter {
+  width: 100%;
+  max-width: 16rem;
+  margin-bottom: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--color-border, rgba(160, 160, 160, 0.3));
+  border-radius: 0.375rem;
+}
+.ktui-sort {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  cursor: pointer;
+}
+.ktui-sort-mark {
+  font-size: 0.625rem;
+}
+.ktui-sparkline {
+  display: inline-block;
+  width: 4rem;
+  height: 1rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+  opacity: 0.8;
+}
+.ktui-chart-grid {
+  fill: none;
+  stroke: var(--color-border, rgba(160, 160, 160, 0.3));
+  stroke-width: 1;
+}
+.ktui-chart-axis-label {
+  fill: currentColor;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.ktui-heatmap {
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+.ktui-heatmap-head {
+  text-align: center;
+  opacity: 0.75;
+  padding: 0 0.25rem;
+}
+.ktui-heatmap-row {
+  text-align: right;
+}
+.ktui-heatmap-cell {
+  text-align: center;
+  border-radius: 2px;
+  padding: 0.25rem 0;
+  font-variant-numeric: tabular-nums;
+}
+.ktui-gauge-track,
+.ktui-gauge-fill {
+  fill: none;
+  stroke-width: 18;
+  stroke-linecap: round;
+}
+.ktui-gauge-track {
+  stroke: var(--color-border, rgba(160, 160, 160, 0.25));
+}
+.ktui-gauge-value {
+  fill: currentColor;
+  font-size: 26px;
+  font-weight: 600;
+}
+.ktui-chart-axis-labels {
+  position: relative;
+  height: 1.1rem;
+  font-size: 0.6875rem;
+  opacity: 0.85;
+}
+.ktui-chart-axis-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  max-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ktui-radar {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+.ktui-html-pending {
+  border: 1px dashed var(--color-border, rgba(160, 160, 160, 0.3));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+.ktui-math {
+  overflow-x: auto;
+}
+.ktui-math-display {
+  text-align: center;
+  padding: 0.25rem 0;
+}
+.ktui-link {
+  color: var(--el-color-primary, #5b8def);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.ktui-link-off {
+  color: inherit;
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.ktui-link-mark {
+  font-size: 0.75em;
+  margin-left: 0.2em;
+  vertical-align: baseline;
+}
+.ktui-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.ktui-icon-sm {
+  font-size: 0.8rem;
+}
+.ktui-icon-md {
+  font-size: 1rem;
+}
+.ktui-icon-lg {
+  font-size: 1.5rem;
+}
+.ktui-gallery {
+  display: grid;
+  gap: 0.5rem;
+}
+.ktui-gallery-item {
+  margin: 0;
+  min-width: 0;
+}
+.ktui-gallery-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.ktui-gallery-item img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 0.375rem;
+}
+.ktui-gallery-item figcaption {
+  font-size: 0.75rem;
+  opacity: 0.8;
+  margin-top: 0.2rem;
+}
+.ktui-gallery-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.8);
+  cursor: zoom-out;
+}
+.ktui-gallery-zoom img {
+  max-width: 94vw;
+  max-height: 90vh;
+  object-fit: contain;
+}
+.ktui-gallery-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  color: #fff;
+  background: none;
+  border: 0;
+  font-size: 1.5rem;
+}
+.ktui-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.5rem;
+}
+.ktui-compare-item {
+  border: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.ktui-compare-title {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.ktui-compare-list {
+  list-style: none;
+  margin: 0.25rem 0;
+  padding: 0;
+  font-size: 0.875rem;
+}
+.ktui-compare-list li {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+}
+.ktui-compare-pro > span {
+  color: #4cb782;
+  flex-shrink: 0;
+}
+.ktui-compare-con > span {
+  color: #d9534f;
+  flex-shrink: 0;
+}
+.ktui-compare-verdict {
+  margin-top: 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.ktui-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ktui-copy-value {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--color-card, rgba(160, 160, 160, 0.08));
+  overflow-x: auto;
+  white-space: pre;
+  max-width: 100%;
+}
+.ktui-timer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ktui-timer-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.ktui-timer-done .ktui-timer-clock {
+  color: #d9534f;
+}
+.ktui-quiz {
+  border: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+.ktui-quiz-question {
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.ktui-quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ktui-quiz-option {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+}
+.ktui-quiz-right {
+  background: color-mix(in srgb, #4cb782 16%, transparent);
+}
+.ktui-quiz-wrong {
+  background: color-mix(in srgb, #d9534f 16%, transparent);
+}
+.ktui-quiz-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.ktui-quiz-explain {
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  opacity: 0.9;
+}
+.ktui-rating {
+  display: inline-flex;
+  gap: 0.1rem;
+}
+.ktui-star {
+  border: 0;
+  background: none;
+  padding: 0.1rem;
+  font-size: 1.1rem;
+  color: rgba(160, 160, 160, 0.7);
+  cursor: pointer;
+}
+.ktui-star-on {
+  color: #e8a33d;
+}
+.ktui-star:disabled {
+  cursor: default;
 }

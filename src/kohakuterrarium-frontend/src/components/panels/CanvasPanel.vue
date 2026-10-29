@@ -36,6 +36,7 @@
       </div>
 
       <CanvasWidgetView v-else-if="viewerType === 'widget'" :store="chat" :canvas="canvas" :event-id="canvas.activeArtifact.content" />
+      <InlineUiBlock v-else-if="viewerType === 'ktui'" :key="canvas.activeArtifact.id" :source="canvas.activeArtifact.content" fill @say="(text) => sayToChat(chat, text)" />
       <ImageViewer v-else-if="viewerType === 'image'" :src="canvas.activeArtifact.content" :alt="canvas.activeArtifact.name" />
       <CodeViewer v-else-if="viewerType === 'code' || viewerType === 'svg' || viewerType === 'diagram'" :content="canvas.activeArtifact.content" :lang="canvas.activeArtifact.lang" />
       <MarkdownViewer v-else-if="viewerType === 'markdown'" :content="canvas.activeArtifact.content" />
@@ -44,7 +45,7 @@
     </div>
 
     <!-- Bottom info strip -->
-    <div v-if="canvas.activeArtifact && viewerType !== 'widget'" class="flex items-center gap-2 px-2 h-6 border-t border-warm-200 dark:border-warm-700 text-[10px] text-warm-500 shrink-0">
+    <div v-if="canvas.activeArtifact && viewerType !== 'widget' && viewerType !== 'ktui'" class="flex items-center gap-2 px-2 h-6 border-t border-warm-200 dark:border-warm-700 text-[10px] text-warm-500 shrink-0">
       <span class="font-mono">{{ canvas.activeArtifact?.lang || "text" }}</span>
       <template v-if="viewerType !== 'image'">
         <span class="opacity-50">·</span>
@@ -59,6 +60,8 @@ import { computed } from "vue"
 
 import AppFrame from "@/components/chat/widgets/app/AppFrame.vue"
 import CanvasWidgetView from "@/components/chat/widgets/CanvasWidgetView.vue"
+import InlineUiBlock from "@/components/chat/widgets/ktui/InlineUiBlock.vue"
+import { sayToChat } from "@/components/chat/widgets/ktui/sayMessage.js"
 import CodeViewer from "@/components/panels/canvas/CodeViewer.vue"
 import ImageViewer from "@/components/panels/canvas/ImageViewer.vue"
 import MarkdownViewer from "@/components/panels/canvas/MarkdownViewer.vue"

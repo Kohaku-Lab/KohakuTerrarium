@@ -218,6 +218,7 @@
 <script setup>
 import { computed, h, inject, reactive, ref } from "vue"
 
+import AssistantText from "./AssistantText.vue"
 import CommandResultMessage from "../CommandResultMessage.vue"
 import ConversationMessage from "./ConversationMessage.js"
 import ToolCallBatch from "../ToolCallBatch.vue"
@@ -225,6 +226,7 @@ import ToolCallBlock from "../ToolCallBlock.vue"
 import VideoFilePreview from "../VideoFilePreview.vue"
 import UIEventBlock from "../UIEventBlock.vue"
 import WidgetBlock from "../widgets/WidgetBlock.vue"
+import { sayToChat } from "../widgets/ktui/sayMessage.js"
 import { makeWidgetHost } from "../widgets/widgetHost.js"
 import { widgetFromMessage } from "../widgets/widgetModel.js"
 import MarkdownRenderer from "../../../public/chat/MarkdownRenderer.vue"
@@ -287,7 +289,10 @@ function toggleTool(id) {
   expandedTools[id] = !expandedTools[id]
 }
 
-function renderSharedText(content, breaks = false) {
+function renderSharedText(content, breaks = false, options = null) {
+  if (options?.assistant) {
+    return h(AssistantText, { content, breaks, origin: markdownOrigin, streaming: options.streaming === true, canOpenCanvas: true, uiStore: chat, uiAddress: uiAddress.value, onSay: sendUiMessage, onOpenCanvas: openUiInCanvas })
+  }
   return h(MarkdownRenderer, { content, breaks, origin: markdownOrigin })
 }
 
@@ -341,6 +346,7 @@ function renderSharedContentPart(part) {
 const chat = inject("chatStore", null) || useChatStore()
 const canvasStore = inject("canvasStore", null) || useCanvasStore()
 const messageTab = computed(() => props.tabId || chat.activeTab)
+const uiAddress = computed(() => ({ tab: messageTab.value, turn: props.message.turnIndex, branch: props.message.branchId }))
 
 // Phase B UI event reply: route through the host seam so the VS Code webview
 // keeps its accepted-reply transport (never a raw store bypass) while the
@@ -364,6 +370,14 @@ const widgetHost = makeWidgetHost({
   canvas: canvasStore,
   extra: { origin: markdownOrigin },
 })
+
+function sendUiMessage(text) {
+  return sayToChat(chat, text, t)
+}
+
+function openUiInCanvas({ source, title }) {
+  canvasStore.pinUi?.({ source, title })
+}
 
 const showSenderHeader = computed(() => {
   if (props.message.role !== "channel") return false
