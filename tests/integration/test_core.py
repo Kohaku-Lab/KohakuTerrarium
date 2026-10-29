@@ -41,6 +41,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.show_app import ShowAppTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.branch_continuation import (
@@ -2185,6 +2186,39 @@ class TestCoreIntegration:
             agent._maybe_trigger_compact(agent.controller)
             await agent.compact_manager.wait_for_current()
             assert agent.compact_manager._compact_count == count_after_first + 1
+            assert agent.compact_rounds == agent.compact_manager._compact_count
+
+            # A tool's compact_arguments hook shortens its old calls that
+            # survive the splice; the newest call round keeps its arguments.
+            agent.registry.register_tool(ShowAppTool())
+            conversation = agent.controller.conversation
+            for call_id, html in (("app_old", "<p>" + "x" * 4000), ("app_new", "<b>")):
+                conversation.append(
+                    "assistant",
+                    "",
+                    tool_calls=[
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "show_app",
+                                "arguments": json.dumps({"title": "t", "html": html}),
+                            },
+                        }
+                    ],
+                )
+                conversation.append("tool", "app w_1 shown", tool_call_id=call_id)
+            agent.controller._last_usage = {"prompt_tokens": 5000}
+            agent._maybe_trigger_compact(agent.controller)
+            await agent.compact_manager.wait_for_current()
+            app_args = {
+                call["id"]: json.loads(call["function"]["arguments"])
+                for msg in agent.controller.conversation.get_messages()
+                for call in getattr(msg, "tool_calls", None) or []
+                if call["function"]["name"] == "show_app"
+            }
+            assert app_args["app_new"]["html"] == "<b>"
+            assert app_args["app_old"]["html"].startswith("[app document")
 
             # With usage BELOW the threshold, the turn-end hook is a
             # no-op — the compact count stays put.

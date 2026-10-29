@@ -21,7 +21,7 @@ from kohakuterrarium.core.compact_text import (
     format_messages_for_summary,
 )
 from kohakuterrarium.core.context_snapshot import capture_context
-from kohakuterrarium.core.conversation_elide import elide_after_compact
+from kohakuterrarium.core.compact_arguments import after_compact
 from kohakuterrarium.core.single_flight import SingleFlightDispatch, SingleFlightLease
 from kohakuterrarium.core.token_ledger import reset_context_tokens
 from kohakuterrarium.utils.logging import get_logger
@@ -426,10 +426,8 @@ class CompactManager:
                 self._controller._last_usage = {}
             reset_context_tokens(self._agent)
 
-            # Compact summarizes the compact zone but leaves the live zone
-            # (recent turns) untouched; elide stale tool results there so
-            # the post-compact prompt actually drops below the threshold.
-            elide_after_compact(self._controller)
+            # The live zone survives the splice: shrink its stale tool output.
+            after_compact(self._controller, self._agent)
 
             # Notify output for TUI/frontend display. The watermark
             # persisted below must observe queued turn events and the

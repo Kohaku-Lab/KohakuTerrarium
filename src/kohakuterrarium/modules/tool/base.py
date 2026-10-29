@@ -285,6 +285,13 @@ class BaseTool(UIOwnerMixin):
         """Return brief system-prompt guidance, leaving full reference text to info."""
         return None
 
+    def compact_arguments(self, args: dict[str, Any]) -> dict[str, Any] | None:
+        """Shorter arguments to keep for an old call of this tool after compaction.
+
+        ``None`` keeps the call's arguments unchanged.
+        """
+        return None
+
 
 @dataclass
 class ToolInfo:

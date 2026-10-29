@@ -141,6 +141,12 @@ class AgentCompactMixin:
     config: Any
     _llm_selector: str | None
 
+    @property
+    def compact_rounds(self) -> int:
+        """Compaction rounds completed on this agent's conversation."""
+        manager = getattr(self, "compact_manager", None)
+        return int(getattr(manager, "_compact_count", 0) or 0)
+
     def _wire_overflow_rescue(self) -> None:
         """Point the active provider's overflow hook at the compact manager.
 
