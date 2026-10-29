@@ -113,4 +113,93 @@ more release.
 
 ## Declarative UI (show_ui)
 
-Not shipped yet.
+The `ui.declarative` plugin contributes `show_ui`. The model writes a
+JSON spec, not code; the web UI draws it with built-in components in
+the app theme. Expressions run in a small pure language (no `eval`),
+so the format is safe for creatures that read untrusted input.
+
+### Turn it on
+
+```yaml
+plugins:
+  - name: ui.declarative
+```
+
+`show_ui` needs the `kt.ui` renderer. The web UI announces it in its
+`client_hello` when it connects, so the tool (and its prompt guidance)
+appears once a browser is attached and disappears when the last one
+leaves. Headless runs, the terminal UIs and package outputs such as
+chat bots do not report `kt.ui`; there the tool is not offered.
+
+### A spec
+
+```json
+{
+  "title": "Bill splitter",
+  "state": {"total": 120, "people": 3, "tip": 10},
+  "computed": {"each": "round(total * (1 + tip / 100) / people, 2)"},
+  "root": {"type": "stack", "children": [
+    {"type": "number", "label": "Total", "bind": "total"},
+    {"type": "slider", "label": "Tip %", "bind": "tip", "min": 0, "max": 30},
+    {"type": "number", "label": "People", "bind": "people", "min": 1},
+    {"type": "stat", "label": "Each pays", "value": "{{ fmt(each, 2) }}"},
+    {"type": "button", "label": "Send to chat", "send": "result",
+     "data": {"each": "{{ each }}"}}
+  ]}
+}
+```
+
+- `state` holds named values; inputs change them through `bind`.
+- `computed` holds named expressions, re-evaluated when state changes.
+- Any string prop may contain `{{ expr }}`. A prop that is exactly one
+  `{{ expr }}` keeps the value's type (a list stays a list).
+- `layout: "page"` makes a larger page and opens on the canvas surface
+  by default.
+
+The calculator above runs entirely in the browser; the agent is not
+woken while the user moves the slider.
+
+### Components
+
+| Group | Types |
+|---|---|
+| Layout | `stack`, `grid`, `card`, `section`, `tabs` / `tab`, `divider` |
+| Content | `text` (markdown), `heading`, `badge`, `stat`, `kv`, `list`, `table`, `image`, `code` |
+| Data | `chart` (`bar`, `line`, `area`, `pie`, `scatter`), `diagram` (shown as source) |
+| Input | `number`, `slider`, `text_input`, `select`, `radio`, `toggle`, `checkbox`, `date` |
+| Action | `button` (`set` changes state locally, `send` messages the agent), `form` (sends the values its inputs bind) |
+| Repeat | `each` (`items` expression, `as` name, one `child`; adds `index`) |
+
+Images accept only `data:image/...` URLs and same-origin paths, so a
+widget cannot load a remote tracking pixel.
+
+### Expressions
+
+Numbers, strings, `true` / `false` / `null`, lists; names from `state`,
+`computed` and `each`; `.key` and `[i]`; `+ - * / % **`, comparisons,
+`and` / `or` / `not`, `a ? b : c`. Functions: `round floor ceil abs
+min max sum avg len pow sqrt clamp fmt pct range join keys values str
+num`. Limits: 2 KB per expression, 10 000 evaluation steps, ranges of
+at most 1000 items.
+
+The same language is implemented in Python (validation and the text
+fallback) and in the frontend; both pass one shared conformance file,
+`tests/fixtures/kt_ui_expressions.json`.
+
+### Messages back to the agent
+
+A `send` on a button or form produces a widget message:
+
+- if the `show_ui` call is waiting (`wait_for: ["result"]`), the call
+  returns `message result: {...}`;
+- otherwise the message reaches the agent later as an ordinary
+  `widget_event` trigger.
+
+### Validation and fallback
+
+The backend validates every spec before it is shown. An invalid spec
+returns all problems with their JSON paths, for example
+`root.children[2].bind: 'ghost' is not a key of 'state'`, so the model
+can fix it in one more call. Every widget also carries a plain-text
+rendering of its initial state, shown by clients that cannot draw
+`kt.ui`.

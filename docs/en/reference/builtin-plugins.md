@@ -25,6 +25,7 @@ of the sandbox plugin, see
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`, `on_load` | Trigger eager context compaction after high-token LLM calls. |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
 | [`ui.apps`](#uiapps) | 50 | `contribute_tools` | Adds `show_app`: model-written HTML apps in the web UI. |
+| [`ui.declarative`](#uideclarative) | 50 | `contribute_tools` | The `show_ui` tool: declarative chat widgets (renderer `kt.ui`). |
 
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
@@ -265,6 +266,35 @@ plugins:
 
 See [Chat widgets](../guides/chat-widgets.md) for the bridge, the sandbox
 and compaction behaviour.
+
+## `ui.declarative`
+
+Contributes the `show_ui` tool, which opens declarative widgets
+(forms, tables, charts, calculators) in the chat or the canvas.
+Implementation: `src/kohakuterrarium/builtins/plugins/ui_declarative/plugin.py`.
+
+### Options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `default_surface` | `chat` \| `canvas` | `chat` | Where widgets open when the call names no surface. `layout: "page"` specs always default to `canvas`. |
+
+### Behaviour
+
+`show_ui` declares `requires_renderers = {"kt.ui"}`, so the model sees
+the tool and its guidance only while an attached client reports the
+`kt.ui` renderer (the web UI does, after its `client_hello`). Headless
+and terminal creatures never see it. See
+[guides/chat-widgets](../guides/chat-widgets.md#declarative-ui-show_ui).
+
+### Example
+
+```yaml
+plugins:
+  - name: ui.declarative
+    options:
+      default_surface: chat
+```
 
 ## Activation summary
 
