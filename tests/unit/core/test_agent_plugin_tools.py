@@ -88,6 +88,27 @@ class TestConstruction:
                 plugins=[_plugin("apps", "show_app")],
             )
 
+    async def test_same_tool_class_already_configured_is_kept_not_a_clash(
+        self, tmp_path
+    ):
+        shared = _tool_class("show_ui")
+        configured = shared()
+
+        class _P(BasePlugin):
+            name = "ui.declarative"
+
+            def contribute_tools(self):
+                return [shared()]
+
+        agent = await kt.Agent.build(
+            _cfg(tmp_path), llm=ScriptedLLM(["x"]), tools=[configured], plugins=[_P()]
+        )
+        assert agent.registry.get_tool("show_ui") is configured
+        agent.plugins.disable("ui.declarative")
+        assert agent.registry.get_tool("show_ui") is configured, "not the plugin's"
+        agent.plugins.enable("ui.declarative")
+        assert agent.registry.get_tool("show_ui") is configured
+
     async def test_two_plugins_with_the_same_tool_fail_the_build(self, tmp_path):
         with pytest.raises(PluginToolConflictError, match="both contribute"):
             await kt.Agent.build(

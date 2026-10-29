@@ -18,7 +18,8 @@ class AgentPluginToolsMixin:
         """Register tools of enabled plugins and remove tools of disabled ones.
 
         Raises :class:`PluginToolConflictError` before the registry changes
-        when a contributed name is already taken by another tool.
+        when a contributed name is already taken by another tool. A tool of
+        the same class that is already configured is kept and stays its owner's.
         """
         plugins = getattr(self, "plugins", None)
         desired: dict[str, tuple[str, Any]] = {}
@@ -44,11 +45,16 @@ class AgentPluginToolsMixin:
             for name, (_, tool) in installed.items()
             if name not in desired or desired[name][1] is not tool
         }
+        configured: set[str] = set()
         for name, (origin, tool) in desired.items():
             if name in installed and name not in removed:
                 continue
             current = self.registry.get_tool(name)
-            if current is not None and current is not tool and name not in removed:
+            if current is None or current is tool or name in removed:
+                continue
+            if type(current) is type(tool):
+                configured.add(name)
+            else:
                 raise PluginToolConflictError(
                     f"plugin {origin!r} contributes tool {name!r}, "
                     "which is already registered"
@@ -59,7 +65,7 @@ class AgentPluginToolsMixin:
             del installed[name]
             logger.info("Plugin tool removed", tool_name=name)
         for name, (origin, tool) in desired.items():
-            if name in installed:
+            if name in installed or name in configured:
                 continue
             self.registry.register_tool(tool)
             self.executor.register_tool(tool)
