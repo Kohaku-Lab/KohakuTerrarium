@@ -64,7 +64,7 @@ class TestSection:
         assert plugin.presentation_contribution(_context({})) is None
         assert plugin.presentation_contribution(_context({"kt.app": 1})) is None
         part = plugin.presentation_contribution(_context({"kt.ui": 1}))
-        assert part == inline_ui_section(on_demand=False)
+        assert part == inline_ui_section(on_demand=False, html=False)
         assert part.startswith("### Inline components")
         assert "show_app" not in part, "the full-page pointer belongs to ui.apps"
         assert plugin.presentation_contribution(PluginContext()) is None
@@ -73,8 +73,8 @@ class TestSection:
     def test_on_demand_components_are_named_when_info_is_callable(self):
         plugin = UiDeclarativePlugin()
         for context in (
-            _context({"kt.ui": 1}, info=True),
-            _context({"kt.ui": 1}, tool_format="bracket"),
+            _context({"kt.ui": 1, "kt.app": 1}, info=True),
+            _context({"kt.ui": 1, "kt.app": 1}, tool_format="bracket"),
         ):
             part = plugin.presentation_contribution(context)
             assert part == inline_ui_section()
@@ -87,15 +87,26 @@ class TestSection:
                 assert f"- `{name}`" in part, name
         assert len(inline_ui_section()) < len(inline_ui_section(on_demand=False))
 
+    def test_html_is_taught_only_with_a_client_that_runs_app_frames(self):
+        plugin = UiDeclarativePlugin()
+        without = plugin.presentation_contribution(_context({"kt.ui": 1}, info=True))
+        assert "`html`" not in without and "→ `html`" not in without
+        assert "`math` and `copy` take raw text" in without
+        both = plugin.presentation_contribution(
+            _context({"kt.ui": 1, "kt.app": 1}, info=True)
+        )
+        assert both == inline_ui_section()
+        assert "→ `html` (a sandboxed frame" in both and "`html`, `math`" in both
+        assert plugin.presentation_contribution(_context({"kt.app": 1})) is None
+
     def test_without_info_every_component_is_inline(self):
         part = UiDeclarativePlugin().presentation_contribution(_context({"kt.ui": 1}))
         assert "ui:<name>" not in part and "- More" not in part
         assert "- `quiz`: question*" in part
 
     def test_every_on_demand_component_has_a_valid_example(self):
-        assert set(EXAMPLES) == set(ON_DEMAND)
-        assert set(ON_DEMAND) <= set(COMPONENTS)
-        for name in ON_DEMAND:
+        assert set(ON_DEMAND) <= set(EXAMPLES) <= set(COMPONENTS)
+        for name in EXAMPLES:
             doc = component_doc(name)
             assert doc.startswith(f"# ui:{name}") and f"- `{name}`" in doc
             source = doc.split("Example:\n", 1)[1]
@@ -138,7 +149,7 @@ class TestSection:
     def test_catalog_entry_and_renderer_dependency(self):
         assert lookup_plugin("ui.declarative") is not None
         plugin = UiDeclarativePlugin(default_surface="canvas")
-        assert plugin.prompt_renderers == frozenset({"kt.ui"})
+        assert plugin.prompt_renderers == frozenset({"kt.ui", "kt.app"})
         assert plugin.contribute_tools() == []
 
 
@@ -147,6 +158,52 @@ def _types(node):
     for child in node.get("children", []) or []:
         found += _types(child)
     return found
+
+
+class TestListAttributes:
+    def test_the_syntax_says_list_entries_are_attributes(self):
+        section = inline_ui_section()
+        rule = next(
+            line for line in section.splitlines() if "never as child tags" in line
+        )
+        for piece in (
+            "`items={[…]}`",
+            "`compare`",
+            "`fields={[…]}`",
+            "`rows={[…]}`",
+            "`options={[…]}`",
+        ):
+            assert piece in rule, piece
+        assert (
+            "- `compare`: items*: [{title, pros: [text], cons: [text], verdict}]"
+            in section
+        )
+
+    def test_the_note_teaches_the_component_it_names(self):
+        failures = block_failures('<ui><compare><item title="A"/></compare></ui>')
+        assert failures == [
+            (1, "<compare> takes no children; set items={[…]} as attributes")
+        ]
+        note = failure_note(failures)
+        assert (
+            "- `compare`: items*: [{title, pros: [text], cons: [text], verdict}]"
+            in note
+        )
+        assert "e.g. <compare items={[{title:" in note
+        assert "- `item`" not in note, "only real components are described"
+
+    def test_the_note_describes_at_most_three_components(self):
+        reasons = [
+            (i, f"<{n}> takes no children")
+            for i, n in enumerate(["compare", "table", "steps", "tree", "quiz"], 1)
+        ]
+        note = failure_note(reasons)
+        assert note.count("\n- `") == 3
+        assert "- `tree`" not in note and "- `quiz`" not in note
+
+    def test_a_note_without_component_names_has_no_props(self):
+        note = failure_note([(1, "root.value: is required")])
+        assert "How to write them" not in note
 
 
 class TestFailureNote:

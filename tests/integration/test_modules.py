@@ -2733,6 +2733,7 @@ class TestModulesIntegration:
             prompt = agent.get_system_prompt()
             assert "When inline UI is not enough, use `show_app`: a full page" in prompt
             assert "stays inline as `html`" in prompt
+            assert "→ `html` (a sandboxed frame" in prompt
 
             await agent._process_event(create_user_input_event("split the bill"))
             last = agent.controller.conversation.get_last_assistant_message()
@@ -2769,6 +2770,8 @@ class TestModulesIntegration:
                 "When inline UI is not enough" not in prompt
                 and "show_app" not in prompt
             )
+            # The terminal runs no app frames, so the ``html`` component is not taught.
+            assert "→ `html`" not in prompt and "`html`" not in prompt
 
             agent.plugins.disable("ui.declarative")
             assert "### Inline components" not in agent.get_system_prompt()

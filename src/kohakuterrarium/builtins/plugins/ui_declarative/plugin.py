@@ -9,6 +9,7 @@ its errors.
 """
 
 import hashlib
+import re
 from typing import Any
 
 from kohakuterrarium.builtins.kt_ui.markup import MarkupError, check_block
@@ -16,16 +17,22 @@ from kohakuterrarium.builtins.kt_ui.markup_lex import split_message
 from kohakuterrarium.builtins.kt_ui.spec import SpecError
 from kohakuterrarium.builtins.kt_ui.components import COMPONENTS
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
+    EXAMPLES,
     component_doc,
+    component_line,
     inline_ui_section,
 )
 from kohakuterrarium.core.tool_gate import visible_tool_names
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 
 RENDERER = "kt.ui"
+# ``html`` runs in the app frame, so it is taught only with a ``kt.app`` client.
+APP_RENDERER = "kt.app"
 MAX_NOTED = 256
 NOTED_STATE_KEY = "noted"
 MAX_REASON_CHARS = 300
+MAX_NOTE_COMPONENTS = 3
+_TAG_RE = re.compile(r"<([a-z_]+)[\s>]")
 
 
 def _text_of(content: Any) -> str:
@@ -59,9 +66,22 @@ def block_failures(text: str) -> list[tuple[int, str]]:
 
 
 def failure_note(failures: list[tuple[int, str]]) -> str:
-    """The note the model reads about its failed blocks."""
+    """The note the model reads about its failed blocks, with the props of the components named."""
     lines = ["[inline UI] Some <ui> blocks in your last reply could not be drawn:"]
     lines += [f"- block {n}: {reason}" for n, reason in failures]
+    named = [
+        name
+        for name in dict.fromkeys(
+            m for _, reason in failures for m in _TAG_RE.findall(reason)
+        )
+        if name in COMPONENTS
+    ][:MAX_NOTE_COMPONENTS]
+    if named:
+        lines.append("How to write them:")
+        for name in named:
+            lines.append(component_line(name))
+            if name in EXAMPLES:
+                lines.append(f"  e.g. {EXAMPLES[name].splitlines()[0]}")
     lines.append(
         "The user saw an error box for these; fix them when you write UI again."
     )
@@ -74,7 +94,7 @@ class UiDeclarativePlugin(BasePlugin):
     name = "ui.declarative"
     description = "Inline UI: the model writes tables, charts, diagrams and controls in its replies."
     priority = 50
-    prompt_renderers = frozenset({RENDERER})
+    prompt_renderers = frozenset({RENDERER, APP_RENDERER})
     doc_prefix = "ui"
 
     def __init__(self, **_extra: Any) -> None:
@@ -89,9 +109,13 @@ class UiDeclarativePlugin(BasePlugin):
             self._noted = {key: None for key in saved if isinstance(key, str)}
 
     def presentation_contribution(self, context: PluginContext) -> str | None:
-        if RENDERER not in attached_renderers(context.host_agent):
+        renderers = attached_renderers(context.host_agent)
+        if RENDERER not in renderers:
             return None
-        return inline_ui_section(on_demand=info_available(context.host_agent))
+        return inline_ui_section(
+            on_demand=info_available(context.host_agent),
+            html=APP_RENDERER in renderers,
+        )
 
     def doc_topics(self, context: PluginContext | None) -> list[str]:
         return list(COMPONENTS)

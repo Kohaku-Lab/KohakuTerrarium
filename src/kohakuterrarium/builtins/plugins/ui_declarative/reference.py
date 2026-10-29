@@ -27,14 +27,18 @@ This chat draws UI components that you write directly in your reply. Use them in
 - options with trade-offs → `compare` (pros, cons, verdict)
 - practice and self-checks → `quiz`; a time box → `timer`; a score the user gives → `rating`
 - next steps the user can pick → `button send="…"`; a click sends that text as the user's next message
-- a custom visual the components cannot express, such as a styled illustration, an SVG drawing or a one-off widget → `html` (a sandboxed frame with no network: inline every script, style and image)
 Mix components with Markdown prose; one reply can hold several `<ui>` blocks."""
+_HTML_LINE = "- a custom visual the components cannot express, such as a styled illustration, an SVG drawing or a one-off widget → `html` (a sandboxed frame with no network: inline every script, style and image)"
+_MIX_LINE = (
+    "Mix components with Markdown prose; one reply can hold several `<ui>` blocks."
+)
 
 _SYNTAX = """#### Writing a block
 - A block starts with `<ui>` at the start of a line and ends with `</ui>`. Root attributes: `title="…"`, `layout="page"` for a wide view.
 - `<state a={1} b="x"/>` declares values that inputs change; `<let total={a * 2}/>` declares computed values. Both go directly inside `<ui>`.
 - Attributes: `name="text"` (may contain `{expr}`), `name={expr}` (a number, `[list]`, `{key: value}` object, or an expression over state), or a bare `name` for true.
 - Text between tags is content: `<text>Markdown with {expr}</text>`, `<stat label="Each">{fmt(each, 2)}</stat>`, `<button send="…">Label</button>`. `code`, `diagram`, `math`, `copy` and `html` take raw text. Write `{{` for a literal brace.
+- List components take their entries as attributes, never as child tags: `items={[…]}` (`steps`, `timeline`, `tree`, `gallery`, `compare`, `list`), `fields={[…]}` (`kv`), `columns={[…]}` and `rows={[…]}` (`table`), `options={[…]}` (`select`, `radio`, `quiz`).
 - Several top-level components stack vertically."""
 
 _EXPRESSIONS = """#### Expressions
@@ -108,6 +112,7 @@ def _prop_text(component: str, name: str, prop: Prop) -> str | None:
 
 
 # Components whose props are loaded with ``info("ui:<name>")``; the rest are inline.
+# ``EXAMPLES`` covers these and the inline components models most often get wrong.
 ON_DEMAND = (
     "section",
     "accordion",
@@ -121,7 +126,6 @@ ON_DEMAND = (
     "link",
     "icon",
     "gallery",
-    "compare",
     "copy",
     "timer",
     "quiz",
@@ -193,25 +197,34 @@ def component_doc(name: str) -> str | None:
     return "\n\n".join(parts)
 
 
-def inline_ui_section(on_demand: bool = True) -> str:
+def inline_ui_section(on_demand: bool = True, html: bool = True) -> str:
     """The inline-components part: when to use them, syntax, components, example.
 
     With ``on_demand`` the ``ON_DEMAND`` components are named in one line and
     their props come from ``info``; without it every component is inline.
+    ``html=False`` leaves out the ``html`` component, for clients that run no
+    app frames.
     """
-    inline = [n for n in COMPONENTS if not (on_demand and n in ON_DEMAND)]
+    shown = [n for n in COMPONENTS if html or n != "html"]
+    inline = [n for n in shown if not (on_demand and n in ON_DEMAND)]
     components = (
         "#### Components (* required; every component also takes `visible`)\n"
         + "\n".join(component_lines(inline))
     )
     if on_demand:
-        names = ", ".join(f"`{n}`" for n in COMPONENTS if n in ON_DEMAND)
+        names = ", ".join(f"`{n}`" for n in shown if n in ON_DEMAND)
         components += (
             f"\n- More, ready to use: {names}. Before the first use of one in "
             "a conversation, call `info` with `ui:<name>` for its props and an "
             "example."
         )
-    return "\n\n".join([_INTRO, _SYNTAX, components, _EXPRESSIONS, _EXAMPLE])
+    intro = _INTRO.replace(_MIX_LINE, (_HTML_LINE + "\n" if html else "") + _MIX_LINE)
+    syntax = (
+        _SYNTAX
+        if html
+        else _SYNTAX.replace("`math`, `copy` and `html`", "`math` and `copy`")
+    )
+    return "\n\n".join([intro, syntax, components, _EXPRESSIONS, _EXAMPLE])
 
 
 __all__ = [

@@ -556,6 +556,11 @@ class Converter {
       if (items.length === 1) node.child = items[0]
       else if (items.length) node.child = { type: "stack", gap: "sm", children: items }
     } else if (nodes.length || texts.some((t) => dedent(t.text))) {
+      const lists = Object.keys(component).filter((key) => component[key] === "list")
+      if (lists.length) {
+        const attrs = lists.map((key) => `${key}={[…]}`).join(" and ")
+        throw new MarkupError(`<${name}> takes no children; set ${attrs} as attributes`)
+      }
       throw new MarkupError(`<${name}> takes no children`)
     }
     return node

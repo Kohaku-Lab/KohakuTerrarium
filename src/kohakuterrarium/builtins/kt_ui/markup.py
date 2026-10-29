@@ -211,6 +211,12 @@ class _Converter:
             elif items:
                 node["child"] = {"type": "stack", "gap": "sm", "children": items}
         elif nodes or any(_clean(t[1]) for t in texts):
+            lists = [k for k, p in component.props.items() if p.kind == "list"]
+            if lists:
+                attrs = " and ".join(f"{k}={{[…]}}" for k in lists)
+                raise MarkupError(
+                    f"<{name}> takes no children; set {attrs} as attributes"
+                )
             raise MarkupError(f"<{name}> takes no children")
         return node
 
