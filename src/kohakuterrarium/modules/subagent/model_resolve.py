@@ -8,6 +8,7 @@ from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.llm.base import LLMProvider, fork_llm
 from kohakuterrarium.llm.preset_store import get_subagent_models
 from kohakuterrarium.llm.profiles import get_profile
+from kohakuterrarium.llm.variations import parse_variation_selector
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
@@ -42,6 +43,11 @@ def resolve_subagent_llm(
         or lowered in _NAMED_DEFAULT_SENTINELS | _INHERIT_PARENT_SENTINELS
     )
     name = table_name if uses_table else configured
+    if name.startswith("@"):
+        try:
+            parse_variation_selector(name)
+        except ValueError:
+            return fork_llm(parent_llm)
     if not uses_table and (
         not name or lowered in _NAMED_DEFAULT_SENTINELS | _INHERIT_PARENT_SENTINELS
     ):
