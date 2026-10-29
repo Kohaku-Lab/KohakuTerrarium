@@ -26,6 +26,7 @@ from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session, get_session
 from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
+from kohakuterrarium.core.tool_gate import is_subagent_visible, visible_catalog
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.router import OutputRouter
@@ -333,10 +334,17 @@ class AgentInitMixin:
         # The aggregator adds tools and framework hints; system.md remains agent-specific.
         base_prompt = self.config.system_prompt
         pending_subagents_prompt = ""
+        visibility = visible_catalog(
+            self.registry,
+            getattr(self, "plugins", None),
+            getattr(self, "output_router", None),
+        )
 
         # Sub-agent inventory follows the same prompt-inclusion switch as tools.
         if self.config.include_tools_in_prompt:
-            subagents_prompt = self.subagent_manager.get_subagents_prompt()
+            subagents_prompt = self.subagent_manager.get_subagents_prompt(
+                lambda name: is_subagent_visible(name, visibility)
+            )
             if subagents_prompt:
                 pending_subagents_prompt = subagents_prompt
 
@@ -403,6 +411,7 @@ class AgentInitMixin:
             ),
             runtime_plugins=getattr(self, "plugins", None),
             plugin_context=plugin_context,
+            visibility=visibility,
         )
 
     def _ensure_skill_tool_registered(self) -> None:

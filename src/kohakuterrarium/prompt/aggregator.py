@@ -13,6 +13,7 @@ from typing import Any
 
 from kohakuterrarium.builtin_skills import get_all_subagent_docs, get_all_tool_docs
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.tool_gate import visible_subagent_names, visible_tool_names
 from kohakuterrarium.parsing.format import (
     BRACKET_FORMAT,
     XML_FORMAT,
@@ -29,6 +30,7 @@ from kohakuterrarium.prompt.framework_hints import (
     is_default_hint,
 )
 from kohakuterrarium.modules.plugin.base import PluginContext as RuntimePluginContext
+from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.tool.doc_mode import (
     DOC_MODE_FULL,
@@ -68,16 +70,18 @@ def _get_tool_call_format(tool_format: str) -> ToolCallFormat:
 
 
 def _build_tool_examples(
-    registry: Registry | None, tool_format: str = "bracket"
+    registry: Registry | None,
+    tool_format: str = "bracket",
+    visibility: ToolVisibility | None = None,
 ) -> str:
-    """Render representative registered functions in the configured syntax."""
+    """Render representative visible functions in the configured syntax."""
     if not registry:
         return ""
 
     fmt = _get_tool_call_format(tool_format)
     examples: list[str] = []
-    tool_names = set(registry.list_tools())
-    subagent_names = set(registry.list_subagents())
+    tool_names = set(visible_tool_names(registry, visibility))
+    subagent_names = set(visible_subagent_names(registry, visibility))
 
     if "read" in tool_names:
         ex = format_tool_call_example(fmt, "read", {"path": "file.py"})
@@ -106,6 +110,7 @@ def _build_call_syntax(
     registry: Registry | None,
     tool_format: str,
     overrides: dict[str, str] | None = None,
+    visibility: ToolVisibility | None = None,
 ) -> str:
     """Render the call-syntax block for text tool-call formats.
 
@@ -119,7 +124,9 @@ def _build_call_syntax(
         return template.strip()
 
     fmt = _get_tool_call_format(tool_format)
-    examples = _build_tool_examples(registry, tool_format=tool_format)
+    examples = _build_tool_examples(
+        registry, tool_format=tool_format, visibility=visibility
+    )
     return template.format(
         format_example=format_tool_call_example(
             fmt, "function_name", {"arg": "value"}, "content here"
@@ -165,6 +172,7 @@ def aggregate_system_prompt(
     skill_index_budget_bytes: int = DEFAULT_SKILL_INDEX_BUDGET_BYTES,
     runtime_plugins: PluginManager | None = None,
     plugin_context: RuntimePluginContext | None = None,
+    visibility: ToolVisibility | None = None,
 ) -> str:
     """Build a complete system prompt in stable component order.
 
@@ -172,6 +180,8 @@ def aggregate_system_prompt(
     carries it natively, the call-syntax block only exists for text formats, and
     inline tool usage appears only for tools resolved to ``full``. Graph
     sections are owned by the terrarium layer and are not emitted here.
+    ``visibility`` is the model-visible catalog; every section naming tools
+    or sub-agents honours it.
     """
     parts = []
 
@@ -186,7 +196,7 @@ def aggregate_system_prompt(
                     else ""
                 ),
             }
-            for name in registry.list_tools()
+            for name in visible_tool_names(registry, visibility)
         ]
 
     rendered_base = render_template_safe(base_prompt, **context)
@@ -198,17 +208,19 @@ def aggregate_system_prompt(
         # Native providers already receive name + description as schema; a
         # second copy in prose is pure duplication.
         if not is_native or tool_doc_mode == DOC_MODE_FULL:
-            tools_list = _build_tools_list(registry)
+            tools_list = _build_tools_list(registry, visibility)
             if tools_list:
                 parts.append(tools_list)
 
-        inline_docs = _build_inline_tool_docs(registry, tool_doc_mode)
+        inline_docs = _build_inline_tool_docs(registry, tool_doc_mode, visibility)
         if inline_docs:
             parts.append(inline_docs)
 
     # Tool guidance follows inventory and obeys the same inclusion gate.
     if registry and include_tools:
-        guidance = build_tool_guidance_section(registry)
+        guidance = build_tool_guidance_section(
+            registry, visible_tool_names(registry, visibility)
+        )
         if guidance:
             parts.append(guidance)
 
@@ -235,7 +247,10 @@ def aggregate_system_prompt(
 
         if not is_native:
             syntax = _build_call_syntax(
-                registry, tool_format, overrides=framework_hint_overrides
+                registry,
+                tool_format,
+                overrides=framework_hint_overrides,
+                visibility=visibility,
             )
             if syntax:
                 parts.append(syntax)
@@ -291,10 +306,12 @@ def _build_output_hints(
     return template.format(named_outputs_section=named_section).strip()
 
 
-def _build_tools_list(registry: Registry) -> str:
-    """List registered tools and sub-agents with concise descriptions."""
-    tool_names = registry.list_tools()
-    subagent_names = registry.list_subagents()
+def _build_tools_list(
+    registry: Registry, visibility: ToolVisibility | None = None
+) -> str:
+    """List visible tools and sub-agents with concise descriptions."""
+    tool_names = visible_tool_names(registry, visibility)
+    subagent_names = visible_subagent_names(registry, visibility)
 
     if not tool_names and not subagent_names:
         return ""
@@ -326,7 +343,11 @@ def _build_tools_list(registry: Registry) -> str:
     return "\n".join(lines)
 
 
-def _build_inline_tool_docs(registry: Registry, default_mode: str) -> str:
+def _build_inline_tool_docs(
+    registry: Registry,
+    default_mode: str,
+    visibility: ToolVisibility | None = None,
+) -> str:
     """Inline the usage tier for every function resolved to ``full``.
 
     Only the usage tier is inlined; reference material stays behind ``info`` in
@@ -334,11 +355,13 @@ def _build_inline_tool_docs(registry: Registry, default_mode: str) -> str:
     """
     tool_names = [
         name
-        for name in registry.list_tools()
+        for name in visible_tool_names(registry, visibility)
         if resolve_doc_mode(registry.get_tool(name), default_mode) == DOC_MODE_FULL
     ]
     subagent_names = (
-        list(registry.list_subagents()) if default_mode == DOC_MODE_FULL else []
+        visible_subagent_names(registry, visibility)
+        if default_mode == DOC_MODE_FULL
+        else []
     )
 
     if not tool_names and not subagent_names:

@@ -595,6 +595,14 @@ class TestModulesIntegration:
         assert [s.name for s in agent.controller._get_native_tool_schemas()] == [
             "recorder"
         ]
+        # The same restriction governs the text-format prompt the toggle
+        # rebuilt: hidden tools are not listed for the model either.
+        listing = agent.get_system_prompt().split("## Available Functions", 1)[1]
+        assert "`recorder`" in listing and "`visibility_probe`" not in listing
+        assert mgr.disable("tool_visibility") is True
+        listing = agent.get_system_prompt().split("## Available Functions", 1)[1]
+        assert "`visibility_probe`" in listing
+        assert mgr.enable("tool_visibility") is True
 
         await agent.start()
         # on_agent_start fired on agent.start().

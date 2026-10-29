@@ -44,6 +44,7 @@ from kohakuterrarium.core.inline_upload import materialize_upload
 from kohakuterrarium.core.job import JobResult, JobStatus, JobStore
 from kohakuterrarium.core.pinned import PinnedContext
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.tool_gate import visible_catalog
 from kohakuterrarium.core.tool_output import materialize_image_part
 from kohakuterrarium.errors import InvalidRequestError
 from kohakuterrarium.llm.base import LLMProvider
@@ -281,14 +282,15 @@ class Controller:
         return self.config.tool_format == "native"
 
     def _get_tool_visibility(self) -> ToolVisibility | None:
-        """Collect active plugins' per-request tool catalog restrictions."""
-        plugins = getattr(self, "plugins", None)
-        if plugins is None:
-            return None
-        return plugins.collect_tool_visibility()
+        """Collect plugin restrictions and renderer availability for this request."""
+        return visible_catalog(
+            self.registry,
+            getattr(self, "plugins", None),
+            getattr(self, "output_router", None),
+        )
 
     def _get_native_tool_schemas(self) -> "list[ToolSchema]":
-        """Build callable schemas, applying plugin tool-visibility restrictions."""
+        """Build callable schemas, applying the visible tool catalog."""
         schemas = build_tool_schemas(
             self.registry, tool_doc_mode=self.config.tool_doc_mode
         )

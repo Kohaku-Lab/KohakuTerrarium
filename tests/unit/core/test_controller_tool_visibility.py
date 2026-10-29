@@ -2,7 +2,8 @@
 
 Behavior-first: plugin contributions restrict native tool schemas by
 category (tools vs sub-agents), provider-native tools obey the tool
-restriction, and a missing manager leaves the catalog untouched.
+restriction, a missing manager leaves the catalog untouched, and a tool
+requiring a renderer appears only while the output router reports it.
 """
 
 from types import SimpleNamespace
@@ -142,3 +143,57 @@ class TestControllerVisibility:
         assert [tool.tool_name for tool in controller._get_provider_native_tools()] == [
             "native"
         ]
+
+
+class _AppTool(_PlainTool):
+    requires_renderers = frozenset({"kt.app"})
+
+    @property
+    def tool_name(self) -> str:
+        return "show_app"
+
+
+class _Router:
+    def __init__(self, renderers):
+        self.renderers = renderers
+
+    def ui_renderers(self):
+        return dict(self.renderers)
+
+
+class TestRendererGate:
+    def _controller(self, renderers):
+        controller, registry = _make_controller()
+        registry.register_tool(_AppTool())
+        controller.output_router = _Router(renderers)
+        return controller
+
+    def test_gated_tool_absent_without_its_renderer(self):
+        controller = self._controller({})
+        names = [schema.name for schema in controller._get_native_tool_schemas()]
+        assert names == ["plain", "worker"]
+
+    def test_gated_tool_present_with_its_renderer(self):
+        controller = self._controller({"kt.app": 1})
+        names = [schema.name for schema in controller._get_native_tool_schemas()]
+        assert names == ["plain", "show_app", "worker"]
+
+    def test_gate_follows_the_router_per_request(self):
+        controller = self._controller({})
+        assert "show_app" not in [s.name for s in controller._get_native_tool_schemas()]
+        controller.output_router.renderers = {"kt.app": 1}
+        assert "show_app" in [s.name for s in controller._get_native_tool_schemas()]
+
+    def test_gate_and_plugin_restriction_intersect(self):
+        controller = self._controller({"kt.app": 1})
+        controller.plugins = _VisibilityManager(
+            ToolVisibility(allowed_tools=frozenset({"plain"}))
+        )
+        names = [schema.name for schema in controller._get_native_tool_schemas()]
+        assert names == ["plain", "worker"]
+
+    def test_router_without_renderer_report_hides_gated_tools(self):
+        controller = self._controller({})
+        controller.output_router = object()
+        names = [schema.name for schema in controller._get_native_tool_schemas()]
+        assert "show_app" not in names and "plain" in names

@@ -197,6 +197,9 @@ class BaseTool(UIOwnerMixin):
     # sandbox plugin checks each declared value (a path or a list of paths).
     path_arguments: ClassVar[dict[str, str]] = {}
 
+    # Widget renderer ids that must be attached for the model to see this tool.
+    requires_renderers: ClassVar[frozenset[str]] = frozenset()
+
     def __init__(self, config: ToolConfig | None = None):
         self.config = config or ToolConfig()
         self._manual_read = False

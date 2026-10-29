@@ -21,7 +21,7 @@ def _intersect_names(
     return left & right
 
 
-def _merge_visibility(
+def merge_visibility(
     current: ToolVisibility | None, extra: ToolVisibility
 ) -> ToolVisibility:
     """Merge an extra restriction into the running restriction set."""
@@ -127,5 +127,5 @@ class ToolVisibilityCollectorMixin:
                     returned_type=type(contributed).__name__,
                 )
                 continue
-            merged = _merge_visibility(merged, contributed)
+            merged = merge_visibility(merged, contributed)
         return merged

@@ -6,6 +6,8 @@ gate is asserted in both directions: present when true, absent when false.
 """
 
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.tool_gate import renderer_visibility
+from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolConfig
 from kohakuterrarium.modules.tool.base import ToolResult
 from kohakuterrarium.prompt.aggregator import (
@@ -252,3 +254,85 @@ class TestBuildContextMessage:
     def test_job_status_leads(self):
         out = build_context_message("EVENTS", job_status="job-1 running")
         assert out.index("## Running Jobs") < out.index("EVENTS")
+
+
+def _gated_tool(name, desc, renderers, *, doc_mode=None, contribution=None):
+    """A tool the model may see only while ``renderers`` are attached."""
+    tool = _tool(name, desc, doc_mode=doc_mode, contribution=contribution)
+    type(tool).requires_renderers = frozenset(renderers)
+    return tool
+
+
+class TestCatalogVisibility:
+    """A tool hidden from the catalog is absent from every section naming tools."""
+
+    def _reg(self):
+        return _registry(
+            _tool("read", "Read files", contribution="read guidance"),
+            _gated_tool(
+                "show_app",
+                "Show an app",
+                {"kt.app"},
+                doc_mode="full",
+                contribution="app guidance",
+            ),
+            subagents=("explore",),
+        )
+
+    def _build(self, reg, renderers, base="base", **kwargs):
+        return aggregate_system_prompt(
+            base,
+            reg,
+            tool_format="bracket",
+            visibility=renderer_visibility(reg, renderers),
+            **kwargs,
+        )
+
+    def test_gated_tool_absent_without_its_renderer(self):
+        out = self._build(self._reg(), {})
+        assert "- `read`: Read files" in out
+        assert "show_app" not in out
+        assert "read guidance" in out and "app guidance" not in out
+        assert "## Function Documentation" not in out
+
+    def test_gated_tool_present_with_its_renderer(self):
+        out = self._build(self._reg(), {"kt.app": 1})
+        assert "- `show_app`: Show an app" in out
+        assert "show_app" in out.split("## Function Documentation", 1)[1]
+        assert "app guidance" in out
+
+    def test_tools_template_variable_follows_the_gate(self):
+        hidden = self._build(self._reg(), {}, base="{{ tools }}")
+        shown = self._build(self._reg(), {"kt.app": 1}, base="{{ tools }}")
+        assert "show_app" not in hidden and "read" in hidden
+        assert "show_app" in shown
+
+    def test_native_guidance_follows_the_gate(self):
+        reg = self._reg()
+        hidden = aggregate_system_prompt(
+            "base", reg, visibility=renderer_visibility(reg, {})
+        )
+        shown = aggregate_system_prompt(
+            "base", reg, visibility=renderer_visibility(reg, {"kt.app": 1})
+        )
+        assert "app guidance" not in hidden and "app guidance" in shown
+
+    def test_plugin_visibility_applies_to_text_format_prompts(self):
+        visibility = ToolVisibility(
+            allowed_tools=frozenset({"show_app"}), allowed_subagents=frozenset()
+        )
+        out = aggregate_system_prompt(
+            "base", self._reg(), tool_format="bracket", visibility=visibility
+        )
+        listing = out.split("## Available Functions", 1)[1]
+        assert "`show_app`" in listing
+        assert "`read`" not in listing and "`explore`" not in listing
+        assert "read guidance" not in out
+
+    def test_hidden_tools_never_appear_in_call_examples(self):
+        reg = _registry(_tool("read", "Read"), _tool("bash", "Shell"))
+        visibility = ToolVisibility(allowed_tools=frozenset({"bash"}))
+        out = aggregate_system_prompt(
+            "base", reg, tool_format="bracket", visibility=visibility
+        )
+        assert "file.py" not in out and "ls -la" in out
