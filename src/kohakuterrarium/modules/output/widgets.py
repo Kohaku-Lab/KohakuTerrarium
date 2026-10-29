@@ -20,6 +20,10 @@ from typing import Any, Literal
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.modules.output.event import OutputEvent, Surface
+from kohakuterrarium.modules.output.widgets_legacy import (
+    LEGACY_KINDS,
+    LegacyWidgetsMixin,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -28,6 +32,7 @@ MAX_MESSAGE_BYTES = 16 * 1024
 MAX_STATE_BYTES = 64 * 1024
 MESSAGE_BURST = 10
 MESSAGE_WINDOW_S = 10.0
+MAX_RECORDS = 2048
 
 _clock = time.monotonic
 
@@ -66,6 +71,8 @@ class WidgetRecord:
     interactive: bool = True
     state: dict[str, Any] = field(default_factory=dict)
     closed: bool = False
+    legacy: str | None = None
+    spec: Any = None
     recent: deque = field(default_factory=deque)
     consumers: list["_Consumer"] = field(default_factory=list)
 
@@ -105,6 +112,20 @@ class WidgetRegistry:
 
     def add(self, record: WidgetRecord) -> None:
         self._records[record.widget_id] = record
+        if len(self._records) > MAX_RECORDS:
+            self._evict()
+
+    def _evict(self) -> None:
+        """Drop the oldest finished records: closed widgets, then legacy kinds."""
+        for finished in (
+            lambda r: r.closed,
+            lambda r: r.legacy is not None and not r.interactive,
+        ):
+            for wid in [w for w, r in self._records.items() if finished(r)]:
+                if len(self._records) <= MAX_RECORDS:
+                    return
+                if not self._records[wid].consumers:
+                    del self._records[wid]
 
     def __contains__(self, widget_id: object) -> bool:
         return widget_id in self._records
@@ -124,9 +145,11 @@ class WidgetRegistry:
                 continue
             match evt.get("type"):
                 case "widget":
+                    renderer = str(evt.get("renderer") or "")
                     restored[wid] = WidgetRecord(
                         widget_id=wid,
-                        renderer=str(evt.get("renderer") or ""),
+                        renderer=renderer,
+                        legacy=LEGACY_KINDS.get(renderer),
                         version=int(evt.get("version") or 1),
                         title=str(evt.get("title") or ""),
                         surface=evt.get("surface") or "chat",
@@ -219,12 +242,15 @@ class WidgetHandle:
             self._service._remove_consumer(self.id, consumer)
 
 
-class WidgetService:
+class WidgetService(LegacyWidgetsMixin):
     """Open widgets on a router and route what they send back."""
+
+    _record_type = WidgetRecord
 
     def __init__(self, router: Any) -> None:
         self._router = router
         self.registry = WidgetRegistry()
+        self._init_legacy()
         self._agent_ref: Callable[[], Any] | None = None
         self._restored_from: int | None = None
         self._tasks: set[asyncio.Task] = set()
@@ -350,6 +376,10 @@ class WidgetService:
     def submit_message(self, msg: WidgetMessage) -> str:
         """Route one message; return ``accepted``, ``dropped``, ``unknown`` or ``rate_limited``."""
         record = self._lookup(msg.widget_id)
+        if (record is not None and record.legacy is not None) or (
+            record is None and msg.widget_id in self.pending_replies
+        ):
+            return self._legacy_message(msg)
         if record is None or record.closed or not record.interactive:
             return "unknown"
         if not MESSAGE_NAME.fullmatch(msg.name or ""):

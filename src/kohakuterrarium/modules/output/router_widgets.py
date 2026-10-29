@@ -67,6 +67,25 @@ class OutputRouterWidgetsMixin:
             except Exception as e:
                 logger.warning("renderers listener raised", error=str(e), exc_info=True)
 
+    async def deliver_legacy(self, legacy: OutputEvent, widget: OutputEvent) -> None:
+        """Deliver a legacy-kind event: ``widget`` to outputs with ``on_widget``,
+        the original ``legacy`` event to the others."""
+        for target in self._widget_targets():
+            try:
+                handler = getattr(target, "on_widget", None)
+                if handler is not None:
+                    await handler(widget)
+                else:
+                    await target.emit(legacy)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "output emit failed",
+                    output=type(target).__name__,
+                    event_type=legacy.type,
+                    error=str(e),
+                    exc_info=True,
+                )
+
     async def emit_widget(self, event: OutputEvent, *, exclude: Any = None) -> None:
         """Deliver a widget-family event to every output except ``exclude``.
 

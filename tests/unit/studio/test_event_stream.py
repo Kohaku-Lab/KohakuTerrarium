@@ -393,30 +393,51 @@ class TestStreamOutputEmit:
         "kind",
         ["ask_text", "confirm", "selection", "progress", "notification", "card"],
     )
-    async def test_phase_b_kinds_passed_through(self, kind, _stream):
+    async def test_legacy_kinds_go_out_as_widget_frames(self, kind, _stream):
         so, q, _log = _stream
-        await so.emit(
+        router = OutputRouter(so)
+        await router.emit(
             _evt(
                 kind,
                 id="evt-1",
                 interactive=True,
-                surface="inline",
+                surface="modal",
                 payload={"prompt": "?"},
-                update_target=None,
                 timeout_s=10,
             )
         )
         msg = q.get_nowait()
-        assert msg["type"] == kind
-        assert msg["event_id"] == "evt-1"
-        assert msg["timeout_s"] == 10
+        assert msg["type"] == "widget" and msg["event_id"] == "evt-1"
+        assert msg["timeout_s"] == 10 and msg["surface"] == "modal"
+        assert msg["interactive"] is True
+        assert msg["payload"] == {
+            "renderer": f"kt.{kind}",
+            "version": 1,
+            "title": "",
+            "spec": {"prompt": "?"},
+            "state": {},
+            "fallback": "?",
+            "routing": "drop",
+        }
 
-    async def test_ui_supersede(self, _stream):
+    async def test_progress_update_sends_the_merged_spec(self, _stream):
         so, q, _log = _stream
-        await so.emit(_evt("ui_supersede", payload={"event_id": "e1"}))
+        router = OutputRouter(so)
+        await router.emit(_evt("progress", id="p1", payload={"label": "a", "value": 1}))
+        await router.emit(_evt("progress", update_target="p1", payload={"value": 2}))
+        q.get_nowait()
         msg = q.get_nowait()
-        assert msg["type"] == "ui_supersede"
-        assert msg["event_id"] == "e1"
+        assert msg["type"] == "widget" and msg["event_id"] == "p1"
+        assert msg["update_target"] == "p1"
+        assert msg["payload"]["spec"] == {"label": "a", "value": 2}
+
+    async def test_ui_supersede_becomes_widget_close(self, _stream):
+        so, q, _log = _stream
+        router = OutputRouter(so)
+        await router.emit(_evt("ui_supersede", payload={"event_id": "e1"}))
+        msg = q.get_nowait()
+        assert msg["type"] == "widget_close" and msg["event_id"] == "e1"
+        assert msg["payload"] == {"reason": "superseded"}
 
     async def test_unknown_kind_no_metadata(self, _stream):
         so, q, _log = _stream

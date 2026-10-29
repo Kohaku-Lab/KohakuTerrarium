@@ -2,9 +2,15 @@
 
 from kohakuterrarium.modules.output.event import OutputEvent
 
+# Display-only legacy kinds were never part of the session history.
+UNRECORDED_RENDERERS = frozenset({"kt.progress", "kt.notification"})
+MAX_UNRECORDED = 1024
+
 
 class SessionWidgetsMixin:
     """Persist widget opens, updates, state, messages and closes as session events."""
+
+    _unrecorded_widgets: dict[str, None]
 
     async def on_widget(self, event: OutputEvent) -> None:
         if not self._capture_activity:
@@ -12,6 +18,13 @@ class SessionWidgetsMixin:
         payload = event.payload
         match event.type:
             case "widget" if event.update_target is None:
+                if payload.get("renderer") in UNRECORDED_RENDERERS:
+                    self._unrecorded_widgets[event.id] = None
+                    while len(self._unrecorded_widgets) > MAX_UNRECORDED:
+                        self._unrecorded_widgets.pop(
+                            next(iter(self._unrecorded_widgets))
+                        )
+                    return
                 self._record(
                     "widget",
                     {
@@ -27,7 +40,7 @@ class SessionWidgetsMixin:
                         "routing": payload.get("routing", "agent"),
                     },
                 )
-            case "widget":
+            case "widget" if event.update_target not in self._unrecorded_widgets:
                 self._record(
                     "widget_update",
                     {"widget_id": event.update_target, "patch": dict(payload)},
@@ -52,4 +65,14 @@ class SessionWidgetsMixin:
                     },
                 )
             case "widget_close":
-                self._record("widget_close", {"widget_id": event.update_target})
+                self.on_widget_close(event)
+
+    def on_widget_close(self, event: OutputEvent) -> None:
+        """Record a close, with the reason a legacy interaction ended."""
+        if not self._capture_activity:
+            return
+        widget_id = event.update_target
+        if widget_id in self._unrecorded_widgets:
+            self._unrecorded_widgets.pop(widget_id, None)
+            return
+        self._record("widget_close", {"widget_id": widget_id, **dict(event.payload)})

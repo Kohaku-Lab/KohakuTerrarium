@@ -169,9 +169,11 @@ class StreamOutput(OutputModule):
                 }
                 if event.update_target is not None:
                     msg["update_target"] = event.update_target
+                if event.timeout_s is not None:
+                    msg["timeout_s"] = event.timeout_s
                 self._put(msg)
             case "widget_close":
-                self._put({"type": "widget_close", "event_id": event.update_target})
+                self.on_widget_close(event)
             case "widget_state":
                 self._put(
                     {
@@ -180,6 +182,13 @@ class StreamOutput(OutputModule):
                         "state": dict(event.payload.get("state") or {}),
                     }
                 )
+
+    def on_widget_close(self, event: OutputEvent) -> None:
+        """Send ``widget_close``, with the reason a legacy interaction ended."""
+        msg: dict = {"type": "widget_close", "event_id": event.update_target}
+        if event.payload:
+            msg["payload"] = dict(event.payload)
+        self._put(msg)
 
     def _current_turn_branch(self) -> tuple[int | None, int | None]:
         """Return positive current turn and branch IDs when both are assigned."""
@@ -326,8 +335,7 @@ class StreamOutput(OutputModule):
         """Convert a native output event without changing websocket compatibility.
 
         Legacy activity keys, metadata filtering, and ID sequencing remain stable.
-        Rich UI event kinds use their own top-level frame types so the client can
-        dispatch them directly.
+        UI kinds arrive through ``on_widget`` as widget frames.
         """
         match event.type:
             case "assistant_round_start" | "assistant_message":
@@ -367,35 +375,6 @@ class StreamOutput(OutputModule):
                 )
             case "resume_batch":
                 pass
-            case (
-                "ask_text"
-                | "confirm"
-                | "selection"
-                | "progress"
-                | "notification"
-                | "card"
-            ):
-                # Rich UI payloads remain nested and unfiltered for direct client dispatch.
-                msg: dict = {
-                    "type": event.type,
-                    "event_id": event.id,
-                    "interactive": bool(event.interactive),
-                    "surface": event.surface,
-                    "payload": dict(event.payload),
-                }
-                if event.update_target is not None:
-                    msg["update_target"] = event.update_target
-                if event.timeout_s is not None:
-                    msg["timeout_s"] = event.timeout_s
-                self._put(msg)
-                self._n += 1
-            case "ui_supersede":
-                self._put(
-                    {
-                        "type": "ui_supersede",
-                        "event_id": event.payload.get("event_id"),
-                    }
-                )
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 metadata = event.payload or {}

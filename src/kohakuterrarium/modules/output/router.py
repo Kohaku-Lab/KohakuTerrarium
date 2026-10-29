@@ -1,9 +1,7 @@
 """Route parsed and typed events across default, named, and secondary outputs."""
 
-import asyncio
-
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.event import OutputEvent, UIReply
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.output.router_interactive import (
     OutputRouterInteractiveMixin,
 )
@@ -11,6 +9,7 @@ from kohakuterrarium.modules.output.router_parsing import OutputRouterParseEvent
 from kohakuterrarium.modules.output.router_state import CompletedOutput, OutputState
 from kohakuterrarium.modules.output.router_widgets import OutputRouterWidgetsMixin
 from kohakuterrarium.modules.output.widgets import WIDGET_EVENT_TYPES, WidgetService
+from kohakuterrarium.modules.output.widgets_legacy import LEGACY_EVENT_TYPES
 from kohakuterrarium.parsing import (
     AssistantImageEvent,
     CommandEvent,
@@ -55,11 +54,11 @@ class OutputRouter(
 
         self._secondary_outputs: list[OutputModule] = []
 
-        # Interactive reply futures are keyed by the originating event ID.
-        self._pending_replies: dict[str, asyncio.Future[UIReply]] = {}
-        self._closed_interactions: dict[str, None] = {}
         self._init_widgets()
         self.widgets = WidgetService(self)
+        # Interactive reply futures, keyed by the originating event ID.
+        self._pending_replies = self.widgets.pending_replies
+        self._closed_interactions = self.widgets.closed_interactions
 
         # Interactive outputs need a back-reference for reply submission.
         for output in (default_output, *self._secondary_outputs):
@@ -178,17 +177,8 @@ class OutputRouter(
                 await self.on_resume(event.payload.get("events", []))
             case kind if kind in WIDGET_EVENT_TYPES:
                 await self.emit_widget(event)
-            case (
-                "ask_text"
-                | "confirm"
-                | "selection"
-                | "progress"
-                | "notification"
-                | "card"
-                | "ui_supersede"
-            ):
-                # Rich UI events retain their typed payload through output emitters.
-                await self._fan_event_to_outputs(event)
+            case kind if kind in LEGACY_EVENT_TYPES:
+                await self.widgets.emit_legacy(event)
             case _:
                 self._dispatch_activity_event(event)
 

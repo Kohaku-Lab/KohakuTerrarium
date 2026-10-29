@@ -7,7 +7,8 @@ import time
 
 import pytest
 
-from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.event import OutputEvent, UIReply
+from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.session.output import (
     SessionOutput,
     _parse_detail,
@@ -1431,29 +1432,42 @@ class TestEmitMatch:
         finally:
             store.close()
 
-    async def test_interactive_lifecycle_keeps_stable_ui_event_id(self, tmp_path):
+    async def test_interactive_lifecycle_records_widget_events(self, tmp_path):
         store, out = _make(tmp_path)
+        router = OutputRouter(out)
         try:
-            await out.emit(
-                OutputEvent(
-                    type="confirm",
-                    id="confirm-1",
-                    interactive=True,
-                    payload={"prompt": "Continue?"},
+            task = asyncio.create_task(
+                router.emit_and_wait(
+                    OutputEvent(
+                        type="confirm",
+                        id="confirm-1",
+                        interactive=True,
+                        payload={"prompt": "Continue?"},
+                    )
                 )
             )
-            out.on_supersede("confirm-1")
+            await asyncio.sleep(0)
+            router.submit_reply(UIReply(event_id="confirm-1", action_id="yes"))
+            await task
+            await router.emit(OutputEvent(type="progress", id="p1", payload={"v": 1}))
+            await router.emit(
+                OutputEvent(type="progress", update_target="p1", payload={"v": 2})
+            )
+            await router.emit(
+                OutputEvent(type="ui_supersede", payload={"event_id": "p1"})
+            )
             await out.drain()
             store.flush()
 
             events = store.get_events("alice")
-            prompt = next(e for e in events if e["type"] == "confirm")
-            terminal = next(e for e in events if e["type"] == "ui_supersede")
-            assert prompt["ui_event_id"] == "confirm-1"
-            assert prompt["event_id"] != "confirm-1"
-            assert prompt["interactive"] is True
-            assert prompt["payload"] == {"prompt": "Continue?"}
-            assert terminal["ui_event_id"] == "confirm-1"
+            (prompt,) = [e for e in events if e["type"] == "widget"]
+            (terminal,) = [e for e in events if e["type"] == "widget_close"]
+            assert prompt["widget_id"] == "confirm-1"
+            assert prompt["renderer"] == "kt.confirm" and prompt["interactive"] is True
+            assert prompt["spec"] == {"prompt": "Continue?"}
+            assert terminal["widget_id"] == "confirm-1"
+            assert terminal["reason"] == "replied" and terminal["action_id"] == "yes"
+            assert not [e for e in events if e["type"] == "widget_update"]
         finally:
             store.close()
 

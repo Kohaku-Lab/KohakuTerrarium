@@ -66,6 +66,8 @@ class SessionOutput(
         )
         self._recovered_open_text: bool = False
         self._chunk_seq: int = 0
+        # Ids of display-only widgets whose updates and close are not recorded.
+        self._unrecorded_widgets: dict[str, None] = {}
         # Retain tasks for child runs that lack SubAgentManager persistence.
         self._subagent_tasks: dict[str, dict] = {}
         # Secondary outputs may skip ``start``, so totals restore lazily before use.
@@ -530,25 +532,6 @@ class SessionOutput(
             case "resume_batch":
                 # Replay batches are consumed by readers, not persisted again.
                 pass
-            case "ask_text" | "confirm" | "selection" | "card":
-                if not self._capture_activity:
-                    return
-                self._record(
-                    event.type,
-                    {
-                        "ui_event_id": event.id,
-                        "interactive": bool(event.interactive),
-                        "surface": event.surface,
-                        "payload": dict(event.payload),
-                    },
-                )
-            case "ui_supersede":
-                if not self._capture_activity:
-                    return
-                self._record(
-                    "ui_supersede",
-                    {"ui_event_id": event.payload.get("event_id")},
-                )
             case _:
                 if not self._capture_activity:
                     return
