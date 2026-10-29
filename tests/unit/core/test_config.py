@@ -530,6 +530,52 @@ class TestLoadBaseConfigData:
         assert _load_base_config_data(base) is None
 
 
+class TestPackageConfigRefs:
+    def test_package_ref_chain_is_nearest_first(self, tmp_path, monkeypatch):
+        pkg = tmp_path / "biome"
+        general = pkg / "creatures" / "general"
+        swe = pkg / "creatures" / "swe"
+        general.mkdir(parents=True)
+        swe.mkdir()
+        (pkg / "kohaku.yaml").write_text("name: biome\n", encoding="utf-8")
+        (general / "config.yaml").write_text("name: general\n", encoding="utf-8")
+        (swe / "config.yaml").write_text(
+            "name: swe\nbase_config: ../general\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
+        loaded = load_agent_config("@biome/creatures/swe")
+        assert loaded.package_config_refs == [
+            "@biome/creatures/swe",
+            "@biome/creatures/general",
+        ]
+
+    def test_unresolvable_ancestor_is_skipped(self, tmp_path, monkeypatch):
+        pkg = tmp_path / "packages" / "biome"
+        local_base = tmp_path / "outside" / "base"
+        child = pkg / "creatures" / "child"
+        local_base.mkdir(parents=True)
+        child.mkdir(parents=True)
+        (pkg / "kohaku.yaml").write_text("name: biome\n", encoding="utf-8")
+        (local_base / "config.yaml").write_text("name: base\n", encoding="utf-8")
+        (child / "config.yaml").write_text(
+            "name: child\nbase_config: ../../../../outside/base\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "packages")
+        loaded = load_agent_config(child)
+        assert loaded.package_config_refs == ["@biome/creatures/child"]
+
+    def test_packaged_creature_without_base_records_itself(self, tmp_path, monkeypatch):
+        pkg = tmp_path / "biome"
+        general = pkg / "creatures" / "general"
+        general.mkdir(parents=True)
+        (pkg / "kohaku.yaml").write_text("name: biome\n", encoding="utf-8")
+        (general / "config.yaml").write_text("name: general\n", encoding="utf-8")
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
+        loaded = load_agent_config("@biome/creatures/general")
+        assert loaded.package_config_refs == ["@biome/creatures/general"]
+
+
 # ── _load_prompt_chain / _render_prompt_context ──────────────────
 
 

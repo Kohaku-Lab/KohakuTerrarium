@@ -28,6 +28,35 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def package_root_map() -> dict[str, str]:
+    """Map each resolved package root to its package name."""
+    mapping: dict[str, str] = {}
+    for pkg in list_packages():
+        root = get_package_root(pkg["name"])
+        if root is not None:
+            mapping[str(root.resolve())] = pkg["name"]
+    return mapping
+
+
+def package_ref(path: Path, roots: dict[str, str] | None = None) -> str | None:
+    """Return the ``@pkg/...`` reference of ``path``, or None outside packages.
+
+    The longest matching root wins, so a nested package does not inherit its
+    parent's reference. The local project uses an empty package name.
+    """
+    resolved = path.resolve()
+    mapping = package_root_map() if roots is None else roots
+    best: str | None = None
+    for root in mapping:
+        if resolved.is_relative_to(root) and (best is None or len(root) > len(best)):
+            best = root
+    if best is None:
+        return None
+    relative = resolved.relative_to(best).as_posix()
+    name = mapping[best]
+    return f"@{name}/{relative}" if relative != "." else f"@{name}"
+
+
 def resolve_package_path(ref: str) -> Path:
     """Resolve a ``@package/path`` reference to an absolute path.
 

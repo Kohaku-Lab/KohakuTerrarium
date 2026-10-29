@@ -85,16 +85,28 @@ def _looks_nested(stored: dict[str, Any]) -> bool:
     return True
 
 
-def get_subagent_models() -> dict[str, str]:
-    """Return exact sub-agent name to model-selector defaults."""
-    stored = _load_yaml().get("subagent_models", {})
+def _string_mapping(stored: Any) -> dict[str, str]:
+    """Keep non-empty string keys whose selector values are non-blank."""
     if not isinstance(stored, dict):
         return {}
     return {
         name: selector
         for name, selector in stored.items()
-        if isinstance(name, str) and isinstance(selector, str) and selector.strip()
+        if isinstance(name, str)
+        and name
+        and isinstance(selector, str)
+        and selector.strip()
     }
+
+
+def get_subagent_models() -> dict[str, str]:
+    """Return exact sub-agent name to model-selector defaults."""
+    return _string_mapping(_load_yaml().get("subagent_models", {}))
+
+
+def get_child_models() -> dict[str, str]:
+    """Return package-ref and global child model defaults."""
+    return _string_mapping(_load_yaml().get("child_models", {}))
 
 
 def load_presets() -> dict[tuple[str, str], LLMPreset]:
@@ -119,13 +131,16 @@ def serialize_user_data(
     backends: dict[str, LLMBackend],
     default_model: str = "",
     subagent_models: dict[str, str] | None = None,
+    child_models: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Serialize user providers and presets in the current nested schema."""
     data: dict[str, Any] = {"version": _SCHEMA_VERSION}
     if default_model:
         data["default_model"] = default_model
     if subagent_models:
-        data["subagent_models"] = dict(subagent_models)
+        data["subagent_models"] = _string_mapping(subagent_models)
+    if child_models:
+        data["child_models"] = _string_mapping(child_models)
     package_records = package_provider_records()
     user_backends = {
         name: backend.to_dict()

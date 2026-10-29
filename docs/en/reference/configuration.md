@@ -951,6 +951,12 @@ subagent_models:
   explore: openrouter/mimo-v2.5-pro
   worker: codex/gpt-5.5
 
+# Optional defaults for creatures spawned by group_add_node and
+# group_spawn_child. Keys are normalized @pkg/... refs; default is global.
+child_models:
+  default: openrouter/mimo-v2.5-pro
+  "@kt-biome/creatures/swe": codex/gpt-5.5
+
 backends:
   <provider-name>:
     backend_type: openai | anthropic | codex  # transport implementation
@@ -1006,6 +1012,19 @@ parent. The mapping is read when a sub-agent is created, so edits affect future
 jobs only. Conversation and Inspector Trace rows record the model actually bound
 to each new job, preferring its canonical profile selector and falling back to
 the raw model id.
+
+`child_models` supplies the same kind of user default for creatures spawned by
+`group_add_node` and `group_spawn_child`. It does not affect `kt run`, Studio,
+recipes, or direct Python API calls. Precedence is: explicit `llm` argument,
+concrete `llm` or `model` from the merged creature config, config sentinels
+`parent` / `inherit` / `default` (caller model, no table lookup), then an absent
+model or `child-default` / `child_default`. The table matches normalized
+`@pkg/...` refs from the creature through its `base_config` ancestors, nearest
+first. It does not match `config.name`, the spawn `name`, or a local filesystem
+path. The table key `default` is the global child fallback. An unavailable table
+selector falls back to the caller model, then `default_model`, and the tool
+result reports `llm`, `llm_source`, and `llm_fallback_from`. The file is read
+when the child is spawned, so edits affect future spawns only.
 
 ### OpenAI-compatible retries
 

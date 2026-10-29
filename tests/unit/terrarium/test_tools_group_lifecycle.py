@@ -13,7 +13,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import kohakuterrarium.terrarium.child_model as child_model_mod
 import kohakuterrarium.terrarium.tools_group_lifecycle as lifecycle_mod
+from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.llm.presets import get_all_presets
 
 # ── helpers ───────────────────────────────────────────────────
@@ -90,6 +92,15 @@ def _parse(result):
     return json.loads(result.output)
 
 
+def _patch_loaded_config(monkeypatch, config=None):
+    """Bypass filesystem loading while exercising spawn decisions."""
+    monkeypatch.setattr(
+        lifecycle_mod,
+        "load_agent_config",
+        lambda _ref: config or AgentConfig(name="kid"),
+    )
+
+
 # ── group_add_node ────────────────────────────────────────────
 
 
@@ -111,9 +122,10 @@ class TestGroupAddNode:
         # ``@pkg/...`` refs are NOT pre-resolved by the tool — the
         # engine's config loader owns resolution (E1 chokepoint).  A
         # bad ref surfaces as the loader's typed error in the result.
-        gctx = _gctx()
+        gctx = _gctx(caller=_caller_on(_preset_selector()))
         gctx.engine.add_creature.side_effect = FileNotFoundError("no pkg")
         _patch_resolve(monkeypatch, gctx)
+        _patch_loaded_config(monkeypatch)
         tool = lifecycle_mod.GroupAddNodeTool()
         r = await tool._execute({"config_path": "@pkg/x"})
         assert "no pkg" in r.error
@@ -124,6 +136,7 @@ class TestGroupAddNode:
         gctx = _gctx()
         gctx.engine.add_creature.side_effect = RuntimeError("boom")
         _patch_resolve(monkeypatch, gctx)
+        _patch_loaded_config(monkeypatch)
         tool = lifecycle_mod.GroupAddNodeTool()
         r = await tool._execute({"config_path": "./c"})
         assert "failed to spawn" in r.error
@@ -135,6 +148,7 @@ class TestGroupAddNode:
         gctx = _gctx()
         gctx.engine.add_creature.return_value = new_creature
         _patch_resolve(monkeypatch, gctx)
+        _patch_loaded_config(monkeypatch)
         applied = {}
         monkeypatch.setattr(
             lifecycle_mod.group_hooks,
@@ -305,6 +319,7 @@ class TestGroupSpawnChild:
         gctx = _gctx()
         gctx.engine.add_creature.side_effect = RuntimeError("boom")
         _patch_resolve(monkeypatch, gctx)
+        _patch_loaded_config(monkeypatch)
         tool = lifecycle_mod.GroupSpawnChildTool()
         r = await tool._execute({"config_ref": "./c"})
         assert "failed to spawn" in r.error
@@ -316,6 +331,7 @@ class TestGroupSpawnChild:
         child = self._child(cid="cid-child", name="worker", parent_creature_id="caller")
         gctx.engine.add_creature.return_value = child
         _patch_resolve(monkeypatch, gctx)
+        _patch_loaded_config(monkeypatch)
         monkeypatch.setattr(
             lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
@@ -341,6 +357,7 @@ class TestGroupSpawnChild:
         child = self._child(cid="cid-child", name="worker")
         gctx.engine.add_creature.return_value = child
         _patch_resolve(monkeypatch, gctx)
+        _patch_loaded_config(monkeypatch)
         monkeypatch.setattr(
             lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
@@ -373,12 +390,18 @@ _SPAWN_TOOLS = [
 
 
 class TestSpawnedModel:
-    async def _spawn(self, monkeypatch, tool_cls, ref_key, caller, **args):
+    async def _spawn(self, monkeypatch, tool_cls, ref_key, caller, config=None, **args):
         gctx = _gctx(caller=caller)
         child = _FakeCreature(cid="cid-child", name="worker")
         child.agent = SimpleNamespace(executor=None, _process_event=AsyncMock())
         gctx.engine.add_creature.return_value = child
         _patch_resolve(monkeypatch, gctx)
+        monkeypatch.setattr(
+            lifecycle_mod,
+            "load_agent_config",
+            lambda _ref: config or AgentConfig(name="kid"),
+        )
+        monkeypatch.setattr(child_model_mod, "get_child_models", lambda: {})
         monkeypatch.setattr(
             lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
@@ -390,7 +413,7 @@ class TestSpawnedModel:
     async def test_caller_model_is_the_fallback(self, monkeypatch, tool_cls, ref_key):
         selector = _preset_selector()
         kwargs = await self._spawn(monkeypatch, tool_cls, ref_key, _caller_on(selector))
-        assert kwargs["llm"] is None
+        assert kwargs["llm"] == selector
         assert kwargs["fallback_llm"] == selector
 
     @pytest.mark.parametrize("tool_cls,ref_key", _SPAWN_TOOLS)
@@ -424,6 +447,194 @@ class TestSpawnedModel:
     ):
         kwargs = await self._spawn(monkeypatch, tool_cls, ref_key, None)
         assert kwargs["fallback_llm"] is None
+
+    @pytest.mark.parametrize("tool_cls,ref_key", _SPAWN_TOOLS)
+    async def test_configured_model_is_not_replaced_by_the_table(
+        self, monkeypatch, tool_cls, ref_key
+    ):
+        selector = _preset_selector()
+        config = AgentConfig(name="kid", llm_profile="openai/from-config")
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {"@biome/creatures/kid": selector},
+        )
+        kwargs = await self._spawn(
+            monkeypatch, tool_cls, ref_key, _caller_on(selector), config=config
+        )
+        assert kwargs["llm"] is None
+        assert kwargs["fallback_llm"] == selector
+
+    @pytest.mark.parametrize("sentinel", ["parent", "inherit", "default"])
+    async def test_inherit_sentinels_skip_the_table(self, monkeypatch, sentinel):
+        selector = _preset_selector()
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {"default": "openai/from-table"},
+        )
+        config = AgentConfig(name="kid", llm_profile=sentinel)
+        kwargs = await self._spawn(
+            monkeypatch,
+            lifecycle_mod.GroupAddNodeTool,
+            "config_path",
+            _caller_on(selector),
+            config=config,
+        )
+        assert kwargs["llm"] == selector
+
+    @pytest.mark.parametrize("configured", ["", "child-default", "child_default"])
+    async def test_child_sentinels_use_the_nearest_package_ref(
+        self, monkeypatch, configured
+    ):
+        parent_selector = _preset_selector()
+        config = AgentConfig(
+            name="kid",
+            llm_profile=configured,
+            package_config_refs=[
+                "@biome/creatures/swe",
+                "@biome/creatures/general",
+            ],
+        )
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {
+                "@biome/creatures/general": parent_selector,
+                "default": "openai/global-child",
+            },
+        )
+        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda selector: True)
+        kwargs = await self._spawn(
+            monkeypatch,
+            lifecycle_mod.GroupSpawnChildTool,
+            "config_ref",
+            _caller_on(_preset_selector()),
+            config=config,
+        )
+        assert kwargs["llm"] == parent_selector
+
+    async def test_global_child_default_is_used_without_a_package_hit(
+        self, monkeypatch
+    ):
+        global_selector = _preset_selector()
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {"default": global_selector},
+        )
+        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda _s: True)
+        kwargs = await self._spawn(
+            monkeypatch,
+            lifecycle_mod.GroupAddNodeTool,
+            "config_path",
+            _caller_on(_preset_selector()),
+        )
+        assert kwargs["llm"] == global_selector
+
+    async def test_unresolvable_table_selector_falls_back_to_the_caller(
+        self, monkeypatch
+    ):
+        selector = _preset_selector()
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {"default": "missing/model"},
+        )
+        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda _s: False)
+        gctx = _gctx(caller=_caller_on(selector))
+        child = _FakeCreature(cid="cid-child", name="worker")
+        child.agent = SimpleNamespace(executor=None, _process_event=AsyncMock())
+        gctx.engine.add_creature.return_value = child
+        _patch_resolve(monkeypatch, gctx)
+        monkeypatch.setattr(
+            lifecycle_mod,
+            "load_agent_config",
+            lambda _ref: AgentConfig(name="kid"),
+        )
+        monkeypatch.setattr(
+            lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
+        )
+        result = await lifecycle_mod.GroupAddNodeTool()._execute({"config_path": "./c"})
+        body = _parse(result)
+        assert body["llm"] == selector
+        assert body["llm_source"] == "caller"
+        assert body["llm_fallback_from"] == "missing/model"
+
+    async def test_unavailable_table_and_caller_use_the_global_default(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {"default": "missing/model"},
+        )
+        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda _s: False)
+        kwargs = await self._spawn(
+            monkeypatch, lifecycle_mod.GroupSpawnChildTool, "config_ref", None
+        )
+        assert kwargs["llm"] is None
+        assert kwargs["fallback_llm"] is None
+
+    async def test_child_sentinel_does_not_fail_when_table_and_caller_are_unavailable(
+        self, monkeypatch
+    ):
+        seen = []
+
+        async def add_creature(*_args, **kwargs):
+            seen.append(kwargs)
+            child = _FakeCreature(cid="cid-child", name="worker")
+            child.config = AgentConfig(name="kid", llm_profile="")
+            child.agent = SimpleNamespace(executor=None, _process_event=AsyncMock())
+            return child
+
+        gctx = _gctx(caller=None)
+        gctx.engine.add_creature.side_effect = add_creature
+        _patch_resolve(monkeypatch, gctx)
+        loaded = AgentConfig(name="kid", llm_profile="child-default")
+        _patch_loaded_config(monkeypatch, loaded)
+        monkeypatch.setattr(
+            child_model_mod,
+            "get_child_models",
+            lambda: {"default": "missing/model"},
+        )
+        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda _s: False)
+        monkeypatch.setattr(
+            lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
+        )
+        result = await lifecycle_mod.GroupSpawnChildTool()._execute(
+            {"config_ref": "./c"}
+        )
+        assert result.error is None
+        assert seen[0]["llm"] is None
+        assert seen[0]["fallback_llm"] is None
+        assert loaded.llm_profile == ""
+        assert loaded.model == ""
+
+    @pytest.mark.parametrize("tool_cls,ref_key", _SPAWN_TOOLS)
+    async def test_spawn_result_records_model_provenance(
+        self, monkeypatch, tool_cls, ref_key
+    ):
+        selector = _preset_selector()
+        gctx = _gctx(caller=_caller_on(selector))
+        child = _FakeCreature(cid="cid-child", name="worker")
+        child.agent = SimpleNamespace(executor=None, _process_event=AsyncMock())
+        gctx.engine.add_creature.return_value = child
+        _patch_resolve(monkeypatch, gctx)
+        monkeypatch.setattr(
+            lifecycle_mod,
+            "load_agent_config",
+            lambda _ref: AgentConfig(name="kid"),
+        )
+        monkeypatch.setattr(child_model_mod, "get_child_models", lambda: {})
+        monkeypatch.setattr(
+            lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
+        )
+        result = await tool_cls()._execute({ref_key: "./c"})
+        body = _parse(result)
+        assert body["llm"] == selector
+        assert body["llm_source"] == "caller"
+        assert body["llm_fallback_from"] == ""
 
 
 # ── group_pause_node / group_resume_node ──────────────────────
