@@ -137,8 +137,10 @@ class TestBeforeStart:
         assert _registered(agent, "show_app")
 
     async def test_catalog_plugin_enabled_before_start_brings_its_tool(self, tmp_path):
-        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
-        assert not agent.plugins.is_enabled("ui.apps")
+        cfg = _cfg(tmp_path)
+        cfg.plugins = [{"name": "ui.apps", "enabled": False}]
+        agent = await kt.Agent.build(cfg, llm=ScriptedLLM(["x"]))
+        assert not agent.plugins.is_enabled("ui.apps"), "config enabled: false wins"
         assert "show_app" not in agent.registry.list_tools()
         agent.plugins.enable("ui.apps")
         assert "show_app" in agent.registry.list_tools()
@@ -150,6 +152,38 @@ class TestBeforeStart:
             assert "show_app" not in agent.registry.list_tools()
         finally:
             await agent.stop()
+
+
+class TestDefaultOn:
+    async def test_ui_plugins_start_enabled_with_a_gated_tool(self, tmp_path):
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
+        assert agent.plugins.is_enabled("ui.apps")
+        assert agent.plugins.is_enabled("ui.declarative")
+        assert not agent.plugins.is_enabled("sandbox"), "policy plugins stay off"
+        assert "show_app" in agent.registry.list_tools()
+        assert "show_app" not in agent.get_system_prompt(), "no client draws kt.app"
+
+    async def test_a_clashing_default_plugin_stands_down(self, tmp_path):
+        agent = await kt.Agent.build(
+            _cfg(tmp_path),
+            llm=ScriptedLLM(["x"]),
+            plugins=[_plugin("my_apps", "show_app")],
+        )
+        assert not agent.plugins.is_enabled("ui.apps")
+        assert agent.plugins.is_enabled("my_apps")
+        assert type(agent.registry.get_tool("show_app")).__name__ == "_T"
+        # The user's own explicit enable still reports the clash.
+        with pytest.raises(PluginToolConflictError):
+            agent.plugins.enable("ui.apps")
+        assert not agent.plugins.is_enabled("ui.apps")
+
+    async def test_a_configured_tool_keeps_its_name(self, tmp_path):
+        agent = await kt.Agent.build(
+            _cfg(tmp_path), llm=ScriptedLLM(["x"]), tools=[_tool_class("show_app")()]
+        )
+        assert not agent.plugins.is_enabled("ui.apps")
+        assert agent.plugins.is_enabled("ui.declarative")
+        assert type(agent.registry.get_tool("show_app")).__name__ == "_T"
 
 
 class TestRuntimeMembership:

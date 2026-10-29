@@ -43,6 +43,24 @@ class PluginCommandRefreshMixin:
                 )
         return out
 
+    def mark_default_on(self, name: str) -> None:
+        """Record that ``name`` is enabled only by default, not by the user's config."""
+        self._default_on.add(name)
+
+    def default_on_names(self) -> set[str]:
+        """Enabled plugins that are on only by default."""
+        return {name for name in self._default_on if name not in self._disabled}
+
+    def stand_down(self, name: str) -> None:
+        """Disable a default-on plugin whose tools clash, without refreshing hosts."""
+        if name in self._disabled:
+            return
+        self._disabled.add(name)
+        logger.warning(
+            "Default-on plugin disabled: its tool name is taken", plugin_name=name
+        )
+        self._notify_selection_change()
+
     def collect_contributed_tools(self) -> list[tuple[str, Any]]:
         """Return ``(plugin_name, tool)`` for every tool active plugins contribute."""
         cache = self._contributed_tools

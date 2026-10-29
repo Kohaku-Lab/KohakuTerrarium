@@ -475,7 +475,8 @@ class TestApiCreatureJourney:
             # interrupt — ``processing_start`` is the engine's signal
             # that the controller loop has begun.
             started = False
-            for _ in range(6):
+            # Bounded, with room for one plugin_hook_timing activity per enabled plugin.
+            for _ in range(20):
                 frame = ws.receive_json()
                 if frame.get("type") == "processing_start":
                     started = True

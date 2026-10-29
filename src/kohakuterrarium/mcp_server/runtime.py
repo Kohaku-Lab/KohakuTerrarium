@@ -73,6 +73,7 @@ class ToolCatalog:
             [p.model_dump(by_alias=True, exclude_none=True) for p in config.plugins],
             loader,
             strict=True,
+            catalog_defaults=False,
         )
         for plugin in plugins:
             self.plugins.register(plugin)

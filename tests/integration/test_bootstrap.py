@@ -338,9 +338,12 @@ class TestBootstrapIntegration:
         assert agent.llm is scripted_llm.built[-1]
 
         # bootstrap.tools -> registry built. Config declared no tools, so
-        # the only entry is ``skill``, auto-registered by _init_controller
-        # because skill discovery always produces a registry.
-        assert agent.registry.list_tools() == ["skill"]
+        # the entries are ``skill`` (auto-registered by _init_controller
+        # because skill discovery always produces a registry) and the
+        # default-on ``ui.apps`` plugin's ``show_app``, which the model does
+        # not see while no client draws ``kt.app``.
+        assert sorted(agent.registry.list_tools()) == ["show_app", "skill"]
+        assert "show_app" not in agent.get_system_prompt()
 
         # _init_executor -> executor + session wired off the registry.
         assert agent.executor is not None
@@ -872,7 +875,7 @@ class TestBootstrapIntegration:
         # Same wiring guarantees as the from_path path. The config
         # declared ``read``; ``skill`` is the auto-registered extra.
         assert isinstance(agent.llm, ScriptedLLM)
-        assert set(agent.registry.list_tools()) == {"read", "skill"}
+        assert set(agent.registry.list_tools()) == {"read", "skill", "show_app"}
         assert "read" in agent.executor._tools
         # Both sub-agents wired: a builtin and an inline custom one.
         assert "critic" in agent.subagent_manager.list_subagents()

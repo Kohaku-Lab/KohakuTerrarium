@@ -1246,10 +1246,11 @@ class TestStudioIntegration:
             assert any(p["name"] == "sandbox" for p in plugins)
             assert any(p["name"] == "goal" and p["enabled"] for p in plugins)
             assert any(p["name"] == "drive_runtime" and p["enabled"] for p in plugins)
+            # The renderer-gated UI plugins are on by default; policy plugins are off.
+            on_by_default = {"goal", "drive_runtime", "ui.apps", "ui.declarative"}
+            assert {p["name"] for p in plugins if p["enabled"]} == on_by_default
             assert all(
-                p["enabled"] is False
-                for p in plugins
-                if p["name"] not in {"goal", "drive_runtime"}
+                p["enabled"] is False for p in plugins if p["name"] not in on_by_default
             )
             toggled_on = await studio.sessions.plugins.toggle(
                 session_id, creature_id, "sandbox"

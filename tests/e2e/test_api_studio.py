@@ -654,7 +654,8 @@ class TestApiStudioJourney:
         # every creature (the ``goal`` composition + the ``drive_runtime``
         # prompt contributor); every other builtin (sandbox, budget, permgate,
         # …) stays off until explicitly toggled.
-        terrarium_defaults = {"goal", "drive_runtime"}
+        # The renderer-gated UI plugins are on by default on every creature.
+        terrarium_defaults = {"goal", "drive_runtime", "ui.apps", "ui.declarative"}
         assert all(
             p["enabled"] is False
             for p in resp.json()

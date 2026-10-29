@@ -46,6 +46,11 @@ def _cfg(tmp_path):
         agent_path=tmp_path,
         input=InputConfig(type="none"),
         output=OutputConfig(type="none"),
+        # The gate is tested on its own: the default-on UI plugins also watch renderers.
+        plugins=[
+            {"name": "ui.apps", "enabled": False},
+            {"name": "ui.declarative", "enabled": False},
+        ],
     )
 
 

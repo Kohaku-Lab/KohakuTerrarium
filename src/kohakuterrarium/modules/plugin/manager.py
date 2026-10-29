@@ -59,6 +59,8 @@ class PluginManager(
         self._unloaded: set[int] = set()
         # Plugin id -> (plugin, tools): contribute_tools runs once per instance.
         self._contributed_tools: dict[int, tuple[BasePlugin, list[Any]]] = {}
+        # Plugins on only by default: they stand down instead of failing a build.
+        self._default_on: set[str] = set()
         # Timing remains optional so sessions without observers pay no callback cost.
         self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
         # Fired after an enable/disable that changes which plugins are active.
@@ -120,6 +122,7 @@ class PluginManager(
 
     def enable(self, name: str) -> bool:
         """Enable a plugin, rolling back state if host inventory refresh fails."""
+        self._default_on.discard(name)
         if name in self._disabled:
             self._disabled.discard(name)
             self._needs_load.add(name)

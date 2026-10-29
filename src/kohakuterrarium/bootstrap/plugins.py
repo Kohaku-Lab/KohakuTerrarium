@@ -5,6 +5,7 @@ from typing import Any
 
 from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.builtins.plugin_catalog import (
+    is_default_on,
     list_catalog_plugins,
     lookup_plugin,
     resolve_plugin_specs,
@@ -26,12 +27,14 @@ def init_plugins(
     default_plugin_specs: list[dict[str, Any]] | None = None,
     *,
     strict: bool = False,
+    catalog_defaults: bool = True,
 ) -> PluginManager:
     """Load configured plugins and register discovered plugins as disabled.
 
     Strict mode rejects configured plugin failures because silently dropping a
     policy plugin is unsafe. Discovery remains lenient so unrelated broken
-    packages cannot block the agent.
+    packages cannot block the agent. ``catalog_defaults=False`` discovers the
+    default-on catalog plugins disabled too (a host with no chat client).
     """
     manager = PluginManager()
     merged_configs = _merge_default_plugin_specs(
@@ -42,15 +45,17 @@ def init_plugins(
     # Make package modules importable before loading configured package plugins.
     _pre_import_packages_for_config(merged_configs)
 
-    # Configured plugins are active.
+    # Configured plugins are active unless the entry says ``enabled: false``.
     for cfg in merged_configs:
         plugin = _load_one(cfg, loader, strict=strict)
         if plugin:
             config_names.add(plugin.name)
             manager.register(plugin)
+            if isinstance(cfg, dict) and cfg.get("enabled") is False:
+                manager.disable(plugin.name)
 
     # Unconfigured catalog plugins remain available for runtime enablement.
-    _discover_catalog_plugins(manager, config_names, loader)
+    _discover_catalog_plugins(manager, config_names, loader, catalog_defaults)
 
     # Unconfigured package plugins also remain available but inactive.
     _discover_package_plugins(manager, config_names, loader)
@@ -86,9 +91,12 @@ def _pre_import_packages_for_config(plugin_configs: list[dict[str, Any]]) -> Non
 
 
 def _discover_catalog_plugins(
-    manager: PluginManager, already_loaded: set[str], loader: ModuleLoader | None
+    manager: PluginManager,
+    already_loaded: set[str],
+    loader: ModuleLoader | None,
+    defaults: bool = True,
 ) -> None:
-    """Register unconfigured built-in plugins as disabled but available."""
+    """Register unconfigured built-in plugins as available, disabled unless default-on."""
     for spec in list_catalog_plugins():
         name = spec.get("name", "")
         if not name or name in already_loaded:
@@ -96,7 +104,11 @@ def _discover_catalog_plugins(
         plugin = _load_one(spec, loader)
         if plugin:
             manager.register(plugin)
-            manager.disable(name)  # Discovery must not activate policy implicitly.
+            # Discovery must not activate policy implicitly; only renderer-gated UI plugins start on.
+            if defaults and is_default_on(name):
+                manager.mark_default_on(name)
+            else:
+                manager.disable(name)
 
 
 def _merge_default_plugin_specs(
