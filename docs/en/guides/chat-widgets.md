@@ -9,7 +9,7 @@ Two optional builtin plugins give the agent widget tools:
 | Plugin | Tool | Renderer | What the agent writes |
 |---|---|---|---|
 | `ui.apps` | `show_app` | `kt.app` | one HTML document, run in a sandboxed frame |
-| `ui.declarative` | `show_ui` | `kt.ui` | a JSON component tree (not shipped yet; see below) |
+| `ui.declarative` | `show_ui` | `kt.ui` | a JSON component tree, bindings and safe expressions |
 
 This guide covers:
 
