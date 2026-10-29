@@ -11,6 +11,7 @@ export const SDK_EXPORT_NAMES = [
   "defineExtension",
   "useExtension",
   "useOwner",
+  "useWidget",
   "OwnerCallError",
   "useHost",
   "useSession",

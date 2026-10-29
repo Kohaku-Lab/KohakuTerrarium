@@ -12,6 +12,11 @@ import { defineComponent, h, markRaw } from "vue"
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
 import {
+  registerWidgetRenderer,
+  unregisterWidgetRenderersByKey,
+  widgetRenderers,
+} from "@/ext/widgets"
+import {
   contributionComponents,
   contributionKey,
   extState,
@@ -29,7 +34,7 @@ import { useTabsStore } from "@/stores/tabs"
 
 const _registered = []
 
-/** Owner kind each mount kind requires (mirrors ``packages/ui_slot.py``). */
+/** Owner kind each mount kind requires (mirrors ``packages/ui_slot.py``); ``any`` takes every owner kind. */
 export const MOUNT_OWNER_KINDS = {
   settings: "package",
   tab: "package",
@@ -37,6 +42,28 @@ export const MOUNT_OWNER_KINDS = {
   panel: "plugin",
   "tool-renderer": "tool",
   "trigger-renderer": "trigger",
+  widget: "any",
+}
+
+const OWNER_KINDS = ["package", "plugin", "tool", "trigger"]
+const RENDERER_ID = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31}){1,3}$/
+const RESERVED_RENDERER_PREFIXES = ["kt.", "mcp."]
+
+/** Whether ``id`` is a renderer id a package may provide. */
+export function isPackageRendererId(id) {
+  return (
+    typeof id === "string" &&
+    RENDERER_ID.test(id) &&
+    !RESERVED_RENDERER_PREFIXES.some((prefix) => id.startsWith(prefix))
+  )
+}
+
+function ownerAllowed(kind, owner, pkg) {
+  const ownerKind = MOUNT_OWNER_KINDS[kind]
+  const [prefix, ...rest] = String(owner || "").split(":")
+  if (!rest.length || !rest.join(":")) return false
+  if (prefix === "package" && owner !== `package:${pkg}`) return false
+  return ownerKind === "any" ? OWNER_KINDS.includes(prefix) : prefix === ownerKind
 }
 
 function ownerName(owner) {
@@ -95,6 +122,11 @@ export function registerContribution(pkg, contribution) {
         return null
       break
     }
+    case "widget":
+      if (!isPackageRendererId(contribution.renderer)) return null
+      if (!registerWidgetRenderer(contribution.renderer, host, { key, trust: "package" }))
+        return null
+      break
     default:
       return null
   }
@@ -119,6 +151,7 @@ export function unregisterAllContributions() {
     else if (kind === "settings") unregisterSettingsSection(key)
   }
   unregisterRenderers(removed.map((r) => r.key))
+  unregisterWidgetRenderersByKey(removed.map((r) => r.key))
   contributionComponents.clear()
 }
 
@@ -140,13 +173,16 @@ export function provideContributionComponent(pkg, kind, id, component, options =
   if (!declared) {
     const record = findPackage(pkg)
     const ownerKind = MOUNT_OWNER_KINDS[kind]
-    const owner = options.owner || (ownerKind === "package" ? `package:${pkg}` : "")
-    if (
-      !owner.startsWith(`${ownerKind}:`) ||
-      (ownerKind === "package" && owner !== `package:${pkg}`)
-    ) {
+    const owner =
+      options.owner || (ownerKind === "package" || ownerKind === "any" ? `package:${pkg}` : "")
+    if (!ownerAllowed(kind, owner, pkg)) {
       throw new Error(
         `${pkg}: an undeclared ${kind} ${id} needs options.owner "${ownerKind}:<name>"`,
+      )
+    }
+    if (kind === "widget" && !isPackageRendererId(options.renderer)) {
+      throw new Error(
+        `${pkg}: widget ${id} needs options.renderer, a dotted id outside kt./mcp. (got ${options.renderer})`,
       )
     }
     const contribution = {
@@ -159,11 +195,26 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       order: options.order ?? 100,
       minDensity: options.minDensity || "compact",
       isolation: "inline",
+      ...(kind === "widget" ? { renderer: options.renderer } : {}),
     }
     if (record) record.contributes = [...(record.contributes || []), contribution]
     registerContribution(pkg, contribution)
   }
   contributionComponents.set(contributionKey(pkg, id), markRaw(component))
+  if (kind === "widget") updateWidgetEntry(contributionKey(pkg, id), options)
+}
+
+/** Apply a package's ``version`` / ``surfaces`` / chrome options to its registered renderer. */
+function updateWidgetEntry(key, options) {
+  for (const entry of widgetRenderers.values()) {
+    if (entry.key !== key) continue
+    if (Number.isInteger(options.version) && options.version >= 1) entry.version = options.version
+    if (Array.isArray(options.surfaces) && options.surfaces.length) {
+      entry.surfaces = [...options.surfaces]
+    }
+    if (typeof options.summary === "function") entry.summary = options.summary
+    if (typeof options.icon === "function") entry.icon = options.icon
+  }
 }
 
 /** Label and icon of an extension tab kind, or ``null`` for a non-extension kind. */

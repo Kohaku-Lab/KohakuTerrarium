@@ -155,6 +155,7 @@ function createHandle(record) {
     registerSettingsSection: provide("settings"),
     registerToolRenderer: provide("tool-renderer"),
     registerTriggerRenderer: provide("trigger-renderer"),
+    registerWidgetRenderer: provide("widget"),
     api: {
       request: (config = {}) => api.request({ ...config, url: join(config.url) }),
       get: (path, config) => api.get(join(path), config),

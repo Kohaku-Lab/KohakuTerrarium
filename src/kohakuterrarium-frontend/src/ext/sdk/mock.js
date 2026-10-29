@@ -75,6 +75,7 @@ export function createMockHost(options = {}) {
     settings: new Map(),
     "tool-renderer": new Map(),
     "trigger-renderer": new Map(),
+    widget: new Map(),
   }
   const requests = []
   const notifications = []
@@ -109,6 +110,7 @@ export function createMockHost(options = {}) {
     registerSettingsSection: provide("settings"),
     registerToolRenderer: provide("tool-renderer"),
     registerTriggerRenderer: provide("trigger-renderer"),
+    registerWidgetRenderer: provide("widget"),
     api: {
       request: (config = {}) =>
         call((config.method || "GET").toUpperCase(), config.url, config.data, config),
@@ -172,6 +174,7 @@ export function createMockHost(options = {}) {
     openedTabs,
     owner,
     ownerCalls,
+    widget: options.widget || null,
     /** Push an owner event, as the backend's ``ui_emit`` would. */
     emit(event, data) {
       if (event === "state") ownerState.value = data
@@ -199,6 +202,13 @@ export function useExtension() {
 
 export function useOwner() {
   return current().owner
+}
+
+/** In tests, the ``{widget, host}`` the mock host was created with (``options.widget``). */
+export function useWidget() {
+  const widget = current().widget
+  if (!widget) throw new Error("useWidget() used outside a widget renderer")
+  return widget
 }
 
 export function useHost() {
