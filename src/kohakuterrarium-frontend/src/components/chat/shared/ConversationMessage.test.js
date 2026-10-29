@@ -13,6 +13,7 @@ vi.mock("../../../public/chat/chatToolGrouping.js", async (importOriginal) => {
 })
 
 import ConversationMessage from "./ConversationMessage"
+import { registerWidgetRenderer, unregisterWidgetRenderer } from "@/ext/widgets"
 
 const TextRenderer = defineComponent({
   props: { content: { type: String, default: "" } },
@@ -466,5 +467,44 @@ describe("ConversationMessage", () => {
     expect(wrapper.text()).not.toContain("ok")
     await wrapper.get('[role="button"]').trigger("click")
     expect(wrapper.text()).toContain("ok")
+  })
+
+  it("renders a widget message and emits its messages and state", async () => {
+    const Probe = defineComponent({
+      props: { widget: Object, host: Object },
+      setup(props) {
+        return () =>
+          h(
+            "button",
+            {
+              class: "probe",
+              onClick: () => {
+                props.host.send("pick", { v: props.widget.spec.v })
+                props.host.setState({ seen: true })
+              },
+            },
+            props.widget.title,
+          )
+      },
+    })
+    registerWidgetRenderer("probe.widget", Probe)
+    const wrapper = mount(ConversationMessage, {
+      props: {
+        message: {
+          role: "widget",
+          eventId: "w_9",
+          renderer: "probe.widget",
+          title: "Probe",
+          spec: { v: 7 },
+          interactive: true,
+        },
+      },
+    })
+    await wrapper.get(".probe").trigger("click")
+    expect(wrapper.emitted("widget-message")).toEqual([
+      [{ eventId: "w_9", name: "pick", data: { v: 7 } }],
+    ])
+    expect(wrapper.emitted("widget-state")).toEqual([[{ eventId: "w_9", state: { seen: true } }]])
+    unregisterWidgetRenderer("probe.widget")
   })
 })

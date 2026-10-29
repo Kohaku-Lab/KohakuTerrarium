@@ -10,6 +10,8 @@ import ToolCallBatch from "../ToolCallBatch.vue"
 import ToolCallBlock from "../ToolCallBlock.vue"
 import VideoFilePreview from "../VideoFilePreview.vue"
 import UIEventBlock from "../UIEventBlock.vue"
+import WidgetBlock from "../widgets/WidgetBlock.vue"
+import { widgetFromMessage } from "../widgets/widgetModel.js"
 
 function plainText(content) {
   return h("div", { class: "kt-conversation-text" }, content || "")
@@ -39,7 +41,7 @@ export default defineComponent({
     renderContentPart: { type: Function, default: null },
     bare: { type: Boolean, default: false },
   },
-  emits: ["reply"],
+  emits: ["reply", "widget-message", "widget-state"],
   setup(props, { emit }) {
     const compactExpanded = ref(false)
     const expandedReasoning = reactive(new Set())
@@ -211,6 +213,21 @@ export default defineComponent({
               message,
               onReply: (reply) => emit("reply", reply),
             })
+      } else if (role === "widget") {
+        // A host without its own widget transport gets the messages and
+        // state changes as ``widget-message`` / ``widget-state`` events.
+        content = h(WidgetBlock, {
+          widget: widgetFromMessage(message),
+          host: {
+            send: (name, data) =>
+              emit("widget-message", { eventId: message.eventId, name, data: data || {} }),
+            setState: (patch) =>
+              emit("widget-state", { eventId: message.eventId, state: patch || {} }),
+            close: () => {},
+            openInCanvas: () => {},
+            theme: {},
+          },
+        })
       } else if (role === "assistant") {
         const parts = assistantParts.value
         content = parts.length

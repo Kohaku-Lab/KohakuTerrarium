@@ -4,6 +4,7 @@ const snapshots = new Map()
 const listeners = new Set()
 const edgeListeners = new Set()
 const INTERACTIVE_TYPES = new Set(["ask_text", "confirm", "selection", "card"])
+const INTERACTIVE_RENDERERS = new Set(["kt.ask_text", "kt.confirm", "kt.selection", "kt.card"])
 
 function notifyListeners() {
   for (const listener of listeners) listener()
@@ -19,31 +20,50 @@ export function createAttentionState() {
 }
 
 function attentionEventId(event) {
-  return event?.ui_event_id ?? event?.event_id ?? event?.payload?.event_id
+  return event?.ui_event_id ?? event?.event_id ?? event?.widget_id ?? event?.payload?.event_id
+}
+
+/** Whether ``event`` raises a prompt that waits for the user. */
+function opensAttention(event) {
+  if (event.interactive !== true) return false
+  if (INTERACTIVE_TYPES.has(event.type)) return true
+  if (event.type !== "widget" || event.update_target) return false
+  const renderer = event.payload?.renderer ?? event.renderer
+  const awaiting = event.payload?.awaiting ?? event.awaiting
+  return INTERACTIVE_RENDERERS.has(renderer) || awaiting === true
+}
+
+/** Whether ``event`` resolves a pending prompt. */
+function closesAttention(event) {
+  switch (event.type) {
+    case "ui_supersede":
+    case "timeout":
+    case "widget_close":
+    case "widget_message":
+      return true
+    case "ui_reply_ack":
+      return ["accepted", "superseded"].includes(event.status)
+    case "widget_ack":
+      return event.kind !== "state" && ["accepted", "superseded"].includes(event.status)
+    case "widget":
+      return Boolean(event.update_target) && event.payload?.awaiting === false
+    default:
+      return false
+  }
 }
 
 export function reduceAttention(state, event) {
   if (!event || event.replay) return state
   if (event.history) {
     const eventId = attentionEventId(event)
-    if (
-      event.interactive === true &&
-      INTERACTIVE_TYPES.has(event.type) &&
-      eventId &&
-      !state.seen.has(eventId)
-    ) {
+    if (opensAttention(event) && eventId && !state.seen.has(eventId)) {
       return {
         ...state,
         seen: new Set([...state.seen, eventId]),
         pending: new Set([...state.pending, eventId]),
       }
     }
-    if (
-      eventId &&
-      (event.type === "ui_supersede" ||
-        event.type === "timeout" ||
-        (event.type === "ui_reply_ack" && ["accepted", "superseded"].includes(event.status)))
-    ) {
+    if (eventId && closesAttention(event)) {
       const pending = new Set(state.pending)
       pending.delete(eventId)
       return { ...state, pending }
@@ -51,7 +71,7 @@ export function reduceAttention(state, event) {
     return state
   }
   const next = { ...state, seen: new Set(state.seen), pending: new Set(state.pending) }
-  if (event.interactive === true && INTERACTIVE_TYPES.has(event.type)) {
+  if (opensAttention(event)) {
     const eventId = attentionEventId(event)
     if (eventId && !next.seen.has(eventId)) {
       next.seen.add(eventId)
@@ -79,11 +99,7 @@ export function reduceAttention(state, event) {
     return next
   }
 
-  if (event.type === "ui_reply_ack" && !["accepted", "superseded"].includes(event.status)) {
-    return next
-  }
-
-  if (["ui_reply_ack", "ui_supersede", "timeout"].includes(event.type)) {
+  if (closesAttention(event)) {
     const eventId = attentionEventId(event)
     if (eventId) next.pending.delete(eventId)
   }

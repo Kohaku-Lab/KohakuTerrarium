@@ -210,6 +210,9 @@
 
   <!-- Phase B output-event kinds (ask_text, confirm, selection, progress, notification, card) -->
   <ConversationMessage v-else-if="message.role === 'ui_event'" :message="message" :render-ui-event="renderSharedUIEvent" @reply="onUIEventReply" />
+
+  <!-- Widgets (renderer looked up in the widget registry) -->
+  <WidgetBlock v-else-if="message.role === 'widget'" :widget="widgetView" :host="widgetHost" />
 </template>
 
 <script setup>
@@ -221,6 +224,8 @@ import ToolCallBatch from "../ToolCallBatch.vue"
 import ToolCallBlock from "../ToolCallBlock.vue"
 import VideoFilePreview from "../VideoFilePreview.vue"
 import UIEventBlock from "../UIEventBlock.vue"
+import WidgetBlock from "../widgets/WidgetBlock.vue"
+import { widgetFromMessage } from "../widgets/widgetModel.js"
 import MarkdownRenderer from "../../../public/chat/MarkdownRenderer.vue"
 import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { useMessageActions } from "../../../public/chat/messageActions.js"
@@ -344,6 +349,18 @@ function onUIEventReply({ actionId, values }) {
     return
   }
   chat.submitUIReply(messageTab.value, props.message.eventId, actionId, values || {})
+}
+
+// Widget transport: a renderer's messages and state go to the creature that
+// opened the widget, through the chat store.
+const widgetView = computed(() => (props.message.role === "widget" ? widgetFromMessage(props.message) : null))
+const widgetHost = {
+  send: (name, data) => chat.submitWidgetMessage(messageTab.value, props.message.eventId, name, data || {}),
+  setState: (patch) => chat.setWidgetState(messageTab.value, props.message.eventId, patch),
+  close: () => {},
+  openInCanvas: () => {},
+  theme: {},
+  origin: markdownOrigin,
 }
 
 const showSenderHeader = computed(() => {

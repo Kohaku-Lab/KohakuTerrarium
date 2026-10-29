@@ -38,6 +38,9 @@ import { useStatusStore } from "@/stores/status"
 import { agentAPI, sessionAPI, terrariumAPI } from "@/utils/api"
 import { createHistoryPageController } from "@/stores/historyPageController"
 import { translate } from "@/utils/i18n"
+import { ensureBuiltinWidgetRenderers } from "@/components/chat/widgets/builtin"
+import { legacyKindOf } from "@/components/chat/widgets/widgetModel"
+import { helloRenderers, watchHelloRenderers } from "@/ext/widgets"
 import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
@@ -135,15 +138,139 @@ function _accumulateAttentionStreamText(accumulated, chunk) {
  * when the user is viewing a different branch, and a text-less turn
  * summaries to "" instead of surfacing a stale earlier turn.
  */
+const WIDGET_STATE_DEBOUNCE_MS = 500
+
 function _attentionEdgeSummary(data, streamedText) {
-  if (ATTENTION_INTERACTIVE_TYPES.includes(data.type)) {
-    const payload = data.payload || {}
+  const legacyWidget = data.type === "widget" && legacyKindOf(data.payload?.renderer)
+  if (ATTENTION_INTERACTIVE_TYPES.includes(data.type) || legacyWidget) {
+    const payload = legacyWidget ? data.payload?.spec || {} : data.payload || {}
     return _truncateAttentionSummary(
       payload.prompt || payload.body || payload.text || payload.title,
     )
   }
   if (data.type === "processing_end") return _truncateAttentionSummary(streamedText)
   return ""
+}
+
+/** A chat message for a recorded ``widget`` row (legacy kinds map to ``ui_event``). */
+function _widgetMessageFromRow(evt, tab) {
+  const widgetId = evt.widget_id
+  if (!widgetId) return null
+  const kind = legacyKindOf(evt.renderer)
+  if (kind) {
+    return _legacyWidgetMessage(tab, widgetId, kind, evt.spec || {}, {
+      interactive: !!evt.interactive,
+      surface: evt.surface || "chat",
+      timestamp: "",
+    })
+  }
+  return _genericWidgetMessage(tab, widgetId, {
+    renderer: evt.renderer,
+    version: evt.version,
+    title: evt.title,
+    spec: evt.spec,
+    state: evt.state,
+    fallback: evt.fallback,
+    routing: evt.routing,
+    interactive: !!evt.interactive,
+    surface: evt.surface,
+    timestamp: "",
+  })
+}
+
+function _legacyWidgetMessage(tab, eventId, kind, payload, { interactive, surface, timestamp }) {
+  return {
+    id: `ui_${eventId}`,
+    role: "ui_event",
+    uiEventType: kind,
+    eventId,
+    payload,
+    interactive,
+    surface: surface || "chat",
+    tab,
+    timestamp,
+    replied: false,
+    superseded: false,
+    timedOut: false,
+    repliedActionId: "",
+    repliedValues: null,
+    viaWidget: true,
+  }
+}
+
+function _genericWidgetMessage(tab, eventId, payload) {
+  return {
+    id: `w_${eventId}`,
+    role: "widget",
+    eventId,
+    renderer: payload.renderer || "",
+    version: payload.version || 1,
+    title: payload.title || "",
+    spec: payload.spec ?? null,
+    state: { ...(payload.state || {}) },
+    fallback: payload.fallback || "",
+    routing: payload.routing || "agent",
+    awaiting: payload.awaiting === true,
+    interactive: payload.interactive === true,
+    surface: payload.surface || "chat",
+    tab,
+    timestamp: payload.timestamp ?? new Date().toISOString(),
+    closed: false,
+    closeReason: "",
+    lastAck: null,
+  }
+}
+
+/** Apply a widget patch (``spec`` replace, ``state`` merge, ``title``, ``fallback``, ``awaiting``). */
+function _applyWidgetPatch(message, patch) {
+  if (!patch || typeof patch !== "object") return
+  if (message.role === "ui_event") {
+    if (patch.spec && typeof patch.spec === "object") message.payload = patch.spec
+    return
+  }
+  if ("spec" in patch) message.spec = patch.spec
+  if (patch.state && typeof patch.state === "object")
+    message.state = { ...message.state, ...patch.state }
+  if (typeof patch.title === "string") message.title = patch.title
+  if (typeof patch.fallback === "string") message.fallback = patch.fallback
+  if (typeof patch.awaiting === "boolean") message.awaiting = patch.awaiting
+}
+
+/** Close a widget message; legacy kinds keep their answered / elsewhere / timed-out flags. */
+function _closeWidgetMessage(message, reason = "") {
+  if (message.role === "ui_event") {
+    if (message.replied) return
+    if (reason === "timeout") message.timedOut = true
+    else message.superseded = true
+    return
+  }
+  message.closed = true
+  message.closeReason = reason || ""
+  message.awaiting = false
+}
+
+/** Replay one recorded widget row onto its message. */
+function _applyWidgetRow(message, type, evt) {
+  switch (type) {
+    case "widget_update":
+      _applyWidgetPatch(message, evt.patch)
+      break
+    case "widget_state":
+      if (message.role === "widget" && evt.state && typeof evt.state === "object") {
+        message.state = { ...evt.state }
+      }
+      break
+    case "widget_message":
+      if (message.role === "ui_event") {
+        message.replied = true
+        message.repliedActionId = evt.name || ""
+        message.repliedValues = evt.data || null
+      }
+      break
+    case "widget_close":
+      _closeWidgetMessage(message, evt.reason || "")
+      break
+  }
 }
 
 function normalizeMessageContent(content) {
@@ -743,6 +870,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
   const startedJobs = {} // jobId -> tool part reference
   const completedJobs = new Set() // jobIds that received done/error
   const interactiveMessages = new Map()
+  const widgetMessages = new Map()
 
   // Positional ids ("h_" + result.length) shift whenever an earlier
   // event is hidden (compact_replace ranges, branch filtering), which
@@ -1129,7 +1257,8 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       result.push(injected)
     } else if (["ask_text", "confirm", "selection", "card"].includes(t)) {
       const uiEventId = evt.ui_event_id ?? evt.payload?.event_id
-      if (!uiEventId) continue
+      if (!uiEventId || widgetMessages.has(uiEventId) || interactiveMessages.has(uiEventId))
+        continue
       cur = null
       const message = {
         id: `ui_${uiEventId}`,
@@ -1160,6 +1289,27 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       if (target && ["accepted", "superseded"].includes(evt.status)) {
         target.superseded = true
       }
+    } else if (t === "widget") {
+      const message = _widgetMessageFromRow(evt, tab)
+      if (!message || widgetMessages.has(message.eventId)) continue
+      const twin = interactiveMessages.get(message.eventId)
+      if (twin) {
+        twin.viaWidget = true
+        widgetMessages.set(message.eventId, twin)
+        continue
+      }
+      cur = null
+      addHistoryKey(message, evt)
+      result.push(message)
+      widgetMessages.set(message.eventId, message)
+    } else if (
+      t === "widget_update" ||
+      t === "widget_state" ||
+      t === "widget_message" ||
+      t === "widget_close"
+    ) {
+      const target = widgetMessages.get(evt.widget_id)
+      if (target) _applyWidgetRow(target, t, evt)
     } else if (t === "processing_start") {
       cur = {
         id: stableId("h_"),
@@ -2904,6 +3054,10 @@ const _chatStoreOptions = {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
         this.wsStatus = "open"
         this._reconnectDelay = 500
+        this._sendClientHello()
+        if (!this._helloWatchStop) {
+          this._helloWatchStop = markRaw(watchHelloRenderers(() => this._sendClientHello()))
+        }
         onOpen?.()
       }
       ws.onmessage = (event) => {
@@ -3159,9 +3313,17 @@ const _chatStoreOptions = {
       if (data.type === "model_recovery") return
       if (source) {
         if (
-          ["ask_text", "confirm", "selection", "card", "ui_supersede", "ui_reply_ack"].includes(
-            data.type,
-          )
+          [
+            "ask_text",
+            "confirm",
+            "selection",
+            "card",
+            "ui_supersede",
+            "ui_reply_ack",
+            "widget",
+            "widget_close",
+            "widget_ack",
+          ].includes(data.type)
         ) {
           this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
         }
@@ -3254,6 +3416,14 @@ const _chatStoreOptions = {
         this._handleUISupersede(source, data)
       } else if (data.type === "ui_reply_ack") {
         this._handleUIReplyAck(source, data)
+      } else if (data.type === "widget") {
+        this._handleWidget(source, data)
+      } else if (data.type === "widget_close") {
+        this._handleWidgetClose(source, data)
+      } else if (data.type === "widget_state") {
+        this._handleWidgetState(source, data)
+      } else if (data.type === "widget_ack") {
+        this._handleWidgetAck(source, data)
       } else if (data.type === "input_queued") {
         this._handlePendingAck(source, data, "queued")
       } else if (data.type === "input_edit_ack") {
@@ -3370,6 +3540,152 @@ const _chatStoreOptions = {
       }
     },
 
+    _findWidgetMessage(tab, eventId) {
+      const list = this.messagesByTab[tab] || []
+      return (
+        list.find((m) => (m.role === "widget" || m.role === "ui_event") && m.eventId === eventId) ||
+        null
+      )
+    },
+
+    /** A ``widget`` frame: a new widget, or a patch when it has ``update_target``. */
+    _handleWidget(source, data) {
+      const tab = source || ""
+      const payload = data.payload || {}
+      if (data.update_target) {
+        const existing = this._findWidgetMessage(tab, data.update_target)
+        if (existing) {
+          _applyWidgetPatch(existing, payload)
+          return
+        }
+        if (!payload.renderer) return
+      }
+      const eventId = data.update_target || data.event_id
+      if (!eventId || this._findWidgetMessage(tab, eventId)) return
+      const kind = legacyKindOf(payload.renderer)
+      if (kind) {
+        if (kind === "notification" && data.surface === "toast") {
+          this._handleUIEvent(source, {
+            type: kind,
+            event_id: eventId,
+            surface: "toast",
+            payload: payload.spec || {},
+          })
+          return
+        }
+        this._addMsg(
+          tab,
+          _legacyWidgetMessage(tab, eventId, kind, payload.spec || {}, {
+            interactive: !!data.interactive,
+            surface: data.surface || "chat",
+            timestamp: new Date().toISOString(),
+          }),
+        )
+        return
+      }
+      this._addMsg(
+        tab,
+        _genericWidgetMessage(tab, eventId, {
+          ...payload,
+          interactive: !!data.interactive,
+          surface: data.surface || "chat",
+        }),
+      )
+    },
+
+    _handleWidgetClose(source, data) {
+      const target = this._findWidgetMessage(source || "", data.event_id)
+      if (target) _closeWidgetMessage(target, data.payload?.reason || data.reason || "")
+    },
+
+    _handleWidgetState(source, data) {
+      const target = this._findWidgetMessage(source || "", data.event_id)
+      if (target?.role === "widget" && data.state && typeof data.state === "object") {
+        target.state = { ...data.state }
+      }
+    },
+
+    /** ``widget_ack``: legacy kinds map like ``ui_reply_ack``; generic widgets keep the last ack. */
+    _handleWidgetAck(source, data) {
+      const target = this._findWidgetMessage(source || "", data.event_id)
+      if (!target) return
+      const kind = data.kind || "message"
+      if (target.role === "widget") {
+        target.lastAck = { kind, status: data.status || "" }
+        return
+      }
+      if (kind !== "message") return
+      switch (data.status) {
+        case "accepted":
+          target.replied = true
+          break
+        case "superseded":
+          if (!target.replied) target.superseded = true
+          break
+        case "unknown":
+          target.replied = false
+          target.timedOut = true
+          break
+        case "dropped":
+        case "rate_limited":
+          target.replied = false
+          target.repliedActionId = ""
+          target.repliedValues = null
+          break
+      }
+    },
+
+    _sendWidgetFrame(frame) {
+      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return false
+      try {
+        this._ws.send(JSON.stringify({ ...frame, ts: Date.now() / 1000 }))
+        return true
+      } catch (err) {
+        console.error(`${frame.type} failed:`, err)
+        return false
+      }
+    },
+
+    /** Send one widget message (``widget_msg``) for the widget ``eventId`` in ``tab``. */
+    submitWidgetMessage(tab, eventId, name, data = {}, origin = "renderer") {
+      return this._sendWidgetFrame({
+        type: "widget_msg",
+        target: tab,
+        event_id: eventId,
+        name,
+        data: data || {},
+        origin: origin === "app" ? "app" : "renderer",
+      })
+    },
+
+    /** Merge ``patch`` into a widget's state now and send it, debounced per widget. */
+    setWidgetState(tab, eventId, patch) {
+      if (!patch || typeof patch !== "object") return
+      const target = this._findWidgetMessage(tab, eventId)
+      if (target?.role === "widget") target.state = { ...target.state, ...patch }
+      if (!this._widgetStateTimers) this._widgetStateTimers = markRaw(new Map())
+      const timers = this._widgetStateTimers
+      const key = `${tab}|${eventId}`
+      const pending = timers.get(key)
+      if (pending) clearTimeout(pending.timer)
+      const state = { ...(pending?.state || {}), ...patch }
+      const timer = setTimeout(() => {
+        timers.delete(key)
+        this._sendWidgetFrame({ type: "widget_state", target: tab, event_id: eventId, state })
+      }, WIDGET_STATE_DEBOUNCE_MS)
+      timers.set(key, { timer, state })
+    },
+
+    /** Announce this client's widget renderers on the current socket. */
+    _sendClientHello() {
+      ensureBuiltinWidgetRenderers()
+      return this._sendWidgetFrame({
+        type: "client_hello",
+        protocol: 1,
+        renderers: helloRenderers(),
+      })
+    },
+
     /**
      * Phase B: send a UIReply over the chat WS.
      *
@@ -3381,6 +3697,13 @@ const _chatStoreOptions = {
       if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return false
       const list = this.messagesByTab[tab] || []
       const target = list.find((m) => m.role === "ui_event" && m.eventId === eventId)
+      if (target?.viaWidget) {
+        if (!this.submitWidgetMessage(tab, eventId, actionId, values || {})) return false
+        target.replied = true
+        target.repliedActionId = actionId
+        target.repliedValues = values || null
+        return true
+      }
       try {
         this._ws.send(
           JSON.stringify({
@@ -5970,6 +6293,10 @@ const _chatStoreOptions = {
         clearTimeout(this._reconnectTimer)
         this._reconnectTimer = null
       }
+      this._helloWatchStop?.()
+      this._helloWatchStop = null
+      for (const { timer } of this._widgetStateTimers?.values() || []) clearTimeout(timer)
+      this._widgetStateTimers?.clear()
       this._reconnectDelay = 500
       this._autoReconnect = true
       this.wsStatus = "closed"
