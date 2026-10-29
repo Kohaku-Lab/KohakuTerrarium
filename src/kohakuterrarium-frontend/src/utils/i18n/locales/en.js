@@ -641,6 +641,12 @@ export default {
   "app.source": "View source",
   "app.sourceTitle": "Source of {title}",
   "app.openTab": "Open in a new tab",
+  "app.unavailable":
+    "This app runs in the KohakuTerrarium web dashboard; this view cannot run app frames.",
+  "app.unavailableSource": "Show the source",
+  "app.openApp": "Open app",
+  "app.reveal": "Show app",
+  "app.launcherNote": "Runs in its own editor tab.",
   "app.fullscreen": "Full screen",
   "app.exitFullscreen": "Exit full screen",
   "app.loadError": "Could not load the app: {error}",

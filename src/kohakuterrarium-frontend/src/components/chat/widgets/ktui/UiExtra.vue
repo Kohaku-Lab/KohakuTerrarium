@@ -1,7 +1,7 @@
 <template>
   <!-- kt.ui media, link and widget components: html, math, link, icon, gallery, compare, copy, timer, quiz, rating. -->
   <div v-if="type === 'html'" class="ktui-html" data-test="ktui-html">
-    <AppFrame v-if="htmlSource" :html="htmlSource" :title="node.title ? text(node.title) : t('chat.inlineUi.htmlTitle')" :bridge="true" :fixed-height="fixedHeight" />
+    <component :is="appFrame" v-if="htmlSource" :html="htmlSource" :title="node.title ? text(node.title) : t('chat.inlineUi.htmlTitle')" :bridge="true" :fixed-height="fixedHeight" />
     <div v-else class="ktui-note ktui-html-pending" data-test="ktui-html-pending">{{ streaming ? t("chat.inlineUi.drawing") : t("chat.inlineUi.emptyHtml") }}</div>
   </div>
   <div v-else-if="type === 'math'" class="ktui-math" :class="{ 'ktui-math-display': mathDisplay }" data-test="ktui-math" v-html="mathHtml" />
@@ -83,6 +83,7 @@ import katex from "katex"
 import { translate, useI18n } from "@/utils/i18n"
 
 import AppFrame from "../app/AppFrame.vue"
+import { findWidgetRenderer } from "../../../../ext/widgets.js"
 import { useKtUi } from "./context.js"
 import { toDisplay, truthy } from "./expr.js"
 import { normalizeOptions, resolve, resolveText, safeImageSrc } from "./runtime.js"
@@ -139,6 +140,8 @@ const copied = ref(false)
 const type = computed(() => props.node.type)
 const ui = computed(() => ctx.uiState?.(props.path) || {})
 const streaming = computed(() => ctx.streaming === true)
+// The host's ``kt.app`` renderer draws the frame, so a host without app frames shows its stand-in.
+const appFrame = computed(() => findWidgetRenderer("kt.app")?.component || AppFrame)
 const htmlSource = computed(() => (typeof props.node.source === "string" ? props.node.source : ""))
 const fixedHeight = computed(() => num(props.node.height, null))
 const mathDisplay = computed(() => flagValue(props.node.display))

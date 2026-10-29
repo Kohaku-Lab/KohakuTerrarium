@@ -291,7 +291,7 @@ function toggleTool(id) {
 
 function renderSharedText(content, breaks = false, options = null) {
   if (options?.assistant) {
-    return h(AssistantText, { content, breaks, origin: markdownOrigin, streaming: options.streaming === true, canOpenCanvas: true, uiStore: chat, uiAddress: uiAddress.value, onSay: sendUiMessage, onOpenCanvas: openUiInCanvas })
+    return h(AssistantText, { content, breaks, origin: markdownOrigin, streaming: options.streaming === true, canOpenCanvas: hostActions?.canvas !== false, uiStore: chat, uiAddress: uiAddress.value, onSay: sendUiMessage, onOpenCanvas: openUiInCanvas })
   }
   return h(MarkdownRenderer, { content, breaks, origin: markdownOrigin })
 }
@@ -371,8 +371,9 @@ const widgetHost = makeWidgetHost({
   extra: { origin: markdownOrigin },
 })
 
+// Inline UI sends use the host's user-message transport when it has one.
 function sendUiMessage(text) {
-  return sayToChat(chat, text, t)
+  return sayToChat(chat, text, t, hostActions?.sendText || null)
 }
 
 function openUiInCanvas({ source, title }) {

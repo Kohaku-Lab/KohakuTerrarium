@@ -95,6 +95,12 @@ describe("widget renderer registry", () => {
     expect(helloRenderers()).toEqual({ "kt.app": 1, "kt.ui": 1, "a.app": 3 })
   })
 
+  it("a stand-in registered with announce: false draws but is not announced", () => {
+    registerWidgetRenderer("a.quiet", C, { announce: false })
+    expect(findWidgetRenderer("a.quiet").component).toBe(C)
+    expect(helloRenderers()["a.quiet"]).toBeUndefined()
+  })
+
   it("falls back to chat for surfaces the renderer does not draw", () => {
     registerWidgetRenderer("a.side", C, { surfaces: ["chat", "side-panel"] })
     expect(effectiveSurface("a.side", "side-panel")).toBe("side-panel")

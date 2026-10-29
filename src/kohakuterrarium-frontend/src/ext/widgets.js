@@ -31,7 +31,9 @@ export const widgetRenderers = reactive(new Map())
  *
  * ``options``: ``version`` (highest spec version, default 1), ``surfaces``
  * (default chat only), ``trust``, ``key`` (owner key used to unregister),
- * ``summary(widget)`` / ``icon(widget)`` for the minimized chrome.
+ * ``summary(widget)`` / ``icon(widget)`` for the minimized chrome, and
+ * ``announce: false`` for a stand-in that draws old widgets but must not
+ * make the backend offer the renderer's tools.
  */
 export function registerWidgetRenderer(id, component, options = {}) {
   if (typeof id !== "string" || !id) throw new Error("registerWidgetRenderer needs an id")
@@ -55,6 +57,7 @@ export function registerWidgetRenderer(id, component, options = {}) {
     trust: WIDGET_TRUST.includes(options.trust) ? options.trust : "package",
     summary: typeof options.summary === "function" ? options.summary : null,
     icon: typeof options.icon === "function" ? options.icon : null,
+    announce: options.announce !== false,
   })
   return true
 }
@@ -75,10 +78,11 @@ export function findWidgetRenderer(id) {
   return widgetRenderers.get(id) || null
 }
 
-/** ``{id: version}`` for ``client_hello``: every renderer except the legacy kinds. */
+/** ``{id: version}`` for ``client_hello``: every announced renderer except the legacy kinds. */
 export function helloRenderers() {
   const out = {}
-  for (const [id, entry] of widgetRenderers) if (!LEGACY.has(id)) out[id] = entry.version
+  for (const [id, entry] of widgetRenderers)
+    if (!LEGACY.has(id) && entry.announce) out[id] = entry.version
   return out
 }
 

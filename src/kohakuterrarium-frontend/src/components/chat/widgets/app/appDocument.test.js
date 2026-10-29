@@ -213,6 +213,40 @@ describe("kt.app frame document", () => {
     return expect(sent).resolves.toEqual({ ok: true })
   })
 
+  it("a page transport replaces the parent and is hidden from the app's own code", () => {
+    const viaParent = []
+    const viaTransport = []
+    const fakeParent = { postMessage: (m) => viaParent.push(m) }
+    const listeners = {}
+    const win = {
+      parent: fakeParent,
+      addEventListener: (name, fn) => (listeners[name] = fn),
+      document: { documentElement: { scrollHeight: 120 } },
+      __ktTransport: { post: (m) => viaTransport.push(m), accept: (e) => e.trusted === true },
+    }
+    const run = new Function(
+      "window",
+      "parent",
+      "document",
+      "ResizeObserver",
+      bootstrapScript({ widgetId: "w_9", data: { a: 1 } }),
+    )
+    run(win, fakeParent, win.document, undefined)
+    expect("__ktTransport" in win).toBe(false)
+    expect(viaParent).toEqual([])
+    expect(viaTransport[0]).toMatchObject({ jsonrpc: "2.0", method: "ui/initialize" })
+    listeners.message({
+      source: fakeParent,
+      data: { jsonrpc: "2.0", method: "kt/data", params: { data: "parent" } },
+    })
+    expect(win.kt.data).toEqual({ a: 1 }, "with a transport the parent is not the host")
+    listeners.message({
+      trusted: true,
+      data: { jsonrpc: "2.0", method: "kt/data", params: { data: { a: 2 } } },
+    })
+    expect(win.kt.data).toEqual({ a: 2 })
+  })
+
   it("bootstrap exposes kt.viewport and emits viewport changes from the host only", () => {
     const listeners = {}
     const fakeParent = { postMessage: () => {} }

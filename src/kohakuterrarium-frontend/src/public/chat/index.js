@@ -139,3 +139,14 @@ export { createModelInventory, MODEL_INVENTORY_FRESH_MS } from "../../composable
 export { default as SlashCommandMenu } from "../../components/chat/SlashCommandMenu.vue"
 export { useSlashCommandCompletion } from "../../composables/useSlashCommandCompletion.js"
 export { handleSlashKeydown } from "./slashKeyboard.js"
+// Host seams for rich content. A host whose CSP admits styles only by nonce
+// marks Mermaid's SVG styles with one; a host that cannot run app frames
+// registers its own ``kt.app`` stand-in with ``announce: false`` so the backend
+// never offers ``show_app`` or ``html`` to it.
+export { setMermaidStyleNonce } from "./mermaidRender.js"
+export { registerWidgetRenderer } from "../../ext/widgets.js"
+export { default as AppUnavailable } from "../../components/chat/widgets/app/AppUnavailable.vue"
+// kt.app for a host that opens apps outside the page through the ``openApp`` message action.
+export { default as AppLauncher } from "../../components/chat/widgets/app/AppLauncher.vue"
+// Status-line text while a tool call's arguments stream ("Writing app… 12 KB").
+export { toolArgsProgressLabel } from "../../components/chat/toolArgsProgress.js"

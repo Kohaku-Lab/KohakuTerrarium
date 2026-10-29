@@ -3,10 +3,11 @@
  *
  * ``ensureBuiltinWidgetRenderers`` is idempotent; the chat store calls it
  * before the first ``client_hello`` and ``WidgetBlock`` before the first
- * lookup, so both the dashboard and the shared chat package see them.
+ * lookup, so both the dashboard and the shared chat package see them. An id a
+ * host registered first (the VS Code ``kt.app`` stand-in) is left to the host.
  */
 
-import { registerWidgetRenderer } from "../../../ext/widgets.js"
+import { findWidgetRenderer, registerWidgetRenderer } from "../../../ext/widgets.js"
 import AppFrame from "./app/AppFrame.vue"
 import UiTree from "./ktui/UiTree.vue"
 import AskTextRenderer from "./legacy/AskTextRenderer.vue"
@@ -41,14 +42,15 @@ export function ensureBuiltinWidgetRenderers() {
       ...LEGACY_CHROME[id],
     })
   }
-  registerWidgetRenderer("kt.app", AppFrame, {
-    key: BUILTIN_KEY,
-    trust: "sandboxed",
-    version: 1,
-    surfaces: ["chat", "canvas"],
-    summary: (widget) => widget.title || "App",
-    icon: () => "i-carbon-application-web text-warm-500",
-  })
+  if (!findWidgetRenderer("kt.app"))
+    registerWidgetRenderer("kt.app", AppFrame, {
+      key: BUILTIN_KEY,
+      trust: "sandboxed",
+      version: 1,
+      surfaces: ["chat", "canvas"],
+      summary: (widget) => widget.title || "App",
+      icon: () => "i-carbon-application-web text-warm-500",
+    })
   registerWidgetRenderer("kt.ui", UiTree, {
     key: BUILTIN_KEY,
     trust: "builtin",

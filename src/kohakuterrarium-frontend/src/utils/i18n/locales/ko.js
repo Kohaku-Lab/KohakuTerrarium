@@ -461,6 +461,12 @@ export default {
   "app.source": "소스 보기",
   "app.sourceTitle": "{title} 소스",
   "app.openTab": "새 탭에서 열기",
+  "app.unavailable":
+    "이 앱은 KohakuTerrarium 웹 대시보드에서 실행됩니다. 이 보기에서는 앱 프레임을 실행할 수 없습니다.",
+  "app.unavailableSource": "소스 보기",
+  "app.openApp": "앱 열기",
+  "app.reveal": "앱 보기",
+  "app.launcherNote": "별도의 편집기 탭에서 실행됩니다.",
   "app.fullscreen": "전체 화면",
   "app.exitFullscreen": "전체 화면 종료",
   "app.loadError": "앱을 불러올 수 없습니다: {error}",

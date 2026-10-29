@@ -14,7 +14,7 @@ import { useCodePin } from "./codePin.js"
 import { applyExternalLinkRule, resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
 import { IncrementalMarkdownRenderer } from "./markdownIncremental.js"
 import { createMarkdownMediaResolver, useMediaResolver } from "./mediaResolver.js"
-import { cachedMermaid, hydrateMermaid, mermaidFailure } from "./mermaidRender.js"
+import { cachedMermaid, hydrateMermaid, mermaidFailure, pageTheme } from "./mermaidRender.js"
 import { usePlatformLinkOpener } from "./platformLink.js"
 
 const props = defineProps({
@@ -150,10 +150,11 @@ md.renderer.rules.fence = (tokens, idx, options, env, renderer) => {
       .split(/[ \t]+/, 1)[0] || ""
   if (lang === "mermaid" && !token.meta?.unclosedFence && token.content.trim()) {
     const source = token.content.replace(/\n$/, "")
-    const svg = cachedMermaid(source)
+    const theme = pageTheme(globalThis.document)
+    const svg = cachedMermaid(source, theme)
     const attr = md.utils.escapeHtml(source)
     if (svg) return `<div class="kt-mermaid" data-state="done" data-source="${attr}">${svg}</div>`
-    if (!mermaidFailure(source)) {
+    if (!mermaidFailure(source, theme)) {
       return `<div class="kt-mermaid" data-source="${attr}">${codeBlockHtml(lang, originalFenceRule(tokens, idx, options, env, renderer))}</div>`
     }
   }

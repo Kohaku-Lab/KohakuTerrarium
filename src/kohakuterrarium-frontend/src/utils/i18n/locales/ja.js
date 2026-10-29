@@ -465,6 +465,12 @@ export default {
   "app.source": "ソースを表示",
   "app.sourceTitle": "{title} のソース",
   "app.openTab": "新しいタブで開く",
+  "app.unavailable":
+    "このアプリは KohakuTerrarium の Web ダッシュボードで動作します。このビューではアプリフレームを実行できません。",
+  "app.unavailableSource": "ソースを表示",
+  "app.openApp": "アプリを開く",
+  "app.reveal": "アプリを表示",
+  "app.launcherNote": "専用のエディタータブで動作します。",
   "app.fullscreen": "全画面",
   "app.exitFullscreen": "全画面を終了",
   "app.loadError": "アプリを読み込めません: {error}",

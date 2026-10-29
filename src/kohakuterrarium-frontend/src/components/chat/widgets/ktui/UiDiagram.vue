@@ -14,24 +14,24 @@
 <script setup>
 import { ref, watch } from "vue"
 
-import { cachedMermaid, renderMermaid } from "../../../../public/chat/mermaidRender.js"
+import { cachedMermaid, pageTheme, renderMermaid } from "../../../../public/chat/mermaidRender.js"
 
 const props = defineProps({
   source: { type: String, default: "" },
   title: { type: String, default: "" },
 })
 
-const svg = ref(cachedMermaid(props.source))
+const svg = ref(cachedMermaid(props.source, pageTheme(globalThis.document)))
 const error = ref("")
 let current = 0
 
 async function draw(source) {
   const ticket = ++current
   error.value = ""
-  svg.value = cachedMermaid(source)
+  svg.value = cachedMermaid(source, pageTheme(globalThis.document))
   if (svg.value || !source.trim()) return
   try {
-    const out = await renderMermaid(source)
+    const out = await renderMermaid(source, globalThis.document)
     if (ticket === current) svg.value = out
   } catch (err) {
     if (ticket === current) error.value = err?.message || String(err)

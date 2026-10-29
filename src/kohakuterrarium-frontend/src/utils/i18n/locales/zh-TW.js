@@ -521,6 +521,12 @@ export default {
   "app.source": "檢視原始碼",
   "app.sourceTitle": "{title} 的原始碼",
   "app.openTab": "在新分頁開啟",
+  "app.unavailable":
+    "此應用程式在 KohakuTerrarium 網頁控制台中執行；目前的檢視無法執行應用程式框架。",
+  "app.unavailableSource": "顯示原始碼",
+  "app.openApp": "開啟應用程式",
+  "app.reveal": "顯示應用程式",
+  "app.launcherNote": "在獨立的編輯器分頁中執行。",
   "app.fullscreen": "全螢幕",
   "app.exitFullscreen": "離開全螢幕",
   "app.loadError": "無法載入應用程式：{error}",

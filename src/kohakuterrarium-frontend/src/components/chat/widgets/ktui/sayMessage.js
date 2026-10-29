@@ -2,8 +2,12 @@
 
 import { ElMessage } from "element-plus"
 
-/** Send ``text`` through ``chat.send``; a leading ``/`` is refused so a click never runs a command. */
-export async function sayToChat(chat, text, t) {
+/**
+ * Send ``text`` through ``send`` (default ``chat.send``); a leading ``/`` is
+ * refused so a click never runs a command. A host passes its own ``send``
+ * when user messages go through a host transport (the VS Code webview).
+ */
+export async function sayToChat(chat, text, t, send = null) {
   const message = String(text || "").trim()
   if (!message) return false
   if (message.startsWith("/")) {
@@ -15,7 +19,7 @@ export async function sayToChat(chat, text, t) {
     return false
   }
   try {
-    await chat.send(message)
+    await (typeof send === "function" ? send(message) : chat.send(message))
     return true
   } catch (err) {
     ElMessage.error(err?.message || String(err))

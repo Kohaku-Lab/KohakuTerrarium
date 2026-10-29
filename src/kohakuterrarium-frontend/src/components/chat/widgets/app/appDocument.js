@@ -98,12 +98,19 @@ export function themeCss(theme) {
   return `:root{${vars};color-scheme:${scheme}}html,body{background:var(--kt-bg);color:var(--kt-fg);font-family:var(--kt-font);margin:0}body{padding:8px}`
 }
 
-/** Bootstrap that runs inside the frame before the app: ``window.kt`` and the JSON-RPC bridge. */
+/**
+ * Bootstrap that runs inside the frame before the app: ``window.kt`` and the JSON-RPC bridge.
+ *
+ * A page that is not a frame (a VS Code editor-tab webview) installs
+ * ``window.__ktTransport = {post, accept}`` first; the bootstrap takes it and
+ * removes it, so the app's own code never reaches the transport.
+ */
 export function bootstrapScript(init) {
   return `(function(){
 var init=${scriptJson(init)};
+var tx=window.__ktTransport||null;try{delete window.__ktTransport}catch(e){window.__ktTransport=undefined}
 var seq=0,pending={},listeners={},state=init.state||{};
-function post(m){parent.postMessage(m,"*")}
+function post(m){if(tx)tx.post(m);else parent.postMessage(m,"*")}
 function note(method,params){post({jsonrpc:"2.0",method:method,params:params||{}})}
 function call(method,params){return new Promise(function(ok,fail){var id=++seq;pending[id]={ok:ok,fail:fail};post({jsonrpc:"2.0",id:id,method:method,params:params||{}})})}
 function applyTheme(t){var r=document.documentElement,v=(t&&t.vars)||{};for(var k in v){if(/^--kt-[a-z-]+$/.test(k)&&!/[;{}<>]/.test(String(v[k])))r.style.setProperty(k,String(v[k]))}r.style.colorScheme=t&&t.scheme==="dark"?"dark":"light"}
@@ -114,7 +121,7 @@ send:function(name,data){return call("kt/send",{name:String(name),data:data===un
 openLink:function(url){note("kt/openLink",{url:String(url)})},
 on:function(name,fn){(listeners[name]=listeners[name]||[]).push(fn)}};
 window.kt=kt;
-window.addEventListener("message",function(e){if(e.source!==parent)return;var m=e.data;if(!m||m.jsonrpc!=="2.0")return;
+window.addEventListener("message",function(e){if(tx?!tx.accept(e):e.source!==parent)return;var m=e.data;if(!m||m.jsonrpc!=="2.0")return;
 if(m.id&&pending[m.id]){var p=pending[m.id];delete pending[m.id];if(m.error)p.fail(new Error(m.error.message||"failed"));else p.ok(m.result);return}
 if(m.method==="kt/theme"){kt.theme=m.params;applyTheme(m.params);emit("theme",m.params)}
 else if(m.method==="kt/data"){kt.data=m.params.data;emit("data",kt.data)}
