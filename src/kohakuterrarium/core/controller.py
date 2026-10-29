@@ -9,7 +9,7 @@ from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, Callable
 
 if TYPE_CHECKING:
     from kohakuterrarium.llm.base import ToolSchema
@@ -222,6 +222,8 @@ class Controller:
         # Post-LLM rewrites use the same router as streamed output so attached
         # consumers observe a coherent assistant turn.
         self.output_router: Any = None
+        # Called before each LLM request so deferred prompt refreshes land between calls.
+        self.before_llm_request: Callable[[], Any] | None = None
         # Capture the Message returned by append, not a later conversation tail.
         self._completed_assistant_message = None
 
@@ -862,6 +864,8 @@ class Controller:
                 msg.metadata.update(tool_feedback_metadata(events))
             msg.metadata.update(origin)
 
+        if self.before_llm_request is not None:
+            self.before_llm_request()
         messages = self.pinned.apply(self.conversation.to_messages())
         messages = await self._resolve_message_files(messages)
 

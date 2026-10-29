@@ -34,6 +34,7 @@ from kohakuterrarium.core.agent_observability import (
     wire_scratchpad_observer,
 )
 from kohakuterrarium.core.agent_selection import track_plugin_selection
+from kohakuterrarium.core.agent_tool_gate import AgentToolGateMixin
 from kohakuterrarium.core.agent_turn import AgentTurnMixin
 from kohakuterrarium.core.branch_continuation import (
     continue_on_branch,
@@ -83,6 +84,7 @@ class Agent(
     AgentModelMixin,
     AgentCompactMixin,
     AgentLifecycleMixin,
+    AgentToolGateMixin,
 ):
     """Main agent orchestrator. Wires LLM, controller, executor, I/O.
 
@@ -250,6 +252,7 @@ class Agent(
                 self._known_outputs.add(output_name)
             self._init_skills()  # Before controller so skill index is in prompt
             self._init_controller()
+            self.watch_renderers()
             self._init_input(input_module)
             self._init_user_commands()
             self._init_triggers()

@@ -325,6 +325,9 @@ class AgentInitMixin:
 
         # The primary controller also owns framework command dispatch.
         self.controller = self._create_controller()
+        self.controller.before_llm_request = getattr(
+            self, "apply_pending_prompt_refresh", None
+        )
         if getattr(self, "plugins", None):
             self.controller.plugins = self.plugins
             self._apply_plugin_hooks()

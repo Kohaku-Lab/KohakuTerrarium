@@ -91,6 +91,8 @@ class AgentExtensionsMixin:
         """
         system_prompt = self._build_aggregated_prompt()
         self._controller_config.system_prompt = system_prompt
+        self._prompt_refresh_pending = False
+        self._prompt_tool_key = self._visible_tool_key()
         controller = getattr(self, "controller", None)
         conversation = getattr(controller, "conversation", None)
         if conversation is None:
