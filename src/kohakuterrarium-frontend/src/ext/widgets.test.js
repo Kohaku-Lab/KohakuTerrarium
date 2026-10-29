@@ -24,6 +24,14 @@ import { ensureBuiltinWidgetRenderers } from "@/components/chat/widgets/builtin"
 const C = { template: "<div />" }
 const D = { template: "<span />" }
 
+/** The hello entries of whichever built-in renderers are registered. */
+function builtinHello() {
+  const out = {}
+  for (const [id, entry] of widgetRenderers)
+    if (entry.key === "builtin" && !LEGACY_RENDERER_IDS.includes(id)) out[id] = entry.version
+  return out
+}
+
 function clearNonBuiltin() {
   for (const [id, entry] of [...widgetRenderers.entries()])
     if (entry.key !== "builtin") widgetRenderers.delete(id)
@@ -84,7 +92,7 @@ describe("widget renderer registry", () => {
     ensureBuiltinWidgetRenderers()
     for (const id of LEGACY_RENDERER_IDS) expect(findWidgetRenderer(id)).not.toBeNull()
     registerWidgetRenderer("a.app", C, { version: 3 })
-    expect(helloRenderers()).toEqual({ "kt.app": 1, "a.app": 3 })
+    expect(helloRenderers()).toEqual({ "kt.app": 1, "kt.ui": 1, "a.app": 3 })
   })
 
   it("falls back to chat for surfaces the renderer does not draw", () => {
@@ -106,7 +114,7 @@ describe("widget renderer registry", () => {
     expect(send).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
     expect(send).toHaveBeenCalledOnce()
-    expect(send.mock.calls[0][0]).toMatchObject({ "a.w1": 1, "a.w2": 1 })
+    expect(send.mock.calls[0][0]).toEqual({ ...builtinHello(), "a.w1": 1, "a.w2": 1 })
     expect(Object.keys(send.mock.calls[0][0])).not.toContain("kt.card")
 
     registerWidgetRenderer("a.tmp", C)

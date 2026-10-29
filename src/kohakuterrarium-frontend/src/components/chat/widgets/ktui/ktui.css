@@ -1,0 +1,248 @@
+/* kt.ui renderer styles; colors follow the app theme variables. */
+.ktui {
+  border: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+.ktui-page {
+  border: 0;
+  padding: 1rem;
+  max-width: 960px;
+}
+.ktui-closed {
+  opacity: 0.75;
+}
+.ktui-title {
+  font-weight: 600;
+}
+.ktui-page-header {
+  font-size: 1.25rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+}
+.ktui-stack {
+  display: flex;
+  flex-direction: column;
+}
+.ktui-row {
+  flex-direction: row;
+}
+.ktui-wrap {
+  flex-wrap: wrap;
+}
+.ktui-align-start {
+  align-items: flex-start;
+}
+.ktui-align-center {
+  align-items: center;
+}
+.ktui-align-end {
+  align-items: flex-end;
+}
+.ktui-align-stretch {
+  align-items: stretch;
+}
+.ktui-grid {
+  display: grid;
+}
+.ktui-gap-none {
+  gap: 0;
+}
+.ktui-gap-sm {
+  gap: 0.25rem;
+}
+.ktui-gap-md {
+  gap: 0.5rem;
+}
+.ktui-gap-lg {
+  gap: 1rem;
+}
+.ktui-card {
+  border: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  border-radius: 0.375rem;
+  padding: 0.5rem 0.625rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.ktui-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.ktui-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.ktui-section-title {
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+.ktui-divider {
+  border: 0;
+  border-top: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  margin: 0.25rem 0;
+}
+.ktui-text-sm {
+  font-size: 0.75rem;
+}
+.ktui-text-lg {
+  font-size: 1rem;
+}
+.ktui-heading {
+  margin: 0;
+  font-weight: 600;
+}
+.ktui-h1 {
+  font-size: 1.25rem;
+}
+.ktui-h2 {
+  font-size: 1.125rem;
+}
+.ktui-h3 {
+  font-size: 1rem;
+}
+.ktui-h4 {
+  font-size: 0.875rem;
+}
+.ktui-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  border: 1px solid currentColor;
+}
+.ktui-tone-info {
+  color: #5b8def;
+}
+.ktui-tone-success {
+  color: #4cb782;
+}
+.ktui-tone-warning {
+  color: #e8a33d;
+}
+.ktui-tone-danger {
+  color: #d9534f;
+}
+.ktui-stat-label,
+.ktui-stat-hint {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+.ktui-stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+.ktui-kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.125rem 0.75rem;
+  margin: 0;
+}
+.ktui-kv dt {
+  font-weight: 600;
+  opacity: 0.8;
+}
+.ktui-kv dd {
+  margin: 0;
+}
+.ktui-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.ktui-table-wrap {
+  overflow-x: auto;
+}
+.ktui-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+.ktui-table th,
+.ktui-table td {
+  border-bottom: 1px solid var(--color-border, rgba(160, 160, 160, 0.2));
+  padding: 0.25rem 0.5rem;
+}
+.ktui-image {
+  max-width: 100%;
+  border-radius: 0.375rem;
+}
+.ktui-code {
+  margin: 0;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--color-card, rgba(160, 160, 160, 0.08));
+  overflow-x: auto;
+  font-size: 0.75rem;
+}
+.ktui-note {
+  font-size: 0.75rem;
+  opacity: 0.7;
+}
+.ktui-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ktui-field-toggle,
+.ktui-field-checkbox {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.ktui-label {
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+.ktui-slider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 0.375rem;
+}
+.ktui-slider .el-slider {
+  flex: 1;
+}
+.ktui-slider-value {
+  min-width: 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ktui-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.ktui-chart {
+  margin: 0;
+}
+.ktui-chart-axis {
+  stroke: var(--color-border, rgba(160, 160, 160, 0.4));
+}
+.ktui-chart-labels,
+.ktui-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  font-size: 0.6875rem;
+  opacity: 0.85;
+}
+.ktui-chart-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.ktui-chart-swatch {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 2px;
+}

@@ -8,6 +8,7 @@
 
 import { registerWidgetRenderer } from "../../../ext/widgets.js"
 import AppFrame from "./app/AppFrame.vue"
+import UiTree from "./ktui/UiTree.vue"
 import AskTextRenderer from "./legacy/AskTextRenderer.vue"
 import CardRenderer from "./legacy/CardRenderer.vue"
 import ConfirmRenderer from "./legacy/ConfirmRenderer.vue"
@@ -47,6 +48,14 @@ export function ensureBuiltinWidgetRenderers() {
     surfaces: ["chat", "canvas"],
     summary: (widget) => widget.title || "App",
     icon: () => "i-carbon-application-web text-warm-500",
+  })
+  registerWidgetRenderer("kt.ui", UiTree, {
+    key: BUILTIN_KEY,
+    trust: "builtin",
+    version: 1,
+    surfaces: ["chat", "canvas"],
+    icon: () => "i-carbon-dashboard text-iolite",
+    summary: (w) => w.title || "Widget",
   })
 }
 
