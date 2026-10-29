@@ -2563,6 +2563,7 @@ class TestCoreIntegration:
             script=[
                 ScriptEntry("original reply", match="first question"),
                 ScriptEntry("regenerated reply", match="first question"),
+                ScriptEntry("regenerated again", match="first question"),
                 ScriptEntry("edited reply", match="changed question"),
                 # A second turn, then a turn-targeted regenerate of it.
                 ScriptEntry("second turn reply", match="second question"),
@@ -2611,13 +2612,53 @@ class TestCoreIntegration:
             )
 
             # --- regenerate: same user msg, new branch -----------------
-            await agent.regenerate_last_response()
-            assert "regenerated reply" in _assistant_text(agent)
-            # Still turn 1, but a new branch was opened.
-            assert agent._turn_index == 1
-            assert agent._branch_id == 2
-            # The event log recorded a second branch for turn 1.
-            assert agent._max_branch_id_for_turn(1) == 2
+            before_rerun = store.get_events(agent.config.name)
+            previous_id = next(
+                event["event_id"]
+                for event in before_rerun
+                if event["type"] == "user_message"
+            )
+            for branch, reply in ((2, "regenerated reply"), (3, "regenerated again")):
+                await agent.regenerate_last_response()
+                assert reply in _assistant_text(agent)
+                assert (agent._turn_index, agent._branch_id) == (1, branch)
+                assert agent._max_branch_id_for_turn(1) == branch
+                live_user = next(
+                    message
+                    for message in agent.controller.conversation.get_messages()
+                    if message.role == "user"
+                )
+                canonical = [
+                    event
+                    for event in store.get_events(agent.config.name)
+                    if event["type"] == "user_message"
+                ][-1]
+                assert canonical["event_id"] > previous_id
+                assert live_user.metadata["event_id"] == canonical["event_id"]
+                assert (canonical["turn_index"], canonical["branch_id"]) == (1, branch)
+                assert canonical["content"] == live_user.content == "first question"
+                request = [
+                    message
+                    for message in agent.llm.call_log[-1]
+                    if message["role"] != "system"
+                ]
+                assert request == [
+                    {"role": "user", "content": "PINNED-PERSONA"},
+                    {"role": "user", "content": "first question"},
+                ]
+                await agent._session_output.drain()
+                saved_user = next(
+                    message
+                    for message in store.load_branch_snapshot(
+                        agent.config.name, {1: branch}
+                    )["messages"]
+                    if message["role"] == "user"
+                )
+                assert saved_user["metadata"]["event_id"] == canonical["event_id"]
+                previous_id = canonical["event_id"]
+            assert (
+                store.get_events(agent.config.name)[: len(before_rerun)] == before_rerun
+            )
 
             # --- edit_and_rerun: replace the user message, re-run ------
             # System message is index 0, the user message is index 1.
@@ -2635,11 +2676,11 @@ class TestCoreIntegration:
             assert user_msgs[-1].get_text_content() == "changed question"
             # Editing turn 1 opened yet another branch on it.
             assert agent._turn_index == 1
-            assert agent._branch_id == 3
+            assert agent._branch_id == 4
 
             # --- a fresh second turn -----------------------------------
             # A new user input after an edit advances to turn 2; the
-            # parent_branch_path now records (turn 1, branch 3) so a
+            # parent_branch_path now records (turn 1, branch 4) so a
             # later branch switch on turn 1 can hide turn 2's events.
             await _drain_chat(creature, "second question")
             assert "second turn reply" in _assistant_text(agent)
@@ -2670,7 +2711,7 @@ class TestCoreIntegration:
             # Only the system prompt survives a rewind to index 1.
             assert roles == ["system"]
             # rewind does not invoke the LLM.
-            assert agent.llm.call_count == 5
+            assert agent.llm.call_count == 6
             assert [key for key, _ in agent.controller.pinned.pinned()] == ["persona"]
             assert all(
                 log[1]["content"] == "PINNED-PERSONA" for log in agent.llm.call_log
@@ -2766,9 +2807,17 @@ class TestCoreIntegration:
             # A message_idx past the end resolves to None → returns False
             # and runs no LLM call.
             calls_pre = agent.llm.call_count
-            bad = await agent.edit_and_rerun(message_idx=999, new_content="nope")
+            context_before = agent.controller.conversation.to_json()
+            path_before = live_branch_path(agent)
+            events_before = store.get_events(agent.config.name)
+            bad = await agent.edit_and_rerun(
+                message_idx=999, new_content="nope", branch_view={1: 1}
+            )
             assert bad is False
             assert agent.llm.call_count == calls_pre
+            assert agent.controller.conversation.to_json() == context_before
+            assert live_branch_path(agent) == path_before
+            assert store.get_events(agent.config.name) == events_before
 
             # --- native_tool_options on a non-native tool is rejected --
             # ``echo``-style tools are NOT provider-native, so setting

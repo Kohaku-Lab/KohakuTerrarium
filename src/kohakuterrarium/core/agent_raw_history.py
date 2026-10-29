@@ -7,12 +7,12 @@ from kohakuterrarium.core.agent_message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
 )
-from kohakuterrarium.core.branch_continuation import live_branch_path
 from kohakuterrarium.core.compact_branch import (
     compact_rule_from_event,
     is_summary_message,
 )
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.history_source import PreparedHistorySource, copy_conversation
 from kohakuterrarium.core.snapshot_history import (
     prepare_snapshot,
     replayed_compact_state,
@@ -57,7 +57,10 @@ def raw_target_content(
 
 
 def _accepted_native_prefix(
-    agent: RawHistoryAgent, prefix: RawHistoryPrefix, events: list[dict]
+    agent: RawHistoryAgent,
+    prefix: RawHistoryPrefix,
+    events: list[dict],
+    source: PreparedHistorySource | None = None,
 ) -> Conversation | None:
     """Detach accepted context when every retained summary predates the target."""
     target = prefix.target
@@ -66,9 +69,10 @@ def _accepted_native_prefix(
         target["branch_id"],
         target["event_id"],
     )
-    if getattr(agent, "_context_cutoff_event_id", 0) >= event_id:
+    source = source or PreparedHistorySource.capture(agent)
+    if source.cutoff >= event_id:
         return None
-    if {t: b for t, b in live_branch_path(agent).items() if t <= turn} != {
+    if {t: b for t, b in source.view.items() if t <= turn} != {
         t: b for t, b in prefix.branch_view.items() if t <= turn
     }:
         return None
@@ -82,7 +86,7 @@ def _accepted_native_prefix(
         != 1
     ):
         return None
-    conversation = agent.controller.conversation
+    conversation = source.conversation
     messages = conversation.get_messages()
     matches = [
         i
@@ -126,33 +130,39 @@ def _accepted_native_prefix(
     return detached
 
 
-def reload_raw_prefix_for_target(
+def prepare_raw_prefix_for_target(
     agent: RawHistoryAgent,
     target: UserMessageSelector,
     *,
     branch_view: dict[int, int] | None = None,
-) -> None:
-    """Restore accepted earlier context, otherwise replay unchanged summary inputs."""
+    source: PreparedHistorySource | None = None,
+) -> PreparedHistorySource:
+    """Prepare a detached canonical prefix without adopting history state."""
     if agent.session_store is None:
         raise ValueError("raw persisted history is unavailable")
-    current_conversation = agent.controller.conversation
+    source = source or PreparedHistorySource.capture(agent)
+    current_conversation = source.conversation
     all_events = list(agent.session_store.get_events(agent.config.name))
     prefix = select_raw_history_prefix(
         all_events,
         selector=target,
         branch_view=branch_view,
     )
-    native = _accepted_native_prefix(agent, prefix, all_events)
+    parent = tuple(
+        (turn, branch)
+        for turn, branch in prefix.branch_view.items()
+        if 0 < turn < target.turn_index and branch > 0
+    )
+    native = _accepted_native_prefix(agent, prefix, all_events, source)
     if native is not None:
-        agent.controller.conversation = native
-        agent._turn_index = target.turn_index
-        agent._branch_id = target.branch_id
-        agent._parent_branch_path = [
-            (turn, branch)
-            for turn, branch in prefix.branch_view.items()
-            if 0 < turn < target.turn_index and branch > 0
-        ]
-        return
+        return PreparedHistorySource(
+            native,
+            target.turn_index,
+            target.branch_id,
+            parent,
+            source.cutoff,
+            deepcopy(source.compact_state),
+        )
     target_path: set[tuple[int, int]] = {
         (turn, branch)
         for turn, branch in prefix.branch_view.items()
@@ -209,12 +219,12 @@ def reload_raw_prefix_for_target(
     for raw_message, message in zip(messages, persisted_messages):
         metadata = raw_message.get("metadata")
         if isinstance(metadata, dict):
-            message.metadata = dict(metadata)
+            message.metadata = deepcopy(metadata)
     if not any(message.role == "system" for message in persisted_messages):
         persisted_messages = [
             *(
-                message
-                for message in agent.controller.conversation.get_messages()
+                deepcopy(message)
+                for message in current_conversation.get_messages()
                 if message.role == "system"
             ),
             *persisted_messages,
@@ -222,21 +232,25 @@ def reload_raw_prefix_for_target(
     conversation = Conversation(current_conversation.config)
     for message in persisted_messages:
         conversation.append_message(message)
-    agent.controller.conversation = conversation
-    agent._context_cutoff_event_id = (
-        prepared.get("context_cutoff_event_id", 0) if prepared is not None else 0
-    )
-    manager = getattr(agent, "compact_manager", None)
-    if manager is not None:
-        state = (
+    return PreparedHistorySource(
+        copy_conversation(conversation),
+        target.turn_index,
+        target.branch_id,
+        parent,
+        prepared.get("context_cutoff_event_id", 0) if prepared is not None else 0,
+        deepcopy(
             prepared["compact_state"] if prepared else replayed_compact_state(messages)
-        )
-        manager._compact_count = state["compact_count"]
-        manager._last_compact_time = state["last_compact_time"]
-    agent._turn_index = target.turn_index
-    agent._branch_id = target.branch_id
-    agent._parent_branch_path = [
-        (turn, branch)
-        for turn, branch in prefix.branch_view.items()
-        if 0 < turn < target.turn_index and branch > 0
-    ]
+        ),
+    )
+
+
+def reload_raw_prefix_for_target(
+    agent: RawHistoryAgent,
+    target: UserMessageSelector,
+    *,
+    branch_view: dict[int, int] | None = None,
+) -> None:
+    """Prepare and adopt the prefix for an existing canonical target."""
+    prepare_raw_prefix_for_target(agent, target, branch_view=branch_view).adopt(
+        agent, preserve_identity=False
+    )

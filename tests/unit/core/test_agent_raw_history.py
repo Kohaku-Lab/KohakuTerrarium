@@ -7,6 +7,7 @@ import pytest
 
 from kohakuterrarium.core.agent_raw_history import (
     _accepted_native_prefix,
+    prepare_raw_prefix_for_target,
     reload_raw_prefix_for_target,
 )
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
@@ -53,6 +54,38 @@ def _agent(events, *, conversation_config=None):
         _branch_id=4,
         _parent_branch_path=[(8, 4)],
     )
+
+
+def test_prepare_and_adopt_are_distinct_and_nested_source_is_detached():
+    events = [
+        _event(1, "user_message", turn=1, content="original"),
+        _event(2, "text_chunk", turn=1, content="answer"),
+        _event(3, "user_message", turn=2, content="target", path=[[1, 1]]),
+    ]
+    agent = _agent(events)
+    original = agent.controller.conversation
+    original.get_messages()[0].metadata["nested"] = {"values": [1]}
+    before = deepcopy(original.to_messages(include_metadata=True))
+    prepared = prepare_raw_prefix_for_target(agent, UserMessageSelector(3, 2, 1))
+    assert agent.controller.conversation is original
+    assert original.to_messages(include_metadata=True) == before
+    assert (agent._turn_index, agent._branch_id, agent._parent_branch_path) == (
+        9,
+        4,
+        [(8, 4)],
+    )
+    source = deepcopy(prepared.conversation.to_messages(include_metadata=True))
+    original.get_messages()[0].metadata["nested"]["values"].append(2)
+    assert prepared.conversation.to_messages(include_metadata=True) == source
+    adopted = prepared.adopt(agent)
+    adopted.get_messages()[-1].metadata["branch_id"] = 99
+    adopted.truncate_from(2)
+    assert prepared.conversation.to_messages(include_metadata=True) == source
+    assert prepared.view == {1: 1, 2: 1}
+    with pytest.raises(ValueError):
+        prepare_raw_prefix_for_target(agent, UserMessageSelector(3, 2, 99))
+    assert agent.controller.conversation is adopted
+    assert adopted.get_messages()[-1].content == "original"
 
 
 def test_reload_restores_missing_system_prompt_and_canonical_user_metadata():
