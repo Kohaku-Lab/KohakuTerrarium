@@ -665,7 +665,7 @@ presets:
 
 `subagent_models` 允许用户不修改上游 creature 包，直接设置各 subagent 的默认模型。键会与最终的 `SubAgentConfig.name` 精确匹配。命中的用户配置会覆盖未设置的模型，以及 `parent`、`inherit`、`default`、`subagent-default`、`subagent_default`。直接写在该 subagent 配置上的具体 selector 仍然优先；没有命中时继承父 LLM。该映射在创建 subagent 时读取，因此修改只影响之后创建的 job。Conversation 与 Inspector Trace 会记录每个新 job 实际绑定的模型，优先显示规范化 profile selector，缺失时回退到 raw model id。
 
-`child_models` 为 `group_add_node` 和 `group_spawn_child` 提供同类的用户默认模型。它不影响 `kt run`、Studio、recipe 和直接 Python API。优先级是：本次调用的 `llm` 参数；用户表；合并后的 creature 配置中的具体 `llm` 或 `model`。配置哨兵 `parent`、`inherit`、`default` 只在用户表没有命中时使用调用者模型。查表时按规范化的 `@pkg/...`，从当前 creature 到 `base_config` 祖先，由近到远使用第一个命中的键。键不匹配 `config.name`、spawn 的 `name` 或本地路径。表内 `default` 是全局 child 默认，和配置哨兵 `default` 不是同一个意思。表中的选择器不可用时，回退到调用者模型，再回退到 `default_model`。工具返回 `llm`、`llm_source` 和 `llm_fallback_from`。文件在 spawn 时读取，修改只影响之后的 spawn。
+`child_models` 为 `group_add_node` 和 `group_spawn_child` 提供同类的用户默认模型。它不影响 `kt run`、Studio、recipe 和直接 Python API。本次调用的 `llm` 参数优先。具名 `@pkg/...` 配置会覆盖具体模型，但表内 `default` 不会；它只用于未写模型或 `parent`、`inherit`、`default`。结果返回 `requested_llm`、`llm`、`llm_source`、`matched_key`、`llm_fallback_from` 和 `fallback_reason`。查表时按规范化的 `@pkg/...`，从当前 creature 到 `base_config` 祖先，由近到远使用第一个命中的键。键不匹配 `config.name`、spawn 的 `name` 或本地路径。表内 `default` 是全局 child 默认，和配置哨兵 `default` 不是同一个意思。表中的选择器不可用时，回退到调用者模型，再回退到 `default_model`。工具返回 `llm`、`llm_source` 和 `llm_fallback_from`。文件在 spawn 时读取，修改只影响之后的 spawn。
 
 ### 添加自定义 LLM backend provider
 

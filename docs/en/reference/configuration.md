@@ -1015,10 +1015,11 @@ the raw model id.
 
 `child_models` supplies the same kind of user default for creatures spawned by
 `group_add_node` and `group_spawn_child`. It does not affect `kt run`, Studio,
-recipes, or direct Python API calls. Precedence is: explicit `llm` argument,
-then the user table, then a concrete `llm` or `model` from the merged creature
-config. Config sentinels `parent`, `inherit`, and `default` use the caller only
-when the table has no match. The table matches normalized
+recipes, or direct Python API calls. An explicit `llm` argument wins. A named
+`@pkg/...` entry overrides a concrete config model, while table `default` does not;
+it applies only to an absent model or `parent`, `inherit`, or `default`. The result
+reports `requested_llm`, `llm`, `llm_source`, `matched_key`, `llm_fallback_from`,
+and `fallback_reason`. The table matches normalized
 `@pkg/...` refs from the creature through its `base_config` ancestors, nearest
 first. It does not match `config.name`, the spawn `name`, or a local filesystem
 path. The table key `default` is the global child fallback. An unavailable table

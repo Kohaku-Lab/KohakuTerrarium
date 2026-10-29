@@ -450,11 +450,15 @@ class TestSpawnedModel:
         assert kwargs["fallback_llm"] is None
 
     @pytest.mark.parametrize("tool_cls,ref_key", _SPAWN_TOOLS)
-    async def test_configured_model_is_not_replaced_by_the_table(
+    async def test_named_entry_replaces_a_configured_model(
         self, monkeypatch, tool_cls, ref_key
     ):
         selector = _preset_selector()
-        config = AgentConfig(name="kid", llm_profile="openai/from-config")
+        config = AgentConfig(
+            name="kid",
+            llm_profile="openai/from-config",
+            package_config_refs=["@biome/creatures/kid"],
+        )
         monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
@@ -464,8 +468,25 @@ class TestSpawnedModel:
         kwargs = await self._spawn(
             monkeypatch, tool_cls, ref_key, _caller_on(selector), config=config
         )
+        assert kwargs["llm"] == selector
+
+    async def test_global_default_does_not_replace_a_configured_model(
+        self, monkeypatch
+    ):
+        selector = _preset_selector()
+        config = AgentConfig(name="kid", llm_profile="openai/from-config")
+        monkeypatch._child_models_set = True
+        monkeypatch.setattr(
+            child_model_mod, "get_child_models", lambda: {"default": selector}
+        )
+        kwargs = await self._spawn(
+            monkeypatch,
+            lifecycle_mod.GroupAddNodeTool,
+            "config_path",
+            _caller_on(selector),
+            config=config,
+        )
         assert kwargs["llm"] is None
-        assert kwargs["fallback_llm"] == selector
 
     @pytest.mark.parametrize("sentinel", ["parent", "inherit", "default"])
     async def test_inherit_sentinels_still_use_the_table(self, monkeypatch, sentinel):

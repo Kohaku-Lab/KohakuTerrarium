@@ -17,11 +17,14 @@ _GLOBAL_CHILD_KEY = "default"
 
 @dataclass(frozen=True)
 class ChildModelChoice:
-    """The selector and provenance for one spawned child."""
+    """The requested selector, actual selector, and why it was chosen."""
 
     selector: str
     source: str
+    requested: str = ""
+    matched_key: str = ""
     fallback_from: str = ""
+    fallback_reason: str = ""
 
 
 def choose_child_model(
@@ -42,24 +45,30 @@ def choose_child_model(
     if requested:
         return ChildModelChoice(requested, "explicit")
 
-    table_selector = _matching_selector(config, child_models)
+    configured = (config.llm_profile or config.model or "").strip()
+    concrete = _is_concrete(configured)
+    table_selector = _matching_selector(config, child_models, allow_global=not concrete)
     if table_selector:
-        source = (
-            "child_default"
-            if table_selector[0] == _GLOBAL_CHILD_KEY
-            else "child_models"
-        )
-        if resolves(table_selector[1]):
-            return ChildModelChoice(table_selector[1], source)
+        key, selector = table_selector
+        source = "child_default" if key == _GLOBAL_CHILD_KEY else "child_models"
+        if resolves(selector):
+            return ChildModelChoice(selector, source, selector, key)
         logger.warning(
             "Child model selector is unavailable; falling back",
-            selector=table_selector[1],
+            selector=selector,
+            matched_key=key,
             caller=caller or "",
         )
         choice = _caller_or_global(caller)
-        return ChildModelChoice(choice.selector, choice.source, table_selector[1])
+        return ChildModelChoice(
+            choice.selector,
+            choice.source,
+            selector,
+            key,
+            selector,
+            "selector_unavailable",
+        )
 
-    configured = (config.llm_profile or config.model or "").strip()
     lowered = configured.lower()
     if lowered in _INHERIT_CALLER:
         return _caller_or_global(caller)
@@ -68,13 +77,22 @@ def choose_child_model(
     return _caller_or_global(caller)
 
 
+def _is_concrete(configured: str) -> bool:
+    return (
+        bool(configured)
+        and configured.lower() not in _INHERIT_CALLER | _USE_CHILD_TABLE
+    )
+
+
 def _matching_selector(
-    config: AgentConfig, child_models: dict[str, str]
+    config: AgentConfig, child_models: dict[str, str], *, allow_global: bool
 ) -> tuple[str, str] | None:
     for ref in config.package_config_refs:
         selector = child_models.get(ref, "").strip()
         if selector:
             return ref, selector
+    if not allow_global:
+        return None
     selector = child_models.get(_GLOBAL_CHILD_KEY, "").strip()
     if selector:
         return _GLOBAL_CHILD_KEY, selector
@@ -128,7 +146,17 @@ def spawn_config(config_ref: str, loaded, choice: ChildModelChoice):
 def model_payload(choice: ChildModelChoice) -> dict[str, str]:
     """Return the model provenance fields for a successful spawn."""
     return {
+        "requested_llm": choice.requested,
         "llm": choice.selector,
         "llm_source": choice.source,
+        "matched_key": choice.matched_key,
         "llm_fallback_from": choice.fallback_from,
+        "fallback_reason": choice.fallback_reason,
     }
+
+
+def preview_child_model(
+    config: AgentConfig, *, explicit: str | None = None, caller: str | None = None
+) -> dict[str, str]:
+    """Return the model decision without spawning a creature."""
+    return model_payload(resolve_spawn_model(config, explicit, caller))
