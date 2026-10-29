@@ -1,0 +1,219 @@
+{
+  "about": "kt.ui inline markup v1 conformance (plans/chat-widgets/08-inline-ui.md). 'split' cases: message text -> segments; a ui segment carries its source and whether it was closed. 'convert' cases: one block source -> kt.ui spec (compared as JSON; numbers compare by value), or 'error' whose text must contain the given fragment. Python and JS must both pass every case.",
+  "split": [
+    {
+      "name": "markdown around one block",
+      "text": "Here is the split:\n\n<ui><stat label=\"Each\">40</stat></ui>\n\nDone.",
+      "segments": [
+        {"kind": "markdown", "text": "Here is the split:\n\n"},
+        {"kind": "ui", "source": "<ui><stat label=\"Each\">40</stat></ui>", "closed": true},
+        {"kind": "markdown", "text": "\n\nDone."}
+      ]
+    },
+    {
+      "name": "a block inside a fenced code block is text",
+      "text": "```html\n<ui><text>x</text></ui>\n```",
+      "segments": [
+        {"kind": "markdown", "text": "```html\n<ui><text>x</text></ui>\n```"}
+      ]
+    },
+    {
+      "name": "ui in the middle of a line is text",
+      "text": "Write `<ui>` tags like <ui> this.",
+      "segments": [
+        {"kind": "markdown", "text": "Write `<ui>` tags like <ui> this."}
+      ]
+    },
+    {
+      "name": "indented up to three spaces and multi-line",
+      "text": "A\n   <ui title=\"T\">\n<text>x</text>\n</ui>\nB",
+      "segments": [
+        {"kind": "markdown", "text": "A\n"},
+        {"kind": "ui", "source": "<ui title=\"T\">\n<text>x</text>\n</ui>", "closed": true},
+        {"kind": "markdown", "text": "\nB"}
+      ]
+    },
+    {
+      "name": "two blocks",
+      "text": "<ui><text>a</text></ui>\n<ui><text>b</text></ui>",
+      "segments": [
+        {"kind": "ui", "source": "<ui><text>a</text></ui>", "closed": true},
+        {"kind": "markdown", "text": "\n"},
+        {"kind": "ui", "source": "<ui><text>b</text></ui>", "closed": true}
+      ]
+    },
+    {
+      "name": "an open block runs to the end",
+      "text": "Intro\n<ui><card title=\"C\"><text>par",
+      "segments": [
+        {"kind": "markdown", "text": "Intro\n"},
+        {"kind": "ui", "source": "<ui><card title=\"C\"><text>par", "closed": false}
+      ]
+    },
+    {
+      "name": "an attribute value containing </ui> does not close the block",
+      "text": "<ui><text>a \"</ui>\" b</text></ui>",
+      "segments": [
+        {"kind": "ui", "source": "<ui><text>a \"</ui>\" b</text></ui>", "closed": true}
+      ]
+    },
+    {"name": "</ui> inside an html element does not close the block", "text": "See:\n<ui><html><p>a </ui> b</p></html></ui>\nafter", "segments": [{"kind": "markdown", "text": "See:\n"}, {"kind": "ui", "source": "<ui><html><p>a </ui> b</p></html></ui>", "closed": true}, {"kind": "markdown", "text": "\nafter"}]}
+  ],
+  "convert": [
+    {
+      "name": "state, let and two children wrap in a stack",
+      "source": "<ui title=\"Split\">\n  <state total={120} people={3}/>\n  <let each={total / people}/>\n  <number label=\"People\" bind=\"people\"/>\n  <stat label=\"Each\">{fmt(each, 2)}</stat>\n</ui>",
+      "spec": {
+        "title": "Split",
+        "state": {"total": 120, "people": 3},
+        "computed": {"each": "total / people"},
+        "root": {"type": "stack", "gap": "md", "children": [
+          {"type": "number", "label": "People", "bind": "people"},
+          {"type": "stat", "label": "Each", "value": "{{ fmt(each, 2) }}"}
+        ]}
+      }
+    },
+    {
+      "name": "one child is the root; constant lists and objects become JSON",
+      "source": "<ui><table columns={[\"name\", \"score\"]} rows={[{name: \"a\", score: 1}]}/></ui>",
+      "spec": {
+        "root": {"type": "table", "columns": ["name", "score"], "rows": [{"name": "a", "score": 1}]}
+      }
+    },
+    {
+      "name": "send becomes message and the text child is the label",
+      "source": "<ui><state plan=\"pro\"/><radio bind=\"plan\" options={[\"free\", \"pro\"]}/><button send=\"I choose the {plan} plan\">Choose</button></ui>",
+      "spec": {
+        "state": {"plan": "pro"},
+        "root": {"type": "stack", "gap": "md", "children": [
+          {"type": "radio", "bind": "plan", "options": ["free", "pro"]},
+          {"type": "button", "label": "Choose", "message": "I choose the {{ plan }} plan"}
+        ]}
+      }
+    },
+    {
+      "name": "bare attribute is true; doubled braces are literal; expressions interpolate",
+      "source": "<ui><state n={2}/><text muted>Value {{x}} is {n * 2}</text></ui>",
+      "spec": {
+        "state": {"n": 2},
+        "root": {"type": "text", "muted": true, "value": "Value {x} is {{ n * 2 }}"}
+      }
+    },
+    {
+      "name": "an attribute expression with names becomes a template",
+      "source": "<ui><state top={10}/><slider label=\"Max\" bind=\"top\" min={0} max={top * 2}/></ui>",
+      "spec": {
+        "state": {"top": 10},
+        "root": {"type": "slider", "label": "Max", "bind": "top", "min": 0, "max": "{{ top * 2 }}"}
+      }
+    },
+    {
+      "name": "diagram and code keep raw dedented text",
+      "source": "<ui>\n<diagram title=\"Flow\">\n  graph LR\n    A{x} --> B\n</diagram>\n<code lang=\"py\">\n  print({1})\n</code>\n</ui>",
+      "spec": {
+        "root": {"type": "stack", "gap": "md", "children": [
+          {"type": "diagram", "title": "Flow", "source": "graph LR\n  A{x} --> B"},
+          {"type": "code", "lang": "py", "value": "print({1})"}
+        ]}
+      }
+    },
+    {
+      "name": "loose text in a container becomes a markdown text node",
+      "source": "<ui><card title=\"Note\">Hello **there**</card></ui>",
+      "spec": {
+        "root": {"type": "card", "title": "Note", "children": [
+          {"type": "text", "value": "Hello **there**"}
+        ]}
+      }
+    },
+    {
+      "name": "multi-line text child is dedented",
+      "source": "<ui>\n<text>\n  - one\n  - two\n</text>\n</ui>",
+      "spec": {
+        "root": {"type": "text", "value": "- one\n- two"}
+      }
+    },
+    {
+      "name": "each keeps the items expression source; one child is the child",
+      "source": "<ui><state rows={[1, 2]}/><each items={rows} as=\"r\"><badge>#{r}</badge></each></ui>",
+      "spec": {
+        "state": {"rows": [1, 2]},
+        "root": {"type": "each", "items": "rows", "as": "r", "child": {"type": "badge", "value": "#{{ r }}"}}
+      }
+    },
+    {
+      "name": "each with several children wraps them in a small stack",
+      "source": "<ui><state rows={[1]}/><each items={rows}><text>a</text><text>b</text></each></ui>",
+      "spec": {
+        "state": {"rows": [1]},
+        "root": {"type": "each", "items": "rows", "child": {"type": "stack", "gap": "sm", "children": [
+          {"type": "text", "value": "a"},
+          {"type": "text", "value": "b"}
+        ]}}
+      }
+    },
+    {
+      "name": "tabs of tab",
+      "source": "<ui><tabs><tab label=\"A\"><text>x</text></tab><tab label=\"B\"><text>y</text></tab></tabs></ui>",
+      "spec": {
+        "root": {"type": "tabs", "children": [
+          {"type": "tab", "label": "A", "children": [{"type": "text", "value": "x"}]},
+          {"type": "tab", "label": "B", "children": [{"type": "text", "value": "y"}]}
+        ]}
+      }
+    },
+    {
+      "name": "page layout, chart series objects, single-quoted attribute",
+      "source": "<ui layout=\"page\" title='Sales'><chart kind=\"bar\" labels={[\"Q1\", \"Q2\"]} series={[{name: \"2026\", data: [3, 5]}]}/></ui>",
+      "spec": {
+        "title": "Sales",
+        "layout": "page",
+        "root": {"type": "chart", "kind": "bar", "labels": ["Q1", "Q2"], "series": [{"name": "2026", "data": [3, 5]}]}
+      }
+    },
+    {
+      "name": "an unclosed block is auto-closed",
+      "source": "<ui><card title=\"C\"><text>partial",
+      "spec": {
+        "root": {"type": "card", "title": "C", "children": [{"type": "text", "value": "partial"}]}
+      }
+    },
+    {
+      "name": "an unfinished tag at the end is dropped",
+      "source": "<ui><text>a</text><stat label=\"Ea",
+      "spec": {
+        "root": {"type": "text", "value": "a"}
+      }
+    },
+    {
+      "name": "mismatched closing tag",
+      "source": "<ui><card><text>x</card></ui>",
+      "error": "mismatched"
+    },
+    {
+      "name": "unterminated expression in a closed block",
+      "source": "<ui><stat label=\"A\" value={fmt(1, 2)/></ui>",
+      "error": "unterminated"
+    },
+    {
+      "name": "state values must be constants",
+      "source": "<ui><state a={b}/><text>x</text></ui>",
+      "error": "constant"
+    },
+    {"name": "callout takes a Markdown text child", "source": "<ui><callout tone=\"warning\" title=\"Heads up\">Back up **first**.</callout></ui>", "spec": {"root": {"type": "callout", "tone": "warning", "title": "Heads up", "value": "Back up **first**."}}},
+    {"name": "quote with a cite", "source": "<ui><quote cite=\"Ada\">Measure twice,\n  cut once.</quote></ui>", "spec": {"root": {"type": "quote", "cite": "Ada", "value": "Measure twice,\n  cut once."}}},
+    {"name": "steps with object items and a current index", "source": "<ui><steps current={1} items={[\"Plan\", {title: \"Build\", detail: \"two days\"}, {title: \"Ship\", status: \"todo\"}]}/></ui>", "spec": {"root": {"type": "steps", "current": 1, "items": ["Plan", {"title": "Build", "detail": "two days"}, {"title": "Ship", "status": "todo"}]}}},
+    {"name": "sortable, filterable table with column formats", "source": "<ui><table sortable filter columns={[\"name\", {key: \"price\", label: \"Price\", format: \"currency\", currency: \"EUR\", digits: 2}, {key: \"share\", format: \"percent\", digits: 1}]} rows={[{name: \"a\", price: 3.5, share: 0.25}]}/></ui>", "spec": {"root": {"type": "table", "sortable": true, "filter": true, "columns": ["name", {"key": "price", "label": "Price", "format": "currency", "currency": "EUR", "digits": 2}, {"key": "share", "format": "percent", "digits": 1}], "rows": [{"name": "a", "price": 3.5, "share": 0.25}]}}},
+    {"name": "tree with nested nodes", "source": "<ui><tree open={false} items={[{label: \"src\", badge: \"dir\", children: [\"main.py\", {label: \"lib\", children: [\"x.py\"]}]}]}/></ui>", "spec": {"root": {"type": "tree", "open": false, "items": [{"label": "src", "badge": "dir", "children": ["main.py", {"label": "lib", "children": ["x.py"]}]}]}}},
+    {"name": "accordion holds children", "source": "<ui><accordion title=\"Details\" open>More **detail** here.<kv fields={[{label: \"a\", value: 1}]}/></accordion></ui>", "spec": {"root": {"type": "accordion", "title": "Details", "open": true, "children": [{"type": "text", "value": "More **detail** here."}, {"type": "kv", "fields": [{"label": "a", "value": 1}]}]}}},
+    {"name": "stat with a trend and a text child", "source": "<ui><state users={1204}/><stat label=\"Users\" trend={[1, 3, 2, 5]}>{fmt(users)}</stat></ui>", "spec": {"state": {"users": 1204}, "root": {"type": "stat", "label": "Users", "trend": [1, 3, 2, 5], "value": "{{ fmt(users) }}"}}},
+    {"name": "gauge chart with a range, timeline and progress", "source": "<ui><chart kind=\"gauge\" min={0} max={100} series={[{name: \"cpu\", data: [42]}]}/><timeline items={[{date: \"2026-01\", title: \"v1\"}, \"v2\"]}/><progress label=\"Upload\" value={30} max={60} style=\"ring\"/></ui>", "spec": {"root": {"type": "stack", "gap": "md", "children": [{"type": "chart", "kind": "gauge", "min": 0, "max": 100, "series": [{"name": "cpu", "data": [42]}]}, {"type": "timeline", "items": [{"date": "2026-01", "title": "v1"}, "v2"]}, {"type": "progress", "label": "Upload", "value": 30, "max": 60, "style": "ring"}]}}},
+    {"name": "html keeps raw markup, braces and nested html tags", "source": "<ui><html title=\"Card\">\n  <!doctype html><html><body><p class=\"a\">{{x}} {y}</p>\n  <script>if (1 < 2) { go({a: 1}) }</script></body></html>\n</html></ui>", "spec": {"root": {"type": "html", "title": "Card", "source": "<!doctype html><html><body><p class=\"a\">{{x}} {y}</p>\n<script>if (1 < 2) { go({a: 1}) }</script></body></html>"}}},
+    {"name": "math and copy keep raw text with braces", "source": "<ui><math display>\\frac{a}{b} = {c}</math><copy label=\"Install\">pip install {kt}</copy></ui>", "spec": {"root": {"type": "stack", "gap": "md", "children": [{"type": "math", "display": true, "value": "\\frac{a}{b} = {c}"}, {"type": "copy", "label": "Install", "value": "pip install {kt}"}]}}},
+    {"name": "link href interpolates and the text child is the label", "source": "<ui><state q=\"kt\"/><link href=\"https://pypi.org/search/?q={q}\" style=\"button\">Search {q}</link></ui>", "spec": {"state": {"q": "kt"}, "root": {"type": "link", "href": "https://pypi.org/search/?q={{ q }}", "style": "button", "label": "Search {{ q }}"}}},
+    {"name": "quiz question is the text child", "source": "<ui><quiz options={[\"a\", \"b\"]} answer=\"b\" explain=\"Because\">Which one?</quiz></ui>", "spec": {"root": {"type": "quiz", "options": ["a", "b"], "answer": "b", "explain": "Because", "question": "Which one?"}}},
+    {"name": "rating, icon, timer, gallery and compare", "source": "<ui><state score={3}/><rating label=\"Score\" bind=\"score\" max={5}/><icon name=\"rocket\" label=\"Launch\"/><timer seconds={300} label=\"Break\"/><gallery columns={2} items={[\"/a.png\", {src: \"/b.png\", caption: \"B\"}]}/><compare items={[{title: \"A\", pros: [\"fast\"], cons: [\"big\"], verdict: \"pick\"}]}/></ui>", "spec": {"state": {"score": 3}, "root": {"type": "stack", "gap": "md", "children": [{"type": "rating", "label": "Score", "bind": "score", "max": 5}, {"type": "icon", "name": "rocket", "label": "Launch"}, {"type": "timer", "seconds": 300, "label": "Break"}, {"type": "gallery", "columns": 2, "items": ["/a.png", {"src": "/b.png", "caption": "B"}]}, {"type": "compare", "items": [{"title": "A", "pros": ["fast"], "cons": ["big"], "verdict": "pick"}]}]}}},
+    {"name": "an unclosed html in a streaming block keeps its partial source", "source": "<ui><text>a</text><html><div>half", "spec": {"root": {"type": "stack", "gap": "md", "children": [{"type": "text", "value": "a"}, {"type": "html", "source": "<div>half"}]}}},
+    {"name": "html without its own close tag in a closed block", "source": "<ui><html><b>x</b></ui>", "error": "never closed"}
+  ]
+}

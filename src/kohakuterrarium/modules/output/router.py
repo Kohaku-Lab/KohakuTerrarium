@@ -1,5 +1,7 @@
 """Route parsed and typed events across default, named, and secondary outputs."""
 
+from typing import Any
+
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.output.router_interactive import (
@@ -56,6 +58,8 @@ class OutputRouter(
 
         self._init_widgets()
         self.widgets = WidgetService(self)
+        # Inline <ui> block state (builtins.kt_ui.inline_state); set by agent construction.
+        self.inline_ui: Any = None
         # Interactive reply futures, keyed by the originating event ID.
         self._pending_replies = self.widgets.pending_replies
         self._closed_interactions = self.widgets.closed_interactions
@@ -161,6 +165,8 @@ class OutputRouter(
         match event.type:
             case "model_recovery":
                 self.model_recovery_status = dict(event.payload)
+                await self._fan_event_to_outputs(event)
+            case "tool_args_progress":
                 await self._fan_event_to_outputs(event)
             case "text":
                 content = event.content

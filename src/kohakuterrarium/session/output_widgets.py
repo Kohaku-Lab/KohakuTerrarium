@@ -8,7 +8,7 @@ MAX_UNRECORDED = 1024
 
 
 class SessionWidgetsMixin:
-    """Persist widget opens, updates, state, messages and closes as session events."""
+    """Persist widget opens, updates, state, messages, closes and inline-UI state."""
 
     _unrecorded_widgets: dict[str, None]
 
@@ -68,6 +68,8 @@ class SessionWidgetsMixin:
                 )
             case "widget_close":
                 self.on_widget_close(event)
+            case "inline_ui_state":
+                self._record("inline_ui_state", dict(payload))
 
     def on_widget_close(self, event: OutputEvent) -> None:
         """Record a close, with the reason a legacy interaction ended."""

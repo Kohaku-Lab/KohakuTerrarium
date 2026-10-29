@@ -2677,137 +2677,102 @@ class TestModulesIntegration:
                 r["kind"] == "goal" for r in await service.list_drive_registrations()
             )
 
-    async def test_ui_declarative_plugin_drives_a_widget_turn(self, make_agent):
-        """plugin + tool + output protocols — the built-in ``ui.declarative``
-        plugin contributes ``show_ui``, which stays out of the prompt until a
-        web client announces ``kt.ui``.
+    async def test_ui_declarative_plugin_teaches_inline_ui(self, make_agent):
+        """plugin + prompt + output protocols — the built-in ``ui.declarative``
+        plugin teaches inline ``<ui>`` components, and only while a client
+        that draws ``kt.ui`` is attached.
 
-        Full workflow: enable the plugin → no client, no tool in the prompt →
-        a client says hello → tool + guidance appear → the model opens a
-        widget and waits → the client's button message resolves the call →
-        a later unclaimed message becomes a ``widget_event`` turn → the client
-        leaves and the tool is gone. Only the LLM is scripted."""
-        spec = {
-            "title": "Split",
-            "state": {"total": 120, "people": 3},
-            "computed": {"each": "total / people"},
-            "root": {
-                "type": "stack",
-                "children": [
-                    {"type": "number", "label": "People", "bind": "people"},
-                    {"type": "stat", "label": "Each", "value": "{{ each }}"},
-                    {"type": "button", "label": "Send", "send": "result"},
-                ],
-            },
-        }
-        call = (
-            f"[/show_ui]@@spec={json.dumps(spec)}\n"
-            '@@wait_for=["result"]\n@@timeout_s=5\n[show_ui/]'
+        Full workflow: enable the plugin → no client, no part → a web client
+        says hello → the inline part of ``## Presenting your answer`` appears
+        (with the ``show_app`` part once ``ui.apps`` is on and the client
+        draws ``kt.app``) → the
+        model replies with one valid and one broken block → the next request
+        carries one note about the broken block, the one after does not →
+        the client leaves and the section is gone → a Rich CLI output brings
+        it back without the ``show_app`` pointer. Only the LLM is scripted."""
+        good = (
+            '<ui title="Split">\n<state total={120} people={3}/>\n'
+            "<let each={total / people}/>\n"
+            '<number label="People" bind="people"/>\n'
+            '<stat label="Each">{fmt(each, 2)}</stat>\n</ui>'
         )
+        broken = '<ui><stat label="Each"/><slider bind="ghost"/></ui>'
+        reply = f"Here you go:\n\n{good}\n\nAnd a second view:\n{broken}\n"
         agent = make_agent(
             script=[
-                ScriptEntry(call, match="split the bill"),
-                ScriptEntry("got the result", match="message result"),
-                ScriptEntry("saw the late click", match="widget_event"),
-                ScriptEntry(call, match="split it in the terminal"),
-                ScriptEntry("terminal result", match="message result"),
+                ScriptEntry(reply, match="split the bill"),
+                ScriptEntry("fixed it", match="and now"),
+                ScriptEntry("plain answer", match="thanks"),
             ]
         )
         await agent.start()
         try:
             await agent.add_plugin(UiDeclarativePlugin())
-            assert "show_ui" in agent.registry.list_tools()
-            assert "show_ui" not in agent.get_system_prompt()
+            assert "### Inline components" not in agent.get_system_prompt()
 
             frames: asyncio.Queue = asyncio.Queue()
             web = StreamOutput("modules_agent", frames, deque(maxlen=50), agent)
             agent.output_router.add_secondary(web)
             web.set_client_renderers({"kt.ui": 1})
             prompt = agent.get_system_prompt()
-            assert "`show_ui`" in prompt and "Use a widget only when" in prompt
-
-            turn = asyncio.create_task(
-                agent._process_event(create_user_input_event("split the bill"))
+            assert (
+                "## Presenting your answer" in prompt
+                and "### Inline components" in prompt
             )
-            opened = None
-            for _ in range(200):
-                while not frames.empty():
-                    frame = frames.get_nowait()
-                    if frame.get("type") == "widget" and "update_target" not in frame:
-                        opened = frame
-                if opened:
-                    break
-                await asyncio.sleep(0.01)
-            assert opened is not None, "show_ui opened no widget"
-            payload = opened["payload"]
-            assert payload["renderer"] == "kt.ui" and payload["title"] == "Split"
-            assert "Each: 40" in payload["fallback"]
-
-            acks: list[dict] = []
-            message = {"event_id": opened["event_id"], "name": "result"}
-            handle_widget_msg(
-                {**message, "data": {"each": 40}}, agent, "web", acks.append
+            assert (
+                "- `chart`: kind*: bar|stacked|line|area|pie|scatter|radar|heatmap|gauge"
+                in prompt
             )
-            await turn
-            assert acks[-1]["status"] == "accepted"
-            convo = " ".join(
+            assert "`show_app`" not in prompt
+
+            await agent.add_plugin(AppsPlugin())
+            web.set_client_renderers({"kt.ui": 1, "kt.app": 1})
+            prompt = agent.get_system_prompt()
+            assert "When inline UI is not enough, use `show_app`: a full page" in prompt
+            assert "stays inline as `html`" in prompt
+
+            await agent._process_event(create_user_input_event("split the bill"))
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert '<stat label="Each">' in last.get_text_content()
+
+            await agent._process_event(create_user_input_event("and now?"))
+            request = " ".join(str(m.get("content")) for m in agent.llm.call_log[-1])
+            assert "[inline UI]" in request and "- block 2:" in request
+            assert "root.children[0].value: is required" in request
+            assert "'ghost' is not a key of 'state'" in request
+            assert "- block 1:" not in request
+            stored = " ".join(
                 m.get_text_content()
                 for m in agent.controller.conversation.get_messages()
             )
-            assert 'message result: {"each": 40}' in convo
-            assert agent.llm.call_count == 2
+            assert "[inline UI]" not in stored, "the note is not kept in history"
 
-            handle_widget_msg(
-                {**message, "data": {"each": 41}}, agent, "web", acks.append
-            )
-            await agent.output_router.widgets.drain()
-            await _settle(agent, until=lambda: agent.llm.call_count >= 3)
+            await agent._process_event(create_user_input_event("thanks"))
+            request = " ".join(str(m.get("content")) for m in agent.llm.call_log[-1])
+            assert "[inline UI]" not in request, "one note per failing reply"
             assert agent.llm.call_count == 3
-            last = agent.controller.conversation.get_last_assistant_message()
-            assert "saw the late click" in last.get_text_content()
 
             agent.output_router.remove_secondary(web)
-            assert "show_ui" not in agent.get_system_prompt()
+            assert "### Inline components" not in agent.get_system_prompt()
 
-            # A terminal output draws kt.ui as cards: show_ui comes back, while
-            # show_app (which needs kt.app) stays hidden.
-            await agent.add_plugin(AppsPlugin())
             previous = agent.output_router.default_output
-            app = _TerminalApp()
-            agent.output_router.default_output = RichCLIOutput(app)
+            agent.output_router.default_output = RichCLIOutput(_TerminalApp())
             prompt = agent.get_system_prompt()
-            assert "`show_ui`" in prompt and "`show_app`" not in prompt
-            turn = asyncio.create_task(
-                agent._process_event(
-                    create_user_input_event("split it in the terminal")
-                )
+            assert (
+                "## Presenting your answer" in prompt
+                and "### Inline components" in prompt
             )
-            for _ in range(200):
-                if app.bus_overlay.opened:
-                    break
-                await asyncio.sleep(0.01)
-            card, reply_router = app.bus_overlay.opened[-1]
-            assert card.type == "card" and "Each: 40" in card.payload["body"]
-            labels = {a["label"]: a["id"] for a in card.payload["actions"]}
-            assert set(labels) == {"People: 3 ✎", "Send"}
-            assert reply_router.submit_reply(
-                UIReply(event_id=card.id, action_id=labels["People: 3 ✎"])
+            assert (
+                "When inline UI is not enough" not in prompt
+                and "show_app" not in prompt
             )
-            prompt_event, _ = app.bus_overlay.opened[-1]
-            assert prompt_event.type == "ask_text"
-            reply_router.submit_reply(UIReply(prompt_event.id, "submit", {"text": "4"}))
-            card, _ = app.bus_overlay.opened[-1]
-            assert "Each: 30" in card.payload["body"]
-            send_id = next(
-                a["id"] for a in card.payload["actions"] if a["label"] == "Send"
-            )
-            assert reply_router.submit_reply(UIReply(card.id, send_id))
-            await turn
-            assert agent.llm.call_count == 5
-            last = agent.controller.conversation.get_last_assistant_message()
-            assert "terminal result" in last.get_text_content()
+
+            agent.plugins.disable("ui.declarative")
+            assert "### Inline components" not in agent.get_system_prompt()
+            agent.plugins.enable("ui.declarative")
+            assert "### Inline components" in agent.get_system_prompt()
 
             agent.output_router.default_output = previous
-            assert "show_ui" not in agent.get_system_prompt()
+            assert "### Inline components" not in agent.get_system_prompt()
         finally:
             await agent.stop()

@@ -11,6 +11,7 @@ a component is defined once. Prop kinds:
 ``var``     name of a ``state`` entry (``bind`` targets)
 ``name``    a message name (``send``)
 ``src``     image source: ``data:image/...`` or a same-origin path
+``url``     an outward ``http(s)://`` link, or a ``{{ expr }}`` template
 ``list``    a JSON array, or a ``{{ expr }}`` string that yields one
 ``map``     a JSON object, or a ``{{ expr }}`` string that yields one
 ``setmap``  object of state name -> bare expression
@@ -41,6 +42,53 @@ class Component:
 
 _GAP = ("none", "sm", "md", "lg")
 _TONE = ("neutral", "info", "success", "warning", "danger")
+_CALLOUT_TONE = ("info", "tip", "success", "warning", "danger")
+CHART_KINDS = (
+    "bar",
+    "stacked",
+    "line",
+    "area",
+    "pie",
+    "scatter",
+    "radar",
+    "heatmap",
+    "gauge",
+)
+STEP_STATUS = ("done", "current", "todo")
+ICONS = (
+    "check",
+    "close",
+    "warning",
+    "info",
+    "error",
+    "help",
+    "star",
+    "heart",
+    "time",
+    "calendar",
+    "user",
+    "users",
+    "settings",
+    "search",
+    "link",
+    "download",
+    "upload",
+    "document",
+    "folder",
+    "code",
+    "chart",
+    "lightning",
+    "rocket",
+    "idea",
+    "lock",
+    "flag",
+    "location",
+    "email",
+    "chat",
+    "money",
+)
+TIMER_MODES = ("countdown", "stopwatch")
+COLUMN_FORMATS = ("text", "number", "percent", "currency", "date")
 _INPUT = {"bind": Prop("var", required=True), "label": Prop("text")}
 
 COMMON_PROPS: dict[str, Prop] = {
@@ -87,6 +135,14 @@ COMPONENTS: dict[str, Component] = {
         "layout",
     ),
     "divider": Component({}, "layout"),
+    "accordion": Component(
+        {
+            "title": Prop("text", required=True),
+            "open": Prop("bool"),
+            "children": Prop("children", required=True),
+        },
+        "layout",
+    ),
     # content
     "text": Component(
         {
@@ -107,12 +163,38 @@ COMPONENTS: dict[str, Component] = {
             "value": Prop("text", required=True),
             "hint": Prop("text"),
             "tone": Prop("enum", choices=_TONE),
+            "trend": Prop("list"),
         }
     ),
+    "callout": Component(
+        {
+            "value": Prop("text", required=True),
+            "title": Prop("text"),
+            "tone": Prop("enum", choices=_CALLOUT_TONE),
+        }
+    ),
+    "quote": Component({"value": Prop("text", required=True), "cite": Prop("text")}),
+    "steps": Component({"items": Prop("list", required=True), "current": Prop("int")}),
+    "timeline": Component({"items": Prop("list", required=True)}),
+    "progress": Component(
+        {
+            "value": Prop("num", required=True),
+            "max": Prop("num"),
+            "label": Prop("text"),
+            "tone": Prop("enum", choices=_TONE),
+            "style": Prop("enum", choices=("bar", "ring")),
+        }
+    ),
+    "tree": Component({"items": Prop("list", required=True), "open": Prop("bool")}),
     "kv": Component({"fields": Prop("list", required=True)}),
     "list": Component({"items": Prop("list", required=True), "ordered": Prop("bool")}),
     "table": Component(
-        {"columns": Prop("list", required=True), "rows": Prop("list", required=True)}
+        {
+            "columns": Prop("list", required=True),
+            "rows": Prop("list", required=True),
+            "sortable": Prop("bool"),
+            "filter": Prop("bool"),
+        }
     ),
     "image": Component(
         {
@@ -125,20 +207,66 @@ COMPONENTS: dict[str, Component] = {
     # data
     "chart": Component(
         {
-            "kind": Prop(
-                "enum",
-                required=True,
-                choices=("bar", "line", "area", "pie", "scatter"),
-            ),
+            "kind": Prop("enum", required=True, choices=CHART_KINDS),
             "labels": Prop("list"),
             "series": Prop("list", required=True),
             "title": Prop("text"),
             "height": Prop("int", low=80, high=800),
+            "min": Prop("num"),
+            "max": Prop("num"),
         },
         "data",
     ),
     "diagram": Component(
         {"source": Prop("text", required=True), "title": Prop("text")}, "data"
+    ),
+    "html": Component(
+        {
+            "source": Prop("literal", required=True),
+            "title": Prop("text"),
+            "height": Prop("int", low=40, high=2000),
+        },
+        "data",
+    ),
+    "math": Component(
+        {"value": Prop("literal", required=True), "display": Prop("bool")}, "data"
+    ),
+    # links, icons, media and comparisons
+    "link": Component(
+        {
+            "href": Prop("url", required=True),
+            "label": Prop("text"),
+            "style": Prop("enum", choices=("link", "button")),
+        }
+    ),
+    "icon": Component(
+        {
+            "name": Prop("enum", required=True, choices=ICONS),
+            "label": Prop("text"),
+            "size": Prop("enum", choices=("sm", "md", "lg")),
+            "tone": Prop("enum", choices=_TONE),
+        }
+    ),
+    "gallery": Component(
+        {"items": Prop("list", required=True), "columns": Prop("int", low=1, high=6)}
+    ),
+    "compare": Component({"items": Prop("list", required=True)}),
+    "copy": Component({"value": Prop("text", required=True), "label": Prop("text")}),
+    "timer": Component(
+        {
+            "mode": Prop("enum", choices=TIMER_MODES),
+            "seconds": Prop("num", low=0, high=604800),
+            "label": Prop("text"),
+            "autostart": Prop("bool"),
+        }
+    ),
+    "quiz": Component(
+        {
+            "question": Prop("text", required=True),
+            "options": Prop("list", required=True),
+            "answer": Prop("literal", required=True),
+            "explain": Prop("text"),
+        }
     ),
     # inputs
     "number": Component(
@@ -162,6 +290,7 @@ COMPONENTS: dict[str, Component] = {
     "toggle": Component(dict(_INPUT), "input"),
     "checkbox": Component(dict(_INPUT), "input"),
     "date": Component(dict(_INPUT), "input"),
+    "rating": Component({**_INPUT, "max": Prop("int", low=3, high=10)}, "input"),
     # actions
     "button": Component(
         {
@@ -169,6 +298,7 @@ COMPONENTS: dict[str, Component] = {
             "style": Prop("enum", choices=("primary", "secondary", "danger")),
             "set": Prop("setmap"),
             "send": Prop("name"),
+            "message": Prop("text"),
             "data": Prop("map"),
             "disabled": Prop("bool"),
         },
@@ -177,7 +307,8 @@ COMPONENTS: dict[str, Component] = {
     "form": Component(
         {
             "children": Prop("children", required=True),
-            "send": Prop("name", required=True),
+            "send": Prop("name"),
+            "message": Prop("text"),
             "submit": Prop("text"),
             "data": Prop("map"),
         },
@@ -196,4 +327,15 @@ COMPONENTS: dict[str, Component] = {
 
 INPUT_TYPES = frozenset(t for t, c in COMPONENTS.items() if c.group == "input")
 
-__all__ = ["COMMON_PROPS", "COMPONENTS", "Component", "INPUT_TYPES", "Prop"]
+__all__ = [
+    "CHART_KINDS",
+    "COLUMN_FORMATS",
+    "COMMON_PROPS",
+    "COMPONENTS",
+    "Component",
+    "ICONS",
+    "INPUT_TYPES",
+    "Prop",
+    "STEP_STATUS",
+    "TIMER_MODES",
+]

@@ -39,6 +39,7 @@ from kohakuterrarium.core.pinned import pin_message, unpin_message
 from kohakuterrarium.core.pinned import state_key as pinned_state_key
 from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
+from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
 from kohakuterrarium.modules.output.widgets import WidgetMessage
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
@@ -83,12 +84,16 @@ from kohakuterrarium.session.resume_async import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
+from kohakuterrarium.studio.attach.widget_frames import handle_widget_frame
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 pytestmark = pytest.mark.timeout(60)
 
 
 # ── deterministic collaborators ──────────────────────────────────
+
+
+INLINE_BLOCK = '<ui><state tip={10}/><slider bind="tip" min={0} max={30}/></ui>'
 
 
 class _HashEmbedder(BaseEmbedder):
@@ -215,7 +220,7 @@ class TestSessionIntegration:
         # ---- phase 1: a live agent runs turns against a real store ----
         store = _new_store(session_path, config_path=config_path, agents=["scribe"])
         patched_llm["script"] = [
-            "Hello, I am the scribe.",
+            f"Hello, I am the scribe.\n\n{INLINE_BLOCK}",
             "[/echo]persisted[echo/]",
             "The echo tool ran and I recorded it.",
         ]
@@ -361,10 +366,61 @@ class TestSessionIntegration:
             ]
             assert waits == [True, False], "the client sees the tool wait start and end"
             assert "widget_state" in web_types
+
+            # Inline UI: a client moves the slider of the <ui> block in the
+            # first reply; the state is checked against the recorded reply,
+            # reaches the other client and is recorded.
+            first = next(
+                e
+                for e in store.get_events("scribe")
+                if e["type"] == "assistant_message"
+                and INLINE_BLOCK in str(e["message"].get("content"))
+            )
+            address = (first["turn_index"], first["branch_id"])
+            ((block, _),) = block_ids(INLINE_BLOCK)
+            other_frames = asyncio.Queue()
+            other = StreamOutput("scribe", other_frames, [], agent=agent)
+            router.add_secondary(other)
+            acks = []
+            frame = {
+                "ui_turn": address[0],
+                "ui_branch": address[1],
+                "block": block,
+                "state": {"tip": 18, "ghost": 1},
+            }
+            handle_widget_frame(
+                "inline_ui_state", frame, agent, web, "scribe", acks.append
+            )
+            handle_widget_frame(
+                "inline_ui_state",
+                {**frame, "ui_branch": address[1] + 1},
+                agent,
+                web,
+                "scribe",
+                acks.append,
+            )
+            await asyncio.sleep(0)
+            assert [a["status"] for a in acks] == ["unknown"]
+            forwarded = [other_frames.get_nowait() for _ in range(other_frames.qsize())]
+            assert [
+                f["state"] for f in forwarded if f["type"] == "inline_ui_state"
+            ] == [{"tip": 18}]
+            assert all(
+                f.get("type") != "inline_ui_state"
+                for f in [web_frames.get_nowait() for _ in range(web_frames.qsize())]
+            ), "the sending client gets no echo"
+            router.remove_secondary(other)
             router.remove_secondary(web)
             assert renderer_changes == [{"kt.ui": 1}, {}]
         finally:
             await agent.stop()
+
+        inline_rows = [
+            (e["ui_turn"], e["ui_branch"], e["block"], e["state"])
+            for e in store.get_events("scribe")
+            if e["type"] == "inline_ui_state"
+        ]
+        assert inline_rows == [(*address, block, {"tip": 18})]
 
         widget_rows = [
             (e["type"], e.get("name"), e.get("routed_to"))
@@ -781,6 +837,12 @@ class TestSessionIntegration:
             )
             # Scratchpad restored exactly.
             assert resumed_agent.session.scratchpad.get("project") == "terrarium"
+            # Inline UI state came back from the recorded rows, and the
+            # resumed agent still accepts edits for the same block.
+            inline = resumed_agent.output_router.inline_ui
+            assert inline.get(*address, block) == {"tip": 18}
+            assert inline.submit(*address, block, {"tip": 21}) == "accepted"
+            assert inline.get(*address, block) == {"tip": 21}
             assert resumed_agent.compact_manager._compact_count == 3
             # The store was re-attached and marked running for continued
             # recording.

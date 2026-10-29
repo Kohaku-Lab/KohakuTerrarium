@@ -30,7 +30,7 @@ MAX_DEPTH = 64
 
 KEYWORDS = frozenset({"true", "false", "null", "and", "or", "not"})
 _TWO_CHAR_OPS = ("**", "==", "!=", "<=", ">=")
-_ONE_CHAR_OPS = "+-*/%<>?:()[],."
+_ONE_CHAR_OPS = "+-*/%<>?:()[]{},."
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "\\": "\\", '"': '"', "'": "'"}
 _CMP_OPS = ("==", "!=", "<", "<=", ">", ">=")
 _INTERP = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
@@ -251,7 +251,28 @@ class _Parser:
                 return inner
             case "op" if tv == "[":
                 return ("list", self.items("]"))
+            case "op" if tv == "{":
+                return ("obj", self.entries())
         raise ExprError("syntax", "unexpected token")
+
+    def entries(self) -> list[tuple[str, tuple]]:
+        entries: list[tuple[str, tuple]] = []
+        seen: set[str] = set()
+        while not self.at("op", "}"):
+            tk, key = self.take()
+            if tk not in ("name", "kw", "str"):
+                raise ExprError("syntax", "an object key is a name or a string")
+            if key in seen:
+                raise ExprError("syntax", f"duplicate object key {key!r}")
+            seen.add(key)
+            self.expect("op", ":")
+            entries.append((key, self.ternary()))
+            if self.at("op", ","):
+                self.take()
+            elif not self.at("op", "}"):
+                raise ExprError("syntax", "expected ',' or '}'")
+        self.take()
+        return entries
 
     def items(self, close: str) -> list[tuple]:
         items: list[tuple] = []
@@ -289,6 +310,10 @@ def free_names(node: tuple) -> set[str]:
             return set().union(*(free_names(a) for a in node[2])) if node[2] else set()
         case "list":
             return set().union(*(free_names(a) for a in node[1])) if node[1] else set()
+        case "obj":
+            return (
+                set().union(*(free_names(v) for _, v in node[1])) if node[1] else set()
+            )
         case "member":
             return free_names(node[1])
     return set().union(*(free_names(c) for c in node[1:] if isinstance(c, tuple)))
@@ -319,6 +344,8 @@ class _Eval:
                 return self.scope[node[1]]
             case "list":
                 return [self.run(item) for item in node[1]]
+            case "obj":
+                return {key: self.run(value) for key, value in node[1]}
             case "neg" | "pos":
                 value = self.run(node[1])
                 if not is_num(value):

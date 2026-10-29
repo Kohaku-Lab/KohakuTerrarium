@@ -43,3 +43,23 @@ async def test_dynamic_message_text_is_literal_during_layout() -> None:
         notice = app.query_one("#notice", SystemNotice)
         assert notice.render_str(notice.border_title).plain == f"/{HOSTILE_TEXT}"
         assert notice.has_class("--error")
+
+
+class _StreamHost(App):
+    def compose(self) -> ComposeResult:
+        yield StreamingText(id="stream")
+
+
+@pytest.mark.asyncio
+async def test_streaming_ui_block_shows_a_placeholder_then_its_text_form() -> None:
+    app = _StreamHost()
+    async with app.run_test() as pilot:
+        stream = app.query_one("#stream", StreamingText)
+        stream.append('Here:\n<ui><state n={3}/><stat label="Each">{120 / n}')
+        await pilot.pause()
+        shown = stream.render().plain
+        assert "building UI" in shown and "<stat" not in shown
+        stream.append("</stat></ui>")
+        await pilot.pause()
+        assert "Each: 40" in stream.render().plain
+        assert stream.get_text().endswith("</stat></ui>"), "raw text is kept"

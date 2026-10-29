@@ -35,7 +35,7 @@ logger = get_logger(__name__)
 RENDERER = "kt.ui"
 TEXT_PROFILE = {RENDERER: 1}
 MAX_CONTROLS = 24
-_CHOICE_TYPES = frozenset({"select", "radio"})
+_CHOICE_TYPES = frozenset({"select", "radio", "rating"})
 _FLIP_TYPES = frozenset({"toggle", "checkbox"})
 _TYPED_TYPES = frozenset({"number", "slider", "text_input", "date"})
 
@@ -101,6 +101,9 @@ def _bound_names(node: Any) -> list[str]:
 
 
 def _options(node: dict, scope: dict[str, Any]) -> list[tuple[Any, str]]:
+    if node.get("type") == "rating":
+        top = node.get("max") if isinstance(node.get("max"), int) else 5
+        return [(i, "★" * i) for i in range(1, top + 1)]
     raw = _resolve_deep(node.get("options"), scope)
     out: list[tuple[Any, str]] = []
     for item in raw if isinstance(raw, list) else []:

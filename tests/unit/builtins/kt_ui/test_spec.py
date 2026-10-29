@@ -131,6 +131,110 @@ class TestErrors:
         assert "not a key" in errors["root.children[9].set.nope"]
         assert "bad expression" in errors["root.children[10].items"]
 
+    def test_new_component_shapes_have_their_paths(self):
+        deep = {"label": "d"}
+        for _ in range(14):
+            deep = {"label": "d", "children": [deep]}
+        nodes = [
+            {"type": "steps", "items": [{"title": "a", "status": "later"}, 3]},
+            {"type": "timeline", "items": [{"date": "2026"}]},
+            {"type": "tree", "items": [{"children": []}]},
+            {"type": "tree", "items": [{"label": "x", "children": "nope"}]},
+            {"type": "tree", "items": [deep]},
+            {"type": "tree", "items": ["leaf"] * 501},
+            {
+                "type": "table",
+                "columns": [
+                    {"key": "a", "format": "money"},
+                    {"key": "b", "digits": 11},
+                ],
+                "rows": [],
+            },
+            {"type": "callout", "value": "x", "tone": "neutral"},
+            {"type": "progress", "value": 1, "style": "pie"},
+            {"type": "chart", "kind": "funnel", "series": []},
+            {"type": "accordion", "children": []},
+        ]
+        errors = _errors({"root": {"type": "stack", "children": nodes}})
+        assert "status is one of" in errors["root.children[0].items[0]"]
+        assert "a step is" in errors["root.children[0].items[1]"]
+        assert "timeline entry" in errors["root.children[1].items[0]"]
+        assert "tree node is" in errors["root.children[2].items[0]"]
+        assert "array of nodes" in errors["root.children[3].items[0]"]
+        assert "levels deep" in errors["root.children[4].items[0]"]
+        assert "at most 500 nodes" in errors["root.children[5].items"]
+        assert "format is one of" in errors["root.children[6].columns[0]"]
+        assert "digits" in errors["root.children[6].columns[1]"]
+        assert "one of" in errors["root.children[7].tone"]
+        assert "one of" in errors["root.children[8].style"]
+        assert "one of" in errors["root.children[9].kind"]
+        assert errors["root.children[10].title"] == "is required"
+
+    def test_media_link_and_widget_rules_have_their_paths(self):
+        nodes = [
+            {"type": "link", "href": "javascript:alert(1)"},
+            {"type": "link", "href": "ftp://x.org/{{ q }}"},
+            {"type": "gallery", "items": ["https://cdn.example/a.png", {"alt": "x"}]},
+            {"type": "gallery", "items": ["/a.png"] * 49},
+            {"type": "compare", "items": []},
+            {"type": "compare", "items": [{"title": "A", "pros": "fast"}]},
+            {"type": "quiz", "question": "Q", "options": ["a", "b"], "answer": "c"},
+            {"type": "timer", "label": "t"},
+            {"type": "icon", "name": "unicorn"},
+            {"type": "html", "source": "x" * (48 * 1024 + 1)},
+            {"type": "rating", "bind": "score", "max": 11},
+            {"type": "link", "href": "{{ q }}/path"},
+        ]
+        spec = {
+            "state": {"q": "", "score": 1, "__ui": {}},
+            "root": {"type": "stack", "children": nodes},
+        }
+        errors = _errors(spec)
+        assert "http://" in errors["root.children[0].href"]
+        assert "http://" in errors["root.children[1].href"]
+        assert "same-origin" in errors["root.children[2].items[0]"]
+        assert "src string" in errors["root.children[2].items[1]"]
+        assert "at most 48" in errors["root.children[3].items"]
+        assert "1-6 items" in errors["root.children[4].items"]
+        assert "list of strings" in errors["root.children[5].items[0]"]
+        assert "one of the options" in errors["root.children[6].answer"]
+        assert "needs 'seconds'" in errors["root.children[7].seconds"]
+        assert "one of" in errors["root.children[8].name"]
+        assert "the limit is" in errors["root.children[9].source"]
+        assert "<= 10" in errors["root.children[10].max"]
+        assert "http://" in errors["root.children[11].href"]
+        assert "reserved" in errors["state.__ui"]
+
+    def test_media_link_and_widget_rules_accept_good_nodes(self):
+        nodes = [
+            {"type": "link", "href": "https://example.org/a?b=1", "label": "Docs"},
+            {"type": "link", "href": "https://example.org/s?q={{ q }}"},
+            {"type": "link", "href": "{{ url }}"},
+            {
+                "type": "gallery",
+                "items": ["/a.png", {"src": "data:image/png;base64,AA"}],
+            },
+            {"type": "compare", "items": [{"title": "A", "pros": ["p"], "cons": []}]},
+            {
+                "type": "quiz",
+                "question": "Q",
+                "options": [{"value": "b"}],
+                "answer": "b",
+            },
+            {"type": "timer", "mode": "stopwatch"},
+            {"type": "html", "source": "<b>{{ raw }}</b>"},
+            {"type": "math", "value": "\\frac{a}{b}"},
+            {"type": "copy", "value": "pip install {kt}"},
+        ]
+        spec = {
+            "state": {"q": "", "url": ""},
+            "root": {"type": "stack", "children": nodes},
+        }
+        assert (
+            validate_spec(spec).spec["root"]["children"][7]["source"]
+            == "<b>{{ raw }}</b>"
+        )
+
     def test_errors_are_capped(self):
         nodes = [{"type": "nope"} for _ in range(50)]
         errors = _errors({"root": {"type": "stack", "children": nodes}})

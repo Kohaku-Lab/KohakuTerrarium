@@ -93,3 +93,15 @@ async def test_nothing_is_recorded_without_activity_capture(tmp_path):
         await out.on_widget(event)
     await out.drain()
     assert not [e for e in store.get_events("alice") if e["type"].startswith("widget")]
+
+
+async def test_inline_ui_state_is_recorded_with_its_block_address(tmp_path):
+    store, out = _sink(tmp_path)
+    payload = {"ui_turn": 2, "ui_branch": 1, "block": "0a1b2c3d.0", "state": {"n": 4}}
+    await out.on_widget(
+        OutputEvent(type="inline_ui_state", id="2:1:0a1b2c3d.0", payload=payload)
+    )
+    await out.drain()
+    (row,) = [e for e in store.get_events("alice") if e["type"] == "inline_ui_state"]
+    assert {k: row[k] for k in payload} == payload
+    store.close()

@@ -48,7 +48,7 @@ def _registry():
     reg = Registry()
     reg.register_tool(_tool("read"))
     reg.register_tool(_tool("show_app", {"kt.app"}))
-    reg.register_tool(_tool("show_ui", {"kt.ui"}))
+    reg.register_tool(_tool("show_chart", {"kt.ui"}))
     reg.register_subagent("explore", SimpleNamespace(description="x"))
     return reg
 
@@ -111,7 +111,7 @@ class TestRendererVisibility:
 
     def test_missing_renderers_hide_their_tools(self):
         visibility = renderer_visibility(_registry(), {"kt.ui": 1})
-        assert visibility.allowed_tools == frozenset({"read", "show_ui"})
+        assert visibility.allowed_tools == frozenset({"read", "show_chart"})
         assert visibility.allowed_subagents is None
 
 
@@ -153,10 +153,10 @@ class TestNameFilters:
     def test_restricted_catalog_keeps_registry_order(self):
         reg = _registry()
         visibility = ToolVisibility(
-            allowed_tools=frozenset({"show_ui", "read"}),
+            allowed_tools=frozenset({"show_chart", "read"}),
             allowed_subagents=frozenset(),
         )
-        assert visible_tool_names(reg, visibility) == ["read", "show_ui"]
+        assert visible_tool_names(reg, visibility) == ["read", "show_chart"]
         assert visible_subagent_names(reg, visibility) == []
 
     def test_missing_registry_lists_nothing(self):

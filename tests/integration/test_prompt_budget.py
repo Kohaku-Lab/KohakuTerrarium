@@ -14,12 +14,16 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.builtins.plugins.apps.plugin import FULL_PAGE_PART
+from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
+    inline_ui_section,
+)
 from kohakuterrarium.builtins.tools.show_app import ShowAppTool
-from kohakuterrarium.builtins.tools.show_ui import ShowUiTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
 from kohakuterrarium.llm.tools import build_tool_schemas
+from kohakuterrarium.prompt.presentation import CLOSING, HEADING, OPENING
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "creatures" / "budget_ref"
@@ -34,7 +38,9 @@ MAX_CALLABLES = 20
 # more than a flat one; the aggregate budget above is the real constraint.
 MAX_SCHEMA_CHARS = 1_500
 MAX_TOOL_GUIDANCE_CHARS = 600
-MAX_WIDGET_GUIDANCE_CHARS = 700
+MAX_WIDGET_GUIDANCE_CHARS = 900
+# ``## Presenting your answer`` with the inline-UI reference and the app part.
+MAX_PRESENTATION_CHARS = 9_000
 
 BACKGROUND_CAPABLE = {"bash", "python", "web_fetch", "web_search"}
 
@@ -133,13 +139,12 @@ class TestPromptBudget:
         finally:
             await agent.stop()
 
-        # Widget tools join the prompt only with an attached renderer; when
-        # they do, their guidance and schema stay inside the same caps.
-        widget_tool = ShowUiTool()
-        assert len(widget_tool.prompt_contribution()) <= MAX_TOOL_GUIDANCE_CHARS
-        widget_schema = json.dumps(widget_tool.get_parameters_schema())
-        assert len(widget_schema) <= MAX_SCHEMA_CHARS
-        assert len(widget_tool.description) <= 160
+        # ``## Presenting your answer`` is the main output vocabulary when a
+        # client draws kt.ui and kt.app; with both parts it stays capped.
+        section = "\n\n".join(
+            [HEADING, OPENING, inline_ui_section(), FULL_PAGE_PART, CLOSING]
+        )
+        assert len(section) <= MAX_PRESENTATION_CHARS, len(section)
 
         # ── full: every usage tier inlined; the shipped default ────────
         config.tool_doc_mode = "full"

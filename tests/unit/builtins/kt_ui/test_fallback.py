@@ -1,6 +1,9 @@
 """Plain-text fallback of kt.ui specs."""
 
+import pytest
+
 from kohakuterrarium.builtins.kt_ui import fallback as fallback_mod
+from kohakuterrarium.builtins.kt_ui.components import COMPONENTS
 from kohakuterrarium.builtins.kt_ui.fallback import render_fallback
 from kohakuterrarium.builtins.kt_ui.spec import validate_spec
 
@@ -153,3 +156,168 @@ def test_long_fallback_is_truncated(monkeypatch):
     monkeypatch.setattr(fallback_mod, "MAX_FALLBACK_CHARS", 10)
     text = _render({"type": "text", "value": "abcdefghijklmnop"})
     assert len(text) == 10 and text.endswith("…")
+
+
+def test_batch_a_and_b_components_render_as_text():
+    root = {
+        "type": "stack",
+        "children": [
+            {
+                "type": "callout",
+                "tone": "warning",
+                "title": "Heads up",
+                "value": "Back up",
+            },
+            {"type": "callout", "value": "plain"},
+            {"type": "quote", "value": "Measure twice.", "cite": "Ada"},
+            {
+                "type": "steps",
+                "current": 1,
+                "items": ["Plan", {"title": "Build", "detail": "2d"}, "Ship"],
+            },
+            {"type": "steps", "items": [{"title": "Only", "status": "done"}]},
+            {"type": "timeline", "items": [{"date": "2026-01", "title": "v1"}, "v2"]},
+            {"type": "progress", "label": "Upload", "value": 30, "max": 60},
+            {"type": "progress", "value": 9, "max": 0},
+            {"type": "progress", "value": 500},
+            {"type": "stat", "label": "Users", "value": "12", "trend": [1, 5, 3]},
+            {"type": "stat", "value": "flat", "trend": []},
+            {
+                "type": "table",
+                "columns": [
+                    "n",
+                    {"key": "p", "label": "Price", "format": "currency"},
+                    {"key": "s", "label": "Share", "format": "percent", "digits": 1},
+                    {"key": "c", "label": "Count", "format": "number"},
+                    {
+                        "key": "e",
+                        "label": "Euro",
+                        "format": "currency",
+                        "currency": "eur",
+                    },
+                    {
+                        "key": "k",
+                        "label": "Odd",
+                        "format": "currency",
+                        "currency": "CHF",
+                    },
+                ],
+                "rows": [
+                    {"n": "a", "p": -1234.5, "s": 0.256, "c": 12345, "e": 2, "k": 3},
+                    ["b", "n/a", None, True, 1, 1],
+                ],
+            },
+            {
+                "type": "tree",
+                "items": [
+                    {
+                        "label": "src",
+                        "badge": "dir",
+                        "children": ["main.py", {"label": "lib", "children": ["x.py"]}],
+                    },
+                    "README.md",
+                ],
+            },
+            {
+                "type": "accordion",
+                "title": "Details",
+                "children": [{"type": "text", "value": "inside"}],
+            },
+            {
+                "type": "chart",
+                "kind": "gauge",
+                "min": 0,
+                "max": 200,
+                "series": [{"name": "cpu", "data": [42]}],
+            },
+        ],
+    }
+    lines = [line.rstrip() for line in _render(root).splitlines()]
+    for expected in [
+        "[warning] Heads up",
+        "  Back up",
+        "[info]",
+        "  plain",
+        "> Measure twice.",
+        "  — Ada",
+        "1. [x] Plan",
+        "2. [>] Build — 2d",
+        "3. [ ] Ship",
+        "1. [x] Only",
+        "- 2026-01  v1",
+        "- v2",
+        "Upload: [##########----------] 50%",
+        "progress: ?",
+        "[####################] 100%",
+        "Users: 12 ▁█▅",
+        "flat",
+        "n | Price | Share | Count | Euro | Odd",
+        "a | -$1,234.50 | 25.6% | 12,345 | €2.00 | CHF 3.00",
+        "b | n/a |  | true | €1.00 | CHF 1.00",
+        "- src [dir]",
+        "  - main.py",
+        "  - lib",
+        "    - x.py",
+        "- README.md",
+        "▸ Details",
+        "  inside",
+        "[gauge chart]",
+        "range: 0-200",
+        "cpu: 42",
+    ]:
+        assert expected in lines, (expected, lines)
+
+
+_SAMPLE_LISTS = {
+    "fields": [{"label": "f", "value": 1}],
+    "gallery.items": ["/a.png"],
+    "compare.items": [{"title": "A", "pros": ["p"], "cons": ["c"]}],
+    "series": [{"name": "s", "data": [1]}],
+    "rows": ["r"],
+}
+_SAMPLE_VALUES = {
+    "text": "x",
+    "literal": "x",
+    "bool": True,
+    "var": "v",
+    "name": "n",
+    "src": "/a.png",
+    "url": "https://example.org/",
+    "map": {},
+    "setmap": {},
+    "expr": "[1]",
+    "children": [{"type": "text", "value": "c"}],
+    "tabs": [{"type": "tab", "label": "t"}],
+    "child": {"type": "text", "value": "c"},
+}
+
+
+def _sample(component_type):
+    node = {"type": component_type}
+    for key, prop in COMPONENTS[component_type].props.items():
+        if not prop.required and prop.kind not in ("children", "tabs"):
+            continue
+        if prop.kind == "enum":
+            node[key] = prop.choices[0]
+        elif prop.kind in ("num", "int"):
+            node[key] = prop.low if prop.low is not None else 1
+        elif prop.kind == "list":
+            node[key] = _SAMPLE_LISTS.get(
+                f"{component_type}.{key}", _SAMPLE_LISTS.get(key, ["x"])
+            )
+        else:
+            node[key] = _SAMPLE_VALUES[prop.kind]
+    if component_type == "form":
+        node["send"] = "n"
+    if component_type == "timer":
+        node["seconds"] = 90
+    return node
+
+
+@pytest.mark.parametrize("component_type", sorted(COMPONENTS))
+def test_every_component_type_has_a_text_form(component_type):
+    if component_type == "tab":
+        root = {"type": "tabs", "children": [_sample("tab")]}
+    else:
+        root = _sample(component_type)
+    assert _render(root, state={"v": 1}).strip(), component_type

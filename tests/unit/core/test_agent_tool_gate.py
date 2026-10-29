@@ -2,13 +2,15 @@
 
 A tool requiring a renderer stays out of the system prompt until an attached
 output reports that renderer. A renderer change refreshes the prompt only
-when the visible tool set changes, at once when idle and at the next LLM
-request while a turn is running.
+when the visible tool set changes, or a renderer a plugin's prompt section
+depends on comes or goes, at once when idle and at the next LLM request
+while a turn is running.
 """
 
 import kohakuterrarium as kt
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -64,9 +66,23 @@ class _RendererFeed(NoneOutput):
         self._router.refresh_renderers()
 
 
-async def _agent(tmp_path, responses=("ok",)):
+class _BoardPrompt(BasePlugin):
+    """A plugin whose prompt section exists only while ``pkg.board`` is drawn."""
+
+    name = "board_prompt"
+    prompt_renderers = frozenset({"pkg.board"})
+
+    def get_prompt_content(self, context):
+        router = context.host_agent.output_router
+        return "BOARD-SECTION" if "pkg.board" in router.ui_renderers() else None
+
+
+async def _agent(tmp_path, responses=("ok",), plugins=()):
     agent = await kt.Agent.build(
-        _cfg(tmp_path), llm=ScriptedLLM(list(responses)), tools=[_ShowApp()]
+        _cfg(tmp_path),
+        llm=ScriptedLLM(list(responses)),
+        tools=[_ShowApp()],
+        plugins=list(plugins),
     )
     feed = _RendererFeed(agent.output_router)
     agent.watch_renderers()
@@ -159,6 +175,30 @@ class TestRendererChanges:
             await agent.stop()
         assert "`show_app`" in agent.get_system_prompt()
         assert agent._prompt_refresh_pending is False
+
+    async def test_plugin_prompt_renderer_refreshes_both_ways(self, tmp_path):
+        agent, feed = await _agent(tmp_path, plugins=[_BoardPrompt()])
+        assert "BOARD-SECTION" not in agent.get_system_prompt()
+        calls = _count_refreshes(agent)
+        feed.set({"kt.ui": 1})
+        assert calls == [], "a renderer no plugin prompt depends on"
+        feed.set({"kt.ui": 1, "pkg.board": 1})
+        assert "BOARD-SECTION" in agent.get_system_prompt()
+        feed.set({"kt.ui": 1, "pkg.board": 2})
+        assert calls == [1], "a version change is not a presence change"
+        feed.set({"kt.ui": 1})
+        assert "BOARD-SECTION" not in agent.get_system_prompt()
+        assert calls == [1, 1]
+
+    async def test_disabled_plugin_renderer_is_not_watched(self, tmp_path):
+        agent, feed = await _agent(tmp_path, plugins=[_BoardPrompt()])
+        agent.plugins.disable("board_prompt")
+        calls = _count_refreshes(agent)
+        feed.set({"pkg.board": 1})
+        assert calls == []
+        assert agent.plugins.prompt_renderers() == frozenset()
+        agent.plugins.enable("board_prompt")
+        assert agent.plugins.prompt_renderers() == frozenset({"pkg.board"})
 
     async def test_router_without_change_events_is_left_alone(self, tmp_path):
         agent = await kt.Agent.build(

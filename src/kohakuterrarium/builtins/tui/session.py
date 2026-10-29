@@ -6,6 +6,7 @@ from typing import Any, TypeVar
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown, Static
 
+from kohakuterrarium.builtins.kt_ui.inline_text import inline_ui_text
 from kohakuterrarium.builtins.tui.app import IDLE_STATUS, AgentTUI, _safe_id
 from kohakuterrarium.builtins.tui.model_info import TabModelRegistryMixin
 from kohakuterrarium.builtins.tui.widgets import (
@@ -626,7 +627,7 @@ class TUISession(TabModelRegistryMixin):
                 at_bottom = (
                     chat.max_scroll_y == 0 or chat.scroll_y >= chat.max_scroll_y - 2
                 )
-                md = Markdown(text)
+                md = Markdown(inline_ui_text(text))
                 chat.mount(md, after=widget)
                 widget.remove()
                 if at_bottom:

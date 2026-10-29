@@ -159,6 +159,27 @@ class TestInputs:
         assert handle.state["tip"] == 20
         assert "Each pays: 48.00" in _card(out)[0].payload["body"]
 
+    async def test_rating_is_a_choice_of_stars_up_to_max(self):
+        spec = {
+            "title": "Rate",
+            "state": {"score": 2},
+            "root": {"type": "rating", "label": "Score", "bind": "score", "max": 4},
+        }
+        out, router, _, handle = await _open(spec)
+        assert "Score: ★★☆☆ (2/4)" in _card(out)[0].payload["body"]
+        rr = _choose(out, "Score")
+        prompt, _ = out.presented[-1]
+        assert [o["label"] for o in prompt.payload["options"]] == [
+            "★",
+            "★★",
+            "★★★",
+            "★★★★",
+        ]
+        assert prompt.payload["default"] == "1"
+        assert rr.submit_reply(UIReply(prompt.id, "submit", {"selected": "3"}))
+        await router.widgets.drain()
+        assert handle.state["score"] == 4
+
     async def test_typed_number_parses_and_bad_text_changes_nothing(self):
         out, router, _, handle = await _open()
         rr = _choose(out, "Total")

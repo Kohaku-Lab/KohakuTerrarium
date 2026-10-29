@@ -24,6 +24,7 @@ _event_logs: dict[str, list] = {}
 # Overridable for lab harnesses.
 _EVENT_LOG_MAX = int(os.environ.get("KT_EVENT_LOG_MAX", "5000"))
 MAX_CLIENT_RENDERERS = 256
+TRANSIENT_FRAMES = frozenset({"model_recovery", "tool_args_progress"})
 
 
 def get_event_log(key: str) -> deque:
@@ -182,6 +183,8 @@ class StreamOutput(OutputModule):
                         "state": dict(event.payload.get("state") or {}),
                     }
                 )
+            case "inline_ui_state":
+                self._put({"type": "inline_ui_state", **dict(event.payload)})
 
     def on_widget_close(self, event: OutputEvent) -> None:
         """Send ``widget_close``, with the reason a legacy interaction ended."""
@@ -212,7 +215,7 @@ class StreamOutput(OutputModule):
         if bi is not None and "branch_id" not in msg:
             msg["branch_id"] = bi
         self._q.put_nowait(msg)
-        if msg.get("type") != "model_recovery":
+        if msg.get("type") not in TRANSIENT_FRAMES:
             self._log.append(msg)
 
     async def start(self) -> None:
@@ -342,6 +345,8 @@ class StreamOutput(OutputModule):
                 pass
             case "model_recovery":
                 self._put({"type": "model_recovery", **event.payload})
+            case "tool_args_progress":
+                self._put({"type": "tool_args_progress", **event.payload})
             case "text":
                 content = event.content
                 if isinstance(content, str) and content:

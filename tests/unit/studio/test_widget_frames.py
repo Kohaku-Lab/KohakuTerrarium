@@ -3,11 +3,14 @@
 import asyncio
 from types import SimpleNamespace
 
+from kohakuterrarium.builtins.kt_ui.inline_state import InlineUiStates, block_ids
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.output.widgets import WidgetRecord
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.studio.attach.widget_frames import (
+    WIDGET_CLIENT_FRAMES,
     apply_client_hello,
+    handle_widget_frame,
     handle_widget_msg,
     handle_widget_state,
 )
@@ -101,3 +104,64 @@ async def test_state_acks_only_failures_and_skips_the_source():
     ]
     assert agent.output_router.widgets.registry.get("w1").state == {"a": 1}
     assert source._q.empty(), "the sending client gets no echo"
+
+
+class _Message:
+    role = "assistant"
+    content = '<ui><state n={1}/><number bind="n"/></ui>'
+
+
+async def test_inline_ui_state_frames_merge_broadcast_and_ack_failures():
+    agent = _Agent()
+    agent.controller = SimpleNamespace(
+        conversation=SimpleNamespace(get_messages=lambda: [_Message()])
+    )
+    agent.output_router.inline_ui = InlineUiStates(agent.output_router)
+    agent.output_router.inline_ui.bind_agent(agent)
+    source = StreamOutput("src", asyncio.Queue(), [])
+    other = StreamOutput("other", asyncio.Queue(), [])
+    agent.output_router.add_secondary(source)
+    agent.output_router.add_secondary(other)
+    ((block, _),) = block_ids(_Message.content)
+    frame = {"ui_turn": 1, "ui_branch": 1, "block": block, "state": {"n": 4}}
+    sent = []
+    assert "inline_ui_state" in WIDGET_CLIENT_FRAMES
+    handle_widget_frame("inline_ui_state", frame, agent, source, "alice", sent.append)
+    handle_widget_frame(
+        "inline_ui_state",
+        {**frame, "block": "deadbeef.0"},
+        agent,
+        source,
+        "alice",
+        sent.append,
+    )
+    handle_widget_frame(
+        "inline_ui_state",
+        {**frame, "state": {"x": 1}},
+        agent,
+        source,
+        "alice",
+        sent.append,
+    )
+    handle_widget_frame(
+        "inline_ui_state", frame, SimpleNamespace(), None, "x", sent.append
+    )
+    await asyncio.sleep(0)
+    assert [(s["kind"], s["status"], s["event_id"]) for s in sent] == [
+        ("inline_ui_state", "unknown", "1:1:deadbeef.0"),
+        ("inline_ui_state", "dropped", f"1:1:{block}"),
+        ("inline_ui_state", "unknown", f"1:1:{block}"),
+    ]
+    assert agent.output_router.inline_ui.get(1, 1, block) == {"n": 4}
+    assert source._q.empty(), "the sending client gets no echo"
+    forwarded = other._q.get_nowait()
+    assert forwarded["source"] == "other"
+    assert {
+        k: forwarded[k] for k in ("type", "ui_turn", "ui_branch", "block", "state")
+    } == {
+        "type": "inline_ui_state",
+        "ui_turn": 1,
+        "ui_branch": 1,
+        "block": block,
+        "state": {"n": 4},
+    }

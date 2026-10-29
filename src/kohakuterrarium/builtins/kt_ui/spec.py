@@ -21,6 +21,15 @@ from kohakuterrarium.builtins.kt_ui.expr import (
     template_expression,
     template_expressions,
 )
+from kohakuterrarium.builtins.kt_ui.shapes import (
+    ITEM_SHAPES,
+    NODE_CHECKS,
+    NODE_ITEM_SHAPES,
+    NODE_LIST_CHECKS,
+    is_outward_url,
+    is_safe_src,
+    state_name_problem,
+)
 from kohakuterrarium.modules.output.widgets import MESSAGE_NAME
 
 SPEC_VERSION = 1
@@ -134,6 +143,8 @@ class _Checker:
                     self.send_names.add(value)
             case "src":
                 self._src(path, value, scope)
+            case "url":
+                self._url(path, value, scope)
             case "list" | "map":
                 self._container(path, node_type, name, spec.kind, value, scope)
             case "setmap":
@@ -155,12 +166,24 @@ class _Checker:
     def _src(self, path: str, value: Any, scope: set) -> None:
         if self.dynamic(path, value, scope):
             return
-        ok = isinstance(value, str) and (
-            value.startswith("data:image/")
-            or (value.startswith("/") and not value.startswith("//"))
+        if not is_safe_src(value):
+            self.error(path, "must be a data:image/ URL or a same-origin path")
+
+    def _url(self, path: str, value: Any, scope: set) -> None:
+        if self.dynamic(path, value, scope):
+            return
+        if not isinstance(value, str):
+            self.error(path, "must be a string")
+            return
+        self.templates(path, value, scope)
+        fixed = value.split("{{", 1)[0]
+        ok = (
+            is_outward_url(value)
+            if fixed == value
+            else fixed.lower().startswith(("http://", "https://"))
         )
         if not ok:
-            self.error(path, "must be a data:image/ URL or a same-origin path")
+            self.error(path, "must be an http:// or https:// link")
 
     def _container(
         self, path: str, node_type: str, name: str, kind: str, value: Any, scope: set
@@ -173,7 +196,12 @@ class _Checker:
             self.error(path, f"must be {label} or '{{{{ expr }}}}'")
             return
         self.templates(path, value, scope)
-        shape = _ITEM_SHAPES.get(name)
+        whole = NODE_LIST_CHECKS.get((node_type, name))
+        problem = whole(value) if kind == "list" and whole is not None else None
+        if problem:
+            self.error(path, problem)
+            return
+        shape = NODE_ITEM_SHAPES.get((node_type, name), ITEM_SHAPES.get(name))
         if kind == "list" and shape is not None:
             for i, item in enumerate(value):
                 problem = shape(item)
@@ -213,6 +241,9 @@ class _Checker:
         for key in node:
             if key not in props:
                 self.error(f"{path}.{key}", f"unknown prop for {node_type}")
+        check = NODE_CHECKS.get(node_type)
+        for key, problem in check(node) if check is not None else ():
+            self.error(f"{path}.{key}", problem)
         for key, spec in props.items():
             if key not in node:
                 if spec.required:
@@ -261,38 +292,6 @@ def _valid_name(name: Any) -> bool:
         and name not in KEYWORDS
         and name not in FUNCTIONS
     )
-
-
-def _option_shape(item: Any) -> str | None:
-    if isinstance(item, str) or (isinstance(item, dict) and "value" in item):
-        return None
-    return "an option is a string or {value, label}"
-
-
-def _field_shape(item: Any) -> str | None:
-    if isinstance(item, dict) and "label" in item and "value" in item:
-        return None
-    return "a field is {label, value}"
-
-
-def _column_shape(item: Any) -> str | None:
-    if isinstance(item, str) or (isinstance(item, dict) and "key" in item):
-        return None
-    return "a column is a key string or {key, label, align}"
-
-
-def _series_shape(item: Any) -> str | None:
-    if isinstance(item, dict) and "data" in item:
-        return None
-    return "a series is {name, data}"
-
-
-_ITEM_SHAPES = {
-    "options": _option_shape,
-    "fields": _field_shape,
-    "columns": _column_shape,
-    "series": _series_shape,
-}
 
 
 def _computed_order(
@@ -354,6 +353,8 @@ def validate_spec(spec: Any) -> ValidatedSpec:
     for key in state:
         if not _valid_name(key):
             errors.append((f"state.{key}", "must be an identifier, not a keyword"))
+        elif reserved := state_name_problem(key):
+            errors.append((f"state.{key}", reserved))
     for key, expr in computed.items():
         if not _valid_name(key):
             errors.append((f"computed.{key}", "must be an identifier"))
@@ -403,7 +404,7 @@ def build_scope(
 def _prop_schema(prop: Prop) -> dict[str, Any]:
     template = {"type": "string", "pattern": r"^\s*\{\{.*\}\}\s*$"}
     match prop.kind:
-        case "text" | "literal" | "expr" | "var" | "src":
+        case "text" | "literal" | "expr" | "var" | "src" | "url":
             return {"type": "string"}
         case "name":
             return {"type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$"}

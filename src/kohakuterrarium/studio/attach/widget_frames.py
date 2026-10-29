@@ -1,4 +1,5 @@
-"""Handle client-sent widget frames: ``client_hello``, ``widget_msg``, ``widget_state``.
+"""Handle client-sent widget frames: ``client_hello``, ``widget_msg``, ``widget_state``,
+``inline_ui_state``.
 
 Shared by the local attach (``io.py``) and the worker-side lab adapter, which
 each resolve the addressed creature and pass in a frame-put callable.
@@ -13,7 +14,9 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-WIDGET_CLIENT_FRAMES = frozenset({"client_hello", "widget_msg", "widget_state"})
+WIDGET_CLIENT_FRAMES = frozenset(
+    {"client_hello", "widget_msg", "widget_state", "inline_ui_state"}
+)
 
 
 def apply_client_hello(frame: dict, outputs: Iterable[Any]) -> None:
@@ -103,3 +106,46 @@ def handle_widget_state(
         status = "unknown"
     if status != "accepted":
         _ack(put, event_id, "state", status, source_name)
+
+
+def handle_inline_ui_state(
+    frame: dict,
+    agent: Any,
+    source_output: Any,
+    source_name: str,
+    put: Callable[[dict], None],
+) -> None:
+    """Merge one ``inline_ui_state`` frame; ack only when it was not accepted."""
+    block = frame.get("block")
+    turn, branch = frame.get("ui_turn"), frame.get("ui_branch")
+    service = getattr(getattr(agent, "output_router", None), "inline_ui", None)
+    if service is None:
+        status = "unknown"
+    else:
+        try:
+            status = service.submit(
+                turn, branch, block, frame.get("state"), source=source_output
+            )
+        except Exception as e:
+            logger.warning("inline ui state failed", error=str(e), exc_info=True)
+            status = "unknown"
+    if status != "accepted":
+        _ack(put, f"{turn}:{branch}:{block}", "inline_ui_state", status, source_name)
+
+
+def handle_widget_frame(
+    msg_type: str,
+    frame: dict,
+    agent: Any,
+    source_output: Any,
+    source_name: str,
+    put: Callable[[dict], None],
+) -> None:
+    """Dispatch one non-hello widget frame to its handler."""
+    match msg_type:
+        case "widget_msg":
+            handle_widget_msg(frame, agent, source_name, put)
+        case "widget_state":
+            handle_widget_state(frame, agent, source_output, source_name, put)
+        case "inline_ui_state":
+            handle_inline_ui_state(frame, agent, source_output, source_name, put)

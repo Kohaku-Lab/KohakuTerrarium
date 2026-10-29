@@ -1,30 +1,135 @@
-"""Opt-in declarative widgets: contributes ``show_ui`` (renderer ``kt.ui``).
+"""Opt-in inline UI: the model writes ``kt.ui`` components inside its replies.
 
-The tool is visible to the model only while an attached client reports the
-``kt.ui`` renderer; its guidance comes with it.
+The plugin adds the inline-components part of ``## Presenting your answer``,
+present only while an attached client reports the ``kt.ui`` renderer. When a
+reply's block fails to convert or validate, the next model request carries a
+short note naming the block and its errors.
 """
 
+import hashlib
 from typing import Any
 
-from kohakuterrarium.builtins.tools.show_ui import SURFACES, ShowUiTool
-from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.tool.base import BaseTool
+from kohakuterrarium.builtins.kt_ui.markup import MarkupError, check_block
+from kohakuterrarium.builtins.kt_ui.markup_lex import split_message
+from kohakuterrarium.builtins.kt_ui.spec import SpecError
+from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
+    inline_ui_section,
+)
+from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
+
+RENDERER = "kt.ui"
+MAX_NOTED = 256
+NOTED_STATE_KEY = "noted"
+MAX_REASON_CHARS = 300
+
+
+def _text_of(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
+    return ""
+
+
+def block_failures(text: str) -> list[tuple[int, str]]:
+    """``(block number, reason)`` for every ``<ui>`` block in ``text`` that fails."""
+    failures: list[tuple[int, str]] = []
+    number = 0
+    for segment in split_message(text):
+        if segment["kind"] != "ui":
+            continue
+        number += 1
+        try:
+            check_block(segment["source"])
+        except (MarkupError, SpecError) as exc:
+            reason = str(exc)
+            if len(reason) > MAX_REASON_CHARS:
+                reason = reason[: MAX_REASON_CHARS - 1] + "…"
+            failures.append((number, reason))
+    return failures
+
+
+def failure_note(failures: list[tuple[int, str]]) -> str:
+    """The note the model reads about its failed blocks."""
+    lines = ["[inline UI] Some <ui> blocks in your last reply could not be drawn:"]
+    lines += [f"- block {n}: {reason}" for n, reason in failures]
+    lines.append(
+        "The user saw an error box for these; fix them when you write UI again."
+    )
+    return "\n".join(lines)
 
 
 class UiDeclarativePlugin(BasePlugin):
-    """Contributes ``show_ui`` with this plugin's options."""
+    """Teaches inline ``<ui>`` components and reports blocks that failed."""
 
     name = "ui.declarative"
-    description = "Declarative chat widgets: the show_ui tool (renderer kt.ui)."
+    description = "Inline UI: the model writes tables, charts, diagrams and controls in its replies."
     priority = 50
+    prompt_renderers = frozenset({RENDERER})
 
-    def __init__(self, default_surface: str = "chat", **_extra: Any) -> None:
+    def __init__(self, **_extra: Any) -> None:
         super().__init__()
-        self.options = {
-            "default_surface": (
-                default_surface if default_surface in SURFACES else "chat"
-            )
-        }
+        self._noted: dict[str, None] = {}
+        self._context: PluginContext | None = None
 
-    def contribute_tools(self) -> list[BaseTool]:
-        return [ShowUiTool(default_surface=self.options["default_surface"])]
+    async def on_load(self, context: PluginContext) -> None:
+        self._context = context
+        saved = context.get_state(NOTED_STATE_KEY)
+        if isinstance(saved, list):
+            self._noted = {key: None for key in saved if isinstance(key, str)}
+
+    def presentation_contribution(self, context: PluginContext) -> str | None:
+        if RENDERER not in attached_renderers(context.host_agent):
+            return None
+        return inline_ui_section()
+
+    async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
+        last_assistant = next(
+            (
+                i
+                for i in range(len(messages) - 1, -1, -1)
+                if messages[i].get("role") == "assistant"
+            ),
+            None,
+        )
+        if last_assistant is None or last_assistant == len(messages) - 1:
+            return None
+        text = _text_of(messages[last_assistant].get("content"))
+        if "<ui" not in text:
+            return None
+        key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if key in self._noted:
+            return None
+        self._noted[key] = None
+        while len(self._noted) > MAX_NOTED:
+            self._noted.pop(next(iter(self._noted)))
+        if self._context is not None:
+            self._context.set_state(NOTED_STATE_KEY, list(self._noted))
+        failures = block_failures(text)
+        if not failures:
+            return None
+        return _append_note(messages, failure_note(failures))
+
+
+def attached_renderers(agent: Any) -> dict[str, int]:
+    """Renderers the agent's attached outputs report (empty without a router)."""
+    router = getattr(agent, "output_router", None)
+    renderers = getattr(router, "ui_renderers", None)
+    return renderers() if callable(renderers) else {}
+
+
+def _append_note(messages: list[dict], note: str) -> list[dict]:
+    """A copy of ``messages`` with ``note`` added to the last message."""
+    out = list(messages)
+    last = dict(out[-1])
+    content = last.get("content")
+    if isinstance(content, list):
+        last["content"] = [*content, {"type": "text", "text": note}]
+    else:
+        last["content"] = f"{content or ''}\n\n{note}".lstrip()
+    out[-1] = last
+    return out

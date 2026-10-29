@@ -1,8 +1,9 @@
-"""Agent side of renderer gating: refresh the prompt when the visible tools change.
+"""Agent side of renderer gating: refresh the prompt when what it shows changes.
 
 ``watch_renderers`` subscribes to the output router; a renderer change that
-alters the visible tool set rebuilds the system prompt at once when idle, or
-at the next LLM request while a turn is running.
+alters the visible tool set, or a renderer a plugin's prompt section depends
+on (``BasePlugin.prompt_renderers``), rebuilds the system prompt at once when
+idle, or at the next LLM request while a turn is running.
 """
 
 from typing import Any
@@ -28,13 +29,27 @@ class AgentToolGateMixin:
             getattr(self, "output_router", None),
         )
 
-    def _visible_tool_key(self) -> tuple[frozenset[str], frozenset[str]]:
-        """Visible tool and sub-agent names, used to detect catalog changes."""
+    def _visible_tool_key(
+        self,
+    ) -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+        """Visible tools, sub-agents and prompt-relevant renderers: what the prompt shows."""
         visibility = self._visible_catalog()
         return (
             frozenset(visible_tool_names(self.registry, visibility)),
             frozenset(visible_subagent_names(self.registry, visibility)),
+            self._prompt_renderer_key(),
         )
+
+    def _prompt_renderer_key(self) -> frozenset[str]:
+        """Attached renderers that some active plugin's prompt section depends on."""
+        plugins = getattr(self, "plugins", None)
+        wanted = plugins.prompt_renderers() if plugins is not None else frozenset()
+        if not wanted:
+            return frozenset()
+        router = getattr(self, "output_router", None)
+        renderers = getattr(router, "ui_renderers", None)
+        present = renderers() if callable(renderers) else {}
+        return frozenset(r for r in present if r in wanted)
 
     def watch_renderers(self) -> None:
         """Subscribe to renderer changes on the output router, when it reports them."""

@@ -12,6 +12,7 @@ from kohakuterrarium.llm.deferred_provider import DeferredLLMProvider
 from kohakuterrarium.bootstrap.subagents import init_subagents
 from kohakuterrarium.bootstrap.tools import init_tools
 from kohakuterrarium.bootstrap.triggers import init_triggers
+from kohakuterrarium.builtins.kt_ui.inline_state import InlineUiStates
 from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.builtins.user_commands import (
@@ -585,6 +586,8 @@ class AgentInitMixin:
 
         self.output_router = OutputRouter(default_output, named_outputs=named_outputs)
         self.output_router.widgets.bind_agent(self)
+        self.output_router.inline_ui = InlineUiStates(self.output_router)
+        self.output_router.inline_ui.bind_agent(self)
 
     def _init_user_commands(self) -> None:
         """Aggregate every user-command source and bind it to the input module."""

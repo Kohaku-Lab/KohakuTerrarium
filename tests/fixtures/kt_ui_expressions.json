@@ -1,5 +1,5 @@
 {
-  "about": "Conformance cases for the kt.ui expression language. Run by tests/unit/builtins/kt_ui/test_expr_conformance.py (Python) and src/kohakuterrarium-frontend/src/components/chat/widgets/ktui/expr.test.js (JS). Each case has expr or template, an optional scope, and either value or error (an error code).",
+  "about": "Conformance cases for the kt.ui expression language. Run by tests/unit/builtins/kt_ui/test_expr_conformance.py (Python) and src/kohakuterrarium-frontend/src/components/chat/widgets/ktui/expr.test.js (JS). Each case has expr or template, an optional scope, and either value or error (an error code). Object literals: {key: value} with identifier or string keys, a trailing comma allowed, duplicate keys a syntax error.",
   "scope": {
     "total": 120,
     "people": 3,
@@ -88,7 +88,6 @@
     {"expr": "1 == '1'", "value": false},
     {"expr": "true == 1", "value": false},
     {"expr": "[1, [2]] == [1, [2]]", "value": true},
-    {"expr": "flags == {'on': true, 'off': false}", "error": "syntax"},
     {"expr": "'abc' < 'abd'", "value": true},
     {"expr": "3 >= 3", "value": true},
     {"expr": "1 != 2", "value": true},
@@ -144,6 +143,18 @@
     {"template": "{{ nothing }}|{{ flags.on }}|{{ nums }}", "value": "|true|[3,1,4,1,5]"},
     {"template": "{{ name }} and {{ name }}", "value": "Ada and Ada"},
     {"template": "no templates here", "value": "no templates here"},
-    {"template": "{{ 1/0 }} broken", "error": "zero_division"}
+    {"template": "{{ 1/0 }} broken", "error": "zero_division"},
+    {"expr": "flags == {'on': true, 'off': false}", "value": true},
+    {"expr": "{a: 1, \"b c\": total / people}", "value": {"a": 1, "b c": 40}},
+    {"expr": "{}", "value": {}},
+    {"expr": "{a: 1,}", "value": {"a": 1}},
+    {"expr": "{name: name, n: len(items)}.n", "value": 2},
+    {"expr": "[{x: 1}, {x: 2}][1].x", "value": 2},
+    {"expr": "{a: 1}['a']", "value": 1},
+    {"expr": "{a: 1, a: 2}", "error": "syntax"},
+    {"expr": "{1: 2}", "error": "syntax"},
+    {"expr": "{a 1}", "error": "syntax"},
+    {"expr": "{a: 1", "error": "syntax"},
+    {"template": "{{ {a: total}.a }}", "value": 120}
   ]
 }

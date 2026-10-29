@@ -248,6 +248,31 @@ async def test_long_markdown_fence_keeps_content_and_has_visible_scrollbar(
         assert fence.scroll_x == fence.max_scroll_x
 
 
+async def test_streamed_ui_block_is_mounted_as_its_text_form(monkeypatch) -> None:
+    async def immediate_idle(_min_sleep=0):
+        return None
+
+    monkeypatch.setattr("textual.pilot.wait_for_idle", immediate_idle)
+    session = TUISession()
+    await session.start()
+    assert session._app is not None
+
+    async with session._app.run_test(size=(60, 20)):
+        session.begin_streaming()
+        session.append_stream('Here:\n<ui><stat label="Each">40</stat></ui>')
+        session.end_streaming()
+
+        async def wait_for_fence():
+            while True:
+                fence = next(iter(session._app.query(MarkdownFence)), None)
+                if fence is not None:
+                    return fence
+                await session._app.wait_for_refresh()
+
+        fence = await asyncio.wait_for(wait_for_fence(), 2)
+        assert fence.code == "Each: 40"
+
+
 class TestModalShutdown:
     async def test_stop_settles_pending_modal_defaults(self) -> None:
         session = TUISession()

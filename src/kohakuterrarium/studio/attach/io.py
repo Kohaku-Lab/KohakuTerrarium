@@ -31,8 +31,7 @@ from kohakuterrarium.studio.attach.io_cluster import attach_io_cluster
 from kohakuterrarium.studio.attach.widget_frames import (
     WIDGET_CLIENT_FRAMES,
     apply_client_hello,
-    handle_widget_msg,
-    handle_widget_state,
+    handle_widget_frame,
 )
 from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
@@ -115,16 +114,14 @@ def _handle_widget_frame(
         target = _resolve_target(engine, creature, session_id, data)
     except KeyError:
         target = creature
-    if msg_type == "widget_msg":
-        handle_widget_msg(data, target.agent, target.name, queue.put_nowait)
-    else:
-        handle_widget_state(
-            data,
-            target.agent,
-            outputs.get(id(target.agent)),
-            target.name,
-            queue.put_nowait,
-        )
+    handle_widget_frame(
+        msg_type,
+        data,
+        target.agent,
+        outputs.get(id(target.agent)),
+        target.name,
+        queue.put_nowait,
+    )
 
 
 async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:

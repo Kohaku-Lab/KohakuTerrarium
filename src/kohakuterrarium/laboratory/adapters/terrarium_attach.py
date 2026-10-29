@@ -20,8 +20,7 @@ from kohakuterrarium.studio.attach._event_stream import (
 from kohakuterrarium.studio.attach.widget_frames import (
     WIDGET_CLIENT_FRAMES,
     apply_client_hello,
-    handle_widget_msg,
-    handle_widget_state,
+    handle_widget_frame,
 )
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
@@ -363,16 +362,14 @@ class TerrariumAttachAdapter(WSProxyAdapter):
         target_name = (frame.get("target") or "").strip()
         if target_name and target_name != creature.name:
             target = self._find_sibling_by_name(creature, target_name) or creature
-        if frame_type == "widget_msg":
-            handle_widget_msg(frame, target.agent, target.name, sink.send_json_nowait)
-        else:
-            handle_widget_state(
-                frame,
-                target.agent,
-                outputs.get(id(target.agent)),
-                target.name,
-                sink.send_json_nowait,
-            )
+        handle_widget_frame(
+            frame_type,
+            frame,
+            target.agent,
+            outputs.get(id(target.agent)),
+            target.name,
+            sink.send_json_nowait,
+        )
 
     @staticmethod
     def _handle_pending_op(
