@@ -1,6 +1,6 @@
 ---
 title: Built-in plugins
-summary: Reference for the four runtime plugins shipped with the framework. Sandbox, budget, permgate, compact.auto.
+summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, permgate, compact.auto, ui.apps.
 tags:
   - reference
   - plugins
@@ -9,7 +9,7 @@ tags:
 
 # Built-in plugins
 
-Four runtime plugins ship with KohakuTerrarium. None of them are
+These runtime plugins ship with KohakuTerrarium. None of them are
 privileged in the framework; they use the same hooks user plugins
 do. They are auto-discovered at agent start; configs activate them
 under `plugins:` like any other plugin.
@@ -24,6 +24,7 @@ of the sandbox plugin, see
 | [`budget`](#budget) | 5 | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Turn / tool-call / walltime budget accounting. |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`, `on_load` | Trigger eager context compaction after high-token LLM calls. |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
+| [`ui.apps`](#uiapps) | 50 | `contribute_tools` | Adds `show_app`: model-written HTML apps in the web UI. |
 
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
@@ -236,6 +237,34 @@ plugins:
       tools: ["bash", "write", "edit"]
       whitelist: ["read", "grep", "glob"]
 ```
+
+## `ui.apps`
+
+Contributes the `show_app` tool: the agent shows one HTML document as an
+interactive app in the web UI canvas or chat. The tool and its prompt
+guidance are visible to the model only while an attached client renders
+`kt.app`. Implementation: `src/kohakuterrarium/builtins/plugins/apps/plugin.py`
+and `src/kohakuterrarium/builtins/tools/show_app.py`.
+
+### Options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `allowed_hosts` | str / list[str] | `common` | Hosts the app may load scripts, styles, fonts and images from: preset names (`common`, `fonts`, `tailwind`) and bare host names. `[]` = no network. `connect-src` is always `'none'`. |
+| `default_surface` | `canvas` / `chat` | `canvas` | Where a new app opens. |
+| `max_document_kb` | int | 256 | Largest app document. |
+
+### Example
+
+```yaml
+plugins:
+  - name: ui.apps
+    options:
+      allowed_hosts: [fonts, cdn.jsdelivr.net]
+```
+
+See [Chat widgets](../guides/chat-widgets.md) for the bridge, the sandbox
+and compaction behaviour.
 
 ## Activation summary
 

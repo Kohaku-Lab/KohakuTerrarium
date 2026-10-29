@@ -250,6 +250,7 @@ your own plugins do. Full reference:
 | `budget` | plugin | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Multi-axis budget accounting and enforcement (turns, tool calls, walltime). Configure axes under `options`. |
 | `permgate` | plugin | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls; emits a confirmation prompt to the output bus and waits on the reply. |
 | `compact.auto` | plugin | `post_llm_call`, `on_load` | Trigger context compaction after high-token LLM calls. |
+| `ui.apps` | plugin | `contribute_tools` | Adds `show_app`: the agent can show interactive HTML apps in the web UI. See [Chat widgets](chat-widgets.md). |
 | `auto-compact` | pack | (none) | Expands to `compact.auto`. The only built-in runtime pack. |
 
 Use them in a creature:
