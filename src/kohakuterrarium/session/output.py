@@ -505,7 +505,7 @@ class SessionOutput(
                 self._begin_assistant_round()
             case "assistant_message":
                 self._finish_assistant_round(event.payload["message"])
-            case "model_recovery":
+            case "model_recovery" | "tool_args_progress":
                 pass
             case "text":
                 content = event.content

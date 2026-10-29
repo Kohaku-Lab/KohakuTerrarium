@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.media_reference import session_media_scope
 from kohakuterrarium.llm.model_recovery_status import observe_model_recovery
+from kohakuterrarium.llm.tool_call_progress import observe_tool_call_progress
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.output.router import OutputRouter
 
@@ -26,12 +27,21 @@ async def chat_with_recovery(
                 OutputEvent(type="model_recovery", surface="status", payload=payload)
             )
 
+    async def progress(payload: dict) -> None:
+        if output_router is not None:
+            await output_router.emit(
+                OutputEvent(
+                    type="tool_args_progress", surface="status", payload=payload
+                )
+            )
+
     with session_media_scope(media_session_path):
         stream = llm.chat(messages, **kwargs)
     try:
         while True:
             with (
                 observe_model_recovery(notify),
+                observe_tool_call_progress(progress),
                 session_media_scope(media_session_path),
             ):
                 try:

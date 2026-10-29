@@ -47,6 +47,7 @@ from kohakuterrarium.llm.openai_sanitize import (
 )
 from kohakuterrarium.llm.openai_tool_calls import ToolCallAccumulator
 from kohakuterrarium.llm.stream_replay import ReplayFilter
+from kohakuterrarium.llm.tool_call_progress import ToolCallProgress
 from kohakuterrarium.llm.turn_segments import TurnSegmentsBuilder
 from kohakuterrarium.llm.openai_ws import stream_ws_turn
 from kohakuterrarium.llm.recovery import (
@@ -454,6 +455,7 @@ class OpenAIProvider(BaseLLMProvider):
         self._last_usage = {}
         tool_call_stream = ToolCallAccumulator()
         pending_calls = tool_call_stream.calls
+        progress = ToolCallProgress()
         segments = TurnSegmentsBuilder()
         reasoning_text = ""
         reasoning_details: list[Any] = []
@@ -482,6 +484,8 @@ class OpenAIProvider(BaseLLMProvider):
                         tc_delta, position, len(delta.tool_calls)
                     )
                     segments.append_tool_call_ref(pending_calls[slot]["id"], slot)
+                    call = pending_calls[slot]
+                    await progress.update(slot, call["name"], len(call["arguments"]))
 
             # Stateful reasoning fields arrive through the SDK's untyped extra surface.
             if self.echo_reasoning:

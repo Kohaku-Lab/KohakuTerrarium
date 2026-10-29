@@ -122,6 +122,7 @@ import { isTailRenderBudgetFull, useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE
 import { createChatHistoryExpander, captureSemanticAnchor, CHAT_AUTO_EXPAND_TOP_PX } from "@/components/chat/chatHistoryExpand"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
+import { toolArgsProgressLabel } from "@/components/chat/toolArgsProgress"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useDensity } from "@/composables/useDensity"
@@ -376,6 +377,7 @@ const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.val
 
 const viewRunningJobCount = computed(() => chat.runningJobCountForTab(viewActiveTab.value))
 const viewModelRecovery = computed(() => chat.modelRecoveryForTab?.(viewActiveTab.value))
+const viewToolArgsProgress = computed(() => chat.toolArgsProgressForTab?.(viewActiveTab.value) || null)
 
 const showKohakUwUingIndicator = computed(() => {
   if (viewModelRecovery.value) return true
@@ -432,6 +434,8 @@ const kohakuwuingLabel = computed(() => {
     const key = viewModelRecovery.value === "waiting" ? "chat.processingRetry" : "chat.processingRecovery"
     return t(bgCount ? `${key}Bg` : key, { n: bgCount })
   }
+  const writing = toolArgsProgressLabel(viewToolArgsProgress.value, t)
+  if (writing) return writing
   if (streaming && bgCount) return t("chat.processingStreamingBg", { n: bgCount })
   if (streaming) return t("chat.processingStreaming")
   if (bgCount) return t("chat.processingWaitingBg", { n: bgCount })
