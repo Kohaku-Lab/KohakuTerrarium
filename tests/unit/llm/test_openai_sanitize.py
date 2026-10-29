@@ -129,6 +129,14 @@ class TestStripInternalMessageFields:
         out = strip_internal_message_fields(messages)
         assert out[0] == {"role": "assistant", "content": "hi"}
 
+    def test_package_owned_kt_fields_stripped(self):
+        # Package backends keep their own ``_kt_*`` state on assistant turns.
+        messages = [
+            {"role": "assistant", "content": "hi", "_kt_claude_code_turn": {"x": 1}}
+        ]
+        out = strip_internal_message_fields(messages)
+        assert out[0] == {"role": "assistant", "content": "hi"}
+
 
 class TestStripSurrogates:
     def test_lone_surrogate_dropped(self):
