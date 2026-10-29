@@ -17,7 +17,7 @@ MetadataReader = Callable[[str | Path], dict[str, Any]]
 
 
 def _read_metadata(path: str | Path) -> dict[str, Any]:
-    """Read local metadata with admission-controlled copy fallback."""
+    """Read local metadata through admitted or enrolled native handles."""
     return read_metadata_candidate(path, eligible=True).meta
 
 

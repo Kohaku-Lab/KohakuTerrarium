@@ -19,6 +19,7 @@ from kohakuterrarium.session.memory_blocks import (
     _extract_blocks as _extract_blocks,
     extract_batch,
 )
+from kohakuterrarium.session.version import require_writable_format
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -73,6 +74,7 @@ class SessionMemory:
         db_path: str,
         embedder: BaseEmbedder | None = None,
     ):
+        require_writable_format(db_path)
         self._path = db_path
         self._embedder = embedder or NullEmbedder()
         self._has_vectors = not isinstance(self._embedder, NullEmbedder)

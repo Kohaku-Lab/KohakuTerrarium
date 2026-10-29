@@ -1,6 +1,9 @@
 """Unit tests for :mod:`kohakuterrarium.session.version`."""
 
 import pytest
+from kohakuvault.errors import KohakuVaultError
+
+from kohakuterrarium.session.resource_gate import ResourceReleaseError
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
@@ -67,7 +70,7 @@ class TestDetectFormatVersion:
             meta.close()
         assert detect_format_version(path) == 3
 
-    def test_garbage_format_version_falls_back_to_1(self, tmp_path):
+    def test_garbage_format_version_is_rejected(self, tmp_path):
         from kohakuvault import KVault
 
         path = tmp_path / "s.kohakutr.v2"
@@ -77,19 +80,18 @@ class TestDetectFormatVersion:
             meta["format_version"] = "not-a-num"
         finally:
             meta.close()
-        assert detect_format_version(path) == 1
+        with pytest.raises(ValueError, match="Invalid format_version"):
+            detect_format_version(path)
 
-    def test_corrupt_file_falls_back_to_1(self, tmp_path):
-        # The path exists but isn't a valid KVault DB — opening it
-        # raises, and the helper defensively reports v1 rather than
-        # propagating the error.
+    def test_corrupt_file_is_rejected(self, tmp_path):
         path = tmp_path / "garbage.kohakutr"
         path.write_bytes(b"this is not a sqlite database at all")
-        assert detect_format_version(path) == 1
+        with pytest.raises(ResourceReleaseError) as caught:
+            detect_format_version(path)
+        assert isinstance(caught.value.__cause__, KohakuVaultError)
+        assert "file is not a database" in str(caught.value.__cause__)
 
-    def test_close_failure_is_swallowed(self, tmp_path, monkeypatch):
-        # If closing the probed meta vault raises, the helper logs and
-        # swallows it — the detected version still comes back correctly.
+    def test_close_failure_is_rejected(self, tmp_path, monkeypatch):
         from kohakuvault import KVault
 
         path = tmp_path / "s.kohakutr.v2"
@@ -110,6 +112,7 @@ class TestDetectFormatVersion:
             raise RuntimeError("close exploded")
 
         monkeypatch.setattr(readonly_mod, "dispose", close_then_raise)
-        # The version is still detected; the close failure only taints occupancy.
-        assert detect_format_version(path) == 2
+        with pytest.raises(ResourceReleaseError, match="release failed") as caught:
+            detect_format_version(path)
+        assert str(caught.value.__cause__) == "close exploded"
         assert GATE.snapshot(path).legacy_uncertain

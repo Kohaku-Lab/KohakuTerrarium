@@ -10,8 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from kohakuterrarium.session.migrations import v1_to_v2
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.resource_gate import acquire_legacy
-from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
+from kohakuterrarium.session.version import (
+    FORMAT_VERSION,
+    archive_family,
+    detect_format_version,
+    require_writable_format,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -60,38 +66,34 @@ def path_for_version(base_path: str | Path, version: int) -> Path:
     return bare.with_name(f"{bare.name}.v{version}")
 
 
+def _read_discovery_version(path: Path) -> int:
+    """Describe a bare archive using the read-only discovery policy."""
+    try:
+        value = read_session_meta(path).get("format_version", 1)
+        return int(value)
+    except Exception as exc:
+        logger.warning(
+            "Failed to probe bare session version",
+            path=str(path),
+            error=str(exc),
+            exc_info=True,
+        )
+        return 1
+
+
 def discover_versions(base_path: str | Path) -> list[tuple[int, Path]]:
     """Return every version file sharing ``base_path``'s basename.
 
     Results are descending by version. Bare-file versions come from metadata;
     suffixed files trust their filename. Missing candidates are ignored.
     """
-    bare = _strip_version_suffix(Path(base_path))
-    parent = bare.parent if bare.parent != Path("") else Path(".")
-    pattern = f"{bare.name}*"
     result: dict[int, Path] = {}
-
-    for candidate in parent.glob(pattern):
-        if candidate == bare and candidate.exists():
-            try:
-                version = detect_format_version(candidate)
-            except Exception as e:
-                logger.warning(
-                    "Failed to probe bare session version",
-                    path=str(candidate),
-                    error=str(e),
-                    exc_info=True,
-                )
-                version = 1
-            # An explicit suffixed file takes precedence over an equivalent bare file.
-            result.setdefault(version, candidate)
-            continue
-
-        suffix_version = _version_from_suffix(candidate)
+    for suffix_version, candidate in archive_family(base_path):
         if suffix_version is None:
-            continue
-        # Tolerate explicit v1 suffixes even though version 1 is normally bare.
-        result[suffix_version] = candidate
+            version = _read_discovery_version(candidate)
+            result.setdefault(version, candidate)
+        else:
+            result[suffix_version] = candidate
 
     return sorted(result.items(), key=lambda pair: pair[0], reverse=True)
 
@@ -129,6 +131,7 @@ def migrate(source_path: str | Path, target_version: int) -> Path:
     if not src.exists():
         raise FileNotFoundError(src)
 
+    require_writable_format(src)
     current_version = detect_format_version(src)
     if current_version >= target_version:
         return src
@@ -196,6 +199,7 @@ def ensure_latest_version(base_path: str | Path) -> Path:
     Select the newest readable candidate and migrate it to the framework's
     maximum supported version when necessary.
     """
+    require_writable_format(base_path)
     candidates = discover_versions(base_path)
     if not candidates:
         # Preserve normal file-not-found behavior at the eventual open call.
