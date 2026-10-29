@@ -64,6 +64,16 @@ Runtime plugins can also contribute prompt prose by implementing
 aggregated prompt before framework hints and work for both parent agents and
 sub-agents.
 
+A plugin that teaches the model a form its answers can take (inline
+components, full-page apps) implements
+`presentation_contribution(context) -> str | None` instead. The parts are
+collected in priority order into `## Presenting your answer`, placed right
+after the creature's base prompt; the section is absent when no plugin
+returns a part. When a part depends on what the attached clients can draw,
+list those renderer ids in the class attribute `prompt_renderers`
+(`frozenset({"kt.ui"})`): the prompt is rebuilt when one of them comes or
+goes, as it is for tools gated by `requires_renderers`.
+
 Separate from prompt plugins, tools themselves can now contribute short
 prompt-guidance paragraphs via `prompt_contribution()`. Those land in the
 aggregated prompt before the framework hints.
@@ -250,7 +260,8 @@ your own plugins do. Full reference:
 | `budget` | plugin | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Multi-axis budget accounting and enforcement (turns, tool calls, walltime). Configure axes under `options`. |
 | `permgate` | plugin | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls; emits a confirmation prompt to the output bus and waits on the reply. |
 | `compact.auto` | plugin | `post_llm_call`, `on_load` | Trigger context compaction after high-token LLM calls. |
-| `ui.apps` | plugin | `contribute_tools` | Adds `show_app`: the agent can show interactive HTML apps in the web UI. See [Chat widgets](chat-widgets.md). |
+| `ui.apps` | plugin | `contribute_tools`, `presentation_contribution` | Adds `show_app`: the agent can show interactive HTML apps in the web UI. See [Chat widgets](chat-widgets.md). |
+| `ui.declarative` | plugin | `presentation_contribution`, `pre_llm_call` | Inline UI: the agent writes tables, charts, diagrams and controls in its replies. See [Chat widgets](chat-widgets.md#inline-ui). |
 | `auto-compact` | pack | (none) | Expands to `compact.auto`. The only built-in runtime pack. |
 
 Use them in a creature:

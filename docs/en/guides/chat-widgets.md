@@ -4,19 +4,132 @@ A **widget** is interactive UI an agent puts into the conversation: an app in
 the canvas, a card in the chat, a form in the side panel. Widgets are drawn by
 **renderers** in the web UI and talk back to the agent with messages.
 
-Two optional builtin plugins give the agent widget tools:
+Two optional builtin plugins let the agent answer with more than text:
 
-| Plugin | Tool | Renderer | What the agent writes |
+| Plugin | How the agent uses it | Renderer | What the agent writes |
 |---|---|---|---|
-| `ui.apps` | `show_app` | `kt.app` | one HTML document, run in a sandboxed frame |
-| `ui.declarative` | `show_ui` | `kt.ui` | a JSON component tree, bindings and safe expressions |
+| `ui.declarative` | inline, in every reply | `kt.ui` | `<ui>` component tags mixed with Markdown |
+| `ui.apps` | the `show_app` tool | `kt.app` | one HTML document, run in a sandboxed frame |
+
+Inline components are the everyday form: tables, charts, diagrams, stats and
+small calculators written straight into the reply. `show_app` is the
+full-page option for when inline UI is not enough: large interactions,
+simulations, games and complex showcases.
 
 This guide covers:
 
-1. [Instant apps (`show_app`)](#instant-apps-show_app)
-2. [What the canvas shows](#what-the-canvas-shows)
-3. [For package authors](#for-package-authors)
-4. [Declarative UI (`show_ui`)](#declarative-ui-show_ui)
+1. [Presenting your answer](#presenting-your-answer)
+2. [Inline UI](#inline-ui)
+3. [Instant apps (`show_app`)](#instant-apps-show_app)
+4. [What the canvas shows](#what-the-canvas-shows)
+5. [For package authors](#for-package-authors)
+
+## Presenting your answer
+
+With either plugin on and a client that can draw it, the system prompt gets a
+`## Presenting your answer` section right after the creature's own prompt. It
+opens with "This chat shows more than text. Before you answer, choose the
+form that serves the user best.", then one part per plugin, then "Plain
+Markdown is for short answers and prose."
+
+- `ui.declarative` adds the inline-components part while a client reports
+  `kt.ui`: when to use each component, the markup, every component's props
+  and one example.
+- `ui.apps` adds the full-page part while `show_app` is visible (a client
+  reports `kt.app`).
+
+The section follows the attached clients: it changes when a browser connects
+or leaves, and is absent when no part applies. Plugins add parts through
+`BasePlugin.presentation_contribution` (see [Plugins](plugins.md)).
+
+## Inline UI
+
+### Turn it on
+
+```yaml
+plugins:
+  - name: ui.declarative
+```
+
+The web UI reports `kt.ui` in its `client_hello`; the Rich CLI and the TUI
+report it too and print blocks as text (see [In the terminal](#in-the-terminal)).
+Headless runs and package outputs such as chat bots do not; there the section
+is not in the prompt and the model writes plain Markdown.
+
+### The markup
+
+The model writes `<ui>` blocks between Markdown paragraphs:
+
+```
+Here is the split:
+
+<ui title="Bill splitter">
+  <state total={120} people={3} tip={10}/>
+  <let each={round(total * (1 + tip / 100) / people, 2)}/>
+  <grid columns={2}>
+    <number label="Total" bind="total"/>
+    <slider label="Tip %" bind="tip" min={0} max={30}/>
+  </grid>
+  <stat label="Each pays">{fmt(each, 2)}</stat>
+  <button send="Split it so each pays {fmt(each, 2)}">Use this split</button>
+</ui>
+```
+
+- A block starts with `<ui` at the start of a line, outside fenced code, and
+  ends at the matching `</ui>`.
+- `<state>` declares values inputs change (`bind`); `<let>` declares computed
+  values, re-evaluated when state changes.
+- `name="text"` may contain `{expr}`; `name={expr}` is a constant (number,
+  list, `{key: value}` object) or an expression over state; a bare `name` is
+  true. `{{` is a literal brace.
+- Text between tags is content: Markdown for `text`, the value of `stat`,
+  `badge` and `heading`, a button's label, and raw text for `code` and
+  `diagram`.
+- `send="…"` on a button or form sends that text as the user's next message.
+  Everything else (sliders, tabs, toggles) runs in the browser without
+  waking the agent.
+
+The markup converts to the `kt.ui` v1 spec, so the same validator,
+expression language and components serve both. Python and the frontend run
+one conformance file, `tests/fixtures/kt_ui_markup.json`.
+
+### Components
+
+| Group | Types |
+|---|---|
+| Layout | `stack`, `grid`, `card`, `section`, `tabs` / `tab`, `divider` |
+| Content | `text` (Markdown), `heading`, `badge`, `stat`, `kv`, `list`, `table`, `image`, `code` |
+| Data | `chart` (`bar`, `line`, `area`, `pie`, `scatter`), `diagram` (Mermaid source) |
+| Input | `number`, `slider`, `text_input`, `select`, `radio`, `toggle`, `checkbox`, `date` |
+| Action | `button` (`set` changes state, `send` posts a message), `form` (`send` with the values its inputs bind) |
+| Repeat | `each` (`items` expression, `as` name; adds `index`) |
+
+Images accept only `data:image/...` URLs and same-origin paths, so a block
+cannot load a remote tracking pixel.
+
+### Expressions
+
+Numbers, strings, `true` / `false` / `null`, lists, `{key: value}` objects;
+names from state, `let` and `each`; `.key` and `[i]`; `+ - * / % **`,
+comparisons, `and` / `or` / `not`, `a ? b : c`. Functions: `round floor ceil
+abs min max sum avg len pow sqrt clamp fmt pct range join keys values str
+num`. Limits: 2 KB per expression, 10 000 evaluation steps, ranges of at most
+1000 items. Both sides pass `tests/fixtures/kt_ui_expressions.json`.
+
+### When a block is wrong
+
+A block that does not convert or validate shows as an error box with its
+source; the rest of the reply is unaffected. On its next request the model
+gets one short note naming each failed block and its errors, for example
+`- block 2: root.children[0].value: is required`, so it can do better next
+time without an extra turn.
+
+### In the terminal
+
+The Rich CLI (`kt run`) and the TUI print each closed block as its text form
+(stats, tables, lists, a chart as its series, buttons as `[label]`) in a text
+block. While a block streams they show a short "building UI" placeholder, not
+the raw tags. `show_app` is not offered in terminals.
 
 ## Instant apps (`show_app`)
 
@@ -31,9 +144,11 @@ plugins:
       max_document_kb: 256
 ```
 
-The tool, and its prompt guidance, exist for the model only while a client
-that renders `kt.app` is attached (the web UI announces its renderers when
-it connects). A headless or CLI creature never sees `show_app`.
+The tool, its technical guidance and its part of
+[Presenting your answer](#presenting-your-answer) exist for the model only
+while a client that renders `kt.app` is attached (the web UI announces its
+renderers when it connects). A headless or CLI creature never sees
+`show_app`.
 
 ### What an app can do
 
@@ -85,7 +200,7 @@ after a resume.
 The canvas holds only:
 
 - generated images (provider image output and `canvas_image`);
-- canvas-surface widgets: `show_app`, and `show_ui` in page mode;
+- canvas-surface widgets such as `show_app`;
 - what the user pins: "Open in canvas" on a code block, or on a chat widget.
 
 Long code blocks no longer open canvas tabs by themselves, and file previews
@@ -110,116 +225,3 @@ more release.
   `openInCanvas`, `theme`).
 - **Compaction.** A tool can shorten its own old calls by overriding
   `BaseTool.compact_arguments(args)`; the default keeps arguments unchanged.
-
-## Declarative UI (show_ui)
-
-The `ui.declarative` plugin contributes `show_ui`. The model writes a
-JSON spec, not code; the web UI draws it with built-in components in
-the app theme. Expressions run in a small pure language (no `eval`),
-so the format is safe for creatures that read untrusted input.
-
-### Turn it on
-
-```yaml
-plugins:
-  - name: ui.declarative
-```
-
-`show_ui` needs the `kt.ui` renderer. The web UI announces it in its
-`client_hello` when it connects, so the tool (and its prompt guidance)
-appears once a browser is attached and disappears when the last one
-leaves. The Rich CLI and the TUI also draw `kt.ui` (see
-[In the terminal](#in-the-terminal)). Headless runs and package outputs
-such as chat bots do not report `kt.ui`; there the tool is not offered.
-
-### A spec
-
-```json
-{
-  "title": "Bill splitter",
-  "state": {"total": 120, "people": 3, "tip": 10},
-  "computed": {"each": "round(total * (1 + tip / 100) / people, 2)"},
-  "root": {"type": "stack", "children": [
-    {"type": "number", "label": "Total", "bind": "total"},
-    {"type": "slider", "label": "Tip %", "bind": "tip", "min": 0, "max": 30},
-    {"type": "number", "label": "People", "bind": "people", "min": 1},
-    {"type": "stat", "label": "Each pays", "value": "{{ fmt(each, 2) }}"},
-    {"type": "button", "label": "Send to chat", "send": "result",
-     "data": {"each": "{{ each }}"}}
-  ]}
-}
-```
-
-- `state` holds named values; inputs change them through `bind`.
-- `computed` holds named expressions, re-evaluated when state changes.
-- Any string prop may contain `{{ expr }}`. A prop that is exactly one
-  `{{ expr }}` keeps the value's type (a list stays a list).
-- `layout: "page"` makes a larger page and opens on the canvas surface
-  by default.
-
-The calculator above runs entirely in the browser; the agent is not
-woken while the user moves the slider.
-
-### Components
-
-| Group | Types |
-|---|---|
-| Layout | `stack`, `grid`, `card`, `section`, `tabs` / `tab`, `divider` |
-| Content | `text` (markdown), `heading`, `badge`, `stat`, `kv`, `list`, `table`, `image`, `code` |
-| Data | `chart` (`bar`, `line`, `area`, `pie`, `scatter`), `diagram` (shown as source) |
-| Input | `number`, `slider`, `text_input`, `select`, `radio`, `toggle`, `checkbox`, `date` |
-| Action | `button` (`set` changes state locally, `send` messages the agent), `form` (sends the values its inputs bind) |
-| Repeat | `each` (`items` expression, `as` name, one `child`; adds `index`) |
-
-Images accept only `data:image/...` URLs and same-origin paths, so a
-widget cannot load a remote tracking pixel.
-
-### Expressions
-
-Numbers, strings, `true` / `false` / `null`, lists; names from `state`,
-`computed` and `each`; `.key` and `[i]`; `+ - * / % **`, comparisons,
-`and` / `or` / `not`, `a ? b : c`. Functions: `round floor ceil abs
-min max sum avg len pow sqrt clamp fmt pct range join keys values str
-num`. Limits: 2 KB per expression, 10 000 evaluation steps, ranges of
-at most 1000 items.
-
-The same language is implemented in Python (validation and the text
-fallback) and in the frontend; both pass one shared conformance file,
-`tests/fixtures/kt_ui_expressions.json`.
-
-### Messages back to the agent
-
-A `send` on a button or form produces a widget message:
-
-- if the `show_ui` call is waiting (`wait_for: ["result"]`), the call
-  returns `message result: {...}`;
-- otherwise the message reaches the agent later as an ordinary
-  `widget_event` trigger.
-
-### Validation and fallback
-
-The backend validates every spec before it is shown. An invalid spec
-returns all problems with their JSON paths, for example
-`root.children[2].bind: 'ghost' is not a key of 'state'`, so the model
-can fix it in one more call. Every widget also carries a plain-text
-rendering of its initial state, shown by clients that cannot draw
-`kt.ui`.
-
-### In the terminal
-
-The Rich CLI (`kt run`) and the TUI draw `kt.ui` with a text profile, so
-`show_ui` is offered there too. `show_app` is not: terminals cannot run
-`kt.app`.
-
-- The widget is a card: its text form (tables, stats, lists; tabs become
-  sections in order; a chart becomes its series as text; images and
-  diagrams show their title) and one action per control.
-- Choosing an input asks for its value: a list for `select` and `radio`,
-  a text prompt for `number`, `slider`, `text_input` and `date`. `toggle`
-  and `checkbox` flip at once. Values are saved as widget state, and
-  computed values update.
-- Buttons run their `set` and `send`; a form sends its bound values. The
-  messages reach the agent as in the web UI.
-- In the Rich CLI the card's actions take the keyboard. Press Esc to go
-  back to the composer; the actions come back when the widget changes or
-  a tool waits on it. In the TUI the actions are buttons on the card.

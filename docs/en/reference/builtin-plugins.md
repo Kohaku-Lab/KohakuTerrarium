@@ -24,8 +24,8 @@ of the sandbox plugin, see
 | [`budget`](#budget) | 5 | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Turn / tool-call / walltime budget accounting. |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`, `on_load` | Trigger eager context compaction after high-token LLM calls. |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
-| [`ui.apps`](#uiapps) | 50 | `contribute_tools` | Adds `show_app`: model-written HTML apps in the web UI. |
-| [`ui.declarative`](#uideclarative) | 50 | `contribute_tools` | The `show_ui` tool: declarative chat widgets (renderer `kt.ui`). |
+| [`ui.apps`](#uiapps) | 50 | `contribute_tools`, `presentation_contribution` | Adds `show_app`: model-written HTML apps in the web UI. |
+| [`ui.declarative`](#uideclarative) | 50 | `presentation_contribution`, `pre_llm_call` | Inline UI: `<ui>` components in replies (renderer `kt.ui`). |
 
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
@@ -242,9 +242,10 @@ plugins:
 ## `ui.apps`
 
 Contributes the `show_app` tool: the agent shows one HTML document as an
-interactive app in the web UI canvas or chat. The tool and its prompt
-guidance are visible to the model only while an attached client renders
-`kt.app`. Implementation: `src/kohakuterrarium/builtins/plugins/apps/plugin.py`
+interactive app in the web UI canvas or chat. It is the full-page option for
+when inline UI is not enough. The tool, its guidance and its part of
+`## Presenting your answer` are visible to the model only while an attached
+client renders `kt.app`. Implementation: `src/kohakuterrarium/builtins/plugins/apps/plugin.py`
 and `src/kohakuterrarium/builtins/tools/show_app.py`.
 
 ### Options
@@ -269,31 +270,30 @@ and compaction behaviour.
 
 ## `ui.declarative`
 
-Contributes the `show_ui` tool, which opens declarative widgets
-(forms, tables, charts, calculators) in the chat or the canvas.
-Implementation: `src/kohakuterrarium/builtins/plugins/ui_declarative/plugin.py`.
-
-### Options
-
-| Option | Type | Default | Purpose |
-|---|---|---|---|
-| `default_surface` | `chat` \| `canvas` | `chat` | Where widgets open when the call names no surface. `layout: "page"` specs always default to `canvas`. |
+Inline UI: the model writes `kt.ui` components (tables, charts, diagrams,
+stats, tabs, inputs, buttons) as `<ui>` blocks inside its normal replies.
+Implementation: `src/kohakuterrarium/builtins/plugins/ui_declarative/` and
+`src/kohakuterrarium/builtins/kt_ui/markup.py`.
 
 ### Behaviour
 
-`show_ui` declares `requires_renderers = {"kt.ui"}`, so the model sees
-the tool and its guidance only while an attached client reports the
-`kt.ui` renderer: the web UI after its `client_hello`, and the Rich CLI
-and TUI with their text profile. Headless creatures never see it. See
-[guides/chat-widgets](../guides/chat-widgets.md#declarative-ui-show_ui).
+- While an attached client reports `kt.ui` (the web UI after its
+  `client_hello`, the Rich CLI and the TUI), the plugin adds the
+  inline-components part of `## Presenting your answer`: when to use each
+  component, the markup, every component's props and one example. Headless
+  creatures never get it.
+- A block that fails to convert or validate is drawn as an error box; the
+  next model request carries one note naming the block and its errors.
+- A button or form `send` posts its text as the user's next message.
+
+The plugin has no options (an old `default_surface` option is accepted and
+ignored). See [guides/chat-widgets](../guides/chat-widgets.md#inline-ui).
 
 ### Example
 
 ```yaml
 plugins:
   - name: ui.declarative
-    options:
-      default_surface: chat
 ```
 
 ## Activation summary
