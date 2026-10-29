@@ -1,6 +1,6 @@
 ---
 name: group_wire
-description: "Create or delete output wires that deliver a creature's turn-end text to another. Not for channels - use group_channel."
+description: 'Create or delete output wires that deliver a creature''s turn-end text to another. Use it to build pipelines. Not for channels - use group_channel.'
 category: builtin
 tags: [group]
 ---

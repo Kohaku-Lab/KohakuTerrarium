@@ -47,7 +47,10 @@ class VideoGenTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Generate a video from a prompt. Not for still images - use image_gen."
+        return (
+            "Generate a video from a prompt. Use it whenever motion or a short clip "
+            "helps the user. Not for still images - use image_gen."
+        )
 
     def get_parameters_schema(self) -> dict[str, Any]:
         return {

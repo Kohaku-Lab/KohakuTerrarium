@@ -1,6 +1,6 @@
 ---
 name: info
-description: Load the full documentation for a tool, sub-agent, or procedural skill by name. Not for running a skill - use skill.
+description: 'Load the full documentation for a tool, sub-agent or skill by name. Use it before a first call you are unsure about. Not for running a skill - use skill.'
 category: builtin
 tags: [docs]
 ---

@@ -1,6 +1,6 @@
 ---
 name: tree
-description: List a directory as a tree, respecting .gitignore. Use to orient in an unfamiliar project. Not for finding a specific file - use glob.
+description: 'List a directory as a tree, respecting .gitignore. Use it to orient in an unfamiliar project. Not for finding a specific file - use glob.'
 category: builtin
 tags: [search, files]
 ---

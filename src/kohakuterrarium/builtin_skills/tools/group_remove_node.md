@@ -1,6 +1,6 @@
 ---
 name: group_remove_node
-description: 'Remove a creature from your group. Not for pausing one temporarily - use group_stop_node.'
+description: 'Remove a creature from your group. Use it when a member''s work is finished. Not for stopping one for now - use group_stop_node.'
 category: builtin
 tags: [group]
 ---

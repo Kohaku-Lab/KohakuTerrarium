@@ -43,7 +43,10 @@ class PythonTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Run a Python snippet and return its stdout. Use for computation and data munging. Not for shell pipelines - use bash."
+        return (
+            "Run a Python snippet and return its stdout. Use it for computation, data "
+            "munging and quick checks. Not for shell pipelines - use bash."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

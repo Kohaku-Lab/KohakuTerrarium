@@ -204,17 +204,23 @@ class WebSearchTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Search the web and return titles, URLs, and snippets. Use to find sources. Not for reading one - use web_fetch."
+        return (
+            "Search the web and return titles, URLs and snippets. Use it whenever you "
+            "need current or outside facts. Not for reading one page - use web_fetch."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
 
     def prompt_contribution(self) -> str | None:
-        """Warn against repeat searches on the backend that charges for them."""
+        """Search guidance for the backends that charge per search."""
         if self.backend not in {"codex", "deepseek_api"}:
             return None
-        return "Search once per question; retry only if results are incomplete."
+        return (
+            "Search whenever you need current or outside facts; when results are "
+            "thin, search again with new terms."
+        )
 
     def runtime_option_schema(self) -> dict[str, dict[str, Any]]:
         disabled: dict[str, str] = {}

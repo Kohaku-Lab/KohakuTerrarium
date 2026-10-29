@@ -1,6 +1,6 @@
 ---
 name: grok_image_gen
-description: "Generate or edit an image with xAI's dedicated image endpoint. Not for other providers - use image_gen."
+description: 'Generate or edit an image with xAI''s image endpoint. Use it for pictures, illustrations and photo edits on xAI. Not for other providers - use image_gen.'
 category: builtin
 tags: [media]
 ---

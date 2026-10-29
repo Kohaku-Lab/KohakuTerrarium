@@ -1,6 +1,6 @@
 ---
 name: mcp_connect
-description: 'Connect to an MCP server by name or definition. Not for calling its tools - use mcp_call.'
+description: 'Connect to an MCP server by name or definition. Use it when a task needs a server''s tools. Not for calling its tools - use mcp_call.'
 category: builtin
 tags: [mcp]
 ---

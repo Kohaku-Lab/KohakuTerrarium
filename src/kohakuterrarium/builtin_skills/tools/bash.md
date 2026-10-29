@@ -1,6 +1,6 @@
 ---
 name: bash
-description: Run a shell command. Use for builds, tests, git, and process control. Not for reading or editing files - use read, glob, grep, multi_edit.
+description: 'Run a shell command. Use it for builds, tests, git, installs and process control. Not for reading or editing files - use read, glob, grep, multi_edit.'
 category: builtin
 tags: [shell, command, system]
 ---
@@ -24,7 +24,7 @@ Runs a command and returns its combined output and exit status.
 - Commands run through bash on every platform unless `type` says otherwise;
   the ambient `$SHELL` is not consulted.
 - Shell commands are opaque, so they take a serial lock by default. Set
-  `allow_concurrent` only when you know the call is independent.
+  `allow_concurrent` for calls you know are independent.
 - `timeout` covers waiting for that lock as well as the command itself, so a
   call can time out before the command starts.
 

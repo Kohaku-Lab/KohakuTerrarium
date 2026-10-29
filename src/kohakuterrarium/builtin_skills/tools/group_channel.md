@@ -1,6 +1,6 @@
 ---
 name: group_channel
-description: 'Create, delete, or rewire channels in your group. Not for output wires - use group_wire.'
+description: 'Create, delete or rewire channels in your group. Use it to set up broadcast routes between creatures. Not for output wires - use group_wire.'
 category: builtin
 tags: [group]
 ---

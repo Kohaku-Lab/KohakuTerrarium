@@ -1,6 +1,6 @@
 ---
 name: delete_trigger
-description: 'Stop and remove an installed trigger by id. Not for cancelling a running job - use stop_task.'
+description: 'Stop and remove an installed trigger by id. Use it when a timer or watcher has done its job. Not for cancelling a running job - use stop_task.'
 category: builtin
 tags: [triggers]
 ---

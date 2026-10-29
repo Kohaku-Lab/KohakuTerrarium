@@ -56,7 +56,10 @@ class NotebookReadTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Read a Jupyter notebook as cells with outputs. Required before notebook_edit. Not for plain files - use read."
+        return (
+            "Read a Jupyter notebook as cells with outputs. Use it to inspect a "
+            "notebook and before notebook_edit. Not for plain files - use read."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -1,6 +1,6 @@
 ---
 name: critic
-description: Review a bounded target for concrete problems. Supply scope, requirements, and any diff. Not for fixing, full audits, or test suites.
+description: 'Review code, a diff or a plan for concrete problems, read-only. Dispatch it after a change or before you ship; hand it the scope, requirements and diff.'
 category: subagent
 tags: [review]
 ---

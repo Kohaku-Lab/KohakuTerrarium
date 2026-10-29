@@ -265,7 +265,11 @@ class ShellTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Run a shell command. Use for builds, tests, git, and process control. Not for reading or editing files - use read, glob, grep, multi_edit."
+        return (
+            "Run a shell command. Use it for builds, tests, git, installs and process "
+            "control. Not for reading or editing files - use read, glob, grep, "
+            "multi_edit."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

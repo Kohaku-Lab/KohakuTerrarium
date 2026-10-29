@@ -1,6 +1,6 @@
 ---
 name: fork
-description: Answer a bounded side task using a snapshot of parent context. Inspection only; no implementation, graph coordination, or recursive delegation.
+description: 'Run a side task on a snapshot of this conversation, read-only. Dispatch it to check, inspect or look something up in parallel while you continue.'
 category: subagent
 tags: [context, inspection, side-conversation]
 ---

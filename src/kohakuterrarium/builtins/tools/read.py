@@ -42,7 +42,11 @@ class ReadTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Read a file: text with line numbers, images, or PDF pages. Required before write or multi_edit. Not for notebooks - use notebook_read."
+        return (
+            "Read a file: text with line numbers, images or PDF pages. Use it to "
+            "inspect any file, and before write or multi_edit. Not for notebooks - use "
+            "notebook_read."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -69,8 +69,9 @@ class GroupSendTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Send a message directly to one creature in your group. Not for "
-            "the whole group - use send_channel."
+            "Send a message directly to one creature in your group. Use it to hand a "
+            "task or a reply to one member. Not for the whole group - use "
+            "send_channel."
         )
 
     @property
@@ -164,7 +165,10 @@ class SendChannelTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Send a message to a channel in your group. Not for one creature in particular - use group_send."
+        return (
+            "Send a message to a channel in your group. Use it to broadcast a task or "
+            "update to every listener. Not for one creature - use group_send."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

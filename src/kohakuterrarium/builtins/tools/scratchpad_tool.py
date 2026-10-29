@@ -25,7 +25,10 @@ class ScratchpadTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Read or write session working memory as key-value pairs."
+        return (
+            "Read or write session working memory as key-value pairs. Use it to keep "
+            "plans, findings and progress notes across turns."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

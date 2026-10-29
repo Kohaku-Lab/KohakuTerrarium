@@ -178,7 +178,10 @@ class TreeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "List a directory as a tree, respecting .gitignore. Use to orient in an unfamiliar project. Not for finding a specific file - use glob."
+        return (
+            "List a directory as a tree, respecting .gitignore. Use it to orient in an "
+            "unfamiliar project. Not for finding a specific file - use glob."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

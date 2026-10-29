@@ -1,6 +1,6 @@
 ---
 name: image_gen
-description: 'Generate or edit a raster image. Not for diagrams from code - write the source and render it with bash.'
+description: 'Generate or edit a raster image. Use it whenever a picture, mockup or photo edit helps. Not for diagrams from code - use bash to render the source.'
 category: builtin
 tags: [media]
 ---

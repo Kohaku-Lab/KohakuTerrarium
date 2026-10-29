@@ -1,6 +1,6 @@
 ---
 name: python
-description: Run a Python snippet and return its stdout. Use for computation and data munging. Not for shell pipelines - use bash.
+description: 'Run a Python snippet and return its stdout. Use it for computation, data munging and quick checks. Not for shell pipelines - use bash.'
 category: builtin
 tags: [shell, system]
 ---

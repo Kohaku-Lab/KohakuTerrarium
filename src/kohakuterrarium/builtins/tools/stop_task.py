@@ -26,7 +26,10 @@ class StopTaskTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Cancel a running background job by id. Use when its result is no longer needed."
+        return (
+            "Cancel a running background job by id. Use it when its result is no "
+            "longer needed or it has run too long."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

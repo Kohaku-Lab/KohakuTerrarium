@@ -1,6 +1,6 @@
 ---
 name: response
-description: 'Draft a long user-facing response. Not for internal analysis - the caller supplies the conclusions.'
+description: 'Draft a long user-facing response from your conclusions. Dispatch it when the answer is long or needs polish; hand it the conclusions to present.'
 category: subagent
 tags: [output]
 ---

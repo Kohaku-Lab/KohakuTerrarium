@@ -1,6 +1,6 @@
 ---
 name: group_send
-description: 'Send a message directly to one creature in your group. Not for the whole group - use send_channel.'
+description: 'Send a message directly to one creature in your group. Use it to hand a task or a reply to one member. Not for the whole group - use send_channel.'
 category: builtin
 tags: [group]
 ---

@@ -1,6 +1,6 @@
 ---
 name: group_stop_node
-description: 'Stop a running member without removing it. Not for permanent removal - use group_remove_node.'
+description: 'Stop a running member without removing it. Use it to halt a member you may restart later. Not for permanent removal - use group_remove_node.'
 category: builtin
 tags: [group]
 ---

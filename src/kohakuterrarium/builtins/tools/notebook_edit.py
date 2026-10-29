@@ -262,7 +262,10 @@ class NotebookEditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Apply ordered cell edits to a Jupyter notebook. Requires a prior notebook_read. Not for plain files - use multi_edit."
+        return (
+            "Apply ordered cell edits to a Jupyter notebook after a notebook_read. Use "
+            "it to change, add or remove cells. Not for plain files - use multi_edit."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

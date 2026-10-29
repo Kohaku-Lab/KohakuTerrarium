@@ -1,6 +1,6 @@
 ---
 name: multi_edit
-description: Apply ordered exact search/replace edits to one file. Use when changing a file in one or more places. Not for whole-file rewrites - use write.
+description: 'Apply ordered exact search/replace edits to one file. Use it to change a file in one or more places. Not for whole-file rewrites - use write.'
 category: builtin
 tags: [file, edit]
 ---

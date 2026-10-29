@@ -18,7 +18,10 @@ _BUDGET_PLUGIN_OPTS = {
 
 RESPONSE_CONFIG = SubAgentConfig(
     name="response",
-    description="Generate user-facing responses",
+    description=(
+        "Draft a long user-facing response from your conclusions. Dispatch it when the "
+        "answer is long or needs polish; hand it the conclusions to present."
+    ),
     tools=["read"],
     system_prompt=RESPONSE_SYSTEM_PROMPT,
     can_modify=False,

@@ -52,7 +52,11 @@ class CanvasImageTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Put a local image file on the Studio canvas. Not for inspecting a file - use read."
+        return (
+            "Put a local image file on the Studio canvas. Use it to show the user a "
+            "chart, render or screenshot you made. Not for inspecting a file - use "
+            "read."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

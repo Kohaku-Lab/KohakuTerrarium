@@ -13,7 +13,10 @@ SUMMARIZE_SYSTEM_PROMPT = render_subagent_prompt(
 
 SUMMARIZE_CONFIG = SubAgentConfig(
     name="summarize",
-    description="Summarize conversation for context continuation",
+    description=(
+        "Condense a long conversation or document into a structured summary. Dispatch "
+        "it to compress context or brief others. Not for review - dispatch critic."
+    ),
     tools=[],
     system_prompt=SUMMARIZE_SYSTEM_PROMPT,
     can_modify=False,

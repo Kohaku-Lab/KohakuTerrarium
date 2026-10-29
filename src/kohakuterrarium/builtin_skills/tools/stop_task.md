@@ -1,6 +1,6 @@
 ---
 name: stop_task
-description: Cancel a running background job by id. Use when its result is no longer needed.
+description: 'Cancel a running background job by id. Use it when its result is no longer needed or it has run too long.'
 category: builtin
 tags: [jobs]
 ---

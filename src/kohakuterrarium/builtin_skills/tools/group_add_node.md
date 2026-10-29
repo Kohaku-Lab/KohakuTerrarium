@@ -1,6 +1,6 @@
 ---
 name: group_add_node
-description: 'Spawn a creature into your group from a config path. Not for one-shot private work - dispatch a sub-agent.'
+description: 'Spawn a creature into your group from a config path. Use it to add a long-lived teammate. Not for one-shot work - dispatch a sub-agent.'
 category: builtin
 tags: [group]
 ---

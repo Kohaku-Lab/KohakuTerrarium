@@ -1,6 +1,6 @@
 ---
 name: summarize
-description: 'Condense a long conversation or document into a structured summary. Not for reviewing quality - use critic.'
+description: 'Condense a long conversation or document into a structured summary. Dispatch it to compress context or brief others. Not for review - dispatch critic.'
 category: subagent
 tags: [context]
 ---

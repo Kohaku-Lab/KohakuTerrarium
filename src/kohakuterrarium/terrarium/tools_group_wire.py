@@ -27,7 +27,10 @@ class GroupWireTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Create or delete output wires that deliver a creature's turn-end text to another. Not for channels - use group_channel."
+        return (
+            "Create or delete output wires that deliver a creature's turn-end text to "
+            "another. Use it to build pipelines. Not for channels - use group_channel."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

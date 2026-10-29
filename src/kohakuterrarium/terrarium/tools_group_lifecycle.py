@@ -83,8 +83,8 @@ class GroupAddNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a creature into your group from a config path. Not for "
-            "one-shot private work - dispatch a sub-agent."
+            "Spawn a creature into your group from a config path. Use it to add a "
+            "long-lived teammate. Not for one-shot work - dispatch a sub-agent."
         )
 
     @property
@@ -173,7 +173,10 @@ class GroupRemoveNodeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Remove a creature from your group. Not for pausing one temporarily - use group_stop_node."
+        return (
+            "Remove a creature from your group. Use it when a member's work is "
+            "finished. Not for stopping one for now - use group_stop_node."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -236,7 +239,10 @@ class GroupStartNodeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Start a stopped member of your group. Not for adding a new one - use group_add_node."
+        return (
+            "Start a stopped member of your group. Use it to bring a stopped member "
+            "back to work. Not for adding a new one - use group_add_node."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -287,8 +293,8 @@ class GroupStopNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Stop a running member without removing it. Not for permanent "
-            "removal - use group_remove_node."
+            "Stop a running member without removing it. Use it to halt a member you "
+            "may restart later. Not for permanent removal - use group_remove_node."
         )
 
     @property
@@ -374,9 +380,8 @@ class GroupSpawnChildTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a child creature linked to you and optionally hand it a "
-            "first task; talk to it with group_send by name. Not for one-shot "
-            "private work - dispatch a sub-agent."
+            "Spawn a linked child creature, optionally with a first task. Use it to "
+            "start a worker in one call. Not for one-shot work - dispatch a sub-agent."
         )
 
     @property
@@ -474,9 +479,8 @@ class GroupPauseNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Warm-pause a non-privileged creature: it stops admitting new "
-            "turns but stays live (resume with group_resume_node). Not a "
-            "teardown — use group_stop_node to force-stop"
+            "Warm-pause a non-privileged creature: no new turns, still live. Use it to "
+            "hold a member briefly. Not for a teardown - use group_stop_node."
         )
 
     @property
@@ -518,7 +522,10 @@ class GroupResumeNodeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Resume a warm-paused non-privileged creature (undoes group_pause_node)"
+        return (
+            "Resume a warm-paused non-privileged creature. Use it to let a paused "
+            "member take turns again, starting with what queued while it was paused."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -558,9 +565,8 @@ class GroupKillNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Force-stop a non-privileged creature and mark it killed. Hard "
-            "kill is NOT supported in a shared process — this is an honest "
-            "force-stop, not a fake SIGKILL"
+            "Force-stop a non-privileged creature and mark it killed. Use it when a "
+            "member is stuck. Not for a clean stop - use group_stop_node."
         )
 
     @property

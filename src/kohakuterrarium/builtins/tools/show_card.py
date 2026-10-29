@@ -39,7 +39,11 @@ class ShowCardTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Display a styled card, optionally with buttons, and return the clicked action. Not for free-text answers - use ask_user."
+        return (
+            "Show a styled card, optionally with buttons, and return the clicked one. "
+            "Use it for a pick-one choice or a confirmation. Not for free text - use "
+            "ask_user."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

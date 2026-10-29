@@ -1,6 +1,6 @@
 ---
 name: video_gen
-description: 'Generate a video from a prompt. Not for still images - use image_gen.'
+description: 'Generate a video from a prompt. Use it whenever motion or a short clip helps the user. Not for still images - use image_gen.'
 category: builtin
 tags: [media]
 ---

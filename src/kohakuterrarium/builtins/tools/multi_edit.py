@@ -140,7 +140,10 @@ class MultiEditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Apply ordered exact search/replace edits to one file. Use when changing a file in one or more places. Not for whole-file rewrites - use write."
+        return (
+            "Apply ordered exact search/replace edits to one file. Use it to change a "
+            "file in one or more places. Not for whole-file rewrites - use write."
+        )
 
     @property
     def execution_mode(self) -> ExecutionMode:

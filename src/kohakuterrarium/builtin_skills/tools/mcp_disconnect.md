@@ -1,6 +1,6 @@
 ---
 name: mcp_disconnect
-description: 'Disconnect a connected MCP server by name.'
+description: 'Disconnect a connected MCP server by name. Use it when you are done with a server''s tools.'
 category: builtin
 tags: [mcp]
 ---
