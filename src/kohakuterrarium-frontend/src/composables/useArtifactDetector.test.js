@@ -64,7 +64,7 @@ describe("useArtifactDetector", () => {
     }
   })
 
-  it("keeps dismissal through older history but reopens for a new reverting edit", async () => {
+  it("keeps dismissal through older history but reopens for a new reverting publication", async () => {
     const scope = "paged-dismissal"
     const chat = useChatStore(scope)
     const canvas = useCanvasStore(scope)
@@ -76,7 +76,7 @@ describe("useArtifactDetector", () => {
           type: "tool",
           jobId: id,
           resultMeta: {
-            canvas_preview: { kind: "edit", file_path: "/work/a.py", lang: "py", content },
+            canvas_preview: { kind: "image", file_path: "/work/a.png", lang: "png", content },
           },
         },
       ],

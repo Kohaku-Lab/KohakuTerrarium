@@ -14,11 +14,11 @@
       </div>
       <div v-if="active" class="shrink-0 flex items-center gap-2 px-3 h-9 border-t kt-v2-line text-[11px] text-warm-500">
         <span class="font-mono">{{ active.lang || active.type }}</span>
-        <span v-if="active.type !== 'image'">· {{ t("side.canvas.lines", { n: lineCount }) }}</span>
+        <span v-if="active.type !== 'image' && active.type !== 'widget'">· {{ t("side.canvas.lines", { n: lineCount }) }}</span>
         <span class="flex-1" />
         <button v-if="active.type === 'html' || active.type === 'markdown'" class="h-6 px-2 rounded hover:bg-warm-100 dark:hover:bg-warm-800" :class="showSource ? 'text-iolite' : ''" @click="showSource = !showSource"><span class="i-carbon-code" /></button>
-        <button class="h-6 px-2 rounded hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-1" @click="copy"><span class="i-carbon-copy" />{{ t("side.canvas.copy") }}</button>
-        <button class="h-6 px-2 rounded hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-1" @click="download"><span class="i-carbon-download" />{{ t("side.canvas.download") }}</button>
+        <button v-if="active.type !== 'widget'" class="h-6 px-2 rounded hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-1" @click="copy"><span class="i-carbon-copy" />{{ t("side.canvas.copy") }}</button>
+        <button v-if="active.type !== 'widget'" class="h-6 px-2 rounded hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-1" @click="download"><span class="i-carbon-download" />{{ t("side.canvas.download") }}</button>
       </div>
     </template>
   </div>

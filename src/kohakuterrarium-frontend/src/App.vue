@@ -38,7 +38,9 @@ import { useDensity } from "@/composables/useDensity"
 import { useDocumentAttention } from "@/composables/useDocumentAttention"
 import { useAttentionEffects } from "@/composables/useAttentionEffects"
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts"
+import { provideCodePin } from "@/public/chat/codePin"
 import { useAuthStore } from "@/stores/auth"
+import { useCanvasStore } from "@/stores/canvas"
 import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
@@ -84,6 +86,7 @@ useAttentionEffects()
 useBuiltinCommands()
 useAutoTriggers()
 useArtifactDetector()
+provideCodePin((block) => useCanvasStore().pinBlock(block))
 
 // Host picker state — accessed by ``HostStatusChip`` via a global
 // event so we don't have to thread a prop through every shell

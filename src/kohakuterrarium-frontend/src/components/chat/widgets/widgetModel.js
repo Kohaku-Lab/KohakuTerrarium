@@ -62,7 +62,7 @@ export function widgetFromMessage(message) {
     title: message.title || "",
     spec: message.spec ?? null,
     state: message.state || {},
-    surface: message.surface || "chat",
+    surface: message.surfaceOverride || message.surface || "chat",
     interactive: message.interactive === true,
     awaiting: message.awaiting === true && !message.closed,
     closed: message.closed === true,

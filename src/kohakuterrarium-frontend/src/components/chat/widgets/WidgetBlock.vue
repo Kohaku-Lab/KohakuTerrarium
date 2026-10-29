@@ -14,6 +14,9 @@
     <el-button v-if="canReveal" size="small" link type="primary" data-test="widget-stub-open" @click="reveal">Open</el-button>
   </div>
   <div v-else class="ui-event-wrapper" :class="{ 'ui-event-collapsed-wrapper': collapsed, 'widget-closed': widget.closed && !isLegacy }" :data-widget="widget.renderer">
+    <button v-if="canMoveToCanvas" class="widget-to-canvas" title="Open in canvas" data-test="widget-open-in-canvas" @click="host.openInCanvas()">
+      <span class="i-carbon-launch" />
+    </button>
     <button class="ui-event-minimize" :title="collapsed ? 'Expand' : 'Minimize'" :aria-expanded="!collapsed" @click="collapsed = !collapsed">
       <span :class="collapsed ? 'i-carbon-add' : 'i-carbon-subtract'" />
     </button>
@@ -80,6 +83,7 @@ const icon = computed(() => entry.value?.icon?.(props.widget) || "i-carbon-appli
 const summary = computed(() => entry.value?.summary?.(props.widget) || props.widget.title || "")
 const pending = computed(() => props.widget.awaiting === true && !props.widget.closed)
 const stubLabel = computed(() => (surface.value === "canvas" ? "opened in canvas" : "shown in the side panel"))
+const canMoveToCanvas = computed(() => props.mode === "chat" && placement.value === "inline" && !isLegacy.value && !props.widget.closed && (entry.value?.surfaces || []).includes("canvas") && typeof props.host?.openInCanvas === "function")
 const canReveal = computed(() => typeof opener?.open === "function" && (opener.surfaces || []).includes(surface.value))
 
 watch(
@@ -139,6 +143,24 @@ function reveal() {
     background 0.15s,
     color 0.15s;
 }
+.widget-to-canvas {
+  position: absolute;
+  top: 0.5rem;
+  right: 2rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.25rem;
+  color: var(--color-text-muted, rgba(160, 160, 160, 0.7));
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 0.75rem;
+  z-index: 1;
+}
+.widget-to-canvas:hover,
 .ui-event-minimize:hover {
   background: var(--color-card-hover, rgba(160, 160, 160, 0.12));
   color: var(--color-text, inherit);

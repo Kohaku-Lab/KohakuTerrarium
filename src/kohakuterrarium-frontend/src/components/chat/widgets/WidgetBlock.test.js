@@ -167,4 +167,25 @@ describe("WidgetBlock", () => {
     expect(w.find('[data-test="widget-modal-open"]').exists()).toBe(true)
     w.unmount()
   })
+
+  it("offers Open in canvas only for open chat widgets whose renderer draws on the canvas", async () => {
+    const hst = host()
+    const w = mount(WidgetBlock, { props: { widget: widget(), host: hst } })
+    await w.find('[data-test="widget-open-in-canvas"]').trigger("click")
+    expect(hst.openInCanvas).toHaveBeenCalledOnce()
+
+    const closed = mount(WidgetBlock, { props: { widget: widget({ closed: true }), host: host() } })
+    expect(closed.find('[data-test="widget-open-in-canvas"]').exists()).toBe(false)
+    const inline = mount(WidgetBlock, { props: { widget: widget(), host: host(), mode: "inline" } })
+    expect(inline.find('[data-test="widget-open-in-canvas"]').exists()).toBe(false)
+    registerWidgetRenderer("t.chatonly", Echo)
+    try {
+      const chatOnly = mount(WidgetBlock, {
+        props: { widget: widget({ renderer: "t.chatonly" }), host: host() },
+      })
+      expect(chatOnly.find('[data-test="widget-open-in-canvas"]').exists()).toBe(false)
+    } finally {
+      unregisterWidgetRenderer("t.chatonly")
+    }
+  })
 })

@@ -32,19 +32,17 @@ describe("canvas store — artifact detection", () => {
     expect(a.content).toContain("print('hi')")
   })
 
-  it("detects long fenced code blocks as artifacts", () => {
+  it("never turns a long fenced code block into an artifact by itself", () => {
     const store = useCanvasStore()
-    const body = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")
+    const body = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n")
     const msg = {
       id: "m2",
       role: "assistant",
       parts: [{ type: "text", content: "See below:\n```python\n" + body + "\n```\n" }],
     }
     store.scanMessage(msg)
-    expect(store.artifacts).toHaveLength(1)
-    expect(store.artifacts[0].lang).toBe("python")
+    expect(store.artifacts).toHaveLength(0)
   })
-
   it("ignores short fenced code blocks", () => {
     const store = useCanvasStore()
     const msg = {
@@ -139,7 +137,7 @@ describe("canvas store — artifact detection", () => {
     expect(a.content).toMatch(/^data:image\/png;base64,/)
   })
 
-  it("keeps one artifact per image and code block when history reload re-keys the message", () => {
+  it("keeps one artifact per image when history reload re-keys the message", () => {
     const store = useCanvasStore()
     const body = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n")
     const parts = [
@@ -147,12 +145,11 @@ describe("canvas store — artifact detection", () => {
       { type: "image_url", image_url: { url: "data:image/png;base64,QUJD" }, meta: {} },
     ]
     store.scanMessages([{ id: "m_1712345", role: "assistant", parts }])
-    expect(store.artifacts).toHaveLength(2)
+    expect(store.artifacts).toHaveLength(1)
     const reloaded = parts.map((p) => ({ ...p }))
     store.scanMessages([{ id: "h_evt_42", role: "assistant", parts: reloaded }])
-    expect(store.artifacts.map((a) => a.type).sort()).toEqual(["code", "image"])
+    expect(store.artifacts.map((a) => a.type)).toEqual(["image"])
   })
-
   it("keeps a closed image closed after history reload re-keys its message", () => {
     const store = useCanvasStore()
     const image = { type: "image_url", image_url: { url: "data:image/png;base64,REVG" } }
@@ -255,72 +252,53 @@ describe("canvas store — artifact detection", () => {
 })
 
 describe("canvas store — write / edit canvas_preview (Feat 1)", () => {
-  it("picks up write tool result canvas_preview as a code artifact", () => {
+  it("leaves write / edit text previews in their tool block", () => {
     const store = useCanvasStore()
-    const msg = {
-      id: "m_write",
-      role: "assistant",
-      parts: [
-        {
-          type: "tool",
-          name: "write",
-          status: "done",
-          resultMeta: {
-            canvas_preview: {
-              kind: "write",
-              file_path: "/repo/foo.py",
-              lang: "python",
-              content: "def hello():\n    return 1\n",
-              bytes: 27,
-              truncated: false,
+    for (const name of ["write", "edit", "multi_edit"]) {
+      store.scanMessage({
+        id: `m_${name}`,
+        role: "assistant",
+        parts: [
+          {
+            type: "tool",
+            name,
+            status: "done",
+            resultMeta: {
+              canvas_preview: {
+                kind: name,
+                file_path: "src/a.py",
+                lang: "python",
+                content: "x = 1",
+              },
             },
           },
-        },
-      ],
+        ],
+      })
     }
-    store.scanMessage(msg)
-    expect(store.artifacts).toHaveLength(1)
-    const a = store.artifacts[0]
-    expect(a.type).toBe("code")
-    expect(a.lang).toBe("python")
-    expect(a.content).toBe("def hello():\n    return 1\n")
-    expect(a.sourceId).toBe("file:/repo/foo.py")
+    expect(store.artifacts).toHaveLength(0)
   })
-
-  it("re-editing the same file updates the existing artifact in place", () => {
-    // Two write/edit calls to the same path produce ONE artifact —
-    // the canvas tracks the file, not the tool call. The sourceId is
-    // ``file:<path>`` precisely so the upsert finds the previous entry.
+  it("re-publishing the same image path updates the existing artifact in place", () => {
     const store = useCanvasStore()
-    const make = (id, content) => ({
-      id,
+    const publish = (jobId, url) => ({
+      id: `m_${jobId}`,
       role: "assistant",
       parts: [
         {
           type: "tool",
-          name: "edit",
+          name: "canvas_image",
+          status: "done",
+          jobId,
           resultMeta: {
-            canvas_preview: {
-              kind: "edit",
-              file_path: "/repo/foo.py",
-              lang: "python",
-              content,
-              bytes: content.length,
-              truncated: false,
-            },
+            canvas_preview: { kind: "image", file_path: "out.png", lang: "png", content: url },
           },
         },
       ],
     })
-    store.scanMessage(make("m1", "v1"))
-    store.scanMessage(make("m2", "v2"))
+    store.scanMessage(publish("j1", "/api/sessions/s/artifacts/a.png"))
+    store.scanMessage(publish("j2", "/api/sessions/s/artifacts/b.png"))
     expect(store.artifacts).toHaveLength(1)
-    expect(store.artifacts[0].content).toBe("v2")
-    // Active artifact follows the most recent touch — keeps the canvas
-    // panel on the file the agent just changed.
-    expect(store.activeArtifact?.content).toBe("v2")
+    expect(store.artifacts[0].content).toBe("/api/sessions/s/artifacts/b.png")
   })
-
   it("skips tool parts whose preview is truncated (content === null)", () => {
     // Files over PREVIEW_MAX_BYTES surface ``content: null, truncated:
     // true``. Showing an empty code bubble would be misleading —
@@ -707,35 +685,29 @@ describe("canvas store — dismiss and cap", () => {
     expect(store.artifacts.some((a) => a.sourceId === "n1")).toBe(false)
   })
 
-  it("scanMessage reopens a dismissed file after a later edit preview", () => {
+  it("scanMessage reopens a dismissed image after a later publication", () => {
     const store = useCanvasStore()
-    const preview = (id, content) => ({
-      id,
+    const publish = (jobId, url) => ({
+      id: `m_${jobId}`,
       role: "assistant",
       parts: [
         {
           type: "tool",
-          name: "edit",
+          name: "canvas_image",
+          status: "done",
+          jobId,
           resultMeta: {
-            canvas_preview: {
-              kind: "edit",
-              file_path: "/work/a.py",
-              lang: "py",
-              content,
-              bytes: content.length,
-              truncated: false,
-            },
+            canvas_preview: { kind: "image", file_path: "out.png", lang: "png", content: url },
           },
         },
       ],
     })
-    store.scanMessage(preview("m1", "v1"))
+    store.scanMessage(publish("j1", "/api/sessions/s/artifacts/a.png"))
     store.dismissArtifact(store.artifacts[0].id)
-    store.scanMessage(preview("m1", "v1"))
+    store.scanMessage(publish("j1", "/api/sessions/s/artifacts/a.png"))
     expect(store.artifacts).toHaveLength(0)
-    store.scanMessage(preview("m2", "v2"))
-    expect(store.artifacts).toHaveLength(1)
-    expect(store.artifacts[0].content).toBe("v2")
+    store.scanMessage(publish("j2", "/api/sessions/s/artifacts/b.png"))
+    expect(store.artifacts.map((a) => a.content)).toEqual(["/api/sessions/s/artifacts/b.png"])
   })
 })
 
@@ -817,5 +789,52 @@ describe("canvas store — historical canvas_image recovery", () => {
     const store = useCanvasStore()
     store.scanMessage(message(name, status))
     expect(store.artifacts).toHaveLength(0)
+  })
+})
+
+describe("canvas store — widgets and pins", () => {
+  const widget = (extra = {}) => ({
+    id: "ui_w1",
+    role: "widget",
+    eventId: "w_1",
+    renderer: "kt.app",
+    title: "Planner",
+    surface: "canvas",
+    ...extra,
+  })
+
+  it("a canvas-surface widget becomes one widget artifact named by its title", () => {
+    const store = useCanvasStore()
+    store.scanMessages([widget(), widget()])
+    expect(store.artifacts).toHaveLength(1)
+    const a = store.artifacts[0]
+    expect([a.type, a.content, a.name, a.sourceId]).toEqual([
+      "widget",
+      "w_1",
+      "Planner",
+      "widget:w_1",
+    ])
+  })
+
+  it("chat-surface widgets stay in the chat until the user pins them", () => {
+    const store = useCanvasStore()
+    const inChat = widget({ eventId: "w_2", surface: "chat" })
+    store.scanMessages([inChat])
+    expect(store.artifacts).toHaveLength(0)
+    store.pinWidget(inChat)
+    expect(store.widgetOnCanvas(inChat)).toBe(true)
+    store.scanMessages([inChat])
+    expect(store.artifacts.map((a) => a.sourceId)).toEqual(["widget:w_2"])
+    expect(store.activeArtifact.content).toBe("w_2")
+  })
+
+  it("pinBlock adds a user-chosen code block once and selects it", () => {
+    const store = useCanvasStore()
+    const first = store.pinBlock({ content: "<b>hi</b>", lang: "HTML" })
+    expect([first.type, first.lang]).toEqual(["html", "html"])
+    expect(store.pinBlock({ content: "<b>hi</b>", lang: "html" }).id).toBe(first.id)
+    expect(store.pinBlock({ content: "" })).toBeNull()
+    expect(store.pinBlock({ content: "x = 1", lang: "python" }).type).toBe("code")
+    expect(store.artifacts).toHaveLength(2)
   })
 })

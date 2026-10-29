@@ -5,6 +5,7 @@
       <button v-for="(a, index) in canvas.artifacts" :key="a.id" class="flex flex-col rounded-lg border kt-v2-line overflow-hidden text-left hover:border-iolite/60 transition-colors" :class="canvas.activeId === a.id ? 'ring-1 ring-iolite/50' : ''" :title="a.name" @click="open(index)">
         <div class="h-20 flex items-center justify-center bg-warm-100 dark:bg-warm-800 overflow-hidden">
           <img v-if="a.type === 'image'" :src="a.content" :alt="a.name" class="w-full h-full object-cover" loading="lazy" />
+          <span v-else-if="a.type === 'widget'" :class="artifactIcon('widget')" class="text-2xl text-warm-400" data-test="canvas-mini-widget" />
           <pre v-else class="w-full h-full p-1.5 text-[8px] leading-[10px] font-mono text-warm-500 overflow-hidden whitespace-pre">{{ head(a) }}</pre>
         </div>
         <div class="flex items-center gap-1 px-1.5 py-1 min-w-0">
