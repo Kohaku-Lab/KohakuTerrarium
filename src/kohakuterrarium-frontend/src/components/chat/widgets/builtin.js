@@ -7,6 +7,7 @@
  */
 
 import { registerWidgetRenderer } from "../../../ext/widgets.js"
+import AppFrame from "./app/AppFrame.vue"
 import AskTextRenderer from "./legacy/AskTextRenderer.vue"
 import CardRenderer from "./legacy/CardRenderer.vue"
 import ConfirmRenderer from "./legacy/ConfirmRenderer.vue"
@@ -39,6 +40,14 @@ export function ensureBuiltinWidgetRenderers() {
       ...LEGACY_CHROME[id],
     })
   }
+  registerWidgetRenderer("kt.app", AppFrame, {
+    key: BUILTIN_KEY,
+    trust: "sandboxed",
+    version: 1,
+    surfaces: ["chat", "canvas"],
+    summary: (widget) => widget.title || "App",
+    icon: () => "i-carbon-application-web text-warm-500",
+  })
 }
 
 /** Forget the one-time registration flag (tests that clear the registry). */

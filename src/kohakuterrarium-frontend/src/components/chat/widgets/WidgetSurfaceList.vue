@@ -13,6 +13,7 @@ import { computed } from "vue"
 
 import { effectiveSurface } from "../../../ext/widgets.js"
 import WidgetBlock from "./WidgetBlock.vue"
+import { makeWidgetHost } from "./widgetHost.js"
 import { widgetFromMessage } from "./widgetModel.js"
 
 /** Every widget of one chat tab whose renderer draws it on ``surface`` (the side-panel host). */
@@ -26,15 +27,7 @@ const props = defineProps({
 const hosts = new Map()
 
 function hostFor(eventId) {
-  if (!hosts.has(eventId)) {
-    hosts.set(eventId, {
-      send: (name, data) => props.store.submitWidgetMessage(props.tab, eventId, name, data || {}),
-      setState: (patch) => props.store.setWidgetState(props.tab, eventId, patch),
-      close: () => {},
-      openInCanvas: () => {},
-      theme: {},
-    })
-  }
+  if (!hosts.has(eventId)) hosts.set(eventId, makeWidgetHost({ store: props.store, tab: () => props.tab, eventId }))
   return hosts.get(eventId)
 }
 

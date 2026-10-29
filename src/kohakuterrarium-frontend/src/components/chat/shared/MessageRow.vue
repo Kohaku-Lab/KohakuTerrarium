@@ -225,11 +225,13 @@ import ToolCallBlock from "../ToolCallBlock.vue"
 import VideoFilePreview from "../VideoFilePreview.vue"
 import UIEventBlock from "../UIEventBlock.vue"
 import WidgetBlock from "../widgets/WidgetBlock.vue"
+import { makeWidgetHost } from "../widgets/widgetHost.js"
 import { widgetFromMessage } from "../widgets/widgetModel.js"
 import MarkdownRenderer from "../../../public/chat/MarkdownRenderer.vue"
 import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { useMessageActions } from "../../../public/chat/messageActions.js"
 import { contentToText, useMessageRowActions } from "../../../public/chat/useMessageRowActions.js"
+import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 import { GEM } from "@/utils/colors"
 import { useI18n } from "@/utils/i18n"
@@ -337,6 +339,7 @@ function renderSharedContentPart(part) {
 }
 
 const chat = inject("chatStore", null) || useChatStore()
+const canvasStore = inject("canvasStore", null) || useCanvasStore()
 const messageTab = computed(() => props.tabId || chat.activeTab)
 
 // Phase B UI event reply: route through the host seam so the VS Code webview
@@ -354,14 +357,13 @@ function onUIEventReply({ actionId, values }) {
 // Widget transport: a renderer's messages and state go to the creature that
 // opened the widget, through the chat store.
 const widgetView = computed(() => (props.message.role === "widget" ? widgetFromMessage(props.message) : null))
-const widgetHost = {
-  send: (name, data) => chat.submitWidgetMessage(messageTab.value, props.message.eventId, name, data || {}),
-  setState: (patch) => chat.setWidgetState(messageTab.value, props.message.eventId, patch),
-  close: () => {},
-  openInCanvas: () => {},
-  theme: {},
-  origin: markdownOrigin,
-}
+const widgetHost = makeWidgetHost({
+  store: chat,
+  tab: () => messageTab.value,
+  eventId: props.message.eventId,
+  canvas: canvasStore,
+  extra: { origin: markdownOrigin },
+})
 
 const showSenderHeader = computed(() => {
   if (props.message.role !== "channel") return false
