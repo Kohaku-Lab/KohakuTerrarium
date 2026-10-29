@@ -17,6 +17,12 @@ from kohakuterrarium.studio.attach._event_stream import (
     get_event_log,
     session_info_frame,
 )
+from kohakuterrarium.studio.attach.widget_frames import (
+    WIDGET_CLIENT_FRAMES,
+    apply_client_hello,
+    handle_widget_msg,
+    handle_widget_state,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
@@ -155,6 +161,9 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                     self._handle_ui_reply(sink, creature, frame)
                     continue
                 if frame_type == "ui_dismiss":
+                    continue
+                if frame_type in WIDGET_CLIENT_FRAMES:
+                    self._handle_widget_frame(sink, creature, frame, frame_type)
                     continue
                 if frame_type not in {"input", "input_edit", "input_cancel"}:
                     continue
@@ -334,6 +343,36 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                 "ts": time.time(),
             }
         )
+
+    def _handle_widget_frame(
+        self,
+        sink: WSFrameSink,
+        creature: Any,
+        frame: dict,
+        frame_type: str,
+    ) -> None:
+        session = self._sessions.get(sink.stream_id)
+        outputs: dict[int, Any] = {}
+        if session is not None:
+            outputs[id(session.agent)] = session.primary_out
+            outputs.update({id(a): m for a, m in session.sibling_modules})
+        if frame_type == "client_hello":
+            apply_client_hello(frame, outputs.values())
+            return
+        target = creature
+        target_name = (frame.get("target") or "").strip()
+        if target_name and target_name != creature.name:
+            target = self._find_sibling_by_name(creature, target_name) or creature
+        if frame_type == "widget_msg":
+            handle_widget_msg(frame, target.agent, target.name, sink.send_json_nowait)
+        else:
+            handle_widget_state(
+                frame,
+                target.agent,
+                outputs.get(id(target.agent)),
+                target.name,
+                sink.send_json_nowait,
+            )
 
     @staticmethod
     def _handle_pending_op(

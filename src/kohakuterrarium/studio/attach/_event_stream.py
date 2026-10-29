@@ -23,6 +23,7 @@ _event_logs: dict[str, list] = {}
 # O(1) (list slicing would left-shift the whole buffer per frame).
 # Overridable for lab harnesses.
 _EVENT_LOG_MAX = int(os.environ.get("KT_EVENT_LOG_MAX", "5000"))
+MAX_CLIENT_RENDERERS = 256
 
 
 def get_event_log(key: str) -> deque:
@@ -131,6 +132,54 @@ class StreamOutput(OutputModule):
         self._log = log
         self._n = 0
         self._agent = agent
+        self._client_renderers: dict[str, int] = {}
+
+    def ui_renderers(self) -> dict[str, int]:
+        """Renderers the attached client announced in its ``client_hello``."""
+        return dict(self._client_renderers)
+
+    def set_client_renderers(self, renderers: Any) -> None:
+        """Replace the client's renderer map and let the router re-aggregate."""
+        clean: dict[str, int] = {}
+        if isinstance(renderers, dict):
+            for renderer, version in list(renderers.items())[:MAX_CLIENT_RENDERERS]:
+                if (
+                    isinstance(renderer, str)
+                    and renderer
+                    and isinstance(version, int)
+                    and not isinstance(version, bool)
+                    and version >= 1
+                ):
+                    clean[renderer] = version
+        self._client_renderers = clean
+        router = getattr(self, "_router", None)
+        if router is not None and hasattr(router, "refresh_renderers"):
+            router.refresh_renderers()
+
+    async def on_widget(self, event: OutputEvent) -> None:
+        """Forward widget-family events as client frames."""
+        match event.type:
+            case "widget":
+                msg: dict = {
+                    "type": "widget",
+                    "event_id": event.id,
+                    "surface": event.surface,
+                    "interactive": bool(event.interactive),
+                    "payload": dict(event.payload),
+                }
+                if event.update_target is not None:
+                    msg["update_target"] = event.update_target
+                self._put(msg)
+            case "widget_close":
+                self._put({"type": "widget_close", "event_id": event.update_target})
+            case "widget_state":
+                self._put(
+                    {
+                        "type": "widget_state",
+                        "event_id": event.update_target,
+                        "state": dict(event.payload.get("state") or {}),
+                    }
+                )
 
     def _current_turn_branch(self) -> tuple[int | None, int | None]:
         """Return positive current turn and branch IDs when both are assigned."""

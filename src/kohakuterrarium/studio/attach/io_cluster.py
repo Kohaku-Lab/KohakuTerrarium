@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from kohakuterrarium.laboratory.streams import RemoteStream
+from kohakuterrarium.studio.attach.widget_frames import WIDGET_CLIENT_FRAMES
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
@@ -236,7 +237,9 @@ async def attach_io_cluster(
                     )
                 except Exception as exc:
                     logger.warning("cluster mux input forward failed", error=str(exc))
-            elif msg_type in ("ui_reply", "ui_dismiss"):
+            elif msg_type in ("ui_reply", "ui_dismiss") or (
+                msg_type in WIDGET_CLIENT_FRAMES
+            ):
                 for node_id, _sid, rs in upstreams:
                     try:
                         await service.host.request(

@@ -28,6 +28,12 @@ from kohakuterrarium.studio.attach.input_ops import (
     _resolve_target,
 )
 from kohakuterrarium.studio.attach.io_cluster import attach_io_cluster
+from kohakuterrarium.studio.attach.widget_frames import (
+    WIDGET_CLIENT_FRAMES,
+    apply_client_hello,
+    handle_widget_msg,
+    handle_widget_state,
+)
 from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium import TerrariumService
@@ -90,6 +96,35 @@ def _handle_ui_reply(
         queue.put_nowait(ack)
     except asyncio.QueueFull:
         logger.debug("ui_reply_ack dropped — queue full")
+
+
+def _handle_widget_frame(
+    data: dict[str, Any],
+    msg_type: str,
+    engine: Any,
+    creature: Any,
+    session_id: str,
+    outputs: dict[int, Any],
+    queue: asyncio.Queue,
+) -> None:
+    """Route a client widget frame to the addressed creature's widget service."""
+    if msg_type == "client_hello":
+        apply_client_hello(data, outputs.values())
+        return
+    try:
+        target = _resolve_target(engine, creature, session_id, data)
+    except KeyError:
+        target = creature
+    if msg_type == "widget_msg":
+        handle_widget_msg(data, target.agent, target.name, queue.put_nowait)
+    else:
+        handle_widget_state(
+            data,
+            target.agent,
+            outputs.get(id(target.agent)),
+            target.name,
+            queue.put_nowait,
+        )
 
 
 async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
@@ -333,6 +368,20 @@ async def attach_io(
                 continue
             if msg_type == "ui_dismiss":
                 # Display-only dismissals require no pending-future resolution.
+                continue
+            if msg_type in WIDGET_CLIENT_FRAMES:
+                _handle_widget_frame(
+                    data,
+                    msg_type,
+                    engine,
+                    creature,
+                    session_id,
+                    {
+                        id(agent): out_module,
+                        **{id(a): m for a, m in sibling_modules},
+                    },
+                    queue,
+                )
                 continue
             if msg_type in ("input_edit", "input_cancel"):
                 # Pending operations are valid only until the mid-turn drain claims the ID.

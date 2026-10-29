@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.studio.attach import _event_stream as es_mod
 from kohakuterrarium.studio.attach._event_stream import (
     StreamOutput,
@@ -13,6 +14,7 @@ from kohakuterrarium.studio.attach._event_stream import (
     get_event_log,
     session_info_frame,
 )
+from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 # ── _parse_detail / get_event_log ────────────────────────────
@@ -610,3 +612,64 @@ class TestStreamOutputAwaitingBackground:
         msg = q.get_nowait()
         assert msg["type"] == "processing_start"
         assert "awaiting_background" not in msg
+
+
+class TestStreamOutputWidgets:
+    def test_hello_replaces_renderers_and_refreshes_the_router(self):
+        so = StreamOutput("src", asyncio.Queue(), [])
+        assert so.ui_renderers() == {}, "nothing before a hello"
+        router = OutputRouter(OutputRecorder())
+        changes = []
+        router.add_renderers_listener(lambda old, new: changes.append(new))
+        router.add_secondary(so)
+        so.set_client_renderers({"kt.ui": 1, "kt.app": 1})
+        assert router.ui_renderers() == {"kt.ui": 1, "kt.app": 1}
+        so.set_client_renderers({"kt.app": 2, "": 1, "x": 0, "y": True, 3: 1})
+        assert so.ui_renderers() == {"kt.app": 2}, "replace, not merge"
+        so.set_client_renderers("garbage")
+        assert so.ui_renderers() == {}
+        assert changes == [{"kt.ui": 1, "kt.app": 1}, {"kt.app": 2}, {}]
+
+    async def test_widget_frames(self, _stream):
+        so, q, log = _stream
+        await so.on_widget(
+            OutputEvent(
+                type="widget",
+                id="w1",
+                surface="canvas",
+                interactive=True,
+                payload={"renderer": "kt.app", "spec": {}},
+            )
+        )
+        await so.on_widget(
+            OutputEvent(
+                type="widget", id="w1", update_target="w1", payload={"title": "T"}
+            )
+        )
+        await so.on_widget(
+            OutputEvent(
+                type="widget_state",
+                id="w1",
+                update_target="w1",
+                payload={"state": {"a": 1}},
+            )
+        )
+        await so.on_widget(
+            OutputEvent(type="widget_message", id="w1", update_target="w1")
+        )
+        await so.on_widget(
+            OutputEvent(type="widget_close", id="w1", update_target="w1")
+        )
+        frames = [q.get_nowait() for _ in range(q.qsize())]
+        assert [f["type"] for f in frames] == [
+            "widget",
+            "widget",
+            "widget_state",
+            "widget_close",
+        ], "widget_message has no client frame"
+        assert frames[0]["surface"] == "canvas" and frames[0]["interactive"] is True
+        assert "update_target" not in frames[0]
+        assert frames[1]["update_target"] == "w1"
+        assert frames[2]["state"] == {"a": 1}
+        assert all(f["source"] == "src" and f["event_id"] == "w1" for f in frames)
+        assert len(log) == 4
