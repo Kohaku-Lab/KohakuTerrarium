@@ -425,6 +425,7 @@ def _usage_dict(
         result["cache_creation_input_tokens"] = cache_creation
     if cache_read:
         result["cache_read_input_tokens"] = cache_read
+        result["cached_tokens"] = cache_read
     if input_tokens:
         result["input_tokens"] = input_tokens
     if output_tokens:

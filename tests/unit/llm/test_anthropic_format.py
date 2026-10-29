@@ -639,6 +639,18 @@ class TestUsageAccounting:
         assert out["total_tokens"] == 20
         assert out["cache_creation_input_tokens"] == 3
         assert out["cache_read_input_tokens"] == 2
+        # KT's ledger and UI count cache hits from ``cached_tokens``.
+        assert out["cached_tokens"] == 2
+
+    def test_usage_without_cache_read_reports_no_cached_tokens(self):
+        out = usage_to_dict(_Usage(input_tokens=10, output_tokens=5))
+        assert "cached_tokens" not in out
+
+    def test_merge_usage_keeps_cached_tokens_across_deltas(self):
+        start = merge_usage({}, _Usage(input_tokens=1, cache_read_input_tokens=90))
+        merged = merge_usage(start, _Usage(output_tokens=4))
+        assert merged["cached_tokens"] == 90
+        assert merged["prompt_tokens"] == 91
 
     def test_usage_to_dict_none_returns_empty(self):
         assert usage_to_dict(None) == {}
