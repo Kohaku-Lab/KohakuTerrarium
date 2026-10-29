@@ -64,6 +64,12 @@ class TestParse:
                     {"kind": "tool-renderer", "id": "send", "owner": "tool:qq_send"},
                     {"kind": "trigger-renderer", "id": "f", "owner": "trigger:qq"},
                     {"kind": "tab", "id": "t", "owner": "package"},
+                    {
+                        "kind": "widget",
+                        "id": "board",
+                        "owner": "tool:qq_send",
+                        "renderer": "pkg.board",
+                    },
                 ],
             },
         )
@@ -79,8 +85,11 @@ class TestParse:
             "send": "tool:qq_send",
             "f": "trigger:qq",
             "t": "package:pkg",
+            "board": "tool:qq_send",
         }
         record = slot.to_dict()
+        assert record["contributes"][-1]["renderer"] == "pkg.board"
+        assert record["contributes"][0]["renderer"] == ""
         assert record["has_api"] is True and record["has_handler"] is True
         assert record["contributes"][1]["owner"] == "plugin:qq_feed"
 
@@ -98,6 +107,11 @@ class TestParse:
             ({"kind": "tab", "id": "t", "isolation": "shadow"}, "isolation"),
             ({"kind": "tab", "id": "t", "minDensity": "huge"}, "minDensity"),
             ({"kind": "tab", "id": "t", "order": "1"}, "order"),
+            ({"kind": "widget", "id": "w"}, "renderer must be a dotted id"),
+            ({"kind": "widget", "id": "w", "renderer": "board"}, "dotted id"),
+            ({"kind": "widget", "id": "w", "renderer": "kt.app"}, "reserved prefix"),
+            ({"kind": "widget", "id": "w", "renderer": "mcp.app"}, "reserved prefix"),
+            ({"kind": "tab", "id": "t", "renderer": "pkg.x"}, "only valid on a widget"),
         ],
     )
     def test_bad_contribution_invalidates_only_this_package(
