@@ -37,7 +37,9 @@ from kohakuterrarium.core.branch_continuation import selected_branch_view
 from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.core.pinned import pin_message, unpin_message
 from kohakuterrarium.core.pinned import state_key as pinned_state_key
+from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
+from kohakuterrarium.modules.output.widgets import WidgetMessage
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.session import history as _history_mod
@@ -80,6 +82,7 @@ from kohakuterrarium.session.resume import detect_session_type, resume_agent
 from kohakuterrarium.session.resume_async import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
+from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 pytestmark = pytest.mark.timeout(60)
@@ -310,8 +313,60 @@ class TestSessionIntegration:
             agent.session.scratchpad.set("project", "terrarium")
             agent.compact_manager._compact_count = 3
             await agent._process_event(create_user_input_event("remember the project"))
+
+            # Widgets: a web client says hello, a widget opens, a waiter
+            # takes its message, an unclaimed message drives a turn, and
+            # client state is merged and recorded.
+            renderer_changes = []
+            router.add_renderers_listener(lambda old, new: renderer_changes.append(new))
+            web_frames = asyncio.Queue()
+            web = StreamOutput("scribe", web_frames, [], agent=agent)
+            router.add_secondary(web)
+            with pytest.raises(RendererUnavailable):
+                await router.widgets.open("kt.ui", {"root": {}})
+            web.set_client_renderers({"kt.ui": 1})
+            handle = await router.widgets.open(
+                "kt.ui",
+                {"root": {"type": "number", "bind": "tip"}},
+                state={"tip": 10},
+                title="Tip",
+                fallback="Tip calculator",
+            )
+            widget_id = handle.id
+            waiter = asyncio.create_task(handle.wait({"submit"}, timeout_s=5))
+            await asyncio.sleep(0)
+            submit = WidgetMessage(widget_id, "submit", {"tip": 12})
+            assert router.widgets.submit_message(submit) == "accepted"
+            assert (await waiter).data == {"tip": 12}
+            unclaimed = WidgetMessage(widget_id, "share", {"tip": 12}, origin="app")
+            assert router.widgets.submit_message(unclaimed) == "accepted"
+            await router.widgets.drain()
+            assert router.widgets.submit_state(widget_id, {"tip": 15}) == "accepted"
+            await router.widgets.drain()
+            widget_turn = str(agent.controller.conversation.to_messages())
+            assert f'<widget_event widget="{widget_id}"' in widget_turn
+            assert 'name="share"' in widget_turn and 'trust="untrusted"' in widget_turn
+            web_types = [
+                web_frames.get_nowait()["type"] for _ in range(web_frames.qsize())
+            ]
+            assert web_types.count("widget") == 1
+            assert "widget_state" in web_types
+            router.remove_secondary(web)
+            assert renderer_changes == [{"kt.ui": 1}, {}]
         finally:
             await agent.stop()
+
+        widget_rows = [
+            (e["type"], e.get("name"), e.get("routed_to"))
+            for e in store.get_events("scribe")
+            if e["type"].startswith("widget")
+        ]
+        assert widget_rows == [
+            ("widget", None, None),
+            ("widget_message", "submit", "waiter"),
+            ("widget_message", "share", "agent"),
+            ("widget_state", None, None),
+        ]
 
         # The SessionOutput sink restored cumulative token totals from
         # state and accumulated the live token_usage call on top.
@@ -740,6 +795,15 @@ class TestSessionIntegration:
             assert unpin_message(resumed_agent, "persona") is True
             assert resumed_store.state[pinned_state_key("scribe")] == []
             assert len(pins) == 0
+            # A message to the widget from before the restart rebuilds the
+            # widget registry from the store and reaches the resumed agent.
+            widgets = resumed_agent.output_router.widgets
+            recalc = WidgetMessage(widget_id, "recalc", {"tip": 18})
+            assert widgets.submit_message(recalc) == "accepted"
+            await widgets.drain()
+            assert widgets.registry.get(widget_id).state == {"tip": 15}
+            resumed_turn = str(resumed_agent.controller.conversation.to_messages())
+            assert 'name="recalc"' in resumed_turn and '"tip": 18' in resumed_turn
         finally:
             await resumed_agent.stop()
             resumed_store.close()

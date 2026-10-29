@@ -54,10 +54,12 @@ from kohakuterrarium.core.config_types import (
     OutputConfigItem,
 )
 from kohakuterrarium.core.events import EventType, create_user_input_event
+from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
+from kohakuterrarium.modules.output.widgets import WidgetMessage
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
@@ -101,6 +103,7 @@ from kohakuterrarium.parsing import (
     ToolCallEvent,
 )
 from kohakuterrarium.skills.registry import Skill
+from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.utils.file_guard import PathBoundaryGuard
@@ -1641,6 +1644,31 @@ class TestModulesIntegration:
             # 13. pending_outputs / completed_outputs property accessors.
             assert router.pending_outputs == []
             assert router.completed_outputs == []
+
+            # 14. Widgets: no attached output renders kt.ui until a web
+            #     client says hello; then a widget opens, plain recorders
+            #     get its fallback text, a message with no agent is dropped.
+            assert router.ui_renderers() == {}
+            with pytest.raises(RendererUnavailable):
+                await router.widgets.open("kt.ui", {})
+            web_frames = asyncio.Queue()
+            web = StreamOutput("modules_agent", web_frames, [])
+            router.add_secondary(web)
+            web.set_client_renderers({"kt.ui": 1})
+            assert router.ui_renderers() == {"kt.ui": 1}
+            handle = await router.widgets.open("kt.ui", {}, fallback="A chart")
+            assert web_frames.get_nowait()["event_id"] == handle.id
+            assert [(a.activity_type, a.detail) for a in secondary.activities][-1] == (
+                "widget",
+                "A chart",
+            )
+            stray = WidgetMessage(handle.id, "click")
+            assert router.widgets.submit_message(stray) == "dropped"
+            await handle.close()
+            assert router.widgets.submit_message(stray) == "unknown"
+            await router.widgets.drain()
+            router.remove_secondary(web)
+            assert router.ui_renderers() == {}
         finally:
             await router.stop()
 
