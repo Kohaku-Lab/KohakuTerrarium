@@ -33,6 +33,7 @@ from kohakuterrarium.core.agent_observability import (
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
 )
+from kohakuterrarium.core.agent_plugin_tools import AgentPluginToolsMixin
 from kohakuterrarium.core.agent_selection import track_plugin_selection
 from kohakuterrarium.core.agent_tool_gate import AgentToolGateMixin
 from kohakuterrarium.core.agent_turn import AgentTurnMixin
@@ -85,6 +86,7 @@ class Agent(
     AgentCompactMixin,
     AgentLifecycleMixin,
     AgentToolGateMixin,
+    AgentPluginToolsMixin,
 ):
     """Main agent orchestrator. Wires LLM, controller, executor, I/O.
 
@@ -240,6 +242,7 @@ class Agent(
             self._init_plugins()
             for plugin_instance in plugins or []:
                 self.plugins.register(plugin_instance)
+            self.refresh_plugin_tools()
             self._init_subagents()
             for subagent_cfg in subagents or []:
                 self.subagent_manager.register(subagent_cfg)

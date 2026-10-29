@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from kohakuterrarium.core.registry import Registry
     from kohakuterrarium.core.scratchpad import Scratchpad
     from kohakuterrarium.modules.subagent.manager import SubAgentManager
+    from kohakuterrarium.modules.tool.base import BaseTool
     from kohakuterrarium.session.memory import SessionMemory
     from kohakuterrarium.session.store import SessionStore
 
@@ -347,6 +348,15 @@ class BasePlugin(UIOwnerMixin):
     def contribute_user_commands(self) -> dict[str, Any]:
         """Return human-facing slash commands subject to the collision policy."""
         return {}
+
+    def contribute_tools(self) -> "list[BaseTool]":
+        """Return tool instances registered while this plugin is enabled.
+
+        Called once per plugin instance; the tools join the registry, executor
+        and prompt on load or enable and leave on disable or removal. A name
+        that clashes with another tool fails the load.
+        """
+        return []
 
     def contribute_termination_check(
         self,

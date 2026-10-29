@@ -35,6 +35,7 @@ from jinja2 import TemplateSyntaxError
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.prompt.aggregator import (
@@ -196,6 +197,54 @@ class _GuidanceTool(BaseTool):
         return ToolResult(output="guided")
 
 
+class _AppTool(BaseTool):
+    """A tool the model may see only while a ``kt.app`` renderer is attached."""
+
+    requires_renderers = frozenset({"kt.app"})
+
+    @property
+    def tool_name(self) -> str:
+        return "show_app"
+
+    @property
+    def description(self) -> str:
+        return "Show an interactive app."
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def prompt_contribution(self) -> str:
+        return "APP-GUIDANCE: prefer plain text for plain answers."
+
+    async def _execute(self, args, **kwargs) -> ToolResult:  # pragma: no cover
+        return ToolResult(output="shown")
+
+
+class _AppsPlugin(BasePlugin):
+    """Contributes the gated app tool, as the ``ui.apps`` plugin does."""
+
+    name = "apps_probe"
+
+    def contribute_tools(self) -> list[BaseTool]:
+        return [_AppTool()]
+
+
+class _RendererFeed:
+    """Renderer report on the output router, standing in for attached clients."""
+
+    def __init__(self, router) -> None:
+        self.renderers: dict[str, int] = {}
+        self.listeners: list = []
+        router.ui_renderers = lambda: dict(self.renderers)
+        router.add_renderers_listener = self.listeners.append
+
+    def set(self, renderers: dict[str, int]) -> None:
+        old, self.renderers = self.renderers, dict(renderers)
+        for listener in self.listeners:
+            listener(old, dict(renderers))
+
+
 def _conversation_text(agent: Agent) -> str:
     """Flatten the controller conversation into a single searchable string."""
     chunks: list[str] = []
@@ -331,6 +380,32 @@ class TestPromptIntegration:
             )
             assert ctx_msg == ("## Running Jobs\njob_x running\n\nthe event body")
             assert build_context_message("just events") == "just events"
+
+            # 5. A plugin-contributed tool that needs a renderer: registered
+            # with the plugin, but absent from every prompt section until an
+            # attached output reports ``kt.app``, and gone again on detach or
+            # when the plugin is disabled.
+            feed = _RendererFeed(agent.output_router)
+            agent.watch_renderers()
+            await agent.add_plugin(_AppsPlugin())
+            assert "show_app" in agent.registry.list_tools()
+            live = agent.get_system_prompt()
+            assert "`show_app`" not in live and "APP-GUIDANCE" not in live
+
+            feed.set({"kt.app": 1})
+            live = agent.get_system_prompt()
+            assert "- `show_app`: Show an interactive app." in live
+            assert "APP-GUIDANCE: prefer plain text" in live
+            assert live.index("## Available Functions") < live.index("APP-GUIDANCE")
+            assert "PERSONALITY-MARKER" in live and "SAFETY-BANNER" in live
+
+            feed.set({})
+            assert "show_app" not in agent.get_system_prompt()
+
+            feed.set({"kt.app": 1})
+            agent.plugins.disable("apps_probe")
+            assert "show_app" not in agent.registry.list_tools()
+            assert "show_app" not in agent.get_system_prompt()
         finally:
             await agent.stop()
 

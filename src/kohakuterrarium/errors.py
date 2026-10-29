@@ -42,6 +42,10 @@ class ConflictError(KTError):
     """The operation conflicts with existing state."""
 
 
+class PluginToolConflictError(ConflictError, ValueError):
+    """A plugin contributed a tool whose name is already taken."""
+
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------

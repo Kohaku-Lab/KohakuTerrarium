@@ -60,6 +60,7 @@ class AgentExtensionsMixin:
             await self.plugins.load_pending()
         # Prompt and command updates are atomic so collisions leave no partial install.
         try:
+            self.refresh_plugin_tools()
             self.refresh_system_prompt()
             refresh_commands = getattr(self, "refresh_user_commands", None)
             if callable(refresh_commands):
@@ -67,6 +68,7 @@ class AgentExtensionsMixin:
         except Exception:
             if name:
                 self.plugins.unregister(name)
+            self.refresh_plugin_tools()
             self.refresh_system_prompt()
             raise
         logger.info("Plugin added at runtime", plugin_name=name or "?")

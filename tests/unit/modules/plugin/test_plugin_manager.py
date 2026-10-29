@@ -1251,3 +1251,65 @@ class TestSelectionChangeCallback:
         assert pm.enable("missing") is False
 
         assert calls == []
+
+
+class _ToolsPlugin(BasePlugin):
+    """Contributes fixed tool stand-ins and counts how often it is asked."""
+
+    def __init__(self, name, *tools, fail=False):
+        super().__init__()
+        self.name = name
+        self._tools = list(tools)
+        self._fail = fail
+        self.calls = 0
+
+    def contribute_tools(self):
+        self.calls += 1
+        if self._fail:
+            raise RuntimeError("broken")
+        return self._tools
+
+
+class TestCollectContributedTools:
+    def test_default_plugin_contributes_nothing(self):
+        mgr = PluginManager()
+        mgr.register(BasePlugin())
+        assert mgr.collect_contributed_tools() == []
+
+    def test_tools_are_tagged_with_their_plugin_and_asked_once(self):
+        a, b = object(), object()
+        plugin = _ToolsPlugin("apps", a, b)
+        mgr = PluginManager()
+        mgr.register(plugin)
+        assert mgr.collect_contributed_tools() == [("apps", a), ("apps", b)]
+        assert mgr.collect_contributed_tools() == [("apps", a), ("apps", b)]
+        assert plugin.calls == 1
+
+    def test_disabled_plugin_contributes_nothing_until_enabled(self):
+        tool = object()
+        plugin = _ToolsPlugin("apps", tool)
+        mgr = PluginManager()
+        mgr.register(plugin)
+        mgr.disable("apps")
+        assert mgr.collect_contributed_tools() == []
+        mgr.enable("apps")
+        assert mgr.collect_contributed_tools() == [("apps", tool)]
+
+    def test_raising_plugin_is_skipped(self):
+        mgr = PluginManager()
+        mgr.register(_ToolsPlugin("broken", fail=True))
+        mgr.register(_ToolsPlugin("ok", "t"))
+        assert mgr.collect_contributed_tools() == [("ok", "t")]
+
+    def test_removed_plugin_leaves_the_cache_and_a_new_instance_is_asked(self):
+        first = _ToolsPlugin("apps", "t1")
+        mgr = PluginManager()
+        mgr.register(first)
+        mgr.collect_contributed_tools()
+        mgr.unregister("apps")
+        assert mgr.collect_contributed_tools() == []
+        assert mgr._contributed_tools == {}
+        second = _ToolsPlugin("apps", "t2")
+        mgr.register(second)
+        assert mgr.collect_contributed_tools() == [("apps", "t2")]
+        assert second.calls == 1

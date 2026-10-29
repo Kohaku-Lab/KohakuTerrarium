@@ -54,6 +54,8 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
         self._needs_load: set[str] = set()
         self._load_context: PluginContext | None = None
         self._unloaded: set[int] = set()
+        # Plugin id -> (plugin, tools): contribute_tools runs once per instance.
+        self._contributed_tools: dict[int, tuple[BasePlugin, list[Any]]] = {}
         # Timing remains optional so sessions without observers pay no callback cost.
         self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
         # Fired after an enable/disable that changes which plugins are active.
