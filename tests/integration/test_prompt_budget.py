@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.builtins.tools.show_app import ShowAppTool
+from kohakuterrarium.builtins.tools.show_ui import ShowUiTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
@@ -131,6 +132,14 @@ class TestPromptBudget:
                 assert len(schema.description) <= 160, schema.name
         finally:
             await agent.stop()
+
+        # Widget tools join the prompt only with an attached renderer; when
+        # they do, their guidance and schema stay inside the same caps.
+        widget_tool = ShowUiTool()
+        assert len(widget_tool.prompt_contribution()) <= MAX_TOOL_GUIDANCE_CHARS
+        widget_schema = json.dumps(widget_tool.get_parameters_schema())
+        assert len(widget_schema) <= MAX_SCHEMA_CHARS
+        assert len(widget_tool.description) <= 160
 
         # ── full: every usage tier inlined; the shipped default ────────
         config.tool_doc_mode = "full"

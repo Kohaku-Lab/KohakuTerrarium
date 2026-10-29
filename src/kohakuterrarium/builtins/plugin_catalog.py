@@ -31,6 +31,10 @@ _PLUGINS: dict[str, dict[str, str]] = {
         "module": "kohakuterrarium.builtins.plugins.apps.plugin",
         "class": "AppsPlugin",
     },
+    "ui.declarative": {
+        "module": "kohakuterrarium.builtins.plugins.ui_declarative.plugin",
+        "class": "UiDeclarativePlugin",
+    },
 }
 
 # Plugin packs are syntactic sugar for opting into multiple plugins by

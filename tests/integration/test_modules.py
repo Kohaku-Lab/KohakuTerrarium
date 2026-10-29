@@ -41,6 +41,7 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
+from kohakuterrarium.builtins.plugins.ui_declarative.plugin import UiDeclarativePlugin
 from kohakuterrarium.builtins.tools import deepseek_web, web_fetch, web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.edit import EditTool
@@ -2645,3 +2646,95 @@ class TestModulesIntegration:
             assert any(
                 r["kind"] == "goal" for r in await service.list_drive_registrations()
             )
+
+    async def test_ui_declarative_plugin_drives_a_widget_turn(self, make_agent):
+        """plugin + tool + output protocols — the built-in ``ui.declarative``
+        plugin contributes ``show_ui``, which stays out of the prompt until a
+        web client announces ``kt.ui``.
+
+        Full workflow: enable the plugin → no client, no tool in the prompt →
+        a client says hello → tool + guidance appear → the model opens a
+        widget and waits → the client's button message resolves the call →
+        a later unclaimed message becomes a ``widget_event`` turn → the client
+        leaves and the tool is gone. Only the LLM is scripted."""
+        spec = {
+            "title": "Split",
+            "state": {"total": 120, "people": 3},
+            "computed": {"each": "total / people"},
+            "root": {
+                "type": "stack",
+                "children": [
+                    {"type": "number", "label": "People", "bind": "people"},
+                    {"type": "stat", "label": "Each", "value": "{{ each }}"},
+                    {"type": "button", "label": "Send", "send": "result"},
+                ],
+            },
+        }
+        call = (
+            f"[/show_ui]@@spec={json.dumps(spec)}\n"
+            '@@wait_for=["result"]\n@@timeout_s=5\n[show_ui/]'
+        )
+        agent = make_agent(
+            script=[
+                ScriptEntry(call, match="split the bill"),
+                ScriptEntry("got the result", match="message result"),
+                ScriptEntry("saw the late click", match="widget_event"),
+            ]
+        )
+        await agent.start()
+        try:
+            await agent.add_plugin(UiDeclarativePlugin())
+            assert "show_ui" in agent.registry.list_tools()
+            assert "show_ui" not in agent.get_system_prompt()
+
+            frames: asyncio.Queue = asyncio.Queue()
+            web = StreamOutput("modules_agent", frames, deque(maxlen=50), agent)
+            agent.output_router.add_secondary(web)
+            web.set_client_renderers({"kt.ui": 1})
+            prompt = agent.get_system_prompt()
+            assert "`show_ui`" in prompt and "Use a widget only when" in prompt
+
+            turn = asyncio.create_task(
+                agent._process_event(create_user_input_event("split the bill"))
+            )
+            opened = None
+            for _ in range(200):
+                while not frames.empty():
+                    frame = frames.get_nowait()
+                    if frame.get("type") == "widget" and "update_target" not in frame:
+                        opened = frame
+                if opened:
+                    break
+                await asyncio.sleep(0.01)
+            assert opened is not None, "show_ui opened no widget"
+            payload = opened["payload"]
+            assert payload["renderer"] == "kt.ui" and payload["title"] == "Split"
+            assert "Each: 40" in payload["fallback"]
+
+            acks: list[dict] = []
+            message = {"event_id": opened["event_id"], "name": "result"}
+            handle_widget_msg(
+                {**message, "data": {"each": 40}}, agent, "web", acks.append
+            )
+            await turn
+            assert acks[-1]["status"] == "accepted"
+            convo = " ".join(
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            )
+            assert 'message result: {"each": 40}' in convo
+            assert agent.llm.call_count == 2
+
+            handle_widget_msg(
+                {**message, "data": {"each": 41}}, agent, "web", acks.append
+            )
+            await agent.output_router.widgets.drain()
+            await _settle(agent, until=lambda: agent.llm.call_count >= 3)
+            assert agent.llm.call_count == 3
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert "saw the late click" in last.get_text_content()
+
+            agent.output_router.remove_secondary(web)
+            assert "show_ui" not in agent.get_system_prompt()
+        finally:
+            await agent.stop()
