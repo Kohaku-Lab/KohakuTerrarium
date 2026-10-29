@@ -67,6 +67,18 @@ class OutputRouter(
             self._maybe_link_router(output)
 
     @property
+    def default_output(self) -> OutputModule:
+        """The primary output; replacing it links the new one and re-aggregates renderers."""
+        return self._default_output
+
+    @default_output.setter
+    def default_output(self, output: OutputModule) -> None:
+        self._default_output = output
+        if hasattr(self, "_renderers_listeners"):
+            self._maybe_link_router(output)
+            self.refresh_renderers()
+
+    @property
     def state(self) -> OutputState:
         """Current output state."""
         return self._state

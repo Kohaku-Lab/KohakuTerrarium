@@ -60,6 +60,17 @@ class TestRenderersListener:
         router.remove_secondary(web)
         assert calls[-1] == ({"kt.app": 1, "kt.ui": 1}, {"kt.app": 1})
 
+    def test_replacing_the_default_output_links_it_and_refreshes(self):
+        router = OutputRouter(OutputRecorder())
+        calls = []
+        router.add_renderers_listener(lambda old, new: calls.append(new))
+        terminal = RendererOutput({"kt.ui": 1})
+        router.default_output = terminal
+        assert terminal._router is router
+        assert calls == [{"kt.ui": 1}]
+        router.default_output = OutputRecorder()
+        assert calls[-1] == {}
+
     def test_a_raising_listener_does_not_stop_the_others(self):
         router = OutputRouter(OutputRecorder())
         seen = []
