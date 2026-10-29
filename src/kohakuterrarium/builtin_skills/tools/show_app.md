@@ -1,6 +1,6 @@
 ---
 name: show_app
-description: 'Show an interactive HTML app (calculator, simulation, small game) in the canvas. Not for plain answers, tables or forms - use text or show_ui.'
+description: 'Run an interactive HTML app as a full page in the canvas. Use it when inline UI is not enough: large interactions, simulations, games or complex showcases.'
 category: builtin
 tags: [interaction, ui]
 ---
@@ -31,6 +31,8 @@ Runs one HTML document as an app in a sandboxed frame in the web UI.
   `read=<id>` before patching that app.
 - With `wait_for`, the call returns the first matching `kt.send` message, or
   a script error the app hit.
+- The app shows in a side pane (about 400px), in the chat, full screen or in
+  its own tab: build it responsive (fluid widths, wrapping flex or grid).
 
 ## Limits
 
@@ -47,7 +49,8 @@ Runs one HTML document as an app in a sandboxed frame in the web UI.
 | `kt.state.get()` / `kt.state.set(patch)` | state kept with the app across reloads |
 | `kt.send(name, data)` | a message to you; needs a recent user click in the app |
 | `kt.openLink(url)` | open a link after the user confirms |
-| `kt.on(name, fn)` | `theme`, `data` and `state` changes from the host |
+| `kt.viewport` | `{width, height, mode}`; mode is `chat`, `canvas`, `fullscreen` or `tab` |
+| `kt.on(name, fn)` | `theme`, `data`, `state` and `viewport` changes from the host |
 
 Theme variables: `--kt-bg`, `--kt-fg`, `--kt-muted`, `--kt-accent`,
 `--kt-border`, `--kt-card`, `--kt-font`, `--kt-mono`.

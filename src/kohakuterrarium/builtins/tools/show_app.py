@@ -79,9 +79,9 @@ class ShowAppTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Show an interactive HTML app (calculator, simulation, small game) "
-            "in the canvas. Not for plain answers, tables or forms - use text "
-            "or show_ui."
+            "Run an interactive HTML app as a full page in the canvas. Use it when "
+            "inline UI is not enough: large interactions, simulations, games or "
+            "complex showcases."
         )
 
     @property
@@ -98,8 +98,12 @@ class ShowAppTool(BaseTool):
         else:
             network = "There is no network: inline every script and style."
         return (
-            "Use an app only when the user gains from interacting with it; one "
-            "self-contained HTML document. " + network + " Pass large data as "
+            "Write one self-contained HTML document. It may show in a narrow "
+            "side pane (about 400px), in the chat, or full screen, so build it "
+            "responsive: fluid widths, flex or grid that wraps, no fixed page "
+            "width; `kt.viewport` and the `viewport` event tell you the size. "
+            + network
+            + " Pass large data as "
             "`data` (read it as `kt.data`), style with the `--kt-*` CSS "
             "variables, and call `kt.send(name, data)` for results you must act "
             "on. Change an app with `update` + `patch`; after context compaction "

@@ -119,11 +119,190 @@ describe("AppFrame", () => {
     w.unmount()
   })
 
+  it("takes the reported content height as is, so it can shrink and never creeps", async () => {
+    const w = mount(AppFrame, {
+      props: { widget: widget({ html: "<p>x</p>" }), host: host() },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const frameEl = w.find("iframe").element
+    const resize = (height) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: frameEl.contentWindow,
+          data: { jsonrpc: "2.0", method: "kt/resize", params: { height } },
+        }),
+      )
+    resize(400)
+    await flushPromises()
+    expect([frameEl.style.height, frameEl.style.maxHeight]).toEqual(["400px", "70vh"])
+    resize(400)
+    await flushPromises()
+    expect([frameEl.style.height, frameEl.style.maxHeight]).toEqual(["400px", "70vh"])
+    resize(150)
+    await flushPromises()
+    expect([frameEl.style.height, frameEl.style.maxHeight]).toEqual(["150px", "70vh"])
+    w.unmount()
+  })
+
   it("fills its container on the canvas surface", async () => {
     const w = mount(AppFrame, {
       props: { widget: widget({ html: "<p>x</p>" }, { surface: "canvas" }), host: host() },
     })
     await flushPromises()
     expect(w.find('[data-test="app-frame"]').classes()).toContain("app-frame-fill")
+  })
+})
+
+describe("AppFrame full screen, toolbar and viewport", () => {
+  let observers
+  beforeEach(() => {
+    observers = []
+    globalThis.ResizeObserver = class {
+      constructor(fn) {
+        this.fn = fn
+        observers.push(this)
+      }
+      observe() {}
+      disconnect() {}
+    }
+  })
+
+  async function mountApp(extra = {}) {
+    const w = mount(AppFrame, {
+      props: { widget: widget({ html: "<p>hi</p>" }), host: host(), ...extra },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    const frameEl = w.find("iframe").element
+    const posted = []
+    Object.defineProperty(frameEl, "contentWindow", {
+      value: { postMessage: (m) => posted.push(m) },
+      configurable: true,
+    })
+    return { w, frameEl, posted }
+  }
+
+  function resizeStage(width, height) {
+    for (const o of observers) o.fn([{ contentRect: { width, height } }])
+  }
+
+  it("enters native full screen on its own shell and keeps the same iframe", async () => {
+    const { w, frameEl, posted } = await mountApp()
+    const shell = w.find('[data-test="app-frame"]').element
+    shell.requestFullscreen = vi.fn(async () => {
+      Object.defineProperty(document, "fullscreenElement", { value: shell, configurable: true })
+      document.dispatchEvent(new Event("fullscreenchange"))
+    })
+    document.exitFullscreen = vi.fn(async () => {
+      Object.defineProperty(document, "fullscreenElement", { value: null, configurable: true })
+      document.dispatchEvent(new Event("fullscreenchange"))
+    })
+    await w.find('[data-test="app-frame-fullscreen"]').trigger("click")
+    await flushPromises()
+    expect(shell.requestFullscreen).toHaveBeenCalled()
+    expect(w.find("iframe").element).toBe(frameEl)
+    expect(w.find('[data-test="app-frame-exit"]').exists()).toBe(true)
+    expect(posted.at(-1)).toMatchObject({ method: "kt/viewport", params: { mode: "fullscreen" } })
+    await w.find('[data-test="app-frame-exit"]').trigger("click")
+    await flushPromises()
+    expect(document.exitFullscreen).toHaveBeenCalled()
+    expect(w.find("iframe").element).toBe(frameEl)
+    expect(posted.at(-1)).toMatchObject({ method: "kt/viewport", params: { mode: "chat" } })
+    w.unmount()
+  })
+
+  it("falls back to a full-window overlay that Esc leaves, without reloading", async () => {
+    const { w, frameEl } = await mountApp()
+    await w.find('[data-test="app-frame-fullscreen"]').trigger("click")
+    await flushPromises()
+    const shell = w.find('[data-test="app-frame"]')
+    expect(shell.classes()).toContain("app-frame-max")
+    expect(frameEl.style.height).toBe("100%")
+    expect(w.find("iframe").element).toBe(frameEl)
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
+    await flushPromises()
+    expect(w.find('[data-test="app-frame"]').classes()).not.toContain("app-frame-max")
+    expect(w.find("iframe").element).toBe(frameEl)
+    w.unmount()
+  })
+
+  it("reports the stage size and mode to the app", async () => {
+    const { w, posted } = await mountApp()
+    resizeStage(412.4, 300)
+    await flushPromises()
+    expect(posted.at(-1)).toEqual({
+      jsonrpc: "2.0",
+      method: "kt/viewport",
+      params: { width: 412, height: 300, mode: "chat" },
+    })
+    const count = posted.length
+    resizeStage(412, 300)
+    await flushPromises()
+    expect(posted.length).toBe(count)
+    expect(w.find("iframe").attributes("srcdoc")).toContain(
+      '"viewport":{"width":0,"height":0,"mode":"chat"}',
+    )
+    w.unmount()
+  })
+
+  it("canvas apps report the canvas mode", async () => {
+    const w = mount(AppFrame, {
+      props: { widget: widget({ html: "<p>x</p>" }, { surface: "canvas" }), host: host() },
+    })
+    await flushPromises()
+    expect(w.find("iframe").attributes("srcdoc")).toContain('"mode":"canvas"')
+  })
+
+  it("reload builds a fresh iframe with the current state; the source is read-only text", async () => {
+    const { w, frameEl } = await mountApp()
+    await w.setProps({ widget: widget({ html: "<p>hi</p>" }, { state: { n: 3 } }) })
+    await w.find('[data-test="app-frame-reload"]').trigger("click")
+    await flushPromises()
+    const fresh = w.find("iframe").element
+    expect(fresh).not.toBe(frameEl)
+    expect(fresh.getAttribute("srcdoc")).toContain('"state":{"n":3}')
+    await w.find('[data-test="app-frame-source"]').trigger("click")
+    await flushPromises()
+    const pre = document.body.querySelector(".app-frame-source")
+    expect(pre.textContent).toBe("<p>hi</p>")
+    expect(pre.querySelector("p")).toBeNull()
+    w.unmount()
+  })
+
+  it("opens the app in a tab inside the same sandbox, with no opener", async () => {
+    const { w } = await mountApp()
+    const blobs = []
+    const createObjectURL = vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+      blobs.push(blob)
+      return "blob:tab"
+    })
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const open = vi.spyOn(window, "open").mockImplementation(() => null)
+    await w.find('[data-test="app-frame-tab"]').trigger("click")
+    expect(open).toHaveBeenCalledWith("blob:tab", "_blank", "noopener")
+    const page = await blobs[0].text()
+    expect(page).toContain('sandbox="allow-scripts allow-forms"')
+    expect(page).toContain("Content-Security-Policy")
+    expect(page).toContain("&quot;mode&quot;:&quot;tab&quot;")
+    expect(page).not.toContain("allow-same-origin")
+    createObjectURL.mockRestore()
+    open.mockRestore()
+    w.unmount()
+  })
+
+  it("shows a script error as an overlay the user can dismiss", async () => {
+    const { w, frameEl } = await mountApp()
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        source: frameEl.contentWindow,
+        data: { jsonrpc: "2.0", method: "kt/error", params: { message: "boom" } },
+      }),
+    )
+    await flushPromises()
+    expect(w.find('[data-test="app-frame-error"]').text()).toContain("boom")
+    await w.find('[data-test="app-frame-error-dismiss"]').trigger("click")
+    expect(w.find('[data-test="app-frame-error"]').exists()).toBe(false)
+    w.unmount()
   })
 })

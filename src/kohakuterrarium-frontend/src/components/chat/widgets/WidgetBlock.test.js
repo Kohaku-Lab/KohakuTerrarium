@@ -111,6 +111,15 @@ describe("WidgetBlock", () => {
     expect(summary.text()).toContain("pending")
   })
 
+  it("fills its container when drawn inline on the canvas, and only there", () => {
+    const onCanvas = mount(WidgetBlock, {
+      props: { widget: widget({ surface: "canvas" }), host: host(), mode: "inline" },
+    })
+    expect(onCanvas.find(".ui-event-wrapper").classes()).toContain("widget-fill")
+    const inChat = mount(WidgetBlock, { props: { widget: widget(), host: host() } })
+    expect(inChat.find(".ui-event-wrapper").classes()).not.toContain("widget-fill")
+  })
+
   it("leaves a stub in chat for side-panel and canvas widgets", async () => {
     const opener = { surfaces: ["side-panel"], open: vi.fn() }
     const side = mount(WidgetBlock, {

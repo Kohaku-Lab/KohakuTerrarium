@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { reactive } from "vue"
+
 import { APP_ERROR, createAppBridge, INTERACTION_WINDOW_MS } from "./appBridge.js"
 
-function setup({ widget = { awaiting: false }, host = undefined } = {}) {
-  const frameWin = { postMessage: vi.fn() }
+function setup({
+  widget = { awaiting: false },
+  host = undefined,
+  init = () => ({ widgetId: "w_1", data: { a: 1 } }),
+} = {}) {
+  const frameWin = { postMessage: vi.fn((message) => structuredClone(message)) }
   const frame = document.createElement("iframe")
   Object.defineProperty(frame, "contentWindow", { value: frameWin })
   document.body.appendChild(frame)
@@ -14,7 +20,7 @@ function setup({ widget = { awaiting: false }, host = undefined } = {}) {
     getFrame: () => frame,
     getWidget: () => widget,
     host: realHost,
-    getInit: () => ({ widgetId: "w_1", data: { a: 1 } }),
+    getInit: init,
     now: () => clock,
     ...hooks,
   })
@@ -48,6 +54,24 @@ describe("kt.app host bridge", () => {
     expect(handled).toBe(false)
     expect(t.host.send).not.toHaveBeenCalled()
     expect(t.frameWin.postMessage).not.toHaveBeenCalled()
+  })
+
+  it("posts plain copies of reactive state and data, which the browser can clone", () => {
+    const state = reactive({ step: 2, picks: ["a"] })
+    const data = reactive({ rows: [{ n: 1 }] })
+    const t = setup({ init: () => ({ widgetId: "w_1", data, state }) })
+    expect(() => t.send("ui/initialize", {})).not.toThrow()
+    expect(t.lastReply().result).toEqual({
+      widgetId: "w_1",
+      data: { rows: [{ n: 1 }] },
+      state: { step: 2, picks: ["a"] },
+    })
+    expect(() => t.bridge.notify("kt/state", { state })).not.toThrow()
+    expect(t.lastReply()).toEqual({
+      jsonrpc: "2.0",
+      method: "kt/state",
+      params: { state: { step: 2, picks: ["a"] } },
+    })
   })
 
   it("answers ui/initialize with the init payload", () => {

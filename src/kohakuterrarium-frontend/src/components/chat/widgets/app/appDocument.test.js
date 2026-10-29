@@ -4,6 +4,7 @@ import {
   bootstrapScript,
   buildCsp,
   buildSrcdoc,
+  buildTabPage,
   cleanHosts,
   readTheme,
   scriptJson,
@@ -95,6 +96,77 @@ describe("kt.app frame document", () => {
     }
   })
 
+  it("reports the content height, not the frame height, so a frame can shrink", () => {
+    const posted = []
+    const fakeParent = { postMessage: (m) => posted.push(m) }
+    const listeners = {}
+    const observed = []
+    class FakeObserver {
+      constructor(fn) {
+        this.fn = fn
+      }
+      observe(target) {
+        observed.push(target)
+      }
+    }
+    const body = { scrollHeight: 120, getBoundingClientRect: () => ({ height: 118 }) }
+    const win = {
+      parent: fakeParent,
+      addEventListener: (name, fn) => (listeners[name] = fn),
+      getComputedStyle: () => ({ marginTop: "0px", marginBottom: "0px" }),
+      document: { documentElement: { scrollHeight: 600 }, body },
+    }
+    const run = new Function(
+      "window",
+      "parent",
+      "document",
+      "ResizeObserver",
+      "getComputedStyle",
+      bootstrapScript({ widgetId: "w_1" }),
+    )
+    run(win, fakeParent, win.document, FakeObserver, win.getComputedStyle)
+    listeners.load()
+    expect(observed).toContain(body)
+    expect(posted.at(-1)).toEqual({ jsonrpc: "2.0", method: "kt/resize", params: { height: 120 } })
+  })
+
+  it("re-applies the theme variables when the host theme changes", () => {
+    const listeners = {}
+    const fakeParent = { postMessage: () => {} }
+    const props = {}
+    const root = {
+      scrollHeight: 100,
+      style: { setProperty: (k, v) => (props[k] = v), colorScheme: "" },
+    }
+    const win = {
+      parent: fakeParent,
+      addEventListener: (name, fn) => (listeners[name] = fn),
+      document: { documentElement: root },
+    }
+    const run = new Function(
+      "window",
+      "parent",
+      "document",
+      "ResizeObserver",
+      bootstrapScript({ widgetId: "w_1" }),
+    )
+    run(win, fakeParent, win.document, undefined)
+    listeners.message({
+      source: fakeParent,
+      data: {
+        jsonrpc: "2.0",
+        method: "kt/theme",
+        params: {
+          scheme: "dark",
+          vars: { "--kt-bg": "#111", "--kt-fg": "#eee", "bad;": "x", "--kt-x": "red;}" },
+        },
+      },
+    })
+    expect(props).toEqual({ "--kt-bg": "#111", "--kt-fg": "#eee" })
+    expect(root.style.colorScheme).toBe("dark")
+    expect(win.kt.theme.scheme).toBe("dark")
+  })
+
   it("bootstrap exposes kt with data synchronously and talks JSON-RPC to the parent", () => {
     const posted = []
     const fakeParent = { postMessage: (m) => posted.push(m) }
@@ -139,5 +211,121 @@ describe("kt.app frame document", () => {
     })
     expect(win.kt.data).toEqual({ a: 2 })
     return expect(sent).resolves.toEqual({ ok: true })
+  })
+
+  it("bootstrap exposes kt.viewport and emits viewport changes from the host only", () => {
+    const listeners = {}
+    const fakeParent = { postMessage: () => {} }
+    const win = {
+      parent: fakeParent,
+      addEventListener: (name, fn) => (listeners[name] = fn),
+      document: { documentElement: { scrollHeight: 10 } },
+    }
+    const run = new Function(
+      "window",
+      "parent",
+      "document",
+      "ResizeObserver",
+      bootstrapScript({ viewport: { width: 400, height: 300, mode: "canvas" } }),
+    )
+    run(win, fakeParent, win.document, undefined)
+    expect(win.kt.viewport).toEqual({ width: 400, height: 300, mode: "canvas" })
+    const seen = []
+    win.kt.on("viewport", (v) => seen.push(v))
+    listeners.message({
+      source: {},
+      data: { jsonrpc: "2.0", method: "kt/viewport", params: { mode: "spoof" } },
+    })
+    listeners.message({
+      source: fakeParent,
+      data: {
+        jsonrpc: "2.0",
+        method: "kt/viewport",
+        params: { width: 1200, height: 800, mode: "fullscreen" },
+      },
+    })
+    expect(seen).toEqual([{ width: 1200, height: 800, mode: "fullscreen" }])
+    expect(win.kt.viewport.mode).toBe("fullscreen")
+  })
+
+  it("the initialize reply carries the measured viewport, so an early resize is not lost", async () => {
+    const posted = []
+    const listeners = {}
+    const fakeParent = { postMessage: (m) => posted.push(m) }
+    const win = {
+      parent: fakeParent,
+      addEventListener: (name, fn) => (listeners[name] = fn),
+      document: { documentElement: { scrollHeight: 10 } },
+    }
+    const run = new Function(
+      "window",
+      "parent",
+      "document",
+      "ResizeObserver",
+      bootstrapScript({ viewport: { width: 0, height: 0, mode: "chat" } }),
+    )
+    run(win, fakeParent, win.document, undefined)
+    const seen = []
+    win.kt.on("viewport", (v) => seen.push(v))
+    const init = posted.find((m) => m.method === "ui/initialize")
+    listeners.message({
+      source: fakeParent,
+      data: {
+        jsonrpc: "2.0",
+        id: init.id,
+        result: { viewport: { width: 486, height: 711, mode: "canvas" } },
+      },
+    })
+    await win.kt.ready
+    expect(win.kt.viewport).toEqual({ width: 486, height: 711, mode: "canvas" })
+    expect(seen).toEqual([{ width: 486, height: 711, mode: "canvas" }])
+  })
+
+  it("the tab page sandboxes the app and answers its bridge read-only", () => {
+    const srcdoc = buildSrcdoc({ html: '<p a="1">x</p>', hosts: [], init: {}, theme: null })
+    const page = buildTabPage({
+      srcdoc,
+      title: "Plan <b>",
+      init: { widgetId: "w", state: { n: 1 } },
+    })
+    expect(page).toContain(
+      '<iframe id="app" title="Plan &lt;b>" sandbox="allow-scripts allow-forms"',
+    )
+    expect(page).not.toContain("allow-same-origin")
+    expect(page.split("<iframe")[0]).not.toContain("Content-Security-Policy")
+    const script = page.split("<script>").at(-1).split("</script>")[0]
+    const replies = []
+    const appWindow = { postMessage: (m) => replies.push(m) }
+    const frame = { contentWindow: appWindow, clientWidth: 900, clientHeight: 700 }
+    const handlers = {}
+    const doc = { getElementById: () => frame }
+    const win = { addEventListener: (name, fn) => (handlers[name] = fn), open: () => {} }
+    new Function("document", "window", "confirm", script)(doc, win, () => false)
+    handlers.message({
+      source: appWindow,
+      data: { jsonrpc: "2.0", id: 1, method: "ui/initialize" },
+    })
+    expect(replies[0]).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        widgetId: "w",
+        state: { n: 1 },
+        viewport: { width: 900, height: 700, mode: "tab" },
+      },
+    })
+    handlers.message({
+      source: appWindow,
+      data: { jsonrpc: "2.0", id: 2, method: "kt/send", params: { name: "x" } },
+    })
+    expect(replies[1].error.message).toContain("read-only")
+    handlers.message({ source: {}, data: { jsonrpc: "2.0", id: 3, method: "ui/initialize" } })
+    expect(replies).toHaveLength(2)
+    handlers.resize()
+    expect(replies[2]).toEqual({
+      jsonrpc: "2.0",
+      method: "kt/viewport",
+      params: { width: 900, height: 700, mode: "tab" },
+    })
   })
 })

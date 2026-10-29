@@ -71,6 +71,18 @@ class TestOptions:
         offline = ShowAppTool(allowed_hosts=[]).prompt_contribution()
         assert "no network" in offline and "esm.sh" not in offline
 
+    def test_guidance_is_technical_and_leaves_when_to_use_to_the_plugin(self):
+        guidance = ShowAppTool().prompt_contribution()
+        assert guidance.startswith("Write one self-contained HTML document.")
+        assert "`update` + `patch`" in guidance and "read=<id>" in guidance
+        assert "whenever" not in guidance and "only when" not in guidance
+
+    def test_guidance_asks_for_a_responsive_app_and_names_the_viewport(self):
+        for tool in (ShowAppTool(), ShowAppTool(allowed_hosts=[])):
+            guidance = tool.prompt_contribution()
+            assert "about 400px" in guidance and "full screen" in guidance
+            assert "responsive" in guidance and "`kt.viewport`" in guidance
+
 
 class TestOpen:
     async def test_open_emits_a_canvas_widget_with_inline_document(self, tmp_path):

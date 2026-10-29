@@ -29,8 +29,9 @@ export function createAppBridge({
     return getFrame()?.contentWindow || null
   }
 
+  // A JSON copy: reactive proxies (widget state, data) cannot be cloned into the frame.
   function post(message) {
-    frameWindow()?.postMessage(message, "*")
+    frameWindow()?.postMessage(JSON.parse(JSON.stringify(message)), "*")
   }
 
   function reply(id, result, error) {

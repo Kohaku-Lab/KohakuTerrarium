@@ -13,7 +13,7 @@
     <span class="text-[10px] text-warm-400">{{ stubLabel }}</span>
     <el-button v-if="canReveal" size="small" link type="primary" data-test="widget-stub-open" @click="reveal">Open</el-button>
   </div>
-  <div v-else class="ui-event-wrapper" :class="{ 'ui-event-collapsed-wrapper': collapsed, 'widget-closed': widget.closed && !isLegacy }" :data-widget="widget.renderer">
+  <div v-else class="ui-event-wrapper" :class="{ 'ui-event-collapsed-wrapper': collapsed, 'widget-closed': widget.closed && !isLegacy, 'widget-fill': fill }" :data-widget="widget.renderer">
     <button v-if="canMoveToCanvas" class="widget-to-canvas" title="Open in canvas" data-test="widget-open-in-canvas" @click="host.openInCanvas()">
       <span class="i-carbon-launch" />
     </button>
@@ -79,6 +79,7 @@ const placement = computed(() => {
   return "inline"
 })
 
+const fill = computed(() => props.mode === "inline" && surface.value === "canvas")
 const icon = computed(() => entry.value?.icon?.(props.widget) || "i-carbon-application text-warm-500")
 const summary = computed(() => entry.value?.summary?.(props.widget) || props.widget.title || "")
 const pending = computed(() => props.widget.awaiting === true && !props.widget.closed)
@@ -119,6 +120,15 @@ function reveal() {
 <style scoped>
 .ui-event-wrapper {
   position: relative;
+}
+.widget-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.widget-fill > .ui-event-body {
+  flex: 1;
+  min-height: 0;
 }
 .ui-event-collapsed-wrapper {
   margin: 0.25rem 0;
