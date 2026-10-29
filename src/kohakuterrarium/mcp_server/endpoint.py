@@ -53,7 +53,8 @@ class Endpoint(BaseModel):
         try:
             parsed = urlsplit(value)
             if (
-                parsed.scheme != "http"
+                any(ord(char) <= 32 or ord(char) == 127 for char in value)
+                or parsed.scheme != "http"
                 or parsed.hostname not in {"127.0.0.1", "::1"}
                 or not parsed.port
                 or parsed.username is not None

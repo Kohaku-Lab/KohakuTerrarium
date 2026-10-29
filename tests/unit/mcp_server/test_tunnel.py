@@ -6,6 +6,9 @@ import sys
 import threading
 import time
 
+import pytest
+
+from kohakuterrarium.mcp_server import tunnel
 from kohakuterrarium.mcp_server.endpoint import Endpoint
 from kohakuterrarium.mcp_server.tunnel import (
     cloudflare_command,
@@ -71,6 +74,33 @@ def test_cloudflare_does_not_inherit_other_tunnel_identity():
         }
     )
     assert env == {"HTTPS_PROXY": "http://proxy"}
+
+
+@pytest.mark.parametrize("stage", ["configuration", "process"])
+def test_guardian_reports_os_errors_without_sensitive_details(
+    tmp_path, monkeypatch, capsys, stage
+):
+    record = Endpoint(
+        home_dir=str(tmp_path),
+        public_origin="https://example.com",
+        secret="s" * 43,
+        tunnel="cloudflare",
+    )
+    monkeypatch.setattr(tunnel.EndpointStore, "load_active", lambda *args: record)
+    monkeypatch.setattr(
+        sys, "argv", ["tunnel", "--home-dir", str(tmp_path), "--run-id", "test"]
+    )
+
+    def fail(*args, **kwargs):
+        raise PermissionError("sensitive-path-or-token")
+
+    monkeypatch.setattr(
+        tunnel, "write_json" if stage == "configuration" else "run_owned", fail
+    )
+    assert tunnel.main() == 1
+    error = capsys.readouterr().err
+    assert stage in error and "PermissionError" in error
+    assert "sensitive-path-or-token" not in error and record.secret not in error
 
 
 def test_parent_pipe_eof_reaps_owned_child(tmp_path):

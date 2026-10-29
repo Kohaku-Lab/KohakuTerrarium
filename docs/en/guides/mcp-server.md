@@ -470,7 +470,7 @@ Supervisor and tunnel diagnostics are stored as `server.log` and `tunnel.log` un
 
 ## Access and isolation boundaries
 
-The full secret URL is a **bearer credential**, not OAuth or a ChatGPT account identity; anyone holding the URL can use the tools of every workspace registered on the endpoint. `setup` summaries, status and the JSON output of lifecycle commands hide the secret, but the human-readable ready output of `start` and the `url` command display the full URL on purpose. Clients can only view registered workspaces; they cannot register or remove workspaces or change configuration remotely.
+The full secret URL is a **bearer credential**, not OAuth or a ChatGPT account identity; anyone holding the URL can use the tools of every workspace registered on the endpoint. `setup` summaries, status and the JSON output of lifecycle commands hide the secret, but the human-readable ready output of `start` and `restart`, and the `url` command, display the full URL on purpose. Clients can only view registered workspaces; they cannot register or remove workspaces or change configuration remotely.
 
 Isolation between workspaces is **runtime-state isolation, not permission isolation**. Each workspace has its own jobs, file-read history, `pwd_guard` allowances and delegation sessions, but they run in the same process under the same secret, and tools such as `bash` can reach paths outside the workspace anyway. Do not treat different workspaces as a security boundary; when you need genuinely separate access scopes, use different configuration environments (different secrets and processes) and consider operating-system-level isolation.
 
