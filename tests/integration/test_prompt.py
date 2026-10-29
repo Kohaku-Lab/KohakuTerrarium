@@ -34,10 +34,10 @@ from pathlib import Path
 import pytest
 from jinja2 import TemplateSyntaxError
 
+from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
@@ -200,39 +200,6 @@ class _GuidanceTool(BaseTool):
         return ToolResult(output="guided")
 
 
-class _AppTool(BaseTool):
-    """A tool the model may see only while a ``kt.app`` renderer is attached."""
-
-    requires_renderers = frozenset({"kt.app"})
-
-    @property
-    def tool_name(self) -> str:
-        return "show_app"
-
-    @property
-    def description(self) -> str:
-        return "Show an interactive app."
-
-    @property
-    def execution_mode(self) -> ExecutionMode:
-        return ExecutionMode.DIRECT
-
-    def prompt_contribution(self) -> str:
-        return "APP-GUIDANCE: prefer plain text for plain answers."
-
-    async def _execute(self, args, **kwargs) -> ToolResult:  # pragma: no cover
-        return ToolResult(output="shown")
-
-
-class _AppsPlugin(BasePlugin):
-    """Contributes the gated app tool, as the ``ui.apps`` plugin does."""
-
-    name = "apps_probe"
-
-    def contribute_tools(self) -> list[BaseTool]:
-        return [_AppTool()]
-
-
 def _conversation_text(agent: Agent) -> str:
     """Flatten the controller conversation into a single searchable string."""
     chunks: list[str] = []
@@ -374,18 +341,19 @@ class TestPromptIntegration:
             # attached output reports ``kt.app``, and gone again on detach or
             # when the plugin is disabled.
             web = StreamOutput("web", asyncio.Queue(), deque(maxlen=50), agent)
-            await agent.add_plugin(_AppsPlugin())
+            await agent.add_plugin(AppsPlugin(allowed_hosts=["esm.sh"]))
             assert "show_app" in agent.registry.list_tools()
             live = agent.get_system_prompt()
-            assert "`show_app`" not in live and "APP-GUIDANCE" not in live
+            assert "`show_app`" not in live and "kt.send(name, data)" not in live
 
             agent.output_router.add_secondary(web)
             assert "show_app" not in agent.get_system_prompt(), "no hello yet"
             web.set_client_renderers({"kt.app": 1})
             live = agent.get_system_prompt()
-            assert "- `show_app`: Show an interactive app." in live
-            assert "APP-GUIDANCE: prefer plain text" in live
-            assert live.index("## Available Functions") < live.index("APP-GUIDANCE")
+            assert "- `show_app`: Show an interactive HTML app" in live
+            assert "load only from esm.sh" in live
+            guidance = live.index("call `kt.send(name, data)`")
+            assert live.index("## Available Functions") < guidance
             assert "PERSONALITY-MARKER" in live and "SAFETY-BANNER" in live
 
             agent.output_router.remove_secondary(web)
@@ -393,7 +361,7 @@ class TestPromptIntegration:
 
             agent.output_router.add_secondary(web)
             assert "show_app" in agent.get_system_prompt()
-            agent.plugins.disable("apps_probe")
+            agent.plugins.disable("ui.apps")
             assert "show_app" not in agent.registry.list_tools()
             assert "show_app" not in agent.get_system_prompt()
             agent.output_router.remove_secondary(web)

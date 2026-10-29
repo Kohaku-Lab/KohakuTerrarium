@@ -38,6 +38,7 @@ from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.tools import deepseek_web, web_fetch, web_search
@@ -2163,6 +2164,72 @@ class TestModulesIntegration:
             )
             assert (await agent.executor.wait_for(bad_job)).error
             assert target.read_text() == "a\nNEW\nb\n"
+
+            # ── ui.apps: a plugin-contributed tool gated on the web client ──
+            # Hidden until a client says it renders kt.app; then show_app
+            # stores the document as a session artifact, the web client gets
+            # the widget frame, an app message the tool is not waiting for
+            # becomes an untrusted widget_event, and read + patch round-trip.
+            await agent.add_plugin(AppsPlugin(allowed_hosts=[]))
+            assert "show_app" in agent.registry.list_tools()
+            assert "show_app" not in agent.get_system_prompt(), "no client yet"
+            web_q: asyncio.Queue = asyncio.Queue()
+            web = StreamOutput("web", web_q, deque(maxlen=20), agent)
+            agent.output_router.add_secondary(web)
+            web.set_client_renderers({"kt.app": 1})
+            assert "show_app" in agent.get_system_prompt()
+            job = await agent.executor.submit(
+                "show_app",
+                {"title": "Tip", "html": "<p id=t>10%</p>", "data": {"bill": 40}},
+                is_direct=True,
+            )
+            shown = await agent.executor.wait_for(job)
+            assert shown.error is None and shown.output.startswith("app w_")
+            app_id = shown.output.split()[1]
+            frame = await asyncio.wait_for(web_q.get(), 1)
+            while frame.get("type") != "widget":
+                frame = await asyncio.wait_for(web_q.get(), 1)
+            spec = frame["payload"]["spec"]
+            assert frame["surface"] == "canvas" and spec["allowed_hosts"] == []
+            assert spec["data"] == {"bill": 40} and "html" not in spec
+            assert list((store.artifacts_dir / "apps" / "docs").glob("*.html"))
+            injected: list = []
+
+            async def _record(event, *args, **kwargs):
+                injected.append(event)
+                return True
+
+            agent.inject_event = _record
+            acks: list[dict] = []
+            handle_widget_msg(
+                {
+                    "event_id": app_id,
+                    "name": "tip",
+                    "data": {"pct": 15},
+                    "origin": "app",
+                },
+                agent,
+                "web",
+                acks.append,
+            )
+            await agent.output_router.widgets.drain()
+            assert acks[-1]["status"] == "accepted"
+            (event,) = injected
+            assert event.type == "widget_event"
+            assert 'trust="untrusted"' in event.get_text_content()
+            del agent.inject_event
+            read_job = await agent.executor.submit(
+                "show_app", {"read": app_id}, is_direct=True
+            )
+            assert "<p id=t>10%</p>" in (await agent.executor.wait_for(read_job)).output
+            patch_job = await agent.executor.submit(
+                "show_app",
+                {"update": app_id, "patch": [{"find": "10%", "replace": "15%"}]},
+                is_direct=True,
+            )
+            assert (await agent.executor.wait_for(patch_job)).error is None
+            agent.output_router.remove_secondary(web)
+            assert "show_app" not in agent.get_system_prompt()
         finally:
             await agent.stop()
             store.close()

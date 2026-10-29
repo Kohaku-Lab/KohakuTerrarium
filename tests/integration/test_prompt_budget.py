@@ -14,8 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.builtins.tools.show_app import ShowAppTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
 from kohakuterrarium.llm.tools import build_tool_schemas
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -31,6 +33,7 @@ MAX_CALLABLES = 20
 # more than a flat one; the aggregate budget above is the real constraint.
 MAX_SCHEMA_CHARS = 1_500
 MAX_TOOL_GUIDANCE_CHARS = 600
+MAX_WIDGET_GUIDANCE_CHARS = 700
 
 BACKGROUND_CAPABLE = {"bash", "python", "web_fetch", "web_search"}
 
@@ -151,6 +154,14 @@ class TestPromptBudget:
             assert full_chars > standard_chars
         finally:
             await agent.stop()
+
+        # ── plugin-contributed widget tools: guidance and schema caps ──
+        # These tools appear only while a client renders them; when they do,
+        # the default host preset is the longest guidance they can carry.
+        app_tool = ShowAppTool()
+        assert len(app_tool.prompt_contribution()) <= MAX_WIDGET_GUIDANCE_CHARS
+        assert len(json.dumps(_BUILTIN_SCHEMAS["show_app"])) <= MAX_SCHEMA_CHARS
+        assert len(app_tool.description) <= 160
 
     @pytest.mark.asyncio
     async def test_per_tool_full_override_costs_only_that_tool(
