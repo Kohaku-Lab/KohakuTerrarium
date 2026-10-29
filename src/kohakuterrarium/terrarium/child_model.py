@@ -32,22 +32,15 @@ def choose_child_model(
     child_models: dict[str, str],
     resolves: Callable[[str], bool],
 ) -> ChildModelChoice:
-    """Apply the five-level child model precedence.
+    """Apply child model precedence.
 
-    A concrete model written in the creature config stays untouched. An
-    unresolvable table entry falls back to the caller, then to the global
-    default, without failing the spawn.
+    The user table overrides a model written in the creature config. An
+    explicit spawn argument still wins. An unresolvable table entry falls
+    back to the caller, then to the global default, without failing the spawn.
     """
     requested = (explicit or "").strip()
     if requested:
         return ChildModelChoice(requested, "explicit")
-
-    configured = (config.llm_profile or config.model or "").strip()
-    lowered = configured.lower()
-    if lowered in _INHERIT_CALLER:
-        return _caller_or_global(caller)
-    if configured and lowered not in _USE_CHILD_TABLE:
-        return ChildModelChoice("", "config")
 
     table_selector = _matching_selector(config, child_models)
     if table_selector:
@@ -65,6 +58,13 @@ def choose_child_model(
         )
         choice = _caller_or_global(caller)
         return ChildModelChoice(choice.selector, choice.source, table_selector[1])
+
+    configured = (config.llm_profile or config.model or "").strip()
+    lowered = configured.lower()
+    if lowered in _INHERIT_CALLER:
+        return _caller_or_global(caller)
+    if configured and lowered not in _USE_CHILD_TABLE:
+        return ChildModelChoice("", "config")
     return _caller_or_global(caller)
 
 

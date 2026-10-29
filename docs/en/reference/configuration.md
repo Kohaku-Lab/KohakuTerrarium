@@ -1004,11 +1004,11 @@ Per-agent overrides via `controller.base_url` / `controller.api_key_env`
 still work.
 
 `subagent_models` supplies user-level defaults without editing packaged creature
-configs. Keys match the final `SubAgentConfig.name` exactly. A concrete `model`
-on the creature or sub-agent module still wins; `parent`, `inherit`, and `default`
-explicitly inherit the parent LLM. An absent model, `subagent-default`, or
-`subagent_default` uses the named entry when present, otherwise it inherits the
-parent. The mapping is read when a sub-agent is created, so edits affect future
+configs. Keys match the final `SubAgentConfig.name` exactly. A matching entry
+overrides an absent model and the config sentinels `parent`, `inherit`, `default`,
+`subagent-default`, and `subagent_default`. A concrete selector written directly
+on that sub-agent config still wins, and a missing table entry inherits the parent
+LLM. The mapping is read when a sub-agent is created, so edits affect future
 jobs only. Conversation and Inspector Trace rows record the model actually bound
 to each new job, preferring its canonical profile selector and falling back to
 the raw model id.
@@ -1016,9 +1016,9 @@ the raw model id.
 `child_models` supplies the same kind of user default for creatures spawned by
 `group_add_node` and `group_spawn_child`. It does not affect `kt run`, Studio,
 recipes, or direct Python API calls. Precedence is: explicit `llm` argument,
-concrete `llm` or `model` from the merged creature config, config sentinels
-`parent` / `inherit` / `default` (caller model, no table lookup), then an absent
-model or `child-default` / `child_default`. The table matches normalized
+then the user table, then a concrete `llm` or `model` from the merged creature
+config. Config sentinels `parent`, `inherit`, and `default` use the caller only
+when the table has no match. The table matches normalized
 `@pkg/...` refs from the creature through its `base_config` ancestors, nearest
 first. It does not match `config.name`, the spawn `name`, or a local filesystem
 path. The table key `default` is the global child fallback. An unavailable table

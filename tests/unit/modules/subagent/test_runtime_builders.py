@@ -47,6 +47,11 @@ def _no_profiles(monkeypatch):
     monkeypatch.setattr(model_resolve, "get_profile", lambda *a, **k: None)
 
 
+@pytest.fixture(autouse=True)
+def _isolate_subagent_models(monkeypatch):
+    monkeypatch.setattr(model_resolve, "get_subagent_models", lambda: {})
+
+
 class TestResolveLLM:
     def test_resolve_llm_is_the_shared_resolver(self):
         # The manager imports ``resolve_llm``; it must be the same
@@ -75,14 +80,18 @@ class TestResolveLLM:
         assert resolve_llm(parent, cfg) is parent
         assert parent.with_model_calls == []
 
-    def test_parent_sentinel_never_uses_named_global(self, monkeypatch):
-        _no_profiles(monkeypatch)
+    def test_parent_sentinel_uses_named_global(self, monkeypatch):
+        selected = object()
         monkeypatch.setattr(
             model_resolve, "get_subagent_models", lambda: {"x": "openai/worker"}
         )
+        monkeypatch.setattr(model_resolve, "get_profile", lambda name: object())
+        monkeypatch.setattr(
+            model_resolve, "_create_from_profile", lambda profile: selected
+        )
         parent = _FakeLLM()
         cfg = SubAgentConfig(name="x", model="parent")
-        assert resolve_llm(parent, cfg) is parent
+        assert resolve_llm(parent, cfg) is selected
 
     def test_sentinel_model_inherits_parent(self, monkeypatch):
         _no_profiles(monkeypatch)

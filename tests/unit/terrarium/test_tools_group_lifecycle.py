@@ -401,7 +401,8 @@ class TestSpawnedModel:
             "load_agent_config",
             lambda _ref: config or AgentConfig(name="kid"),
         )
-        monkeypatch.setattr(child_model_mod, "get_child_models", lambda: {})
+        if not getattr(monkeypatch, "_child_models_set", False):
+            monkeypatch.setattr(child_model_mod, "get_child_models", lambda: {})
         monkeypatch.setattr(
             lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
@@ -454,6 +455,7 @@ class TestSpawnedModel:
     ):
         selector = _preset_selector()
         config = AgentConfig(name="kid", llm_profile="openai/from-config")
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",
@@ -466,12 +468,13 @@ class TestSpawnedModel:
         assert kwargs["fallback_llm"] == selector
 
     @pytest.mark.parametrize("sentinel", ["parent", "inherit", "default"])
-    async def test_inherit_sentinels_skip_the_table(self, monkeypatch, sentinel):
+    async def test_inherit_sentinels_still_use_the_table(self, monkeypatch, sentinel):
         selector = _preset_selector()
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",
-            lambda: {"default": "openai/from-table"},
+            lambda: {"default": selector},
         )
         config = AgentConfig(name="kid", llm_profile=sentinel)
         kwargs = await self._spawn(
@@ -496,6 +499,7 @@ class TestSpawnedModel:
                 "@biome/creatures/general",
             ],
         )
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",
@@ -518,6 +522,7 @@ class TestSpawnedModel:
         self, monkeypatch
     ):
         global_selector = _preset_selector()
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",
@@ -536,12 +541,12 @@ class TestSpawnedModel:
         self, monkeypatch
     ):
         selector = _preset_selector()
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",
             lambda: {"default": "missing/model"},
         )
-        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda _s: False)
         gctx = _gctx(caller=_caller_on(selector))
         child = _FakeCreature(cid="cid-child", name="worker")
         child.agent = SimpleNamespace(executor=None, _process_event=AsyncMock())
@@ -564,12 +569,12 @@ class TestSpawnedModel:
     async def test_unavailable_table_and_caller_use_the_global_default(
         self, monkeypatch
     ):
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",
             lambda: {"default": "missing/model"},
         )
-        monkeypatch.setattr(child_model_mod, "selector_resolves", lambda _s: False)
         kwargs = await self._spawn(
             monkeypatch, lifecycle_mod.GroupSpawnChildTool, "config_ref", None
         )
@@ -593,6 +598,7 @@ class TestSpawnedModel:
         _patch_resolve(monkeypatch, gctx)
         loaded = AgentConfig(name="kid", llm_profile="child-default")
         _patch_loaded_config(monkeypatch, loaded)
+        monkeypatch._child_models_set = True
         monkeypatch.setattr(
             child_model_mod,
             "get_child_models",

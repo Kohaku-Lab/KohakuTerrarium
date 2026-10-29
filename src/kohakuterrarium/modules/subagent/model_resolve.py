@@ -34,14 +34,18 @@ def resolve_subagent_llm(
     parent_llm: LLMProvider, config: SubAgentConfig
 ) -> LLMProvider:
     """Resolve a profile selector or a same-provider model as the sub-agent's own provider."""
-    name = (config.model or "").strip()
-    lowered = name.lower()
-    if lowered in _INHERIT_PARENT_SENTINELS:
+    configured = (config.model or "").strip()
+    lowered = configured.lower()
+    table_name = get_subagent_models().get(config.name, "").strip()
+    uses_table = bool(table_name) and (
+        not configured
+        or lowered in _NAMED_DEFAULT_SENTINELS | _INHERIT_PARENT_SENTINELS
+    )
+    name = table_name if uses_table else configured
+    if not uses_table and (
+        not name or lowered in _NAMED_DEFAULT_SENTINELS | _INHERIT_PARENT_SENTINELS
+    ):
         return fork_llm(parent_llm)
-    if not name or lowered in _NAMED_DEFAULT_SENTINELS:
-        name = get_subagent_models().get(config.name, "").strip()
-        if not name:
-            return fork_llm(parent_llm)
 
     # Direct lookup avoids warning for valid raw model IDs that are not profiles.
     profile = get_profile(name)
