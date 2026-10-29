@@ -27,7 +27,9 @@ Each method runs ONE complete workflow end-to-end.
 
 import asyncio
 import json
+from collections import deque
 from contextlib import closing
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -104,6 +106,7 @@ from kohakuterrarium.parsing import (
 )
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
+from kohakuterrarium.studio.attach.widget_frames import handle_widget_msg
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.utils.file_guard import PathBoundaryGuard
@@ -1758,6 +1761,43 @@ class TestModulesIntegration:
             )
             assert timed_out.is_timeout is True
             assert timed_out.action_id == "__timeout__"
+
+            # The same interaction over the widget path: a web client gets a
+            # kt.confirm widget, answers with widget_msg, and sees the close;
+            # the plain recorder keeps receiving the legacy-typed event.
+            web_q: asyncio.Queue = asyncio.Queue()
+            web = StreamOutput("web", web_q, deque(maxlen=20))
+            ibus.add_secondary(web)
+            web_agent = SimpleNamespace(output_router=ibus)
+            acks: list[dict] = []
+            wait = asyncio.create_task(
+                ibus.emit_and_wait(
+                    OutputEvent(
+                        type="confirm",
+                        interactive=True,
+                        id="evt-3",
+                        payload={"prompt": "Ship?"},
+                    )
+                )
+            )
+            opened = await asyncio.wait_for(web_q.get(), 1)
+            assert opened["type"] == "widget" and opened["event_id"] == "evt-3"
+            assert opened["payload"]["renderer"] == "kt.confirm"
+            assert opened["payload"]["spec"] == {"prompt": "Ship?"}
+            assert ibus_default.events[-1].type == "confirm"
+            handle_widget_msg(
+                {"event_id": "evt-3", "name": "yes", "data": {"why": "ready"}},
+                web_agent,
+                "web",
+                acks.append,
+            )
+            answered = await wait
+            assert (answered.action_id, answered.values) == ("yes", {"why": "ready"})
+            assert acks[-1]["status"] == "accepted"
+            closed = await asyncio.wait_for(web_q.get(), 1)
+            assert closed["type"] == "widget_close"
+            assert closed["payload"] == {"reason": "replied", "action_id": "yes"}
+            ibus.remove_secondary(web)
         finally:
             await ibus.stop()
 
