@@ -88,7 +88,8 @@ Subclass `BasePlugin` and implement any of these hooks. All are async unless not
 | `post_subagent_run(result, **kwargs)` | return result or `None` | Replace sub-agent result |
 | `contribute_commands()` | return `dict[name, BaseCommand]` | Add controller `##command##` handlers |
 | `contribute_termination_check()` | return callable or `None` | Vote on whether the run should stop |
-| `get_tool_visibility(context)` | return `ToolVisibility \| None` | Restrict the per-request native tool catalog (`allowed_tools` / `allowed_subagents`; `None` = unrestricted) |
+| `get_tool_visibility(context)` | return `ToolVisibility \| None` | Restrict the tool catalog the model sees, in native schemas and in the prompt (`allowed_tools` / `allowed_subagents`; `None` = unrestricted) |
+| `contribute_tools()` | return `list[BaseTool]` | Add tools that exist while the plugin is enabled |
 
 `pre_tool_execute` / `post_tool_execute` receive keyword arguments that
 include `tool_name`, `tool` (the tool instance) and, in the main agent,
@@ -114,6 +115,31 @@ creature-scoped record exists, reads still return that legacy value. New writes
 leave the legacy record unchanged; an explicitly saved `None` also overrides
 the fallback. Legacy records do not identify their original owner, so values
 already overwritten by another creature cannot be recovered automatically.
+
+### Contributing tools
+
+`contribute_tools()` returns tool instances that belong to the plugin. It is
+called once per plugin instance. The tools join the registry, the executor
+and the system prompt when the plugin is loaded or enabled, and leave when it
+is disabled or removed; enabling it again restores the same instances.
+
+```python
+class AppsPlugin(BasePlugin):
+    name = "apps"
+
+    def __init__(self, allowed_hosts: list[str] | None = None):
+        super().__init__()
+        self.allowed_hosts = allowed_hosts or []
+
+    def contribute_tools(self) -> list[BaseTool]:
+        return [ShowAppTool(allowed_hosts=self.allowed_hosts)]
+```
+
+A contributed name that is already taken (by a configured tool or by another
+plugin) raises `PluginToolConflictError` and the load or enable fails without
+changing the registry. A contributed tool can declare `requires_renderers` to
+stay hidden until a client that can draw its UI is attached (see
+[custom modules](custom-modules.md#tools-that-need-a-ui-renderer)).
 
 ### Pinned context
 

@@ -66,22 +66,33 @@ When a `post_llm_call` rewrite changes the final assistant text, the runtime emi
 
 ## Tool visibility contributions
 
-Plugins can restrict the catalog exposed to the model on each native
-request without touching the registry. `PluginManager` intersects
-multiple contributions per category, so each plugin can only narrow the
-catalog.
+Plugins can restrict the catalog exposed to the model without touching
+the registry. `PluginManager` intersects multiple contributions per
+category, so each plugin can only narrow the catalog.
 
 | Hook | Signature | Fired when | Return semantics |
 |---|---|---|---|
-| `get_tool_visibility` | `def get_tool_visibility(context: PluginContext) -> ToolVisibility \| None` | Before each native request's tool schemas and provider-native tools are built. | `None` keeps the catalog unrestricted. A `ToolVisibility(allowed_tools=..., allowed_subagents=...)` keeps only the named members; an empty `frozenset` hides the whole category. |
+| `get_tool_visibility` | `def get_tool_visibility(context: PluginContext) -> ToolVisibility \| None` | Before each native request's tool schemas and provider-native tools are built, and whenever the system prompt is assembled. | `None` keeps the catalog unrestricted. A `ToolVisibility(allowed_tools=..., allowed_subagents=...)` keeps only the named members; an empty `frozenset` hides the whole category. |
 
 `ToolVisibility` fields:
 
 - `allowed_tools: frozenset[str] | None` — `None` means unrestricted.
 - `allowed_subagents: frozenset[str] | None` — `None` means unrestricted.
 
-This contribution only affects native tool schemas; text-mode prompt
-filtering is left to prompt contributions.
+The resulting catalog is intersected with renderer availability (tools
+declaring `requires_renderers` are hidden while no attached output reports
+those renderers). It governs the native schemas and every prompt section
+that names tools: `## Available Functions`, `## Function Documentation`,
+`## Tool guidance`, call examples and the `{{ tools }}` template variable.
+The prompt is assembled at construction and on refresh, so a contribution
+that changes from request to request only reaches the prompt on the next
+refresh.
+
+## Tool contributions
+
+| Hook | Signature | Fired when | Return semantics |
+|---|---|---|---|
+| `contribute_tools` | `def contribute_tools() -> list[BaseTool]` | Once per plugin instance, when the agent is built or the plugin is added, enabled or loaded. | The tools are registered while the plugin is enabled and removed when it is disabled or unregistered. A name already taken raises `PluginToolConflictError`. |
 
 ---
 
