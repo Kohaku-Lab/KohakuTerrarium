@@ -346,10 +346,20 @@ class TestSessionIntegration:
             widget_turn = str(agent.controller.conversation.to_messages())
             assert f'<widget_event widget="{widget_id}"' in widget_turn
             assert 'name="share"' in widget_turn and 'trust="untrusted"' in widget_turn
-            web_types = [
-                web_frames.get_nowait()["type"] for _ in range(web_frames.qsize())
+            frames = [web_frames.get_nowait() for _ in range(web_frames.qsize())]
+            web_types = [frame["type"] for frame in frames]
+            opens = [
+                f
+                for f in frames
+                if f["type"] == "widget" and not f.get("update_target")
             ]
-            assert web_types.count("widget") == 1
+            assert len(opens) == 1
+            waits = [
+                f["payload"]["awaiting"]
+                for f in frames
+                if f["type"] == "widget" and "awaiting" in f.get("payload", {})
+            ]
+            assert waits == [True, False], "the client sees the tool wait start and end"
             assert "widget_state" in web_types
             router.remove_secondary(web)
             assert renderer_changes == [{"kt.ui": 1}, {}]

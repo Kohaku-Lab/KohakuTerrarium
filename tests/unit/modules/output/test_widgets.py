@@ -276,6 +276,27 @@ class TestMessageRouting:
         assert router.widgets.submit_message(_msg(first.id)) == "accepted"
         await router.widgets.drain()
 
+    async def test_wait_marks_the_widget_awaiting_until_it_ends(self):
+        router, out = _router()
+        handle = await router.widgets.open("kt.ui", {})
+        first = asyncio.create_task(handle.wait({"a"}))
+        second = asyncio.create_task(handle.wait({"b"}))
+        await asyncio.sleep(0)
+        flags = [e.payload for e in out.widget_events if "awaiting" in e.payload]
+        assert flags == [{"awaiting": True}, {"awaiting": True}]
+        router.widgets.submit_message(_msg(handle.id, "a"))
+        await first
+        flags = [e.payload for e in out.widget_events if "awaiting" in e.payload]
+        assert flags[-1] == {"awaiting": True}, "another wait is still pending"
+        router.widgets.submit_message(_msg(handle.id, "b"))
+        await second
+        flags = [e.payload for e in out.widget_events if "awaiting" in e.payload]
+        assert flags[-1] == {"awaiting": False}
+        await handle.close()
+        count = len(out.widget_events)
+        assert await handle.wait(timeout_s=0.01) is None
+        assert len(out.widget_events) == count, "a closed widget sends no flags"
+
     async def test_close_wakes_a_pending_wait_with_none(self):
         router, _ = _router()
         handle = await router.widgets.open("kt.ui", {})

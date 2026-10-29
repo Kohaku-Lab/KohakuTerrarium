@@ -34,6 +34,8 @@ EVENTS = [
     OutputEvent(
         type="widget", id="w1", update_target="w1", payload={"state": {"b": 2}}
     ),
+    # A wait flag is live-only and is never part of the history.
+    OutputEvent(type="widget", id="w1", update_target="w1", payload={"awaiting": True}),
     OutputEvent(
         type="widget_state",
         id="w1",
@@ -75,7 +77,7 @@ async def test_widget_events_are_recorded_as_typed_rows(tmp_path):
 
 async def test_recorded_rows_rebuild_the_registry(tmp_path):
     store, out = _sink(tmp_path)
-    for event in EVENTS[:3]:
+    for event in EVENTS[:4]:
         await out.on_widget(event)
     await out.drain()
     registry = WidgetRegistry()

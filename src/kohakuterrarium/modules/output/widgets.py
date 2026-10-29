@@ -216,6 +216,7 @@ class WidgetHandle:
         if self.closed:
             return None
         consumer = self._service._add_consumer(self.id, names, once=True)
+        await self._service._set_awaiting(self.id, True)
         try:
             if timeout_s is None:
                 return await consumer.queue.get()
@@ -224,6 +225,7 @@ class WidgetHandle:
             return None
         finally:
             self._service._remove_consumer(self.id, consumer)
+            await self._service._set_awaiting(self.id, False)
 
     async def messages(
         self, names: set[str] | None = None
@@ -449,6 +451,14 @@ class WidgetService(LegacyWidgetsMixin):
         )
         return "accepted"
 
+    def find(self, widget_id: str) -> WidgetRecord | None:
+        """The widget's record, restoring widgets from the session when needed."""
+        return self._lookup(widget_id)
+
+    def handle(self, widget_id: str) -> WidgetHandle | None:
+        """A handle on an existing widget, or ``None`` when the id is unknown."""
+        return WidgetHandle(self, widget_id) if self._lookup(widget_id) else None
+
     def _require(self, widget_id: str) -> WidgetRecord:
         record = self._lookup(widget_id)
         if record is None:
@@ -477,6 +487,23 @@ class WidgetService(LegacyWidgetsMixin):
         added = self.registry.restore(events)
         if added:
             logger.debug("Widgets restored", count=added)
+
+    async def _set_awaiting(self, widget_id: str, awaiting: bool) -> None:
+        """Tell renderers whether a tool call is waiting on this widget."""
+        record = self.registry.get(widget_id)
+        if record is None or record.closed:
+            return
+        if not awaiting and any(c.once for c in record.consumers):
+            return
+        await self._router.emit_widget(
+            OutputEvent(
+                type="widget",
+                id=widget_id,
+                update_target=widget_id,
+                surface=record.surface,
+                payload={"awaiting": awaiting},
+            )
+        )
 
     def _add_consumer(
         self, widget_id: str, names: set[str] | None, *, once: bool

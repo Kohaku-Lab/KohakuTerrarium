@@ -40,6 +40,8 @@ class SessionWidgetsMixin:
                         "routing": payload.get("routing", "agent"),
                     },
                 )
+            case "widget" if set(payload) == {"awaiting"}:
+                return
             case "widget" if event.update_target not in self._unrecorded_widgets:
                 self._record(
                     "widget_update",
