@@ -232,6 +232,33 @@ describe("paged history consumers", () => {
     expect(content(chat)).toEqual(["snapshot"])
   })
 
+  it("a session that started empty reads events on refresh, so replies get their turn ids", async () => {
+    const turn = { turn_index: 1, branch_id: 1 }
+    const api = vi
+      .spyOn(terrariumAPI, "getHistoryPage")
+      .mockResolvedValueOnce(page([], { before: null, after: null, older: false }))
+      .mockResolvedValueOnce(
+        page([], { stream: "snapshot", before: null, after: null, older: false }),
+      )
+      .mockResolvedValueOnce(
+        page(
+          [
+            event(1, "user_input", { ...turn, content: "hi" }),
+            event(2, "processing_start", turn),
+            event(3, "text", { ...turn, content: "hello" }),
+            event(4, "processing_end", turn),
+          ],
+          { before: null, older: false },
+        ),
+      )
+    await chat.initHistoryPage("root")
+    expect(api.mock.calls[1][2]).toMatchObject({ stream: "snapshot" })
+    await chat.refreshHistoryHead("root")
+    expect(api.mock.calls[2][2].stream).toBeUndefined()
+    const reply = chat.messagesByTab.root.find((m) => m.role === "assistant")
+    expect(reply).toMatchObject({ turnIndex: 1, branchId: 1 })
+  })
+
   it("preserves duplicate provenance and remaps an assistant boundary after older text merges", async () => {
     vi.spyOn(terrariumAPI, "getHistoryPage")
       .mockResolvedValueOnce(page([event(20, "text", { content: "later" })]))

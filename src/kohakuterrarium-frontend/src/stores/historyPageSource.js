@@ -18,6 +18,8 @@ export function createHistoryPageSource({
   let metadata = null
   let suffixFence = null
   let resetRequired = false
+  // The window came from the snapshot fallback for an empty event stream.
+  let snapshotFallback = false
   const cache = new Map()
   const pendingOlder = new Map()
 
@@ -36,6 +38,7 @@ export function createHistoryPageSource({
     pendingHead = null
     window = null
     resetRequired = false
+    snapshotFallback = false
     suffix = []
     metadata = null
     suffixFence = null
@@ -119,6 +122,7 @@ export function createHistoryPageSource({
         if (result.discarded || sequence !== headSequence)
           return { discarded: true, resetRequired: result.resetRequired }
         if (result.legacy) return result
+        snapshotFallback = true
       }
       suffix = result.records
       suffixFence = result.fence
@@ -180,6 +184,8 @@ export function createHistoryPageSource({
     async refreshHead() {
       if (pendingHead) return pendingHead
       if (!window || !isCurrent(suffixFence, false)) return { discarded: true, applied: false }
+      // A session that started empty has events once a turn ran: read those, with their turn ids.
+      if (snapshotFallback) return source.initialize()
       const sequence = ++headSequence
       const fence = capture()
       const promise = (async () => {
