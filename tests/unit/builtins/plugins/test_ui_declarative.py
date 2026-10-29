@@ -18,8 +18,13 @@ from kohakuterrarium.builtins.plugins.ui_declarative.plugin import (
     failure_note,
 )
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
+    EXAMPLES,
+    ON_DEMAND,
+    component_doc,
     inline_ui_section,
 )
+from kohakuterrarium.builtins.tools.info import InfoTool
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.session.store import SessionStore
 from tests.unit.test_tool_doc_shape import DISCOURAGING
@@ -36,8 +41,17 @@ class _Router:
         return dict(self.renderers)
 
 
-def _context(renderers):
-    return PluginContext(_host_agent=SimpleNamespace(output_router=_Router(renderers)))
+def _context(renderers, *, info=False, tool_format="native"):
+    registry = Registry()
+    if info:
+        registry.register_tool(InfoTool())
+    agent = SimpleNamespace(
+        output_router=_Router(renderers),
+        registry=registry,
+        config=SimpleNamespace(tool_format=tool_format),
+        _visible_catalog=lambda: None,
+    )
+    return PluginContext(_host_agent=agent)
 
 
 def _run(coro):
@@ -50,14 +64,54 @@ class TestSection:
         assert plugin.presentation_contribution(_context({})) is None
         assert plugin.presentation_contribution(_context({"kt.app": 1})) is None
         part = plugin.presentation_contribution(_context({"kt.ui": 1}))
-        assert part == inline_ui_section()
+        assert part == inline_ui_section(on_demand=False)
         assert part.startswith("### Inline components")
         assert "show_app" not in part, "the full-page pointer belongs to ui.apps"
         assert plugin.presentation_contribution(PluginContext()) is None
         assert plugin.get_prompt_content(_context({"kt.ui": 1})) is None
 
+    def test_on_demand_components_are_named_when_info_is_callable(self):
+        plugin = UiDeclarativePlugin()
+        for context in (
+            _context({"kt.ui": 1}, info=True),
+            _context({"kt.ui": 1}, tool_format="bracket"),
+        ):
+            part = plugin.presentation_contribution(context)
+            assert part == inline_ui_section()
+            more = next(line for line in part.splitlines() if "- More" in line)
+            for name in ON_DEMAND:
+                assert f"- `{name}`:" not in part, name
+                assert f"`{name}`" in more, name
+            assert "call `info` with `ui:<name>`" in more
+            for name in set(COMPONENTS) - set(ON_DEMAND):
+                assert f"- `{name}`" in part, name
+        assert len(inline_ui_section()) < len(inline_ui_section(on_demand=False))
+
+    def test_without_info_every_component_is_inline(self):
+        part = UiDeclarativePlugin().presentation_contribution(_context({"kt.ui": 1}))
+        assert "ui:<name>" not in part and "- More" not in part
+        assert "- `quiz`: question*" in part
+
+    def test_every_on_demand_component_has_a_valid_example(self):
+        assert set(EXAMPLES) == set(ON_DEMAND)
+        assert set(ON_DEMAND) <= set(COMPONENTS)
+        for name in ON_DEMAND:
+            doc = component_doc(name)
+            assert doc.startswith(f"# ui:{name}") and f"- `{name}`" in doc
+            source = doc.split("Example:\n", 1)[1]
+            types = _types(check_block(source).spec["root"])
+            assert name in types, (name, types)
+
+    def test_doc_topics_cover_every_component(self):
+        plugin = UiDeclarativePlugin()
+        assert plugin.doc_prefix == "ui"
+        assert plugin.doc_topics(None) == list(COMPONENTS)
+        assert plugin.doc_topic("table", None) == component_doc("table")
+        assert "Example:" not in plugin.doc_topic("table", None)
+        assert plugin.doc_topic("nope", None) is None
+
     def test_lists_every_component_and_leads_with_when_to_use(self):
-        section = inline_ui_section()
+        section = inline_ui_section(on_demand=False)
         for name in COMPONENTS:
             assert f"- `{name}`" in section, name
         intro = section.split("### Writing a block", 1)[0]
@@ -86,6 +140,13 @@ class TestSection:
         plugin = UiDeclarativePlugin(default_surface="canvas")
         assert plugin.prompt_renderers == frozenset({"kt.ui"})
         assert plugin.contribute_tools() == []
+
+
+def _types(node):
+    found = [node.get("type")]
+    for child in node.get("children", []) or []:
+        found += _types(child)
+    return found
 
 
 class TestFailureNote:

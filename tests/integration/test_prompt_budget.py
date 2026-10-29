@@ -40,7 +40,10 @@ MAX_SCHEMA_CHARS = 1_500
 MAX_TOOL_GUIDANCE_CHARS = 600
 MAX_WIDGET_GUIDANCE_CHARS = 900
 # ``## Presenting your answer`` with the inline-UI reference and the app part.
-MAX_PRESENTATION_CHARS = 9_000
+# Components past the common set are named only (``info("ui:<name>")``).
+MAX_PRESENTATION_CHARS = 7_000
+# The same section when ``info`` is not callable and every component is inline.
+MAX_PRESENTATION_INLINE_CHARS = 9_000
 
 BACKGROUND_CAPABLE = {"bash", "python", "web_fetch", "web_search"}
 
@@ -145,6 +148,10 @@ class TestPromptBudget:
             [HEADING, OPENING, inline_ui_section(), FULL_PAGE_PART, CLOSING]
         )
         assert len(section) <= MAX_PRESENTATION_CHARS, len(section)
+        inline = "\n\n".join(
+            [HEADING, OPENING, inline_ui_section(False), FULL_PAGE_PART, CLOSING]
+        )
+        assert len(inline) <= MAX_PRESENTATION_INLINE_CHARS, len(inline)
 
         # ── full: every usage tier inlined; the shipped default ────────
         config.tool_doc_mode = "full"

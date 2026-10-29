@@ -1,9 +1,11 @@
 """Opt-in inline UI: the model writes ``kt.ui`` components inside its replies.
 
 The plugin adds the inline-components part of ``## Presenting your answer``,
-present only while an attached client reports the ``kt.ui`` renderer. When a
-reply's block fails to convert or validate, the next model request carries a
-short note naming the block and its errors.
+present only while an attached client reports the ``kt.ui`` renderer. Common
+components are described inline; the rest are named, and ``info("ui:<name>")``
+returns their props and an example. When a reply's block fails to convert or
+validate, the next model request carries a short note naming the block and
+its errors.
 """
 
 import hashlib
@@ -12,9 +14,12 @@ from typing import Any
 from kohakuterrarium.builtins.kt_ui.markup import MarkupError, check_block
 from kohakuterrarium.builtins.kt_ui.markup_lex import split_message
 from kohakuterrarium.builtins.kt_ui.spec import SpecError
+from kohakuterrarium.builtins.kt_ui.components import COMPONENTS
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
+    component_doc,
     inline_ui_section,
 )
+from kohakuterrarium.core.tool_gate import visible_tool_names
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 
 RENDERER = "kt.ui"
@@ -70,6 +75,7 @@ class UiDeclarativePlugin(BasePlugin):
     description = "Inline UI: the model writes tables, charts, diagrams and controls in its replies."
     priority = 50
     prompt_renderers = frozenset({RENDERER})
+    doc_prefix = "ui"
 
     def __init__(self, **_extra: Any) -> None:
         super().__init__()
@@ -85,7 +91,13 @@ class UiDeclarativePlugin(BasePlugin):
     def presentation_contribution(self, context: PluginContext) -> str | None:
         if RENDERER not in attached_renderers(context.host_agent):
             return None
-        return inline_ui_section()
+        return inline_ui_section(on_demand=info_available(context.host_agent))
+
+    def doc_topics(self, context: PluginContext | None) -> list[str]:
+        return list(COMPONENTS)
+
+    def doc_topic(self, topic: str, context: PluginContext | None) -> str | None:
+        return component_doc(topic)
 
     async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
         last_assistant = next(
@@ -120,6 +132,18 @@ def attached_renderers(agent: Any) -> dict[str, int]:
     router = getattr(agent, "output_router", None)
     renderers = getattr(router, "ui_renderers", None)
     return renderers() if callable(renderers) else {}
+
+
+def info_available(agent: Any) -> bool:
+    """Whether the model can call ``info``: a text format, or a visible ``info`` tool."""
+    config = getattr(agent, "config", None)
+    if getattr(config, "tool_format", "native") != "native":
+        return True
+    catalog = getattr(agent, "_visible_catalog", None)
+    registry = getattr(agent, "registry", None)
+    if not callable(catalog) or registry is None:
+        return False
+    return "info" in visible_tool_names(registry, catalog())
 
 
 def _append_note(messages: list[dict], note: str) -> list[dict]:

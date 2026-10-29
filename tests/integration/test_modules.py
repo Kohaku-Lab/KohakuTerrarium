@@ -2724,6 +2724,9 @@ class TestModulesIntegration:
                 in prompt
             )
             assert "`show_app`" not in prompt
+            # Rare components are named once; ``info("ui:<name>")`` has them.
+            assert "call `info` with `ui:<name>`" in prompt
+            assert "`quiz`" in prompt and "- `quiz`:" not in prompt
 
             await agent.add_plugin(AppsPlugin())
             web.set_client_renderers({"kt.ui": 1, "kt.app": 1})

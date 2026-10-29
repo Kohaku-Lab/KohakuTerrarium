@@ -280,8 +280,12 @@ Implementation: `src/kohakuterrarium/builtins/plugins/ui_declarative/` and
 - While an attached client reports `kt.ui` (the web UI after its
   `client_hello`, the Rich CLI and the TUI), the plugin adds the
   inline-components part of `## Presenting your answer`: when to use each
-  component, the markup, every component's props and one example. Headless
-  creatures never get it.
+  component, the markup, the props of the common components and one
+  example. The less common components (`accordion`, `timeline`, `tree`,
+  `gallery`, `quiz`, `timer`, `html` …) are named in one line;
+  `info("ui:<name>")` returns their props and an example. When the model
+  cannot call `info`, every component is written out. Headless creatures
+  never get the part.
 - A block that fails to convert or validate is drawn as an error box; the
   next model request carries one note naming the block and its errors.
 - A button or form `send` posts its text as the user's next message.

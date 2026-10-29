@@ -107,37 +107,118 @@ def _prop_text(component: str, name: str, prop: Prop) -> str | None:
     return f"{name}{star}: {shown}"
 
 
-def component_lines() -> list[str]:
-    """One line per component: its props, text child and children."""
-    lines = []
-    for name, component in COMPONENTS.items():
-        parts = [
-            text
-            for key, prop in component.props.items()
-            if (text := _prop_text(name, key, prop)) is not None
-        ]
-        if name in ("button", "form"):
-            parts.append("send: text sent as the user's message")
-        target = TEXT_CHILD.get(name) or RAW_CHILD.get(name)
-        kinds = {p.kind for p in component.props.values()}
-        if target is not None:
-            raw = " (raw)" if name in RAW_CHILD else ""
-            parts.append(f"text child{raw} = {target}")
-        elif kinds & {"children", "tabs"}:
-            parts.append("tab children" if "tabs" in kinds else "children")
-        elif "child" in kinds:
-            parts.append("children repeat per item")
-        lines.append(f"- `{name}`" + (": " + "; ".join(parts) if parts else ""))
-    return lines
+# Components whose props are loaded with ``info("ui:<name>")``; the rest are inline.
+ON_DEMAND = (
+    "section",
+    "accordion",
+    "quote",
+    "timeline",
+    "progress",
+    "tree",
+    "image",
+    "html",
+    "math",
+    "link",
+    "icon",
+    "gallery",
+    "compare",
+    "copy",
+    "timer",
+    "quiz",
+    "date",
+    "rating",
+)
+
+EXAMPLES = {
+    "section": '<section title="Details">\n  <text>Background the reader may skip.</text>\n</section>',
+    "accordion": '<accordion title="Why it works">\n  <text>Each step halves the range.</text>\n</accordion>',
+    "quote": '<quote cite="PEP 20">Readability counts.</quote>',
+    "timeline": '<timeline items={[{title: "v1.0", date: "2024-03", detail: "First release"}, {title: "v2.0", date: "2025-01", tone: "success"}]}/>',
+    "progress": '<progress label="Migrated" value={34} max={50}/>\n<progress label="Coverage" value={0.82} max={1} style="ring" tone="success"/>',
+    "tree": '<tree items={[{label: "src", open: true, children: ["main.py", {label: "utils", children: ["io.py"]}]}, "README.md"]}/>',
+    "image": '<image src="/workspace/plot.png" alt="Loss curve" width={480}/>',
+    "html": '<html title="Badge" height={120}>\n<style>.b{font:600 20px system-ui;padding:12px;border-radius:12px;background:linear-gradient(90deg,#8ec5fc,#e0c3fc)}</style>\n<div class="b">Level 3 unlocked</div>\n</html>',
+    "math": "<math display>\\int_0^1 x^2\\,dx = \\tfrac{1}{3}</math>",
+    "link": '<link href="https://docs.python.org/3/library/asyncio.html">asyncio docs</link>',
+    "icon": '<stack direction="row" gap="sm"><icon name="check"/><text>Tests pass</text></stack>',
+    "gallery": '<gallery columns={3} items={[{src: "/shots/login.png", caption: "Login"}, "/shots/home.png"]}/>',
+    "compare": '<compare items={[{title: "SQLite", pros: ["No server"], cons: ["One writer"], verdict: "Good for one app"}, {title: "Postgres", pros: ["Concurrent writes"], cons: ["A server to run"]}]}/>',
+    "copy": '<copy label="Install">pip install kohakuterrarium</copy>',
+    "timer": '<timer mode="countdown" seconds={300} label="Break"/>',
+    "quiz": '<quiz options={["O(n)", "O(log n)", "O(1)"]} answer="O(log n)" explain="Each step halves the range.">Time of a binary search?</quiz>',
+    "date": '<state due="2026-11-01"/>\n<date label="Due" bind="due"/>\n<text>Due on {due}</text>',
+    "rating": '<state score={0}/>\n<rating label="How useful?" bind="score" max={5}/>\n<button send="I rate it {score}/5">Send rating</button>',
+}
 
 
-def inline_ui_section() -> str:
-    """The inline-components part: when to use them, syntax, components, example."""
+def component_line(name: str) -> str:
+    """One reference line for a component: its props, text child and children."""
+    component = COMPONENTS[name]
+    parts = [
+        text
+        for key, prop in component.props.items()
+        if (text := _prop_text(name, key, prop)) is not None
+    ]
+    if name in ("button", "form"):
+        parts.append("send: text sent as the user's message")
+    target = TEXT_CHILD.get(name) or RAW_CHILD.get(name)
+    kinds = {p.kind for p in component.props.values()}
+    if target is not None:
+        raw = " (raw)" if name in RAW_CHILD else ""
+        parts.append(f"text child{raw} = {target}")
+    elif kinds & {"children", "tabs"}:
+        parts.append("tab children" if "tabs" in kinds else "children")
+    elif "child" in kinds:
+        parts.append("children repeat per item")
+    return f"- `{name}`" + (": " + "; ".join(parts) if parts else "")
+
+
+def component_lines(names: list[str] | None = None) -> list[str]:
+    """Reference lines for ``names`` (every component by default), in spec order."""
+    wanted = set(COMPONENTS) if names is None else set(names)
+    return [component_line(name) for name in COMPONENTS if name in wanted]
+
+
+def component_doc(name: str) -> str | None:
+    """What ``info("ui:<name>")`` returns: the props line and an example."""
+    if name not in COMPONENTS:
+        return None
+    parts = [
+        f"# ui:{name}",
+        "Props (* required; every component also takes `visible`):",
+        component_line(name),
+    ]
+    if name in EXAMPLES:
+        parts.append(f"Example:\n<ui>\n{EXAMPLES[name]}\n</ui>")
+    return "\n\n".join(parts)
+
+
+def inline_ui_section(on_demand: bool = True) -> str:
+    """The inline-components part: when to use them, syntax, components, example.
+
+    With ``on_demand`` the ``ON_DEMAND`` components are named in one line and
+    their props come from ``info``; without it every component is inline.
+    """
+    inline = [n for n in COMPONENTS if not (on_demand and n in ON_DEMAND)]
     components = (
         "#### Components (* required; every component also takes `visible`)\n"
-        + "\n".join(component_lines())
+        + "\n".join(component_lines(inline))
     )
+    if on_demand:
+        names = ", ".join(f"`{n}`" for n in COMPONENTS if n in ON_DEMAND)
+        components += (
+            f"\n- More, ready to use: {names}. Before the first use of one in "
+            "a conversation, call `info` with `ui:<name>` for its props and an "
+            "example."
+        )
     return "\n\n".join([_INTRO, _SYNTAX, components, _EXPRESSIONS, _EXAMPLE])
 
 
-__all__ = ["component_lines", "inline_ui_section"]
+__all__ = [
+    "EXAMPLES",
+    "ON_DEMAND",
+    "component_doc",
+    "component_line",
+    "component_lines",
+    "inline_ui_section",
+]
