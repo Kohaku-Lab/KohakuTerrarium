@@ -283,8 +283,8 @@ Implementation: `src/kohakuterrarium/builtins/plugins/ui_declarative/plugin.py`.
 
 `show_ui` declares `requires_renderers = {"kt.ui"}`, so the model sees
 the tool and its guidance only while an attached client reports the
-`kt.ui` renderer (the web UI does, after its `client_hello`). Headless
-and terminal creatures never see it. See
+`kt.ui` renderer: the web UI after its `client_hello`, and the Rich CLI
+and TUI with their text profile. Headless creatures never see it. See
 [guides/chat-widgets](../guides/chat-widgets.md#declarative-ui-show_ui).
 
 ### Example

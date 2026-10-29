@@ -128,8 +128,9 @@ plugins:
 `show_ui` needs the `kt.ui` renderer. The web UI announces it in its
 `client_hello` when it connects, so the tool (and its prompt guidance)
 appears once a browser is attached and disappears when the last one
-leaves. Headless runs, the terminal UIs and package outputs such as
-chat bots do not report `kt.ui`; there the tool is not offered.
+leaves. The Rich CLI and the TUI also draw `kt.ui` (see
+[In the terminal](#in-the-terminal)). Headless runs and package outputs
+such as chat bots do not report `kt.ui`; there the tool is not offered.
 
 ### A spec
 
@@ -203,3 +204,22 @@ returns all problems with their JSON paths, for example
 can fix it in one more call. Every widget also carries a plain-text
 rendering of its initial state, shown by clients that cannot draw
 `kt.ui`.
+
+### In the terminal
+
+The Rich CLI (`kt run`) and the TUI draw `kt.ui` with a text profile, so
+`show_ui` is offered there too. `show_app` is not: terminals cannot run
+`kt.app`.
+
+- The widget is a card: its text form (tables, stats, lists; tabs become
+  sections in order; a chart becomes its series as text; images and
+  diagrams show their title) and one action per control.
+- Choosing an input asks for its value: a list for `select` and `radio`,
+  a text prompt for `number`, `slider`, `text_input` and `date`. `toggle`
+  and `checkbox` flip at once. Values are saved as widget state, and
+  computed values update.
+- Buttons run their `set` and `send`; a form sends its bound values. The
+  messages reach the agent as in the web UI.
+- In the Rich CLI the card's actions take the keyboard. Press Esc to go
+  back to the composer; the actions come back when the widget changes or
+  a tool waits on it. In the TUI the actions are buttons on the card.
