@@ -28,6 +28,7 @@ from kohakuterrarium.builtins.tui.widgets.ui_event_modals import (
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
+from kohakuterrarium.modules.output.widgets_legacy import render_widget_as_legacy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -416,6 +417,13 @@ class TUIOutput(BaseOutputModule):
                 logger.exception("card action submit failed", error=str(e))
 
         return _on_action
+
+    async def on_widget(self, event: OutputEvent) -> None:
+        """Draw the legacy widget kinds; other renderers show their fallback text."""
+        await render_widget_as_legacy(self, event)
+
+    def on_widget_close(self, event: OutputEvent) -> None:
+        self.on_supersede(event.update_target)
 
     def on_supersede(self, event_id: str | None) -> None:
         if not self._tui:

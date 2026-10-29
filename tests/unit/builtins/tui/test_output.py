@@ -10,6 +10,7 @@ from kohakuterrarium.builtins.tui.session import TUISession
 from kohakuterrarium.builtins.tui.widgets import ChatInput, UserMessage
 from kohakuterrarium.builtins.tui.widgets.blocks import ToolBlock
 from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.router import OutputRouter
 
 
 async def test_processing_tracks_active_tab_during_overlapping_turns():
@@ -325,3 +326,22 @@ async def test_resume_survives_slow_mount_without_raising(
         await output.on_resume([{"type": "user_input", "content": "turn"}])
         monkeypatch.setattr(session._app, "call_later", original_call_later)
         await pilot.pause()
+
+
+async def test_router_delivers_legacy_kinds_to_the_tui_through_on_widget():
+    tui = FakeTUI()
+    output = TUIOutput()
+    output._tui = tui
+    output._default_target = "alice"
+    router = OutputRouter(output)
+
+    await router.emit(
+        OutputEvent(type="notification", payload={"text": "built", "level": "ok"})
+    )
+    await router.emit(
+        OutputEvent(type="widget", id="w1", payload={"renderer": "kt.ui"})
+    )
+
+    assert tui.notices == [
+        {"text": "built", "command": "ok", "error": False, "target": "alice"}
+    ]

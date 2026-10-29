@@ -12,6 +12,7 @@ from typing import Any
 from kohakuterrarium.builtins.terminal_attention import set_attention
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.output.widgets_legacy import render_widget_as_legacy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -149,6 +150,13 @@ class RichCLIOutput(BaseOutputModule):
                         activity_type=event.type,
                         error=str(e),
                     )
+
+    async def on_widget(self, event: OutputEvent) -> None:
+        """Draw the legacy widget kinds; other renderers show their fallback text."""
+        await render_widget_as_legacy(self, event)
+
+    def on_widget_close(self, event: OutputEvent) -> None:
+        self.on_supersede(event.update_target)
 
     def on_supersede(self, event_id: str) -> None:
         overlay = getattr(self.app, "bus_overlay", None)
