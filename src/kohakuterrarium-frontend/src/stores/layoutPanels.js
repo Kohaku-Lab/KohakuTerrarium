@@ -21,6 +21,7 @@ import ActivityPanel from "@/components/panels/ActivityPanel.vue"
 import SettingsPanel from "@/components/panels/SettingsPanel.vue"
 import StatePanel from "@/components/panels/StatePanel.vue"
 import TerminalPanel from "@/components/panels/TerminalPanel.vue"
+import WidgetsPanel from "@/components/panels/WidgetsPanel.vue"
 import ModulesPanel from "@/components/panels/modules/ModulesPanel.vue"
 import StatusDashboard from "@/components/status/StatusDashboard.vue"
 import StatusDashboardTab from "@/components/status/StatusDashboardTab.vue"
@@ -255,6 +256,12 @@ export function registerBuiltinPanels() {
     label: "Canvas",
     description: "Images and artifacts the creature produced.",
     component: CanvasPanel,
+  })
+  layout.registerPanel({
+    id: "widgets",
+    label: "Widgets",
+    description: "Chat widgets the creature opened in the side panel.",
+    component: WidgetsPanel,
   })
   layout.registerPanel({
     id: "debug",

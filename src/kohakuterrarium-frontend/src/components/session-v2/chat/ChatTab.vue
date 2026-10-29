@@ -18,8 +18,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from "vue"
+import { computed, nextTick, provide, ref, watch } from "vue"
 
+import { WIDGET_SURFACE_KEY } from "@/components/chat/widgets/useWidget"
 import AddDialog from "@/components/session-v2/add/AddDialog.vue"
 import ChannelMembers from "@/components/session-v2/chat/ChannelMembers.vue"
 import ChatColumn from "@/components/session-v2/chat/ChatColumn.vue"
@@ -53,6 +54,14 @@ const activeChannel = computed(() => {
   return tab.startsWith("ch:") ? tab.slice(3) : ""
 })
 const membersOpen = ref(readLocalPref(MEMBERS_KEY) !== "0")
+
+// Chat stubs of side-panel widgets reveal them in the side view.
+provide(WIDGET_SURFACE_KEY, {
+  surfaces: ["side-panel"],
+  open(surface, widgetId) {
+    if (surface === "side-panel") ctx.openSide("widgets", { eventId: widgetId })
+  },
+})
 function setMembersOpen(value) {
   membersOpen.value = value
   writeLocalPref(MEMBERS_KEY, value ? "1" : "0")

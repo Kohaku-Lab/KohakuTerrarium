@@ -28,6 +28,7 @@ export const SIDES = {
   drive: lazy(() => import("../side/DriveDetailSide.vue")),
   terminal: lazy(() => import("../side/TerminalSide.vue")),
   graph: lazy(() => import("../side/GraphSide.vue")),
+  widgets: lazy(() => import("../side/WidgetsSide.vue")),
 }
 
 /** Whole-page session tabs other than Chat. */

@@ -8,6 +8,7 @@ export default {
     "side.terminal.title": "Terminal",
     "side.graph.title": "Graph",
     "side.widget.title": "Widget",
+    "side.widgets.title": "Chat widgets",
     "side.canvas.empty":
       "No artifacts yet. Images, long code blocks and file previews appear here.",
     "side.canvas.copy": "Copy",
@@ -42,6 +43,7 @@ export default {
     "side.terminal.title": "終端機",
     "side.graph.title": "圖",
     "side.widget.title": "小工具",
+    "side.widgets.title": "對話小工具",
     "side.canvas.empty": "尚無成果。圖片、長程式碼區塊與檔案預覽會出現在這裡。",
     "side.canvas.copy": "複製",
     "side.canvas.download": "下載",
@@ -75,6 +77,7 @@ export default {
     "side.terminal.title": "终端",
     "side.graph.title": "图",
     "side.widget.title": "小组件",
+    "side.widgets.title": "对话小组件",
     "side.canvas.empty": "暂无成果。图片、长代码块与文件预览会出现在这里。",
     "side.canvas.copy": "复制",
     "side.canvas.download": "下载",
