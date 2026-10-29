@@ -77,6 +77,12 @@ class ToolContext:
         """Backward-compatible accessor for session.scratchpad."""
         return self.session.scratchpad if self.session else None
 
+    @property
+    def widgets(self) -> Any:
+        """The agent's :class:`WidgetService`, or ``None`` without an output router."""
+        router = getattr(self.agent, "output_router", None)
+        return getattr(router, "widgets", None)
+
 
 def resolve_tool_path(path_str: str, context: ToolContext | None = None) -> Path:
     """Resolve a path against agent context when one is available."""

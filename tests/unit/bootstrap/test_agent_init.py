@@ -378,6 +378,7 @@ class TestInitInputOutput:
         # An OutputRouter is constructed; no named outputs declared → empty set.
         assert isinstance(fake.output_router, OutputRouter)
         assert fake._known_outputs == set()
+        assert fake.output_router.widgets.agent is fake
 
     def test_init_output_uses_custom_override(self):
         cfg = AgentConfig(name="a")

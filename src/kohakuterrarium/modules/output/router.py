@@ -9,6 +9,8 @@ from kohakuterrarium.modules.output.router_interactive import (
 )
 from kohakuterrarium.modules.output.router_parsing import OutputRouterParseEventMixin
 from kohakuterrarium.modules.output.router_state import CompletedOutput, OutputState
+from kohakuterrarium.modules.output.router_widgets import OutputRouterWidgetsMixin
+from kohakuterrarium.modules.output.widgets import WIDGET_EVENT_TYPES, WidgetService
 from kohakuterrarium.parsing import (
     AssistantImageEvent,
     CommandEvent,
@@ -21,7 +23,11 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
+class OutputRouter(
+    OutputRouterParseEventMixin,
+    OutputRouterInteractiveMixin,
+    OutputRouterWidgetsMixin,
+):
     """Coordinate output state, typed events, lifecycle, and interactive replies."""
 
     def __init__(
@@ -52,6 +58,8 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         # Interactive reply futures are keyed by the originating event ID.
         self._pending_replies: dict[str, asyncio.Future[UIReply]] = {}
         self._closed_interactions: dict[str, None] = {}
+        self._init_widgets()
+        self.widgets = WidgetService(self)
 
         # Interactive outputs need a back-reference for reply submission.
         for output in (default_output, *self._secondary_outputs):
@@ -120,6 +128,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         """Add a secondary output that receives copies of all text output."""
         self._secondary_outputs.append(output)
         self._maybe_link_router(output)
+        self.refresh_renderers()
 
     def _maybe_link_router(self, output: OutputModule) -> None:
         """Best-effort link an interactive output back to this router."""
@@ -134,6 +143,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         self._secondary_outputs = [
             o for o in self._secondary_outputs if o is not output
         ]
+        self.refresh_renderers()
 
     async def emit(self, event: OutputEvent) -> None:
         """Dispatch a typed event according to its output visibility contract."""
@@ -166,6 +176,8 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
                 )
             case "resume_batch":
                 await self.on_resume(event.payload.get("events", []))
+            case kind if kind in WIDGET_EVENT_TYPES:
+                await self.emit_widget(event)
             case (
                 "ask_text"
                 | "confirm"

@@ -21,8 +21,10 @@ from kohakuterrarium.modules.plugin.base import (
     PluginContext,
     ToolVisibility,
 )
+from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.plugin.option_validation import PluginOptionError
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.testing.output import OutputRecorder
 
 
 class _FakeStore:
@@ -288,6 +290,15 @@ class TestPluginContextEmit:
         ctx = PluginContext(agent_name="a", _host_agent=agent)
         result = await ctx.emit_and_wait(object(), timeout_s=5.0)
         assert result == ("reply", 5.0)
+
+    def test_widgets_is_the_routers_service_or_none(self):
+        router = OutputRouter(OutputRecorder())
+        ctx = PluginContext(
+            agent_name="a", _host_agent=_FakeAgent(output_router=router)
+        )
+        assert ctx.widgets is router.widgets
+        assert PluginContext(agent_name="a").widgets is None
+        assert PluginContext(agent_name="a", _host_agent=_FakeAgent()).widgets is None
 
 
 # ── BasePlugin: gating ─────────────────────────────────────────────

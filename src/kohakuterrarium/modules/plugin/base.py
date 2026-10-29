@@ -178,6 +178,12 @@ class PluginContext:
             raise RuntimeError("Agent has no output_router")
         return await router.emit_and_wait(event, timeout_s=timeout_s)
 
+    @property
+    def widgets(self) -> Any:
+        """The host agent's :class:`WidgetService`, or ``None`` when unattached."""
+        router = getattr(self._host_agent, "output_router", None)
+        return getattr(router, "widgets", None)
+
     def inject_message_before_llm(self, role: str, content: str | list) -> None:
         """Queue a message before pre-call hooks so every plugin observes it."""
         controller = self.controller

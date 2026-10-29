@@ -584,6 +584,7 @@ class AgentInitMixin:
         logger.info("Named outputs registered", named_outputs=list(self._known_outputs))
 
         self.output_router = OutputRouter(default_output, named_outputs=named_outputs)
+        self.output_router.widgets.bind_agent(self)
 
     def _init_user_commands(self) -> None:
         """Aggregate every user-command source and bind it to the input module."""

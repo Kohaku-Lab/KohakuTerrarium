@@ -7,7 +7,7 @@ from typing import Any, Literal
 from kohakuterrarium.llm.message import ContentPart
 
 # Unsupported renderer surfaces fall back to chat rather than dropping events.
-Surface = Literal["chat", "modal", "toast", "side-panel", "status"]
+Surface = Literal["chat", "canvas", "modal", "toast", "side-panel", "status"]
 
 ACTION_TIMEOUT = "__timeout__"
 ACTION_SUPERSEDED = "__superseded__"

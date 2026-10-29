@@ -180,3 +180,12 @@ class TurnTimeoutError(TurnError, TimeoutError):
 
 class AgentNotRunningError(KTError, RuntimeError):
     """An operation needed a started agent but it isn't running."""
+
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+
+
+class RendererUnavailable(KTError, RuntimeError):
+    """No attached output can render the requested widget renderer."""

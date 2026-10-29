@@ -5,11 +5,13 @@ protocol — error wrapping, provider-native gating, multimodal result
 inspection, path resolution, ToolInfo derivation.
 """
 
+import types
 from pathlib import Path
 
 import pytest
 
 from kohakuterrarium.llm.message import ImagePart, TextPart
+from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -20,6 +22,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
+from kohakuterrarium.testing.output import OutputRecorder
 
 
 class _OkTool(BaseTool):
@@ -174,6 +177,15 @@ class TestToolResultInspection:
 
 
 class TestToolContextPathResolution:
+    def test_widgets_is_the_agent_routers_service_or_none(self, tmp_path):
+        router = OutputRouter(OutputRecorder())
+        agent = types.SimpleNamespace(output_router=router)
+        ctx = ToolContext(
+            agent_name="a", session=None, working_dir=tmp_path, agent=agent
+        )
+        assert ctx.widgets is router.widgets
+        assert ToolContext("a", None, tmp_path).widgets is None
+
     def test_positional_memory_path_remains_backward_compatible(self, tmp_path):
         memory_path = tmp_path / "memory.md"
         ctx = ToolContext("a", None, tmp_path, memory_path)
