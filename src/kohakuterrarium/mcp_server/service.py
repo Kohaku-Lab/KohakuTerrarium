@@ -5,6 +5,7 @@ import secrets
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
@@ -40,7 +41,7 @@ def status(store: EndpointStore) -> dict:
             public_ready=False,
             pid=None,
             tunnel_pid=None,
-            tunnel_state="stopped" if record.tunnel == "ngrok" else "external",
+            tunnel_state="external" if record.tunnel == "external" else "stopped",
             management={"protocol_version": 1, "state": "stopped"},
         )
     elif snapshot.get("updated_at") and time.time() - snapshot["updated_at"] > 30:
@@ -101,7 +102,7 @@ def rotate(store: EndpointStore) -> dict:
         try:
             record = store.load()
             record.secret = secrets.token_urlsafe(32)
-            write_json(store.record_path, record.model_dump())
+            write_json(store.record_path, record.serialized())
             return {
                 "state": "stopped",
                 "running": False,
@@ -113,9 +114,13 @@ def rotate(store: EndpointStore) -> dict:
 
 
 def start(store: EndpointStore, *, wait: float = 30) -> dict:
+    return _start(store, wait=wait)
+
+
+def _start(store: EndpointStore, *, wait: float, locked: bool = False) -> dict:
     if not 1 <= wait <= 120:
         raise ValueError("Startup wait must be between 1 and 120 seconds")
-    with lifecycle_command(store.command_lock):
+    with nullcontext() if locked else lifecycle_command(store.command_lock):
         if is_running(store):
             return status(store)
         record = store.load()
@@ -200,7 +205,20 @@ def start(store: EndpointStore, *, wait: float = 30) -> dict:
 
 
 def stop(store: EndpointStore, *, wait: float = 20) -> dict:
+    return _stop(store, wait=wait)
+
+
+def restart(store: EndpointStore, *, wait: float = 30) -> dict:
+    if not 1 <= wait <= 120:
+        raise ValueError("Startup wait must be between 1 and 120 seconds")
     with lifecycle_command(store.command_lock):
+        store.validate(store.load())
+        _stop(store, wait=20, locked=True)
+        return _start(store, wait=wait, locked=True)
+
+
+def _stop(store: EndpointStore, *, wait: float, locked: bool = False) -> dict:
+    with nullcontext() if locked else lifecycle_command(store.command_lock):
         if not is_running(store):
             return status(store)
         snapshot = store.runtime()

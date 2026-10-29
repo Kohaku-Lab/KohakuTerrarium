@@ -10,10 +10,18 @@ from kohakuterrarium.mcp_server.setup import SetupSession
 
 def add_setup_arguments(parser):
     parser.add_argument("--non-interactive", action="store_true")
-    parser.add_argument("--mode", choices=("ngrok", "external"))
+    parser.add_argument("--mode", choices=("ngrok", "cloudflare", "external"))
     parser.add_argument("--origin", help="Stable HTTPS origin, without the MCP path")
     parser.add_argument("--port", type=int)
     parser.add_argument("--ngrok-bin")
+    parser.add_argument("--cloudflared-bin")
+    parser.add_argument("--cloudflare-tunnel-id")
+    parser.add_argument("--cloudflare-credentials", type=Path)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--probe-proxy", help="Local HTTP proxy for public readiness checks"
+    )
+    group.add_argument("--clear-probe-proxy", action="store_true")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--ngrok-config", type=Path)
     group.add_argument("--clear-ngrok-config", action="store_true")
@@ -40,12 +48,15 @@ def _path_prompt(label, current):
 def _wizard(store, original, options):
     defaults = original.summary() if original else {}
     print(f"Configuration environment: {store.process_directory}")
-    print("ngrok: KT manages the tunnel; external: you maintain the HTTPS entry.")
-    mode = _prompt(
-        "Mode (ngrok/external)", options["tunnel"] or defaults.get("tunnel", "ngrok")
+    print(
+        "ngrok/cloudflare: KT manages the tunnel; external: you maintain the HTTPS entry."
     )
-    if mode not in {"ngrok", "external"}:
-        raise ValueError("Mode must be ngrok or external")
+    mode = _prompt(
+        "Mode (ngrok/cloudflare/external)",
+        options["tunnel"] or defaults.get("tunnel", "ngrok"),
+    )
+    if mode not in {"ngrok", "cloudflare", "external"}:
+        raise ValueError("Mode must be ngrok, cloudflare or external")
     options["tunnel"] = mode
     options["public_origin"] = (
         _prompt(
@@ -81,6 +92,29 @@ def _wizard(store, original, options):
         options["ngrok_config"], options["clear_ngrok_config"] = _path_prompt(
             "ngrok configuration", "-" if options["clear_ngrok_config"] else path
         )
+    if mode == "cloudflare":
+        options["cloudflared_bin"] = _prompt(
+            "cloudflared executable",
+            options["cloudflared_bin"]
+            or defaults.get("cloudflared_bin", "cloudflared"),
+        )
+        options["cloudflare_tunnel_id"] = (
+            _prompt(
+                "Cloudflare tunnel UUID",
+                options["cloudflare_tunnel_id"]
+                or defaults.get("cloudflare_tunnel_id")
+                or "",
+            )
+            or None
+        )
+        credentials = (
+            options["cloudflare_credentials"]
+            or defaults.get("cloudflare_credentials")
+            or ""
+        )
+        options["cloudflare_credentials"] = (
+            _prompt("Cloudflare tunnel credentials file", credentials) or None
+        )
     return options
 
 
@@ -92,6 +126,11 @@ def setup_cli(args, store) -> int:
         "port": args.port,
         "ngrok_bin": args.ngrok_bin,
         "ngrok_config": args.ngrok_config,
+        "cloudflared_bin": args.cloudflared_bin,
+        "cloudflare_tunnel_id": args.cloudflare_tunnel_id,
+        "cloudflare_credentials": args.cloudflare_credentials,
+        "probe_proxy": args.probe_proxy,
+        "clear_probe_proxy": args.clear_probe_proxy,
         "tools_config": args.config,
         "clear_tools_config": args.clear_config,
         "clear_ngrok_config": args.clear_ngrok_config,
@@ -136,7 +175,7 @@ def setup_cli(args, store) -> int:
                 "Public origin changed: update the connection URL in ChatGPT after restart."
             )
         if result["restart_required"]:
-            print("Pending settings: run kt mcp-serve stop, then kt mcp-serve start.")
+            print("Pending settings: run kt mcp-serve restart.")
         elif result["running"]:
             print("The existing instance is unchanged.")
         else:

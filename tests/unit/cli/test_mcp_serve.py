@@ -9,6 +9,7 @@ import sys
 
 import pytest
 
+from kohakuterrarium.cli import mcp_serve
 from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import write_json
@@ -110,6 +111,28 @@ def test_setup_script_contract_and_removed_start_flags(tmp_path, capsys):
         parser.parse_args(
             ["mcp-serve", "start", "--public-origin", "https://example.com"]
         )
+
+
+def test_restart_uses_start_readiness_contract(tmp_path, monkeypatch, capsys):
+    parser = argparse.ArgumentParser()
+    add_mcp_serve_subparser(parser.add_subparsers())
+    args = parser.parse_args(
+        ["mcp-serve", "restart", "--home-dir", str(tmp_path), "--wait", "12", "--json"]
+    )
+    calls = []
+
+    def restart(store, *, wait):
+        calls.append(wait)
+        return {
+            "state": "offline",
+            "public_ready": False,
+            "home_dir": str(store.home_dir),
+        }
+
+    monkeypatch.setattr(mcp_serve, "restart", restart)
+    assert mcp_serve_cli(args) == 1
+    assert calls == [12]
+    assert json.loads(capsys.readouterr().out)["state"] == "offline"
 
 
 def test_setup_non_tty_missing_input_never_prompts(tmp_path, monkeypatch, capsys):

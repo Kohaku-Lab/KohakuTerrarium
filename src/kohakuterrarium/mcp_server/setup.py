@@ -41,7 +41,7 @@ class SetupSession:
             if is_running(self.store):
                 self.store.load_active(self.store.runtime().get("run_id", ""))
             self.store.validate(candidate)
-            write_json(self.store.record_path, candidate.model_dump())
+            write_json(self.store.record_path, candidate.serialized())
             current = status(self.store)
             return {
                 "state": "configured",

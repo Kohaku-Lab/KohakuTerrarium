@@ -1,12 +1,18 @@
 """Owned child cleanup is driven by pipe lifetime, not a saved PID."""
 
+import json
 import os
 import sys
 import threading
 import time
 
 from kohakuterrarium.mcp_server.endpoint import Endpoint
-from kohakuterrarium.mcp_server.tunnel import ngrok_command, run_owned
+from kohakuterrarium.mcp_server.tunnel import (
+    cloudflare_command,
+    cloudflare_environment,
+    ngrok_command,
+    run_owned,
+)
 
 
 def test_ngrok_command_contains_no_mcp_credential():
@@ -21,6 +27,50 @@ def test_ngrok_command_contains_no_mcp_credential():
     assert record.secret not in " ".join(command)
     assert "http://127.0.0.1:9000" in command
     assert command[-2:] == ["--config", "private.yml"]
+
+
+def test_cloudflare_config_routes_active_port_without_secrets(tmp_path):
+    record = Endpoint(
+        home_dir="home",
+        public_origin="https://mcp.example.com",
+        secret="s" * 43,
+        port=9123,
+        tunnel="cloudflare",
+        cloudflared_bin="cloudflared",
+        cloudflare_tunnel_id="f28d5968-1e07-4a79-8055-0c7e58f38341",
+        cloudflare_credentials="/private/credentials.json",
+    )
+    path = tmp_path / "generated.json"
+    command = cloudflare_command(record, path)
+    config = json.loads(path.read_text())
+    assert config["ingress"] == [
+        {"hostname": "mcp.example.com", "service": "http://127.0.0.1:9123"},
+        {"service": "http_status:404"},
+    ]
+    assert config["credentials-file"] == record.cloudflare_credentials
+    assert command == [
+        "cloudflared",
+        "tunnel",
+        "--no-autoupdate",
+        "--config",
+        str(path),
+        "run",
+        record.cloudflare_tunnel_id,
+    ]
+    assert record.secret not in str(config) + str(command)
+
+
+def test_cloudflare_does_not_inherit_other_tunnel_identity():
+    env = cloudflare_environment(
+        {
+            "TUNNEL_TOKEN": "wrong",
+            "TUNNEL_TOKEN_FILE": "wrong-file",
+            "TUNNEL_CRED_CONTENTS": "wrong",
+            "TUNNEL_CRED_FILE": "wrong-file",
+            "HTTPS_PROXY": "http://proxy",
+        }
+    )
+    assert env == {"HTTPS_PROXY": "http://proxy"}
 
 
 def test_parent_pipe_eof_reaps_owned_child(tmp_path):
