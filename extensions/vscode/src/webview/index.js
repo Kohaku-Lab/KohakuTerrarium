@@ -45,6 +45,9 @@ import { installNotificationSurface } from './notifications.mjs'
 import './notifications.css'
 import QueuedMessages from './QueuedMessages.vue'
 import { composerLabels } from './composerLabels.mjs'
+import { createAppOpener, inlineSend, installRichContent, processingLabel } from './richContent.mjs'
+
+installRichContent(document)
 
 const vscode = acquireVsCodeApi()
 // The request lifecycle is a small real module; only branch-mutation requests
@@ -370,11 +373,15 @@ const App = {
         .catch((cause) => (error.value = cause?.message || String(cause)))
     }
 
-    // Message actions use Host clipboard, accepted replies and current ready identity.
+    // Message actions use Host clipboard, accepted replies and sends, and current
+    // ready identity; the view has no canvas, so inline blocks offer none.
     provideMessageActions({
       markdownOrigin: null,
+      canvas: false,
       writeClipboard: (text) => request('platform.writeClipboard', { text }),
       submitReply: (message, actionId, values) => submitReply(message, actionId, values),
+      sendText: inlineSend(chat, hostAcceptedChat),
+      openApp: createAppOpener(request, window),
       getViewOwner: () => `${activeSelectionReadyId ?? ''}:${latestReadyRequestId.value ?? ''}`,
     })
 
@@ -521,7 +528,7 @@ const App = {
             emptyTitle: 'No messages yet',
             emptySubtitle: 'Choose a Session and send a message',
             processing: chat.processingByTab[tab.value],
-            processingLabel: 'Kohaku is working',
+            processingLabel: processingLabel(chat, tab.value) || 'Kohaku is working',
             reconnecting: chat.wsStatus === 'reconnecting',
             reconnectLabel: 'Reconnecting',
             partial: paging.partial.value,

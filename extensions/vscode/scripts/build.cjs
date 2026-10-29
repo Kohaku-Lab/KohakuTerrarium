@@ -22,6 +22,9 @@ async function main() {
 
   const { build } = await import('vite')
   await build({ configFile: path.join(root, 'vite.config.mjs') })
+
+  // Mermaid's own browser build, loaded on the first diagram (src/webview/shims/mermaid.mjs).
+  fs.copyFileSync(require.resolve('mermaid/dist/mermaid.min.js', { paths: [root] }), path.join(dist, 'mermaid.js'))
 }
 
 main().catch((error) => {

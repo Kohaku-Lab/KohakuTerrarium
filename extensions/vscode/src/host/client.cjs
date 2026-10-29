@@ -106,6 +106,15 @@ function createClient({ endpoint, token, fetchImpl = fetch }) {
   }
 
   return {
+    // An app document stored as a session artifact, read as text up to ``maxBytes``.
+    async artifactText(route, maxBytes) {
+      const response = await request(route)
+      const declared = Number(response.headers?.get?.('content-length'))
+      if (Number.isFinite(declared) && declared > maxBytes) throw Error('The app document is too large')
+      const text = await response.text()
+      if (Buffer.byteLength(text, 'utf8') > maxBytes) throw Error('The app document is too large')
+      return text
+    },
     async capabilities() {
       return (await request('/api/auth/capabilities')).json()
     },

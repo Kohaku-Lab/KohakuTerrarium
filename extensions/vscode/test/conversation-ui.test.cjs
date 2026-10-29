@@ -51,7 +51,8 @@ test('Dashboard and VS Code consume one host-neutral transcript section', () => 
   assert.match(webview, /from ["']@kohakuterrarium\/chat-ui["']/)
   assert.doesNotMatch(webview, /messages\.value\.map/)
   assert.match(webview, /processing:\s*chat\.processingByTab\[tab\.value\]/)
-  assert.match(webview, /processingLabel:\s*['"][^'"]+['"]/)
+  // The view's own label, after the shared streaming-tool-call text when there is one.
+  assert.match(webview, /processingLabel:\s*(?:processingLabel\(chat, tab\.value\)\s*\|\|\s*)?['"][^'"]+['"]/)
   assert.doesNotMatch(webview, /`\$\{error\.value\} \$\{chat\.wsStatus\}`/)
 })
 

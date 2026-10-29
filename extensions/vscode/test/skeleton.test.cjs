@@ -198,6 +198,23 @@ test('webview shell uses a strict CSP and only packaged resources', () => {
   assert.doesNotMatch(policy, /script-src[^;]*(?:unsafe-inline|unsafe-eval|https?:)/)
   assert.doesNotMatch(policy, /style-src-elem[^;]*https?:/)
   assert.doesNotMatch(html, /https?:\/\//)
+
+  // Mermaid diagrams: a separate style-only nonce, and the lazily loaded browser build's URI.
+  const rich = renderWebviewHtml({
+    cspSource: 'vscode-webview://origin',
+    scriptUri: 'vscode-webview://origin/dist/webview.js',
+    styleUri: 'vscode-webview://origin/dist/webview.css',
+    mermaidUri: 'vscode-webview://origin/dist/mermaid.js',
+    nonce: 'script-nonce',
+    styleNonce: 'style-nonce',
+  })
+  const richPolicy = rich.match(/Content-Security-Policy" content="([^"]+)"/)?.[1]
+  assert.ok(richPolicy.split('; ').includes("style-src-elem vscode-webview://origin 'nonce-style-nonce'"))
+  assert.ok(richPolicy.split('; ').includes("script-src 'nonce-script-nonce'"), 'scripts keep their own nonce only')
+  assert.doesNotMatch(richPolicy, /script-src[^;]*style-nonce/)
+  assert.doesNotMatch(richPolicy, /frame-src|unsafe-inline'[^;]*style-src-elem/)
+  assert.match(rich, /data-mermaid-uri="vscode-webview:\/\/origin\/dist\/mermaid\.js"/)
+  assert.match(rich, /data-style-nonce="style-nonce"/)
 })
 
 test('build script is self-contained inside the formal extension package', () => {
@@ -208,6 +225,9 @@ test('build script is self-contained inside the formal extension package', () =>
   assert.match(build, /path\.join\(root, 'vite\.config\.mjs'\)/)
   assert.doesNotMatch(build, /vscode-chat-sidebar-tracer/)
   assert.doesNotMatch(build, /kohakuterrarium-frontend[\\/]node_modules/)
+  // Mermaid's browser build ships beside the bundle, resolved from the Extension's own packages.
+  assert.match(build, /require\.resolve\('mermaid\/dist\/mermaid\.min\.js', \{ paths: \[root\] \}\)/)
+  assert.match(build, /path\.join\(dist, 'mermaid\.js'\)/)
 })
 
 test('webview host locale is flattened to a bare language tag', () => {

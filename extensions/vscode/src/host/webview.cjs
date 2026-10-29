@@ -10,11 +10,22 @@ function hostLanguage() {
   }
 }
 
-function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', locale = hostLanguage(), nonce, mediaSrc = '' }) {
+function renderWebviewHtml({
+  cspSource,
+  scriptUri,
+  styleUri,
+  brandUri = '',
+  mermaidUri = '',
+  locale = hostLanguage(),
+  nonce,
+  styleNonce = '',
+  mediaSrc = '',
+}) {
   const policy = [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
-    `style-src-elem ${cspSource}`,
+    // A separate style-only nonce marks the <style> inside Mermaid's SVG diagrams.
+    styleNonce ? `style-src-elem ${cspSource} 'nonce-${styleNonce}'` : `style-src-elem ${cspSource}`,
     "style-src-attr 'unsafe-inline'",
     `font-src ${cspSource} data:`,
     `img-src ${cspSource} data:`,
@@ -38,7 +49,7 @@ function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', loca
   <title>KohakuTerrarium</title>
 </head>
 <body>
-  <main id="app" aria-live="polite" data-brand-uri="${brandUri}"></main>
+  <main id="app" aria-live="polite" data-brand-uri="${brandUri}" data-mermaid-uri="${mermaidUri}" data-style-nonce="${styleNonce}"></main>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`

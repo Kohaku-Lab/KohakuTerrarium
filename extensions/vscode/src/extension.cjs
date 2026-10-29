@@ -14,6 +14,7 @@ const { SocketOwners } = require('./host/sockets.cjs')
 const { ConnectionStateWriter } = require('./host/state.cjs')
 const { TopologyWatcher } = require('./host/topology.cjs')
 const { renderWebviewHtml } = require('./host/webview.cjs')
+const { APP_TYPES, AppPanels } = require('./host/appPanels.cjs')
 const { createMediaView } = require('./host/mediaView.cjs')
 
 const CONFIG_KEY = 'kohakuterrarium.connection'
@@ -202,8 +203,10 @@ function activate(context) {
         scriptUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview.js'))),
         styleUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview.css'))),
         brandUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'kohaku-icon.png'))),
+        mermaidUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'mermaid.js'))),
         mediaSrc: media ? webview.cspSource : '',
         nonce: crypto.randomBytes(16).toString('base64'),
+        styleNonce: crypto.randomBytes(16).toString('base64'),
       })
 
       let runtime = null
@@ -358,6 +361,22 @@ function activate(context) {
         return runtimePromise
       }
 
+      // Each kt.app opens in its own editor tab (see host/appPanels.cjs).
+      const apps = new AppPanels({
+        createPanel: (title) =>
+          vscode.window.createWebviewPanel('kohakuterrarium.app', title, vscode.ViewColumn.Beside, {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            localResourceRoots: [],
+          }),
+        confirmSend: async ({ title, name }) => {
+          const send = 'Send'
+          const always = 'Always for this app'
+          const pick = await vscode.window.showInformationMessage(`The app "${title}" wants to send "${name}" to the agent.`, send, always)
+          return pick === send ? 'send' : pick === always ? 'always' : null
+        },
+        post: (message) => webview.postMessage(message),
+      })
       const disposable = webview.onDidReceiveMessage(async (message) => {
         if (!allowedMessage(message)) {
           if (
@@ -371,6 +390,11 @@ function activate(context) {
           return
         }
         try {
+          if (APP_TYPES.has(message.type)) {
+            const data = await apps.handle(message, runtime)
+            webview.postMessage({ type: `${message.type}.result`, requestId: message.requestId, data })
+            return
+          }
           if (message.type === 'platform.writeClipboard') {
             try {
               await vscode.env.clipboard.writeText(message.text)
@@ -451,6 +475,7 @@ function activate(context) {
       })
 
       view.onDidDispose(() => {
+        apps.dispose()
         disposable.dispose()
         entry.disposeRuntime()
         // Abort in-flight media and drop the webview lease surface, but keep any

@@ -88,6 +88,7 @@
     "highlight.js": "^11.11.0",
     "katex": "^0.19.1",
     "markdown-it": "^14.0.0",
+    "mermaid": "11.17.2",
     "pinia": "^3.0.3",
     "prettier": "^3.8.2",
     "unocss": "^66.10.2",

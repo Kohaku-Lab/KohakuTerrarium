@@ -1,3 +1,5 @@
+const { APP_TYPES, validAppMessage } = require('./appPanels.cjs')
+
 const ALLOWED = new Set([
   'ready',
   'session.list',
@@ -35,6 +37,7 @@ const ALLOWED = new Set([
   'ws.open',
   'ws.send',
   'ws.close',
+  ...APP_TYPES,
 ])
 const FORBIDDEN_FIELDS = [
   'token',
@@ -194,6 +197,8 @@ function allowedMessage(message) {
   if (!Number.isSafeInteger(identifier) || identifier < 1) return false
   if (socketMessage ? Object.hasOwn(message, 'requestId') : Object.hasOwn(message, 'socketId')) return false
   if (FORBIDDEN_FIELDS.some((field) => Object.hasOwn(message, field))) return false
+  // App tabs: a closed field set each, an artifact route for documents (see appPanels).
+  if (APP_TYPES.has(message.type)) return validAppMessage(message)
 
   switch (message.type) {
     case 'session.resume':

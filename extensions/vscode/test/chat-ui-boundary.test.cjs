@@ -24,7 +24,7 @@ const read = (file) => fs.readFileSync(file, 'utf8')
 
 test('Extension independently owns shared Markdown SFC build dependencies', async () => {
   const packageJson = JSON.parse(read(path.join(root, 'package.json')))
-  const required = ['@vitejs/plugin-vue', '@vscode/markdown-it-katex', 'highlight.js', 'katex', 'markdown-it']
+  const required = ['@vitejs/plugin-vue', '@vscode/markdown-it-katex', 'highlight.js', 'katex', 'markdown-it', 'mermaid']
   const extensionRequire = createRequire(path.join(root, 'package.json'))
   for (const dependency of required) {
     assert.equal(typeof packageJson.devDependencies?.[dependency], 'string', `${dependency} must be direct`)

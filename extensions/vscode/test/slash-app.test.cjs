@@ -147,6 +147,8 @@ async function boot({ holdInventory = false, inventoryError = null } = {}) {
     },
   })
   const sent = (type) => requests.filter((message) => message.type === type)
+  // Chat sends only: the store also announces its renderers with ``client_hello``.
+  const chatSends = () => sent('ws.send').filter((message) => JSON.parse(message.data).type === 'input')
   const textarea = () => document.querySelector('.composer-region textarea')
   const options = () => [...document.querySelectorAll('#slash-command-menu button[role="option"]')]
   const type = (text) => {
@@ -169,6 +171,7 @@ async function boot({ holdInventory = false, inventoryError = null } = {}) {
     window,
     document,
     sent,
+    chatSends,
     textarea,
     options,
     type,
@@ -223,7 +226,7 @@ test('the built webview opens the shared production menu, searches by name/alias
     app.press('Enter')
     await settle()
     assert.equal(app.textarea().value, '/goal ', 'Enter selected the highlighted completion')
-    assert.equal(app.sent('ws.send').length, 0, 'choosing a completion never dispatched a chat send')
+    assert.equal(app.chatSends().length, 0, 'choosing a completion never dispatched a chat send')
     assert.equal(app.sent('goal.execute').length, 0, 'choosing a completion never executed a command')
 
     // Search by alias narrows to the visible command; mouse click completes it.
@@ -236,7 +239,7 @@ test('the built webview opens the shared production menu, searches by name/alias
     app.options()[0].click()
     await settle()
     assert.equal(app.textarea().value, '/goal ')
-    assert.equal(app.sent('ws.send').length, 0)
+    assert.equal(app.chatSends().length, 0)
 
     // Search by skill name and complete it with the mouse.
     app.type('/res')
@@ -275,7 +278,7 @@ test('Enter after completion submits the goal command through the real goal brid
     const goal = app.sent('goal.execute').at(-1)
     assert.ok(goal, 'the goal command crossed the real Host bridge')
     assert.equal(goal.args, 'release the mice')
-    assert.equal(app.sent('ws.send').length, 0, 'the goal command never went over the chat socket')
+    assert.equal(app.chatSends().length, 0, 'the goal command never went over the chat socket')
     assert.match(app.document.body.textContent, /goal release the mice/, 'the goal result rendered through the shared command-result leaf')
     assert.deepEqual(app.errors, [])
   } finally {
@@ -294,7 +297,7 @@ test('an ordinary skill sends over the socket with Host acceptance while a hidde
     app.press('Enter')
     await settle(16)
 
-    const send = app.sent('ws.send').at(-1)
+    const send = app.chatSends().at(-1)
     assert.ok(send, 'the skill send crossed the chat socket')
     const frame = JSON.parse(send.data)
     assert.equal(frame.type, 'input')
@@ -305,13 +308,13 @@ test('an ordinary skill sends over the socket with Host acceptance while a hidde
 
     // A hidden non-goal command the inventory advertises is NOT authorized: it
     // follows the existing ordinary WS input path, never a synthesized HTTP route.
-    const before = app.sent('ws.send').length
+    const before = app.chatSends().length
     app.type('/status now')
     await settle()
     app.press('Enter')
     await settle(16)
-    assert.equal(app.sent('ws.send').length, before + 1, 'the hidden command went over the socket as ordinary text')
-    assert.equal(JSON.parse(app.sent('ws.send').at(-1).data).content[0].text, '/status now')
+    assert.equal(app.chatSends().length, before + 1, 'the hidden command went over the socket as ordinary text')
+    assert.equal(JSON.parse(app.chatSends().at(-1).data).content[0].text, '/status now')
     assert.equal(app.sent('goal.execute').length, 0)
     assert.deepEqual(app.errors, [])
   } finally {
@@ -350,7 +353,7 @@ test('manual slash sends retain Dashboard fallback when command inventory is una
     assert.equal(app.sent('http.commandInventory').length, 1)
     assert.equal(app.sent('goal.execute').length, 1, 'literal goal still reaches the existing command route')
     assert.equal(app.sent('goal.execute')[0].args, 'list')
-    assert.equal(app.sent('ws.send').length, 0)
+    assert.equal(app.chatSends().length, 0)
     assert.equal(app.textarea().value, '')
 
     app.type('/status now')
@@ -359,8 +362,8 @@ test('manual slash sends retain Dashboard fallback when command inventory is una
     await settle(16)
     assert.equal(app.sent('http.commandInventory').length, 2, 'one lookup per explicit send, no automatic retry')
     assert.equal(app.sent('goal.execute').length, 1, 'fallback does not expand command execution')
-    assert.equal(app.sent('ws.send').length, 1)
-    const frame = JSON.parse(app.sent('ws.send')[0].data)
+    assert.equal(app.chatSends().length, 1)
+    const frame = JSON.parse(app.chatSends()[0].data)
     assert.equal(frame.target, CREATURE)
     assert.equal(frame.content[0].text, '/status now')
     assert.equal(app.textarea().value, '')
@@ -384,7 +387,7 @@ test('inventory failure after Refresh never falls back onto a superseding conver
     app.failInventory()
     await settle(16)
     assert.equal(app.sent('goal.execute').length, 0)
-    assert.equal(app.sent('ws.send').length, 0)
+    assert.equal(app.chatSends().length, 0)
     assert.equal(app.textarea().value, '/goal list', 'the superseded draft remains owned by its conversation')
     assert.deepEqual(app.errors, [])
   } finally {
@@ -410,14 +413,14 @@ test('IME composition preserves the draft before ordinary Enter completes', asyn
     app.press('Enter', { isComposing: true, keyCode: 229 })
     await settle()
     assert.equal(app.textarea().value, '/', 'a composing Enter did not complete the completion')
-    assert.equal(app.sent('ws.send').length, 0, 'a composing Enter never dispatched a chat send')
+    assert.equal(app.chatSends().length, 0, 'a composing Enter never dispatched a chat send')
     assert.equal(app.sent('goal.execute').length, 0, 'a composing Enter never executed a command')
 
     // The next real Enter completes the highlighted /goal without dispatching.
     app.press('Enter')
     await settle()
     assert.equal(app.textarea().value, '/goal ', 'a normal Enter then completed the highlighted entry')
-    assert.equal(app.sent('ws.send').length, 0)
+    assert.equal(app.chatSends().length, 0)
     assert.equal(app.sent('goal.execute').length, 0)
     assert.deepEqual(app.errors, [])
   } finally {

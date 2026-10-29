@@ -70,6 +70,8 @@ export default defineConfig({
         find: /^highlight\.js$/,
         replacement: fileURLToPath(import.meta.resolve('highlight.js')),
       },
+      // Diagrams load Mermaid's browser build on first use instead of bundling it.
+      { find: /^mermaid$/, replacement: path.join(webview, 'shims/mermaid.mjs') },
       {
         find: /^katex\/dist\/katex\.min\.css$/,
         replacement: fileURLToPath(import.meta.resolve('katex/dist/katex.min.css')),

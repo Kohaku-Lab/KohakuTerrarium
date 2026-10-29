@@ -105,3 +105,11 @@ function branchDelegate(name, label) {
         throw error
       })
 }
+
+// ``kt.app`` documents load through the Dashboard's HTTP client; this view has
+// no app frames (see ``appUnavailable.mjs``), so a fetch rejects explicitly.
+export default {
+  get: async () => {
+    throw Error('App documents are unavailable in the VS Code view')
+  },
+}
