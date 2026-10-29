@@ -11,7 +11,7 @@ tags:
 
 The MCP server lets an external MCP client use KT capabilities in workspaces registered on this machine. The client can call file and command tools directly, or optionally delegate tasks to a local Creature or a one-shot subagent. When only direct tools are used, no Creature is created and no local model is started.
 
-`kt mcp-serve` manages one **unified endpoint** per KT configuration environment: a background process, an authenticated Streamable HTTP endpoint, and an optional ngrok tunnel. You register one or more workspaces on that endpoint, and clients choose the directory to operate on with `workspace_id`. This guide covers "letting external clients call KT". To let a Creature call other MCP servers, read [MCP client configuration](mcp.md).
+`kt mcp-serve` manages one **unified endpoint** per KT configuration environment: a background process, an authenticated Streamable HTTP endpoint, and an optional managed ngrok or Cloudflare tunnel. You register one or more workspaces on that endpoint, and clients choose the directory to operate on with `workspace_id`. This guide covers "letting external clients call KT". To let a Creature call other MCP servers, read [MCP client configuration](mcp.md).
 
 > **Confirm the permission scope before exposing the server.** The default tools include file writes and command execution. A workspace is the default execution directory, **not a sandbox**. The full connection URL contains an access secret that grants access to **every registered workspace** on the endpoint, so keep it like a credential. See [Access and isolation boundaries](#access-and-isolation-boundaries).
 
@@ -21,16 +21,39 @@ First-time users start at [First-time setup](#first-time-setup). If you are alre
 
 ### Prerequisites and ingress modes
 
-Install a KT version that provides `kt mcp-serve`, and prepare a stable public HTTPS entry point. Choose one of two ingress modes:
+Install a KT version that provides `kt mcp-serve`, and prepare a stable public HTTPS entry point. Choose an ingress mode:
 
 | Mode | What you prepare | What KT manages |
 | --- | --- | --- |
 | `ngrok` | An installed and authenticated ngrok, an account, and a fixed HTTPS domain | Starting, supervising and reaping the ngrok tunnel process |
+| `cloudflare` | An installed cloudflared, a locally managed tunnel, its UUID and credentials file, and a fixed hostname routed to that tunnel | Generating a dedicated local ingress configuration and supervising cloudflared |
 | `external` | A stable HTTPS entry point you maintain yourself, forwarding requests to a loopback port on this machine | Only the local MCP service; it never starts or stops the external tunnel |
 
 The local port defaults to 8765. In `external` mode, forward the entry point to `http://127.0.0.1:8765`, adjusting the port if you choose another. An HTTPS reverse proxy is needed even if the host itself is publicly reachable: KT listens only on loopback and does not terminate TLS. For setting up the entry point, see [Reverse-proxy deployment](deployment-reverse-proxy.md).
 
 The **public HTTPS origin** asked for by the wizard is the scheme, domain and optional port of the entry point, such as `https://your-domain.example`, without the MCP path. It is not the full connection URL you later paste into the client.
+
+### Public readiness through a local proxy
+
+Public readiness checks connect directly by default and ignore proxy environment variables. If the host cannot reliably reach the public origin directly, opt in to a trusted local HTTP proxy for the check:
+
+```powershell
+kt mcp-serve setup --non-interactive --probe-proxy http://127.0.0.1:7897
+kt mcp-serve restart
+```
+
+Only `http` proxies on the literal loopback IPs `127.0.0.1` or `[::1]`, with a nonzero port and no credentials, are accepted. The proxy receives a CONNECT request for the public hostname, and TLS remains enabled; the MCP path contains a secret, so use only a trusted proxy and trusted TLS roots. This affects readiness checks only, not client traffic or tunnel connections. `--clear-probe-proxy` restores direct checks. Restart to apply a change. A passing check proves reachability from the configured probe path, not from every client network. Older KT versions cannot read a saved proxy setting: clear it and restart with this version before downgrading.
+
+### Cloudflare locally managed tunnel
+
+Install `cloudflared`, authenticate and create a locally managed tunnel following the [Cloudflare instructions](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/). Create its DNS route for the fixed hostname, and note the tunnel UUID and generated credentials file. KT does not create the tunnel or DNS records, and does not manage a remotely configured or Quick Tunnel.
+
+```powershell
+kt mcp-serve setup --non-interactive --mode cloudflare --origin https://mcp.example.com --port 9876 --cloudflare-tunnel-id 01234567-89ab-cdef-0123-456789abcdef --cloudflare-credentials C:/path/to/credentials.json
+kt mcp-serve start
+```
+
+Use `--cloudflared-bin` if the executable is not on PATH. KT writes its own ingress configuration for the configured hostname and `http://127.0.0.1:<port>`; it never edits your existing cloudflared YAML. After changing the KT port, run `kt mcp-serve restart` to regenerate the route for the new instance. Protect the tunnel credentials file and MCP URL as secrets. Access policies or firewalls must allow both the MCP client and KT's public readiness probe. Use a dedicated tunnel for this endpoint: KT's connector returns 404 for other hostnames, so sharing the tunnel with other services or differently configured connectors can disrupt traffic routed to them. Multiple connectors for this tunnel must have consistent routing to the intended endpoint. Older KT versions cannot read a saved Cloudflare-mode endpoint; switch back to a supported mode before downgrading.
 
 ### Configure, register a workspace and start
 
@@ -43,9 +66,9 @@ kt mcp-serve start
 kt mcp-serve url
 ```
 
-`setup` opens an interactive wizard that asks, in order, for the ingress mode, public origin, local port, optional MCP tool configuration file, and, in managed mode, the ngrok executable and configuration file. If you only use the default tools at first, you can skip the tool configuration file. Before saving, the wizard shows a change summary and asks for confirmation; cancelling or ending input (EOF) leaves the existing configuration untouched.
+`setup` opens an interactive wizard that asks, in order, for the ingress mode, public origin, local port, optional MCP tool configuration file, and the selected tunnel's executable and configuration or credentials. If you only use the default tools at first, you can skip the tool configuration file. Before saving, the wizard shows a change summary and asks for confirmation; cancelling or ending input (EOF) leaves the existing configuration untouched.
 
-**`setup` only saves endpoint configuration.** It does not register workspaces, start the service, install ngrok, register an account, allocate a domain or test public connectivity. It checks local dependencies before saving; see [Command options and non-interactive use](#command-options-and-non-interactive-use) for when each check runs.
+**`setup` only saves endpoint configuration.** It does not register workspaces, start the service, install tunnel software, register an account, create a tunnel or DNS route, allocate a domain or test public connectivity. It checks local dependencies before saving; see [Command options and non-interactive use](#command-options-and-non-interactive-use) for when each check runs.
 
 `workspace add` registers an existing directory under the name `myproject`; clients then use that name as `workspace_id`. You can register several workspaces; see [Registering and managing workspaces](#registering-and-managing-workspaces) for the rules. The endpoint also starts with no registered workspaces, but clients then have nothing to operate on besides `workspaces`.
 
@@ -74,11 +97,14 @@ After configuration, daily use does not require running `setup` again:
 ```powershell
 kt mcp-serve start
 kt mcp-serve status
+kt mcp-serve restart
 kt mcp-serve url
 kt mcp-serve stop
 ```
 
-Repeated or concurrent `start` calls reuse the existing instance: they neither launch a duplicate nor apply [pending configuration](#active-and-pending-configuration) automatically. `stop` cancels owned jobs in every workspace, closes the local listener and reaps the managed ngrok process; it keeps the endpoint configuration and workspace registrations and never deletes cloud resources. Starting again reuses these settings but creates a new runtime instance; for job and session lifetimes, see [Calling tools and managing jobs](#calling-tools-and-managing-jobs).
+Repeated or concurrent `start` calls reuse the existing instance: they neither launch a duplicate nor apply [pending configuration](#active-and-pending-configuration) automatically. `stop` cancels owned jobs in every workspace, closes the local listener and reaps the managed tunnel process; it keeps the endpoint configuration and workspace registrations and never deletes cloud resources. Starting again reuses these settings but creates a new runtime instance; for job and session lifetimes, see [Calling tools and managing jobs](#calling-tools-and-managing-jobs).
+
+`restart` checks the saved local configuration, then stops and starts under one lifecycle lock. It cancels running jobs and sessions, causes downtime, and does not roll back if startup fails. If already stopped, it starts the endpoint. Its `--wait`, readiness and exit-code behavior match `start`; it launches with the Python environment running the command, and does not update installed software or restart external tunnels.
 
 The supervisor is not a boot service. After a crash or a computer restart, run `start` again.
 
@@ -111,7 +137,7 @@ Readiness-related fields in `status --json`:
 | --- | --- |
 | `state` | `starting`: starting up; `ready`: listening locally and the latest public check passed; `offline`: running locally, but the public check failed or the tunnel is not running; `degraded`: running, but the local management channel is unhealthy, see `management`; `failed`: startup or runtime error, see `error`; `stopped`: not running; `unresponsive`: the process still holds the instance lock, but its runtime status has not been updated for more than 30 seconds or cannot be read |
 | `local_ready` / `public_ready` | Whether the local listener is ready / whether the latest public check passed |
-| `tunnel_state` | In `ngrok` mode: `starting`, `connecting`, `online`, `reconnecting` or `stopped`; always `external` in `external` mode |
+| `tunnel_state` | In managed `ngrok` or `cloudflare` mode: `starting`, `connecting`, `online`, `reconnecting` or `stopped`; always `external` in `external` mode |
 | `public_checked_at` | Unix timestamp (seconds) of the latest public check. After a passing check it is repeated roughly every 10 seconds; after a failing one, roughly every 2 seconds |
 | `management` | State of the local management channel used by `workspace` commands while running; its `state` is `ready`, `busy`, `degraded`, `failed`, `stopping` or `stopped` |
 | `error` | The most recent error message, never containing the secret |
@@ -385,7 +411,7 @@ kt mcp-serve stop
 kt mcp-serve start
 ```
 
-Changing the origin does not rotate the secret (use `rotate` for that; see [Leaked secret or corrupted endpoint record](#leaked-secret-or-corrupted-endpoint-record)), but after restarting you must update the connection URL in the client. Switching to `external` mode clears saved ngrok-specific settings; ngrok options are rejected in that mode.
+Changing the origin does not rotate the secret (use `rotate` for that; see [Leaked secret or corrupted endpoint record](#leaked-secret-or-corrupted-endpoint-record)), but after restarting you must update the connection URL in the client. Switching modes clears the previous mode's tunnel-specific settings; settings for another mode are rejected.
 
 ### Active and pending configuration
 
@@ -393,7 +419,7 @@ Changing the origin does not rotate the secret (use `rotate` for that; see [Leak
 
 At startup, the endpoint configuration and the tool configuration's contents are written together into a private `active.json` snapshot bound to the run identity. The current instance, all of its tunnel retries, and workspace runtimes loaded later all use this snapshot, never adopting pending configuration mid-run. After you edit the tool configuration file, the `tools_revision` difference appears in `pending_changes`; it takes effect after a restart.
 
-**The snapshot does not include the contents of delegation target definitions or the ngrok configuration file.** Delegation target definitions are read when a delegation instance is created, so edits affect newly created instances; changes to the ngrok configuration file may affect the next tunnel restart. Status comparison does not detect those file contents.
+**The snapshot does not include the contents of delegation target definitions, the ngrok configuration file, or the Cloudflare credentials file.** Delegation target definitions are read when a delegation instance is created, so edits affect newly created instances; changes to a tunnel configuration or credentials file may affect the next tunnel retry. Status comparison does not detect those file contents.
 
 ### Concurrent edits
 
@@ -488,8 +514,8 @@ Configuration options belong to **`setup`**, not `start`:
 
 | Command | Main options |
 | --- | --- |
-| `setup` | `--mode`, `--origin`, `--port`, `--config`, `--ngrok-bin`, `--ngrok-config`, `--clear-config`, `--clear-ngrok-config`, `--non-interactive` |
-| `start` | `--wait`, which only controls the startup wait; configuration options are not accepted |
+| `setup` | `--mode`, `--origin`, `--port`, `--config`, `--ngrok-bin`, `--ngrok-config`, `--cloudflared-bin`, `--cloudflare-tunnel-id`, `--cloudflare-credentials`, `--probe-proxy`, `--clear-probe-proxy`, `--clear-config`, `--clear-ngrok-config`, `--non-interactive` |
+| `start` / `restart` | `--wait`, which only controls the startup wait; configuration options are not accepted |
 | `url` | `--configured`, to get the URL the next start will use |
 | `rotate` | No dedicated options; replaces the secret while the service is stopped, keeping other settings |
 | `workspace add NAME PATH` / `workspace list` / `workspace remove NAME` | `remove` accepts `--force` |
@@ -510,21 +536,21 @@ Exit codes:
 
 | Exit code | When |
 | --- | --- |
-| 0 | The command succeeded; for `start`, the state is `ready` and the public readiness check passed. An interactive `setup` answered "no" at the confirmation prompt also returns 0 |
-| 1 | `start` ended before reaching `ready` (the local service may already be running); a configuration, dependency, lock or process error, such as no saved configuration, another lifecycle command still running, `stop` failing to stop the instance within 20 seconds, `rotate` run on a running endpoint, or a `workspace` command refused or left unconfirmed; an interactive `setup` interrupted by Ctrl+C or EOF |
+| 0 | The command succeeded; for `start` and `restart`, the state is `ready` and the public readiness check passed. An interactive `setup` answered "no" at the confirmation prompt also returns 0 |
+| 1 | `start` or `restart` ended before reaching `ready` (the local service may already be running); a configuration, dependency, lock or process error, such as no saved configuration, another lifecycle command still running, `stop` failing to stop the instance within 20 seconds, `rotate` run on a running endpoint, or a `workspace` command refused or left unconfirmed; an interactive `setup` interrupted by Ctrl+C or EOF |
 | 2 | Invalid command-line arguments |
 
 With `--json`, a failing command prints `{"error": "..."}`.
 
-Before saving, the origin and local dependencies are validated: the tool configuration is parsed, managed mode confirms ngrok can be found, and an explicitly specified ngrok configuration file must be readable. ngrok validates its configuration file contents when it starts, and whether the local port is in use is also checked at startup.
+Before saving, the origin and local dependencies are validated: the tool configuration is parsed, the selected managed executable must be found, an explicitly specified ngrok configuration file must be readable, and Cloudflare credentials must match the tunnel UUID. ngrok validates its configuration file contents when it starts; the local port is checked at startup.
 
 ### Process and tunnel recovery
 
 The background supervisor holds an operating-system file lock per configuration environment; a stale PID alone never establishes ownership. Stop requests and `workspace` management commands carry the current run identity in private local files, not through a remote management endpoint; an old request cannot act on a newer instance. Management command outcomes are acknowledged locally, and an unconfirmed command is never replayed automatically.
 
-A public outage never triggers a random-domain fallback or creates a new tool instance. When managed ngrok exits, it is retried with bounded 1–30 second backoff; a still-running ngrok handles its own network reconnects. The supervisor periodically rechecks the public instance identity without downloading job contents.
+A public outage never triggers a random-domain fallback or creates a new tool instance. When a managed tunnel exits, it is retried with bounded 1–30 second backoff; a still-running tunnel handles its own network reconnects. The supervisor periodically rechecks the public instance identity without downloading job contents.
 
-Only managed mode removes inherited HTTP proxy environment variables from the ngrok child process; ngrok's own configuration is kept and the system proxy is not changed. An ownership pipe lets the tunnel guardian reap its ngrok child if the supervisor exits unexpectedly.
+The ngrok child does not inherit HTTP proxy environment variables; cloudflared keeps them but does not inherit conflicting tunnel token or credentials environment variables. The system proxy is not changed. An ownership pipe lets the tunnel guardian reap its child if the supervisor exits unexpectedly.
 
 On Windows, readers briefly holding a file can delay atomic updates of the status file. Such diagnostic write failures do not stop tool execution; when the runtime status has not been updated for more than 30 seconds it is shown as `unresponsive`, and a still-held ownership lock prevents a duplicate launch.
 

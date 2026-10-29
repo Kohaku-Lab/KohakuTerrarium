@@ -42,7 +42,7 @@ async def probe_public(record, instance_id: str) -> tuple[bool, str | None]:
     """Verify the configured HTTPS route reaches this exact tool instance."""
     try:
         async with httpx.AsyncClient(
-            timeout=5, follow_redirects=False, trust_env=False
+            timeout=5, follow_redirects=False, trust_env=False, proxy=record.probe_proxy
         ) as client:
             response = await client.post(
                 record.url,
@@ -102,7 +102,7 @@ async def _monitor(store, record, server, serving, snapshot, management, health)
         while not serving.done() and not stop_requested(store, snapshot["run_id"]):
             now = time.monotonic()
             snapshot["local_ready"] = bool(server.started)
-            if record.tunnel == "ngrok":
+            if record.tunnel != "external":
                 if tunnel is not None and tunnel.poll() is not None:
                     snapshot.update(
                         tunnel_state="reconnecting",
@@ -148,7 +148,7 @@ async def _monitor(store, record, server, serving, snapshot, management, health)
                     error=error,
                     public_checked_at=time.time(),
                 )
-                if ok and record.tunnel == "ngrok" and ingress_alive:
+                if ok and record.tunnel != "external" and ingress_alive:
                     snapshot["tunnel_state"] = "online"
                     retry_delay = 1
                 next_probe = now + (10 if ok else 2)
@@ -170,7 +170,7 @@ async def _monitor(store, record, server, serving, snapshot, management, health)
             probing.cancel()
             await asyncio.gather(probing, return_exceptions=True)
         if tunnel is not None:
-            # Closing the ownership pipe asks the guardian to reap ngrok. A
+            # Closing the ownership pipe asks the guardian to reap the tunnel. A
             # supervisor crash closes the same pipe in the OS automatically.
             tunnel.stdin.close()
             await asyncio.to_thread(tunnel.wait, 10)

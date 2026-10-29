@@ -1,4 +1,4 @@
-"""Owned ngrok child with parent-pipe lifetime; external tunnels never enter here."""
+"""Owned tunnel child with parent-pipe lifetime."""
 
 import argparse
 import os
@@ -6,8 +6,10 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
+from kohakuterrarium.mcp_server.records import write_json
 
 
 def ngrok_command(record) -> list[str]:
@@ -23,6 +25,42 @@ def ngrok_command(record) -> list[str]:
     if record.ngrok_config:
         command.extend(["--config", record.ngrok_config])
     return command
+
+
+def cloudflare_environment(env: dict[str, str]) -> dict[str, str]:
+    excluded = {
+        "TUNNEL_TOKEN",
+        "TUNNEL_TOKEN_FILE",
+        "TUNNEL_CRED_CONTENTS",
+        "TUNNEL_CRED_FILE",
+    }
+    return {key: value for key, value in env.items() if key.upper() not in excluded}
+
+
+def cloudflare_command(record, config_path: Path) -> list[str]:
+    write_json(
+        config_path,
+        {
+            "tunnel": record.cloudflare_tunnel_id,
+            "credentials-file": record.cloudflare_credentials,
+            "ingress": [
+                {
+                    "hostname": urlsplit(record.public_origin).hostname,
+                    "service": f"http://127.0.0.1:{record.port}",
+                },
+                {"service": "http_status:404"},
+            ],
+        },
+    )
+    return [
+        record.cloudflared_bin,
+        "tunnel",
+        "--no-autoupdate",
+        "--config",
+        str(config_path),
+        "run",
+        record.cloudflare_tunnel_id,
+    ]
 
 
 def run_owned(command: list[str], parent_input, *, env=None) -> int:
@@ -62,17 +100,21 @@ def main() -> int:
     parser.add_argument("--home-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
-    record = EndpointStore(args.home_dir).load_active(args.run_id)
-    if record.tunnel != "ngrok":
+    store = EndpointStore(args.home_dir)
+    record = store.load_active(args.run_id)
+    if record.tunnel == "external":
         raise ValueError("External entry points have no owned tunnel process")
     env = dict(os.environ)
-    # The previously verified ngrok setup uses its own configured connectivity,
-    # independent of proxy variables injected into the hosting tool process.
-    for key in list(env):
-        if key.upper() in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}:
-            env.pop(key)
     try:
-        return run_owned(ngrok_command(record), sys.stdin.buffer, env=env)
+        if record.tunnel == "ngrok":
+            for key in list(env):
+                if key.upper() in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}:
+                    env.pop(key)
+            command = ngrok_command(record)
+        else:
+            env = cloudflare_environment(env)
+            command = cloudflare_command(record, store.directory / "cloudflared.json")
+        return run_owned(command, sys.stdin.buffer, env=env)
     except OSError:
         return 1
 

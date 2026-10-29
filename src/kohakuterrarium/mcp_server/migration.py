@@ -54,7 +54,7 @@ def migrate(store, workspace: Path, name: str, legacy_state_dir: Path | None = N
                 store.validate(candidate)
                 entry = store.registry.add(name, workspace)
                 try:
-                    write_json(store.record_path, candidate.model_dump())
+                    write_json(store.record_path, candidate.serialized())
                 except BaseException:
                     store.registry.remove(name, entry.registration_id)
                     raise
