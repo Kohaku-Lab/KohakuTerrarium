@@ -81,10 +81,20 @@ class PluginCommandRefreshMixin:
             self._notify_command_change()
         return removed
 
+    def bind_host(self, host_agent: Any) -> None:
+        """Name the agent whose tools, commands and prompt follow plugin toggles.
+
+        Until ``load_all`` supplies a load context, enable / disable refresh
+        this agent, so toggles before ``start()`` take effect too.
+        """
+        self._bound_host = host_agent
+
     def _refresh_host_inventories(self) -> None:
         """Rebuild host commands and prompt together after plugin state changes."""
         context = self._load_context
         host_agent = context._host_agent if context is not None else None
+        if host_agent is None:
+            host_agent = getattr(self, "_bound_host", None)
         if host_agent is None:
             return
         refresh_tools = getattr(host_agent, "refresh_plugin_tools", None)

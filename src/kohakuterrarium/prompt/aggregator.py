@@ -37,6 +37,7 @@ from kohakuterrarium.modules.tool.doc_mode import (
     DEFAULT_DOC_MODE,
     resolve_doc_mode,
 )
+from kohakuterrarium.prompt.presentation import build_presentation_section
 from kohakuterrarium.prompt.template import render_template_safe
 from kohakuterrarium.prompt.tool_contributions import build_tool_guidance_section
 from kohakuterrarium.skills.index import (
@@ -176,7 +177,8 @@ def aggregate_system_prompt(
 ) -> str:
     """Build a complete system prompt in stable component order.
 
-    Sections are gated: the inventory is skipped when the provider already
+    Sections are gated: ``## Presenting your answer`` exists only when a plugin
+    contributes a part, the inventory is skipped when the provider already
     carries it natively, the call-syntax block only exists for text formats, and
     inline tool usage appears only for tools resolved to ``full``. Graph
     sections are owned by the terrarium layer and are not emitted here.
@@ -201,6 +203,10 @@ def aggregate_system_prompt(
 
     rendered_base = render_template_safe(base_prompt, **context)
     parts.append(rendered_base)
+
+    presentation = build_presentation_section(runtime_plugins, plugin_context)
+    if presentation:
+        parts.append(presentation)
 
     is_native = tool_format == "native"
 

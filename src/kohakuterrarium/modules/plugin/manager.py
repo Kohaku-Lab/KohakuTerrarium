@@ -244,15 +244,32 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
             services.update(contributed)
         return services
 
+    def prompt_renderers(self) -> frozenset[str]:
+        """Renderer ids the active plugins' prompt content depends on."""
+        wanted: set[str] = set()
+        for plugin in self._applicable_plugins():
+            wanted |= set(getattr(plugin, "prompt_renderers", ()) or ())
+        return frozenset(wanted)
+
     def collect_prompt_contributions(self, context: PluginContext) -> list[str]:
         """Collect runtime prompt prose in plugin priority order."""
+        return self._collect_text("get_prompt_content", context)
+
+    def collect_presentation_contributions(self, context: PluginContext) -> list[str]:
+        """Collect ``## Presenting your answer`` parts in plugin priority order."""
+        return self._collect_text("presentation_contribution", context)
+
+    def _collect_text(self, hook: str, context: PluginContext) -> list[str]:
         out: list[str] = []
         for plugin in self._applicable_plugins():
+            method = getattr(plugin, hook, None)
+            if not callable(method):
+                continue
             try:
-                content = plugin.get_prompt_content(context)
+                content = method(context)
             except Exception as e:
                 logger.warning(
-                    "Plugin get_prompt_content raised",
+                    f"Plugin {hook} raised",
                     plugin_name=getattr(plugin, "name", "?"),
                     error=str(e),
                     exc_info=True,

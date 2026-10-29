@@ -44,6 +44,7 @@ class AgentExtensionsMixin:
         """
         if self.plugins is None:
             self.plugins = PluginManager()
+            self.plugins.bind_host(self)
             if hasattr(self, "controller") and self.controller is not None:
                 self.controller.plugins = self.plugins
                 self._apply_plugin_hooks()

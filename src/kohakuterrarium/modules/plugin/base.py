@@ -256,6 +256,8 @@ class BasePlugin(UIOwnerMixin):
 
     # An empty applicability filter enables the plugin for every context.
     applies_to: dict[str, list[str]] = {}
+    # Renderer ids whose attach or detach changes get_prompt_content.
+    prompt_renderers: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
         # Compile once because applicability is evaluated for every hook.
@@ -337,6 +339,15 @@ class BasePlugin(UIOwnerMixin):
 
     def get_prompt_content(self, context: PluginContext) -> str | None:
         """Return optional runtime prompt prose collected in plugin priority order."""
+        return None
+
+    def presentation_contribution(self, context: PluginContext) -> str | None:
+        """Return this plugin's part of ``## Presenting your answer``, or ``None``.
+
+        The section sits right after the base prompt and teaches the forms an
+        answer can take in the attached clients (inline components, apps).
+        Declare the renderers the part depends on in ``prompt_renderers``.
+        """
         return None
 
     def get_tool_visibility(self, context: PluginContext) -> ToolVisibility | None:

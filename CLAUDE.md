@@ -709,6 +709,10 @@ so prompt-size work that ignores `llm/tools.py` is optimizing the smaller one.
 is worse than a missing one — it teaches the model something false.
 
 1. **Base prompt from system.md** — always. Personality and domain judgment only.
+1b. **`## Presenting your answer`** — only when a plugin returns a part from
+   `BasePlugin.presentation_contribution()` (inline UI while a client draws
+   `kt.ui`, full-page apps while `show_app` is visible). Framework opening
+   and closing lines around the parts; `prompt_renderers` refreshes it.
 2. **`## Available Functions`** — only when `tool_format != "native"` or
    `tool_doc_mode == "full"`. Native providers already carry the inventory.
 3. **`## Function Documentation`** — only for tools resolved to `full`.
@@ -734,7 +738,7 @@ reachable only through `info`, in every mode.
 |---------|----------|
 | Agent personality / role / domain judgment | `system.md` |
 | What is true about the runtime (dispatch, channels, graph) | framework blocks |
-| Tool name + one-line description (≤160 chars, with a "Not for" clause) | tool class, mirrored in the doc frontmatter |
+| Tool name + one-line description (≤160 chars): what it does, then a "Use it when/to …" trigger, then optionally "Not for X - use Y" | tool class, mirrored in the doc frontmatter |
 | Argument tables, behavior, limits | `builtin_skills/<tool>.md` above `## Reference` |
 | Output formats, edge cases, worked failures | below `## Reference` |
 | A procedure for a task | a skill, not a creature prompt |
@@ -751,6 +755,12 @@ reachable only through `info`, in every mode.
    `tests/unit/test_tool_doc_shape.py` enforces that.
 5. **NEVER add a framework section without asserting its gate in both
    directions** — present when true, absent when false.
+6. **NEVER introduce a tool by its prohibitions** — every description and
+   guidance block leads with a positive trigger ("Use it when …", "Dispatch it
+   to …"). A "Not for X - use Y" clause is optional, comes last, and names one
+   specific wrong use and the tool to use instead. Text that only says when a
+   tool is *allowed* ("only when", "sparingly", "do not use unless") teaches
+   the model that not calling it is safest.
 
 ### Budget
 

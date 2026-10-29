@@ -259,6 +259,8 @@ class Agent(
             self._init_input(input_module)
             self._init_user_commands()
             self._init_triggers()
+            if self.plugins is not None:
+                self.plugins.bind_host(self)
 
         logger.info(
             "Agent initialized",

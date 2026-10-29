@@ -34,13 +34,20 @@ from pathlib import Path
 import pytest
 from jinja2 import TemplateSyntaxError
 
-from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
+from kohakuterrarium.builtins.plugins.apps.plugin import (
+    FULL_PAGE_PART,
+    WITH_INLINE_LINE,
+    AppsPlugin,
+)
+from kohakuterrarium.builtins.plugins.ui_declarative import UiDeclarativePlugin
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
+from kohakuterrarium.prompt.presentation import CLOSING as PRESENTING_CLOSING
+from kohakuterrarium.prompt.presentation import HEADING as PRESENTING
 from kohakuterrarium.prompt.aggregator import (
     aggregate_system_prompt,
     build_context_message,
@@ -165,7 +172,7 @@ class _SendMessageTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Send a message to a named channel."
+        return "Send a message to a named channel. Use it to publish results or updates to the channels listed in your prompt."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -271,15 +278,15 @@ class TestPromptIntegration:
             # exactly one line each, sourced from the tool classes.
             assert "## Available Functions" in system_prompt
             assert (
-                "- `read`: Read a file: text with line numbers, images, or PDF pages. Required before write or multi_edit. Not for notebooks - use notebook_read."
+                "- `read`: Read a file: text with line numbers, images or PDF pages. Use it to inspect any file, and before write or multi_edit. Not for notebooks - use notebook_read."
                 in system_prompt
             )
             assert (
-                "- `write`: Create a file or replace its entire contents. Requires a prior read if it exists. Not for changing part of a file - use multi_edit."
+                "- `write`: Create a file or replace its contents; read an existing file first. Use it for new files and full rewrites. Not for changing part of a file - use multi_edit."
                 in system_prompt
             )
             assert (
-                "- `bash`: Run a shell command. Use for builds, tests, git, and process control. Not for reading or editing files - use read, glob, grep, multi_edit."
+                "- `bash`: Run a shell command. Use it for builds, tests, git, installs and process control. Not for reading or editing files - use read, glob, grep, multi_edit."
                 in system_prompt
             )
 
@@ -350,7 +357,7 @@ class TestPromptIntegration:
             assert "show_app" not in agent.get_system_prompt(), "no hello yet"
             web.set_client_renderers({"kt.app": 1})
             live = agent.get_system_prompt()
-            assert "- `show_app`: Show an interactive HTML app" in live
+            assert "- `show_app`: Run an interactive HTML app as a full page" in live
             assert "load only from esm.sh" in live
             guidance = live.index("call `kt.send(name, data)`")
             assert live.index("## Available Functions") < guidance
@@ -361,9 +368,36 @@ class TestPromptIntegration:
 
             agent.output_router.add_secondary(web)
             assert "show_app" in agent.get_system_prompt()
+
+            # 6. ``## Presenting your answer``: right after the base prompt,
+            # one part per plugin whose client renders it, gone with the last.
+            await agent.add_plugin(UiDeclarativePlugin())
+            web.set_client_renderers({"kt.app": 1, "kt.ui": 1})
+            live = agent.get_system_prompt()
+            section = live.index(PRESENTING)
+            assert (
+                live.index("PERSONALITY-MARKER") < section < live.index("SAFETY-BANNER")
+            )
+            assert section < live.index("## Available Functions")
+            assert live.index("### Inline components") > section
+            assert f"{FULL_PAGE_PART} {WITH_INLINE_LINE}" in live
+            assert live.index(PRESENTING_CLOSING) < live.index("## Available Functions")
+            web.set_client_renderers({"kt.ui": 1})
+            live = agent.get_system_prompt()
+            assert PRESENTING in live and "### Inline components" in live
+            assert FULL_PAGE_PART not in live and "`show_app`" not in live
+            web.set_client_renderers({})
+            live = agent.get_system_prompt()
+            assert PRESENTING not in live and PRESENTING_CLOSING not in live
+            web.set_client_renderers({"kt.app": 1})
+            live = agent.get_system_prompt()
+            assert FULL_PAGE_PART in live and WITH_INLINE_LINE not in live
+            assert "### Inline components" not in live
+
             agent.plugins.disable("ui.apps")
             assert "show_app" not in agent.registry.list_tools()
             assert "show_app" not in agent.get_system_prompt()
+            assert PRESENTING not in agent.get_system_prompt()
             agent.output_router.remove_secondary(web)
         finally:
             await agent.stop()
@@ -539,7 +573,7 @@ class TestPromptIntegration:
             assert "Agent loopagent has:" in system_prompt
             # The loop iterated over the registry-injected ``tools`` list.
             assert (
-                "* read: Read a file: text with line numbers, images, or PDF pages. Required before write or multi_edit. Not for notebooks - use notebook_read."
+                "* read: Read a file: text with line numbers, images or PDF pages. Use it to inspect any file, and before write or multi_edit. Not for notebooks - use notebook_read."
                 in system_prompt
             )
             # A base prompt that placed ``{{ tools }}`` itself suppresses

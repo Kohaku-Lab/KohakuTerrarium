@@ -91,7 +91,7 @@ class TestConstruction:
     async def test_same_tool_class_already_configured_is_kept_not_a_clash(
         self, tmp_path
     ):
-        shared = _tool_class("show_ui")
+        shared = _tool_class("show_chart")
         configured = shared()
 
         class _P(BasePlugin):
@@ -103,11 +103,11 @@ class TestConstruction:
         agent = await kt.Agent.build(
             _cfg(tmp_path), llm=ScriptedLLM(["x"]), tools=[configured], plugins=[_P()]
         )
-        assert agent.registry.get_tool("show_ui") is configured
+        assert agent.registry.get_tool("show_chart") is configured
         agent.plugins.disable("ui.declarative")
-        assert agent.registry.get_tool("show_ui") is configured, "not the plugin's"
+        assert agent.registry.get_tool("show_chart") is configured, "not the plugin's"
         agent.plugins.enable("ui.declarative")
-        assert agent.registry.get_tool("show_ui") is configured
+        assert agent.registry.get_tool("show_chart") is configured
 
     async def test_two_plugins_with_the_same_tool_fail_the_build(self, tmp_path):
         with pytest.raises(PluginToolConflictError, match="both contribute"):
@@ -120,6 +120,36 @@ class TestConstruction:
     def test_conflict_error_is_typed(self):
         assert issubclass(PluginToolConflictError, ConflictError)
         assert issubclass(PluginToolConflictError, KTError)
+
+
+class TestBeforeStart:
+    async def test_disable_and_enable_before_start_keep_tools_in_step(self, tmp_path):
+        agent = await kt.Agent.build(
+            _cfg(tmp_path),
+            llm=ScriptedLLM(["x"]),
+            plugins=[_plugin("apps", "show_app")],
+        )
+        agent.plugins.disable("apps")
+        assert "show_app" not in agent.registry.list_tools()
+        assert agent.executor.get_tool("show_app") is None
+        assert "show_app" not in agent.get_system_prompt()
+        agent.plugins.enable("apps")
+        assert _registered(agent, "show_app")
+
+    async def test_catalog_plugin_enabled_before_start_brings_its_tool(self, tmp_path):
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
+        assert not agent.plugins.is_enabled("ui.apps")
+        assert "show_app" not in agent.registry.list_tools()
+        agent.plugins.enable("ui.apps")
+        assert "show_app" in agent.registry.list_tools()
+        assert agent.executor.get_tool("show_app") is not None
+        await agent.start()
+        try:
+            assert "show_app" in agent.registry.list_tools()
+            agent.plugins.disable("ui.apps")
+            assert "show_app" not in agent.registry.list_tools()
+        finally:
+            await agent.stop()
 
 
 class TestRuntimeMembership:
