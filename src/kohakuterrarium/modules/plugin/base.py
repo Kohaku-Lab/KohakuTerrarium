@@ -258,6 +258,8 @@ class BasePlugin(UIOwnerMixin):
     applies_to: dict[str, list[str]] = {}
     # Renderer ids whose attach or detach changes get_prompt_content.
     prompt_renderers: frozenset[str] = frozenset()
+    # Names ``<doc_prefix>:<topic>`` that ``info`` resolves through doc_topic.
+    doc_prefix: str = ""
 
     def __init__(self) -> None:
         # Compile once because applicability is evaluated for every hook.
@@ -347,6 +349,19 @@ class BasePlugin(UIOwnerMixin):
         The section sits right after the base prompt and teaches the forms an
         answer can take in the attached clients (inline components, apps).
         Declare the renderers the part depends on in ``prompt_renderers``.
+        """
+        return None
+
+    def doc_topics(self, context: PluginContext | None) -> list[str]:
+        """Topic names ``info`` can load as ``<doc_prefix>:<topic>``."""
+        return []
+
+    def doc_topic(self, topic: str, context: PluginContext | None) -> str | None:
+        """Documentation for one topic under ``doc_prefix``, or ``None`` if unknown.
+
+        ``info("<doc_prefix>:<topic>")`` returns it, through the tool and the
+        text-format ``info`` command alike. Advertise the prefix in the
+        plugin's own prompt content.
         """
         return None
 

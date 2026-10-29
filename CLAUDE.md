@@ -730,7 +730,9 @@ is worse than a missing one — it teaches the model something false.
 `tool_doc_mode` is `brief` | `standard` (default) | `full`, overridable per tool
 with `doc_mode` on a `tools:` entry. Files in `builtin_skills/` split at
 `## Reference`: above it is the **usage** tier that `full` inlines, below it is
-reachable only through `info`, in every mode.
+reachable only through `info`, in every mode. Plugins serve their own topics
+through `info("<doc_prefix>:<topic>")` (`BasePlugin.doc_prefix` / `doc_topic`);
+`ui.declarative` keeps its less common components there as `ui:<name>`.
 
 ### What Goes Where
 

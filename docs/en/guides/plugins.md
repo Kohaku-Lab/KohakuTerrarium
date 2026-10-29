@@ -151,6 +151,39 @@ changing the registry. A contributed tool can declare `requires_renderers` to
 stay hidden until a client that can draw its UI is attached (see
 [custom modules](custom-modules.md#tools-that-need-a-ui-renderer)).
 
+### Documentation topics (`info("prefix:topic")`)
+
+A plugin can serve its own documentation through `info`. Set `doc_prefix`
+and implement `doc_topics` and `doc_topic`; `info("<prefix>:<topic>")`
+returns the topic, from the native `info` tool and the text-format `info`
+command alike. `info("<prefix>:")` lists the topics, and an unknown topic
+returns an error that lists them.
+
+```python
+class GlossaryPlugin(BasePlugin):
+    name = "glossary"
+    doc_prefix = "gloss"
+    TERMS = {"creature": "A configured agent.", "terrarium": "The runtime engine."}
+
+    def doc_topics(self, context):
+        return list(self.TERMS)
+
+    def doc_topic(self, topic, context):
+        return self.TERMS.get(topic)  # None means "no such topic"
+
+    def get_prompt_content(self, context):
+        return "Project terms: call `info` with `gloss:<term>` for a definition."
+```
+
+- A prefix is lowercase: a letter, then letters, digits, `_`, `.` or `-`
+  (at most 32 characters). Invalid prefixes are ignored with a warning.
+- Only enabled, applicable plugins own a prefix. When two plugins claim the
+  same prefix, the one that runs first by priority owns it.
+- Tell the model about your prefix in your own prompt content: `info` lists
+  no plugin topics by itself. Use it to keep rarely needed reference out of
+  the always-loaded prompt; `ui.declarative` names its less common
+  components and serves their props as `ui:<name>`.
+
 ### Pinned context
 
 `context.pin_message(key, role, content)` places a message right after the
