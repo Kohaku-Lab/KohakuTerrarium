@@ -4,6 +4,7 @@ import pytest
 from textual.widgets import Label, TabbedContent
 from textual.widgets._markdown import MarkdownFence
 
+from kohakuterrarium.builtins.tui import attention
 from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.builtins.tui.app import _safe_id
 from kohakuterrarium.builtins.tui.session import TUISession
@@ -345,3 +346,33 @@ async def test_router_delivers_legacy_kinds_to_the_tui_through_on_widget():
     assert tui.notices == [
         {"text": "built", "command": "ok", "error": False, "target": "alice"}
     ]
+
+
+class CardTUI(FakeTUI):
+    def __init__(self):
+        super().__init__()
+        self.cards = []
+
+    def add_card_block(self, payload, *, event_id, on_action, target):
+        self.cards.append((payload, event_id, on_action))
+
+
+async def test_tui_reports_kt_ui_and_draws_it_as_card_blocks(monkeypatch):
+    monkeypatch.setattr(attention, "add_pending", lambda *a: None)
+    monkeypatch.setattr(attention, "clear", lambda *a: None)
+    tui = CardTUI()
+    output = TUIOutput()
+    output._tui = tui
+    router = OutputRouter(output)
+    assert router.ui_renderers() == {"kt.ui": 1}
+    spec = {
+        "title": "Count",
+        "state": {"n": 1},
+        "root": {"type": "button", "label": "Add", "set": {"n": "n + 1"}},
+    }
+    handle = await router.widgets.open("kt.ui", spec, state={"n": 1}, title="Count")
+    payload, event_id, on_action = tui.cards[-1]
+    assert payload["actions"] == [{"id": "c0", "label": "Add"}]
+    on_action(event_id, "c0")
+    assert handle.state == {"n": 2}
+    assert len(tui.cards) == 2

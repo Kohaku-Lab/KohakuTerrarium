@@ -38,6 +38,7 @@ from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
@@ -187,6 +188,35 @@ class VisibilityProbeTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         return ToolResult(output="visibility probe ran")
+
+
+class _TerminalOverlay:
+    """Rich CLI bus overlay stand-in that records what it was asked to show."""
+
+    def __init__(self) -> None:
+        self.opened: list = []
+        self.pending_event_ids: set[str] = set()
+        self.on_reply = None
+
+    def open(self, event, *, router=None) -> None:
+        self.opened.append((event, router))
+
+    def on_supersede(self, event_id) -> None:
+        self.pending_event_ids.discard(event_id)
+
+
+class _TerminalApp:
+    """The parts of RichCLIApp that RichCLIOutput draws widgets through."""
+
+    def __init__(self) -> None:
+        self.bus_overlay = _TerminalOverlay()
+        self.cards: list[dict] = []
+
+    def _invalidate(self) -> None:
+        pass
+
+    def on_card_event(self, payload: dict) -> None:
+        self.cards.append(payload)
 
 
 class _DeepSeekResponse:
@@ -2679,6 +2709,8 @@ class TestModulesIntegration:
                 ScriptEntry(call, match="split the bill"),
                 ScriptEntry("got the result", match="message result"),
                 ScriptEntry("saw the late click", match="widget_event"),
+                ScriptEntry(call, match="split it in the terminal"),
+                ScriptEntry("terminal result", match="message result"),
             ]
         )
         await agent.start()
@@ -2735,6 +2767,47 @@ class TestModulesIntegration:
             assert "saw the late click" in last.get_text_content()
 
             agent.output_router.remove_secondary(web)
+            assert "show_ui" not in agent.get_system_prompt()
+
+            # A terminal output draws kt.ui as cards: show_ui comes back, while
+            # show_app (which needs kt.app) stays hidden.
+            await agent.add_plugin(AppsPlugin())
+            previous = agent.output_router.default_output
+            app = _TerminalApp()
+            agent.output_router.default_output = RichCLIOutput(app)
+            prompt = agent.get_system_prompt()
+            assert "`show_ui`" in prompt and "`show_app`" not in prompt
+            turn = asyncio.create_task(
+                agent._process_event(
+                    create_user_input_event("split it in the terminal")
+                )
+            )
+            for _ in range(200):
+                if app.bus_overlay.opened:
+                    break
+                await asyncio.sleep(0.01)
+            card, reply_router = app.bus_overlay.opened[-1]
+            assert card.type == "card" and "Each: 40" in card.payload["body"]
+            labels = {a["label"]: a["id"] for a in card.payload["actions"]}
+            assert set(labels) == {"People: 3 ✎", "Send"}
+            assert reply_router.submit_reply(
+                UIReply(event_id=card.id, action_id=labels["People: 3 ✎"])
+            )
+            prompt_event, _ = app.bus_overlay.opened[-1]
+            assert prompt_event.type == "ask_text"
+            reply_router.submit_reply(UIReply(prompt_event.id, "submit", {"text": "4"}))
+            card, _ = app.bus_overlay.opened[-1]
+            assert "Each: 30" in card.payload["body"]
+            send_id = next(
+                a["id"] for a in card.payload["actions"] if a["label"] == "Send"
+            )
+            assert reply_router.submit_reply(UIReply(card.id, send_id))
+            await turn
+            assert agent.llm.call_count == 5
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert "terminal result" in last.get_text_content()
+
+            agent.output_router.default_output = previous
             assert "show_ui" not in agent.get_system_prompt()
         finally:
             await agent.stop()

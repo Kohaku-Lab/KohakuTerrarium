@@ -9,6 +9,7 @@ The agent's output router calls into this module:
 
 from typing import Any
 
+from kohakuterrarium.builtins.kt_ui.terminal import TEXT_PROFILE, TerminalUiRenderer
 from kohakuterrarium.builtins.terminal_attention import set_attention
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
@@ -36,6 +37,30 @@ class RichCLIOutput(BaseOutputModule):
         overlay = getattr(app, "bus_overlay", None)
         if overlay is not None:
             overlay.on_reply = self._on_pending_changed
+        self._kt_ui = TerminalUiRenderer(
+            get_service=self._widget_service,
+            present=self._present_widget_event,
+            retract=self.on_supersede,
+            source=self,
+        )
+
+    def ui_renderers(self) -> dict[str, int]:
+        """The ``kt.ui`` text profile, when an interactive overlay is available."""
+        if getattr(self.app, "bus_overlay", None) is None:
+            return {}
+        return dict(TEXT_PROFILE)
+
+    def _widget_service(self):
+        router = self.reply_router or getattr(self, "_router", None)
+        return getattr(router, "widgets", None)
+
+    def _present_widget_event(self, event: OutputEvent, reply_router) -> None:
+        """Draw a ``kt.ui`` card or prompt and send its reply to ``reply_router``."""
+        if event.interactive:
+            self._open_bus_overlay(event, router=reply_router)
+            self._refresh_attention()
+        else:
+            self._render_card(event)
 
     async def write(self, content: str) -> None:
         if not content or self.app is None:
@@ -152,10 +177,18 @@ class RichCLIOutput(BaseOutputModule):
                     )
 
     async def on_widget(self, event: OutputEvent) -> None:
-        """Draw the legacy widget kinds; other renderers show their fallback text."""
+        """Draw ``kt.ui`` and the legacy kinds; other renderers show their fallback text."""
+        if self._kt_ui.handles(event):
+            self._kt_ui.on_widget(event)
+            if self.app is not None:
+                self.app._invalidate()
+            return
         await render_widget_as_legacy(self, event)
 
     def on_widget_close(self, event: OutputEvent) -> None:
+        if self._kt_ui.handles(event):
+            self._kt_ui.on_widget(event)
+            return
         self.on_supersede(event.update_target)
 
     def on_supersede(self, event_id: str) -> None:
@@ -173,7 +206,7 @@ class RichCLIOutput(BaseOutputModule):
         pending = bool(getattr(overlay, "pending_event_ids", ()))
         self._on_pending_changed(None, pending)
 
-    def _open_bus_overlay(self, event: OutputEvent) -> None:
+    def _open_bus_overlay(self, event: OutputEvent, *, router=None) -> None:
         """Queue an interactive event for keyboard input in the live region."""
         if self.app is None:
             return
@@ -188,7 +221,7 @@ class RichCLIOutput(BaseOutputModule):
                     logger.exception("CLI panel fallback failed", error=str(e))
             return
         try:
-            overlay.open(event, router=self.reply_router)
+            overlay.open(event, router=router or self.reply_router)
             self.app._invalidate()
         except Exception as e:
             logger.exception(
