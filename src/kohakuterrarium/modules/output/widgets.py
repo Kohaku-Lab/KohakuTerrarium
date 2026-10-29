@@ -8,6 +8,7 @@ a ``widget_event`` trigger, or is dropped.
 
 import asyncio
 import json
+import re
 import secrets
 import time
 import weakref
@@ -29,6 +30,8 @@ MESSAGE_BURST = 10
 MESSAGE_WINDOW_S = 10.0
 
 _clock = time.monotonic
+
+MESSAGE_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 
 Origin = Literal["renderer", "app"]
 Routing = Literal["agent", "drop"]
@@ -84,6 +87,11 @@ def _json_size(value: Any) -> int:
         return len(json.dumps(value, ensure_ascii=False, default=str))
     except (TypeError, ValueError):
         return MAX_STATE_BYTES + 1
+
+
+def _escape_markup(text: str) -> str:
+    """Escape ``<`` and ``>`` so widget text cannot open or close a block."""
+    return text.replace("<", "\\u003c").replace(">", "\\u003e")
 
 
 class WidgetRegistry:
@@ -342,7 +350,9 @@ class WidgetService:
     def submit_message(self, msg: WidgetMessage) -> str:
         """Route one message; return ``accepted``, ``dropped``, ``unknown`` or ``rate_limited``."""
         record = self._lookup(msg.widget_id)
-        if record is None or record.closed or not record.interactive or not msg.name:
+        if record is None or record.closed or not record.interactive:
+            return "unknown"
+        if not MESSAGE_NAME.fullmatch(msg.name or ""):
             return "unknown"
         if _json_size(msg.data) > MAX_MESSAGE_BYTES:
             return "dropped"
@@ -459,8 +469,8 @@ class WidgetService:
     def _trigger_for(record: WidgetRecord, msg: WidgetMessage) -> TriggerEvent:
         """Build the ``widget_event`` trigger for an unclaimed message."""
         trust = ' trust="untrusted"' if msg.origin == "app" else ""
-        body = json.dumps(msg.data, ensure_ascii=False, default=str)
-        title = record.title.replace('"', "'")
+        body = _escape_markup(json.dumps(msg.data, ensure_ascii=False, default=str))
+        title = _escape_markup(record.title.replace('"', "'"))
         content = (
             f'<widget_event widget="{record.widget_id}" title="{title}" '
             f'name="{msg.name}" origin="{msg.origin}"{trust}>{body}</widget_event>'
