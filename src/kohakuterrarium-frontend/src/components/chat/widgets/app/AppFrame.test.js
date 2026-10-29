@@ -112,7 +112,7 @@ describe("AppFrame", () => {
       }),
     )
     await flushPromises()
-    expect(h.send).toHaveBeenCalledWith("done", {})
+    expect(h.send).toHaveBeenCalledWith("done", {}, "app")
     expect(w.find('[data-test="app-frame-sent"]').text()).toContain("done")
     expect(w.find('[data-test="app-frame-error"]').text()).toContain("x is undefined")
     expect(w.text()).not.toContain("spoofed")

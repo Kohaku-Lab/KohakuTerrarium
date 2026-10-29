@@ -21,7 +21,9 @@ export function findWidgetMessage(store, eventId, tab = "") {
 export function makeWidgetHost({ store, tab, eventId, canvas = null, extra = {} }) {
   const resolveTab = () => (typeof tab === "function" ? tab() : tab)
   return {
-    send: (name, data) => store.submitWidgetMessage(resolveTab(), eventId, name, data || {}),
+    // ``origin: "app"`` marks a message from model-written app code; the agent sees it as untrusted.
+    send: (name, data, origin = "renderer") =>
+      store.submitWidgetMessage(resolveTab(), eventId, name, data || {}, origin),
     setState: (patch) => store.setWidgetState(resolveTab(), eventId, patch),
     close: () => {},
     openInCanvas: () => {

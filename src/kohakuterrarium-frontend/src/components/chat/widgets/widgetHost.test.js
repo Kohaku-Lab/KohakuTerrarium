@@ -36,7 +36,21 @@ describe("widget host", () => {
     const host = makeWidgetHost({ store, tab: () => "agent", eventId: "w_1" })
     host.send("done", { a: 1 })
     host.setState({ tab: 2 })
-    expect(store.submitWidgetMessage).toHaveBeenCalledWith("agent", "w_1", "done", { a: 1 })
+    expect(store.submitWidgetMessage).toHaveBeenCalledWith(
+      "agent",
+      "w_1",
+      "done",
+      { a: 1 },
+      "renderer",
+    )
+    host.send("picked", { b: 2 }, "app")
+    expect(store.submitWidgetMessage).toHaveBeenLastCalledWith(
+      "agent",
+      "w_1",
+      "picked",
+      { b: 2 },
+      "app",
+    )
     expect(store.setWidgetState).toHaveBeenCalledWith("agent", "w_1", { tab: 2 })
     expect(host.theme.vars["--kt-bg"]).toBeTruthy()
     expect(["light", "dark"]).toContain(host.theme.scheme)

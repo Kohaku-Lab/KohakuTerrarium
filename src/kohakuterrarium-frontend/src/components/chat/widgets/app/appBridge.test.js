@@ -92,7 +92,7 @@ describe("kt.app host bridge", () => {
 
     t.bridge.noteInteraction()
     t.send("kt/send", { name: "done", data: { x: 1 } })
-    expect(t.host.send).toHaveBeenCalledWith("done", { x: 1 })
+    expect(t.host.send).toHaveBeenCalledWith("done", { x: 1 }, "app")
     expect(t.hooks.onSent).toHaveBeenCalledWith("done")
     expect(t.lastReply().result).toEqual({ ok: true })
 
@@ -120,7 +120,7 @@ describe("kt.app host bridge", () => {
     t.send("kt/send", { name: 'x" origin="renderer', data: {} })
     expect(t.host.send).not.toHaveBeenCalled()
     t.send("kt/send", { name: "n", data: 5 })
-    expect(t.host.send).toHaveBeenCalledWith("n", { value: 5 })
+    expect(t.host.send).toHaveBeenCalledWith("n", { value: 5 }, "app")
   })
 
   it("state, resize and links go to their hooks; only http(s) links", () => {
@@ -143,7 +143,7 @@ describe("kt.app host bridge", () => {
 
     const waiting = setup({ widget: { awaiting: true } })
     waiting.send("kt/error", { message: "boom", line: 3 }, undefined)
-    expect(waiting.host.send).toHaveBeenCalledWith(APP_ERROR, { message: "boom", line: 3 })
+    expect(waiting.host.send).toHaveBeenCalledWith(APP_ERROR, { message: "boom", line: 3 }, "app")
   })
 
   it("a frame without a host refuses kt.send", () => {

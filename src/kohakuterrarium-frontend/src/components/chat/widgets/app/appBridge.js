@@ -86,7 +86,7 @@ export function createAppBridge({
         }
         const data =
           params.data && typeof params.data === "object" ? params.data : { value: params.data }
-        host.send(name, data)
+        host.send(name, data, "app")
         onSent?.(name)
         reply(msg.id, { ok: true })
         break
@@ -105,7 +105,7 @@ export function createAppBridge({
         const message = String(params.message || "script error").slice(0, 500)
         onError?.(message)
         if (!empty && getWidget()?.awaiting)
-          host.send(APP_ERROR, { message, line: params.line || 0 })
+          host.send(APP_ERROR, { message, line: params.line || 0 }, "app")
         break
       }
       default:
