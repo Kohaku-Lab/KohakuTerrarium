@@ -167,12 +167,20 @@ class TestWait:
         result = await _run(tool, {"spec": SPEC, "wait_for": 3}, ctx)
         assert "list" in result.error
 
+        def opened():
+            return [
+                e
+                for e in out.widget_events
+                if e.type == "widget" and not e.update_target
+            ]
+
+        before = len(opened())
         task = asyncio.create_task(
             _run(tool, {"spec": SPEC, "wait_for": ["result"]}, ctx)
         )
-        while len(out.widget_events) < 2:
+        while len(opened()) == before:
             await asyncio.sleep(0)
-        await router.widgets.close(out.widget_events[-1].id)
+        await router.widgets.close(opened()[-1].id)
         assert (await task).output.endswith("widget closed")
 
 
