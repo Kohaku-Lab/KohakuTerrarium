@@ -30,6 +30,23 @@ of the sandbox plugin, see
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
 
+`ui.apps` and `ui.declarative` are **on by default**; every other plugin
+starts off. Both add nothing until an attached client draws their renderer, so
+a headless creature gets no prompt or tool from them. Turn one off with an
+entry in `plugins:`:
+
+```yaml
+plugins:
+  - name: ui.apps
+    enabled: false
+```
+
+A plugin that is on only by default yields: if one of its tools has a name a
+configured tool or another plugin already uses, it is turned off with a
+warning instead of failing the build. A user's own toggle in the Plugins tab is
+saved with the session and wins on resume. KohakuTerrarium's own MCP tool
+server, which has no chat client, starts both off.
+
 ## `sandbox`
 
 Hard capability gate. Restricts what tools and subprocesses can do
@@ -287,7 +304,13 @@ Implementation: `src/kohakuterrarium/builtins/plugins/ui_declarative/` and
   cannot call `info`, every component is written out. Headless creatures
   never get the part.
 - A block that fails to convert or validate is drawn as an error box; the
-  next model request carries one note naming the block and its errors.
+  next model request carries one note naming the block and its errors, with
+  the props (and an example) of each component the errors name.
+- The VS Code view cannot run app frames inside its chat, so a `show_app`
+  app or an inline `html` block opens in its own editor tab, behind a fixed
+  policy with no network connections. The app's bridge is relayed through
+  the extension, and each `kt.send` asks the user first ("Send" or "Always
+  for this app"), because every script in that tab is the model's.
 - A button or form `send` posts its text as the user's next message.
 
 The plugin has no options (an old `default_surface` option is accepted and
