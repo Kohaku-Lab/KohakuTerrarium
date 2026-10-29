@@ -26,7 +26,9 @@ runs a *real* turn through a ``ScriptedLLM``. The LLM is the only seam.
 
 from __future__ import annotations
 
+import asyncio
 import textwrap
+from collections import deque
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,7 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.prompt.aggregator import (
     aggregate_system_prompt,
     build_context_message,
@@ -230,21 +233,6 @@ class _AppsPlugin(BasePlugin):
         return [_AppTool()]
 
 
-class _RendererFeed:
-    """Renderer report on the output router, standing in for attached clients."""
-
-    def __init__(self, router) -> None:
-        self.renderers: dict[str, int] = {}
-        self.listeners: list = []
-        router.ui_renderers = lambda: dict(self.renderers)
-        router.add_renderers_listener = self.listeners.append
-
-    def set(self, renderers: dict[str, int]) -> None:
-        old, self.renderers = self.renderers, dict(renderers)
-        for listener in self.listeners:
-            listener(old, dict(renderers))
-
-
 def _conversation_text(agent: Agent) -> str:
     """Flatten the controller conversation into a single searchable string."""
     chunks: list[str] = []
@@ -385,27 +373,30 @@ class TestPromptIntegration:
             # with the plugin, but absent from every prompt section until an
             # attached output reports ``kt.app``, and gone again on detach or
             # when the plugin is disabled.
-            feed = _RendererFeed(agent.output_router)
-            agent.watch_renderers()
+            web = StreamOutput("web", asyncio.Queue(), deque(maxlen=50), agent)
             await agent.add_plugin(_AppsPlugin())
             assert "show_app" in agent.registry.list_tools()
             live = agent.get_system_prompt()
             assert "`show_app`" not in live and "APP-GUIDANCE" not in live
 
-            feed.set({"kt.app": 1})
+            agent.output_router.add_secondary(web)
+            assert "show_app" not in agent.get_system_prompt(), "no hello yet"
+            web.set_client_renderers({"kt.app": 1})
             live = agent.get_system_prompt()
             assert "- `show_app`: Show an interactive app." in live
             assert "APP-GUIDANCE: prefer plain text" in live
             assert live.index("## Available Functions") < live.index("APP-GUIDANCE")
             assert "PERSONALITY-MARKER" in live and "SAFETY-BANNER" in live
 
-            feed.set({})
+            agent.output_router.remove_secondary(web)
             assert "show_app" not in agent.get_system_prompt()
 
-            feed.set({"kt.app": 1})
+            agent.output_router.add_secondary(web)
+            assert "show_app" in agent.get_system_prompt()
             agent.plugins.disable("apps_probe")
             assert "show_app" not in agent.registry.list_tools()
             assert "show_app" not in agent.get_system_prompt()
+            agent.output_router.remove_secondary(web)
         finally:
             await agent.stop()
 

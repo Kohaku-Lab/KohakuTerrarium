@@ -7,6 +7,7 @@ request while a turn is running.
 """
 
 import kohakuterrarium as kt
+from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -46,19 +47,21 @@ def _cfg(tmp_path):
     )
 
 
-class _RendererFeed:
-    """Stand-in for the router's renderer report and change subscription."""
+class _RendererFeed(NoneOutput):
+    """A secondary output whose reported renderers the test sets."""
 
     def __init__(self, router):
+        super().__init__()
         self.renderers: dict[str, int] = {}
-        self.listeners = []
-        router.ui_renderers = lambda: dict(self.renderers)
-        router.add_renderers_listener = self.listeners.append
+        self._router = router
+        router.add_secondary(self)
+
+    def ui_renderers(self) -> dict[str, int]:
+        return dict(self.renderers)
 
     def set(self, renderers):
-        old, self.renderers = self.renderers, dict(renderers)
-        for listener in self.listeners:
-            listener(old, dict(renderers))
+        self.renderers = dict(renderers)
+        self._router.refresh_renderers()
 
 
 async def _agent(tmp_path, responses=("ok",)):
