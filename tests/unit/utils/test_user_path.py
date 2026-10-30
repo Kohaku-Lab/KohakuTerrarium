@@ -1,6 +1,5 @@
 """User PATH editing: pure string rules plus the registry and profile adapters."""
 
-import os
 import sys
 from pathlib import Path
 
@@ -8,7 +7,7 @@ import pytest
 
 from kohakuterrarium.utils import user_path
 
-SEP = os.pathsep
+SEP = ";"
 
 
 class TestEntries:
@@ -18,10 +17,12 @@ class TestEntries:
         assert added == SEP.join(["a", "b", "c"])
         assert user_path.with_entry(added, "c") == added
 
-    def test_membership_ignores_case_and_separators_on_this_platform(self):
-        value = SEP.join([str(Path("x") / "bin"), "y"])
-        assert user_path.contains(value, str(Path("x") / "bin"))
-        assert not user_path.contains(value, "z")
+    def test_membership_follows_windows_path_rules_on_every_platform(self):
+        value = SEP.join([r"C:\Users\Me\Bin", "y"])
+        assert user_path.contains(value, r"c:\users\me\bin")
+        assert user_path.contains(value, "C:/Users/Me/Bin/")
+        assert user_path.contains(value, r"C:\Users\Me\..\Me\Bin")
+        assert not user_path.contains(value, r"C:\Users\Me")
 
     def test_removal_drops_only_the_named_entry(self):
         value = SEP.join(["a", "b", "c"])

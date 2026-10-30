@@ -7,7 +7,7 @@ outside the marked entry.
 """
 
 import ctypes
-import os
+import ntpath
 import sys
 from pathlib import Path
 
@@ -22,14 +22,17 @@ _BROADCAST = 0xFFFF
 _SETTING_CHANGE = 0x001A
 
 
+WINDOWS_SEPARATOR = ";"
+
+
 def _same(a: str, b: str) -> bool:
-    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(
-        os.path.normpath(b)
-    )
+    """Windows path equality: case-insensitive, separators and ``..`` normalised."""
+    return ntpath.normcase(ntpath.normpath(a)) == ntpath.normcase(ntpath.normpath(b))
 
 
 def split_entries(value: str) -> list[str]:
-    return [entry for entry in value.split(os.pathsep) if entry]
+    """Split a Windows ``Path`` value, dropping empty segments."""
+    return [entry for entry in value.split(WINDOWS_SEPARATOR) if entry]
 
 
 def with_entry(value: str, directory: str) -> str:
@@ -37,11 +40,11 @@ def with_entry(value: str, directory: str) -> str:
     entries = split_entries(value)
     if any(_same(entry, directory) for entry in entries):
         return value
-    return os.pathsep.join([*entries, directory])
+    return WINDOWS_SEPARATOR.join([*entries, directory])
 
 
 def without_entry(value: str, directory: str) -> str:
-    return os.pathsep.join(
+    return WINDOWS_SEPARATOR.join(
         entry for entry in split_entries(value) if not _same(entry, directory)
     )
 
