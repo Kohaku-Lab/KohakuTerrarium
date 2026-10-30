@@ -19,7 +19,7 @@ The workflows mirror how the codebase actually drives ``packages/``:
   lifecycle: ``install_package_op`` → ``list_installed_packages`` →
   ``load_agent_info`` / ``get_package_modules`` → ``uninstall_package_op``.
 - ``core/config/load.py`` (``_resolve_base_config``) and
-  ``terrarium/tools_group_lifecycle.py`` resolve ``@pkg/creatures/<name>``
+  ``terrarium/tools/lifecycle.py`` resolve ``@pkg/creatures/<name>``
   references in recipes via ``is_package_ref`` + ``resolve_package_path``.
 - ``packages/resolve.py`` scanners (``resolve_package_tool`` etc.) are
   what ``bootstrap`` uses to find package-declared tools / io / triggers.

@@ -6,7 +6,7 @@ snapshots, append-only event logs, channel message history, sub-agent
 conversations, scratchpad state, token usage, and full-text search indexes.
 `SessionOutput` (in `output/`) is an output module that captures all agent
 events without modifying the processing loop. `resume/` rebuilds agents from
-saved state; engine-level terrarium resume lives in `terrarium/resume.py`.
+saved state; engine-level terrarium resume lives in `terrarium/resume/resume.py`.
 
 ## Layout
 

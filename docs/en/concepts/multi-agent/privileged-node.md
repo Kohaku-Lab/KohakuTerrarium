@@ -110,7 +110,7 @@ privilege plus the `report_to_root` channel plus listen-all wiring.
 
 - **Privilege flag:** `Creature.is_privileged`, a runtime property of
   the creature handle, not the underlying agent config.
-- **Tool registration:** `terrarium/tools_group.py` exposes
+- **Tool registration:** `terrarium/tools/group.py` exposes
   `force_register_basic_tools` (always) and
   `force_register_privileged_tools` (only on privileged nodes). The
   privileged surface is `group_add_node`, `group_remove_node`,

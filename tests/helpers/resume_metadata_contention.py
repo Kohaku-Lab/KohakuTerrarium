@@ -9,7 +9,8 @@ from kohakuterrarium.session.readonly import metadata as readonly_module
 from kohakuterrarium.session.resume import async_flow as resume_async
 from kohakuterrarium.session.store.lifecycle import tables as store_tables_module
 from kohakuterrarium.session.occupancy.gate import GATE
-from kohakuterrarium.terrarium import resume, resume_manifest
+from kohakuterrarium.terrarium.resume import resume
+from kohakuterrarium.terrarium.resume import manifest as resume_manifest
 
 
 def resume_with_metadata_contention(client, path, url, monkeypatch):

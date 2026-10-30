@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 
-import kohakuterrarium.terrarium.autosession as _autosession
+import kohakuterrarium.terrarium.session.autosession as _autosession
 import kohakuterrarium.terrarium.channels.channels as channel_module
 import kohakuterrarium.terrarium.graph.manifest as _manifest
 from kohakuterrarium.studio._runtime import as_engine

@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import kohakuterrarium.terrarium.autosession as _autosession
+import kohakuterrarium.terrarium.session.autosession as _autosession
 import kohakuterrarium.terrarium.channels.channels as _channels
 import kohakuterrarium.terrarium.graph.checkpoint as _checkpoint
 import kohakuterrarium.terrarium.graph.identity_engine as _identity

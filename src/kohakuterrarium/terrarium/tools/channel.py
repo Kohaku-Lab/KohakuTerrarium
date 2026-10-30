@@ -1,0 +1,282 @@
+"""``group_channel`` — channel CRUD + per-creature wiring.
+
+The ``direction`` argument toggles the target's edge, not the caller's.
+``direction="listen"`` makes ``creature_id`` listen; ``direction="send"``
+allows that target to send. The privileged caller wires on its behalf.
+
+When the wire crosses graph boundaries (target is in a different
+graph — typically a freshly-spawned worker still in its own singleton
+graph), the call routes through :meth:`Terrarium.connect` which merges
+the two graphs and pairs the caller as the counterparty (caller sends
+when target listens; caller listens when target sends).
+"""
+
+from typing import Any
+
+import kohakuterrarium.terrarium.channels.lifecycle as _lifecycle
+import kohakuterrarium.terrarium.channels.channels as _channels
+import kohakuterrarium.terrarium.graph.topology as _topo
+from kohakuterrarium.builtins.tool_catalog import register_builtin
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolContext,
+    ToolResult,
+)
+from kohakuterrarium.terrarium.events import EngineEvent, EventKind
+from kohakuterrarium.terrarium.tools.context import (
+    GroupContext,
+    cross_cluster_target_error,
+    resolve_group_target,
+)
+from kohakuterrarium.terrarium.tools.common import (
+    err,
+    missing_channel_error,
+    ok,
+    resolve_or_error,
+)
+
+
+def _emit_intra_graph_wire_event(gctx: GroupContext, target_id: str) -> None:
+    """Refresh caller and target prompts after an intra-graph edge change.
+
+    Cross-graph operations route through engine methods that emit their own event.
+    """
+    gctx.engine._emit(
+        EngineEvent(
+            kind=EventKind.TOPOLOGY_CHANGED,
+            graph_id=gctx.caller.graph_id,
+            payload={
+                "kind": "nothing",
+                "old_graph_ids": [gctx.caller.graph_id],
+                "new_graph_ids": [gctx.caller.graph_id],
+                "affected": sorted({gctx.caller.creature_id, target_id}),
+            },
+        )
+    )
+
+
+@register_builtin("group_channel")
+class GroupChannelTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_channel"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Create, delete or rewire channels in your group. Use it to set up "
+            "broadcast routes between creatures. Not for output wires - use "
+            "group_wire."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create", "delete", "wire", "unwire"],
+                },
+                "channel": {"type": "string"},
+                "description": {"type": "string"},
+                "creature_id": {"type": "string"},
+                "direction": {"type": "string", "enum": ["send", "listen"]},
+            },
+            "required": ["action", "channel"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        action = (args.get("action") or "").strip()
+        channel = (args.get("channel") or "").strip()
+        if not action or not channel:
+            return err("action and channel are required")
+
+        if action == "create":
+            if channel in gctx.graph.channels:
+                return err(f"channel {channel!r} already exists in your graph")
+            try:
+                info = await gctx.engine.add_channel(
+                    gctx.graph.graph_id,
+                    channel,
+                    description=args.get("description", "") or "",
+                )
+            except Exception as exc:
+                return err(f"add_channel failed: {exc}")
+            return ok(
+                {
+                    "created": info.name,
+                    "caller_graph_id": gctx.caller.graph_id,
+                }
+            )
+
+        if action == "delete":
+            if channel not in gctx.graph.channels:
+                return err(
+                    f"channel {channel!r} not in your graph; "
+                    f"available: {sorted(gctx.graph.channels)}"
+                )
+            try:
+                delta = await gctx.engine.remove_channel(gctx.graph.graph_id, channel)
+            except Exception as exc:
+                return err(f"remove_channel failed: {exc}")
+            return ok(
+                {
+                    "deleted": channel,
+                    "caller_graph_id": gctx.caller.graph_id,
+                    "delta_kind": delta.kind,
+                }
+            )
+
+        ident = (args.get("creature_id") or "").strip()
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
+        if target is None:
+            return err(cross_cluster_target_error(gctx.engine, ident))
+        direction = (args.get("direction") or "").strip()
+        if direction not in ("send", "listen"):
+            return err("direction must be 'send' or 'listen'")
+
+        if action == "wire":
+            return await _wire(gctx, target, channel, direction)
+        if action == "unwire":
+            return await _unwire(gctx, target, channel, direction)
+        return err(f"unknown action {action!r}")
+
+
+async def _wire(
+    gctx: GroupContext,
+    target: Any,
+    channel: str,
+    direction: str,
+) -> ToolResult:
+    graph = gctx.graph
+    if channel not in graph.channels:
+        return missing_channel_error(graph, channel, target_name=target.name)
+    # Cross-graph wiring merges the graphs; the caller takes the role opposite
+    # the requested target direction.
+    if target.graph_id != graph.graph_id:
+        sender = gctx.caller if direction == "listen" else target
+        receiver = target if direction == "listen" else gctx.caller
+        try:
+            await gctx.engine.connect(
+                sender.creature_id,
+                receiver.creature_id,
+                channel=channel,
+            )
+        except Exception as exc:
+            return err(f"cross-graph wire failed: {exc}")
+        return ok(
+            {
+                "wired": channel,
+                "creature_id": target.creature_id,
+                "direction": direction,
+                "caller_graph_id": gctx.caller.graph_id,
+                "merged": True,
+            }
+        )
+
+    env = gctx.engine._environments.get(graph.graph_id)
+    registry = getattr(env, "shared_channels", None) if env is not None else None
+    if direction == "listen":
+        _topo.set_listen(
+            gctx.engine._topology, target.creature_id, channel, listening=True
+        )
+        if registry is not None:
+            _channels.inject_channel_trigger(
+                target.agent,
+                subscriber_id=target.name,
+                channel_name=channel,
+                registry=registry,
+                ignore_sender=target.name,
+                ignore_sender_id=target.creature_id,
+            )
+        if channel not in target.listen_channels:
+            target.listen_channels.append(channel)
+    else:
+        _topo.set_send(gctx.engine._topology, target.creature_id, channel, sending=True)
+        if channel not in target.send_channels:
+            target.send_channels.append(channel)
+    _emit_intra_graph_wire_event(gctx, target.creature_id)
+    await gctx.engine.checkpoint_graph(graph.graph_id)
+    return ok(
+        {
+            "wired": channel,
+            "creature_id": target.creature_id,
+            "direction": direction,
+            "caller_graph_id": gctx.caller.graph_id,
+        }
+    )
+
+
+async def _unwire(
+    gctx: GroupContext,
+    target: Any,
+    channel: str,
+    direction: str,
+) -> ToolResult:
+    if target.graph_id != gctx.graph.graph_id:
+        return err(f"target {target.name!r} is not in your graph; nothing to unwire")
+    graph = gctx.graph
+    if channel not in graph.channels:
+        return err(
+            f"channel {channel!r} not in your graph; "
+            f"available: {sorted(graph.channels)}"
+        )
+
+    if direction == "listen":
+        _topo.set_listen(
+            gctx.engine._topology, target.creature_id, channel, listening=False
+        )
+        _channels.remove_channel_trigger(
+            target.agent,
+            subscriber_id=target.name,
+            channel_name=channel,
+        )
+        if channel in target.listen_channels:
+            target.listen_channels.remove(channel)
+    else:
+        _topo.set_send(
+            gctx.engine._topology, target.creature_id, channel, sending=False
+        )
+        if channel in target.send_channels:
+            target.send_channels.remove(channel)
+
+    # Removing one direction may split the graph. Paired-edge disconnect would
+    # remove too much, so normalize connectivity after the single-edge change and
+    # apply the standard split bookkeeping. Otherwise emit to refresh both prompts.
+    delta = _topo._normalize_components(
+        gctx.engine._topology,
+        graph,
+        affected={gctx.caller.creature_id, target.creature_id},
+    )
+    if delta.kind == "split":
+        _lifecycle.apply_split_bookkeeping(gctx.engine, delta)
+        for graph_id in delta.new_graph_ids:
+            await gctx.engine.checkpoint_graph(graph_id)
+    else:
+        _emit_intra_graph_wire_event(gctx, target.creature_id)
+        await gctx.engine.checkpoint_graph(graph.graph_id)
+
+    return ok(
+        {
+            "unwired": channel,
+            "creature_id": target.creature_id,
+            "direction": direction,
+            "caller_graph_id": gctx.caller.graph_id,
+            "delta_kind": delta.kind,
+        }
+    )

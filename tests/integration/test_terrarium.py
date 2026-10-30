@@ -49,7 +49,7 @@ from kohakuterrarium.terrarium.drive.store.migration import _migrate_same_file_d
 from kohakuterrarium.terrarium.drive.wire import pack_drive_record
 from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.persistence.viewer.exchanges import build_exchanges_payload
-import kohakuterrarium.terrarium.session_coord as _session_coord
+import kohakuterrarium.terrarium.session.coord as _session_coord
 from kohakuterrarium.terrarium.drive.store.store import (
     DriveRepositoryClosedError,
     SqliteDriveRepository,
@@ -77,20 +77,20 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.output_log import OutputLogCapture
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
-from kohakuterrarium.terrarium.tools_group_channel import GroupChannelTool
-from kohakuterrarium.terrarium.tools_group_lifecycle import (
+from kohakuterrarium.terrarium.tools.channel import GroupChannelTool
+from kohakuterrarium.terrarium.tools.lifecycle import (
     GroupAddNodeTool,
     GroupRemoveNodeTool,
     GroupSpawnChildTool,
     GroupStartNodeTool,
     GroupStopNodeTool,
 )
-from kohakuterrarium.terrarium.tools_group_send import (
+from kohakuterrarium.terrarium.tools.send import (
     GroupSendTool,
     SendChannelTool,
 )
-from kohakuterrarium.terrarium.tools_group_status import GroupStatusTool
-from kohakuterrarium.terrarium.tools_group_wire import GroupWireTool
+from kohakuterrarium.terrarium.tools.status import GroupStatusTool
+from kohakuterrarium.terrarium.tools.wire import GroupWireTool
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 pytestmark = pytest.mark.timeout(60)

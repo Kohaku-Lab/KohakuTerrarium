@@ -141,7 +141,7 @@ delta 報告 `kind="split"` 與受影響的生物。
 `apply_split_bookkeeping` 與 `_merge_environment_into` 路徑會對每一對
 受影響的生物 × channel 呼叫它。
 
-### Resume 時 recipe 是真理來源（`terrarium/resume.py`、`terrarium/recipe/loader.py`）
+### Resume 時 recipe 是真理來源（`terrarium/resume/resume.py`、`terrarium/recipe/loader.py`）
 
 `resume_into_engine` **不會**把活動拓樸寫到磁碟再播回。它會讀
 `meta.config_path`（session 建立時記下的 recipe 路徑），並在新的引擎
@@ -184,14 +184,14 @@ scratchpad、觸發器）。
   `inject_channel_trigger`、`_teardown_existing_trigger`。
 - `src/kohakuterrarium/terrarium/channels/lifecycle.py`：
   `apply_split_bookkeeping`、頻道移除流程、environment 重新分配。
-- `src/kohakuterrarium/terrarium/session_coord.py`：`apply_merge`、
+- `src/kohakuterrarium/terrarium/session/coord.py`：`apply_merge`、
   `apply_split`、`merge_session_stores`、`split_session_store`、
   `copy_events_into`、meta 刷新輔助函數。
 - `src/kohakuterrarium/terrarium/runtime_prompt.py`：事件驅動的
   per-creature 提示詞刷新，監聽 `TOPOLOGY_CHANGED`、
   `CREATURE_STARTED`、`CREATURE_STOPPED`、`OUTPUT_WIRE_ADDED`、
   `OUTPUT_WIRE_REMOVED`、`PARENT_LINK_CHANGED`。
-- `src/kohakuterrarium/terrarium/resume.py`：`resume_into_engine`、
+- `src/kohakuterrarium/terrarium/resume/resume.py`：`resume_into_engine`、
   recipe 驅動的拓樸重建。
 - `src/kohakuterrarium/terrarium/events.py`：`EngineEvent` 分類、
   `EventFilter`。

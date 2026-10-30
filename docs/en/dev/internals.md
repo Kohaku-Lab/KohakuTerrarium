@@ -316,7 +316,7 @@ gave it. Solo creatures get no injection.
 **Hot-plug.** Topology can change at runtime. `Terrarium.connect(a, b,
 channel=...)` may merge two graphs (environments union, channels
 pool, attached session stores merge into one via
-`terrarium/session_coord.py:apply_merge`). `Terrarium.disconnect` may
+`terrarium/session/coord.py:apply_merge`). `Terrarium.disconnect` may
 split a graph (parent session is duplicated to each side via
 `apply_split`). The pure-data topology mutators in
 `terrarium/graph/topology.py` return a `TopologyDelta` whose
@@ -324,7 +324,7 @@ split a graph (parent session is duplicated to each side via
 
 **Session merge / split.** The unit of session is the connected
 component of the graph. Topology changes that don't affect graph
-membership reuse the existing store. `terrarium/session_coord.py`
+membership reuse the existing store. `terrarium/session/coord.py`
 implements both branches and emits `SESSION_FORKED` / `TOPOLOGY_CHANGED`
 events.
 

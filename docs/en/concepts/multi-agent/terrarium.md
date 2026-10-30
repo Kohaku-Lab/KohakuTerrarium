@@ -199,7 +199,7 @@ others can DM it via `send_channel`) and, if a root exists, a
   registration and user-IO mounting stay at higher layers. Use it any
   time you build a graph imperatively and want the normal "one-team,
   one-root" topology without going through a recipe file.
-- `terrarium/session_coord.py`: session merge / split policy. On a
+- `terrarium/session/coord.py`: session merge / split policy. On a
   graph merge, both old stores are unioned into a new one. On a graph
   split, the parent store is duplicated to each side.
 - `terrarium/events.py`: the `EngineEvent` taxonomy plus

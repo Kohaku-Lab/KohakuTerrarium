@@ -11,7 +11,7 @@ from typing import Any
 
 import kohakuterrarium.session.run_state as run_state
 from kohakuterrarium.studio.sessions.live.registry import live_sessions
-from kohakuterrarium.terrarium.store_observers import observe_session_stores
+from kohakuterrarium.terrarium.session.observers import observe_session_stores
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

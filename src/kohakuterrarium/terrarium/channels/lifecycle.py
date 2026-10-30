@@ -27,7 +27,7 @@ back), satisfying the dep-graph cycle check.
 
 from typing import TYPE_CHECKING
 
-import kohakuterrarium.terrarium.session_coord as _session_coord
+import kohakuterrarium.terrarium.session.coord as _session_coord
 import kohakuterrarium.terrarium.graph.topology as _topo
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.terrarium.channels.channels import (

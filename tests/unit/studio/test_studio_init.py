@@ -9,7 +9,7 @@ from kohakuterrarium import studio as studio_pkg
 
 class TestStudioInitHooks:
     def test_import_registers_group_hooks(self):
-        from kohakuterrarium.terrarium import group_hooks
+        from kohakuterrarium.terrarium.tools import hooks as group_hooks
 
         assert group_hooks._store_attach is not None
         assert group_hooks._spawnable is not None

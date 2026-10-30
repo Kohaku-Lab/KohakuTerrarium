@@ -100,7 +100,7 @@ creature)` 是完整的 root 风格助手：特权 + `report_to_root` 频道 + �
 
 - **特权旗标：** `Creature.is_privileged` 是生物句柄的运行时属
   性，与底层 agent 配置无关。
-- **工具注册：** `terrarium/tools_group.py` 暴露
+- **工具注册：** `terrarium/tools/group.py` 暴露
   `force_register_basic_tools`（每只生物都有）与
   `force_register_privileged_tools`（仅在特权节点上）。特权工具表面是
   `group_add_node`、`group_remove_node`、`group_start_node`、

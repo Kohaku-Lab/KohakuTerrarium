@@ -36,7 +36,7 @@ the public API from `builtins.tool_catalog`.
 | `delete_trigger.py`                     | Remove an installed setup-able trigger                                                                            |
 
 Graph management tools (`send_channel`, `group_send`, and the privileged
-`group_*` surface) are NOT here; they live in `terrarium/tools_group*.py`.
+`group_*` surface) are NOT here; they live in `terrarium/tools/`.
 
 ## Dependency direction
 

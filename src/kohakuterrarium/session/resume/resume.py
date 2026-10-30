@@ -500,7 +500,7 @@ def _rebuild_resumed_agent(
             f"Session config_type is {config_type!r}, not 'agent'. "
             "Resume the saved file via "
             "`Terrarium.resume(path)` / `engine.adopt_session(path)` "
-            "(see kohakuterrarium.terrarium.resume.resume_into_engine) "
+            "(see kohakuterrarium.terrarium.resume.resume.resume_into_engine) "
             "which dispatches between the agent and terrarium rebuild "
             "paths."
         )

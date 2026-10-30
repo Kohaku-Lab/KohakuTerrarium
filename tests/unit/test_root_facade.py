@@ -45,7 +45,7 @@ def test_root_import_defers_public_implementation_modules():
 def test_public_terrarium_access_registers_group_hooks():
     state = _fresh_python(
         "import json; from kohakuterrarium import Terrarium; "
-        "from kohakuterrarium.terrarium import group_hooks; "
+        "from kohakuterrarium.terrarium.tools import hooks as group_hooks; "
         "print(json.dumps([group_hooks._store_attach is not None, "
         "group_hooks._spawnable is not None, "
         "group_hooks._workspace_resolver is not None]))"

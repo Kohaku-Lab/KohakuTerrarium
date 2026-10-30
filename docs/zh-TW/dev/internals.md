@@ -164,9 +164,9 @@ Resume (`session/resume/resume.py`)：載入 `meta`、每個代理的 conversati
 
 **頻道注入**。當一隻生物加入了一個有它要 listen 的頻道的 graph，`terrarium/channels/channels.py:inject_channel_trigger` 會往它的 `trigger_manager` 加一個 `ChannelTrigger`。這是 layer 模型裡唯一被允許的向下注入：在 graph 裡的生物 *會* 知道自己有同伴 (它得知道)，但只透過引擎給它的 handle。獨立生物不會有任何注入。
 
-**熱插拔**。拓樸可以在執行期變更。`Terrarium.connect(a, b, channel=...)` 可能合併兩個 graph (environment 取聯集，頻道彙集，掛著的 session store 透過 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透過 `apply_split` 複製到兩邊)。`terrarium/graph/topology.py` 裡的純資料拓樸 mutator 回傳 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驅動這些 live 更新。
+**熱插拔**。拓樸可以在執行期變更。`Terrarium.connect(a, b, channel=...)` 可能合併兩個 graph (environment 取聯集，頻道彙集，掛著的 session store 透過 `terrarium/session/coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透過 `apply_split` 複製到兩邊)。`terrarium/graph/topology.py` 裡的純資料拓樸 mutator 回傳 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驅動這些 live 更新。
 
-**Session 合併 / 分裂**。Session 的單位是 graph 的連通分量。不影響 graph 成員的拓樸變更會沿用既有的 store。`terrarium/session_coord.py` 實作兩條分支並發出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
+**Session 合併 / 分裂**。Session 的單位是 graph 的連通分量。不影響 graph 成員的拓樸變更會沿用既有的 store。`terrarium/session/coord.py` 實作兩條分支並發出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
 
 **事件 bus**。`terrarium/events.py:EngineEvent` 是統一的可觀測面。kind 涵蓋 text chunk、頻道訊息、拓樸變更、session fork、creature 生命週期、processing start / end、error。`Terrarium.subscribe(filter)` 回傳與 `EventFilter` 匹配的事件 async iterator。每個訂閱者各有一個 queue；取消 iterator 會自動撤銷訂閱。
 

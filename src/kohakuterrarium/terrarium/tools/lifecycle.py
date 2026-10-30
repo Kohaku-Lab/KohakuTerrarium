@@ -1,0 +1,600 @@
+"""Implement privileged tools that manage non-privileged worker lifecycles."""
+
+import asyncio
+from typing import Any
+
+import kohakuterrarium.terrarium.tools.hooks as group_hooks
+from kohakuterrarium.builtins.tool_catalog import register_builtin
+from kohakuterrarium.core.events import create_creature_output_event
+from kohakuterrarium.llm.profiles.resolve import resolve_controller_llm
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolContext,
+    ToolResult,
+)
+from kohakuterrarium.terrarium.events import EngineEvent, EventKind
+from kohakuterrarium.terrarium.tools.context import (
+    GroupContext,
+    cross_cluster_target_error,
+    resolve_group_target,
+)
+from kohakuterrarium.terrarium.tools.common import (
+    err,
+    ok,
+    population_cap_error,
+    resolve_or_error,
+)
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+def _caller_pwd(gctx: GroupContext) -> str:
+    executor = getattr(gctx.caller.agent, "executor", None)
+    if executor is not None:
+        wd = getattr(executor, "_working_dir", None)
+        if wd is not None:
+            return str(wd)
+    return ""
+
+
+def _caller_llm(gctx: GroupContext) -> str | None:
+    """Return the caller's model selector, or None when it names no profile."""
+    get_ident = getattr(gctx.caller.agent, "llm_identifier", None)
+    identifier = get_ident() if callable(get_ident) else ""
+    if not identifier or resolve_controller_llm({}, llm=identifier) is None:
+        return None
+    return identifier
+
+
+_LLM_PARAM = {
+    "type": "string",
+    "description": "Model selector; default is the config's model, else yours.",
+}
+
+
+def _resolve_worker_target(
+    gctx: GroupContext, ident: str, verb: str
+) -> tuple[Any, ToolResult | None]:
+    """Resolve a worker while reserving privileged lifecycle control for Studio."""
+    try:
+        target = resolve_group_target(gctx, ident)
+    except Exception as exc:
+        return None, err(str(exc))
+    if target is None:
+        return None, err(cross_cluster_target_error(gctx.engine, ident))
+    if target.is_privileged:
+        return None, err(
+            f"cannot {verb} privileged creature {target.name!r}; "
+            "only the user can do that via Studio"
+        )
+    return target, None
+
+
+@register_builtin("group_add_node")
+class GroupAddNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_add_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Spawn a creature into your group from a config path. Use it to add a "
+            "long-lived teammate. Not for one-shot work - dispatch a sub-agent."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {
+                "config_path": {
+                    "type": "string",
+                    "description": "Creature config path or @pkg/creatures/<name>",
+                },
+                "name": {"type": "string"},
+                "llm": _LLM_PARAM,
+                "pwd": {"type": "string"},
+            },
+            "required": ["config_path"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        config_path = (args.get("config_path") or "").strip()
+        if not config_path:
+            return err("config_path is required")
+        # Configuration loading resolves and validates package references.
+        name = (args.get("name") or "").strip()
+        pwd = args.get("pwd") or _caller_pwd(gctx)
+        cap_error = population_cap_error(gctx)
+        if cap_error is not None:
+            return cap_error
+        try:
+            # Joining at creation avoids a transient singleton graph and session.
+            new = await gctx.engine.add_creature(
+                config_path,
+                graph=gctx.caller.graph_id,
+                llm=args.get("llm") or None,
+                fallback_llm=_caller_llm(gctx),
+                pwd=pwd,
+                name=name or None,
+                is_privileged=False,
+                parent_creature_id=gctx.caller.creature_id,
+                io="none",
+            )
+        except Exception as exc:
+            return err(f"failed to spawn creature from {config_path!r}: {exc}")
+
+        await group_hooks.attach_session_store(
+            gctx.engine, new, config_path=config_path, config_type="agent"
+        )
+
+        gctx.engine._emit(
+            EngineEvent(
+                kind=EventKind.PARENT_LINK_CHANGED,
+                creature_id=new.creature_id,
+                graph_id=new.graph_id,
+                payload={"parent": gctx.caller.creature_id, "change": "added"},
+            )
+        )
+        checkpoint = getattr(gctx.engine, "checkpoint_graph", None)
+        if checkpoint is not None:
+            await checkpoint(new.graph_id)
+        return ok(
+            {
+                "creature_id": new.creature_id,
+                "name": new.name,
+                "graph_id": new.graph_id,
+                "parent_creature_id": new.parent_creature_id,
+                "caller_graph_id": gctx.caller.graph_id,
+            }
+        )
+
+
+@register_builtin("group_remove_node")
+class GroupRemoveNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_remove_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Remove a creature from your group. Use it when a member's work is "
+            "finished. Not for stopping one for now - use group_stop_node."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
+        if target is None:
+            return err(cross_cluster_target_error(gctx.engine, ident))
+        if target.is_privileged:
+            return err(
+                f"cannot remove privileged creature {target.name!r}; "
+                "only the user can do that via Studio"
+            )
+        # Removal invalidates the creature handle needed for the unlink event.
+        parent_id = getattr(target, "parent_creature_id", None)
+        try:
+            await gctx.engine.remove_creature(target.creature_id)
+        except Exception as exc:
+            return err(f"remove failed: {exc}")
+        if parent_id is not None:
+            gctx.engine._emit(
+                EngineEvent(
+                    kind=EventKind.PARENT_LINK_CHANGED,
+                    creature_id=target.creature_id,
+                    payload={"change": "removed", "parent": parent_id},
+                )
+            )
+        return ok(
+            {
+                "removed": target.creature_id,
+                "caller_graph_id": gctx.caller.graph_id,
+            }
+        )
+
+
+@register_builtin("group_start_node")
+class GroupStartNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_start_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Start a stopped member of your group. Use it to bring a stopped member "
+            "back to work. Not for adding a new one - use group_add_node."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
+        if target is None:
+            return err(cross_cluster_target_error(gctx.engine, ident))
+        if target.is_privileged:
+            return err(
+                f"cannot start/stop privileged creature {target.name!r}; "
+                "only the user can do that via Studio"
+            )
+        if target.is_running:
+            return err(f"creature {target.name!r} is already running")
+        try:
+            await gctx.engine.start(target.creature_id)
+        except Exception as exc:
+            return err(f"start failed: {exc}")
+        return ok({"started": target.creature_id})
+
+
+@register_builtin("group_stop_node")
+class GroupStopNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_stop_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Stop a running member without removing it. Use it to halt a member you "
+            "may restart later. Not for permanent removal - use group_remove_node."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
+        if target is None:
+            return err(cross_cluster_target_error(gctx.engine, ident))
+        if target.is_privileged:
+            return err(
+                f"cannot start/stop privileged creature {target.name!r}; "
+                "only the user can do that via Studio"
+            )
+        if not target.is_running:
+            return err(f"creature {target.name!r} is not running")
+        try:
+            await gctx.engine.stop(target.creature_id)
+        except Exception as exc:
+            return err(f"stop failed: {exc}")
+        return ok({"stopped": target.creature_id})
+
+
+def _log_spawn_task_error(task: asyncio.Task, child_name: str) -> None:
+    """Log failures from the detached initial-task delivery."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.warning(
+        "group_spawn_child initial task delivery failed inside child",
+        child=child_name,
+        error=str(exc),
+    )
+
+
+def _deliver_initial_task(caller: Any, child: Any, task: str) -> bool:
+    """Deliver the initial task directly before channel listening is ready."""
+    prompt = f"[direct from {caller.name}] {task}"
+    event = create_creature_output_event(
+        source=caller.name,
+        target=child.name,
+        content=task,
+        with_content=True,
+        source_event_type="group_spawn_child",
+        turn_index=0,
+        prompt_override=prompt,
+    )
+    handle = asyncio.create_task(
+        child.agent._process_event(event),
+        name=f"spawn_task_{child.creature_id}",
+    )
+    handle.add_done_callback(lambda t, name=child.name: _log_spawn_task_error(t, name))
+    return True
+
+
+@register_builtin("group_spawn_child")
+class GroupSpawnChildTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_spawn_child"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Spawn a linked child creature, optionally with a first task. Use it to "
+            "start a worker in one call. Not for one-shot work - dispatch a sub-agent."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        # Tool schema construction falls back to this native definition.
+        return {
+            "type": "object",
+            "properties": {
+                "config_ref": {
+                    "type": "string",
+                    "description": "Creature config path or @pkg/creatures/<name>",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Optional first task, delivered immediately.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional display name for the child.",
+                },
+                "llm": _LLM_PARAM,
+                "pwd": {"type": "string"},
+            },
+            "required": ["config_ref"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        config_ref = (args.get("config_ref") or "").strip()
+        if not config_ref:
+            return err("config_ref is required")
+
+        pwd = args.get("pwd") or _caller_pwd(gctx)
+        name = (args.get("name") or "").strip()
+        try:
+            child = await gctx.engine.add_creature(
+                config_ref,
+                graph=gctx.caller.graph_id,
+                llm=args.get("llm") or None,
+                fallback_llm=_caller_llm(gctx),
+                pwd=pwd,
+                name=name or None,
+                is_privileged=False,
+                parent_creature_id=gctx.caller.creature_id,
+                io="none",
+            )
+        except Exception as exc:
+            return err(f"failed to spawn creature from {config_ref!r}: {exc}")
+
+        await group_hooks.attach_session_store(
+            gctx.engine, child, config_path=config_ref, config_type="agent"
+        )
+
+        gctx.engine._emit(
+            EngineEvent(
+                kind=EventKind.PARENT_LINK_CHANGED,
+                creature_id=child.creature_id,
+                graph_id=child.graph_id,
+                payload={"parent": gctx.caller.creature_id, "change": "added"},
+            )
+        )
+
+        task = (args.get("task") or "").strip()
+        delivered = _deliver_initial_task(gctx.caller, child, task) if task else False
+        checkpoint = getattr(gctx.engine, "checkpoint_graph", None)
+        if checkpoint is not None:
+            await checkpoint(child.graph_id)
+
+        return ok(
+            {
+                "creature_id": child.creature_id,
+                "name": child.name,
+                "graph_id": child.graph_id,
+                "task_delivered": delivered,
+                "caller_graph_id": gctx.caller.graph_id,
+            }
+        )
+
+
+@register_builtin("group_pause_node")
+class GroupPauseNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_pause_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Warm-pause a non-privileged creature: no new turns, still live. Use it to "
+            "hold a member briefly. Not for a teardown - use group_stop_node."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        target, terr = _resolve_worker_target(gctx, ident, "pause")
+        if terr is not None:
+            return terr
+        if not target.is_running:
+            return err(f"creature {target.name!r} is not running")
+        if target.paused:
+            return err(f"creature {target.name!r} is already paused")
+        target.pause()
+        return ok({"paused": target.creature_id})
+
+
+@register_builtin("group_resume_node")
+class GroupResumeNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_resume_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Resume a warm-paused non-privileged creature. Use it to let a paused "
+            "member take turns again, starting with what queued while it was paused."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        target, terr = _resolve_worker_target(gctx, ident, "resume")
+        if terr is not None:
+            return terr
+        if not target.paused:
+            return err(f"creature {target.name!r} is not paused")
+        target.resume()
+        return ok({"resumed": target.creature_id})
+
+
+@register_builtin("group_kill_node")
+class GroupKillNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_kill_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Force-stop a non-privileged creature and mark it killed. Use it when a "
+            "member is stuck. Not for a clean stop - use group_stop_node."
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        target, terr = _resolve_worker_target(gctx, ident, "kill")
+        if terr is not None:
+            return terr
+        if not target.is_running:
+            return err(f"creature {target.name!r} is not running")
+        try:
+            await gctx.engine.stop(target.creature_id)
+        except Exception as exc:
+            return err(f"kill failed: {exc}")
+        target._killed = True
+        return ok({"killed": target.creature_id, "hard_kill_supported": False})

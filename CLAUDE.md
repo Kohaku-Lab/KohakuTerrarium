@@ -442,7 +442,7 @@ src/kohakuterrarium/
 │   │                         # web_search, web_fetch, info, ask_user,
 │   │                         # scratchpad_tool, send_message, stop_task, search_memory,
 │   │                         # skill, image_gen, canvas_preview, show_card, …)
-│   │                         #: group_* terrarium tools live in terrarium/tools_group*.py
+│   │                         #: group_* terrarium tools live in terrarium/tools/
 │   ├── subagents/            # Built-in sub-agent configs
 │   │                         # (coordinator, critic, explore, plan, research, response,
 │   │                         #  summarize, worker, memory_read, memory_write)
@@ -545,20 +545,24 @@ src/kohakuterrarium/
 │   │                         #   checkpoint, identity, identity_engine
 │   ├── events.py             # EngineEvent / EventKind / EventFilter observable surface
 │   ├── channels/             # Channel layer for the engine (channels) + lifecycle
-│   ├── autosession.py        # Engine-owned session persistence (session_dir autosession)
-│   ├── session_coord.py      # Session merge/split coordination across graphs
-│   ├── recipe.py             # Apply a TerrariumConfig recipe to an engine
-│   ├── resume.py             # Engine-level resume: adopt a saved session
+│   ├── session/              # Engine-owned session persistence: autosession (session_dir),
+│   │                         #   coord (merge/split across graphs), event_copy, successor,
+│   │                         #   unload, observers
+│   ├── recipe/               # Apply a TerrariumConfig recipe to an engine: loader, apply,
+│   │                         #   discard, identity, transaction, remote
+│   ├── resume/               # Engine-level resume: adopt a saved session (resume, manifest,
+│   │                         #   workspace)
 │   ├── root.py               # assign_root: privileged-node promotion + root wiring
 │   ├── runtime_prompt.py     # Keeps creature system prompts in sync with the group
-│   ├── tools_group*.py       # group_* tool surface (lifecycle, channel, send, status,
-│   │                         #   wire + shared helpers, hooks, caller context)
-│   ├── multi_node_*.py       # Multi-node service: cluster fold, routing, replication,
-│   │                         #   channels (lab-host mode)
-│   ├── service.py            # TerrariumService: runtime abstraction Studio depends on
-│   ├── remote_service.py     # TerrariumService backed by Lab APP calls
-│   ├── wire.py               # Pack/unpack DTO helpers for Laboratory APP transport
-│   ├── wiring.py             # Output-wiring helpers (+ output_wiring.py resolver)
+│   ├── tools/                # group_* tool surface: group (registration), lifecycle,
+│   │                         #   channel, send, status, wire + common helpers, hooks, context
+│   ├── multi_node/           # Multi-node service: service, cluster fold, routing,
+│   │                         #   replication, channels, runtime_options (lab-host mode)
+│   ├── service/              # TerrariumService: runtime abstraction Studio depends on
+│   │                         #   (service, remote via Lab APP calls, dto, wire, history,
+│   │                         #   subagent, local_command, command_inventory)
+│   ├── wiring/               # Output-wiring helpers (wiring) + output resolver
+│   ├── drive/                # Drive runtime resource (see drive/README.md)
 │   ├── observer.py           # ChannelObserver for non-destructive monitoring
 │   ├── output_log.py         # Capture and log creature output
 │   └── config.py             # Terrarium config loading + topology prompt

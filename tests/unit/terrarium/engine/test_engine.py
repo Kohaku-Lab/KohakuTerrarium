@@ -97,7 +97,7 @@ class TestAddRemoveCreature:
             raise RuntimeError("attach failed")
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.autosession.attach_for_new_creature",
+            "kohakuterrarium.terrarium.session.autosession.attach_for_new_creature",
             fail_attach,
         )
         try:

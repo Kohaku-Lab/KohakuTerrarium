@@ -172,7 +172,7 @@ channel, and resubscribes against the new live one. The
 `apply_split_bookkeeping` and `_merge_environment_into` paths call
 this for every affected creature × channel pair.
 
-### Recipe as the source of truth on resume (`terrarium/resume.py`,
+### Recipe as the source of truth on resume (`terrarium/resume/resume.py`,
 `terrarium/recipe/loader.py`)
 
 `resume_into_engine` does **not** persist the live topology to disk
@@ -223,14 +223,14 @@ topology returns to the recipe's natural shape.
 - `src/kohakuterrarium/terrarium/channels/lifecycle.py`:
   `apply_split_bookkeeping`, channel removal flow, environment
   reallocation.
-- `src/kohakuterrarium/terrarium/session_coord.py`: `apply_merge`,
+- `src/kohakuterrarium/terrarium/session/coord.py`: `apply_merge`,
   `apply_split`, `merge_session_stores`, `split_session_store`,
   `copy_events_into`, meta refresh helpers.
 - `src/kohakuterrarium/terrarium/runtime_prompt.py`: event-driven
   per-creature prompt refresh on `TOPOLOGY_CHANGED`,
   `CREATURE_STARTED`, `CREATURE_STOPPED`, `OUTPUT_WIRE_ADDED`,
   `OUTPUT_WIRE_REMOVED`, `PARENT_LINK_CHANGED`.
-- `src/kohakuterrarium/terrarium/resume.py`: `resume_into_engine`,
+- `src/kohakuterrarium/terrarium/resume/resume.py`: `resume_into_engine`,
   recipe-driven topology reconstruction.
 - `src/kohakuterrarium/terrarium/events.py`: `EngineEvent` taxonomy,
   `EventFilter`.

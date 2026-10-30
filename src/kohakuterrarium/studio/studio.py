@@ -61,7 +61,7 @@ from kohakuterrarium.studio.identity import (
 from kohakuterrarium.studio.nodes import NodeMap, build_node_map_if_multi_node
 from kohakuterrarium.terrarium import LocalTerrariumService, TerrariumService
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.resume import prepare_resume_workspace
+from kohakuterrarium.terrarium.resume.resume import prepare_resume_workspace
 
 
 class Studio:

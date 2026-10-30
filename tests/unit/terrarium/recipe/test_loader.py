@@ -661,7 +661,7 @@ class TestRecipeRollback:
             raise RuntimeError("session attach failed")
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.autosession.attach_for_recipe",
+            "kohakuterrarium.terrarium.session.autosession.attach_for_recipe",
             fail_attach,
         )
         with pytest.raises(RuntimeError, match="session attach failed"):

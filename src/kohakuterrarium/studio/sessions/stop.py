@@ -9,7 +9,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.sessions import cluster_fold
 from kohakuterrarium.studio.sessions import live as _live
-from kohakuterrarium.terrarium.session_unload import unload_session_graph
+from kohakuterrarium.terrarium.session.unload import unload_session_graph
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

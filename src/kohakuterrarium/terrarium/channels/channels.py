@@ -19,7 +19,7 @@ import weakref
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-import kohakuterrarium.terrarium.session_coord as _session_coord
+import kohakuterrarium.terrarium.session.coord as _session_coord
 import kohakuterrarium.terrarium.graph.topology as _topo
 from kohakuterrarium.core.channel import ChannelRegistry
 from kohakuterrarium.core.environment import Environment

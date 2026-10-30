@@ -1,0 +1,95 @@
+"""Shared helpers for the group_* tool modules.
+
+Shared helpers provide caller resolution, JSON-shaped results, and channel-history
+serialization for the group tools.
+"""
+
+import json
+from typing import Any
+
+from kohakuterrarium.modules.tool.base import ToolContext, ToolResult
+from kohakuterrarium.terrarium.tools.context import (
+    GroupContext,
+    GroupToolError,
+    resolve_group_context,
+    resolve_group_target,
+)
+
+
+def err(message: str) -> ToolResult:
+    return ToolResult(error=message)
+
+
+def ok(payload: dict[str, Any]) -> ToolResult:
+    return ToolResult(output=json.dumps(payload, default=str), exit_code=0)
+
+
+def missing_channel_error(
+    graph: Any, channel: str, *, target_name: str | None = None
+) -> ToolResult:
+    """Refuse an undeclared channel and name the two ways to reach a member."""
+    to = repr(target_name) if target_name else "'<creature name>'"
+    then_wire = f" then wire {target_name!r} to it" if target_name else ""
+    return err(
+        f"channel {channel!r} does not exist in your graph; no channel was created. "
+        f"available: {sorted(graph.channels)}. Either create it first with "
+        f"group_channel(action='create', channel={channel!r}){then_wire}, or "
+        f"message the creature directly by name with group_send(to={to}, message=...)."
+    )
+
+
+def resolve_or_error(
+    ctx: ToolContext | None,
+    *,
+    require_privileged: bool = True,
+) -> tuple[GroupContext | None, ToolResult | None]:
+    """Resolve the caller's :class:`GroupContext` or return an error
+    :class:`ToolResult`. ``require_privileged=False`` lets ``send_channel``
+    / ``group_send`` accept non-privileged engine creatures."""
+    try:
+        return (
+            resolve_group_context(ctx, require_privileged=require_privileged),
+            None,
+        )
+    except GroupToolError as exc:
+        return None, err(str(exc))
+
+
+def resolve_target_or_error(
+    gctx: GroupContext, identifier: str
+) -> tuple[Any | None, ToolResult | None]:
+    """Resolve one caller-graph target while preserving safe resolver errors."""
+    try:
+        return resolve_group_target(gctx, identifier), None
+    except GroupToolError as exc:
+        return None, err(str(exc))
+
+
+def serialize_channel_history(channel: Any, limit: int) -> list[dict[str, Any]]:
+    history = list(getattr(channel, "history", []) or [])[-limit:]
+    out: list[dict[str, Any]] = []
+    for msg in history:
+        out.append(
+            {
+                "message_id": getattr(msg, "message_id", ""),
+                "sender": getattr(msg, "sender", ""),
+                "content": getattr(msg, "content", ""),
+                "reply_to": getattr(msg, "reply_to", None),
+            }
+        )
+    return out
+
+
+def population_cap_error(gctx: Any) -> ToolResult | None:
+    """Refuse a spawn that would exceed the graph's declared population cap."""
+    topology = getattr(gctx.engine, "_topology", None)
+    graph = topology.graphs.get(gctx.caller.graph_id) if topology else None
+    if graph is None:
+        return None
+    cap = getattr(graph, "max_creatures", 0) or 0
+    if cap <= 0 or len(graph.creature_ids) < cap:
+        return None
+    return err(
+        f"population cap reached ({len(graph.creature_ids)}/{cap}). "
+        "Remove a member with group_remove_node before spawning another."
+    )

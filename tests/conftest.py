@@ -44,6 +44,8 @@ _SESSION_CONFIG_DIR = Path(tempfile.mkdtemp(prefix="kt-test-session-config-"))
 os.environ["KT_CONFIG_DIR"] = str(_SESSION_CONFIG_DIR)
 # The operator's home, captured before any fixture redirects HOME; read-only.
 os.environ.setdefault("KT_TEST_REAL_HOME", str(Path.home()))
+# LiteLLM reads its bundled cost map instead of retrying a blocked download.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP  # noqa: E402
 from kohakuterrarium.testing.llm_seam import (  # noqa: E402

@@ -100,7 +100,7 @@ creature)` 是完整的 root 風格輔助：特權 + `report_to_root` 頻道 + �
 
 - **特權旗標：** `Creature.is_privileged`：這是生物 handle 的執行期
   屬性，與底層 agent 設定無關。
-- **工具註冊：** `terrarium/tools_group.py` 暴露
+- **工具註冊：** `terrarium/tools/group.py` 暴露
   `force_register_basic_tools`（每隻生物都有）與
   `force_register_privileged_tools`（僅在特權節點上）。特權工具表面是
   `group_add_node`、`group_remove_node`、`group_start_node`、

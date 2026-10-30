@@ -21,7 +21,7 @@ from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import DriveQuery
 from kohakuterrarium.terrarium.drive.tools.group import GroupDriveTool
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.tools_group_wire import GroupWireTool
+from kohakuterrarium.terrarium.tools.wire import GroupWireTool
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

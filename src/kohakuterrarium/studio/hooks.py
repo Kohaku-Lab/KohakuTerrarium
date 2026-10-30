@@ -41,7 +41,7 @@ def resolve_workspace_hook(engine, creature):
 
 
 def register_group_hooks() -> None:
-    group_hooks = importlib.import_module("kohakuterrarium.terrarium.group_hooks")
+    group_hooks = importlib.import_module("kohakuterrarium.terrarium.tools.hooks")
     group_hooks.register_store_attach(store_attach_hook)
     group_hooks.register_name_apply(name_apply_hook)
     group_hooks.register_spawnable(spawnable_hook)

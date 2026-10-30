@@ -22,12 +22,12 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.testing.llm import ScriptedLLM
-from kohakuterrarium.terrarium import resume as terrarium_resume_mod
+from kohakuterrarium.terrarium.resume import resume as terrarium_resume_mod
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
-from kohakuterrarium.terrarium.workspace_resume import (
+from kohakuterrarium.terrarium.resume.workspace import (
     WorkspaceResumeError,
     WorkspaceResumeFailure,
 )

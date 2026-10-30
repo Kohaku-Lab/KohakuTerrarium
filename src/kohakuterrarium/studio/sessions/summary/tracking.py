@@ -13,7 +13,7 @@ from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.compact.manager import CompactConfig
 from kohakuterrarium.studio.identity.session_summary import SummarySettings
 from kohakuterrarium.studio.sessions.summary.hook import SummaryHook
-from kohakuterrarium.terrarium.store_observers import observe_session_stores
+from kohakuterrarium.terrarium.session.observers import observe_session_stores
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

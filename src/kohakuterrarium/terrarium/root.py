@@ -15,7 +15,7 @@ import kohakuterrarium.terrarium.drive.injection as _drive_injection
 import kohakuterrarium.terrarium.graph.topology as _topo
 import kohakuterrarium.terrarium.wiring.wiring as _wiring
 from kohakuterrarium.terrarium.events import RootAssignment
-from kohakuterrarium.terrarium.tools_group import force_register_privileged_tools
+from kohakuterrarium.terrarium.tools.group import force_register_privileged_tools
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium.engine.engine import CreatureRef, Terrarium

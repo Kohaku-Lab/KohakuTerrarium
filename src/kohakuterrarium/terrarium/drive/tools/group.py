@@ -23,7 +23,7 @@ from kohakuterrarium.terrarium.drive.tools.self_service import (
     _err,
     _ok,
 )
-from kohakuterrarium.terrarium.group_tool_context import (
+from kohakuterrarium.terrarium.tools.context import (
     GroupContext,
     GroupToolError,
     resolve_group_context,

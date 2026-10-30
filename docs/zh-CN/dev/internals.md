@@ -160,9 +160,9 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 **频道注入**。当一只 Creature 加入了一个有它要 listen 的频道的 graph，`terrarium/channels/channels.py:inject_channel_trigger` 会往它的 `trigger_manager` 加一个 `ChannelTrigger`。这是 layer 模型里唯一被允许的向下注入：在 graph 里的 Creature *会* 知道自己有同伴 (它得知道)，但只透过引擎给它的 handle。独立 Creature 不会有任何注入。
 
-**热插拔**。拓扑可以在运行时变更。`Terrarium.connect(a, b, channel=...)` 可能合并两个 graph (environment 取联集，频道汇集，挂著的 session store 透过 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透过 `apply_split` 复制到两边)。`terrarium/graph/topology.py` 里的纯数据拓扑 mutator 返回 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驱动这些 live 更新。
+**热插拔**。拓扑可以在运行时变更。`Terrarium.connect(a, b, channel=...)` 可能合并两个 graph (environment 取联集，频道汇集，挂著的 session store 透过 `terrarium/session/coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透过 `apply_split` 复制到两边)。`terrarium/graph/topology.py` 里的纯数据拓扑 mutator 返回 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驱动这些 live 更新。
 
-**Session 合并 / 分裂**。Session 的单位是 graph 的连通分量。不影响 graph 成员的拓扑变更会沿用既有的 store。`terrarium/session_coord.py` 实作两条分支并发出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
+**Session 合并 / 分裂**。Session 的单位是 graph 的连通分量。不影响 graph 成员的拓扑变更会沿用既有的 store。`terrarium/session/coord.py` 实作两条分支并发出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
 
 **事件 bus**。`terrarium/events.py:EngineEvent` 是统一的可观测面。kind 涵盖 text chunk、频道消息、拓扑变更、session fork、creature 生命周期、processing start / end、error。`Terrarium.subscribe(filter)` 返回与 `EventFilter` 匹配的事件 async iterator。每个订阅者各有一个 queue；取消 iterator 会自动撤销订阅。
 

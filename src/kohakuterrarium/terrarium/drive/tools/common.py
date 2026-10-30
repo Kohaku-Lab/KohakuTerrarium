@@ -20,7 +20,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationNotFoundError,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveRecord
-from kohakuterrarium.terrarium.group_tool_context import (
+from kohakuterrarium.terrarium.tools.context import (
     GroupToolError,
     resolve_group_context,
 )

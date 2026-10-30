@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import kohakuterrarium.session.run_state as _run_state
-import kohakuterrarium.terrarium.autosession as _autosession
+import kohakuterrarium.terrarium.session.autosession as _autosession
 import kohakuterrarium.terrarium.channels.lifecycle as _lifecycle
 import kohakuterrarium.terrarium.channels.channels as _channels
 import kohakuterrarium.terrarium.engine.creature_add as _engine_creature_add
@@ -25,7 +25,7 @@ import kohakuterrarium.terrarium.graph.identity_engine as _identity
 import kohakuterrarium.terrarium.recipe.loader as _recipe
 import kohakuterrarium.terrarium.recipe.identity as _recipe_identity
 import kohakuterrarium.terrarium.recipe.transaction as _recipe_transaction
-import kohakuterrarium.terrarium.resume as _resume
+import kohakuterrarium.terrarium.resume.resume as _resume
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.graph.topology as _topo
 import kohakuterrarium.terrarium.wiring.wiring as _wiring
@@ -47,7 +47,7 @@ from kohakuterrarium.terrarium.events import (
     RootAssignment,
 )
 from kohakuterrarium.terrarium.runtime_prompt import RuntimeGraphPrompt
-from kohakuterrarium.terrarium.tools_group import (
+from kohakuterrarium.terrarium.tools.group import (
     force_register_basic_tools,
     force_register_privileged_tools,
 )

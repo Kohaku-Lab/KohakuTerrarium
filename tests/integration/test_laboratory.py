@@ -623,7 +623,7 @@ class TestLaboratoryMultiNodeService:
             # Create two isolated host-side creatures with attached
             # session stores, then connect them so the engine
             # auto-merges + the SessionCoordinator copies / preserves
-            # session state.  Hits terrarium/session_coord.py paths.
+            # session state.  Hits terrarium/session/coord.py paths.
             from kohakuterrarium.core.config.load import load_agent_config
             from kohakuterrarium.session.store import SessionStore
             from pathlib import Path as _P

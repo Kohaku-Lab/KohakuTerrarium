@@ -57,7 +57,7 @@ from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
-from kohakuterrarium.terrarium.workspace_resume import (
+from kohakuterrarium.terrarium.resume.workspace import (
     WorkspaceResumeError,
     plan_workspace_resume,
     preflight_session_workspaces,
@@ -66,7 +66,7 @@ from kohakuterrarium.terrarium.workspace_resume import (
 )
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
-from kohakuterrarium.terrarium.resume import prepare_resume_workspace
+from kohakuterrarium.terrarium.resume.resume import prepare_resume_workspace
 from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()

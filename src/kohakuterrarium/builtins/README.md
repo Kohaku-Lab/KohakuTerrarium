@@ -29,7 +29,7 @@ Core general-purpose tools:
 | `web_fetch`                                    | Fetch and clean a web page (crawl4ai → trafilatura → jina → naive fallback)               |
 | `web_search`                                   | DuckDuckGo web search (optional dep)                                                      |
 
-Graph management tools live in `terrarium/tools_group*.py`, not here:
+Graph management tools live in `terrarium/tools/`, not here:
 `send_channel` / `group_send` on every creature, and the privileged-node
 surface (`group_add_node`, `group_remove_node`, `group_start_node`,
 `group_stop_node`, `group_channel`, `group_wire`, `group_status`). The

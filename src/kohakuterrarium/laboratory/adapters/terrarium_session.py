@@ -22,8 +22,8 @@ from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
-from kohakuterrarium.terrarium.session_unload import unload_session_graph
-from kohakuterrarium.terrarium.workspace_resume import (
+from kohakuterrarium.terrarium.session.unload import unload_session_graph
+from kohakuterrarium.terrarium.resume.workspace import (
     preflight_session_workspaces,
     WorkspaceResumeError,
     plan_workspace_resume,

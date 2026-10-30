@@ -154,7 +154,7 @@ async def test_non_privileged_agent_gets_no_group_drive(tmp_path):
 async def test_privileged_agent_gets_group_drive(tmp_path):
     # Once the privileged group tools are registered (add_creature / assign_root),
     # injection detects privilege and adds group_drive — idempotently.
-    from kohakuterrarium.terrarium.tools_group import force_register_privileged_tools
+    from kohakuterrarium.terrarium.tools.group import force_register_privileged_tools
 
     agent = await _agent(tmp_path)
     try:
