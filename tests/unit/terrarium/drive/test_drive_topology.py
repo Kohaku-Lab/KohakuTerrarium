@@ -24,7 +24,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveProposalConflictError,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-from kohakuterrarium.terrarium.drive.repository import Mutation
+from kohakuterrarium.terrarium.drive.repository.repository import Mutation
 from kohakuterrarium.terrarium.drive.requests import (
     CreateDriveRequest,
     DriveQuery,
@@ -507,7 +507,7 @@ class TestExplicitProviderStore:
         # R1-10: a merge uses the shared destination resolver, so a provider-backed
         # survivor keeps its provider repo (no replace by the session sidecar) and
         # the provider-owned repo is never closed by the mover.
-        from kohakuterrarium.terrarium.drive.store import SqliteDriveRepository
+        from kohakuterrarium.terrarium.drive.store.store import SqliteDriveRepository
 
         provider_repo = SqliteDriveRepository(str(tmp_path / "prov.drives"))
         closes = {"n": 0}
@@ -1039,7 +1039,7 @@ class TestForkContract:
 
     async def test_forked_session_opens_with_zero_drives(self, tmp_path):
         from kohakuterrarium.terrarium.drive.requests import DriveQuery
-        from kohakuterrarium.terrarium.drive.store import (
+        from kohakuterrarium.terrarium.drive.store.store import (
             open_session_drive_repository,
         )
 

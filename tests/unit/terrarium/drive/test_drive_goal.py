@@ -18,7 +18,9 @@ from kohakuterrarium.terrarium.drive.errors import (
 )
 from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    GenericDriveRegistration,
+)
 
 from tests.unit.terrarium.drive._harness import (
     ADMIN,

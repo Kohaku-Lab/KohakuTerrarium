@@ -18,13 +18,13 @@ from kohakuterrarium.terrarium.drive.models import (
     DriveProgress,
     DriveRecord,
 )
-from kohakuterrarium.terrarium.drive.repository import (
+from kohakuterrarium.terrarium.drive.repository.repository import (
     DriveDeadLetter,
     DriveOutboxEntry,
     IdempotencyRecord,
     Mutation,
 )
-from kohakuterrarium.terrarium.drive.repository_base import BaseDriveRepository
+from kohakuterrarium.terrarium.drive.repository.base import BaseDriveRepository
 from kohakuterrarium.terrarium.drive.requests import DriveTransitionProposal
 
 

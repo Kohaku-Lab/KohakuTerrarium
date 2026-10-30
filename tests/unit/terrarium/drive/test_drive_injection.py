@@ -12,12 +12,12 @@ from kohakuterrarium.terrarium.drive.injection import (
     install_drive_runtime,
     refresh_drive_prompt,
 )
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveRegistrationDescriptor,
     GenericDriveRegistration,
 )
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
-from kohakuterrarium.terrarium.drive.tools import SELF_SERVICE_TOOL_NAMES
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.tools.self_service import SELF_SERVICE_TOOL_NAMES
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 

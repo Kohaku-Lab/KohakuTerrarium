@@ -42,12 +42,12 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,
 )
-from kohakuterrarium.terrarium.drive.registration import effective_options
-from kohakuterrarium.terrarium.drive.registration_options import (
+from kohakuterrarium.terrarium.drive.registration.registration import effective_options
+from kohakuterrarium.terrarium.drive.registration.options import (
     apply_registration_wake_policy,
     implementation_fingerprint,
 )
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 

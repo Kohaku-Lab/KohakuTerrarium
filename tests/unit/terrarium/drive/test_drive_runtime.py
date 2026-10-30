@@ -19,9 +19,9 @@ from kohakuterrarium.terrarium.drive.config import (
 )
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
-from kohakuterrarium.terrarium.drive.store import DriveRepositoryClosedError
+from kohakuterrarium.terrarium.drive.store.store import DriveRepositoryClosedError
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveRegistrationDescriptor,
     GenericDriveRegistration,
 )

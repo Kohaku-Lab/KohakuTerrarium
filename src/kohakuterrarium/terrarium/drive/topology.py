@@ -40,7 +40,7 @@ from kohakuterrarium.terrarium.drive.split_intent import (
     complete_split_intent,
     write_split_intent,
 )
-from kohakuterrarium.terrarium.drive.store import SqliteDriveRepository
+from kohakuterrarium.terrarium.drive.store.store import SqliteDriveRepository
 from kohakuterrarium.terrarium.drive.wire import (
     WIRE_SCHEMA_VERSION,
     pack_drive_assignment,

@@ -23,7 +23,7 @@ from kohakuterrarium.terrarium.drive.config import (
 )
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveRegistrationDescriptor,
     GenericDriveRegistration,
 )

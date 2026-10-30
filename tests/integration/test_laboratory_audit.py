@@ -495,7 +495,7 @@ from kohakuterrarium.terrarium.drive.config import (  # noqa: E402
     default_registrations,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef  # noqa: E402
-from kohakuterrarium.terrarium.drive.multi_node import (  # noqa: E402
+from kohakuterrarium.terrarium.drive.multi_node.homes import (  # noqa: E402
     DriveHomeUnavailableError,
 )
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest  # noqa: E402

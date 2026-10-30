@@ -15,7 +15,7 @@ from kohakuterrarium.session.occupancy.gate import (
     REASON_LEGACY_ENROLLED,
     try_fast,
 )
-from kohakuterrarium.terrarium.drive.store_migration import (
+from kohakuterrarium.terrarium.drive.store.migration import (
     DRIVE_SCHEMA_VERSION,
     _SCHEMA,
 )

@@ -19,7 +19,7 @@ from kohakuterrarium.terrarium.drive.config import (
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
-from kohakuterrarium.terrarium.drive.store import (
+from kohakuterrarium.terrarium.drive.store.store import (
     SqliteDriveRepository,
     drive_sidecar_path,
 )

@@ -15,7 +15,7 @@ from typing import Any
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.models import DriveStatus
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveProjection,
     DriveRegistrationDescriptor,
     Readiness,

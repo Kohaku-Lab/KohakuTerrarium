@@ -21,9 +21,9 @@ from kohakuterrarium.errors import SessionError
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.drive.requests import DriveQuery
-from kohakuterrarium.terrarium.drive.saved_snapshot import DriveSidecarMissingError
-from kohakuterrarium.terrarium.drive.store import open_drive_repository_readonly
-from kohakuterrarium.terrarium.drive.store_migration import drive_sidecar_path
+from kohakuterrarium.terrarium.drive.snapshot.saved import DriveSidecarMissingError
+from kohakuterrarium.terrarium.drive.store.store import open_drive_repository_readonly
+from kohakuterrarium.terrarium.drive.store.migration import drive_sidecar_path
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()

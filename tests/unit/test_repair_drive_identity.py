@@ -21,9 +21,9 @@ from kohakuterrarium.terrarium.graph_manifest import (
 from kohakuterrarium.terrarium.drive.errors import DriveStorageError
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-from kohakuterrarium.terrarium.drive.repository import Mutation
+from kohakuterrarium.terrarium.drive.repository.repository import Mutation
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
-from kohakuterrarium.terrarium.drive.store import (
+from kohakuterrarium.terrarium.drive.store.store import (
     SqliteDriveRepository,
     open_drive_repository_readonly,
 )

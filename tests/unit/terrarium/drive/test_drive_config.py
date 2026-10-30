@@ -16,7 +16,9 @@ from kohakuterrarium.terrarium.drive.config import (
     validate_runtime_selection,
 )
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
-from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    GenericDriveRegistration,
+)
 
 
 class TestRuntimeConfig:

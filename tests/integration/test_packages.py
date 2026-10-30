@@ -86,7 +86,9 @@ from kohakuterrarium.studio.catalog import drive_registrations as drive_catalog
 from kohakuterrarium.studio.catalog import packages as studio_packages
 from kohakuterrarium.studio.identity.llm_backends import save_backend_record
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
-from kohakuterrarium.terrarium.drive.registration import resolve_registration
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    resolve_registration,
+)
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -273,7 +275,7 @@ def _make_drive_registration_bundle(
     _write(src / "kohaku.yaml", yaml.safe_dump(manifest, sort_keys=False))
     _write(
         src / "kt_watch_reg.py",
-        "from kohakuterrarium.terrarium.drive.registration import (\n"
+        "from kohakuterrarium.terrarium.drive.registration.registration import (\n"
         "    DriveRegistrationDescriptor,\n)\n\n\n"
         "class WatchDriveRegistration:\n"
         f"    name = {reg_name!r}\n"

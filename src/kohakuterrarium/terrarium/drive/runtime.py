@@ -37,9 +37,9 @@ from kohakuterrarium.terrarium.drive.injection import (
     refresh_drive_prompt,
 )
 import kohakuterrarium.terrarium.drive.topology as _topology
-from kohakuterrarium.terrarium.drive.manager import DriveManager
+from kohakuterrarium.terrarium.drive.manager.manager import DriveManager
 from kohakuterrarium.terrarium.drive.partition import GraphDriveRegistry
-from kohakuterrarium.terrarium.drive.registration import DriveRegistration
+from kohakuterrarium.terrarium.drive.registration.registration import DriveRegistration
 from kohakuterrarium.terrarium.drive.sink import (
     DeliveryOutcome,
     DriveObservation,
@@ -48,9 +48,9 @@ from kohakuterrarium.terrarium.drive.sink import (
     SettlementSource,
     SettlementStatus,
 )
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.terrarium.drive.split_intent import recover_split_intents
-from kohakuterrarium.terrarium.drive.store import DriveRepositoryClosedError
+from kohakuterrarium.terrarium.drive.store.store import DriveRepositoryClosedError
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.utils.logging import get_logger
 

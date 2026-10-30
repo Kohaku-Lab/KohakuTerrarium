@@ -68,7 +68,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DrivePermissionError,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-from kohakuterrarium.terrarium.drive.multi_node import DriveHomeUnavailableError
+from kohakuterrarium.terrarium.drive.multi_node.homes import DriveHomeUnavailableError
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
 from kohakuterrarium.terrarium.service import LocalTerrariumService

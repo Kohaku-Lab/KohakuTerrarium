@@ -11,12 +11,12 @@ unchanged.
 from typing import Any
 
 from kohakuterrarium.terrarium.drive.prompt import DriveRuntimePromptPlugin
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
-from kohakuterrarium.terrarium.drive.tools import (
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.tools.self_service import (
     SELF_SERVICE_TOOL_NAMES,
     build_self_service_tools,
 )
-from kohakuterrarium.terrarium.drive.tools_group import build_group_drive_tools
+from kohakuterrarium.terrarium.drive.tools.group import build_group_drive_tools
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

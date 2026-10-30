@@ -34,7 +34,7 @@ from kohakuterrarium.terrarium.drive.models import (
     DriveRecord,
     DriveStatus,
 )
-from kohakuterrarium.terrarium.drive.wire_service import DriveView
+from kohakuterrarium.terrarium.drive.service.wire import DriveView
 
 _NOW = datetime(2026, 7, 12, tzinfo=timezone.utc)
 _OWNER = ActorRef("service", "ops")

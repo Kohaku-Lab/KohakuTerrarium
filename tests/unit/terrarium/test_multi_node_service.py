@@ -9,7 +9,7 @@ StreamDemux.
 
 import pytest
 
-from kohakuterrarium.terrarium.drive.multi_node import DriveRouteCache
+from kohakuterrarium.terrarium.drive.multi_node.homes import DriveRouteCache
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,

@@ -890,7 +890,7 @@ For an explicitly constructed engine, configure the registration before passing 
 to `Terrarium(drive_registrations=[registration])`:
 
 ```python
-from kohakuterrarium.terrarium.drive.registration_options import (
+from kohakuterrarium.terrarium.drive.registration.options import (
     apply_registration_wake_policy,
 )
 

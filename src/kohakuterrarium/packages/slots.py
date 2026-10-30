@@ -16,7 +16,7 @@ The Drive runtime resource adds one more (design §8.2):
 - ``drive_registrations:`` — deterministic Drive kind/policy registrations
   (name + kind + module + class). Scanned WITHOUT importing the
   implementation module; the import happens only on explicit enable/validate
-  via :func:`kohakuterrarium.terrarium.drive.registration.resolve_registration`.
+  via :func:`kohakuterrarium.terrarium.drive.registration.registration.resolve_registration`.
 
 These resolvers scan every installed package, enforce the cross-cutting
 collision policy (hard error when two packages declare the same name —

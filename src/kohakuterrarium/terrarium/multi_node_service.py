@@ -33,9 +33,9 @@ from typing import Any
 
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory.streams import StreamDemux
-from kohakuterrarium.terrarium.drive.multi_node import DriveRouteCache
-from kohakuterrarium.terrarium.drive.multi_node_ops import MultiNodeDriveServiceMixin
-from kohakuterrarium.terrarium.drive.service_protocol import (
+from kohakuterrarium.terrarium.drive.multi_node.homes import DriveRouteCache
+from kohakuterrarium.terrarium.drive.multi_node.ops import MultiNodeDriveServiceMixin
+from kohakuterrarium.terrarium.drive.service.protocol import (
     DriveServiceUnsupportedMixin,
 )
 from kohakuterrarium.terrarium.history_remote import MultiNodeHistoryServiceMixin

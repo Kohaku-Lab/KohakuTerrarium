@@ -15,7 +15,9 @@ from kohakuterrarium.studio.identity.drive_settings import (
     RegistrationSetting,
 )
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    GenericDriveRegistration,
+)
 
 
 @pytest.fixture

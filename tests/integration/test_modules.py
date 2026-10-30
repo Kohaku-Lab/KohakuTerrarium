@@ -2442,7 +2442,9 @@ class TestModulesIntegration:
             DriveRuntimeConfig,
             default_registrations,
         )
-        from kohakuterrarium.terrarium.drive.tools import SELF_SERVICE_TOOL_NAMES
+        from kohakuterrarium.terrarium.drive.tools.self_service import (
+            SELF_SERVICE_TOOL_NAMES,
+        )
         from kohakuterrarium.terrarium.engine import Terrarium
 
         llm_box.set(["ok"] * 8)

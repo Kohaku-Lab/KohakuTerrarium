@@ -13,7 +13,7 @@ from kohakuterrarium.terrarium.drive.wire import (
     unpack_create_request,
     unpack_drive_patch,
 )
-from kohakuterrarium.terrarium.drive.wire_service import (
+from kohakuterrarium.terrarium.drive.service.wire import (
     pack_drive_view,
     pack_runtime_status,
 )

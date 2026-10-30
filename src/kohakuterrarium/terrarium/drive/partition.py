@@ -17,11 +17,11 @@ from datetime import datetime
 from typing import Any
 
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.drive.manager import DriveManager
+from kohakuterrarium.terrarium.drive.manager.manager import DriveManager
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
 from kohakuterrarium.terrarium.drive.sink import DriveDeliverySink, DriveObserver
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
-from kohakuterrarium.terrarium.drive.store import open_session_drive_repository
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.store.store import open_session_drive_repository
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -12,7 +12,9 @@ import pytest
 
 from kohakuterrarium.studio.catalog import drive_registrations as dr
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
-from kohakuterrarium.terrarium.drive.registration import DriveRegistrationDescriptor
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    DriveRegistrationDescriptor,
+)
 
 
 class FakeCustomRegistration:

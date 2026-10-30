@@ -26,7 +26,7 @@ from kohakuterrarium.studio.sessions.drives_serde import (
 )
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.drive.wire_service import DriveView
+from kohakuterrarium.terrarium.drive.service.wire import DriveView
 
 if TYPE_CHECKING:
     # Runtime import would cycle through the engine and built-in Drive command.

@@ -39,7 +39,7 @@ from kohakuterrarium.terrarium.drive.policy import (
     transition_capabilities_allow,
     _OPERATION_CAPABILITY,
 )
-from kohakuterrarium.terrarium.drive.snapshot import (
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import (
     EnabledRegistrySnapshot,
     availability_for_kind,
     derive_availability,

@@ -21,7 +21,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveValidationError,
 )
 from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveRegistration,
     DriveRegistrationDescriptor,
     GenericDriveRegistration,

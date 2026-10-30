@@ -58,7 +58,7 @@ from kohakuterrarium.terrarium.topology import (
     TopologyState,
 )
 from kohakuterrarium.utils.logging import get_logger
-from kohakuterrarium.terrarium.drive.store import DriveRepositoryClosedError
+from kohakuterrarium.terrarium.drive.store.store import DriveRepositoryClosedError
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium.config import TerrariumConfig

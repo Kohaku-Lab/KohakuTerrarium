@@ -8,11 +8,11 @@ duplicating.
 
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.terrarium.drive.prompt import DriveRuntimePromptPlugin
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveRegistrationDescriptor,
     GenericDriveRegistration,
 )
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 
 
 class _AltRegistration:

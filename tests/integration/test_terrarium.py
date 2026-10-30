@@ -45,12 +45,12 @@ from kohakuterrarium.session.history.replay import (
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.occupancy.gate import try_fast
-from kohakuterrarium.terrarium.drive.store_migration import _migrate_same_file_drives
+from kohakuterrarium.terrarium.drive.store.migration import _migrate_same_file_drives
 from kohakuterrarium.terrarium.drive.wire import pack_drive_record
 from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.persistence.viewer.exchanges import build_exchanges_payload
 import kohakuterrarium.terrarium.session_coord as _session_coord
-from kohakuterrarium.terrarium.drive.store import (
+from kohakuterrarium.terrarium.drive.store.store import (
     DriveRepositoryClosedError,
     SqliteDriveRepository,
 )
@@ -65,7 +65,7 @@ from kohakuterrarium.terrarium.drive.config import (
     default_registrations,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-from kohakuterrarium.terrarium.drive.registration import (
+from kohakuterrarium.terrarium.drive.registration.registration import (
     DriveRegistrationDescriptor,
     GenericDriveRegistration,
 )

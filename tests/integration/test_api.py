@@ -2928,7 +2928,9 @@ def test_drive_record_http_lifecycle(monkeypatch, tmp_path) -> None:
     entered by the TestClient lifespan so every async primitive lives in one loop.
     """
     from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-    from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+    from kohakuterrarium.terrarium.drive.registration.registration import (
+        GenericDriveRegistration,
+    )
 
     monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "drive-sessions"))
     engine = Terrarium(

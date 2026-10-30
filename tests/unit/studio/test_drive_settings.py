@@ -23,14 +23,16 @@ from kohakuterrarium.studio.identity.drive_settings import (
     RegistrationSetting,
 )
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.drive.registration import DriveRegistrationDescriptor
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    DriveRegistrationDescriptor,
+)
 from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationNotFoundError,
     DriveSettingsConflictError,
     DriveValidationError,
 )
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.utils.config_dir import config_dir
 
 # Subprocess body for the cross-process lock test: a SEPARATE process acquires
@@ -514,7 +516,7 @@ class TestRunningRevision:
         return SimpleNamespace(drives=drives)
 
     def _reg_with_options(self, options):
-        from kohakuterrarium.terrarium.drive.registration import (
+        from kohakuterrarium.terrarium.drive.registration.registration import (
             EFFECTIVE_OPTIONS_ATTR,
             GenericDriveRegistration,
         )

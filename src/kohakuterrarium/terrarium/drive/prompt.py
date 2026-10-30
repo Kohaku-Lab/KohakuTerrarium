@@ -8,7 +8,7 @@ prompt and arrive through event projections or status tools instead.
 from typing import Any
 
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 
 # This contract stays kind-agnostic and bounded because registration-specific
 # guidance is appended separately.

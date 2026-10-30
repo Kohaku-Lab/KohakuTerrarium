@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from kohakuterrarium.terrarium.drive.store import SqliteDriveRepository
+from kohakuterrarium.terrarium.drive.store.store import SqliteDriveRepository
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

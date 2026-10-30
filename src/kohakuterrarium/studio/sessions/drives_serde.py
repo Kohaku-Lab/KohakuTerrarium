@@ -19,7 +19,7 @@ from kohakuterrarium.terrarium.drive.models import (
     DriveStatus,
 )
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DrivePatch
-from kohakuterrarium.terrarium.drive.wire_service import DriveView
+from kohakuterrarium.terrarium.drive.service.wire import DriveView
 
 # List rows omit sensitive or verbose payloads reserved for authorized detail views.
 _REDACTED_KEYS = ("spec", "presentation", "metadata", "terminal_evidence")

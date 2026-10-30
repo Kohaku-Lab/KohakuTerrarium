@@ -14,7 +14,7 @@ import kohakuterrarium.bootstrap.agent_init as agent_init
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.drive.store import (
+from kohakuterrarium.terrarium.drive.store.store import (
     DriveRepositoryClosedError,
 )
 from kohakuterrarium.terrarium.events import EventFilter, EventKind

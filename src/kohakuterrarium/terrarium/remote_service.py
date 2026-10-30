@@ -39,8 +39,10 @@ from kohakuterrarium.laboratory._internal.client import (
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
 from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.drive.remote_ops import RemoteDriveServiceMixin
-from kohakuterrarium.terrarium.drive.service_protocol import (
+from kohakuterrarium.terrarium.drive.multi_node.remote_ops import (
+    RemoteDriveServiceMixin,
+)
+from kohakuterrarium.terrarium.drive.service.protocol import (
     DriveServiceUnsupportedMixin,
 )
 from kohakuterrarium.terrarium.events import (
@@ -179,7 +181,7 @@ class RemoteTerrariumService(
     about; typically managed by :class:`MultiNodeTerrariumService`.
 
     The Drive surface comes from
-    :class:`~kohakuterrarium.terrarium.drive.remote_ops.RemoteDriveServiceMixin`,
+    :class:`~kohakuterrarium.terrarium.drive.multi_node.remote_ops.RemoteDriveServiceMixin`,
     which routes every ``drive_*`` op to this worker's ``terrarium.runtime``
     adapter; the unsupported stubs remain a defensive MRO floor.
     """

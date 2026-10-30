@@ -10,17 +10,19 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.drive.manager import DriveManager
+from kohakuterrarium.terrarium.drive.manager.manager import DriveManager
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
 from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    GenericDriveRegistration,
+)
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.drive.sink import (
     DeliveryOutcome,
     Settlement,
     SettlementStatus,
 )
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 
 WORKER = ActorRef("creature", "worker")
 OTHER = ActorRef("creature", "other")

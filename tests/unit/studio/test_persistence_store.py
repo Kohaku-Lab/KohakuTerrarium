@@ -344,7 +344,7 @@ class TestDeleteSessionFiles:
 
         from kohakuterrarium.terrarium.drive.models import ActorRef
         from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
-        from kohakuterrarium.terrarium.drive.store import (
+        from kohakuterrarium.terrarium.drive.store.store import (
             open_session_drive_repository,
         )
 
@@ -392,7 +392,7 @@ class TestDeleteSessionFiles:
         assert rows == ()
 
     def test_busy_migration_prevents_any_session_deletion(self, tmp_path, monkeypatch):
-        from kohakuterrarium.terrarium.drive import store_migration as migration
+        from kohakuterrarium.terrarium.drive.store import migration
         from kohakuterrarium.utils.file.lock import FileLock
 
         path = _make_session(tmp_path)

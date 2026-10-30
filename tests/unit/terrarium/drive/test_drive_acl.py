@@ -32,8 +32,10 @@ from kohakuterrarium.terrarium.drive.models import (
     DriveRecord,
     DriveStatus,
 )
-from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.registration.registration import (
+    GenericDriveRegistration,
+)
+from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 
 _NOW = datetime(2026, 7, 11, tzinfo=timezone.utc)
 _SNAP = EnabledRegistrySnapshot.build([GenericDriveRegistration()])

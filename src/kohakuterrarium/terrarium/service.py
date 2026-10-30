@@ -36,8 +36,8 @@ from typing import Any, Protocol, runtime_checkable
 
 from kohakuterrarium.core.channel import ChannelMessage as _ChannelMessage
 from kohakuterrarium.session.history.raw import UserMessageSelector
-from kohakuterrarium.terrarium.drive.service import DriveServiceMixin
-from kohakuterrarium.terrarium.drive.service_protocol import DriveServiceProtocol
+from kohakuterrarium.terrarium.drive.service.service import DriveServiceMixin
+from kohakuterrarium.terrarium.drive.service.protocol import DriveServiceProtocol
 from kohakuterrarium.terrarium.local_command_service import LocalCommandServiceMixin
 from kohakuterrarium.terrarium.subagent_service import (
     LocalSubagentServiceMixin,
