@@ -406,15 +406,25 @@ jobs:
       - name: Install the Tauri CLI
         run: npm install --global @tauri-apps/cli@2
 
+      # With the signing key present the build also writes signed updater
+      # artifacts; without it (forks) the installers are still built.
       - name: Build installers (Windows)
         if: matrix.platform == 'windows'
         working-directory: packaging/desktop/src-tauri
-        run: tauri build --bundles "msi,nsis"
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          $extra = @()
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) { $extra = @('--config', 'tauri.updater.conf.json') }
+          tauri build --bundles "msi,nsis" @extra
 
       - name: Build and ad-hoc sign the app bundle (macOS)
         if: matrix.platform == 'macos'
         working-directory: packaging/desktop/src-tauri
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           tauri build --bundles app
           app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
@@ -427,6 +437,12 @@ jobs:
           mkdir -p target/release/bundle/dmg
           hdiutil create -volname KohakuTerrarium -srcfolder "${app}" -ov -format UDZO \
             "target/release/bundle/dmg/KohakuTerrarium_${version}_aarch64.dmg"
+          # The updater installs from an archive of the signed app.
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY}" ]; then
+            archive="target/release/bundle/macos/KohakuTerrarium_${version}_aarch64.app.tar.gz"
+            tar -czf "${archive}" -C "$(dirname "${app}")" "$(basename "${app}")"
+            tauri signer sign -k "${TAURI_SIGNING_PRIVATE_KEY}" "${archive}"
+          fi
 
       - name: Install and self-check (Windows MSI)
         if: matrix.platform == 'windows'
@@ -469,7 +485,10 @@ jobs:
         run: |
           mkdir -p artifacts
           find packaging/desktop/src-tauri/target/release/bundle -type f \
-            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \) -exec cp {} artifacts/ \;
+            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \
+               -o -name '*.msi.sig' -o -name '*-setup.exe.sig' \
+               -o -name '*_aarch64.app.tar.gz' -o -name '*_aarch64.app.tar.gz.sig' \) \
+            -exec cp {} artifacts/ \;
           ls -la artifacts/
           test -n "$(find artifacts -maxdepth 1 -type f | head -n 1)"
 
@@ -614,6 +633,14 @@ jobs:
           find all-artifacts/release-tree-* -type f -exec cp {} release/ \;
           # Desktop installers
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
+          # The desktop shell's updater reads this from the latest stable release.
+          if [ "${{ needs.meta.outputs.channel }}" = "stable" ] && compgen -G "release/*.sig" > /dev/null; then
+            python packaging/desktop/updater_manifest.py \
+              --assets release \
+              --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ needs.meta.outputs.tag }}" \
+              --notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ needs.meta.outputs.tag }}" \
+              --out release/latest.json
+          fi
           (cd release && sha256sum * > SHA256SUMS)
           ls -la release/
           cat release/SHA256SUMS
