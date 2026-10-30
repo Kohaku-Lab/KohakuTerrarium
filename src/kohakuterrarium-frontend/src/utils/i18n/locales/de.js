@@ -343,6 +343,14 @@ export default {
   "settings.desktop.terminalFailed": "Der Terminalbefehl konnte nicht geändert werden.",
   "settings.desktop.autostartTitle": "Beim Anmelden starten",
   "settings.desktop.autostartHint": "KohakuTerrarium beim Anmelden automatisch öffnen.",
+  "settings.desktop.updateTitle": "App-Updates",
+  "settings.desktop.updateHint":
+    "Sucht nach einer neueren Desktop-Shell. Die Python-Laufzeit wird separat aktualisiert.",
+  "settings.desktop.updateCheck": "Nach Updates suchen",
+  "settings.desktop.updateCurrent": "Du hast die neueste Version.",
+  "settings.desktop.updateAvailable": "Version {version} ist verfügbar.",
+  "settings.desktop.updateInstall": "Installieren und neu starten",
+  "settings.desktop.updateFailed": "Die Update-Suche oder Installation ist fehlgeschlagen.",
 
   "settings.prefs.desktopZoom": "Desktop-Zoom",
   "settings.prefs.mobileZoom": "Mobile-Zoom",

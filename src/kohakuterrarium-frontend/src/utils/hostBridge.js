@@ -116,6 +116,26 @@ export async function setAutostart(enabled) {
   }
 }
 
+/** Whether a newer shell build is published: `{ available, version? }`, or ``null`` if the shell cannot check. */
+export async function checkShellUpdate() {
+  if (!hostSupports("check_shell_update")) return null
+  try {
+    return (await call("check_shell_update")) || null
+  } catch {
+    return null
+  }
+}
+
+/** Download and install the newer shell build and restart into it. Resolves ``false`` on failure. */
+export async function installShellUpdate() {
+  if (!hostSupports("install_shell_update")) return false
+  try {
+    return (await call("install_shell_update")) === true
+  } catch {
+    return false
+  }
+}
+
 /** The deep link that arrived before the page could ask for it, or ``null``. */
 export async function takeDeepLink() {
   if (!hostSupports("take_deep_link")) return null

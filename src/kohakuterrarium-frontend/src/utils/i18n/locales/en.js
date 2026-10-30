@@ -427,6 +427,14 @@ export default {
   "settings.desktop.terminalFailed": "Could not change the terminal command.",
   "settings.desktop.autostartTitle": "Start at login",
   "settings.desktop.autostartHint": "Open KohakuTerrarium automatically when you sign in.",
+  "settings.desktop.updateTitle": "App updates",
+  "settings.desktop.updateHint":
+    "Check for a newer desktop shell. The Python runtime updates separately.",
+  "settings.desktop.updateCheck": "Check for updates",
+  "settings.desktop.updateCurrent": "You have the latest version.",
+  "settings.desktop.updateAvailable": "Version {version} is available.",
+  "settings.desktop.updateInstall": "Install and restart",
+  "settings.desktop.updateFailed": "The update check or installation failed.",
   "settings.prefs.readingSize": "Reading size",
   "settings.prefs.readingSizeHint":
     "Enlarges interface text and the controls needed to keep it readable.",

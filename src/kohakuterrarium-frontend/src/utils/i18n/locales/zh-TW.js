@@ -343,6 +343,13 @@ export default {
   "settings.desktop.terminalFailed": "無法變更終端機指令。",
   "settings.desktop.autostartTitle": "登入時啟動",
   "settings.desktop.autostartHint": "登入系統時自動開啟 KohakuTerrarium。",
+  "settings.desktop.updateTitle": "應用程式更新",
+  "settings.desktop.updateHint": "檢查是否有較新的桌面外殼。Python 執行環境另行更新。",
+  "settings.desktop.updateCheck": "檢查更新",
+  "settings.desktop.updateCurrent": "已是最新版本。",
+  "settings.desktop.updateAvailable": "有可用的新版本 {version}。",
+  "settings.desktop.updateInstall": "安裝並重新啟動",
+  "settings.desktop.updateFailed": "檢查或安裝更新失敗。",
 
   "settings.prefs.mobileZoom": "手機縮放",
   "settings.keys.storageHint": "API 金鑰儲存在 ~/.kohakuterrarium/api_keys.yaml",

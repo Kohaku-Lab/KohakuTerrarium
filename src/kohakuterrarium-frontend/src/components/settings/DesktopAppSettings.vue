@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showTerminal || showAutostart" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
+  <div v-if="showTerminal || showAutostart || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
     <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
 
     <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
@@ -20,6 +20,18 @@
       </div>
       <el-switch :model-value="autostart" @change="setLogin" />
     </div>
+
+    <div v-if="showUpdate" class="flex items-start justify-between gap-4" data-setting="shell-update">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.updateTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.updateHint") }}</div>
+        <div v-if="updateStatus === 'current'" class="text-[11px] text-warm-400 mt-1" data-update-status>{{ t("settings.desktop.updateCurrent") }}</div>
+        <div v-else-if="updateStatus === 'available'" class="text-[11px] text-iolite mt-1" data-update-status>{{ t("settings.desktop.updateAvailable", { version: updateVersion }) }}</div>
+        <div v-else-if="updateStatus === 'failed'" class="text-[11px] text-coral mt-1" data-update-status>{{ t("settings.desktop.updateFailed") }}</div>
+      </div>
+      <el-button v-if="updateStatus === 'available'" size="small" type="primary" data-update-install :loading="updateBusy" @click="installUpdate">{{ t("settings.desktop.updateInstall") }}</el-button>
+      <el-button v-else size="small" data-update-check :loading="updateBusy" @click="checkUpdate">{{ t("settings.desktop.updateCheck") }}</el-button>
+    </div>
   </div>
 </template>
 
@@ -27,7 +39,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import { appShimsAPI } from "@/utils/appShimsApi"
-import { getAutostart, hasDesktopHost, hostSupports, onHostReady, setAutostart } from "@/utils/hostBridge"
+import { checkShellUpdate, getAutostart, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -43,6 +55,34 @@ const hostReady = ref(hasDesktopHost())
 const terminalEnabled = computed(() => shims.value.commands.length > 0 && shims.value.installed.length === shims.value.commands.length)
 const showTerminal = computed(() => available.value && shims.value.supported && shims.value.local)
 const showAutostart = computed(() => hostReady.value && hostSupports("get_autostart"))
+const showUpdate = computed(() => hostReady.value && hostSupports("check_shell_update"))
+const updateStatus = ref("idle")
+const updateVersion = ref("")
+const updateBusy = ref(false)
+
+async function checkUpdate() {
+  updateBusy.value = true
+  try {
+    const result = await checkShellUpdate()
+    if (result?.available) {
+      updateVersion.value = result.version || ""
+      updateStatus.value = "available"
+    } else {
+      updateStatus.value = result && !result.error ? "current" : "failed"
+    }
+  } finally {
+    updateBusy.value = false
+  }
+}
+
+async function installUpdate() {
+  updateBusy.value = true
+  try {
+    if (!(await installShellUpdate())) updateStatus.value = "failed"
+  } finally {
+    updateBusy.value = false
+  }
+}
 
 async function loadShims() {
   try {

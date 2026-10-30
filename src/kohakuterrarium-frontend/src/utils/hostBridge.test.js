@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   DESKTOP_PROTOCOL,
+  checkShellUpdate,
+  installShellUpdate,
   desktopCapabilities,
   getAutostart,
   hasDesktopHost,
@@ -114,6 +116,35 @@ describe("hostBridge", () => {
     expect(await setAutostart(false)).toBe(false)
     expect(api.set_autostart).toHaveBeenCalledWith(false)
     expect(await takeDeepLink()).toBe("kt://session/x")
+  })
+
+  it("checks for and installs a shell update through the shell", async () => {
+    const api = {
+      check_shell_update: vi.fn(async () => ({ available: true, version: "9.9.9" })),
+      install_shell_update: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+
+    expect(await checkShellUpdate()).toEqual({ available: true, version: "9.9.9" })
+    expect(await installShellUpdate()).toBe(true)
+  })
+
+  it("treats a shell without updates or a failing update as nothing to do", async () => {
+    window.pywebview = { api: {} }
+    expect(await checkShellUpdate()).toBeNull()
+    expect(await installShellUpdate()).toBe(false)
+    window.pywebview = {
+      api: {
+        check_shell_update: async () => {
+          throw new Error("offline")
+        },
+        install_shell_update: async () => {
+          throw new Error("offline")
+        },
+      },
+    }
+    expect(await checkShellUpdate()).toBeNull()
+    expect(await installShellUpdate()).toBe(false)
   })
 
   it("reports the state the shell actually reached when it refuses a change", async () => {

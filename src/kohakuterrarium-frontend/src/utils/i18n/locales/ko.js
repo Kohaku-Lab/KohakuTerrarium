@@ -328,6 +328,14 @@ export default {
   "settings.desktop.terminalFailed": "터미널 명령을 변경할 수 없습니다.",
   "settings.desktop.autostartTitle": "로그인 시 시작",
   "settings.desktop.autostartHint": "로그인할 때 KohakuTerrarium을 자동으로 엽니다.",
+  "settings.desktop.updateTitle": "앱 업데이트",
+  "settings.desktop.updateHint":
+    "새 데스크톱 셸이 있는지 확인합니다. Python 런타임은 별도로 업데이트됩니다.",
+  "settings.desktop.updateCheck": "업데이트 확인",
+  "settings.desktop.updateCurrent": "최신 버전입니다.",
+  "settings.desktop.updateAvailable": "버전 {version}을(를) 사용할 수 있습니다.",
+  "settings.desktop.updateInstall": "설치 후 다시 시작",
+  "settings.desktop.updateFailed": "업데이트 확인 또는 설치에 실패했습니다.",
 
   "settings.prefs.mobileZoom": "모바일 확대/축소",
   "settings.keys.storageHint": "API 키는 ~/.kohakuterrarium/api_keys.yaml에 저장됩니다",

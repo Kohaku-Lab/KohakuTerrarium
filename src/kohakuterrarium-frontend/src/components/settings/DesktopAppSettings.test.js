@@ -36,8 +36,17 @@ const ElSwitch = {
     '<button class="switch" :data-on="modelValue" @click="$emit(\'change\', !modelValue)" />',
 }
 
+const ElButton = {
+  props: ["loading"],
+  template: '<button class="btn" @click="$emit(\'click\')"><slot /></button>',
+}
+
 function mountSettings() {
-  return mount(DesktopAppSettings, { global: { stubs: { ElSwitch, "el-switch": ElSwitch } } })
+  return mount(DesktopAppSettings, {
+    global: {
+      stubs: { ElSwitch, "el-switch": ElSwitch, ElButton, "el-button": ElButton },
+    },
+  })
 }
 
 beforeEach(() => {
@@ -130,6 +139,46 @@ describe("DesktopAppSettings", () => {
 
     expect(api.set_autostart).toHaveBeenCalledWith(true)
     expect(wrapper.find("[data-setting='autostart'] .switch").attributes("data-on")).toBe("true")
+  })
+
+  it("checks for a shell update, offers it, and installs it", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const api = {
+      check_shell_update: vi.fn(async () => ({ available: true, version: "9.1.0" })),
+      install_shell_update: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    expect(wrapper.find("[data-update-install]").exists()).toBe(false)
+    await wrapper.find("[data-update-check]").trigger("click")
+    await flushPromises()
+
+    expect(wrapper.find("[data-update-status]").text()).toContain("9.1.0")
+    await wrapper.find("[data-update-install]").trigger("click")
+    await flushPromises()
+    expect(api.install_shell_update).toHaveBeenCalled()
+  })
+
+  it("says the app is current, and reports a failed check or install", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const api = {
+      check_shell_update: vi.fn(async () => ({ available: false })),
+      install_shell_update: vi.fn(async () => false),
+    }
+    window.pywebview = { api }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.find("[data-update-check]").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-update-status]").text()).toContain("settings.desktop.updateCurrent")
+
+    api.check_shell_update.mockResolvedValue({ available: false, error: "offline" })
+    await wrapper.find("[data-update-check]").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-update-status]").text()).toContain("settings.desktop.updateFailed")
   })
 
   it("does not offer start-at-login in a plain browser", async () => {
