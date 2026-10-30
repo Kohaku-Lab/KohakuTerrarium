@@ -29,6 +29,16 @@ the window. Later starts reuse it; updates swap in a newer release without
 reinstalling the app. Tools that start Python (the `python` tool, MCP servers,
 package installs) use the bundled interpreter.
 
+## Updates
+
+Two things update separately. The Python runtime (the release tree) updates through
+the launcher without reinstalling. The desktop shell itself (the window, tray and
+native features) updates from **Settings → Preferences → Desktop app → App
+updates**: **Check for updates** looks for a newer shell published with the latest
+stable release, and **Install and restart** downloads it, verifies its signature
+against the key built into the app, installs it and restarts. Shell updates are
+rare; most releases only change the runtime.
+
 ## Terminal command
 
 The installed app can put `kt`, `kt-cli` and `kt-tui` on your PATH. It is off by
