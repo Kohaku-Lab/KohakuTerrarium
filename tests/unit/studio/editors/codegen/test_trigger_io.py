@@ -175,8 +175,7 @@ class TestIoRenderNew:
         back = io.parse_back(out)
         assert back["mode"] == "simple"
         assert back["form"]["class_name"] == "StdoutOutput"
-        # Output modules expose a write-family protocol method.
-        assert back["form"]["method_name"] in ("write", "write_output")
+        assert back["form"]["method_name"] == "write"
 
     def test_defaults_applied(self):
         out = io.render_new({})

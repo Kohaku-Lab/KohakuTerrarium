@@ -136,11 +136,7 @@ class TestNodeSettingsFlow:
         try:
             await client.save(_enabled_settings())
             result = await client.apply()
-            assert result["result"] in {
-                "applied_live",
-                "restart_required",
-                "rejected",
-            }
+            assert result["result"] == "restart_required"
         finally:
             await engine.shutdown()
 

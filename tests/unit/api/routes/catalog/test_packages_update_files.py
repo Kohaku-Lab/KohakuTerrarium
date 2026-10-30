@@ -97,8 +97,7 @@ class TestFiles:
         _seed_package(tmp_path)
         # ``%2F..%2F..%2Fetc%2Fpasswd`` would resolve outside the pkg root.
         resp = client.get("/api/registry/alpha/files/..%2F..%2Fetc%2Fpasswd")
-        # Either 403 (escapes root) or 404 (no such file) — both block reads.
-        assert resp.status_code in (403, 404)
+        assert resp.status_code == 403
 
     def test_write_file_round_trip(self, client, tmp_path):
         pkg = _seed_package(tmp_path)

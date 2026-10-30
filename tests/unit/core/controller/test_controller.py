@@ -368,11 +368,11 @@ class TestKnownOutputsAndFormat:
         assert "discord" in cfg.known_outputs
 
     async def test_default_tool_format_bracket(self):
-        from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT
+        from kohakuterrarium.parsing.format import BRACKET_FORMAT
 
         env = TestAgentBuilder().with_llm_script(["x"]).build()
         env.controller._get_parser()
-        assert env.controller._parser_config.tool_format in (BRACKET_FORMAT, XML_FORMAT)
+        assert env.controller._parser_config.tool_format == BRACKET_FORMAT
 
 
 class _DummyOutput:

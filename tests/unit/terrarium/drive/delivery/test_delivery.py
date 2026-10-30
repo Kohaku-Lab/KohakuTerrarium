@@ -522,7 +522,7 @@ class TestRepoCloseRace:
             await opener
             # The round settled on the LIVE repo and its dispatcher lease is gone.
             deliveries = await repo.list_deliveries(rec.drive_id)
-            assert deliveries[0].state in ("admitted", "acknowledged")
+            assert deliveries[0].state == "acknowledged"
             assert (await repo.get_assignment(rec.drive_id)).lease_owner is None
         finally:
             repo.close_blocking()

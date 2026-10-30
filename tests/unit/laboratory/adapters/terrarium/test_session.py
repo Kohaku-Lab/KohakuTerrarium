@@ -674,11 +674,7 @@ class TestResume:
         out = await _adapter._dispatch(
             _msg("resume", {"path": "/no/such/file.kohakutr"})
         )
-        # FileNotFoundError is a KeyError sibling? No — it maps via the
-        # generic Exception arm to ``session``; assert it surfaces as a
-        # structured error rather than crashing the dispatcher.
-        assert "error" in out
-        assert out["error"]["kind"] in {"not_found", "session"}
+        assert out["error"]["kind"] == "session"
 
     async def test_resume_adopts_file_and_returns_session_meta(
         self, _adapter, _engine, tmp_path

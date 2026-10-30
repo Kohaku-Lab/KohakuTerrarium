@@ -408,8 +408,8 @@ class TestCorsPreflightBypass:
                     "Access-Control-Request-Method": "GET",
                 },
             )
-        # CORS responds with 200 + Allow-Origin.
-        assert resp.status_code in (200, 204)
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "*"
 
 
 # ---------------------------------------------------------------------------

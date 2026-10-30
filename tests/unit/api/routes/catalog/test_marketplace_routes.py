@@ -168,9 +168,8 @@ class TestRefresh:
 
         monkeypatch.setattr(data_mod, "fetch_marketplace", fake_fetch)
 
-        # Without admin header → 401/403.
         r = client.post(f"{PREFIX}/refresh")
-        assert r.status_code in (401, 403)
+        assert r.status_code == 401
 
         # With admin header → 200.
         r = client.post(

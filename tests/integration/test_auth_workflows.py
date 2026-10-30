@@ -109,7 +109,7 @@ class TestAuthIntegration:
             r = client.get("/api/auth/me", headers=host_bearer)
             assert r.status_code == 401
             # Distinguishable from L2 by the X-Auth-Required header.
-            assert r.headers.get("X-Auth-Required", "").lower() in ("user", "")
+            assert r.headers["X-Auth-Required"] == "user"
 
             # ── 5. Admin seeded directly via DB (registration is
             #     invite_only — no self-register without a token; the

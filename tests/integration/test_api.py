@@ -753,15 +753,10 @@ class TestApiIntegration:
         assert resp.json()["settings"]["runtime"]["enabled"] is True
         assert resp.json()["revision"] == saved_rev
 
-        # Saving remains distinct from applying; changing the enabled registry
-        # may apply live or report that a restart is required.
+        # Saving remains distinct from applying.
         resp = client.post("/api/settings/drives/apply")
         assert resp.status_code == 200
-        assert resp.json()["result"] in {
-            "applied_live",
-            "restart_required",
-            "rejected",
-        }
+        assert resp.json()["result"] == "restart_required"
         resp = client.get("/api/settings/drives/runtime-status")
         assert resp.status_code == 200
         assert "enabled" in resp.json()
@@ -2647,12 +2642,10 @@ terrarium:
             assert frame["type"] == "error"
             assert "not found" in frame["content"]
 
-        # Log-tail WS: the server either streams a ``meta`` frame (a log
-        # file exists for this process) or an ``error`` frame (none
-        # found). Both are valid first frames — assert on the type.
+        # Log-tail WS: the test config dir holds no log file yet.
         with client.websocket_connect("/ws/logs") as ws:
             frame = ws.receive_json()
-            assert frame["type"] in {"meta", "error"}
+            assert frame["type"] == "error"
 
         # A zero-backlog daemon stream closes without replaying historical logs.
         with client.websocket_connect("/ws/daemon/logs?follow=false&lines=0") as ws:
@@ -2662,7 +2655,7 @@ terrarium:
         # ``ready`` frame; an unknown agent gets an ``error`` frame.
         with client.websocket_connect(f"/ws/files/{alice_id}") as ws:
             frame = ws.receive_json()
-            assert frame["type"] in {"ready", "error"}
+            assert frame["type"] == "ready"
         with client.websocket_connect("/ws/files/ghost-agent") as ws:
             frame = ws.receive_json()
             assert frame["type"] == "error"

@@ -164,7 +164,7 @@ class TestCanvasImagePromotes:
         resolved = png.resolve()
         assert preview["kind"] == "image"
         assert preview["file_path"] == str(resolved)
-        assert preview["lang"] in {"png", "jpg"}
+        assert preview["lang"] == "png"
         assert preview["content"] == resolved.as_uri()
         assert preview["truncated"] is False
         image = _image_part(result)

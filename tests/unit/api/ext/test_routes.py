@@ -76,9 +76,10 @@ def test_multi_user_hosts_disable_by_default_and_need_a_user(ui_package, reset_s
         resp = client.post("/api/extensions/ui/asset-token", json={"package": "alpha"})
         assert resp.status_code == 401
         # Anonymous callers never reach the toggle under required L4 either.
-        assert client.put(
-            "/api/extensions/ui/alpha", json={"enabled": True}
-        ).status_code in (401, 403)
+        assert (
+            client.put("/api/extensions/ui/alpha", json={"enabled": True}).status_code
+            == 403
+        )
     with _client(AuthConfig(multi_user="optional")) as client:
         alpha = _by_name(client.get("/api/extensions/ui"))["alpha"]
         assert alpha["enabled"] is False and alpha["enabled_by_default"] is False

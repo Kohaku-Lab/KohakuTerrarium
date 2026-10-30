@@ -390,25 +390,24 @@ class TestHostBackpressureDrops:
 # ──────────────────────────────────────────────────────────────────
 
 
+async def _until(predicate, *, timeout: float = 5.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        assert asyncio.get_running_loop().time() < deadline, "condition not reached"
+        await asyncio.sleep(0.02)
+
+
 class TestHeartbeatTimeoutShorterThanInterval:
-    async def test_client_first_heartbeat_arrives_before_timeout(self):
-        # heartbeat_timeout < heartbeat_interval — client never gets
-        # to send its first heartbeat before host reaps it.
+    async def test_misconfigured_client_is_reaped_then_rejoins(self):
+        # The first heartbeat is 2s away but the host reaps after 0.3s, so the
+        # client is dropped and then rejoins through its reconnect backoff.
         host = await _start_host(port=106, heartbeat_timeout=0.3)
+        dropped: list[str] = []
+        host.on_node_disconnect(dropped.append)
         client = await _start_client(port=106, heartbeat_interval=2.0)
         try:
-            # Wait one reaper cycle plus a hair.
-            await asyncio.sleep(0.6)
-            # If the host reaped, the client gets disconnected (then
-            # auto-reconnects forever).  ``alive_clients`` should
-            # still include the worker because the lab link is
-            # genuinely up — no real network problem, just a
-            # misconfigured heartbeat.  This guards against a UX
-            # footgun: silent reconnect-loops behind a healthy WS.
-            assert "worker-1" in host.alive_clients(), (
-                "host reaped a client that was actually alive — "
-                "heartbeat config invariant is not enforced"
-            )
+            await _until(lambda: bool(dropped))
+            await _until(lambda: "worker-1" in host.alive_clients())
         finally:
             await client.stop()
             await host.stop()

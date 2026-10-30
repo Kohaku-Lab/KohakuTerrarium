@@ -110,7 +110,7 @@ class TestRemoveChannelFromGraph:
         try:
             gid = t.list_graphs()[0].graph_id
             delta = await cl.remove_channel_from_graph(t, gid, "ch")
-            assert delta.kind in ("nothing", "split")
+            assert delta.kind == "nothing"
         finally:
             await t.shutdown()
 

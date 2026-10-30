@@ -200,7 +200,7 @@ class TestRun:
                 await agent.run("hello", timeout=0.3)
             # The turn was actually unwound — the agent is usable again.
             follow_up = await agent.run("again", raise_on_error=False)
-            assert follow_up.status in ("ok", "error")
+            assert follow_up.status == "ok"
         finally:
             await agent.stop()
 

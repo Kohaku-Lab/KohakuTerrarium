@@ -17,7 +17,7 @@ class TestListBuiltinToolEntries:
         bash = by_name["bash"]
         assert bash["source"] == "builtin"
         assert bash["type"] == "builtin"
-        assert bash["execution_mode"] in ("direct", "background", "stateful")
+        assert bash["execution_mode"] == "direct"
         assert isinstance(bash["needs_context"], bool)
         assert isinstance(bash["has_doc"], bool)
         # Every entry has a non-empty name + a description string.

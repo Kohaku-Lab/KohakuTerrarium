@@ -188,13 +188,9 @@ class TestCreateUserInputEvent:
         # The first part has a ``text`` attr with the original value.
         assert e.content[0].text == "hi"
 
-    def test_empty_normalised_content_falls_back_to_empty_string(self):
-        # ``normalize_content_parts`` may return None for unrecognised
-        # shapes; the factory must fall back to "".
+    def test_empty_part_list_stays_an_empty_list(self):
         e = create_user_input_event([])
-        # Empty list is still a list — but normalize may yield None.
-        # Whichever, the content is a recognisable empty value.
-        assert e.content in ("", [], None) or isinstance(e.content, list)
+        assert e.content == []
 
 
 class TestCreateToolCompleteEvent:

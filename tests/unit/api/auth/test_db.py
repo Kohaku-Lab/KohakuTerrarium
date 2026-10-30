@@ -43,11 +43,7 @@ class TestPragmas:
     def test_journal_mode_is_wal(self, db_path):
         with connection() as conn:
             cur = conn.execute("PRAGMA journal_mode")
-            mode = cur.fetchone()[0].lower()
-            # On some filesystems WAL falls back; we accept wal or delete
-            # (the standard fallback) — the important thing is no
-            # exception was raised by the pragma SET.
-            assert mode in {"wal", "delete", "memory"}
+            assert cur.fetchone()[0].lower() == "wal"
 
     def test_row_factory_lets_index_by_name(self, db_path):
         ensure_migrated()

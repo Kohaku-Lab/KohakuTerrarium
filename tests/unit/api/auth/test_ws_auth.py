@@ -34,7 +34,7 @@ class TestEcho:
             with client.websocket_connect("/ws/echo") as ws:
                 ws.send_text("hi")
                 assert ws.receive_text() == "hi"
-                assert ws.accepted_subprotocol in (None, "")
+                assert ws.accepted_subprotocol is None
 
     def test_kt_token_subprotocol_is_echoed(self):
         # Send + receive first so the server-side handler completes its
