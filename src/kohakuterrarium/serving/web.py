@@ -1,14 +1,11 @@
-"""Serve the web application or host it in a native desktop window.
+"""Serve the web application: FastAPI with the built Vue frontend.
 
-Web mode runs FastAPI with the built Vue frontend. Desktop mode adds a
-pywebview shell and adapts process handling for regular and Briefcase runtimes.
+The native desktop window lives in ``serving/desktop/``.
 """
 
-import ctypes
 import json
 import os
 import socket
-import subprocess
 import sys
 import threading
 import time
@@ -19,13 +16,9 @@ import uvicorn
 import kohakuterrarium.session.run_state as run_state
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
-from kohakuterrarium.serving.desktop.chrome import configure_desktop_chrome
-from kohakuterrarium.serving.desktop.palette import BACKGROUND
-from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
-    enable_file_logging,
     enable_stderr_logging,
     get_logger,
     set_level,
@@ -280,209 +273,3 @@ def run_web_server(
 
     mark_startup("web_server_run", surface="web", host=host, port=port)
     uvicorn.run(app, host=host, port=port)
-
-
-def _is_briefcase_runtime() -> bool:
-    """Return whether the process uses the non-detachable Briefcase runtime.
-
-    Detection accepts the launcher's explicit environment marker or the
-    isolated path file placed beside a Briefcase stub executable.
-    """
-    if os.environ.get("KT_LAUNCHER_EXEC") == "1":
-        return True
-    try:
-        exe_dir = Path(sys.executable).resolve().parent
-    except OSError:
-        return False
-    return any(exe_dir.glob("python3*._pth"))
-
-
-def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
-    """Launch the desktop app in-process for Briefcase or detached otherwise.
-
-    Regular interpreters spawn a child and redirect its output to ``app.log``.
-    Briefcase must run the server and window in the current process because its
-    application stub does not support ``python -m`` execution.
-    """
-    if _is_briefcase_runtime():
-        _run_desktop_app_blocking(port=port, log_level=log_level)
-        return
-
-    cmd = [
-        sys.executable,
-        "-m",
-        "kohakuterrarium.serving.desktop.desktop",
-        "--port",
-        str(port),
-        "--log-level",
-        str(log_level),
-    ]
-
-    log_dir = config_dir()
-    log_file = open(log_dir / "app.log", "w", encoding="utf-8")  # noqa: SIM115
-
-    kwargs: dict[str, object] = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": log_file,
-        "stderr": log_file,
-    }
-
-    if sys.platform == "win32":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    else:
-        kwargs["start_new_session"] = True
-
-    mark_startup("desktop_child_spawn_begin", surface="desktop", port=port)
-    child = subprocess.Popen(cmd, **kwargs)
-    mark_startup(
-        "desktop_child_spawned", surface="desktop", port=port, child_pid=child.pid
-    )
-    print(f"KohakuTerrarium desktop app launched (port {port})")
-    print(f"  Log: {log_dir / 'app.log'}")
-
-
-def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
-    """Run uvicorn and the native desktop window until the UI closes."""
-    configure_utf8_stdio(log=True)
-    raise_fd_limit(log=True)
-    os.environ["KT_STARTUP_SURFACE"] = "desktop"
-    enable_file_logging()
-
-    # A stable application ID lets Windows associate the packaged taskbar icon.
-    if sys.platform == "win32":
-        try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                "KohakuLab.KohakuTerrarium"
-            )
-        except Exception:
-            pass
-
-    set_level(log_level)
-    enable_stderr_logging(log_level)
-
-    try:
-        import webview
-    except ImportError:
-        print("pywebview is required for 'kt app'.")
-        print("Install: pip install 'KohakuTerrarium[desktop]'")
-        sys.exit(1)
-
-    if not WEB_DIST_DIR.is_dir():
-        logger.error(
-            "web_dist not found — run 'npm run build --prefix src/kohakuterrarium-frontend' first",
-            path=str(WEB_DIST_DIR),
-        )
-        sys.exit(1)
-
-    creatures_dirs, terrariums_dirs = _resolve_config_dirs()
-    mark_startup(
-        "desktop_config_dirs_resolved",
-        surface="desktop",
-        creatures=len(creatures_dirs),
-        terrariums=len(terrariums_dirs),
-    )
-
-    app = create_app(
-        creatures_dirs=creatures_dirs,
-        terrariums_dirs=terrariums_dirs,
-        static_dir=WEB_DIST_DIR,
-    )
-    mark_startup("desktop_app_created", surface="desktop")
-
-    # Open webview only after uvicorn reports the actual bound port.
-    try:
-        _server, port = start_uvicorn_with_port_fallback(
-            app,
-            requested_port=port,
-            host="127.0.0.1",
-            log_level="warning",
-        )
-    except RuntimeError as e:
-        logger.error("Failed to start uvicorn", error=str(e))
-        sys.exit(1)
-    logger.info("desktop: uvicorn listening at http://127.0.0.1:%d", port)
-    mark_startup("desktop_server_ready", surface="desktop", port=port)
-
-    icons_dir = Path(__file__).parent.parent / "app_icons"
-    icon_ico = icons_dir / "window.ico"
-    icon_png = icons_dir / "window.png"
-
-    window = webview.create_window(
-        "KohakuTerrarium",
-        f"http://127.0.0.1:{port}",
-        width=1280,
-        height=800,
-        min_size=(800, 500),
-        zoomable=True,
-        text_select=True,
-        confirm_close=True,
-        background_color=BACKGROUND,
-    )
-    configure_desktop_chrome(window)
-    mark_startup("desktop_window_created", surface="desktop", port=port)
-
-    def _set_icon_windows():
-        try:
-            user32 = ctypes.windll.user32
-            WM_SETICON = 0x0080
-            ICON_SMALL = 0
-            ICON_BIG = 1
-            ico = str(icon_ico) if icon_ico.exists() else None
-            if not ico:
-                return
-            hicon = user32.LoadImageW(None, ico, 1, 0, 0, 0x00000010)
-            if not hicon:
-                return
-            hwnd = user32.FindWindowW(None, "KohakuTerrarium")
-            if hwnd:
-                user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hicon)
-                user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hicon)
-        except Exception:
-            pass
-
-    def _set_icon_macos():
-        try:
-            if not icon_png.exists():
-                return
-            from AppKit import NSApp, NSApplication, NSImage
-
-            app = NSApp() or NSApplication.sharedApplication()
-            image = NSImage.alloc().initWithContentsOfFile_(str(icon_png))
-            if image:
-                app.setApplicationIconImage_(image)
-        except Exception:
-            pass
-
-    if sys.platform == "win32":
-
-        def _on_shown():
-            mark_startup("desktop_window_shown", surface="desktop", port=port)
-            _set_icon_windows()
-
-        window.events.shown += _on_shown
-        webview.start(icon=str(icon_ico) if icon_ico.exists() else None)
-    elif sys.platform == "darwin":
-
-        def _on_shown():
-            mark_startup("desktop_window_shown", surface="desktop", port=port)
-            _set_icon_macos()
-
-        window.events.shown += _on_shown
-        webview.start(gui="cocoa")
-    else:
-        icon_path = str(icon_png) if icon_png.exists() else None
-        webview.start(icon=icon_path)
-
-
-if __name__ == "__main__":
-    import argparse as _ap
-
-    _parser = _ap.ArgumentParser()
-    _parser.add_argument("--port", type=int, default=8001)
-    _parser.add_argument(
-        "--log-level",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        default="INFO",
-    )
-    _args = _parser.parse_args()
-    _run_desktop_app_blocking(port=_args.port, log_level=_args.log_level)
