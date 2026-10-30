@@ -530,7 +530,10 @@ src/kohakuterrarium/
 │
 ├── serving/                  # Web/desktop launch glue (no service manager: Studio/Terrarium
 │   │                         #   own lifecycle; AgentSession / KohakuManager are gone)
-│   ├── web.py                # Static web frontend serving + pywebview desktop app
+│   ├── web.py                # Static web frontend serving (`kt web`)
+│   ├── desktop/              # `kt app` pywebview shell: desktop (window + server child), server
+│   │                         #   (child entry), links (external links), webview_probe (Linux
+│   │                         #   backend check), chrome / titlebar / attention (native chrome)
 │   ├── events.py             # Legacy serving event dataclasses
 │   └── process_metrics.py    # Process-wide metrics aggregator (canonical subscriber)
 │
@@ -630,11 +633,12 @@ src/kohakuterrarium/
 │   ├── git_backend.py        # native git + dulwich fallback (Android)
 │   ├── marketplace.py        # TerrariumMarket resolver (fetch + cache + search)
 │   └── marketplace_types.py  # Frozen dataclasses + typed errors
-├── launcher/                 # Thin Briefcase wrapper: owns the managed venv +
-│                             # self-update flow.  STRICT BOUNDARY: launcher/*.py
-│                             # imports nothing from kohakuterrarium.<not launcher>
-│                             # (enforced by tests/unit/test_dep_graph_lint.py).
-│                             # See plans/1.5.0-roadmap/06-app-update/ for design.
+├── launcher/                 # Runtime manager for packaged apps: versioned release trees +
+│                             # self-update.  `sidecar.py` is the headless entry the Tauri
+│                             # shell runs; `interpreter_mode.py` lets the Briefcase stub act
+│                             # as `python`.  STRICT BOUNDARY: launcher/*.py imports nothing
+│                             # from kohakuterrarium.<not launcher> (android.py excepted).
+│                             # See plans/1.5.0-roadmap/06-app-update/ and plans/desktop-app/.
 ├── errors.py                 # Typed exception hierarchy: KTError base; bottom of the
 │                             #   dep graph (imports nothing from kohakuterrarium)
 ├── validate.py               # kt.validate.config/llm/creature/ping: pre-flight checks
@@ -655,7 +659,7 @@ src/kohakuterrarium/
 7. **MCP integration** (`mcp/`): Stdio + HTTP transport. Tools indirected through four meta-tools instead of mirrored, which keeps the agent's prompt small.
 8. **Compose algebra** (`compose/`): `>>` sequence, `&` parallel, `|` fallback, `*` retry. User-facing only; framework does not depend on it.
 9. **Package system** (`packages/` + `kt install` / `kt uninstall`): Sharing creature / terrarium / plugin bundles.  Marketplace integration (`packages/marketplace/marketplace.py` + `kt marketplace …` + `/api/catalog/marketplace/*`) resolves `@<name>` install specs against [TerrariumMarket](https://github.com/Kohaku-Lab/TerrariumMarket) (default source; user-configurable list at `~/.kohakuterrarium/marketplace-sources.json`).  Cache at `~/.kohakuterrarium/marketplace/cache.json` (1h TTL, ETag-revalidated, `KT_MARKETPLACE_CACHE_TTL` overridable, `KT_MARKETPLACE_SOURCES` env override).  Frontend Settings → Extensions tab is now a two-pane Catalog view (Browse + Installed) backed by `stores/marketplace.js` + `utils/marketplaceApi.js`.
-10. **Desktop packaging** (`__briefcase__.py` + briefcase tooling): macOS / Windows / Linux native app builds.
+10. **Desktop packaging** (`packaging/desktop/`, a Tauri 2 shell): Windows / macOS installers that bundle a real interpreter, the launcher and one release tree and run the Python backend as a sidecar behind a per-launch token (`api/auth/launch_token.py`). The page talks to either shell (pywebview or Tauri) only through `utils/hostBridge.js`. `__briefcase__.py` + Briefcase remain for Android; see `packaging/desktop/README.md`.
 11. **Auth** (`api/auth/`): four optional layers stacked at the API server: L1 host selection (frontend), L2 host token (middleware), L3 admin token (FastAPI Depends on config-mutating routes), L4 user accounts (sqlite + per-user `Terrarium` engine pool). Defaults to OFF; see `plans/1.5.0-roadmap/03-frontend-backend-connection/` + `docs/{en,zh-CN,zh-TW}/guides/authentication.md`.
 
 ## Auth invariant (CRITICAL)
