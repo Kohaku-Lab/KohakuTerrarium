@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "KohakuTerrarium",
+  "version": "0.0.0",
+  "identifier": "com.kohaku.terrarium",
+  "build": {
+    "frontendDist": "../shell"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "shortDescription": "Universal agent framework desktop app",
+    "targets": ["msi", "nsis", "dmg", "app"],
+    "icon": [
+      "../../../src/kohakuterrarium/app_icon.png",
+      "../../../src/kohakuterrarium/app_icon.icns",
+      "../../../src/kohakuterrarium/app_icon.ico"
+    ],
+    "resources": {
+      "../stage/python": "python",
+      "../stage/bootstrap": "bootstrap",
+      "../stage/bundled-release": "bundled-release"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["kt"]
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "source": "https://github.com/astral-sh/python-build-standalone/releases/download",
+  "tag": "20261026",
+  "python": "3.13.18",
+  "variant": "install_only_stripped",
+  "triples": {
+    "win-x64": "x86_64-pc-windows-msvc",
+    "macos-arm64": "aarch64-apple-darwin",
+    "linux-x64": "x86_64-unknown-linux-gnu"
+  }
+}

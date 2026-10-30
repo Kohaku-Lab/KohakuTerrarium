@@ -1,0 +1,55 @@
+# Desktop shell (Tauri 2)
+
+A native window around the local Python backend, shipped as `.msi`/`.exe` on
+Windows and `.dmg`/`.app` on macOS. `kt app` (pywebview) shares the same page,
+server and host-bridge contract.
+
+```
+Tauri shell ── spawns ──> python/python(.exe) -m kohakuterrarium.launcher.sidecar
+   │                         │ prepares the versioned release (first run: bundled-release/)
+   │ progress events         │ runs serving/desktop/server.py
+   ▼                         ▼
+ shell/index.html        http://127.0.0.1:<port>/?kt_launch=<token>  (cookie-gated)
+```
+
+## Layout
+
+| Path | Purpose |
+|---|---|
+| `src-tauri/src/backend.rs` | start, watch and stop the Python backend; progress and state-file protocol |
+| `src-tauri/src/window.rs` | main window, navigation policy, tray |
+| `src-tauri/src/commands.rs` | native operations the app page may call (mirrors the pywebview shell) |
+| `src-tauri/src/navigation.rs` | which URLs may load in the window |
+| `src-tauri/src/smoke.rs` | headless self-check for installer tests |
+| `src-tauri/capabilities/main.json` | the loopback origin and the commands it may invoke |
+| `shell/index.html` | loading and error page shown before the backend is ready |
+| `stage_runtime.py` | downloads the pinned interpreter, stages the launcher and the release archive |
+| `python-runtime.json` | pinned python-build-standalone release |
+
+The Rust constants and names that Python and the frontend also use are compared by
+`tests/unit/packaging/test_desktop_contract.py`.
+
+## Build
+
+```
+python packaging/desktop/stage_runtime.py --platform win-x64 --release-dir <dir with kohakuterrarium-*.tar.zst>
+cd packaging/desktop/src-tauri
+cargo tauri build        # or: cargo build  (development)
+```
+
+`--stamp-version` writes the project's numeric core version into `tauri.conf.json`.
+
+## Run without installing
+
+```
+KT_DESKTOP_RESOURCES=<stage dir> cargo run
+```
+
+`KT_DESKTOP_SMOKE_OUT=<file>` runs headless: the window stays hidden, and once the
+backend is ready and the page has loaded the shell writes a JSON report there and
+exits (status 0 when the page loaded).
+
+## Signing
+
+Builds are unsigned for Windows and ad-hoc signed for macOS. Signing steps in CI run
+only when certificate secrets are present.

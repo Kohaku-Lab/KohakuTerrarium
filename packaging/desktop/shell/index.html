@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KohakuTerrarium</title>
+    <style>
+      :root {
+        --bg: #e3ddd5;
+        --fg: #2e2a26;
+        --track: #ccc4ba;
+        --accent: #6250d5;
+        --error: #b42318;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #2a2724;
+          --fg: #e8e0d8;
+          --track: #4a443e;
+        }
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 16px system-ui, sans-serif;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      .shell {
+        width: min(420px, 80vw);
+        text-align: center;
+      }
+      .spinner {
+        width: 34px;
+        height: 34px;
+        margin: 0 auto 18px;
+        border: 3px solid var(--track);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .bar {
+        height: 6px;
+        margin: 14px 0 8px;
+        border-radius: 3px;
+        background: var(--track);
+        overflow: hidden;
+        visibility: hidden;
+      }
+      .bar > div {
+        height: 100%;
+        width: 0;
+        background: var(--accent);
+        transition: width 0.2s ease;
+      }
+      .detail {
+        min-height: 1.2em;
+        font-size: 13px;
+        opacity: 0.7;
+        word-break: break-word;
+      }
+      .failed .spinner,
+      .failed .bar {
+        display: none;
+      }
+      .failed h2 {
+        color: var(--error);
+      }
+      pre {
+        text-align: left;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell" id="shell">
+      <div class="spinner"></div>
+      <div id="title">Starting KohakuTerrarium…</div>
+      <div class="bar" id="bar"><div id="fill"></div></div>
+      <div class="detail" id="detail"></div>
+    </div>
+    <script>
+      (function () {
+        var title = document.getElementById("title")
+        var bar = document.getElementById("bar")
+        var fill = document.getElementById("fill")
+        var detail = document.getElementById("detail")
+        var shell = document.getElementById("shell")
+
+        function progress(payload) {
+          if (!payload) return
+          if (payload.phase) title.textContent = payload.phase
+          if (typeof payload.percent === "number") {
+            bar.style.visibility = "visible"
+            fill.style.width = Math.max(0, Math.min(100, payload.percent)) + "%"
+          }
+          detail.textContent = payload.message || ""
+        }
+
+        window.__ktShowError = function (message) {
+          shell.className = "shell failed"
+          title.innerHTML = "<h2>Startup failed</h2>"
+          detail.innerHTML = ""
+          var pre = document.createElement("pre")
+          pre.textContent = String(message)
+          detail.appendChild(pre)
+        }
+
+        var events = window.__TAURI__ && window.__TAURI__.event
+        if (events) {
+          events.listen("kt-progress", function (event) {
+            progress(event.payload)
+          })
+          events.listen("kt-error", function (event) {
+            window.__ktShowError(event.payload)
+          })
+        }
+      })()
+    </script>
+  </body>
+</html>

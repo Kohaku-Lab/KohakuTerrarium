@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Native calls the loading shell and the app page may make.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:event:default",
+    "allow-get-desktop-capabilities",
+    "allow-request-desktop-attention",
+    "allow-open-external",
+    "allow-show-notification",
+    "allow-get-autostart",
+    "allow-set-autostart",
+    "allow-set-desktop-theme",
+    "allow-take-deep-link",
+    "allow-smoke-ack"
+  ]
+}
