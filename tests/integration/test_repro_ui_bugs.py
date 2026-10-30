@@ -10,6 +10,8 @@ import asyncio
 import contextlib
 from typing import Any
 
+import pytest
+
 from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config.types import (
@@ -615,31 +617,37 @@ class TestTuiStdinStealFix:
         # Non-terminal inputs are fine.
         assert _input_steals_stdin(NoneInput()) is False
 
-    def test_cli_run_defers_creature_start_for_tui_mode(self):
-        # Pin the deferred-start: cli/run.py:159 passes
-        # ``start=(io_mode not in ("cli", "tui"))`` so the focus
-        # creature is NOT started during ``engine.add_creature(...)``
-        # in TUI mode. Without this, the creature's CLIInput task
-        # spawns a blocking ``sys.stdin.readline`` BEFORE Textual
-        # can claim stdin — the TUI then renders but never receives
-        # input, the canonical symptom of the bug.
-        from pathlib import Path
+    async def test_cli_run_defers_creature_start_for_terminal_surfaces(
+        self, tmp_path, monkeypatch
+    ):
+        # A creature started inside add_creature reads stdin before the
+        # terminal surface can claim it, so cli and tui defer the start.
+        from kohakuterrarium.cli.run import _run
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
-        run_py = (
-            Path(__file__).resolve().parents[2]
-            / "src"
-            / "kohakuterrarium"
-            / "cli"
-            / "run.py"
-        )
-        text = run_py.read_text(encoding="utf-8")
-        # The condition MUST defer for BOTH cli and tui. A regression
-        # to ``start=(io_mode != "cli")`` reintroduces the freeze.
-        assert 'start=(io_mode not in ("cli", "tui"))' in text, (
-            "cli/run.py must defer creature.start() for BOTH cli and tui "
-            "modes — otherwise the agent's CLIInput grabs stdin before "
-            "Textual can, and the TUI is born inert."
-        )
+        class _Stop(Exception):
+            pass
+
+        started_with: dict[str | None, bool] = {}
+
+        for io_mode in ("cli", "tui", None):
+
+            async def record_add(self, *args, _mode=io_mode, **kwargs):
+                started_with[_mode] = kwargs["start"]
+                raise _Stop
+
+            monkeypatch.setattr(Terrarium, "add_creature", record_add)
+            with pytest.raises(_Stop):
+                await _run(
+                    str(tmp_path),
+                    session=None,
+                    llm=None,
+                    io_mode=io_mode,
+                    extra_creatures=[],
+                    extra_channels=[],
+                )
+
+        assert started_with == {"cli": False, "tui": False, None: True}
 
     def test_tui_output_on_start_preserves_external_tui_wiring(self):
         # Regression: when ``engine_cli.run_engine_with_tui`` direct-
