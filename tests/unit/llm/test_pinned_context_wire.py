@@ -10,7 +10,7 @@ import pytest
 from kohakuterrarium.core.pinned import PinnedContext
 from kohakuterrarium.llm.anthropic_format import prepare_messages
 from kohakuterrarium.llm.antigravity_format import encode_messages
-from kohakuterrarium.llm.codex_format import to_responses_input
+from kohakuterrarium.llm.codex.format import to_responses_input
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.llm.openai import OpenAIProvider
 

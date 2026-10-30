@@ -24,7 +24,7 @@ from kohakuterrarium.bootstrap.llm import (
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.grok_auth import GrokToken
 from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
@@ -148,7 +148,7 @@ class TestCreateLLMProviderProfilePath:
             def __init__(self, **kw):
                 pass
 
-        import kohakuterrarium.llm.codex_provider as codex_provider
+        import kohakuterrarium.llm.codex.provider as codex_provider
 
         monkeypatch.setattr(codex_provider, "CodexOAuthProvider", _StubProvider)
         cfg = AgentConfig(name="a", model="m")

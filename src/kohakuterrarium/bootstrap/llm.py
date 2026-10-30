@@ -195,7 +195,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "codex":
-        from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+        from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 
         # A custom base URL requires API-key auth; the default endpoint uses OAuth.
         codex_base_url = _resolved_base_url(profile)
@@ -394,7 +394,7 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         )
 
     if config.auth_mode == "codex-oauth":
-        from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+        from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 
         provider = CodexOAuthProvider(
             model=config.model,

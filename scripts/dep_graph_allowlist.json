@@ -380,7 +380,7 @@
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_profile",
-    "target": "kohakuterrarium.llm.codex_provider",
+    "target": "kohakuterrarium.llm.codex.provider",
     "reason": "Provider implementation is loaded only for a selected Codex profile."
   },
   {
@@ -404,7 +404,7 @@
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_inline",
-    "target": "kohakuterrarium.llm.codex_provider",
+    "target": "kohakuterrarium.llm.codex.provider",
     "reason": "Provider implementation is loaded only for selected inline Codex auth."
   },
   {

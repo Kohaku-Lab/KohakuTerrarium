@@ -10,7 +10,7 @@ import httpx
 import kohakuterrarium.core.agent_message_history as branch_history
 from kohakuterrarium.core.branch_continuation import live_branch_path
 from kohakuterrarium.core.config_types import AgentConfig
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.session.raw_history import UserMessageSelector

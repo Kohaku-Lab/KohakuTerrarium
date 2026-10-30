@@ -3,13 +3,13 @@
 from contextlib import aclosing
 from typing import Any, AsyncIterator
 
-from kohakuterrarium.llm.codex_format import (
+from kohakuterrarium.llm.codex.format import (
     fix_tool_call_pairing,
     maybe_capture_stream_rate_limit,
 )
 from kohakuterrarium.llm.base import NativeToolCall
-from kohakuterrarium.llm.codex_image_gen import build_image_part
-from kohakuterrarium.llm.codex_rate_limits import (
+from kohakuterrarium.llm.codex.image.gen import build_image_part
+from kohakuterrarium.llm.codex.rate_limits import (
     parse_rate_limit_event,
     UsageSnapshot,
     set_cached,

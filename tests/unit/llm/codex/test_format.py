@@ -1,4 +1,4 @@
-"""Unit tests for ``llm/codex_format.py`` — Responses API message shapes.
+"""Unit tests for ``llm/codex/format.py`` — Responses API message shapes.
 
 Behavior-first: assert the exact Responses-API ``input`` items produced
 from Chat Completions messages, the function_call / function_call_output
@@ -13,13 +13,13 @@ import pytest
 
 from kohakuterrarium.errors import MediaReferenceError
 from kohakuterrarium.llm import artifact_resolve
-from kohakuterrarium.llm.codex_format import (
+from kohakuterrarium.llm.codex.format import (
     _resolve_artifact_url,
     fix_tool_call_pairing,
     maybe_capture_stream_rate_limit,
     to_responses_input,
 )
-from kohakuterrarium.llm.codex_rate_limits import (
+from kohakuterrarium.llm.codex.rate_limits import (
     UsageSnapshot,
     parse_rate_limit_event,
 )

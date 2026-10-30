@@ -19,9 +19,7 @@ provides typed message structures compatible with the OpenAI API format.
 | `responses_ws.py`       | `ResponsesWSSession`: persistent Responses-API WebSocket transport with `previous_response_id` incremental continuation (shared by the openai + codex providers; enabled via `extra_body.websocket_mode`) |
 | `anthropic_provider.py` | Native Anthropic Messages API provider using the official SDK (+ `anthropic_format.py`, `anthropic_pairing.py`, `anthropic_cache.py`) |
 | `anthropic_images.py`   | Outgoing Anthropic image dimensions, including images nested in tool results; saved history is unchanged |
-| `codex_provider.py`     | `CodexOAuthProvider`: ChatGPT subscription provider (+ `codex_format.py`, `codex_image_gen.py`, `codex_rate_limits.py`)   |
-| `codex_image_budget.py` | Outbound image limits and recognition of explicit image-count rejections; saved history is unchanged |
-| `codex_auth.py`         | OAuth PKCE authentication flows (browser redirect and device code) with token caching                                     |
+| `codex/`                | Codex (ChatGPT subscription) provider package: `CodexOAuthProvider`, OAuth, Responses format, rate limits, image limits, web search; see `codex/README.md` |
 | `litellm_provider.py`   | LiteLLM provider (optional dep)                                                                                           |
 | `deferred_provider.py`  | Placeholder provider for the "no model configured yet" state                                                              |
 | `message.py`            | Typed message classes (`SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolMessage`) with multimodal content support |

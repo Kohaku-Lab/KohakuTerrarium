@@ -14,7 +14,7 @@ import json
 import httpx
 import pytest
 
-from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.studio.identity import codex_account as mod
 from kohakuterrarium.studio.identity.codex_account import (
     CONSUME_URL,

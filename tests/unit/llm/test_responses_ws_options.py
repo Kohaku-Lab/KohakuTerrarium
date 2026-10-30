@@ -7,7 +7,7 @@ import pytest
 from websockets import serve
 
 from kohakuterrarium.llm import openai as openai_module
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
 

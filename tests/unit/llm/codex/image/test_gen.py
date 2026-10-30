@@ -1,4 +1,4 @@
-"""Unit tests for ``llm/codex_image_gen.py`` — image-gen translation.
+"""Unit tests for ``llm/codex/image/gen.py`` — image-gen translation.
 
 Behavior-first: assert the exact wire-format spec produced for an
 image_gen tool, the None return for non-image-gen tools, the minimal
@@ -6,7 +6,7 @@ fallback path, and the ImagePart built from a Codex
 ``image_generation_call`` item (including the no-result → None rule).
 """
 
-from kohakuterrarium.llm.codex_image_gen import (
+from kohakuterrarium.llm.codex.image.gen import (
     build_image_part,
     translate_image_gen_tool,
 )

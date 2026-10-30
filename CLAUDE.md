@@ -481,9 +481,9 @@ src/kohakuterrarium/
 │   │                         #   previous_response_id continuation; openai + codex)
 │   ├── anthropic_provider.py # Native Anthropic Messages API provider (official SDK)
 │   │                         #   (+ anthropic_format.py, anthropic_pairing.py, anthropic_cache.py)
-│   ├── codex_provider.py     # Codex OAuth provider (ChatGPT-subscription)
-│   │                         #   (+ codex_auth.py, codex_format.py, codex_image_gen.py,
-│   │                         #      codex_rate_limits.py)
+│   ├── codex/                # Codex OAuth provider package (ChatGPT-subscription):
+│   │                         #   provider, ws, stream, auth, format, rate_limits,
+│   │                         #   web_search, presets, claims, image/{budget,gen}
 │   ├── litellm_provider.py   # LiteLLM provider (optional dep)
 │   ├── deferred_provider.py  # Placeholder provider for "no model configured yet"
 │   ├── message.py            # Message types (multimodal-aware ContentPart, etc.)

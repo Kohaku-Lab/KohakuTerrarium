@@ -7,9 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.llm import codex_web_search as search_mod
-from kohakuterrarium.llm.codex_auth import CodexTokens
-from kohakuterrarium.llm.codex_web_search import (
+from kohakuterrarium.llm.codex import web_search as search_mod
+from kohakuterrarium.llm.codex.auth import CodexTokens
+from kohakuterrarium.llm.codex.web_search import (
     CodexSearchOperationalError,
     CodexSearchUnavailable,
     CodexSubscriptionSearchBackend,

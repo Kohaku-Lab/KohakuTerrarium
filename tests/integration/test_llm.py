@@ -78,8 +78,8 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
-from kohakuterrarium.llm.codex_auth import CodexTokens
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.codex.auth import CodexTokens
+from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.grok_auth import GROK_CLI_BASE_URL, GrokToken, GrokTokens
 from kohakuterrarium.llm.grok_image_gen import GrokImageClient
 from kohakuterrarium.llm.grok_media import GrokMediaClient

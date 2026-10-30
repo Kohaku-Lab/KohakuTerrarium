@@ -143,7 +143,7 @@ def isolate_global_state():
         pass
 
     try:
-        from kohakuterrarium.llm import codex_auth
+        from kohakuterrarium.llm.codex import auth as codex_auth
 
         snapshots["codex_auth._resolver"] = getattr(codex_auth, "_resolver", None)
     except Exception:
@@ -176,7 +176,7 @@ def isolate_global_state():
         pass
 
     try:
-        from kohakuterrarium.llm import codex_auth
+        from kohakuterrarium.llm.codex import auth as codex_auth
 
         codex_auth._resolver = snapshots.get("codex_auth._resolver")
     except Exception:
@@ -300,8 +300,8 @@ def _no_real_provider_login(monkeypatch):
     async def _refuse(*args, **kwargs):
         raise AssertionError("a test tried to start a real provider login")
 
-    monkeypatch.setattr("kohakuterrarium.llm.codex_auth.oauth_login", _refuse)
-    monkeypatch.setattr("kohakuterrarium.llm.codex_provider.oauth_login", _refuse)
+    monkeypatch.setattr("kohakuterrarium.llm.codex.auth.oauth_login", _refuse)
+    monkeypatch.setattr("kohakuterrarium.llm.codex.provider.oauth_login", _refuse)
 
 
 @pytest.fixture(autouse=True)

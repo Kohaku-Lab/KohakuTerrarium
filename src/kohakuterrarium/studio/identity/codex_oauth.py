@@ -1,7 +1,7 @@
 """Codex OAuth — login flow, status, usage snapshot.
 
-Wraps :mod:`kohakuterrarium.llm.codex_auth` and
-:mod:`kohakuterrarium.llm.codex_rate_limits`. The CLI uses
+Wraps :mod:`kohakuterrarium.llm.codex.auth` and
+:mod:`kohakuterrarium.llm.codex.rate_limits`. The CLI uses
 :func:`run_login_blocking` (sync wrapper around the async oauth flow);
 the HTTP layer uses :func:`login_async` directly.
 """
@@ -11,8 +11,8 @@ import time
 import uuid
 from typing import Any
 
-from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
-from kohakuterrarium.llm.codex_rate_limits import get_cached as _get_cached_usage
+from kohakuterrarium.llm.codex.auth import CodexTokens, oauth_login, refresh_tokens
+from kohakuterrarium.llm.codex.rate_limits import get_cached as _get_cached_usage
 from kohakuterrarium.studio.identity.codex_account import (
     consume_reset_credit,
     fetch_usage,

@@ -9,7 +9,7 @@ _EXPORTS = {
     "BaseLLMProvider": "kohakuterrarium.llm.base",
     "ChatChunk": "kohakuterrarium.llm.base",
     "ChatResponse": "kohakuterrarium.llm.base",
-    "CodexOAuthProvider": "kohakuterrarium.llm.codex_provider",
+    "CodexOAuthProvider": "kohakuterrarium.llm.codex.provider",
     "LLMConfig": "kohakuterrarium.llm.base",
     "LLMProvider": "kohakuterrarium.llm.base",
     "Message": "kohakuterrarium.llm.message",

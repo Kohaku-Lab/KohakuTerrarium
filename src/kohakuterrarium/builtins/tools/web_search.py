@@ -34,7 +34,7 @@ from kohakuterrarium.builtins.tools.web_search_types import (
     SearchResponse,
 )
 from kohakuterrarium.llm.api_keys import get_api_key, has_api_key
-from kohakuterrarium.llm.codex_web_search import (
+from kohakuterrarium.llm.codex.web_search import (
     CODEX_SEARCH_MODELS,
     DEFAULT_CODEX_SEARCH_MODEL,
     CodexSearchOperationalError,

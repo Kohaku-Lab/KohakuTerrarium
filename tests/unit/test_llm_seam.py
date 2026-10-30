@@ -10,7 +10,7 @@ import pytest
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.compact import CompactConfig
 from kohakuterrarium.core.config_types import AgentConfig
-from kohakuterrarium.llm import codex_auth
+from kohakuterrarium.llm.codex import auth as codex_auth
 from kohakuterrarium.llm.base import BaseLLMProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.testing.llm import ScriptedLLM

@@ -15,9 +15,9 @@ from websockets import serve
 from websockets.exceptions import ConnectionClosedError
 from websockets.frames import Close
 
-from kohakuterrarium.llm import codex_provider as cp
-from kohakuterrarium.llm.codex_auth import CodexTokens
-from kohakuterrarium.llm.codex_provider import CODEX_BASE_URL, CodexOAuthProvider
+from kohakuterrarium.llm.codex import provider as cp
+from kohakuterrarium.llm.codex.auth import CodexTokens
+from kohakuterrarium.llm.codex.provider import CODEX_BASE_URL, CodexOAuthProvider
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
 pytestmark = [

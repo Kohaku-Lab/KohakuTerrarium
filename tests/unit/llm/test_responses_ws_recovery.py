@@ -10,10 +10,10 @@ from openai import APIConnectionError
 from kohakuterrarium.bootstrap.tools import create_tool
 from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
 from kohakuterrarium.core.config_types import ToolConfigItem
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.model_recovery_status import observe_model_recovery
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
-from tests.unit.llm.test_codex_provider import _FakeWSClient
+from tests.unit.llm.codex.test_provider import _FakeWSClient
 from tests.unit.llm.test_openai_ws import MESSAGES, make_provider
 from tests.unit.llm.test_responses_ws import (
     ASSIST1,

@@ -10,7 +10,7 @@ from copy import deepcopy
 from typing import Any, AsyncIterator
 
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
-from kohakuterrarium.llm.codex_format import fix_tool_call_pairing, to_responses_input
+from kohakuterrarium.llm.codex.format import fix_tool_call_pairing, to_responses_input
 from kohakuterrarium.llm.openai_sanitize import strip_kt_extras, strip_surrogates
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession

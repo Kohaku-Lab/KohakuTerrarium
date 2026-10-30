@@ -15,8 +15,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 
-from kohakuterrarium.llm.codex_auth import CodexTokens, refresh_tokens
-from kohakuterrarium.llm.codex_provider import CODEX_BASE_URL
+from kohakuterrarium.llm.codex.auth import CodexTokens, refresh_tokens
+from kohakuterrarium.llm.codex.provider import CODEX_BASE_URL
 
 try:
     from openai import AsyncOpenAI

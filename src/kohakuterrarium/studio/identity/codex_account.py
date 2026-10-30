@@ -2,7 +2,7 @@
 
 Talks to the ChatGPT backend WHAM endpoints directly with the Codex
 access-token bearer and ``ChatGPT-Account-Id`` header. These account operations
-bypass :class:`~kohakuterrarium.llm.codex_provider.CodexOAuthProvider` and the
+bypass :class:`~kohakuterrarium.llm.codex.provider.CodexOAuthProvider` and the
 Responses API so reading usage or redeeming a reset credit cannot consume a
 model round. The endpoint and outcome semantics match codex-rs.
 
@@ -16,9 +16,9 @@ from typing import Any
 
 import httpx
 
-from kohakuterrarium.llm.codex_auth import CodexTokens
-from kohakuterrarium.llm.codex_claims import account_id_from_id_token
-from kohakuterrarium.llm.codex_rate_limits import snapshots_from_usage_body
+from kohakuterrarium.llm.codex.auth import CodexTokens
+from kohakuterrarium.llm.codex.claims import account_id_from_id_token
+from kohakuterrarium.llm.codex.rate_limits import snapshots_from_usage_body
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

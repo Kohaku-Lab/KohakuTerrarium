@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.llm.codex_claims`.
+"""Unit tests for :mod:`kohakuterrarium.llm.codex.claims`.
 
 The OIDC id-token decoder must never raise on malformed input — a bad
 token yields ``""`` (treated as "unknown account id") rather than an
@@ -8,7 +8,7 @@ exception on the usage / consume hot path.
 import base64
 import json
 
-from kohakuterrarium.llm.codex_claims import account_id_from_id_token
+from kohakuterrarium.llm.codex.claims import account_id_from_id_token
 
 
 def _fake_id_token(payload: dict) -> str:

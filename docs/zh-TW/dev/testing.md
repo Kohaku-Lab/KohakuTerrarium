@@ -65,7 +65,7 @@ studio}` 加上多節點。e2e 回答一個問題：*系統從頭到尾能跑嗎
 ### 排除項
 
 有些檔案被刻意排除在 95% per-file 覆蓋率目標之外：第三方
-provider（`llm/codex_provider.py`）、平台 PTY
+provider（`llm/codex/provider.py`）、平台 PTY
 （`api/ws/pty.py`）、使用者端 CLI/UI（`builtins/cli_rich/*`、
 `builtins/tui/*`）、pywebview 啟動路徑。完整清單在
 `tests/README.md`。

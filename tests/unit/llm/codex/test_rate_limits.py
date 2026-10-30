@@ -1,4 +1,4 @@
-"""Unit tests for ``llm/codex_rate_limits.py`` — rate-limit parsing.
+"""Unit tests for ``llm/codex/rate_limits.py`` — rate-limit parsing.
 
 Behavior-first: assert the exact RateLimitWindow / RateLimitSnapshot /
 CreditsSnapshot values parsed from headers and SSE payloads, the
@@ -10,7 +10,7 @@ import json
 
 import httpx
 
-from kohakuterrarium.llm.codex_rate_limits import (
+from kohakuterrarium.llm.codex.rate_limits import (
     CreditsSnapshot,
     RateLimitSnapshot,
     RateLimitWindow,

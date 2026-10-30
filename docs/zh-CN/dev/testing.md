@@ -65,7 +65,7 @@ studio}` 加上多节点。e2e 回答一个问题：*系统端到端能跑起来
 ### 例外
 
 有些文件被故意排除在 95% 单文件覆盖目标之外：第三方 provider
-（`llm/codex_provider.py`）、平台 PTY（`api/ws/pty.py`）、终端
+（`llm/codex/provider.py`）、平台 PTY（`api/ws/pty.py`）、终端
 用户 CLI/UI（`builtins/cli_rich/*`、`builtins/tui/*`）、
 pywebview 启动路径。完整列表在 `tests/README.md` 中。
 

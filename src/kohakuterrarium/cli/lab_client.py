@@ -40,7 +40,7 @@ from kohakuterrarium.llm.api_keys import (
     clear_api_key_resolver,
     register_api_key_resolver,
 )
-from kohakuterrarium.llm.codex_auth import (
+from kohakuterrarium.llm.codex.auth import (
     clear_codex_resolver,
     register_codex_resolver,
 )

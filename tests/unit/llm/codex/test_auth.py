@@ -1,4 +1,4 @@
-"""Unit tests for the deterministic helpers in ``llm/codex_auth.py``.
+"""Unit tests for the deterministic helpers in ``llm/codex/auth.py``.
 
 Behavior-first: assert the token expiry math, the on-disk save/load
 round-trip for BOTH supported shapes (our flat shape + the Codex CLI
@@ -14,7 +14,7 @@ import json
 import time
 from urllib.parse import parse_qs, urlparse
 
-from kohakuterrarium.llm.codex_auth import (
+from kohakuterrarium.llm.codex.auth import (
     CLIENT_ID,
     REDIRECT_URI,
     SCOPE,
@@ -157,7 +157,7 @@ class TestIsHeadless:
 
 class TestCodexResolverHook:
     def test_resolver_overrides_local_file(self, tmp_path, monkeypatch):
-        from kohakuterrarium.llm.codex_auth import (
+        from kohakuterrarium.llm.codex.auth import (
             CodexTokens,
             clear_codex_resolver,
             register_codex_resolver,
@@ -195,7 +195,7 @@ class TestCodexResolverHook:
         # Worker-mode miss: the resolver returns None; load() must NOT
         # silently fall back to the worker-local file (host-canonical
         # by design — same rule as the api-key resolver).
-        from kohakuterrarium.llm.codex_auth import (
+        from kohakuterrarium.llm.codex.auth import (
             CodexTokens,
             clear_codex_resolver,
             register_codex_resolver,
@@ -218,7 +218,7 @@ class TestCodexResolverHook:
     def test_explicit_path_skips_resolver(self, tmp_path, monkeypatch):
         # When caller passes an explicit path, the resolver is bypassed
         # (used by ``kt login codex`` to write/read a specific file).
-        from kohakuterrarium.llm.codex_auth import (
+        from kohakuterrarium.llm.codex.auth import (
             CodexTokens,
             clear_codex_resolver,
             register_codex_resolver,

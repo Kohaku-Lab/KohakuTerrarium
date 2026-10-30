@@ -6,7 +6,7 @@ import pytest
 
 from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm import responses_ws, responses_ws_recovery
 from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.llm.responses_ws import (
@@ -18,7 +18,7 @@ from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.manager import SubAgentManager
 from kohakuterrarium.modules.subagent.model_resolve import resolve_subagent_llm
-from tests.unit.llm.test_codex_provider import _FakeWSConnection, _FakeWSManager
+from tests.unit.llm.codex.test_provider import _FakeWSConnection, _FakeWSManager
 from tests.unit.llm.test_openai_ws import MESSAGES
 from tests.unit.llm.test_responses_ws import (
     ASSIST1,

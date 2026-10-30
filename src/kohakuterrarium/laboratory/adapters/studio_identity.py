@@ -4,7 +4,7 @@ from typing import Any
 
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.protocols import LabRegistrar
-from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.studio.identity.api_keys import (
     get_existing_key,
     list_keys_payload,

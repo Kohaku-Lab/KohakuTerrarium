@@ -69,7 +69,7 @@ from kohakuterrarium.core.turn import Activity, TurnCapture
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
 from kohakuterrarium.llm.base import NativeToolCall
-from kohakuterrarium.llm.codex_format import to_responses_input
+from kohakuterrarium.llm.codex.format import to_responses_input
 from kohakuterrarium.llm.recovery import drop_last_tool_round
 from kohakuterrarium.session import resume as resume_history
 from kohakuterrarium.session import resume_branch

@@ -17,7 +17,7 @@ from kohakuterrarium.llm.api_keys import (
     PROVIDER_KEY_MAP,
     _load_api_keys,
 )
-from kohakuterrarium.llm.codex_auth import CodexTokens, _default_token_path
+from kohakuterrarium.llm.codex.auth import CodexTokens, _default_token_path
 from kohakuterrarium.llm.profiles import get_profile as _local_get_profile
 from kohakuterrarium.utils.logging import get_logger
 

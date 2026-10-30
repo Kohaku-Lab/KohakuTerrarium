@@ -17,7 +17,7 @@ import pytest
 from kohakuterrarium.llm import api_keys as ak
 from kohakuterrarium.llm import presets as presets_mod
 from kohakuterrarium.llm import profiles as profiles_mod
-from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.grok_auth import GrokTokens
 from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset
 from kohakuterrarium.llm.profiles import (

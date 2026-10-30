@@ -36,7 +36,7 @@ from kohakuterrarium.llm.backends import save_yaml_store as _save_yaml
 from kohakuterrarium.llm.backends import (
     validate_backend_type,
 )
-from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.grok_auth import GrokTokens
 from kohakuterrarium.llm.antigravity_auth import AgyCredentials
 from kohakuterrarium.llm.preset_store import get_subagent_models, load_presets

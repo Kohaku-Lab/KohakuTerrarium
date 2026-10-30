@@ -67,7 +67,7 @@ terrarium, studio}` plus multi-node. e2e answers one question:
 ### Carve-outs
 
 Some files are intentionally excluded from the 95% per-file
-coverage target: third-party providers (`llm/codex_provider.py`),
+coverage target: third-party providers (`llm/codex/provider.py`),
 platform PTY (`api/ws/pty.py`), the end-user CLI/UI
 (`builtins/cli_rich/*`, `builtins/tui/*`), the pywebview boot path.
 The full list is in `tests/README.md`.

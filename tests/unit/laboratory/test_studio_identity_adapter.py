@@ -154,7 +154,7 @@ class TestLookupErrorMapping:
 
 class TestGetCodexToken:
     async def test_known(self, monkeypatch):
-        from kohakuterrarium.llm.codex_auth import CodexTokens
+        from kohakuterrarium.llm.codex.auth import CodexTokens
 
         def _fake_load(cls, path=None):
             return CodexTokens(

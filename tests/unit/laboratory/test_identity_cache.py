@@ -228,14 +228,14 @@ class TestCodexTokens:
 
     def test_sync_codex_tokens_misses_when_unwarmed(self):
         # Cold cache → None (the codex resolver registered in
-        # ``llm.codex_auth`` then treats this as "no tokens locally"
+        # ``llm.codex.auth`` then treats this as "no tokens locally"
         # and the load returns None — host-canonical-by-design).
         sender = _FakeSender()
         c = IdentityCache(sender)
         assert c.sync_codex_tokens() is None
 
     async def test_sync_codex_tokens_returns_CodexTokens_after_warm(self):
-        from kohakuterrarium.llm.codex_auth import CodexTokens
+        from kohakuterrarium.llm.codex.auth import CodexTokens
 
         sender = _FakeSender(
             responses={

@@ -10,7 +10,7 @@ may be lower than the vendor-advertised maximum for reliability.
 from typing import Any
 
 from kohakuterrarium.llm.antigravity_presets import PRESETS as AGY_PRESETS
-from kohakuterrarium.llm.codex_presets import PRESETS as GPT6_CODEX_PRESETS
+from kohakuterrarium.llm.codex.presets import PRESETS as GPT6_CODEX_PRESETS
 
 from kohakuterrarium.llm.preset_aliases import (
     _CANONICAL_NAMES,

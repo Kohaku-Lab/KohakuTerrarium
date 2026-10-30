@@ -26,25 +26,25 @@ from kohakuterrarium.llm.base import (
     OverflowRecoveryState,
     ToolSchema,
 )
-from kohakuterrarium.llm.codex_auth import CodexTokens, oauth_login, refresh_tokens
-from kohakuterrarium.llm.codex_format import (
+from kohakuterrarium.llm.codex.auth import CodexTokens, oauth_login, refresh_tokens
+from kohakuterrarium.llm.codex.format import (
     fix_tool_call_pairing,
     to_responses_input,
 )
-from kohakuterrarium.llm.codex_image_budget import (
+from kohakuterrarium.llm.codex.image.budget import (
     CODEX_BASE_URL,
     initial_image_limit,
     limit_codex_images,
     reported_image_limit,
 )
-from kohakuterrarium.llm.codex_image_gen import (
+from kohakuterrarium.llm.codex.image.gen import (
     translate_image_gen_tool,
 )
-from kohakuterrarium.llm.codex_rate_limits import (
+from kohakuterrarium.llm.codex.rate_limits import (
     capture_rate_limit_headers as _capture_rate_limit_headers,
 )
-from kohakuterrarium.llm.codex_stream import process_codex_event, stream_codex_ws_turn
-from kohakuterrarium.llm.codex_ws import CodexWSMixin
+from kohakuterrarium.llm.codex.stream import process_codex_event, stream_codex_ws_turn
+from kohakuterrarium.llm.codex.ws import CodexWSMixin
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.recovery import (
     RetryPolicy,
