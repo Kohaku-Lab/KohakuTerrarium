@@ -35,7 +35,7 @@
     "katex": "^0.19.1",
     "markdown-it": "^14.0.0",
     "markdown-it-cjk-friendly": "^3.0.0",
-    "mermaid": "11.17.2",
+    "mermaid": "^12.2.0",
     "monaco-editor": "^0.53.0",
     "pinia": "^3.0.0",
     "splitpanes": "^4.0.4",
