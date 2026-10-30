@@ -3,13 +3,13 @@
 import os
 import secrets
 import subprocess
-import sys
 import time
 from contextlib import nullcontext
 
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
 from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.interpreter import python_command
 
 
 def is_running(store: EndpointStore) -> bool:
@@ -142,7 +142,7 @@ def _start(store: EndpointStore, *, wait: float, locked: bool = False) -> dict:
         with os.fdopen(fd, "ab") as log:
             process = subprocess.Popen(
                 [
-                    sys.executable,
+                    *python_command(),
                     "-m",
                     "kohakuterrarium.serving.mcp",
                     *store.server_arguments,

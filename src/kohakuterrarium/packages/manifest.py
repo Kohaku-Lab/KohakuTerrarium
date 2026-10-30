@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from kohakuterrarium.errors import PackageError
+from kohakuterrarium.utils.interpreter import python_command
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -72,7 +73,7 @@ def _pip_install(args: list[str], *, what: str) -> None:
     Always targets the running interpreter's environment —
     a bare PATH ``pip`` may belong to a different Python entirely.
     """
-    cmd = [sys.executable, "-m", "pip", "install", *args]
+    cmd = [*python_command(), "-m", "pip", "install", *args]
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:

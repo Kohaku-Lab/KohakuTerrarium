@@ -26,6 +26,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from kohakuterrarium.utils.interpreter import is_briefcase_runtime
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -69,13 +70,7 @@ class ShimPlan:
 
 def in_bundle() -> bool:
     """True when running inside the Briefcase desktop bundle."""
-    if os.environ.get("KT_LAUNCHER_EXEC") == "1":
-        return True
-    try:
-        exe_dir = Path(sys.executable).resolve().parent
-    except OSError:
-        return False
-    return any(exe_dir.glob("python3*._pth"))
+    return is_briefcase_runtime()
 
 
 def _default_target_dir(system: str) -> Path:

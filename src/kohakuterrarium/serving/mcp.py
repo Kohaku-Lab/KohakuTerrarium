@@ -6,7 +6,6 @@ import logging
 import os
 import socket
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from kohakuterrarium.mcp_server.management import (
     stop_requested,
 )
 from kohakuterrarium.utils.file.lock import FileLockBusy
+from kohakuterrarium.utils.interpreter import python_command
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ def _start_tunnel(store: EndpointStore, run_id: str):
     with os.fdopen(fd, "ab") as log:
         return subprocess.Popen(
             [
-                sys.executable,
+                *python_command(),
                 "-m",
                 "kohakuterrarium.mcp_server.tunnel",
                 *store.server_arguments,

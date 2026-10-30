@@ -24,19 +24,14 @@ def _configure_mcp_environment(argv: list[str]) -> None:
 _configure_mcp_environment(sys.argv[1:])
 
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
+from kohakuterrarium.utils.interpreter import executable_is_stub
 from kohakuterrarium.utils.logging import configure_utf8_stdio
-
-
-def _is_briefcase_bundle() -> bool:
-    """Detect Briefcase's embedded Python by its executable-adjacent ``._pth``."""
-    exe_dir = Path(sys.executable).resolve().parent
-    return any(exe_dir.glob("python3*._pth"))
 
 
 def main() -> int:
     configure_utf8_stdio(log=True)
     raise_fd_limit(log=True)
-    if _is_briefcase_bundle() and len(sys.argv) <= 1:
+    if executable_is_stub() and len(sys.argv) <= 1:
         from kohakuterrarium.__briefcase__ import main as briefcase_main
 
         briefcase_main()

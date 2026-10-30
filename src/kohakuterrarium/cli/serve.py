@@ -14,6 +14,7 @@ from kohakuterrarium.cli._config_layers import (
 )
 from kohakuterrarium.cli.version import get_git_info, get_package_version
 from kohakuterrarium.serving.web import run_web_server
+from kohakuterrarium.utils.interpreter import python_command
 from kohakuterrarium.utils.logging import enable_stderr_logging
 
 RUN_DIR = Path.home() / ".kohakuterrarium" / "run"
@@ -141,7 +142,7 @@ def _spawn_server_process(
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log_file = open(LOG_PATH, "a", encoding="utf-8")  # noqa: SIM115
     cmd = [
-        sys.executable,
+        *python_command(),
         "-m",
         "kohakuterrarium",
         "__run-server",

@@ -9,31 +9,28 @@ selected release in process while retaining the bundled launcher modules.
 import os
 import sys
 
+from kohakuterrarium.launcher import interpreter_mode
 from kohakuterrarium.launcher.bootloader import prepare
 
 
-def _swap_to_version_tree(site_packages: str) -> None:
-    """Redirect framework imports to a release tree while retaining launcher state."""
-    if site_packages not in sys.path:
-        sys.path.insert(0, site_packages)
-    # Launcher modules must survive because they own the active release selection.
-    for mod in list(sys.modules):
-        if mod == "kohakuterrarium" or (
-            mod.startswith("kohakuterrarium.")
-            and not mod.startswith("kohakuterrarium.launcher")
-        ):
-            del sys.modules[mod]
-
-
 def main() -> int:
-    """Prepare the active release and run its CLI in the Briefcase process."""
+    """Prepare the active release and run its CLI in the Briefcase process.
+
+    ``--kt-python`` short-circuits to interpreter mode so child processes can use
+    this stub as ``python``.
+    """
+    os.environ[interpreter_mode.STUB_ENV] = sys.executable
+    if interpreter_mode.requested(sys.argv):
+        return interpreter_mode.run(sys.argv)
+
     result = prepare()
     if result.done:
         return result.exit_code
     if result.site_packages is None:
         return result.exit_code or 7
 
-    _swap_to_version_tree(str(result.site_packages))
+    # Launcher modules must survive because they own the active release selection.
+    interpreter_mode.activate_release(str(result.site_packages))
 
     # Serving must stay in process because the Briefcase stub cannot run modules.
     os.environ["KT_LAUNCHER_EXEC"] = "1"

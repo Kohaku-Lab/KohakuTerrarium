@@ -8,7 +8,6 @@ import asyncio
 import contextlib
 import io
 import os
-import sys
 import traceback
 from typing import Any
 
@@ -22,6 +21,7 @@ from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
     windows_process_kwargs,
 )
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.utils.interpreter import python_command
 from kohakuterrarium.utils.timeouts import resolve_timeout_arg
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import is_mobile_profile
@@ -87,7 +87,7 @@ class PythonTool(BaseTool):
         if is_mobile_profile():
             return await self._execute_in_process(code, cwd, timeout)
 
-        python_cmd = [sys.executable, "-c", code]
+        python_cmd = [*python_command(), "-c", code]
 
         try:
             runner = _subprocess_runner(context)
