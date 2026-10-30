@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.laboratory._internal.app.app import AppMessage
+from kohakuterrarium.laboratory.adapters.terrarium import file_mutations
 from kohakuterrarium.laboratory.adapters.terrarium import files as mod
 from kohakuterrarium.laboratory.adapters.terrarium.files import (
     MAX_ONESHOT_BYTES,
@@ -587,3 +588,111 @@ class TestPushBundlePartialFailure:
         assert len(out["remaining"]) == 1
         assert "disk full" in out["error"]
         assert out["conflicts"] == []
+
+
+# ── active-session guard re-checked after admission (#481) ──────
+
+
+class TestActiveSessionAttachRace:
+    """A store attached while a mutation waits for occupancy admission
+    must still be refused: the dispatch-time guard alone is a
+    check-then-await window, so the enrolled mutations re-check after
+    admission, before the syscall."""
+
+    def _attach_during_admission(self, monkeypatch, adapter, target):
+        real_acquire = file_mutations.acquire_family
+
+        def attaching_acquire(paths, label):
+            lease = real_acquire(paths, label)
+            # The attach lands after the dispatch-time guard passed and
+            # after admission, in the window the issue reproduces.
+            adapter._engine._session_stores["sid"] = SimpleNamespace(path=target)
+            return lease
+
+        monkeypatch.setattr(file_mutations, "acquire_family", attaching_acquire)
+
+    def _seed_target(self, monkeypatch, tmp_path) -> Path:
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        target = tmp_path / "resume" / "active.kohakutr"
+        target.parent.mkdir()
+        target.write_bytes(b"active")
+        return target
+
+    async def test_write_rejected_when_attach_races_admission(
+        self, adapter, monkeypatch, tmp_path
+    ):
+        target = self._seed_target(monkeypatch, tmp_path)
+        self._attach_during_admission(monkeypatch, adapter, target)
+
+        out = await adapter._dispatch(
+            _msg(
+                "write",
+                {
+                    "scope": "config://",
+                    "path": "resume/active.kohakutr",
+                    "bytes_b64": _b64encode(b"new"),
+                },
+            )
+        )
+
+        assert out["error"]["kind"] == "invalid"
+        assert "active session store" in out["error"]["message"]
+        assert target.read_bytes() == b"active"
+        assert_idle(target)
+
+    async def test_write_commit_rejected_when_attach_races_admission(
+        self, adapter, monkeypatch, tmp_path
+    ):
+        target = self._seed_target(monkeypatch, tmp_path)
+        body = {
+            "scope": "config://",
+            "path": "resume/active.kohakutr",
+            "total_size": 3,
+            "sha256": _sha(b"new"),
+        }
+        begin = await adapter._dispatch(_msg("write_begin", body))
+        transfer_id = begin["transfer_id"]
+        chunk = await adapter._dispatch(
+            _msg(
+                "write_chunk",
+                {
+                    "transfer_id": transfer_id,
+                    "seq": 0,
+                    "bytes_b64": _b64encode(b"new"),
+                },
+            )
+        )
+        assert chunk == {"received": 3}
+        self._attach_during_admission(monkeypatch, adapter, target)
+
+        out = await adapter._dispatch(
+            _msg("write_commit", {"transfer_id": transfer_id})
+        )
+
+        assert out["error"]["kind"] == "invalid"
+        assert "active session store" in out["error"]["message"]
+        assert target.read_bytes() == b"active"
+        # The refused commit discards the staged transfer, like the
+        # dispatch-time guard path in _op_write_commit already does.
+        assert transfer_id not in adapter._transfers
+        staging = target.parent / f".staging-stream-{transfer_id}"
+        assert not staging.exists()
+        assert_idle(target)
+
+    async def test_delete_rejected_when_attach_races_admission(
+        self, adapter, monkeypatch, tmp_path
+    ):
+        target = self._seed_target(monkeypatch, tmp_path)
+        self._attach_during_admission(monkeypatch, adapter, target)
+
+        out = await adapter._dispatch(
+            _msg(
+                "delete",
+                {"scope": "config://", "path": "resume/active.kohakutr"},
+            )
+        )
+
+        assert out["error"]["kind"] == "invalid"
+        assert "active session store" in out["error"]["message"]
+        assert target.read_bytes() == b"active"
+        assert_idle(target)
