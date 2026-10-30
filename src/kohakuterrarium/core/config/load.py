@@ -28,7 +28,11 @@ from kohakuterrarium.core.config.resolve import resolve_pwd_guard, resolve_tool_
 from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
 from kohakuterrarium.core.output_wiring import parse_wiring_list
 from kohakuterrarium.modules.tool.doc_mode import validate_doc_mode
-from kohakuterrarium.packages.resolve import resolve_any_path, resolve_package_path
+from kohakuterrarium.packages.resolve import (
+    package_ref,
+    resolve_any_path,
+    resolve_package_path,
+)
 
 try:
     import tomllib
@@ -163,6 +167,11 @@ def _load_base_config_data(base_path: Path) -> dict[str, Any] | None:
             existing_chain = data.get("_prompt_chain", [])
             data["_prompt_chain"] = existing_chain + [str(prompt_path)]
 
+    ancestor_refs = list(data.get("_package_config_refs", []))
+    own_ref = package_ref(base_path)
+    data["_package_config_refs"] = ([own_ref] if own_ref else []) + [
+        ref for ref in ancestor_refs if ref != own_ref
+    ]
     return data
 
 
@@ -304,6 +313,17 @@ def load_agent_config(agent_path: str | Path) -> AgentConfig:
     return build_agent_config(config_data, agent_path)
 
 
+def _package_config_refs(config_data: dict[str, Any], agent_path: Path) -> list[str]:
+    """Return this creature's package ref, then each packaged ancestor."""
+    own_ref = package_ref(agent_path)
+    ancestor_refs = [
+        ref
+        for ref in config_data.get("_package_config_refs", [])
+        if isinstance(ref, str) and ref and ref != own_ref
+    ]
+    return ([own_ref] if own_ref else []) + ancestor_refs
+
+
 def _resolve_inheritance(
     config_data: dict[str, Any], agent_path: Path
 ) -> dict[str, Any]:
@@ -334,8 +354,10 @@ def _resolve_inheritance(
         base=str(base_path),
         child=str(agent_path),
     )
+    ancestor_refs = list(base_data.get("_package_config_refs", []))
     merged = _merge_configs(base_data, config_data)
     merged["_base_path"] = base_path
+    merged["_package_config_refs"] = ancestor_refs
     return merged
 
 
@@ -562,7 +584,9 @@ def build_agent_config(
     config_data = _interpolate_env_vars(config_data)
     config_data = _resolve_inheritance(config_data, agent_path)
     config_data = _merge_global_mcp_servers(config_data)
+    package_config_refs = _package_config_refs(config_data, agent_path)
     config = _construct_agent_config(config_data, agent_path)
+    config.package_config_refs = package_config_refs
     _load_prompt_chain(config, config_data)
     _render_prompt_context(config)
 

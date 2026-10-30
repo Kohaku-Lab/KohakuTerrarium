@@ -951,6 +951,12 @@ subagent_models:
   explore: openrouter/mimo-v2.5-pro
   worker: codex/gpt-5.5
 
+# Optional defaults for creatures spawned by group_add_node and
+# group_spawn_child. Keys are normalized @pkg/... refs; default is global.
+child_models:
+  default: openrouter/mimo-v2.5-pro
+  "@kt-biome/creatures/swe": codex/gpt-5.5
+
 backends:
   <provider-name>:
     backend_type: openai | anthropic | codex  # transport implementation
@@ -998,14 +1004,28 @@ Per-agent overrides via `controller.base_url` / `controller.api_key_env`
 still work.
 
 `subagent_models` supplies user-level defaults without editing packaged creature
-configs. Keys match the final `SubAgentConfig.name` exactly. A concrete `model`
-on the creature or sub-agent module still wins; `parent`, `inherit`, and `default`
-explicitly inherit the parent LLM. An absent model, `subagent-default`, or
-`subagent_default` uses the named entry when present, otherwise it inherits the
-parent. The mapping is read when a sub-agent is created, so edits affect future
+configs. Keys match the final `SubAgentConfig.name` exactly. A matching entry
+overrides an absent model and the config sentinels `parent`, `inherit`, `default`,
+`subagent-default`, and `subagent_default`. A concrete selector written directly
+on that sub-agent config still wins, and a missing table entry inherits the parent
+LLM. The mapping is read when a sub-agent is created, so edits affect future
 jobs only. Conversation and Inspector Trace rows record the model actually bound
 to each new job, preferring its canonical profile selector and falling back to
 the raw model id.
+
+`child_models` supplies the same kind of user default for creatures spawned by
+`group_add_node` and `group_spawn_child`. It does not affect `kt run`, Studio,
+recipes, or direct Python API calls. An explicit `llm` argument wins. A named
+`@pkg/...` entry overrides a concrete config model, while table `default` does not;
+it applies only to an absent model or `parent`, `inherit`, or `default`. The result
+reports `requested_llm`, `llm`, `llm_source`, `matched_key`, `llm_fallback_from`,
+and `fallback_reason`. The table matches normalized
+`@pkg/...` refs from the creature through its `base_config` ancestors, nearest
+first. It does not match `config.name`, the spawn `name`, or a local filesystem
+path. The table key `default` is the global child fallback. An unavailable table
+selector falls back to the caller model, then `default_model`, and the tool
+result reports `llm`, `llm_source`, and `llm_fallback_from`. The file is read
+when the child is spawned, so edits affect future spawns only.
 
 ### OpenAI-compatible retries
 

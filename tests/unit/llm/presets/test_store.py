@@ -226,3 +226,16 @@ class TestSerializeUserData:
         mapping = {"researcher": "anthropic/claude-sonnet", "Reviewer": "raw-model"}
         data = serialize_user_data({}, {}, subagent_models=mapping)
         assert data["subagent_models"] == mapping
+
+    def test_child_models_keep_exact_keys_and_drop_blank_values(self):
+        mapping = {
+            "default": "openrouter/cheap",
+            "@biome/creatures/swe": "codex/gpt",
+            "blank": "  ",
+            "": "openai/missing",
+        }
+        data = serialize_user_data({}, {}, child_models=mapping)
+        assert data["child_models"] == {
+            "default": "openrouter/cheap",
+            "@biome/creatures/swe": "codex/gpt",
+        }

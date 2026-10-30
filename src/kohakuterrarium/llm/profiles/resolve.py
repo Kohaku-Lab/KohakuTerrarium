@@ -39,7 +39,11 @@ from kohakuterrarium.llm.profiles.backends import (
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.grok.auth import GrokTokens
 from kohakuterrarium.llm.antigravity.auth import AgyCredentials
-from kohakuterrarium.llm.presets.store import get_subagent_models, load_presets
+from kohakuterrarium.llm.presets.store import (
+    get_child_models,
+    get_subagent_models,
+    load_presets,
+)
 from kohakuterrarium.llm.presets.store import preset_from_data as _preset_from_data
 from kohakuterrarium.llm.presets.store import (
     serialize_user_data as _serialize_user_data,
@@ -85,6 +89,7 @@ def save_backend(backend: LLMBackend) -> None:
             backends,
             data.get("default_model", ""),
             get_subagent_models(),
+            get_child_models(),
         )
     )
 
@@ -107,6 +112,7 @@ def delete_backend(name: str) -> bool:
             backends,
             data.get("default_model", ""),
             get_subagent_models(),
+            get_child_models(),
         )
     )
     save_api_key(name, "")
@@ -224,7 +230,11 @@ def _upgrade_bare_default(bare: str) -> str:
 def set_default_model(model_name: str) -> None:
     _save_yaml(
         _serialize_user_data(
-            load_presets(), load_backends(), model_name, get_subagent_models()
+            load_presets(),
+            load_backends(),
+            model_name,
+            get_subagent_models(),
+            get_child_models(),
         )
     )
 
@@ -271,6 +281,7 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
             backends,
             data.get("default_model", ""),
             get_subagent_models(),
+            get_child_models(),
         )
     )
 
@@ -295,6 +306,7 @@ def delete_profile(name: str, provider: str = "") -> bool:
             load_backends(),
             data.get("default_model", ""),
             get_subagent_models(),
+            get_child_models(),
         )
     )
     return True
