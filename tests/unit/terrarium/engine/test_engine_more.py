@@ -521,11 +521,11 @@ class TestAttachSessionBranches:
         store = SessionStore(str(tmp_path / "s.kohakutr"))
         try:
             c = t.get_creature("alice")
-            hook = MagicMock()
-            c.agent.attach_session_store = hook
+            attached = []
+            c.agent.attach_session_store = attached.append
             gid = t.list_graphs()[0].graph_id
             await t.attach_session(gid, store)
-            hook.assert_called_once_with(store)
+            assert attached == [store]
         finally:
             await t.shutdown()
             store.close()

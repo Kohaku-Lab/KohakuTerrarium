@@ -7,7 +7,7 @@ we drive it with the ``_FakeAgent`` test helper extended with an
 
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 
 from kohakuterrarium.laboratory.adapters.terrarium.attach import (
@@ -59,10 +59,17 @@ class TestNormalizeInputContent:
 
 class TestSinkQueueAdapter:
     def test_put_nowait_forwards_to_sink(self):
-        sink = MagicMock()
+        class _Sink:
+            def __init__(self):
+                self.sent = []
+
+            def send_json_nowait(self, payload):
+                self.sent.append(payload)
+
+        sink = _Sink()
         adapter = _SinkQueueAdapter(sink)
         adapter.put_nowait({"x": 1})
-        sink.send_json_nowait.assert_called_once_with({"x": 1})
+        assert sink.sent == [{"x": 1}]
 
 
 # ── adapter setup / teardown ─────────────────────────────────

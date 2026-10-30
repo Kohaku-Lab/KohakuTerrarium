@@ -2,7 +2,7 @@
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,7 +13,10 @@ from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.event_inbox import EventInbox
 from kohakuterrarium.core.jobs.job import JobResult
 from kohakuterrarium.llm.message import ImagePart
+from kohakuterrarium.modules.plugin.base import BasePlugin
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.parsing import ToolCallEvent
+from tests.helpers.waiting import wait_until
 
 # ── fake agent harness ───────────────────────────────────────────
 
@@ -933,14 +936,21 @@ class TestStartToolAsync:
 
 class TestHandlePromotionPlugins:
     async def test_plugin_notify_fires(self, agent):
-        mgr = MagicMock()
-        mgr.notify = AsyncMock()
-        agent.plugins = mgr
+        promoted = []
+
+        class _Recorder(BasePlugin):
+            name = "recorder"
+
+            async def on_task_promoted(self, job_id, tool_name):
+                promoted.append((job_id, tool_name))
+
+        manager = PluginManager()
+        manager.register(_Recorder())
+        agent.plugins = manager
         agent._register_direct_job("bash_x", kind="tool", name="bash")
         agent._handle_promotion("bash_x", agent.controller, {}, False)
-        # asyncio.create_task scheduled the plugin notify; give it a tick.
-        await asyncio.sleep(0)
-        mgr.notify.assert_called()
+        await wait_until(lambda: promoted, what="on_task_promoted")
+        assert promoted == [("bash_x", "bash")]
 
     def test_no_plugins_no_op(self, agent):
         # ``plugins`` attribute missing means the notify branch is skipped.

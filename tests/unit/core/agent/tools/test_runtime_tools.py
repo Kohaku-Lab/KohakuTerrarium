@@ -1,7 +1,8 @@
 """Unit tests for :mod:`kohakuterrarium.core.agent.tools.runtime_tools`."""
 
+import asyncio
 import types
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -10,7 +11,6 @@ from kohakuterrarium.core.agent.tools.runtime_tools import (
     AgentRuntimeToolsMixin,
     _make_job_label,
 )
-from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.event_inbox import EventInbox
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
@@ -239,21 +239,24 @@ class TestEmitTokenUsage:
 
 
 class TestCancelHandles:
-    def test_cancels_undone_unpromoted(self):
+    async def test_cancels_undone_unpromoted(self):
         a = _make_mixin()
-        h1 = MagicMock(spec=BackgroundifyHandle)
-        h1.promoted = False
-        h1.done = False
-        h2 = MagicMock(spec=BackgroundifyHandle)
-        h2.promoted = True  # skip
-        h2.done = False
-        h3 = MagicMock(spec=BackgroundifyHandle)
-        h3.promoted = False
-        h3.done = True  # skip
+
+        async def forever():
+            await asyncio.Event().wait()
+
+        def handle(promoted, done):
+            return types.SimpleNamespace(
+                promoted=promoted, done=done, task=asyncio.ensure_future(forever())
+            )
+
+        h1, h2, h3 = handle(False, False), handle(True, False), handle(False, True)
         a._cancel_handles({"a": h1, "b": h2, "c": h3})
-        h1.task.cancel.assert_called_once()
-        h2.task.cancel.assert_not_called()
-        h3.task.cancel.assert_not_called()
+        await asyncio.sleep(0)
+        assert [h.task.cancelled() for h in (h1, h2, h3)] == [True, False, False]
+        for h in (h2, h3):
+            h.task.cancel()
+        await asyncio.gather(h2.task, h3.task, return_exceptions=True)
 
 
 # ── reset / flush ────────────────────────────────────────────────

@@ -17,6 +17,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.terrarium.service import service as svc_mod
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
+from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 
 class _NamedPlugin(BasePlugin):
@@ -58,7 +59,7 @@ class _MockAgent:
         )
         self.regenerate_last_response = AsyncMock()
         self.edit_and_rerun = AsyncMock(return_value=True)
-        self.rewind_to = AsyncMock()
+        self.rewound: list[int] = []
         self.interrupt = MagicMock()
         self.interrupt_and_wait = AsyncMock(side_effect=self.interrupt)
         self.is_processing = False
@@ -70,6 +71,9 @@ class _MockAgent:
         self._processing_task = None
         self._direct_job_meta = {}
         self.input_module = None
+
+    async def rewind_to(self, index):
+        self.rewound.append(index)
 
     def get_system_prompt(self):
         return "you are X"
@@ -127,6 +131,17 @@ def _build_service():
     return LocalTerrariumService(engine), creature
 
 
+async def _real_service(*names, separate_graphs=False):
+    """A service over a real engine hosting fake agents named ``names``."""
+    builder = TestTerrariumBuilder()
+    for name in names:
+        builder = builder.with_creature(name)
+    if separate_graphs:
+        builder = builder.with_separate_graphs()
+    engine = await builder.build()
+    return LocalTerrariumService(engine), engine
+
+
 # ── lifecycle (lines 555-565, 567-577) ────────────────────────
 
 
@@ -153,46 +168,60 @@ class TestLifecycle:
         assert out.creature_id == "cid"
 
     async def test_remove_creature(self):
-        svc, _ = _build_service()
-        await svc.remove_creature("cid")
-        svc._engine.remove_creature.assert_awaited_once_with("cid")
+        svc, engine = await _real_service("alice", "bob")
+        try:
+            await svc.remove_creature("alice")
+            assert "alice" not in engine
+            assert "bob" in engine
+        finally:
+            await engine.shutdown()
 
     async def test_start_stop_creature(self):
-        svc, _ = _build_service()
-        await svc.start_creature("cid")
-        await svc.stop_creature("cid")
-        svc._engine.start.assert_awaited_with("cid")
-        svc._engine.stop.assert_awaited_with("cid")
+        svc, engine = await _real_service("alice")
+        try:
+            creature = engine.get_creature("alice")
+            await svc.stop_creature("alice")
+            assert creature.is_running is False
+            assert creature.agent.stop_calls == 1
+            await svc.start_creature("alice")
+            assert creature.is_running is True
+            assert creature.agent.start_calls == 2
+        finally:
+            await engine.shutdown()
 
     async def test_shutdown(self):
-        svc, _ = _build_service()
+        svc, engine = await _real_service("alice", "bob")
         await svc.shutdown()
-        svc._engine.shutdown.assert_awaited_once()
+        assert not any(c.is_running for c in engine.list_creatures())
 
 
 # ── channel ops ──────────────────────────────────────────────
 
 
 class TestChannels:
-    async def test_add_channel(self):
-        svc, _ = _build_service()
-        await svc.add_channel("g1", "chat", "desc")
-        svc._engine.add_channel.assert_awaited_with("g1", "chat", "desc")
+    async def test_add_and_remove_channel(self):
+        svc, engine = await _real_service("alice")
+        try:
+            graph_id = engine.get_creature("alice").graph_id
+            await svc.add_channel(graph_id, "chat", "desc")
+            assert engine.get_graph(graph_id).channels["chat"].description == "desc"
+            await svc.remove_channel(graph_id, "chat")
+            assert "chat" not in engine.get_graph(graph_id).channels
+        finally:
+            await engine.shutdown()
 
-    async def test_remove_channel(self):
-        svc, _ = _build_service()
-        await svc.remove_channel("g1", "chat")
-        svc._engine.remove_channel.assert_awaited_with("g1", "chat")
-
-    async def test_connect(self):
-        svc, _ = _build_service()
-        await svc.connect("a", "b", channel="x")
-        svc._engine.connect.assert_awaited_with("a", "b", channel="x")
-
-    async def test_disconnect(self):
-        svc, _ = _build_service()
-        await svc.disconnect("a", "b")
-        svc._engine.disconnect.assert_awaited_with("a", "b", channel=None)
+    async def test_connect_merges_graphs_and_disconnect_splits_them(self):
+        svc, engine = await _real_service("alice", "bob", separate_graphs=True)
+        try:
+            alice, bob = engine.get_creature("alice"), engine.get_creature("bob")
+            assert alice.graph_id != bob.graph_id
+            await svc.connect("alice", "bob", channel="x")
+            assert alice.graph_id == bob.graph_id
+            assert "x" in engine.get_graph(alice.graph_id).channels
+            await svc.disconnect("alice", "bob", channel="x")
+            assert alice.graph_id != bob.graph_id
+        finally:
+            await engine.shutdown()
 
 
 # ── interaction ───────────────────────────────────────────────
@@ -200,10 +229,12 @@ class TestChannels:
 
 class TestInteraction:
     async def test_inject_input(self):
-        svc, c = _build_service()
-        await svc.inject_input("cid", "hello", source="api")
-        svc._engine.wake.assert_awaited_once_with(c)
-        c.inject_input.assert_awaited_with("hello", source="api")
+        svc, engine = await _real_service("alice")
+        try:
+            await svc.inject_input("alice", "hello", source="api")
+            assert engine.get_creature("alice").agent.injected == [("hello", "api")]
+        finally:
+            await engine.shutdown()
 
     async def test_chat_delegates(self):
         svc, c = _build_service()
@@ -220,9 +251,14 @@ class TestInteraction:
 
 class TestJobs:
     async def test_interrupt(self):
-        svc, c = _build_service()
-        await svc.interrupt("cid")
-        c.agent.interrupt.assert_called_once()
+        svc, engine = await _real_service("alice")
+        try:
+            agent = engine.get_creature("alice").agent
+            agent.is_processing = True
+            await svc.interrupt("alice")
+            assert agent.is_processing is False
+        finally:
+            await engine.shutdown()
 
     async def test_list_jobs(self):
         svc, _ = _build_service()
@@ -300,7 +336,7 @@ class TestPerCreatureOps:
     async def test_rewind(self):
         svc, c = _build_service()
         await svc.rewind("cid", 3)
-        c.agent.rewind_to.assert_awaited_with(3)
+        assert c.agent.rewound == [3]
 
     async def test_get_scratchpad(self):
         svc, _ = _build_service()

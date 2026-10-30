@@ -6,8 +6,6 @@ through a fake service and assert the underlying method was invoked
 with the expected arguments.
 """
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from kohakuterrarium.terrarium.multi_node import service as mns_mod
@@ -247,9 +245,14 @@ class TestOutputWiringRouting:
 class TestWireCreatureRouting:
     async def test_normal_creature(self):
         svc = _make_service(remote_specs={"w1": [_info("c1")]})
-        svc._remotes["w1"].wire_creature = AsyncMock()
+        forwarded = []
+
+        async def _wire(*args, **kwargs):
+            forwarded.append((args, kwargs))
+
+        svc._remotes["w1"].wire_creature = _wire
         await svc.wire_creature("g1", "c1", "chat", "listen")
-        svc._remotes["w1"].wire_creature.assert_awaited_once()
+        assert forwarded == [(("g", "c1", "chat", "listen"), {"enabled": True})]
 
 
 # ── attach_policies ─────────────────────────────────────────

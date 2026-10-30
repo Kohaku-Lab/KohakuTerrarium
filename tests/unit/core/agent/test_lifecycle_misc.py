@@ -99,14 +99,15 @@ class TestAgentLifecycle:
     async def test_mcp_manager_shut_down_when_present(self):
         a = _build_lifecycle_agent(has_mcp=True)
         await a.stop()
-        a._mcp_manager.shutdown.assert_awaited()
+        assert a._mcp_manager.shutdown.await_count == 1
 
     async def test_compact_llm_closed_when_distinct(self):
         compact_llm = AsyncMock()
         compact_llm.close = AsyncMock()
         a = _build_lifecycle_agent(compact_llm=compact_llm)
         await a.stop()
-        compact_llm.close.assert_awaited()
+        assert compact_llm.close.await_count == 1
+        assert a.llm.close.await_count == 1
 
     async def test_compact_llm_same_as_main_not_double_closed(self):
         a = _build_lifecycle_agent()
@@ -125,7 +126,8 @@ class TestAgentLifecycle:
     async def test_no_compact_manager_safe(self):
         a = _build_lifecycle_agent(has_compact=False)
         await a.stop()
-        a.llm.close.assert_awaited()
+        assert a._running is False
+        assert a.llm.close.await_count == 1
 
     async def test_cancel_executor_tasks_no_executor(self):
         a = _build_lifecycle_agent()

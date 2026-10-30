@@ -1,7 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.core.agent.mcp`."""
 
 import types
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 
 from kohakuterrarium.core.agent import mcp as am
@@ -30,10 +30,12 @@ class _FakeManager:
 
 
 def _agent_with_mcp(*, mcp_configs=None):
+    prompts: list[str] = []
     return types.SimpleNamespace(
         config=types.SimpleNamespace(mcp_servers=mcp_configs or []),
         _mcp_manager=None,
-        update_system_prompt=MagicMock(),
+        prompts=prompts,
+        update_system_prompt=prompts.append,
     )
 
 
@@ -104,13 +106,13 @@ class TestInjectMcpToolsIntoPrompt:
     def test_no_manager_no_op(self):
         a = _agent_with_mcp()
         inject_mcp_tools_into_prompt(a)
-        a.update_system_prompt.assert_not_called()
+        assert a.prompts == []
 
     def test_no_servers_no_op(self):
         a = _agent_with_mcp()
         a._mcp_manager = _FakeManager(server_list=[])
         inject_mcp_tools_into_prompt(a)
-        a.update_system_prompt.assert_not_called()
+        assert a.prompts == []
 
     def test_disconnected_server_skipped(self):
         a = _agent_with_mcp()
@@ -125,7 +127,7 @@ class TestInjectMcpToolsIntoPrompt:
         )
         inject_mcp_tools_into_prompt(a)
         # All servers disconnected → nothing added beyond the header.
-        a.update_system_prompt.assert_not_called()
+        assert a.prompts == []
 
     def test_connected_server_renders_tools(self):
         a = _agent_with_mcp()
@@ -154,8 +156,8 @@ class TestInjectMcpToolsIntoPrompt:
             ]
         )
         inject_mcp_tools_into_prompt(a)
-        a.update_system_prompt.assert_called_once()
-        prompt = a.update_system_prompt.call_args[0][0]
+        assert len(a.prompts) == 1
+        prompt = a.prompts[0]
         assert "Available MCP Tools" in prompt
         assert "### Server: fs" in prompt
         assert "**read_file**" in prompt
@@ -177,7 +179,7 @@ class TestInjectMcpToolsIntoPrompt:
             ]
         )
         inject_mcp_tools_into_prompt(a)
-        prompt = a.update_system_prompt.call_args[0][0]
+        prompt = a.prompts[-1]
         # Tool listed without description.
         assert "**x**" in prompt
         # No "—" separator because no description.

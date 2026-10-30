@@ -485,10 +485,15 @@ class TestWireCreatureAndPolicies:
         g = GraphTopology(graph_id="g1", creature_ids=set(), channels={})
         svc = _make_service()
         worker = _FakeService(node_id="w1", graphs=[g])
-        worker.wire_creature = AsyncMock()
+        forwarded = []
+
+        async def _wire(*args, **kwargs):
+            forwarded.append((args, kwargs))
+
+        worker.wire_creature = _wire
         svc._remotes["w1"] = worker
         await svc.wire_creature("g1", "root", "chat", "listen")
-        worker.wire_creature.assert_awaited_once()
+        assert forwarded == [(("g1", "root", "chat", "listen"), {"enabled": True})]
 
     async def test_session_attach_policies_unknown_returns_empty(self):
         # No connected worker hosts the graph — there are no policies
@@ -926,7 +931,12 @@ class TestClusterGraphSnapshot:
             creatures=[_info("b", name="bravo", graph_id="g_b")],
             channels_by_graph={"g_b": []},
         )
-        w2.wire_creature = AsyncMock()
+        wired = []
+
+        async def _wire(*args, **kwargs):
+            wired.append((args, kwargs))
+
+        w2.wire_creature = _wire
         svc = _make_service()
         svc._remotes = {"w1": w1, "w2": w2}
         svc._home = {"a": "w1", "b": "w2"}
@@ -942,9 +952,7 @@ class TestClusterGraphSnapshot:
 
         # The wire call MUST go to w2 with g_b (b's actual graph_id),
         # not g_a.
-        w2.wire_creature.assert_awaited_once_with(
-            "g_b", "b", "ch2", "send", enabled=True
-        )
+        assert wired == [(("g_b", "b", "ch2", "send"), {"enabled": True})]
 
     async def test_ensure_channel_replicated_records_cluster_link(self):
         # End-to-end at the unit tier: ``_ensure_channel_replicated``
