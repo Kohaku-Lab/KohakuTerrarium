@@ -14,7 +14,7 @@ from kohakuterrarium.llm.stream.segments import KT_ASSISTANT_SEGMENTS
 
 pytestmark = pytest.mark.real_llm_provider
 
-FIXTURE = Path(__file__).parent / "fixtures" / "gemini_parallel_deltas.json"
+FIXTURE = Path(__file__).parents[3] / "fixtures" / "gemini_parallel_deltas.json"
 CALLS = json.loads(FIXTURE.read_text(encoding="utf-8"))
 URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
