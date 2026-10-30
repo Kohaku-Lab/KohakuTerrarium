@@ -349,122 +349,11 @@ jobs:
             --clobber \
             -R "${GITHUB_REPOSITORY}"
 
-  # ── Briefcase desktop shell (slim — bundles ONE release-tree as fallback) ─
-  build-desktop:
-    needs: [meta, build-wheel, build-release-tree]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            plat_tag: win-x64
-            abi: cp313
-            py: "3.13"
-          - os: macos-latest
-            platform: macOS
-            plat_tag: macos-arm64
-            abi: cp313
-            py: "3.13"
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.meta.outputs.ref }}
-          submodules: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.py }}
-
-      - name: Stamp the dispatched version
-        if: needs.meta.outputs.stamp == 'true'
-        run: python scripts/set_pyproject_version.py write "${{ needs.meta.outputs.version }}"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Build frontend
-        working-directory: src/kohakuterrarium-frontend
-        run: |
-          npm ci
-          npm run build
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: release-tree-${{ matrix.plat_tag }}-${{ matrix.abi }}
-          path: bundled-release/
-
-      - name: Verify bundled-release has the right tarball
-        shell: bash
-        run: |
-          ls -la bundled-release/
-          test -n "$(find bundled-release -maxdepth 1 -name 'kohakuterrarium-*.tar.*' | head -n 1)"
-
-      - name: Install briefcase
-        run: pip install briefcase
-
-      - name: Pre-build wheels for sdist-only deps
-        shell: bash
-        run: |
-          mkdir -p wheels
-          pip wheel proxy_tools -w wheels --no-deps
-
-      # ``KohakuTerrarium[desktop]`` would otherwise resolve from PyPI — which
-      # at this point still serves the PREVIOUS release, since publish-pypi
-      # runs in parallel with this job.
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: wheel-dist/
-
-      - name: Stage the release wheel for briefcase
-        shell: bash
-        run: |
-          find wheel-dist -maxdepth 1 -name "*.whl" -exec cp {} wheels/ \;
-          python scripts/pin_briefcase_local_wheel.py --wheel-dir wheels
-          ls -la wheels/
-
-      - name: Create briefcase project
-        run: briefcase create
-
-      - name: Build briefcase app
-        run: briefcase build
-
-      - name: Package briefcase app
-        shell: bash
-        run: |
-          if [ "${{ matrix.platform }}" = "macOS" ]; then
-            briefcase package --adhoc-sign
-          else
-            briefcase package
-          fi
-
-      - name: Collect artifacts
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          cp dist/*.msi artifacts/ 2>/dev/null || true
-          cp dist/*.dmg artifacts/ 2>/dev/null || true
-          cp dist/*.zip artifacts/ 2>/dev/null || true
-          find dist/ -maxdepth 1 -type f \( -name "*.msi" -o -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.app" \) -exec cp {} artifacts/ \; 2>/dev/null || true
-          ls -la artifacts/
-          test -n "$(find artifacts -maxdepth 1 -type f | head -n 1)"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desktop-${{ matrix.platform }}
-          path: artifacts/
-
   # ── Tauri desktop shell: bundled interpreter + launcher + one release tree ─
   # Builds the installer, installs it on the runner and runs the headless
   # self-check (app serves behind its launch token, kt runs, python tool runs).
   build-desktop-tauri:
     needs: [meta, build-release-tree]
-    # Advisory until its first green nightly: a failure must not block the wheel,
-    # PyPI, docker or the release trees.
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -683,9 +572,9 @@ jobs:
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
 
-  # ── GitHub Release (release-tree tarballs + briefcase artifacts) ──
+  # ── GitHub Release (release-tree tarballs + desktop installers) ──
   github-release:
-    needs: [meta, build-wheel, build-release-tree, build-desktop, build-desktop-tauri, publish-channel-manifests]
+    needs: [meta, build-wheel, build-release-tree, build-desktop-tauri, publish-channel-manifests]
     runs-on: ubuntu-latest
     steps:
       # Checkout first: the action cleans its destination directory, which
@@ -723,7 +612,7 @@ jobs:
           find all-artifacts/dist -type f -exec cp {} release/ \;
           # Release-tree tarballs + sidecars
           find all-artifacts/release-tree-* -type f -exec cp {} release/ \;
-          # Briefcase desktop bundles
+          # Desktop installers
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
           (cd release && sha256sum * > SHA256SUMS)
           ls -la release/
