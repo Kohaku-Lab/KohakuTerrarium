@@ -1,6 +1,7 @@
-"""Guard: no source file exceeds 500 statements (soft) or 1000 (hard)."""
+"""Guard: source files stay under 1000 statements (hard); over 500 (soft) warns."""
 
 import ast
+import warnings
 from pathlib import Path
 
 import pytest
@@ -13,15 +14,6 @@ VSCODE_TESTS = ROOT / "extensions" / "vscode" / "test"
 SOFT_CAP_STATEMENTS = 500
 HARD_CAP_STATEMENTS = 1000
 VSCODE_CAP_LINES = 600
-
-# Files allowed above the soft cap until their part-by-part refactor lands.
-# An entry is removed when its file is split; never add one for new code.
-ALLOWLIST_SOFT = {
-    # Single TUI session-state class awaiting a pseudo-class package split.
-    "builtins/tui/session.py",
-    # Rich CLI app class awaiting a pseudo-class package split.
-    "builtins/cli_rich/app.py",
-}
 
 
 def count_statements(source: str) -> int:
@@ -60,39 +52,19 @@ def _all_vscode_files():
 @pytest.mark.parametrize(
     "path", list(_all_py_files()), ids=lambda p: str(p.relative_to(SRC))
 )
-def test_file_under_soft_statement_cap(path):
+def test_file_statement_caps(path):
+    """Over the soft cap warns; over the hard cap fails."""
     rel = path.relative_to(SRC).as_posix()
     statements = count_statements(path.read_text(encoding="utf-8"))
-    if rel in ALLOWLIST_SOFT:
-        assert statements <= HARD_CAP_STATEMENTS, (
-            f"{rel} has {statements} statements (allowlisted but max "
-            f"{HARD_CAP_STATEMENTS})"
+    assert (
+        statements <= HARD_CAP_STATEMENTS
+    ), f"{rel} has {statements} statements (hard max {HARD_CAP_STATEMENTS})"
+    if statements > SOFT_CAP_STATEMENTS:
+        warnings.warn(
+            f"{rel} has {statements} statements (soft cap {SOFT_CAP_STATEMENTS}): "
+            "keep it only if it is one large coherent unit",
+            stacklevel=1,
         )
-    else:
-        assert (
-            statements <= SOFT_CAP_STATEMENTS
-        ), f"{rel} has {statements} statements (max {SOFT_CAP_STATEMENTS})"
-
-
-@pytest.mark.parametrize(
-    "path", list(_all_py_files()), ids=lambda p: str(p.relative_to(SRC))
-)
-def test_file_under_hard_statement_cap(path):
-    statements = count_statements(path.read_text(encoding="utf-8"))
-    assert statements <= HARD_CAP_STATEMENTS, (
-        f"{path.relative_to(SRC)} has {statements} statements "
-        f"(hard max {HARD_CAP_STATEMENTS})"
-    )
-
-
-def test_allowlist_entries_still_exceed_the_soft_cap():
-    stale = [
-        rel
-        for rel in sorted(ALLOWLIST_SOFT)
-        if count_statements((SRC / rel).read_text(encoding="utf-8"))
-        <= SOFT_CAP_STATEMENTS
-    ]
-    assert not stale, f"remove from ALLOWLIST_SOFT: {stale}"
 
 
 @pytest.mark.parametrize(

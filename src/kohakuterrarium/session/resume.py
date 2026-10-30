@@ -7,9 +7,9 @@ from typing import Any, NamedTuple
 from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.agent_compact import stage_resume_compact_state
-from kohakuterrarium.core.agent_message_history import replay_with_settled_tools
-from kohakuterrarium.core.agent_selection import restore_selections
+from kohakuterrarium.core.agent.history.compact import stage_resume_compact_state
+from kohakuterrarium.core.agent.history.message_history import replay_with_settled_tools
+from kohakuterrarium.core.agent.history.selection import restore_selections
 from kohakuterrarium.core.branch_continuation import load_persisted_branch_view
 from kohakuterrarium.core.config_serde import unpack_agent_config
 from kohakuterrarium.core.conversation_elide import (

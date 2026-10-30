@@ -3,7 +3,9 @@
 from copy import deepcopy
 from types import SimpleNamespace
 
-from kohakuterrarium.core.agent_message_history import apply_prepared_branch_view
+from kohakuterrarium.core.agent.history.message_history import (
+    apply_prepared_branch_view,
+)
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.session.resume_build import build_conversation

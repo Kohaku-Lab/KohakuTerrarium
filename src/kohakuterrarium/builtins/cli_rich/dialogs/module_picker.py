@@ -35,7 +35,7 @@ from kohakuterrarium.builtins.cli_rich.dialogs.module_picker_model import (
 from kohakuterrarium.builtins.cli_rich.dialogs.module_picker_render import (
     render_overlay,
 )
-from kohakuterrarium.core.agent_tool_options import agent_tool_inventory
+from kohakuterrarium.core.agent.tools.options import agent_tool_inventory
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

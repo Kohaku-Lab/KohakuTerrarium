@@ -106,7 +106,7 @@ class _MyEchoTool(BaseTool):
 
 # --------------------------------------------------------------------------
 # Fixtures — build a real, fully-wired Agent with ScriptedLLM as the only
-# seam. Mirrors how tests/unit/core/test_agent_real.py constructs an agent,
+# seam. Mirrors how tests/unit/core/agent/test_real.py constructs an agent,
 # patching BOTH bootstrap LLM-factory import sites.
 # --------------------------------------------------------------------------
 

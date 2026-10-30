@@ -1,10 +1,10 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_tool_options`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.options`."""
 
 from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.agent_tool_options import (
+from kohakuterrarium.core.agent.tools.options import (
     TOOL_OPTIONS_STATE_SUFFIX,
     ToolOptions,
 )

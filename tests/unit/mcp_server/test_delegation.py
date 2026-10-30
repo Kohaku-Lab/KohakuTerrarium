@@ -13,7 +13,7 @@ from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 @pytest.fixture(autouse=True)
 def scripted_compaction(monkeypatch):
     monkeypatch.setattr(
-        "kohakuterrarium.core.agent_compact.create_llm_from_profile_name",
+        "kohakuterrarium.core.agent.history.compact.create_llm_from_profile_name",
         lambda *_args, **_kwargs: ScriptedLLM(["compacted"]),
     )
 

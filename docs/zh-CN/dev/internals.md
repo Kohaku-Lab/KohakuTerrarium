@@ -25,7 +25,7 @@ tags:
 
 CLI 入口位于 `cli/run.py:run_agent_cli()`。它会先检查配置路径，再选择 I/O 模式（`cli` / TUI），然后一切都走 Terrarium 引擎：`Terrarium(pwd=…)` 加 `engine.add_creature(…)`（配方则用 `engine.apply_recipe(…)`），再把引擎交给 `run_engine_with_rich_cli()` / `run_engine_with_tui()`。编程式嵌入方直接用 `await Agent.build(…)` 构造 agent。
 
-`Agent.__init__`（`src/kohakuterrarium/core/agent.py`）会按固定顺序初始化：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。mixin 布局为 `AgentInitMixin`（`bootstrap/agent_init.py`）+ `AgentHandlersMixin`（`core/agent_handlers.py`）+ `AgentToolsMixin`（`core/agent_tools.py`），外加 2.0 之后的 mixin：`AgentConstructMixin`（`Agent.build` / `Agent.from_path`）、`AgentTurnMixin`（带类型的 `run` / `run_stream`）、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
+`Agent.__init__`（`src/kohakuterrarium/core/agent.py`）会按固定顺序初始化：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。mixin 布局为 `AgentInitMixin`（`bootstrap/agent_init.py`）+ `AgentHandlersMixin`（`core/agent/turn/handlers.py`）+ `AgentToolsMixin`（`core/agent/tools/dispatch.py`），外加 2.0 之后的 mixin：`AgentConstructMixin`（`Agent.build` / `Agent.from_path`）、`AgentTurnMixin`（带类型的 `run` / `run_stream`）、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
 
 `await agent.start()`（`core/agent.py`）会启动 input 和 output 模块；如果存在 TUI，就挂上回调；接着启动 trigger manager、注册 completion callback、初始化 MCP、将 tool 描述注入 prompt、初始化 `CompactManager`、加载 plugin、发布 session 信息，最后启动 termination checker。
 

@@ -1,14 +1,14 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_model`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.model`."""
 
 import types
 
 import pytest
 
-from kohakuterrarium.core import agent_model as am
+from kohakuterrarium.core.agent import model as am
 from kohakuterrarium import Agent
 from kohakuterrarium.core.config_types import AgentConfig
-from kohakuterrarium.core.agent_compact import AgentCompactMixin
-from kohakuterrarium.core.agent_model import AgentModelMixin
+from kohakuterrarium.core.agent.history.compact import AgentCompactMixin
+from kohakuterrarium.core.agent.model import AgentModelMixin
 from kohakuterrarium.llm.profiles.backends import save_yaml_store
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
 

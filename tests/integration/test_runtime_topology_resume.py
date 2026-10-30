@@ -21,8 +21,8 @@ import yaml
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
-from kohakuterrarium.core import agent_compact as _agent_compact
-from kohakuterrarium.core import agent_model as _agent_model
+from kohakuterrarium.core.agent.history import compact as _agent_compact
+from kohakuterrarium.core.agent import model as _agent_model
 from kohakuterrarium.terrarium import graph_checkpoint
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.drive.config import (

@@ -6,8 +6,8 @@ Provide model switching and canonical LLM identifiers for agents.
 from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
-from kohakuterrarium.core.agent_budget_recovery import attach_recovery_hooks
-from kohakuterrarium.core.agent_selection import persist_model_selection
+from kohakuterrarium.core.agent.turn.budget_recovery import attach_recovery_hooks
+from kohakuterrarium.core.agent.history.selection import persist_model_selection
 from kohakuterrarium.core.provider_tools import sync_provider_tools
 from kohakuterrarium.core.token_ledger import context_window
 from kohakuterrarium.llm.profiles.resolve import (
@@ -31,6 +31,15 @@ class AgentModelMixin:
     config: Any
     _llm_selector: str | None
     _llm_identifier: str
+
+    def _init_model_state(self, llm: Any) -> None:
+        # Raw llm= argument (instance | selector string | profile | None).
+        self._llm_spec = llm
+        # Selector string, when one was given — feeds llm_identifier()
+        # and compact-LLM resolution.  Instance injections leave it None.
+        self._llm_selector = llm if isinstance(llm, str) else None
+        # Canonical provider/name[@variations] id; lazy via llm_identifier().
+        self._llm_identifier = ""
 
     def switch_model(self, profile_name: str) -> str:
         """Switch the LLM provider to a different model profile.

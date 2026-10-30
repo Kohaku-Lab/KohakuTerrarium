@@ -1,10 +1,10 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_pre_dispatch`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.turn.pre_dispatch`."""
 
 import types
 from pathlib import Path
 
 
-from kohakuterrarium.core.agent_pre_dispatch import (
+from kohakuterrarium.core.agent.turn.pre_dispatch import (
     run_pre_subagent_dispatch,
     run_pre_tool_dispatch,
 )

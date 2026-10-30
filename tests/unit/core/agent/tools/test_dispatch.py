@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_tools`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.dispatch`."""
 
 import asyncio
 from typing import Any
@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kohakuterrarium.core.agent_event_loop import AgentEventLoopMixin
-from kohakuterrarium.core.agent_tools import AgentToolsMixin, _TurnResult
+from kohakuterrarium.core.agent.turn.event_loop import AgentEventLoopMixin
+from kohakuterrarium.core.agent.tools.dispatch import AgentToolsMixin, _TurnResult
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.event_inbox import EventInbox
@@ -1076,7 +1076,7 @@ class TestOnBackgroundifyCompleteEventContextInit:
 
         # Patch create_tool_complete_event to return an event with
         # context=None so line 323 fires.
-        from kohakuterrarium.core import agent_tools as at
+        from kohakuterrarium.core.agent.tools import dispatch as at
         from kohakuterrarium.core.events import TriggerEvent, EventType
 
         def make_evt(**kwargs):

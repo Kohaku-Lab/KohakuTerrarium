@@ -36,7 +36,7 @@ import pytest
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.agent_pre_dispatch import run_pre_tool_dispatch
+from kohakuterrarium.core.agent.turn.pre_dispatch import run_pre_tool_dispatch
 from kohakuterrarium.core.config_types import (
     AgentConfig,
     InputConfig,

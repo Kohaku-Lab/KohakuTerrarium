@@ -7,7 +7,9 @@ new user input. Branch selection is persisted so resume restores it.
 
 from typing import Any
 
-from kohakuterrarium.core.agent_message_history import apply_prepared_branch_view
+from kohakuterrarium.core.agent.history.message_history import (
+    apply_prepared_branch_view,
+)
 from kohakuterrarium.errors import AgentNotRunningError, ConflictError
 from kohakuterrarium.session.history import (
     InvalidBranchViewError,

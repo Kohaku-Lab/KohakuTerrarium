@@ -1,12 +1,12 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_runtime_tools`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.runtime_tools`."""
 
 import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kohakuterrarium.core.agent_event_loop import AgentEventLoopMixin
-from kohakuterrarium.core.agent_runtime_tools import (
+from kohakuterrarium.core.agent.turn.event_loop import AgentEventLoopMixin
+from kohakuterrarium.core.agent.tools.runtime_tools import (
     AgentRuntimeToolsMixin,
     _make_job_label,
 )

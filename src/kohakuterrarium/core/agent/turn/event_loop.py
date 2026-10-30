@@ -9,12 +9,14 @@ per run. The processing lock allows shutdown to join an in-flight turn.
 import asyncio
 from typing import Any
 
-from kohakuterrarium.core.agent_mid_turn import _to_serializable_content
+from kohakuterrarium.core.agent.turn.mid_turn import _to_serializable_content
 from kohakuterrarium.core.controller_context import declare_message_origin
-from kohakuterrarium.core.agent_runtime_tools import _make_job_label
-from kohakuterrarium.core.event_inbox import EventEnvelope, TurnOutcome
+from kohakuterrarium.core.agent.tools.runtime_tools import _make_job_label
+from kohakuterrarium.core.event_inbox import EventEnvelope, EventInbox, TurnOutcome
+from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.metrics_hook import metrics
 from kohakuterrarium.core.pending_input import pending_id_of
+from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.session.raw_history import append_user_event_pair
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
@@ -64,6 +66,41 @@ def segment_stackable(batch: list[EventEnvelope]) -> list[list[EventEnvelope]]:
 
 class AgentEventLoopMixin:
     """The single consumer + batch-turn driver mixed into ``Agent``."""
+
+    def _init_event_state(self) -> None:
+        self._running = False
+        # Warm-pause admission gate (UXI-11): when True, new turns are
+        # buffered instead of run; the runtime stays live.
+        self._paused = False
+        self._shutdown_event = asyncio.Event()
+        # Set once the startup trigger's awaited turn has settled inside
+        # ``_drive_input`` (or immediately when no startup trigger is
+        # configured). The Terrarium restoration barrier waits on this so
+        # Drive reconciliation never runs against an un-settled creature.
+        self._startup_settled = asyncio.Event()
+        # Turn mutex — now held ONLY by the single event consumer for the
+        # span of a turn so ``stop()`` can join an in-flight turn.
+        self._processing_lock = asyncio.Lock()
+        self._turn_lock_holder: asyncio.Task | None = None
+        # False while a NON-stackable turn (startup / error / Drive) holds
+        # the mutex, so nothing folds into it.
+        self._active_turn_stackable = True
+        # The single infinite event queue + its one consumer (queue-first
+        # event system — see ``core/event_inbox.py`` + this module).
+        self._event_inbox = EventInbox()
+        self._consumer_task: asyncio.Task | None = None
+        # Warm-pause gate for the consumer: set = draining, cleared = paused.
+        self._consumer_resume = asyncio.Event()
+        self._consumer_resume.set()
+        # A trigger's drained backlog stashed by ``admit_ready_events`` and
+        # flushed onto the inbox right after its primary (UXI-08b).
+        self._trigger_backlog_stash: list[TriggerEvent] = []
+        self._bg_dispatch_acks: list[str] = []
+        self.trigger_manager = TriggerManager(self._process_event)
+        self.trigger_manager.set_host_agent(self)
+        # A trigger drains its whole ready backlog on fire and admits the
+        # extras here so the burst is absorbed in ONE turn (UXI-08b).
+        self.trigger_manager.admit_ready = self.admit_ready_events
 
     def _flush_trigger_backlog_stash(self) -> None:
         """Place a trigger's stashed backlog immediately after its primary.

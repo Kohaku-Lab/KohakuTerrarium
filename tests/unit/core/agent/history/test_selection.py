@@ -1,9 +1,9 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_selection`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.history.selection`."""
 
 import json
 
 from kohakuterrarium import Agent
-from kohakuterrarium.core.agent_selection import (
+from kohakuterrarium.core.agent.history.selection import (
     load_model_selection,
     load_plugin_selection,
     persist_model_selection,

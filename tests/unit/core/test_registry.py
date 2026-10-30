@@ -153,4 +153,4 @@ class TestClear:
 # NOTE: the module-level global registry + its ``@tool`` / ``@command``
 # decorators were dead surface (nothing read them into an agent) and
 # were removed (E7).  ``@kohakuterrarium.tool`` — the real adapter — is
-# covered in ``tests/unit/core/test_agent_extensions.py``.
+# covered in ``tests/unit/core/agent/test_extensions.py``.

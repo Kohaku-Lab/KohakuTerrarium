@@ -5,8 +5,8 @@ Modify past messages, regenerate responses, and replay conversation branches.
 
 import asyncio
 
-from kohakuterrarium.core.agent_lifecycle import wait_for_turn_completion
-from kohakuterrarium.core.agent_message_history import (
+from kohakuterrarium.core.agent.lifecycle import wait_for_turn_completion
+from kohakuterrarium.core.agent.history.message_history import (
     live_user_turns as _live_user_turns,
     max_branch_id_for_turn as _max_branch_id_for_turn,
     previous_branch_user_content as _previous_branch_user_content,
@@ -15,7 +15,7 @@ from kohakuterrarium.core.agent_message_history import (
     turn_index_for_user_position as _turn_index_for_user_position,
     user_message_content_for_turn as _user_message_content_for_turn,
 )
-from kohakuterrarium.core.agent_raw_history import (
+from kohakuterrarium.core.agent.history.raw_history import (
     prepare_raw_prefix_for_target,
     raw_target_content,
 )

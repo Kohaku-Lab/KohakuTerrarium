@@ -7,7 +7,7 @@ from copy import deepcopy
 
 import httpx
 
-import kohakuterrarium.core.agent_message_history as branch_history
+import kohakuterrarium.core.agent.history.message_history as branch_history
 from kohakuterrarium.core.branch_continuation import live_branch_path
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider

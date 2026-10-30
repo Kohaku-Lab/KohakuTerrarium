@@ -21,7 +21,7 @@
 
 **Files:** `src/kohakuterrarium/session/branch_paths.py`, `src/kohakuterrarium/session/history.py`, `tests/unit/session/test_branch_paths.py`, `tests/unit/session/test_history.py`, `tests/unit/session/test_history_selection.py`.
 
-Also share the raw projection's index in `src/kohakuterrarium/core/agent_message_history.py` (`replay_with_settled_tools` and `snapshot_needs_settled_tool_replay`), covered by `tests/unit/core/test_agent_message_history.py`. Normalization still creates a separate replay projection and therefore requires its own index.
+Also share the raw projection's index in `src/kohakuterrarium/core/agent_message_history.py` (`replay_with_settled_tools` and `snapshot_needs_settled_tool_replay`), covered by `tests/unit/core/agent/history/test_message_history.py`. Normalization still creates a separate replay projection and therefore requires its own index.
 
 1. Add a replay work budget requiring one parent index for the deduplicated event projection; assert exact branch and compaction output.
 2. Run the focused file and confirm the budget fails.

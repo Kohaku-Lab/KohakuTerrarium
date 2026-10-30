@@ -7,7 +7,7 @@ import pytest
 
 from kohakuterrarium.builtins.tui.input import TUIInput
 from kohakuterrarium.builtins.user_commands.exit import ExitCommand
-from kohakuterrarium.core.agent_input import drive_input
+from kohakuterrarium.core.agent.turn.input import drive_input
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     UserCommandResult,

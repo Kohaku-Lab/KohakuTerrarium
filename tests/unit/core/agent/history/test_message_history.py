@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from kohakuterrarium.core import agent_message_history as history
+from kohakuterrarium.core.agent.history import message_history as history
 from kohakuterrarium.session import history as session_history
 
 

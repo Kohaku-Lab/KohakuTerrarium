@@ -6,7 +6,7 @@ import pytest
 from textual.app import App
 from textual.widgets import DataTable, Input, Select, Switch, TabbedContent
 
-from kohakuterrarium.core.agent_tool_options import ToolOptions
+from kohakuterrarium.core.agent.tools.options import ToolOptions
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.profiles.api_keys import save_api_key
 from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool

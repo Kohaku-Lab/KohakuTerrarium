@@ -26,8 +26,8 @@ import kohakuterrarium.terrarium.channels as _terrarium_channels
 import kohakuterrarium.terrarium.topology as _terrarium_topology
 import kohakuterrarium.terrarium.topology_snapshot as _terrarium_topology_snap
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
-from kohakuterrarium.core.agent_selection import persist_plugin_selection
-from kohakuterrarium.core.agent_tool_options import (
+from kohakuterrarium.core.agent.history.selection import persist_plugin_selection
+from kohakuterrarium.core.agent.tools.options import (
     agent_get_tool_options,
     agent_set_tool_options,
     agent_tool_inventory,

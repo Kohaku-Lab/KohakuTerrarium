@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_tool_gate`.
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.gate`.
 
 A tool requiring a renderer stays out of the system prompt until an attached
 output reports that renderer. A renderer change refreshes the prompt only

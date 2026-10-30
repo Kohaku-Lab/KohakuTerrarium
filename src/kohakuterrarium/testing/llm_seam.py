@@ -21,8 +21,8 @@ LLM_FACTORY_TARGETS: tuple[tuple[str, str], ...] = (
     ("kohakuterrarium.bootstrap.llm", "create_llm_from_profile_name"),
     ("kohakuterrarium.bootstrap.llm", "_create_from_profile"),
     ("kohakuterrarium.bootstrap.agent_init", "create_llm_provider"),
-    ("kohakuterrarium.core.agent_model", "create_llm_from_profile_name"),
-    ("kohakuterrarium.core.agent_compact", "create_llm_from_profile_name"),
+    ("kohakuterrarium.core.agent.model", "create_llm_from_profile_name"),
+    ("kohakuterrarium.core.agent.history.compact", "create_llm_from_profile_name"),
     (
         "kohakuterrarium.studio.sessions.summary.tracking",
         "create_llm_from_profile_name",

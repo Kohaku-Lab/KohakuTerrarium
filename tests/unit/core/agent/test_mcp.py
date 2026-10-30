@@ -1,11 +1,11 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_mcp`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.mcp`."""
 
 import types
 from unittest.mock import AsyncMock, MagicMock
 
 
-from kohakuterrarium.core import agent_mcp as am
-from kohakuterrarium.core.agent_mcp import (
+from kohakuterrarium.core.agent import mcp as am
+from kohakuterrarium.core.agent.mcp import (
     init_mcp,
     inject_mcp_tools_into_prompt,
 )

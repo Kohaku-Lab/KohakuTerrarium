@@ -4,8 +4,8 @@ import pytest
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
-from kohakuterrarium.core import agent_compact as _agent_compact_mod
-from kohakuterrarium.core import agent_model as _agent_model_mod
+from kohakuterrarium.core.agent.history import compact as _agent_compact_mod
+from kohakuterrarium.core.agent import model as _agent_model_mod
 from kohakuterrarium.studio.sessions.summary import tracking as _summary_tracking_mod
 from kohakuterrarium.testing.llm import ScriptedLLM
 

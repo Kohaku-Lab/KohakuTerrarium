@@ -5,21 +5,21 @@
 import types
 
 
-from kohakuterrarium.core import agent_observability as obs
-from kohakuterrarium.core import agent_tools_metrics as tm
-from kohakuterrarium.core.agent_helpers import attach_session_helpers
-from kohakuterrarium.core.agent_native_tools import NativeToolOptions
-from kohakuterrarium.core.agent_observability import (
+from kohakuterrarium.core.agent import observability as obs
+from kohakuterrarium.core.agent.tools import metrics as tm
+from kohakuterrarium.core.agent.helpers import attach_session_helpers
+from kohakuterrarium.core.agent.tools.native_tools import NativeToolOptions
+from kohakuterrarium.core.agent.observability import (
     _TOKEN_KEYS,
     build_session_info,
     init_branch_state,
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
 )
-from kohakuterrarium.core.agent_plugin_options import PluginOptions
-from kohakuterrarium.core.agent_tool_options import ToolOptions
-from kohakuterrarium.core.agent_tools_metrics import emit_completion_metrics
-from kohakuterrarium.core.agent_workspace import WorkspaceController
+from kohakuterrarium.core.agent.tools.plugin_options import PluginOptions
+from kohakuterrarium.core.agent.tools.options import ToolOptions
+from kohakuterrarium.core.agent.tools.metrics import emit_completion_metrics
+from kohakuterrarium.core.agent.workspace import WorkspaceController
 
 
 def _fake_agent(**kw):

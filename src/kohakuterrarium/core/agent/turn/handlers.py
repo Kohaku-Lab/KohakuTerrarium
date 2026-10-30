@@ -4,13 +4,13 @@ import asyncio
 import importlib
 
 from kohakuterrarium.errors import AgentNotRunningError
-from kohakuterrarium.core.agent_mid_turn import AgentMidTurnMixin
-from kohakuterrarium.core.agent_output_wiring import AgentOutputWiringMixin
-from kohakuterrarium.core.agent_pre_dispatch import (
+from kohakuterrarium.core.agent.turn.mid_turn import AgentMidTurnMixin
+from kohakuterrarium.core.agent.turn.output_wiring import AgentOutputWiringMixin
+from kohakuterrarium.core.agent.turn.pre_dispatch import (
     run_pre_subagent_dispatch,
     run_pre_tool_dispatch,
 )
-from kohakuterrarium.core.agent_tools import (
+from kohakuterrarium.core.agent.tools.dispatch import (
     AgentToolsMixin,
     _make_job_label,
     _TurnResult,

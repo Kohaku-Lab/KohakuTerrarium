@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
-from kohakuterrarium.core.agent_tool_options import agent_tool_inventory
+from kohakuterrarium.core.agent.tools.options import agent_tool_inventory
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

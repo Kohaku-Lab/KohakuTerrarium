@@ -42,7 +42,7 @@ bootstrap in a fixed order: `_init_llm`, `_init_registry`,
 `_init_executor`, `_init_subagents`, `_init_output`, `_init_controller`,
 `_init_input`, `_init_user_commands`, `_init_triggers`. The mixin
 layout is `AgentInitMixin` (`bootstrap/agent_init.py`) + `AgentHandlersMixin`
-(`core/agent_handlers.py`) + `AgentToolsMixin` (`core/agent_tools.py`),
+(`core/agent/turn/handlers.py`) + `AgentToolsMixin` (`core/agent/tools/dispatch.py`),
 plus the post-2.0 mixins: `AgentConstructMixin` (`Agent.build` /
 `Agent.from_path`), `AgentTurnMixin` (typed `run` / `run_stream`),
 `AgentExtensionsMixin`, `AgentMessagesMixin`, `AgentModelMixin`,

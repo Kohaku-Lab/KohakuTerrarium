@@ -8,7 +8,7 @@ from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.turn import Activity, AgentEventStream, TurnCapture
-from kohakuterrarium.core import agent_turn
+from kohakuterrarium.core.agent.turn import run as agent_turn
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.testing.llm import ScriptedLLM

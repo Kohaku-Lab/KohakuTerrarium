@@ -23,7 +23,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from kohakuterrarium.core.agent_tool_options import agent_tool_inventory
+from kohakuterrarium.core.agent.tools.options import agent_tool_inventory
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

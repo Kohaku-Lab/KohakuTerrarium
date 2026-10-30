@@ -6,10 +6,10 @@ via monkeypatched bootstrap. They exercise:
 * `core/agent.py` — `Agent.__init__`, `start`, `stop`,
   `_init_compact_manager`, `_init_iteration_budget`, `update_system_prompt`,
   `interrupt`, `session_info`.
-* `core/agent_handlers.py` — `_process_event`, `_handle_user_input`,
+* `core/agent/turn/handlers.py` — `_process_event`, `_handle_user_input`,
   `_run_controller_with_dispatch`, `_finalize_processing`,
   branch bookkeeping.
-* `core/agent_tools.py` — direct + background tool dispatch,
+* `core/agent/tools/dispatch.py` — direct + background tool dispatch,
   `_collect_direct_results`, sub-agent handling.
 
 The harness avoids any I/O dependency by overriding `_init_input`
@@ -1880,7 +1880,9 @@ class TestDriveInput:
             agent._running = False
 
         sleep = AsyncMock(side_effect=stop_after_wait)
-        monkeypatch.setattr("kohakuterrarium.core.agent.asyncio.sleep", sleep)
+        monkeypatch.setattr(
+            "kohakuterrarium.core.agent.turn.input.asyncio.sleep", sleep
+        )
 
         await agent._drive_input()
 
@@ -2669,7 +2671,7 @@ class TestAssistantReasoningEmission:
     async def test_reasoning_emitted_after_each_controller_round(
         self, make_agent, monkeypatch
     ):
-        from kohakuterrarium.core.agent_tools import _TurnResult
+        from kohakuterrarium.core.agent.tools.dispatch import _TurnResult
 
         agent = make_agent(script=["resp"])
         await agent.start()
@@ -3084,7 +3086,7 @@ class TestInitPluginsFreshFromConfig:
     ):
         """When ``init_plugins`` returns a falsy manager (empty), the
         early-return at line 427 fires."""
-        from kohakuterrarium.core import agent as agent_mod
+        from kohakuterrarium.core.agent import startup as agent_mod
         from kohakuterrarium.modules.plugin.manager import PluginManager
 
         # Force init_plugins to always return an empty manager.
@@ -4107,7 +4109,7 @@ class TestInterruptMidStream:
             async def fake_run_single_turn(controller):
                 # Set the flag mid-turn.
                 agent._interrupt_requested = True
-                from kohakuterrarium.core.agent_tools import _TurnResult
+                from kohakuterrarium.core.agent.tools.dispatch import _TurnResult
 
                 return _TurnResult(
                     handles={},

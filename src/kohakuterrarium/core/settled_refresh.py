@@ -1,6 +1,6 @@
 """Restore completed background results before truncating stable history."""
 
-from kohakuterrarium.core.agent_message_history import (
+from kohakuterrarium.core.agent.history.message_history import (
     reload_conversation_under_branch_view,
     snapshot_needs_settled_tool_replay,
 )

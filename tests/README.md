@@ -180,7 +180,7 @@ Each mirrors how the **real consumer** drives that folder.
 | `test_prompt.py` | `prompt/` | assemble a real agent's system prompt through the aggregator → on-demand `##info##` skill load → template rendering | `core/agent_init`, `bootstrap` |
 | `test_parsing.py` | `parsing/` | feed real streamed LLM output through `StreamParser` across chunk boundaries → exact tool-call/command/text events | `core/controller.py` |
 | `test_commands.py` | `commands/` | a real controller turn emits `##info##` / `##read##` → command resolves docs/skills into the conversation | `core/controller`, `core/agent_handlers` |
-| `test_mcp.py` | `mcp/` | real in-process stdio MCP server → connect → list → call → disconnect, cross-task as `core/agent_mcp.py` drives it | `core/agent_mcp.py` |
+| `test_mcp.py` | `mcp/` | real in-process stdio MCP server → connect → list → call → disconnect, cross-task as `core/agent/mcp.py` drives it | `core/agent/mcp.py` |
 | `test_compose.py` | `compose/` | build real `>>` / `&` / `\|` / `*` pipelines over engine-backed runnables and run them | user code (compose is a public API) |
 | `test_serving.py` | `serving/` | `KohakuManager` + `AgentSession` → create session → stream chat → lifecycle | `api/`, `compose/` |
 | `test_packages.py` | `packages/` | install a local package → list → info → resolve a `pkg:` ref → uninstall | `cli/packages.py`, `terrarium/config.py` |

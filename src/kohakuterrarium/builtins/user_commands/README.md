@@ -55,7 +55,7 @@ The `layer` class attribute determines which pathway executes the command.
   session store can undo-stack the clear if needed.
 - `regen` works by popping the last assistant turn + refiring the user
   event; it reuses normal rewind machinery on the agent
-  (`core/agent_messages.py`).
+  (`core/agent/history/messages.py`).
 - `plugin` toggles go through the agent's `PluginManager`; disabled
   plugins are still loaded so they can be re-enabled without restart.
 

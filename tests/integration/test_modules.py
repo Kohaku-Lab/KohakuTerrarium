@@ -1948,7 +1948,7 @@ class TestModulesIntegration:
         result is fed back into the controller's conversation so the next
         LLM turn can see it.
 
-        Mirrors: ``core/agent_handlers.py._dispatch_tool_event`` →
+        Mirrors: ``core/agent/turn/handlers.py._dispatch_tool_event`` →
         ``core/executor.py.submit`` → result collection back into the
         controller loop.
         """

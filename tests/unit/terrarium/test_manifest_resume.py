@@ -26,7 +26,7 @@ async def test_restore_default_output_policy(
     tmp_path, capsys, monkeypatch, legacy_recipe, io
 ):
     monkeypatch.setattr(
-        "kohakuterrarium.core.agent_compact.create_llm_from_profile_name",
+        "kohakuterrarium.core.agent.history.compact.create_llm_from_profile_name",
         lambda *_args, **_kwargs: ScriptedLLM(["compacted"]),
     )
     for module in ("bootstrap.llm", "bootstrap.agent_init"):

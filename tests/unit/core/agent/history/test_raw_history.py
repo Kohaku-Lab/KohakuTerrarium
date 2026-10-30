@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.agent_raw_history import (
+from kohakuterrarium.core.agent.history.raw_history import (
     _accepted_native_prefix,
     prepare_raw_prefix_for_target,
     reload_raw_prefix_for_target,

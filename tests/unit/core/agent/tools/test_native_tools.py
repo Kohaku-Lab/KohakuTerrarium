@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_native_tools`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.native_tools`."""
 
 import json
 import types
@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from kohakuterrarium.core.agent_native_tools import (
+from kohakuterrarium.core.agent.tools.native_tools import (
     NATIVE_TOOL_OPTIONS_KEY,
     NATIVE_TOOL_OPTIONS_STATE_SUFFIX,
     NativeToolOptions,

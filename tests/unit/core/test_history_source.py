@@ -5,7 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.agent_message_history import apply_prepared_branch_view
+from kohakuterrarium.core.agent.history.message_history import (
+    apply_prepared_branch_view,
+)
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.history_source import (
     PreparedHistorySource,

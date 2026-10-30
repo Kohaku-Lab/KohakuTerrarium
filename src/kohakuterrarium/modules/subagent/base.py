@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.core.agent_budget_recovery import apply_context_repair
+from kohakuterrarium.core.agent.turn.budget_recovery import apply_context_repair
 from kohakuterrarium.core.budget import (
     BudgetExhausted,
     IterationBudget,

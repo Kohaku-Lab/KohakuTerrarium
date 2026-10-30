@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_messages`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.history.messages`."""
 
 import asyncio
 from copy import deepcopy
@@ -6,13 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import kohakuterrarium.core.agent_messages as agent_messages_module
+import kohakuterrarium.core.agent.history.messages as agent_messages_module
 
-from kohakuterrarium.core.agent_message_history import (
+from kohakuterrarium.core.agent.history.message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
 )
-from kohakuterrarium.core.agent_messages import AgentMessagesMixin
+from kohakuterrarium.core.agent.history.messages import AgentMessagesMixin
 from kohakuterrarium.core.compact_splice import splice_conversation
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.errors import ConflictError
@@ -1703,7 +1703,7 @@ class TestReloadConvBranchViewExtraMetadata:
         monkeypatch.setattr(agent.session_store, "get_events", lambda name: events)
 
         # Mock replay_conversation to return messages with extras.
-        from kohakuterrarium.core import agent_messages as am
+        from kohakuterrarium.core.agent.history import messages as am
 
         def fake_replay(events, branch_view=None, **_kwargs):
             return [

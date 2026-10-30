@@ -8,10 +8,10 @@ truth for all mutable state.
 
 from typing import TYPE_CHECKING
 
-from kohakuterrarium.core.agent_native_tools import NativeToolOptions
-from kohakuterrarium.core.agent_plugin_options import PluginOptions
-from kohakuterrarium.core.agent_tool_options import ToolOptions
-from kohakuterrarium.core.agent_workspace import WorkspaceController
+from kohakuterrarium.core.agent.tools.native_tools import NativeToolOptions
+from kohakuterrarium.core.agent.tools.plugin_options import PluginOptions
+from kohakuterrarium.core.agent.tools.options import ToolOptions
+from kohakuterrarium.core.agent.workspace import WorkspaceController
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent

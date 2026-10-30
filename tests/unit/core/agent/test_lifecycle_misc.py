@@ -8,16 +8,16 @@ from contextlib import closing
 from unittest.mock import AsyncMock
 
 
-from kohakuterrarium.core.agent_budget_recovery import (
+from kohakuterrarium.core.agent.turn.budget_recovery import (
     _message_to_conversation_json,
     _metadata_for_messages,
     sync_emergency_drop_conversation,
 )
-from kohakuterrarium.core.agent_compact import (
+from kohakuterrarium.core.agent.history.compact import (
     AgentCompactMixin,
     restore_compact_state_from_session,
 )
-from kohakuterrarium.core.agent_lifecycle import AgentLifecycleMixin
+from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 from kohakuterrarium.core.pinned import PinnedContext
 from kohakuterrarium.session.store import SessionStore
@@ -489,7 +489,7 @@ class TestCompactOverflowRescue:
 class TestBuildCompactLLM:
     def test_falls_back_to_main_when_profile_resolution_fails(self, monkeypatch):
         # When no profile name is resolvable, falls back to ``self.llm``.
-        from kohakuterrarium.core import agent_compact as ac
+        from kohakuterrarium.core.agent.history import compact as ac
 
         monkeypatch.setattr(ac, "resolve_controller_llm", lambda *a, **k: None)
 
@@ -512,7 +512,7 @@ class TestBuildCompactLLM:
         assert out is a.llm
 
     def test_uses_explicit_compact_model(self, monkeypatch):
-        from kohakuterrarium.core import agent_compact as ac
+        from kohakuterrarium.core.agent.history import compact as ac
 
         seen = []
 
@@ -542,7 +542,7 @@ class TestBuildCompactLLM:
         assert seen == ["my-profile"]
 
     def test_create_failure_falls_back(self, monkeypatch):
-        from kohakuterrarium.core import agent_compact as ac
+        from kohakuterrarium.core.agent.history import compact as ac
 
         def boom(name):
             raise RuntimeError("create failed")
@@ -570,7 +570,7 @@ class TestBuildCompactLLM:
     def test_resolves_via_controller_data(self, monkeypatch):
         """When no explicit compact_model / override / profile, falls back to
         resolve_controller_llm and uses its result (covers line 46)."""
-        from kohakuterrarium.core import agent_compact as ac
+        from kohakuterrarium.core.agent.history import compact as ac
 
         called = []
 

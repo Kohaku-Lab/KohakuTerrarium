@@ -1,11 +1,11 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_plugin_options`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.plugin_options`."""
 
 import types
 from typing import Any
 
 import pytest
 
-from kohakuterrarium.core.agent_plugin_options import (
+from kohakuterrarium.core.agent.tools.plugin_options import (
     PLUGIN_OPTIONS_STATE_SUFFIX,
     PluginOptions,
 )

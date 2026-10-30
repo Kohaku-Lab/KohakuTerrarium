@@ -55,7 +55,7 @@ from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.api.routes.catalog import _deps as _catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
-from kohakuterrarium.core import agent_model as _agent_model
+from kohakuterrarium.core.agent import model as _agent_model
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.session.embedding import NullEmbedder
 from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops

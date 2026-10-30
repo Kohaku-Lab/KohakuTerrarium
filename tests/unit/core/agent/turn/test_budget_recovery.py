@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.agent_budget_recovery import (
+from kohakuterrarium.core.agent.turn.budget_recovery import (
     apply_context_repair,
     attach_recovery_hooks,
     repair_controller,

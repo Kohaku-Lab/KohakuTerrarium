@@ -4,8 +4,8 @@ from copy import deepcopy
 
 import pytest
 
-from kohakuterrarium.core import agent_message_history
-from kohakuterrarium.core.agent_message_history import (
+from kohakuterrarium.core.agent.history import message_history as agent_message_history
+from kohakuterrarium.core.agent.history.message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
 )

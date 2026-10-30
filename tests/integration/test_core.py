@@ -36,7 +36,7 @@ from typing import Callable
 import pytest
 from PIL import Image
 
-import kohakuterrarium.core.agent_message_history as branch_history
+import kohakuterrarium.core.agent.history.message_history as branch_history
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool

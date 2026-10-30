@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from kohakuterrarium.core import agent_compact as _agent_compact
+from kohakuterrarium.core.agent.history import compact as _agent_compact
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.identity.session_summary import SummarySettings
 from kohakuterrarium.studio.sessions.lifecycle import start_creature

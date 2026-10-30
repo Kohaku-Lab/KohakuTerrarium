@@ -47,7 +47,7 @@ from websockets import serve
 
 from kohakuterrarium import Terrarium
 from kohakuterrarium.errors import MediaReferenceError
-from kohakuterrarium.core.agent_budget_recovery import apply_context_repair
+from kohakuterrarium.core.agent.turn.budget_recovery import apply_context_repair
 from kohakuterrarium.core.config_types import AgentConfig, ToolConfigItem
 from kohakuterrarium.core.controller import Controller, ControllerConfig
 from kohakuterrarium.core.conversation import Conversation

@@ -31,7 +31,7 @@ import pytest
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
-from kohakuterrarium.core import agent_message_history as _message_history_mod
+from kohakuterrarium.core.agent.history import message_history as _message_history_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.branch_continuation import selected_branch_view
 from kohakuterrarium.core.events import create_user_input_event

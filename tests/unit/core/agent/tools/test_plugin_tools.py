@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_plugin_tools`.
+"""Unit tests for :mod:`kohakuterrarium.core.agent.tools.plugin_tools`.
 
 Tools a plugin contributes join the registry, executor and prompt with the
 plugin, leave when it is disabled or removed, come back on enable, and a

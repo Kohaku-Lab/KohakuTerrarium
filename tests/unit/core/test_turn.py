@@ -1,5 +1,5 @@
 """Unit tests for the typed turn API (E3) —
-:mod:`kohakuterrarium.core.turn` + :mod:`kohakuterrarium.core.agent_turn`.
+:mod:`kohakuterrarium.core.turn` + :mod:`kohakuterrarium.core.agent.turn.run`.
 
 Pins the headline contracts:
 

@@ -349,22 +349,14 @@ Stackable events can be batched when occurring simultaneously.
 ```
 src/kohakuterrarium/
 ├── core/                     # Runtime engine
-│   ├── agent.py              # Agent class: orchestrates everything (run_forever main loop)
-│   ├── agent_construct.py    # Agent.build / Agent.from_path constructors (AgentConstructMixin)
-│   ├── agent_turn.py         # Agent.run / Agent.run_stream: typed single-turn drivers
+│   ├── agent/                # Agent pseudo-class package (see agent/README.md):
+│   │                         #   assembly.py builds Agent from mixins; __init__ is a lazy
+│   │                         #   facade. construct, extensions, startup, session, lifecycle,
+│   │                         #   model, workspace, mcp + turn/ (run, drive, interrupt,
+│   │                         #   event_loop, handlers, mid_turn, input, pre_dispatch,
+│   │                         #   budget_recovery), tools/ (dispatch, gate, options, ...),
+│   │                         #   history/ (messages, message_history, selection, compact)
 │   ├── turn.py               # TurnResult / TextChunk / Activity / TurnEnded: typed turn events
-│   ├── agent_lifecycle.py    # Lifecycle helpers (AgentLifecycleMixin)
-│   ├── agent_extensions.py   # Runtime injection: add_tool / add_plugin (AgentExtensionsMixin)
-│   ├── agent_handlers.py     # Event handling, controller loop (AgentHandlersMixin)
-│   ├── agent_tools.py        # Tool/subagent dispatch + bg completion (AgentToolsMixin)
-│   ├── agent_messages.py     # Edit / regenerate / rewind past messages (AgentMessagesMixin)
-│   ├── agent_model.py        # LLM-profile switching (AgentModelMixin)
-│   ├── agent_mcp.py          # MCP init + prompt wiring for Agent
-│   ├── agent_mid_turn.py     # Mid-turn user-input injection + interrupt-buffer drain
-│   ├── agent_workspace.py    # Per-agent runtime working-directory controller
-│   ├── agent_*.py            # Smaller agent helpers: runtime tools, compact-model glue,
-│   │                         #   pre-dispatch plugin chain, native-tool / plugin option
-│   │                         #   overrides, observability + tool metrics, budget recovery
 │   ├── controller.py         # Controller: LLM conversation loop + event queue
 │   │                         #   (+ controller_metrics.py, controller_plugins.py)
 │   ├── conversation.py       # Context management (multimodal aware)
@@ -671,7 +663,7 @@ the launcher's strict-isolation rule.
 
 Plugin context (`PluginContext`) exposes: `agent_name`, `working_dir`, `session_id`, `model`, `switch_model()`, `inject_event()`, plus plugin-scoped `get_state()` / `set_state()` persisted to the session store.
 
-Loaded by `bootstrap/plugins.py`. Manager calls live in `core/agent_handlers.py` (pre-LLM) and `core/agent_tools.py` (pre/post tool, pre/post sub-agent).
+Loaded by `bootstrap/plugins.py`. Manager calls live in `core/agent/turn/handlers.py` (pre-LLM) and `core/agent/tools/dispatch.py` (pre/post tool, pre/post sub-agent).
 
 ## MCP Integration
 

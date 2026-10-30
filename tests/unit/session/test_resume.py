@@ -15,10 +15,12 @@ import kohakuterrarium.session.resume as resume_mod
 import kohakuterrarium.session.resume_branch as resume_branch_mod
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
-from kohakuterrarium.core.agent_compact import restore_compact_state_from_session
+from kohakuterrarium.core.agent.history.compact import (
+    restore_compact_state_from_session,
+)
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
-from kohakuterrarium.core.agent_handlers import _BG_PLACEHOLDER
-from kohakuterrarium.core.agent_message_history import replay_with_settled_tools
+from kohakuterrarium.core.agent.turn.handlers import _BG_PLACEHOLDER
+from kohakuterrarium.core.agent.history.message_history import replay_with_settled_tools
 from kohakuterrarium.core.controller_context import format_events_for_context
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.events import create_tool_complete_event

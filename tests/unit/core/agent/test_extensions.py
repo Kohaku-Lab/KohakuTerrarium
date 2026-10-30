@@ -283,7 +283,7 @@ class TestAsyncContextManager:
 
 class TestMCPAlwaysOn:
     async def test_configless_agent_gets_mcp_manager(self, tmp_path):
-        from kohakuterrarium.core.agent_mcp import init_mcp
+        from kohakuterrarium.core.agent.mcp import init_mcp
 
         agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
         await init_mcp(agent)

@@ -1,11 +1,11 @@
-"""Unit tests for :mod:`kohakuterrarium.core.agent_workspace`."""
+"""Unit tests for :mod:`kohakuterrarium.core.agent.workspace`."""
 
 import types
 from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.core.agent_workspace import WorkspaceController
+from kohakuterrarium.core.agent.workspace import WorkspaceController
 from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
 
 
