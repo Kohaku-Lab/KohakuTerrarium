@@ -120,13 +120,13 @@
     "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
   },
   {
-    "file": "src/kohakuterrarium/utils/file_lock.py",
+    "file": "src/kohakuterrarium/utils/file/lock.py",
     "function": "_acquire",
     "target": "msvcrt",
     "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
   },
   {
-    "file": "src/kohakuterrarium/utils/file_lock.py",
+    "file": "src/kohakuterrarium/utils/file/lock.py",
     "function": "_release",
     "target": "msvcrt",
     "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"

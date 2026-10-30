@@ -29,7 +29,7 @@ from kohakuterrarium.builtins.tui.widgets.ui_event_modals import (
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.modules.output.widgets_legacy import render_widget_as_legacy
+from kohakuterrarium.modules.output.widgets.legacy import render_widget_as_legacy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

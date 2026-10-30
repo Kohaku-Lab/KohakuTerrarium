@@ -15,14 +15,14 @@ import pytest
 
 from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT
 from kohakuterrarium.testing.output import OutputRecorder
 
@@ -770,7 +770,7 @@ class TestInitController:
 
     def test_plugins_wired_onto_controller(self):
         from kohakuterrarium.modules.plugin.base import BasePlugin
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         manager = PluginManager()
         plugin = BasePlugin()

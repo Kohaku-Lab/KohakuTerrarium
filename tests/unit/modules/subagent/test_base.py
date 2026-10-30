@@ -9,7 +9,7 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.recovery.context_repair import ContextRepair
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig, ToolResult
@@ -854,7 +854,7 @@ class TestPluginIntegration:
             BasePlugin,
             PluginBlockError,
         )
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         class _BlockPlugin(BasePlugin):
             name = "blocker"
@@ -905,7 +905,7 @@ class TestPluginIntegration:
         # A post_llm_call plugin can rewrite the assistant output; the
         # rewritten text is what lands in the result.
         from kohakuterrarium.modules.plugin.base import BasePlugin
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         class _RewritePlugin(BasePlugin):
             name = "rewriter"

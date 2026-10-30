@@ -13,7 +13,7 @@ from kohakuterrarium.llm.recovery.status import (
     notify_model_recovery,
 )
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.studio.attach.io import _session_info_frame
 from tests.unit.llm.openai.test_ws import Ev, MESSAGES, completed

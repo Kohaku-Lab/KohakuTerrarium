@@ -13,7 +13,7 @@ from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.model_resolve import (  # noqa: F401
     resolve_subagent_llm as resolve_llm,
 )
-from kohakuterrarium.utils.file_guard import FileReadState
+from kohakuterrarium.utils.file.guard import FileReadState
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

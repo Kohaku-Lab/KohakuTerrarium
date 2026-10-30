@@ -19,8 +19,8 @@ from kohakuterrarium.laboratory.adapters.terrarium_attach import (
     _AttachSession,
 )
 from kohakuterrarium.laboratory.ws_proxy import WSFrameSink
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.widgets import WidgetRecord
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.widgets.service import WidgetRecord
 from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 

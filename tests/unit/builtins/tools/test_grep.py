@@ -8,7 +8,7 @@ from aiofiles.threadpool.text import AsyncTextIOWrapper
 
 from kohakuterrarium.builtins.tools.grep import GrepTool, _search_single_file
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.utils.file_guard import PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import PathBoundaryGuard
 
 
 def _context(root):

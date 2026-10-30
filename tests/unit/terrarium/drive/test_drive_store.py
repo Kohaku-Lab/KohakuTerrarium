@@ -678,7 +678,7 @@ class TestMigrationLockOwnership:
         # refused, so no second migrator can enter concurrently. (Fails on the old
         # scheme, which closed its fd immediately and held nothing.)
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+        from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
         sidecar = str(tmp_path / "s.kohakutr.drives")
         lock_path = sidecar + ".migrate-lock"
@@ -696,7 +696,7 @@ class TestMigrationLockOwnership:
         # holder writes an unstamped (no-token) lock — exactly the shape the old
         # code misclassified stale-by-empty-token and unlinked out from under it.
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         monkeypatch.setattr(sm, "_MIGRATE_LOCK_TIMEOUT_S", 0.05)
         monkeypatch.setattr(sm, "_MIGRATE_POLL_S", 0.001)
@@ -730,7 +730,7 @@ class TestMigrationLockOwnership:
         # Handle close frees the OS lock so a subsequent acquirer succeeds on the
         # leftover file (no unlink needed).
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         sidecar = str(tmp_path / "s.kohakutr.drives")  # no sidecar → not complete
         lock_path = Path(sidecar + ".migrate-lock")
@@ -746,13 +746,13 @@ class TestMigrationLockOwnership:
         # takeover. This is exactly what the round-3b unlink scheme could not do
         # safely.
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+        from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
         sidecar = str(tmp_path / "s.kohakutr.drives")
         lock_path = sidecar + ".migrate-lock"
         code = (
             "import sys, time\n"
-            "from kohakuterrarium.utils.file_lock import FileLock\n"
+            "from kohakuterrarium.utils.file.lock import FileLock\n"
             f"lk = FileLock({lock_path!r})\n"
             "lk.acquire()\n"
             "sys.stdout.write('locked\\n'); sys.stdout.flush()\n"
@@ -778,7 +778,7 @@ class TestMigrationLockOwnership:
 class TestMigrationLockTimeoutBound:
     def test_slow_probe_cannot_exceed_fifty_ms_deadline(self, tmp_path, monkeypatch):
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         budgets: list[float | None] = []
 
@@ -812,7 +812,7 @@ class TestMigrationLockTimeoutBound:
         # then noticed the deadline — a single probe overshoots the whole
         # timeout.)
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         probe_calls: list[float] = []
 
@@ -839,7 +839,7 @@ class TestMigrationLockTimeoutBound:
     def test_probe_budget_never_exceeds_the_configured_cap(self, tmp_path, monkeypatch):
         # A float deadline can round above the cap, so "t0 + 0.05 - t0" > 0.05.
         from kohakuterrarium.terrarium.drive import store_migration as sm
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         budgets: list[float | None] = []
 
@@ -933,7 +933,7 @@ class TestMigrationLockFileLifecycle:
         from kohakuterrarium.terrarium.drive.store_migration import (
             drive_sidecar_family,
         )
-        from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+        from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
         session = tmp_path / "alice.kohakutr"
         store = SessionStore(str(session))

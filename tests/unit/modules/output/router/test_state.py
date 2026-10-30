@@ -1,8 +1,8 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.output.router_state`."""
+"""Unit tests for :mod:`kohakuterrarium.modules.output.router.state`."""
 
 from datetime import datetime
 
-from kohakuterrarium.modules.output.router_state import (
+from kohakuterrarium.modules.output.router.state import (
     CompletedOutput,
     OutputState,
 )

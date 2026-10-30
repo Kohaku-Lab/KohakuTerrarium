@@ -12,7 +12,7 @@ from kohakuterrarium.builtins.plugin_catalog import (
 )
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.packages.resolve import ensure_package_importable
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import get_logger

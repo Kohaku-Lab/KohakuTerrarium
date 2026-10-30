@@ -40,7 +40,7 @@ from kohakuterrarium.core.conversation.pinned import state_key as pinned_state_k
 from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
-from kohakuterrarium.modules.output.widgets import WidgetMessage
+from kohakuterrarium.modules.output.widgets.service import WidgetMessage
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.session.history import replay as _history_mod

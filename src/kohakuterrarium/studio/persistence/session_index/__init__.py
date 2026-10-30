@@ -19,7 +19,7 @@ from kohakuterrarium.studio.persistence.session_index.entry import (
     SessionIndexEntry,
 )
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.studio.persistence.session_index.hooks import (
     SessionIndexHook,
     push_index_update,

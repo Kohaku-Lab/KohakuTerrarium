@@ -15,7 +15,7 @@ from kohakuterrarium.builtins.plugins.permgate.plugin import PermGatePlugin
 from kohakuterrarium.builtins.tools.ask_user import AskUserTool
 from kohakuterrarium.builtins.tools.show_card import ShowCardTool
 from kohakuterrarium.modules.output.event import ACTION_TIMEOUT, OutputEvent, UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.modules.plugin.base import PluginBlockError
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.testing.output import OutputRecorder

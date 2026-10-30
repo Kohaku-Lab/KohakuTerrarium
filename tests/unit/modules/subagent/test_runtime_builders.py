@@ -282,7 +282,7 @@ class TestLoadAndWrapPlugins:
         await load_and_wrap_plugins(None, object(), _FakeLLM(), None)
 
     async def test_empty_manager_is_a_noop(self):
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         empty = PluginManager()
         # bool(empty) is False → early return, no on_load attempts.

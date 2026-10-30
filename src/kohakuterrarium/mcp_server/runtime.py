@@ -26,7 +26,7 @@ from kohakuterrarium.mcp_server.delegation import DelegationRuntime
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.parsing import ToolCallEvent
-from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 
 _EXECUTION_OPTIONS = {"max_output"}
 _UNSUPPORTED_HOOKS = (

@@ -16,7 +16,7 @@ from kohakuterrarium.builtins.kt_ui.inline_state import (
     block_hash,
     block_ids,
 )
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.output import OutputRecorder
 

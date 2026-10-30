@@ -3,7 +3,7 @@ Gitignore-aware file walking with early termination.
 
 Provides directory/file iterators that respect ``.gitignore`` at every
 level (scoped rules included, via
-:class:kohakuterrarium.utils.file_ignore.GitIgnoreFilter) and skip
+:class:kohakuterrarium.utils.file.ignore.GitIgnoreFilter) and skip
 common build/cache directories immediately.  Used by the grep and glob
 tools; the tree tool shares the skip/ignore helpers but walks with its
 own recursive builder (per-directory sorting, depth limits and
@@ -22,7 +22,7 @@ from os import scandir
 from pathlib import Path
 from typing import Iterator
 
-from kohakuterrarium.utils.file_ignore import GitIgnoreFilter
+from kohakuterrarium.utils.file.ignore import GitIgnoreFilter
 
 # ── always-skip dirs ─────────────────────────────────────────────────
 # Directories unconditionally skipped regardless of .gitignore state.

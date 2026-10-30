@@ -21,7 +21,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginContext,
     ToolVisibility,
 )
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.modules.plugin.option_validation import PluginOptionError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.output import OutputRecorder

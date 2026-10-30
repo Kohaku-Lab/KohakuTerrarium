@@ -9,7 +9,7 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.errors import InvalidRequestError
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.ui_owner import (

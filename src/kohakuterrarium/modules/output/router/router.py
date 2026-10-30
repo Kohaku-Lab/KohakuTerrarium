@@ -4,14 +4,17 @@ from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router_interactive import (
+from kohakuterrarium.modules.output.router.interactive import (
     OutputRouterInteractiveMixin,
 )
-from kohakuterrarium.modules.output.router_parsing import OutputRouterParseEventMixin
-from kohakuterrarium.modules.output.router_state import CompletedOutput, OutputState
-from kohakuterrarium.modules.output.router_widgets import OutputRouterWidgetsMixin
-from kohakuterrarium.modules.output.widgets import WIDGET_EVENT_TYPES, WidgetService
-from kohakuterrarium.modules.output.widgets_legacy import LEGACY_EVENT_TYPES
+from kohakuterrarium.modules.output.router.parsing import OutputRouterParseEventMixin
+from kohakuterrarium.modules.output.router.state import CompletedOutput, OutputState
+from kohakuterrarium.modules.output.router.widgets import OutputRouterWidgetsMixin
+from kohakuterrarium.modules.output.widgets.service import (
+    WIDGET_EVENT_TYPES,
+    WidgetService,
+)
+from kohakuterrarium.modules.output.widgets.legacy import LEGACY_EVENT_TYPES
 from kohakuterrarium.parsing import (
     AssistantImageEvent,
     CommandEvent,

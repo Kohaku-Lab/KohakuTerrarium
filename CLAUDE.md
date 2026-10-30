@@ -418,17 +418,20 @@ src/kohakuterrarium/
 │   │                         #   function.py = @kohakuterrarium.tool function adapter
 │   │                         #   doc_mode.py = brief / standard / full tier resolution
 │   ├── output/               # State-machine router + output modules
+│   │                         #   router/ (router, state, parsing, multi, interactive, widgets),
+│   │                         #   widgets/ (service, legacy)
 │   ├── subagent/             # Sub-agent lifecycle management
 │   │   ├── base.py           # SubAgent class (conversation loop)
 │   │   ├── result.py         # SubAgentResult, SubAgentJob, framework hints
 │   │   ├── manager.py        # SubAgentManager (spawn, cancel, cleanup)
-│   │   ├── interactive.py    # InteractiveSubAgent (long-running)
-│   │   ├── interactive_mgr.py# InteractiveManagerMixin
+│   │   ├── interactive/      # interactive.py = InteractiveSubAgent (long-running),
+│   │   │                     #   manager.py = InteractiveManagerMixin
 │   │   └── config.py         # SubAgentConfig dataclass
 │   ├── user_command/         # User slash command protocol
 │   └── plugin/               # Plugin protocol: pre/post hooks + callbacks
 │       ├── base.py           # BasePlugin, PluginContext, PluginBlockError
-│       └── manager.py        # PluginManager: runs hooks linearly by priority
+│       └── manager/          # manager.py = PluginManager (hooks run linearly by priority),
+│                             #   commands.py = plugin command registration
 │
 ├── builtins/                 # Built-in implementations
 │   ├── tool_catalog.py       # Global builtin tool lookup (deferred loaders)
@@ -596,7 +599,7 @@ src/kohakuterrarium/
 │   └── terrarium.py          # Engine test helpers (+ subprocess_seam.py)
 │
 ├── utils/                    # Shared utilities (logging, async helpers, config_dir,
-│                             #   file_guard, file_walk, mobile_sandbox)
+│                             #   mobile_sandbox) + file/ (guard, ignore, lock, walk, path)
 │
 ├── packages/                 # Package install / resolve / git-backend / marketplace
 │   ├── __init__.py           # Lazy public façade (PEP 562): packages.ensure(),
@@ -708,7 +711,7 @@ is worse than a missing one — it teaches the model something false.
    `tool_doc_mode == "full"`. Native providers already carry the inventory.
 3. **`## Function Documentation`** — only for tools resolved to `full`.
 4. **`## Tool guidance`** — `BaseTool.prompt_contribution()`, cache-stable order.
-5. **Plugin contributions** — `modules/plugin/manager.py`.
+5. **Plugin contributions** — `modules/plugin/manager/manager.py`.
 6. **`## Skills`** — byte-budgeted procedural-skill index.
 7. **`## Working with the group`** / **`## Growing the group`** — injected by
    `terrarium/runtime_prompt.py` only when the creature is actually in a graph /

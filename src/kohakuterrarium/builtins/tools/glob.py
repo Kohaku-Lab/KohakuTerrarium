@@ -12,7 +12,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
-from kohakuterrarium.utils.file_walk import iter_matching_files_stat
+from kohakuterrarium.utils.file.walk import iter_matching_files_stat
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

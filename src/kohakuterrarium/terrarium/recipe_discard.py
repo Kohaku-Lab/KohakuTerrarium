@@ -18,7 +18,7 @@ from kohakuterrarium.session.occupancy.mutation import (
 )
 from kohakuterrarium.terrarium import graph_checkpoint
 from kohakuterrarium.terrarium.channels import remove_channel_trigger
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

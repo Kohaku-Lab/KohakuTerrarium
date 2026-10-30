@@ -30,7 +30,7 @@ from kohakuterrarium.core.termination import TerminationChecker, TerminationConf
 from kohakuterrarium.core.tools.gate import is_subagent_visible, visible_catalog
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.subagent import SubAgentManager
 from kohakuterrarium.modules.user_command.aggregate import (
@@ -57,7 +57,7 @@ from kohakuterrarium.skills import (
     build_user_skill_turn,
     discover_skills,
 )
-from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

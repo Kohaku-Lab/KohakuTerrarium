@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.utils.file_guard`.
+"""Unit tests for :mod:`kohakuterrarium.utils.file.guard`.
 
 Every branch of the three guards plus the binary-detection helper
 must be exercised — these are security-relevant primitives used by
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.utils.file_guard import (
+from kohakuterrarium.utils.file.guard import (
     FileReadRecord,
     FileReadState,
     PathBoundaryGuard,
@@ -127,7 +127,7 @@ class TestCheckReadBeforeWrite:
         # call inside the guard's try-block raises — patching the real
         # ``os.stat`` would also break pathlib internals (Path.resolve
         # calls os.stat on Windows) and bubble before the try-block.
-        from kohakuterrarium.utils import file_guard as fg
+        from kohakuterrarium.utils.file import guard as fg
 
         f = tmp_path / "exists.txt"
         f.write_text("body")

@@ -4,8 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 from kohakuterrarium.builtins.kt_ui.inline_state import InlineUiStates, block_ids
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.widgets import WidgetRecord
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.widgets.service import WidgetRecord
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.studio.attach.widget_frames import (
     WIDGET_CLIENT_FRAMES,

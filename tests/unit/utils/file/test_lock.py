@@ -1,4 +1,4 @@
-"""Unit tests for ``utils/file_lock.py`` — cross-process advisory lock.
+"""Unit tests for ``utils/file/lock.py`` — cross-process advisory lock.
 
 Behavior-first: assert that a second acquire on the same path is refused
 while the first is held (even within this process — a different open file
@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 class TestAcquireRelease:

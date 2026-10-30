@@ -14,7 +14,7 @@ way the production runtime does:
   loop and feeds the produced ``TriggerEvent`` into ``_process_event``.
 * ``modules/subagent/manager.py`` spawns sub-agents; results route back
   into the parent controller's conversation.
-* ``modules/output/router.py`` runs the parse-event state machine.
+* ``modules/output/router/router.py`` runs the parse-event state machine.
 * ``bootstrap/agent_init.py`` wires slash commands; ``inject_input``
   with a ``/command`` string dispatches them against the live agent.
 
@@ -62,16 +62,16 @@ from kohakuterrarium.core.events import EventType, create_user_input_event
 from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
-from kohakuterrarium.modules.output.widgets import WidgetMessage
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.router.multi import MultiOutputRouter
+from kohakuterrarium.modules.output.widgets.service import WidgetMessage
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext as RuntimePluginContext,
     ToolVisibility,
 )
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
@@ -112,7 +112,7 @@ from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.studio.attach.widget_frames import handle_widget_msg
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
-from kohakuterrarium.utils.file_guard import PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import PathBoundaryGuard
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -1378,8 +1378,8 @@ class TestModulesIntegration:
         stays alive across multiple ``push_context`` calls, and produces
         output for each, then is stopped.
 
-        Mirrors: ``modules/subagent/interactive_mgr.py`` +
-        ``modules/subagent/interactive.py`` lifecycle.
+        Mirrors: ``modules/subagent/interactive/manager.py`` +
+        ``modules/subagent/interactive/interactive.py`` lifecycle.
         """
         agent = make_agent(script=["interactive reply"])
 
@@ -1514,7 +1514,7 @@ class TestModulesIntegration:
         the typed-event ``emit()`` bus fans activity + processing
         events.
 
-        Mirrors: ``modules/output/router_parsing.py.route``, the
+        Mirrors: ``modules/output/router/parsing.py.route``, the
         ``OutputState`` suppression machine, and ``OutputRouter.emit``
         that ``core/agent_*`` drives during a turn.
         """

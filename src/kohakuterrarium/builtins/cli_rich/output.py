@@ -13,7 +13,7 @@ from kohakuterrarium.builtins.kt_ui.terminal import TEXT_PROFILE, TerminalUiRend
 from kohakuterrarium.builtins.terminal_attention import set_attention
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.widgets_legacy import render_widget_as_legacy
+from kohakuterrarium.modules.output.widgets.legacy import render_widget_as_legacy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -9,7 +9,7 @@ import pytest
 from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.modules.plugin.docs import PluginDocNotFound, split_doc_name
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
 
 class _Docs(BasePlugin):

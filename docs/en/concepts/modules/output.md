@@ -62,7 +62,7 @@ Built-in outputs:
 `TTSModule` still exists as a base class for richer custom/package TTS
 backends, but there is no plain built-in `tts` registry key.
 
-`OutputRouter` (`modules/output/router.py`) also exposes an activity
+`OutputRouter` (`modules/output/router/router.py`) also exposes an activity
 stream used by the TUI and HTTP clients to show tool start/complete
 events without routing them through the text channel.
 

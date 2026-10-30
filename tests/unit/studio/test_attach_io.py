@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.widgets import WidgetRecord
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.widgets.service import WidgetRecord
 from kohakuterrarium.studio.attach import input_ops as input_ops_mod
 from kohakuterrarium.studio.attach import io as io_mod
 from kohakuterrarium.studio.attach import io_cluster as io_cluster_mod

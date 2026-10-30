@@ -6,7 +6,7 @@ from pathlib import Path
 
 from kohakuterrarium.session.readonly.metadata import read_strict_session_meta
 from kohakuterrarium.session.occupancy.gate import ResourceReleaseError
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 FORMAT_VERSION: int = 2
 

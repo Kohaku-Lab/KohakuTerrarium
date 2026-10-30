@@ -4,7 +4,7 @@ import asyncio
 
 from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.testing.output import OutputRecorder
 
 

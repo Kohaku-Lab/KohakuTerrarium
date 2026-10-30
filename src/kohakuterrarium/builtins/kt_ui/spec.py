@@ -30,7 +30,7 @@ from kohakuterrarium.builtins.kt_ui.shapes import (
     is_safe_src,
     state_name_problem,
 )
-from kohakuterrarium.modules.output.widgets import MESSAGE_NAME
+from kohakuterrarium.modules.output.widgets.service import MESSAGE_NAME
 
 SPEC_VERSION = 1
 MAX_SPEC_BYTES = 64 * 1024

@@ -79,7 +79,7 @@ Executor (`core/jobs/executor.py`) 把 `{job_id: asyncio.Task}` 存起來，並�
 
 執行完成後會推一個 `subagent_output` 事件回父控制器。如果子代理設了 `output_to: external`，它的輸出會直接串到指定的輸出模組，而不是回到父代理。
 
-互動式子代理 (`modules/subagent/interactive.py` + `interactive_mgr.py`) 會跨回合持續活著、吸收 context update，並可透過 `_feed_interactive()` 餵新的提示詞。它們會像頂層對話一樣存在 session store 裡。
+互動式子代理 (`modules/subagent/interactive/interactive.py` + `interactive/manager.py`) 會跨回合持續活著、吸收 context update，並可透過 `_feed_interactive()` 餵新的提示詞。它們會像頂層對話一樣存在 session store 裡。
 
 細節參考 [concepts/modules/sub-agent.md](../concepts/modules/sub-agent.md)。
 

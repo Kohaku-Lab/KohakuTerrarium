@@ -18,7 +18,7 @@ from kohakuterrarium.mcp_server.records import (
 )
 from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 class Endpoint(BaseModel):

@@ -1,12 +1,12 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.output.router_widgets`.
+"""Unit tests for :mod:`kohakuterrarium.modules.output.router.widgets`.
 
 The renderer union over attached outputs, listeners that fire only on a real
 change, and widget delivery with ``exclude`` and the fallback activity.
 """
 
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.router_widgets import output_renderers
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.router.widgets import output_renderers
 from kohakuterrarium.testing.output import OutputRecorder
 
 

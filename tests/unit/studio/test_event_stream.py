@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.studio.attach import _event_stream as es_mod
 from kohakuterrarium.studio.attach._event_stream import (
     StreamOutput,

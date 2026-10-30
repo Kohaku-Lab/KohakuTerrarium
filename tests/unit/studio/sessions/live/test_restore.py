@@ -10,7 +10,7 @@ from kohakuterrarium.studio.sessions.live.restore import (
 )
 from kohakuterrarium.studio.sessions.lifecycle import start_creature
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 async def _saved_creature_session(tmp_path, creature_dir, name="alpha"):

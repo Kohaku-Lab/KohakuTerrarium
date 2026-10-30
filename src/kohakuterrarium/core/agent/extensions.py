@@ -8,7 +8,7 @@ and prompt bookkeeping needed to make an extension immediately usable.
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.utils.logging import get_logger
 

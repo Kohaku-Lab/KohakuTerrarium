@@ -1,11 +1,11 @@
-"""Unit tests for :mod:`kohakuterrarium.utils.fs_path`."""
+"""Unit tests for :mod:`kohakuterrarium.utils.file.path`."""
 
 import os
 from pathlib import Path, PureWindowsPath
 
 import pytest
 
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 
 class TestCoerceFsPath:

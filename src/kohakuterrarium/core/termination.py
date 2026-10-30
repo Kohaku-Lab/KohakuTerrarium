@@ -8,7 +8,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.scratchpad import Scratchpad
-    from kohakuterrarium.modules.plugin.manager import PluginManager
+    from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
 logger = get_logger(__name__)
 

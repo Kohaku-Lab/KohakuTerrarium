@@ -11,7 +11,7 @@ from kohakuterrarium.mcp_server import records
 from kohakuterrarium.mcp_server.setup import SetupSession
 from kohakuterrarium.mcp_server.service import connection_url, status
 from kohakuterrarium.mcp_server.records import write_json
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 @pytest.fixture

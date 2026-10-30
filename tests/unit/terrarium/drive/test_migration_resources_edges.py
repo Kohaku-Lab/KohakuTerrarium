@@ -17,7 +17,7 @@ from kohakuterrarium.terrarium.drive.store_migration_resources import (
     MigrationSqlResources,
     append_cleanup,
 )
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 from tests.unit.terrarium.drive.store_migration_resource_fixtures import (
     _REAL_CONNECT,
     assert_idle,

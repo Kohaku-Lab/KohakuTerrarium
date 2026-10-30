@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 def workspace_identity(path: Path) -> str:

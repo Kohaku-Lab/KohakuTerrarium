@@ -11,7 +11,7 @@ import weakref
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 _lock = threading.Lock()
 _open: dict[str, list["weakref.ReferenceType[Any]"]] = {}

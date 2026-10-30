@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
 
 class ForkToolPolicy:

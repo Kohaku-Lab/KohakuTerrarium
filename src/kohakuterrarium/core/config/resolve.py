@@ -4,7 +4,7 @@ from typing import Any
 
 from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE, validate_doc_mode
-from kohakuterrarium.utils.file_guard import PWD_GUARD_MODES
+from kohakuterrarium.utils.file.guard import PWD_GUARD_MODES
 
 
 def resolve_tool_doc_mode(

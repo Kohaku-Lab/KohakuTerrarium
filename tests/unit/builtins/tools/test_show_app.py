@@ -7,8 +7,8 @@ import pytest
 
 from kohakuterrarium.builtins.tools.app_hosts import PRESETS
 from kohakuterrarium.builtins.tools.show_app import ShowAppTool
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.widgets import WidgetMessage
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.widgets.service import WidgetMessage
 from kohakuterrarium.modules.tool.base import ToolConfig, ToolContext
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.output import OutputRecorder

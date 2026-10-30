@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.output.router`.
+"""Unit tests for :mod:`kohakuterrarium.modules.output.router.router`.
 
 Behavior-first: OutputRouter fans typed events + parse events to the
 right targets, drives the suppression state machine, tracks completed
@@ -9,8 +9,8 @@ attached module.
 import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.router_state import (
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.router.state import (
     CompletedOutput,
     OutputState,
 )

@@ -19,7 +19,7 @@ from kohakuterrarium.modules.tool.base import (
     resolve_tool_path,
 )
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
-from kohakuterrarium.utils.file_guard import is_binary_file
+from kohakuterrarium.utils.file.guard import is_binary_file
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

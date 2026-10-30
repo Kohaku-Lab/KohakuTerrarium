@@ -6,11 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from kohakuterrarium.builtins.tools.show_card import ShowCardTool
-from kohakuterrarium.modules.output import widgets as widgets_mod
+from kohakuterrarium.modules.output.widgets import service as widgets_mod
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.widgets import WidgetMessage, WidgetRecord
-from kohakuterrarium.modules.output.widgets_legacy import (
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.widgets.service import WidgetMessage, WidgetRecord
+from kohakuterrarium.modules.output.widgets.legacy import (
     legacy_event_from_widget,
     legacy_fallback,
     render_widget_as_legacy,

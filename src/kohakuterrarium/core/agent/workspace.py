@@ -34,7 +34,7 @@ Constraints:
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import default_workdir
 

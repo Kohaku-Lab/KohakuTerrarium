@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.llm.message import ImagePart, TextPart
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,

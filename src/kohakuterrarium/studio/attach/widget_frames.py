@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from kohakuterrarium.modules.output.widgets import WidgetMessage
+from kohakuterrarium.modules.output.widgets.service import WidgetMessage
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

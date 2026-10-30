@@ -12,7 +12,7 @@ import pytest
 from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import write_json
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 def test_home_override_precedes_framework_logging(tmp_path):

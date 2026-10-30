@@ -5,7 +5,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginBlockError,
     PluginContext,
 )
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.plugin.option_validation import (
     PluginOptionError,
     validate_plugin_options,

@@ -23,7 +23,7 @@ from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

@@ -16,7 +16,7 @@ from kohakuterrarium.session.store.lifecycle.table_policy import (
     resolve_table_policy,
 )
 from kohakuterrarium.session.store.lifecycle.version import require_writable_format
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

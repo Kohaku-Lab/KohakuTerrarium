@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.subagent.interactive`.
+"""Unit tests for :mod:`kohakuterrarium.modules.subagent.interactive.interactive`.
 
 Behavior-first: InteractiveSubAgent stays alive, processes queued
 context updates by generating a response, streams output through the
@@ -13,7 +13,7 @@ from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
     SubAgentConfig,
 )
-from kohakuterrarium.modules.subagent.interactive import (
+from kohakuterrarium.modules.subagent.interactive.interactive import (
     InteractiveOutput,
     InteractiveSubAgent,
 )

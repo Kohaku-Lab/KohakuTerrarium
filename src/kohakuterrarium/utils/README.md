@@ -13,8 +13,9 @@ for timeouts, retries, concurrency limiting, and thread offloading.
 | `logging.py`     | `get_logger`, `set_level`, `disable_colors`: colored structured logging with ANSI codes                                           |
 | `kt_logger.py`   | `KTLogger`: `Logger` subclass whose level methods take structured fields as keyword arguments                                     |
 | `async_utils.py` | `run_with_timeout`, `gather_with_concurrency`, `retry_async`, `collect_async_iterator`, `first_result`, `AsyncQueue`, `to_thread` |
-| `file_ignore.py` | Per-search directory-scoped `.gitignore` rules, ancestor inheritance and excluded-parent caching |
-| `file_walk.py` | Bounded file/directory iteration and glob filtering for built-in search tools |
+| `file/ignore.py` | Per-search directory-scoped `.gitignore` rules, ancestor inheritance and excluded-parent caching |
+| `file/walk.py` | Bounded file/directory iteration and glob filtering for built-in search tools |
+| `file/guard.py`, `file/lock.py`, `file/path.py` | Read-before-write guard, file locks, filesystem path coercion |
 
 ## Dependencies
 

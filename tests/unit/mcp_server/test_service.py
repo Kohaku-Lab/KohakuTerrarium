@@ -12,7 +12,7 @@ from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.mcp_server.service import connection_url, start, status, stop
 from kohakuterrarium.mcp_server.setup import SetupSession
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 def test_existing_instance_and_stale_records(tmp_path):

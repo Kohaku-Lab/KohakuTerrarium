@@ -109,7 +109,7 @@ class TestWriteToolCanvasPreview:
 
 class TestEditToolCanvasPreview:
     async def test_search_replace_attaches_canvas_preview(self, tmp_path):
-        from kohakuterrarium.utils.file_guard import FileReadState
+        from kohakuterrarium.utils.file.guard import FileReadState
 
         path = tmp_path / "edit_target.py"
         path.write_text("def a():\n    return 1\n")

@@ -22,7 +22,7 @@ from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,

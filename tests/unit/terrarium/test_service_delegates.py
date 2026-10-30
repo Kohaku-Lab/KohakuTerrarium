@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.terrarium import service as svc_mod
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 

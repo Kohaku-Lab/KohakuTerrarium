@@ -32,7 +32,7 @@ from kohakuterrarium.parsing.events import (
 )
 from kohakuterrarium.testing.agent import TestAgentBuilder
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
-from kohakuterrarium.utils.file_guard import PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import PathBoundaryGuard
 
 # ── _merge_text_and_parts ────────────────────────────────────────
 
@@ -808,7 +808,7 @@ class TestResolveFilePart:
         from pathlib import Path
 
         from kohakuterrarium.builtins.tools.write import WriteTool
-        from kohakuterrarium.utils.file_guard import FileReadState
+        from kohakuterrarium.utils.file.guard import FileReadState
 
         env = TestAgentBuilder().with_llm_script(["x"]).build()
         env.executor._file_read_state = FileReadState()

@@ -9,7 +9,7 @@ from kohakuterrarium.mcp_server.records import (
     workspace_identity,
     write_json,
 )
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 def migrate(store, workspace: Path, name: str, legacy_state_dir: Path | None = None):

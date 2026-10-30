@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.subagent.interactive_mgr`.
+"""Unit tests for :mod:`kohakuterrarium.modules.subagent.interactive.manager`.
 
 Behavior-first: the InteractiveManagerMixin (exercised through the real
 SubAgentManager) starts/stops interactive sub-agents, rejects
@@ -12,10 +12,10 @@ from kohakuterrarium.builtins.tools.write import WriteTool
 from kohakuterrarium.core.tools.execution_context import ExecutionBinding
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.parsing import ToolCallEvent
-from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
     SubAgentConfig,

@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.output.widgets`.
+"""Unit tests for :mod:`kohakuterrarium.modules.output.widgets.service`.
 
 Widgets open on a real router, messages route waiter → agent trigger →
 drop, limits hold, and the registry rebuilds from recorded events.
@@ -9,9 +9,9 @@ import asyncio
 import pytest
 
 from kohakuterrarium.errors import KTError, RendererUnavailable
-from kohakuterrarium.modules.output import widgets as widgets_mod
-from kohakuterrarium.modules.output.router import OutputRouter
-from kohakuterrarium.modules.output.widgets import (
+from kohakuterrarium.modules.output.widgets import service as widgets_mod
+from kohakuterrarium.modules.output.router.router import OutputRouter
+from kohakuterrarium.modules.output.widgets.service import (
     MAX_MESSAGE_BYTES,
     MAX_STATE_BYTES,
     MESSAGE_BURST,

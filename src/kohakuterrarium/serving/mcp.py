@@ -23,7 +23,7 @@ from kohakuterrarium.mcp_server.management import (
     serve_management,
     stop_requested,
 )
-from kohakuterrarium.utils.file_lock import FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLockBusy
 
 logger = logging.getLogger(__name__)
 

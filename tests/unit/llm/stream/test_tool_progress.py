@@ -18,7 +18,7 @@ from kohakuterrarium.llm.stream.tool_progress import (
     ToolCallProgress,
     observe_tool_call_progress,
 )
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.attach._event_stream import StreamOutput

@@ -20,7 +20,7 @@ from kohakuterrarium.terrarium.drive.store_migration import (
     _legacy_same_file_drives,
     _migrate_same_file_drives,
 )
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 from tests.unit.terrarium.drive.store_migration_resource_fixtures import (
     CommitThenCloseFails,
     FailingCloseConnection,

@@ -10,14 +10,14 @@ from kohakuterrarium.core.conversation.context_snapshot import capture_context
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.testing.llm import ScriptedLLM
-from kohakuterrarium.utils.file_guard import FileReadState
+from kohakuterrarium.utils.file.guard import FileReadState
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
 )
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.fork_policy import ForkToolPolicy
 from kohakuterrarium.modules.subagent.manager import SubAgentManager

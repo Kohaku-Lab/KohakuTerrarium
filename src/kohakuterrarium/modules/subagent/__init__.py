@@ -7,7 +7,7 @@ from kohakuterrarium.modules.subagent.config import (
     SubAgentConfig,
     SubAgentInfo,
 )
-from kohakuterrarium.modules.subagent.interactive import (
+from kohakuterrarium.modules.subagent.interactive.interactive import (
     ContextUpdate,
     InteractiveOutput,
     InteractiveSubAgent,

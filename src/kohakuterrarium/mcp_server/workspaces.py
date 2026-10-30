@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig, MCPToolsConfig
 from kohakuterrarium.mcp_server.records import workspace_identity, write_json
 from kohakuterrarium.mcp_server.runtime import ToolRuntime
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 class WorkspaceRegistration(BaseModel):

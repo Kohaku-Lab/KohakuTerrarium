@@ -18,7 +18,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
-from kohakuterrarium.utils.file_guard import check_read_before_write, is_binary_file
+from kohakuterrarium.utils.file.guard import check_read_before_write, is_binary_file
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -23,7 +23,7 @@ from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

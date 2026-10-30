@@ -3,7 +3,7 @@
 Pins bug B-iw-1 at the unit tier: the studio per-creature plugin
 toggle silently fabricates ``{"enabled": True}`` for a plugin name the
 creature does not have. Driven with a real
-:class:`kohakuterrarium.modules.plugin.manager.PluginManager` holding a
+:class:`kohakuterrarium.modules.plugin.manager.manager.PluginManager` holding a
 real :class:`BasePlugin` — NOT a hand-rolled fake whose ``enable`` /
 ``disable`` ignore the documented bool return (the same masking
 anti-pattern that hid B-e2e-2).
@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.studio.sessions import creature_plugins as plug_mod
 
 

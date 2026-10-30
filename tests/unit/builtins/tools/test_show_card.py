@@ -12,7 +12,7 @@ from pathlib import Path
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.builtins.tools.show_card import ShowCardTool
 from kohakuterrarium.modules.output.event import UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.testing.output import OutputRecorder
 

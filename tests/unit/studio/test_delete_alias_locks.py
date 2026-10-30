@@ -8,7 +8,7 @@ import pytest
 from kohakuterrarium.errors import SessionLockedError
 from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.studio.persistence import store as persistence
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 @pytest.mark.parametrize("suffix", [".lock", ".drives.migrate-lock"])

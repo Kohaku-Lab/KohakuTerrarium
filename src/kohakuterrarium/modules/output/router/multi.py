@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -1,11 +1,11 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.output.router_multi`.
+"""Unit tests for :mod:`kohakuterrarium.modules.output.router.multi`.
 
 Behavior-first: MultiOutputRouter owns an extra named-output map,
 write_to targets a specific module, and lifecycle cascades to every
 owned module on top of the base router's cascade.
 """
 
-from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
+from kohakuterrarium.modules.output.router.multi import MultiOutputRouter
 from kohakuterrarium.testing.output import OutputRecorder
 
 

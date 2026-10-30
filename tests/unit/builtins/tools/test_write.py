@@ -10,7 +10,7 @@ import pytest
 from kohakuterrarium.builtins.tools import write as write_module
 from kohakuterrarium.builtins.tools.write import WriteTool
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.utils.file_guard import FileReadState
+from kohakuterrarium.utils.file.guard import FileReadState
 
 
 def _context(tmp_path: Path, existing: Path | None = None) -> ToolContext:

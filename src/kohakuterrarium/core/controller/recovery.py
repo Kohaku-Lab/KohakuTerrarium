@@ -8,7 +8,7 @@ from kohakuterrarium.llm.media.reference import session_media_scope
 from kohakuterrarium.llm.recovery.status import observe_model_recovery
 from kohakuterrarium.llm.stream.tool_progress import observe_tool_call_progress
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 
 
 async def chat_with_recovery(

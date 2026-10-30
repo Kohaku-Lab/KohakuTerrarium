@@ -19,7 +19,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,
 )
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

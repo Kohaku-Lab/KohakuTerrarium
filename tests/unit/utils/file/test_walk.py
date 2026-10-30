@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.utils.file_walk`, the traversal
+"""Unit tests for :mod:`kohakuterrarium.utils.file.walk`, the traversal
 behind the tree / grep / glob tools.  Every branch exercised on real fixtures."""
 
 import fnmatch
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.utils import file_walk
-from kohakuterrarium.utils.file_walk import (
+from kohakuterrarium.utils.file import walk as file_walk
+from kohakuterrarium.utils.file.walk import (
     ALWAYS_SKIP_NAMES,
     _glob_match,
     _glob_to_regex,

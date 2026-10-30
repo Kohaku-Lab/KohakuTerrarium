@@ -393,7 +393,7 @@ class TestDeleteSessionFiles:
 
     def test_busy_migration_prevents_any_session_deletion(self, tmp_path, monkeypatch):
         from kohakuterrarium.terrarium.drive import store_migration as migration
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         path = _make_session(tmp_path)
         sidecar = Path(str(path) + ".drives")

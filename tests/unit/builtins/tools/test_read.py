@@ -13,7 +13,7 @@ from kohakuterrarium.builtins.tools.read import (
     encode_page,
 )
 from kohakuterrarium.modules.tool.base import ToolConfig, ToolContext
-from kohakuterrarium.utils.file_guard import PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import PathBoundaryGuard
 
 
 def _ctx(tmp_path):

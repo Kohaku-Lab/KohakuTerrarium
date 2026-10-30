@@ -5,7 +5,7 @@ Widget events land as typed session rows, and those rows rebuild a
 """
 
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.widgets import WidgetRegistry
+from kohakuterrarium.modules.output.widgets.service import WidgetRegistry
 from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
 

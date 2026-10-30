@@ -21,7 +21,7 @@ from kohakuterrarium.utils.drive_migration_lock import (
     _MIGRATE_LOCK_TIMEOUT_S,
     _MIGRATE_POLL_S,
 )
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

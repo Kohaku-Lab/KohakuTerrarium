@@ -14,8 +14,8 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
-from kohakuterrarium.utils.file_guard import is_binary_file
-from kohakuterrarium.utils.file_walk import iter_matching_files
+from kohakuterrarium.utils.file.guard import is_binary_file
+from kohakuterrarium.utils.file.walk import iter_matching_files
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

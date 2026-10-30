@@ -1444,7 +1444,7 @@ class TestLaboratoryModulesViaAgent:
     async def test_output_router_state_machine(self, tmp_path):
         """OutputRouter routes parse events to the right output module.
         Mirrors test_modules.py::test_output_router_state_machine."""
-        from kohakuterrarium.modules.output.router import OutputRouter
+        from kohakuterrarium.modules.output.router.router import OutputRouter
         from kohakuterrarium.testing.output import OutputRecorder
 
         from kohakuterrarium.modules.output.event import OutputEvent

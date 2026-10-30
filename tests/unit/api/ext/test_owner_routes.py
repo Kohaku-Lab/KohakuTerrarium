@@ -15,7 +15,7 @@ from kohakuterrarium.api.ext.owner_routes import (
     OwnerSocketSession,
 )
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.ui_owner import OwnerArgumentError
 from kohakuterrarium.studio.identity import ui_extensions
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium

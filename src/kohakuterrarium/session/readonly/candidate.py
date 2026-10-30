@@ -11,7 +11,7 @@ from kohakuterrarium.session.readonly.metadata import (
     validate_metadata_keys,
 )
 from kohakuterrarium.session.occupancy.gate import try_fast
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 
 class MetadataReadError(Exception):

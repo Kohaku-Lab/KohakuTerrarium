@@ -28,5 +28,5 @@ and `EventRecorder` capture all output and events for test assertions.
 - `kohakuterrarium.llm.base` (LLMProvider, ChatResponse)
 - `kohakuterrarium.llm.message` (Message)
 - `kohakuterrarium.modules.output.base` (BaseOutputModule)
-- `kohakuterrarium.modules.output.router` (OutputRouter)
+- `kohakuterrarium.modules.output.router.router` (OutputRouter)
 - `kohakuterrarium.parsing` (ToolCallEvent, CommandResultEvent)

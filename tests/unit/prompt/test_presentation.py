@@ -8,7 +8,7 @@ present and absent).
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
 from kohakuterrarium.prompt.presentation import (
     CLOSING,

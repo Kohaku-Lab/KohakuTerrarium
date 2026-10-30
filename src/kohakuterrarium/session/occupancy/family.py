@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from kohakuterrarium.session.occupancy.gate import ResourceLease, acquire_legacy
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 _OWNER = re.compile(
     r"(?P<owner>.+\.kohakutr(?:\.v[0-9]+)?)"

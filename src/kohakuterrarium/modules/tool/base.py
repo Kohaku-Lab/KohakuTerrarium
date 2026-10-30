@@ -12,7 +12,7 @@ from kohakuterrarium.modules.ui_owner import UIOwnerMixin
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.modules.tool.request_replay import RequestReplay
 from kohakuterrarium.modules.tool.runtime_options import validate_tool_options
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

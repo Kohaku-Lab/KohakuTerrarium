@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.utils.file_ignore import GitIgnoreFilter
+from kohakuterrarium.utils.file.ignore import GitIgnoreFilter
 
 
 def test_nested_rules_override_only_inside_their_directory(tmp_path):
@@ -436,7 +436,7 @@ def test_walk_terminates_when_pattern_prefix_escapes_the_boundary(tmp_path):
     # walk directories outside the gitignore boundary (proj, which
     # holds .git). The walk must terminate; the out-of-base paths
     # leaking into the result matches baseline (pre-existing) behavior.
-    from kohakuterrarium.utils.file_walk import iter_matching_files
+    from kohakuterrarium.utils.file.walk import iter_matching_files
 
     (tmp_path / ".git").mkdir()
     proj = tmp_path / "proj"
@@ -454,7 +454,7 @@ def test_entry_prefix_normalizes_separators_only_on_windows(monkeypatch):
     # A "\" is a legal filename character on POSIX: prefix building must
     # leave it alone there (mirroring relative_to().as_posix()) while
     # Windows separators are normalized to "/".
-    from kohakuterrarium.utils.file_ignore import _entry_prefix
+    from kohakuterrarium.utils.file.ignore import _entry_prefix
 
     monkeypatch.setattr(os, "name", "posix")
     assert _entry_prefix("/r/sub", "/r") == "sub/"

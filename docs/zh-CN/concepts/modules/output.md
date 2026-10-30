@@ -57,7 +57,7 @@ sink 可以不只一个。Creature可以同时输出到 stdout、串流到 TTS�
 
 `TTSModule` 仍然存在，可作为更完整 custom/package TTS 后端的基底；但没有纯内建的 `tts` registry key。
 
-`OutputRouter`（`modules/output/router.py`）也提供一条 activity stream，
+`OutputRouter`（`modules/output/router/router.py`）也提供一条 activity stream，
 供 TUI 与 HTTP client 显示工具开始 / 完成事件，而不必把它们混进文字通道。
 
 ## 因此你可以做什么

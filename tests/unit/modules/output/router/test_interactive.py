@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.output.router_interactive`.
+"""Unit tests for :mod:`kohakuterrarium.modules.output.router.interactive`.
 
 Behavior-first: the Phase B interactive bus — emit_and_wait registers a
 Future, submit_reply resolves it, timeout yields a __timeout__ reply,
@@ -15,7 +15,7 @@ from kohakuterrarium.modules.output.event import (
     OutputEvent,
     UIReply,
 )
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.testing.output import OutputRecorder
 
 

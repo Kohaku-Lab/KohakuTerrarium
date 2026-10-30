@@ -27,7 +27,7 @@ from kohakuterrarium.session.store.lifecycle.lock import (
 from kohakuterrarium.studio.persistence import store as store_mod
 from kohakuterrarium.studio.persistence.delete_family import detach_file_family
 from kohakuterrarium.terrarium.drive import store_migration as migration
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 def _plain_session(tmp_path, name: str = "alice") -> Path:

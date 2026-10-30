@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 
 from kohakuterrarium.terrarium.drive.errors import DriveConflictError, DriveError
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 class DriveSidecarMissingError(DriveError):

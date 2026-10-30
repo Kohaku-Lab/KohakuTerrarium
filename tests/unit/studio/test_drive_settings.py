@@ -44,7 +44,7 @@ from pathlib import Path
 from kohakuterrarium.studio.identity import drive_settings as ds
 from kohakuterrarium.studio.identity import drive_settings_io as ds_io
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 held = Path(os.environ["KT_LOCKHOLD_HELD"])
 go = Path(os.environ["KT_LOCKHOLD_GO"])
@@ -348,7 +348,7 @@ class TestOptimisticConcurrency:
         # R1-28: a wedged holder that never releases must not hang the writer
         # forever — the bounded blocking acquire gives up and raises a conflict.
         from kohakuterrarium.studio.identity import drive_settings_io as ds_io
-        from kohakuterrarium.utils.file_lock import FileLock
+        from kohakuterrarium.utils.file.lock import FileLock
 
         ds.save_settings(_enabled_settings())  # ensure the file + dir exist
         held = FileLock(str(ds_io._save_lock_path(ds.drive_settings_path())))

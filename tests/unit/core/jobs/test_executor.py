@@ -13,7 +13,7 @@ from kohakuterrarium.core.tools.execution_context import ExecutionBinding
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.jobs.job import JobState, JobStore
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,

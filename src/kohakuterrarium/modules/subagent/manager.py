@@ -23,11 +23,11 @@ from kohakuterrarium.modules.subagent.runtime_builders import (
     load_and_wrap_plugins,
     resolve_llm,
 )
-from kohakuterrarium.modules.subagent.interactive import (
+from kohakuterrarium.modules.subagent.interactive.interactive import (
     InteractiveOutput,
     InteractiveSubAgent,
 )
-from kohakuterrarium.modules.subagent.interactive_mgr import InteractiveManagerMixin
+from kohakuterrarium.modules.subagent.interactive.manager import InteractiveManagerMixin
 from kohakuterrarium.modules.subagent.model_resolve import release_forked_llm
 from kohakuterrarium.parsing.events import SubAgentCallEvent
 from kohakuterrarium.utils.logging import get_logger

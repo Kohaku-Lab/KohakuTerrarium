@@ -8,7 +8,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 # Editor language IDs are derived from lowercase filename extensions.
 _EXT_LANG: dict[str, str] = {

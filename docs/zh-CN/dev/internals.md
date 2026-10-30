@@ -79,7 +79,7 @@ Sub-agent 由 `modules/subagent/manager.py:spawn` 启动。Sub-agent 不能再�
 
 执行完成后，它会将一个 `subagent_output` event 推回父 controller。如果该 sub-agent 配置了 `output_to: external`，输出就会直接流向某个具名 output module，而不再返回父级。
 
-交互式 sub-agent（`modules/subagent/interactive.py` + `interactive_mgr.py`）会跨多轮持续存在，能够接收 `context_update`，也能通过 `_feed_interactive()` 接收新的 prompt。它们和顶层对话一样，也会持久化到 session store。
+交互式 sub-agent（`modules/subagent/interactive/interactive.py` + `interactive/manager.py`）会跨多轮持续存在，能够接收 `context_update`，也能通过 `_feed_interactive()` 接收新的 prompt。它们和顶层对话一样，也会持久化到 session store。
 
 相关文档见 [concepts/modules/sub-agent.md](../concepts/modules/sub-agent.md)。
 

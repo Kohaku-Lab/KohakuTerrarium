@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 logger = logging.getLogger(__name__)
 

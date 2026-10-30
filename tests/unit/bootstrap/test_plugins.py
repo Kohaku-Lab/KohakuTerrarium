@@ -14,7 +14,7 @@ from kohakuterrarium.bootstrap.plugins import (
     init_plugins,
 )
 from kohakuterrarium.core.loader import ModuleLoader
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
 
 @pytest.fixture(autouse=True)

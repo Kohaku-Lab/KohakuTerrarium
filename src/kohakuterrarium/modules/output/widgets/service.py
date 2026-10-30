@@ -20,7 +20,7 @@ from typing import Any, Literal
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.modules.output.event import OutputEvent, Surface
-from kohakuterrarium.modules.output.widgets_legacy import (
+from kohakuterrarium.modules.output.widgets.legacy import (
     LEGACY_KINDS,
     LegacyWidgetsMixin,
 )

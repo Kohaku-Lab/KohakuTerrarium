@@ -19,7 +19,7 @@ from kohakuterrarium.modules.plugin.dispatch import (
     has_override as _has_override,
 )
 from kohakuterrarium.modules.plugin.docs import PluginDocsMixin
-from kohakuterrarium.modules.plugin.manager_commands import (
+from kohakuterrarium.modules.plugin.manager.commands import (
     PluginCommandRefreshMixin,
 )
 from kohakuterrarium.modules.plugin.tool_visibility import (

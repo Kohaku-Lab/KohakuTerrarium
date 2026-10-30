@@ -31,7 +31,7 @@ from kohakuterrarium.prompt.framework_hints import (
 )
 from kohakuterrarium.modules.plugin.base import PluginContext as RuntimePluginContext
 from kohakuterrarium.modules.plugin.base import ToolVisibility
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.doc_mode import (
     DOC_MODE_FULL,
     DEFAULT_DOC_MODE,

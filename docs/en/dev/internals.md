@@ -150,8 +150,8 @@ controller. If the sub-agent is configured with `output_to: external`,
 its output streams directly to a named output module instead of the
 parent.
 
-Interactive sub-agents (`modules/subagent/interactive.py` +
-`interactive_mgr.py`) stay alive across turns, absorb context updates,
+Interactive sub-agents (`modules/subagent/interactive/interactive.py` +
+`interactive/manager.py`) stay alive across turns, absorb context updates,
 and can be fed new prompts via `_feed_interactive()`. They persist in
 the session store like top-level conversations.
 

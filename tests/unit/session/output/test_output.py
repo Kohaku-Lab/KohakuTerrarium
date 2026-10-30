@@ -8,7 +8,7 @@ import time
 import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.session.output.output import (
     SessionOutput,
     _parse_detail,

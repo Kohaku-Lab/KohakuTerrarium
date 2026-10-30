@@ -231,7 +231,9 @@ class TestInteractiveModelResolution:
     async def test_start_interactive_resolves_child_model(self, monkeypatch):
         # An interactive child must run on its resolved ``config.model``
         # provider, not the parent's LLM.
-        from kohakuterrarium.modules.subagent import interactive_mgr
+        from kohakuterrarium.modules.subagent.interactive import (
+            manager as interactive_mgr,
+        )
 
         child_llm = ScriptedLLM(["child"])
         seen: dict[str, str] = {}
@@ -360,7 +362,7 @@ class TestRunSubagentOutcomes:
         # The parent's post_subagent_run hook may return a new
         # SubAgentResult — the manager must adopt it.
         from kohakuterrarium.modules.plugin.base import BasePlugin
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
         from kohakuterrarium.modules.subagent.result import SubAgentResult
 
         class _RewritePlugin(BasePlugin):

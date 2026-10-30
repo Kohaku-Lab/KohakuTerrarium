@@ -17,7 +17,7 @@ Notes on the source of each signal:
   :meth:`Agent.interrupt` at ``core/agent.py:566``).
 - ``waiting`` — ``creature.agent.output_router._pending_replies``
   is non-empty (the interactive-bus pending-reply map from
-  ``modules/output/router.py:98``). Covers ``ask_user`` tools and
+  ``modules/output/router/router.py:98``). Covers ``ask_user`` tools and
   the ``permgate`` plugin's held-tool prompts.
 - ``failed`` — ``creature._last_turn_failed`` flag (default False
   on legacy creatures; set by future error-capture hook).

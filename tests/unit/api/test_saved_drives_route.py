@@ -26,7 +26,7 @@ from kohakuterrarium.terrarium.drive.store import (
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 pytestmark = pytest.mark.timeout(30)
 

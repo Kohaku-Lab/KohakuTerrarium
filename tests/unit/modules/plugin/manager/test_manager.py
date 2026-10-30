@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.modules.plugin.manager`.
+"""Unit tests for :mod:`kohakuterrarium.modules.plugin.manager.manager`.
 
 Behavior-first: the manager wraps methods with pre/post hooks that
 chain linearly by priority, PluginBlockError propagates, disabled
@@ -17,7 +17,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginContext,
     ToolVisibility,
 )
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
 # ── Test plugins ───────────────────────────────────────────────────
 

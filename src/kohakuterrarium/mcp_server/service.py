@@ -8,7 +8,7 @@ import time
 
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 def is_running(store: EndpointStore) -> bool:

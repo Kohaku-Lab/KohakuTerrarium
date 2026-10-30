@@ -3,7 +3,7 @@
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext
 from kohakuterrarium.modules.tool.doc_mode import (
     DEFAULT_DOC_MODE,

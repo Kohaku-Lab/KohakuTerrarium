@@ -23,7 +23,7 @@ from kohakuterrarium.api.auth.engine_pool import EnginePool, _user_session_dir
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.fs_path import env_fs_path_text
+from kohakuterrarium.utils.file.path import env_fs_path_text
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

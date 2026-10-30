@@ -3,7 +3,7 @@
 from typing import Any, Callable
 
 from kohakuterrarium.modules.subagent.base import SubAgent
-from kohakuterrarium.modules.subagent.interactive import (
+from kohakuterrarium.modules.subagent.interactive.interactive import (
     InteractiveOutput,
     InteractiveSubAgent,
 )

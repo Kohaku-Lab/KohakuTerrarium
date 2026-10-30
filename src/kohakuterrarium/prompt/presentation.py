@@ -6,7 +6,7 @@ one part does, and sits right after the base prompt.
 """
 
 from kohakuterrarium.modules.plugin.base import PluginContext
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
 HEADING = "## Presenting your answer"
 OPENING = (

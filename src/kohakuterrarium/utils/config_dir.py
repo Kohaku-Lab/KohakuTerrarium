@@ -17,7 +17,7 @@ paths under it.
 import os
 from pathlib import Path
 
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 
 _DEFAULT = "~/.kohakuterrarium"
 

@@ -10,7 +10,7 @@ from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session, set_session
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.parsing import CommandResultEvent, ToolCallEvent
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder

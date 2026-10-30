@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 class AntigravityError(ValueError):

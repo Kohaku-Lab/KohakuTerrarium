@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.core.agent.workspace import WorkspaceController
-from kohakuterrarium.utils.file_guard import FileReadState, PathBoundaryGuard
+from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 
 
 def _fake_agent(tmp_path, mode="warn"):

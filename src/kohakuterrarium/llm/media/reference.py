@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlparse
 
 from kohakuterrarium.errors import MediaReferenceError
 from kohakuterrarium.session.store.records.artifacts import resolve_artifact_file
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

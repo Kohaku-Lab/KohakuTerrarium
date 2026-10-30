@@ -11,7 +11,7 @@ from kohakuterrarium.builtins.tui.session import TUISession
 from kohakuterrarium.builtins.tui.widgets import ChatInput, UserMessage
 from kohakuterrarium.builtins.tui.widgets.blocks import ToolBlock
 from kohakuterrarium.modules.output.event import OutputEvent
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 
 
 async def test_processing_tracks_active_tab_during_overlapping_turns():

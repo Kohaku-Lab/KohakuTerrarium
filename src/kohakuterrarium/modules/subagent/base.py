@@ -27,7 +27,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginBlockError,
     PluginContext,
 )
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.result import (  # noqa: F401
     SUBAGENT_FRAMEWORK_HINTS,

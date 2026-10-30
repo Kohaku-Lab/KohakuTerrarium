@@ -10,7 +10,7 @@ import asyncio
 
 from kohakuterrarium.builtins.kt_ui.terminal import TerminalUiRenderer
 from kohakuterrarium.modules.output.event import UIReply
-from kohakuterrarium.modules.output.router import OutputRouter
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.testing.output import OutputRecorder
 
 SPEC = {

@@ -16,7 +16,7 @@ from kohakuterrarium.laboratory.adapters.terrarium_runtime import (
     TerrariumRuntimeAdapter,
 )
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 

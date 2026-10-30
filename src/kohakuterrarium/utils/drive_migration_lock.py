@@ -4,7 +4,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 _MIGRATE_LOCK_TIMEOUT_S = 30.0
 _MIGRATE_POLL_S = 0.02

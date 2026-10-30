@@ -18,7 +18,7 @@ from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.fs_path import env_fs_path_text
+from kohakuterrarium.utils.file.path import env_fs_path_text
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

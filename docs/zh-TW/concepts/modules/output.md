@@ -57,7 +57,7 @@ sink 可以不只一個。生物可以同時輸出到 stdout、串流到 TTS、�
 
 `TTSModule` 仍然存在，可作為更完整 custom/package TTS 後端的基底；但沒有純內建的 `tts` registry key。
 
-`OutputRouter`（`modules/output/router.py`）也提供一條 activity stream，
+`OutputRouter`（`modules/output/router/router.py`）也提供一條 activity stream，
 供 TUI 與 HTTP client 顯示工具開始 / 完成事件，而不必把它們混進文字通道。
 
 ## 因此你可以做什麼

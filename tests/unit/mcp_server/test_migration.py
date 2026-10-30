@@ -8,7 +8,7 @@ import pytest
 
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.migration import migrate
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 def test_stopped_legacy_migration_preserves_source_and_rekeys(tmp_path):

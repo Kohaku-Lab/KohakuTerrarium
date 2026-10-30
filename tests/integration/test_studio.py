@@ -65,7 +65,7 @@ from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.llm_seam import real_llm_providers
-from kohakuterrarium.utils.file_lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock
 from kohakuterrarium.session import job_reaper, run_state
 from kohakuterrarium.studio.sessions.live import live_sessions
 from kohakuterrarium.studio.sessions.live.restore import restore_live_sessions

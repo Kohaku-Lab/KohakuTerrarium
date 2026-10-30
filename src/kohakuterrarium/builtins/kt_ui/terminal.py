@@ -27,7 +27,7 @@ from kohakuterrarium.builtins.kt_ui.spec import (
     validate_spec,
 )
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.modules.output.widgets import WidgetMessage
+from kohakuterrarium.modules.output.widgets.service import WidgetMessage
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -36,7 +36,7 @@ from kohakuterrarium.studio.persistence.viewer.paths import (
 from kohakuterrarium.studio.sessions import live as _live
 from kohakuterrarium.utils import drive_migration_lock
 from kohakuterrarium.utils.config_dir import config_dir
-from kohakuterrarium.utils.fs_path import coerce_fs_path
+from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

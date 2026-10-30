@@ -1018,7 +1018,7 @@ class TestPluginHooks:
         patched_llm.set_script(["original"])
         agent = make_agent()
         # Inject plugin manager manually.
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         mgr = PluginManager()
         mgr.register(_AppendPlugin())
@@ -2439,7 +2439,7 @@ class _VetoPlugin:
 
 class TestPluginVeto:
     async def test_tool_call_vetoed_by_plugin(self, make_agent):
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         agent = make_agent(
             script=[
@@ -2858,7 +2858,7 @@ class TestEmitStartupSessionInfo:
 class TestInitPluginsWithPreSet:
     async def test_pre_set_plugins_early_return_no_crash(self, make_agent):
         from kohakuterrarium.modules.plugin.base import BasePlugin
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         class _NoOpPlugin(BasePlugin):
             name = "noop"
@@ -3087,7 +3087,7 @@ class TestInitPluginsFreshFromConfig:
         """When ``init_plugins`` returns a falsy manager (empty), the
         early-return at line 427 fires."""
         from kohakuterrarium.core.agent import startup as agent_mod
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         # Force init_plugins to always return an empty manager.
         monkeypatch.setattr(agent_mod, "init_plugins", lambda *a, **kw: PluginManager())
@@ -3760,7 +3760,7 @@ class TestDispatchSubAgentEventDirect:
             BasePlugin,
             PluginBlockError,
         )
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
         from kohakuterrarium.parsing import SubAgentCallEvent
 
         class _VetoSA(BasePlugin):
@@ -3872,7 +3872,7 @@ class TestCollectAndPushFeedbackNative:
 
 class TestLoadPlugins:
     async def test_load_plugins_calls_lifecycle(self, make_agent):
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         agent = make_agent()
         captured = []
@@ -3976,7 +3976,7 @@ class TestOnEmergencyDropWiring:
 
 class TestInterruptWithPlugins:
     async def test_interrupt_notifies_plugins(self, make_agent):
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         agent = make_agent()
         mgr = PluginManager()
@@ -4065,7 +4065,7 @@ class TestRunSingleTurnDispatchKinds:
 
 class TestCheckTerminationPluginRegistered:
     async def test_termination_with_plugin_attached(self, make_agent):
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         agent = make_agent(termination={"max_turns": 10})
         mgr = PluginManager()
@@ -5241,7 +5241,7 @@ class TestInitCompactManagerNoProfileContext:
 class TestInitPluginsEarlyReturnBranches:
     async def test_early_return_with_termination_checker_attached(self, make_agent):
         from kohakuterrarium.modules.plugin.base import BasePlugin
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         class _N(BasePlugin):
             name = "n"
@@ -5256,7 +5256,7 @@ class TestInitPluginsEarlyReturnBranches:
 
     async def test_early_return_with_compact_manager(self, make_agent):
         from kohakuterrarium.modules.plugin.base import BasePlugin
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         class _N(BasePlugin):
             name = "n"
@@ -5410,7 +5410,7 @@ class TestInitPluginsEarlyReturnFull:
         self, make_agent
     ):
         """Exercise every branch of the pre-existing-plugins early return."""
-        from kohakuterrarium.modules.plugin.manager import PluginManager
+        from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 
         agent = make_agent(termination={"max_turns": 5})
         await agent.start()

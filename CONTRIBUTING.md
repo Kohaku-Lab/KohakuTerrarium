@@ -217,7 +217,7 @@ src/kohakuterrarium/
   terrarium/        # Multi-agent runtime
   api/              # FastAPI HTTP API + WebSocket
   testing/          # Test infrastructure (ScriptedLLM, recorders, harness)
-  utils/            # Shared utilities (logging, async, file_guard)
+  utils/            # Shared utilities (logging, async, file/guard)
 
 src/kohakuterrarium-frontend/   # Vue 3 web dashboard
 creatures/                       # Creature config templates
