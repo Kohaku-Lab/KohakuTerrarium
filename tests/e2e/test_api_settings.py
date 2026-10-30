@@ -655,7 +655,7 @@ class TestApiSettingsJourney:
         assert resp.status_code == 404
         # native_tool does not support toggle — that is a hard 400.
         resp = client.post(f"{cbase}/modules/native_tool/anything/toggle")
-        assert resp.status_code in (400, 404)
+        assert resp.status_code == 400
         # Re-enable the budget plugin and reset its options to defaults
         # by applying an empty values payload — the live creature reads
         # back the plugin's declared defaults again.

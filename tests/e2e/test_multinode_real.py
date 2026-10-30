@@ -1578,7 +1578,7 @@ async def test_spawn_chat_model_stop_creature_on_worker(tmp_path, monkeypatch):
                 host.http.delete(f"/api/sessions/active/agents/{creature_id}"),
                 timeout=OP_TIMEOUT,
             )
-            assert stop_resp.status_code in (200, 204), f"stop failed: {stop_resp.text}"
+            assert stop_resp.status_code == 200, f"stop failed: {stop_resp.text}"
             await RealLabHost._wait_for(
                 lambda: creature_id
                 not in {c.creature_id for c in worker.engine.list_creatures()},
@@ -1672,9 +1672,9 @@ async def test_worker_disconnect_drops_creature_and_keeps_api_responsive(
                 host.http.delete(f"/api/sessions/active/agents/{creature_id}"),
                 timeout=OP_TIMEOUT,
             )
-            assert stop_resp.status_code in (200, 204, 404), (
+            assert stop_resp.status_code == 404, (
                 f"stop of a gone creature returned {stop_resp.status_code} "
-                f"(expected a clean 200/204/404): {stop_resp.text}"
+                f"(expected 404): {stop_resp.text}"
             )
         finally:
             if not worker_closed:
@@ -1813,7 +1813,7 @@ async def test_two_workers_stop_one_keeps_everything_responsive(tmp_path, monkey
                 host.http.delete(f"/api/sessions/active/agents/{cid_a}"),
                 timeout=OP_TIMEOUT,
             )
-            assert stop.status_code in (200, 204), f"stop a failed: {stop.text}"
+            assert stop.status_code == 200, f"stop a failed: {stop.text}"
 
             # --- the API stays responsive -----------------------------
             listed = await asyncio.wait_for(
@@ -1942,7 +1942,7 @@ async def test_worker_creature_does_not_self_start_config_io(tmp_path, monkeypat
                 agent, "input_module", None
             )
             input_type = type(input_mod).__name__ if input_mod is not None else None
-            assert input_type in (None, "NoneInput"), (
+            assert input_type == "NoneInput", (
                 f"worker creature booted its config IO ({input_type}) — "
                 "API-spawned creatures must have input suppressed for attach"
             )
@@ -2059,7 +2059,7 @@ async def test_interrupt_worker_creature_routes_to_home(tmp_path, monkeypatch):
             intr = await asyncio.wait_for(
                 host.http.post(f"{base}/interrupt"), timeout=OP_TIMEOUT
             )
-            assert intr.status_code in (200, 204), (
+            assert intr.status_code == 200, (
                 f"interrupt did not route to the worker creature: "
                 f"{intr.status_code} {intr.text}"
             )
@@ -2276,9 +2276,8 @@ async def test_channel_add_and_list_on_worker_session(tmp_path, monkeypatch):
                 ),
                 timeout=OP_TIMEOUT,
             )
-            assert add.status_code in (
-                200,
-                201,
+            assert (
+                add.status_code == 200
             ), f"add channel on worker session failed: {add.text}"
 
             # List it back — must route to the worker too, not the host
@@ -2784,7 +2783,7 @@ async def test_resume_happy_path_on_worker(tmp_path, monkeypatch):
                 host.http.delete(f"/api/sessions/active/agents/{creature_id}"),
                 timeout=OP_TIMEOUT,
             )
-            assert stop.status_code in (200, 204), f"stop failed: {stop.text}"
+            assert stop.status_code == 200, f"stop failed: {stop.text}"
             await RealLabHost._wait_for(
                 lambda: not worker.engine.list_creatures(),
                 "creature removed from worker after stop",

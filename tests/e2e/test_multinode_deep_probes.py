@@ -576,7 +576,7 @@ class TestMultinodeDeepProbes:
                 )
                 # Both URL forms should accept the wire — user-reported
                 # 400 may live here.
-                assert r2.status_code in (200, 400, 404), (
+                assert r2.status_code == 200, (
                     f"BUG #145 (variant 2: cluster primary URL): "
                     f"{r2.status_code} {r2.text}"
                 )
@@ -597,7 +597,7 @@ class TestMultinodeDeepProbes:
                         "allow_self_trigger": False,
                     },
                 )
-                assert r3.status_code in (200, 400, 404), (
+                assert r3.status_code == 200, (
                     f"BUG #145 (variant 3: by name): " f"{r3.status_code} {r3.text}"
                 )
 
@@ -942,7 +942,7 @@ class TestMultinodeDeepProbes:
 
                 # Close: evict from memory.
                 dd = await host.http.delete(f"/api/sessions/active/{ga}")
-                assert dd.status_code in (200, 204, 404), dd.text
+                assert dd.status_code == 200, dd.text
 
                 # Find the saved session in /api/sessions.  The mirror
                 # writer drains worker session.sync events asynchronously
@@ -980,7 +980,7 @@ class TestMultinodeDeepProbes:
                     f"/api/sessions/{sid}/resume",
                     json={"on_node": "w1"},
                 )
-                assert rr.status_code in (200, 201, 202), (
+                assert rr.status_code == 200, (
                     f"NEW BUG: worker resume returned " f"{rr.status_code} {rr.text}"
                 )
 
@@ -1133,7 +1133,7 @@ class TestMultinodeDeepProbes:
 
                 # Stop the creature.
                 dd = await host.http.delete(f"/api/sessions/active/agents/{a_id}")
-                assert dd.status_code in (200, 204), dd.text
+                assert dd.status_code == 200, dd.text
 
                 # Re-spawn from the same config; must get a fresh
                 # session + creature_id.
