@@ -194,3 +194,87 @@ describe("installExternalLinkGuard", () => {
     expect(opened).toEqual([])
   })
 })
+
+describe("installExternalLinkGuard in a native shell", () => {
+  let uninstall
+  let hostOpened
+  let browserOpened
+
+  beforeEach(() => {
+    hostOpened = []
+    browserOpened = []
+    window.pywebview = {
+      api: {
+        open_external: vi.fn(async (url) => {
+          hostOpened.push(url)
+          return true
+        }),
+      },
+    }
+    vi.spyOn(window, "open").mockImplementation((url) => {
+      browserOpened.push(url)
+      return null
+    })
+    uninstall = installExternalLinkGuard()
+  })
+
+  afterEach(() => {
+    uninstall()
+    delete window.pywebview
+    document.body.innerHTML = ""
+    vi.restoreAllMocks()
+  })
+
+  function click(html) {
+    document.body.innerHTML = html
+    const event = new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })
+    document.querySelector("a").dispatchEvent(event)
+    return event
+  }
+
+  it("sends target=_blank links to the shell instead of leaving them to the webview", () => {
+    const event = click('<a href="https://example.test/docs" target="_blank">docs</a>')
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(hostOpened).toEqual(["https://example.test/docs"])
+    expect(browserOpened).toEqual([])
+  })
+
+  it("sends untargeted external links to the shell", () => {
+    click('<a href="https://example.test/docs">docs</a>')
+
+    expect(hostOpened).toEqual(["https://example.test/docs"])
+    expect(browserOpened).toEqual([])
+  })
+
+  it("routes external window.open calls to the shell and returns no window", () => {
+    expect(window.open("https://example.test/x")).toBeNull()
+
+    expect(hostOpened).toEqual(["https://example.test/x"])
+    expect(browserOpened).toEqual([])
+  })
+
+  it("lets same-origin window.open calls through", () => {
+    window.open("/sessions/abc")
+
+    expect(hostOpened).toEqual([])
+    expect(browserOpened).toEqual(["/sessions/abc"])
+  })
+
+  it("never falls back to window.open when the shell cannot open the link", () => {
+    window.pywebview.api.open_external = vi.fn(async () => false)
+
+    click('<a href="https://example.test/docs" target="_blank">docs</a>')
+
+    expect(browserOpened).toEqual([])
+  })
+
+  it("restores window.open when uninstalled", () => {
+    uninstall()
+
+    window.open("https://example.test/y")
+
+    expect(hostOpened).toEqual([])
+    expect(browserOpened).toEqual(["https://example.test/y"])
+  })
+})

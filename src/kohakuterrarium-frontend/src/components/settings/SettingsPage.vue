@@ -419,6 +419,7 @@ import { useClusterStore } from "@/stores/cluster"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { registerBuiltinSettingsSections, visibleSettingsSections } from "@/stores/settingsSectionRegistry"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, READING_SIZES, useThemeStore } from "@/stores/theme"
+import { hasDesktopHost, onHostReady } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const cluster = useClusterStore()
@@ -439,7 +440,7 @@ function sectionLabel(section) {
   return section.labelKey ? t(section.labelKey) : section.label
 }
 const requestingNotificationPermission = ref(false)
-const desktopSurface = ref(Boolean(window.pywebview?.api))
+const desktopSurface = ref(hasDesktopHost())
 const notificationPermission = ref(getNotificationPermission())
 
 const localeOptions = computed(() =>
@@ -460,7 +461,7 @@ const readingSizeOptions = computed(() =>
 )
 
 function getNotificationPermission() {
-  if (window.pywebview?.api) return "desktop"
+  if (hasDesktopHost()) return "desktop"
   if (typeof Notification === "undefined") return "unsupported"
   if (window.isSecureContext === false) return "unsupported"
   return Notification.permission || "default"
@@ -1032,14 +1033,15 @@ async function removeMCPServer(name) {
 // ───────── Lifecycle ─────────
 
 function detectDesktopSurface() {
-  if (!window.pywebview?.api) return
+  if (!hasDesktopHost()) return
   desktopSurface.value = true
   notificationPermission.value = "desktop"
 }
 
+let stopHostReady = () => {}
+
 onMounted(async () => {
-  window.addEventListener("pywebviewready", detectDesktopSurface)
-  detectDesktopSurface()
+  stopHostReady = onHostReady(detectDesktopSurface)
   await loadKeys()
   await loadBackends()
   await loadNativeTools()
@@ -1048,7 +1050,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener("pywebviewready", detectDesktopSurface)
+  stopHostReady()
 })
 
 // The Drives *record* panel lives in a workspace, not in global Settings.

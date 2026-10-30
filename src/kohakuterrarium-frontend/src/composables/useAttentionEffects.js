@@ -3,9 +3,15 @@ import { onBeforeUnmount, onMounted, watch } from "vue"
 import { subscribeAttention, subscribeAttentionEdges, totalAttention } from "@/stores/attention"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { attentionTargetLabel, navigateToAttention } from "@/utils/attentionNavigation"
+import {
+  desktopCapabilities,
+  hasDesktopHost,
+  hostSupports,
+  onHostReady,
+  requestDesktopAttention as requestHostAttention,
+} from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
-const DESKTOP_PROTOCOL = 1
 const AUDIO_UNLOCK_EVENT = "kt:attention-audio-unlock"
 
 export function requestAttentionAudioUnlock() {
@@ -26,28 +32,21 @@ export function useAttentionEffects() {
   const { t } = useI18n()
   let unsubscribeEdges
   let unsubscribeAttention
-  let desktopSurface = Boolean(window.pywebview?.api)
-  let desktopCapabilities = null
+  let desktopSurface = hasDesktopHost()
+  let hostCapabilities = null
+  let stopHostReady = () => {}
   let audioContext = null
   let favicons = []
   let originalFavicons = []
   let pendingDesktopAttention = false
 
   async function detectDesktopSurface() {
-    const api = window.pywebview?.api
-    if (!api) return
+    if (!hasDesktopHost()) return
     desktopSurface = true
-    try {
-      const capabilities = await api.get_desktop_capabilities?.()
-      if (capabilities?.surface === "desktop" && capabilities.protocol === DESKTOP_PROTOCOL) {
-        desktopCapabilities = capabilities
-        if (pendingDesktopAttention) {
-          pendingDesktopAttention = false
-          requestDesktopAttention()
-        }
-      }
-    } catch {
-      desktopCapabilities = null
+    hostCapabilities = await desktopCapabilities()
+    if (hostCapabilities && pendingDesktopAttention) {
+      pendingDesktopAttention = false
+      requestDesktopAttention()
     }
   }
 
@@ -128,14 +127,14 @@ export function useAttentionEffects() {
   }
 
   function requestDesktopAttention() {
-    const api = window.pywebview?.api
-    if (!desktopSurface || !prefs.state.desktopAttention || !api?.request_desktop_attention) return
-    if (desktopCapabilities === null) {
+    if (!desktopSurface || !prefs.state.desktopAttention) return
+    if (!hostSupports("request_desktop_attention")) return
+    if (hostCapabilities === null) {
       pendingDesktopAttention = true
       return
     }
-    if (desktopCapabilities.nativeAttention !== true) return
-    void api.request_desktop_attention().catch(() => {})
+    if (hostCapabilities.nativeAttention !== true) return
+    void requestHostAttention()
   }
 
   function onEdge(event) {
@@ -169,8 +168,7 @@ export function useAttentionEffects() {
     document.addEventListener("pointerdown", unlockAudio, { passive: true })
     document.addEventListener("keydown", unlockAudio)
     document.addEventListener(AUDIO_UNLOCK_EVENT, unlockAudio)
-    window.addEventListener("pywebviewready", detectDesktopSurface)
-    void detectDesktopSurface()
+    stopHostReady = onHostReady(detectDesktopSurface)
     updateFavicon()
   })
 
@@ -180,7 +178,7 @@ export function useAttentionEffects() {
     document.removeEventListener("pointerdown", unlockAudio)
     document.removeEventListener("keydown", unlockAudio)
     document.removeEventListener(AUDIO_UNLOCK_EVENT, unlockAudio)
-    window.removeEventListener("pywebviewready", detectDesktopSurface)
+    stopHostReady()
     favicons.forEach((favicon, index) => {
       const original = originalFavicons[index]
       if (original !== null) favicon.href = original
