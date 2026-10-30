@@ -314,7 +314,9 @@ class TestMigrationLockTimeouts:
 
         def slow_complete(sidecar_path, *, timeout_s=None):
             calls["n"] += 1
-            time.sleep(0.03)
+            started = time.monotonic()
+            while time.monotonic() - started < 0.1:
+                time.sleep(0.005)
             return True
 
         monkeypatch.setattr(migration, "_MIGRATE_LOCK_TIMEOUT_S", 0.02)
