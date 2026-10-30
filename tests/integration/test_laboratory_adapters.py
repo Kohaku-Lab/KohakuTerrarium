@@ -165,7 +165,9 @@ class TestTerrariumFilesAdapter:
                     },
                     timeout=5.0,
                 )
-                assert "error" not in (resp or {}), f"write error: {resp}"
+                hello_sha = hashlib.sha256(b"hello").hexdigest()
+                assert resp == {"written": 5, "sha256": hello_sha}
+                assert (worker_cfg_dir / "test.txt").read_bytes() == b"hello"
 
                 # stat — verb 2
                 resp = await host.request(
@@ -175,7 +177,10 @@ class TestTerrariumFilesAdapter:
                     body={"scope": "config://", "path": "test.txt"},
                     timeout=5.0,
                 )
-                assert "error" not in (resp or {}), f"stat error: {resp}"
+                assert resp["stat"]["size"] == 5
+                assert resp["stat"]["is_dir"] is False
+                assert resp["stat"]["sha256"] == hello_sha
+                assert Path(resp["stat"]["path"]) == worker_cfg_dir / "test.txt"
 
                 # read — verb 3
                 resp = await host.request(
@@ -185,13 +190,10 @@ class TestTerrariumFilesAdapter:
                     body={"scope": "config://", "path": "test.txt"},
                     timeout=5.0,
                 )
-                assert "error" not in (resp or {}), f"read error: {resp}"
-                # content round-tripped (key name varies: content/bytes_b64)
-                if isinstance(resp, dict):
-                    content = (
-                        resp.get("content") or resp.get("bytes_b64") or resp.get("data")
-                    )
-                    assert content is not None, f"no content in {resp}"
+                assert resp == {
+                    "bytes_b64": base64.b64encode(b"hello").decode(),
+                    "sha256": hello_sha,
+                }
 
                 # list — verb 4
                 resp = await host.request(
@@ -201,7 +203,9 @@ class TestTerrariumFilesAdapter:
                     body={"scope": "config://", "path": ""},
                     timeout=5.0,
                 )
-                assert "error" not in (resp or {}), f"list error: {resp}"
+                assert [
+                    (e["name"], e["is_dir"], e["size"]) for e in resp["entries"]
+                ] == [("test.txt", False, 5)]
 
                 # write_begin / write_chunk / write_commit — verbs 5,6,7
                 resp = await host.request(
