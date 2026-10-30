@@ -227,6 +227,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "pattern": {"type": "string", "description": "Glob pattern (e.g. **/*.py)"},
             "path": {"type": "string", "description": "Base directory (optional)"},
+            "limit": {
+                "type": "integer",
+                "description": "Max paths to return (default 100, 0 = unlimited)",
+            },
             "gitignore": {
                 "type": "boolean",
                 "description": "Follow .gitignore rules (default true)",
@@ -240,6 +244,15 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "pattern": {"type": "string", "description": "Regex pattern to search"},
             "path": {"type": "string", "description": "Directory or file to search"},
             "glob": {"type": "string", "description": "File glob filter (optional)"},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Max matches to return (default 50)",
+            },
+            "ignore_case": {
+                "type": "boolean",
+                "description": "Case-insensitive matching (default false)",
+            },
             "gitignore": {
                 "type": "boolean",
                 "description": "Follow .gitignore rules (default true)",
@@ -255,6 +268,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "limit": {
                 "type": "integer",
                 "description": "Max output lines (default 100, 0 = unlimited)",
+            },
+            "hidden": {
+                "type": "boolean",
+                "description": "Include dot-prefixed entries (default false)",
             },
             "gitignore": {
                 "type": "boolean",
