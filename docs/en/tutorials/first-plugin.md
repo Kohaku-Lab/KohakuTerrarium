@@ -50,11 +50,10 @@ Both plugins below are lifecycle plugins: they subclass
 `BasePlugin` from `kohakuterrarium.modules.plugin.base`. That is the
 class wired through the `plugins:` section of a creature config.
 
-> Note: the framework also has *prompt plugins*
-> (`kohakuterrarium.prompt.plugins.BasePlugin`) that contribute
-> sections to the system prompt at build time. They are a lower-level
-> primitive and not config-wired. For "add something to every call",
-> a `pre_llm_call` lifecycle plugin (as below) is the right on-ramp.
+> Note: the same class can also contribute prose to the system prompt
+> at build time by overriding `get_prompt_content(context)`. For "add
+> something to every call", a `pre_llm_call` hook (as below) is the right
+> on-ramp.
 
 ## Step 2: Write the context-injector plugin
 

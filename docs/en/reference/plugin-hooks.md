@@ -159,31 +159,29 @@ All callbacks are fire-and-forget. Their return value is ignored.
 
 ---
 
-## Prompt plugins (separate category)
+## Prompt contributions
 
-Prompt plugins run during system prompt assembly in
-`prompt/aggregator.py`. They are loaded independently from lifecycle
-plugins.
-
-`BasePlugin` (in `kohakuterrarium.prompt.plugins`) has:
+`BasePlugin` (in `kohakuterrarium.modules.plugin.base`) can also add prose
+to the system prompt that `prompt/aggregator.py` assembles:
 
 ```python
 priority: int       # lower = earlier
 name: str
-async def get_content(self, context: PromptContext) -> str | None
+prompt_renderers: frozenset[str]   # renderer ids whose attach/detach changes the text
+def get_prompt_content(self, context: PluginContext) -> str | None
+def presentation_contribution(self, context: PluginContext) -> str | None
 ```
 
-- `get_content(context) -> str | None`: Return the text block to
+- `get_prompt_content(context) -> str | None`: Return the text block to
   insert, or `None` to contribute nothing.
-- `priority`: ordering key. Built-ins sit at 50/45/40/30.
+- `presentation_contribution(context) -> str | None`: Return this plugin's
+  part of `## Presenting your answer`, or `None`.
+- `priority`: ordering key among plugin contributions.
 
-Built-in prompt plugins are listed in
-[Prompt plugins in builtins.md](builtins.md#prompt-plugins).
-
-Register custom prompt plugins via the `plugins` field of a creature
-config (same as lifecycle plugins); the framework dispatches based on
-whether a plugin class subclasses the lifecycle `Plugin` protocol or
-the prompt `BasePlugin`.
+The framework's own sections are listed in
+[Prompt sections in builtins.md](builtins.md#prompt-sections). Custom
+plugins register via the `plugins` field of a creature config, the same as
+any other plugin.
 
 ---
 

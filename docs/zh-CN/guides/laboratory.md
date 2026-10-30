@@ -449,7 +449,7 @@ WARNING 级别记录在工作节点侧，不会出现在主机的 log 里。
   `?node=` 查询参数）。请见 [HTTP API 参考](../reference/http.md)。
 - Python：`kohakuterrarium.terrarium.MultiNodeTerrariumService`
   （lab-host 模式）、`RemoteTerrariumService`（每工作节点的
-  handle）、`kohakuterrarium.laboratory.ClientConnector`（工
+  handle）、`kohakuterrarium.laboratory._internal.client.ClientConnector`（工
   作节点的 client 对象，驱动你自己内嵌的工作节点）。
 - 概念：[Laboratory](../concepts/laboratory.md)：wire 格
   式、session 同步、resume 语义、identity 模型。

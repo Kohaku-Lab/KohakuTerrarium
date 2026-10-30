@@ -109,11 +109,11 @@ Resume 時，觸發器的狀態會從 session store 的 `events[agent]:*` 列重
 
 ### 1.7 外掛系統
 
-兩套獨立的系統：
+只有一個外掛類別 `BasePlugin`（`modules/plugin/base.py`），由 `bootstrap/plugins.py` 載入，manager 在 `modules/plugin/`。
 
-**Prompt 外掛** (`prompt/plugins.py`) 在 aggregate 時貢獻內容到 system prompt。按 priority 排序。內建包含 `ToolList`、`FrameworkHints`、`EnvInfo`、`ProjectInstructions`。
+**Prompt 貢獻** (`get_prompt_content`、`presentation_contribution`) 由 manager 依 priority 收集，aggregate 時由 aggregator 放入；工具清單、工具指引、skills 與 group 區塊是框架區段，不是外掛。
 
-**Lifecycle 外掛** (`bootstrap/plugins.py` + `modules/plugin/` 底下的 manager) 掛進代理的事件流。`PluginManager.notify(hook, **kwargs)` 會 await 每個啟用的外掛對應方法。`pre_*` hook 丟出 `PluginBlockError` 會中止該操作。所有 hook 列在內建清單裡。
+**Lifecycle hook** 掛進代理的事件流。`PluginManager.notify(hook, **kwargs)` 會 await 每個啟用的外掛對應方法。`pre_*` hook 丟出 `PluginBlockError` 會中止該操作。所有 hook 列在內建清單裡。
 
 套件在 `kohaku.yaml` 宣告外掛；列在 `config.plugins[]` 裡的外掛會在代理啟動時載入。
 

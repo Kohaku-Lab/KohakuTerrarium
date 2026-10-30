@@ -109,7 +109,7 @@ Sub-agent 由 `modules/subagent/manager.py:spawn` 启动。Sub-agent 不能再�
 
 ### 1.7 Plugin 系统
 
-这里实际上是两套彼此独立的系统。**Prompt plugin**（`prompt/plugins.py`）会在聚合 system prompt 时向其中追加内容，按 priority 排序。内建的有 `ToolList`、`FrameworkHints`、`EnvInfo`、`ProjectInstructions`。**Lifecycle plugin**（`bootstrap/plugins.py`，管理器位于 `modules/plugin/`）会挂到 agent event 上。`PluginManager.notify(hook, **kwargs)` 会等待所有启用 plugin 的匹配方法执行完毕。如果某个 `pre_*` hook 抛出 `PluginBlockError`，当前操作就会被拦截。可用 hook 列表见 builtin inventory。
+这里只有一个 plugin 类 `BasePlugin`（`modules/plugin/base.py`），由 `bootstrap/plugins.py` 加载，管理器位于 `modules/plugin/`。**Prompt 贡献**（`get_prompt_content`、`presentation_contribution`）由管理器按 priority 收集，聚合 system prompt 时由 aggregator 放入；工具清单、工具指引、skills 与 group 区块是框架区段，不是 plugin。**Lifecycle hook** 会挂到 agent event 上。`PluginManager.notify(hook, **kwargs)` 会等待所有启用 plugin 的匹配方法执行完毕。如果某个 `pre_*` hook 抛出 `PluginBlockError`，当前操作就会被拦截。可用 hook 列表见 builtin inventory。
 
 Package 可以在 `kohaku.yaml` 中声明 plugin；`config.plugins[]` 中列出的 plugin 会在 agent 启动时加载。
 

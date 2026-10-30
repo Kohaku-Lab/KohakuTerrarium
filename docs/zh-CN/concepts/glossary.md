@@ -72,7 +72,7 @@ Creature session 里的 key-value store。跨回合存活；用 `scratchpad` 工
 
 ## Plugin / 插件
 
-修改模块之间 **连接方式 ** 的代码，而不是 fork 某个模块。两种 ** ：prompt 插件 ** (为 system prompt 贡献内容) 与 **lifecycle 插件** (挂在 `pre_llm_call`、`post_tool_execute` 这类 hook)。`pre_*` hook 可以抛 `PluginBlockError` 来终止操作。完整说明：[插件](modules/plugin.md)。
+修改模块之间 **连接方式 ** 的代码，而不是 fork 某个模块。只有一个 `BasePlugin` 类：它挂在 `pre_llm_call`、`post_tool_execute` 这类 hook 上，也可以为 system prompt 贡献内容。`pre_*` hook 可以抛 `PluginBlockError` 来终止操作。完整说明：[插件](modules/plugin.md)。
 
 ## Skill mode / Skill 模式
 

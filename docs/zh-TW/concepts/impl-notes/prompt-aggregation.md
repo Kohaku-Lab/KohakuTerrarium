@@ -63,10 +63,8 @@ tags:
    長什麼樣子。
 5. **具名輸出區段。** 對每個 `named_outputs.<name>`，簡短說明
    何時該把文字路由到該處。
-6. **Prompt 外掛區段。** 每個已註冊的 prompt plugin
-   （依優先級排序，由低到高）都會貢獻一個區段。內建有：
-   `ToolListPlugin`、`FrameworkHintsPlugin`、`EnvInfoPlugin`、
-   `ProjectInstructionsPlugin`。
+6. **外掛貢獻區段。** 每個已啟用的 plugin 透過
+   `get_prompt_content` 回傳的內容（依優先級排序，由低到高）。
 
 當 MCP 工具已連線時，還會額外插入一個名為
 「Available MCP Tools」的區段，依伺服器用條列方式列出工具。
@@ -92,6 +90,6 @@ tags:
 
 ## 另請參閱
 
-- [Plugin](../modules/plugin.md)：如何撰寫 prompt plugins。
+- [Plugin](../modules/plugin.md)：如何撰寫 plugin 與它的 prompt 貢獻。
 - [Tool](../modules/tool.md)：工具文件如何被註冊。
 - [reference/configuration.md：tool_doc_mode, tool_format, include_*](../../reference/configuration.md)：相關設定旋鈕。

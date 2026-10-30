@@ -132,7 +132,7 @@ Tool args (shape; concrete syntax depends on your `tool_format`; default bracket
 [search_memory/]
 ```
 
-For RAG over *external* sources, build a custom tool or a [prompt plugin](plugins.md) that calls your vector store.
+For RAG over *external* sources, build a custom tool or a [plugin](plugins.md) that calls your vector store.
 
 ## Configuring memory in a creature
 

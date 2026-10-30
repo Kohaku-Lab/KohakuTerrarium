@@ -122,9 +122,9 @@ memory, or as a rendezvous between cooperating tools.
 ## Plugin
 
 Code that modifies the *connections between modules* instead of
-forking a module. Two flavours: **prompt plugins** (contribute content
-to the system prompt) and **lifecycle plugins** (hook `pre_llm_call`,
-`post_tool_execute`, and so on). A `pre_*` hook can raise
+forking a module. One `BasePlugin` class that hooks `pre_llm_call`,
+`post_tool_execute`, and so on, and may contribute prose to the system
+prompt. A `pre_*` hook can raise
 `PluginBlockError` to abort an operation. Full: [plugin](modules/plugin.md).
 
 ## Skill mode

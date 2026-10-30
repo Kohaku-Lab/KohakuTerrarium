@@ -38,9 +38,8 @@ mkdir -p creatures/tutorial-creature/plugins
 
 下面兩個外掛都是生命週期外掛，它們會繼承 `kohakuterrarium.modules.plugin.base` 中的 `BasePlugin`。這就是能透過生物設定中的 `plugins:` 區段接線的類別。
 
-> 注意：框架中也有 *prompt plugins*
-> （`kohakuterrarium.prompt.plugins.BasePlugin`），可在建構時替 system prompt 貢獻區段。
-> 它們是更底層的原語，不能直接透過設定接線。若你的需求是「替每次呼叫都加點東西」，那麼 `pre_llm_call` 生命週期外掛（如下）才是最合適的入口。
+> 注意：同一個類別也可以透過覆寫 `get_prompt_content(context)`，在建構時替 system prompt 貢獻區段。
+> 若你的需求是「替每次呼叫都加點東西」，那麼 `pre_llm_call` hook（如下）才是最合適的入口。
 
 ## 步驟 2：撰寫脈絡注入外掛
 

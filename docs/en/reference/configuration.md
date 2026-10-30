@@ -65,7 +65,7 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `termination` | dict | `null` | no | Termination conditions. See [Termination](#termination). |
 | `tool_format` | str \| dict | `"bracket"` | no | `bracket`, `xml`, `native`, or a custom dict format. `native` requires the configured LLM provider to support structured tool calling. |
 | `mcp_servers` | list | `[]` | no | Per-agent MCP servers. See [MCP servers](#mcp-servers-in-agent-config). |
-| `plugins` | list | `[]` | no | Lifecycle plugins. See [Plugins](#plugins). |
+| `plugins` | list | `[]` | no | Plugins. See [Plugins](#plugins). |
 | `no_inherit` | list[str] | `[]` | no | Keys that replace (not merge) base values. E.g. `[tools, subagents]`. |
 | `memory` | dict | `{}` | no | `memory.embedding.{provider,model}`. See [Memory](#memory). |
 | `output_wiring` | list | `[]` | no | Per-creature automatic round-output routing. See [Output wiring](#output-wiring). |

@@ -38,7 +38,7 @@ mkdir -p creatures/tutorial-creature/plugins
 
 下面这两个插件都是生命周期插件，它们会继承 `kohakuterrarium.modules.plugin.base` 中的 `BasePlugin`。也只有这种类，才能通过 Creature 配置中的 `plugins:` 区段接入。
 
-> 注意：框架中也有 *prompt plugins*（`kohakuterrarium.prompt.plugins.BasePlugin`），可以在构建时为 system prompt 贡献片段。
+> 注意：同一个类也可以通过覆写 `get_prompt_content(context)`，在构建时为 system prompt 贡献片段。
 > 它们属于更底层的原语，不能直接通过配置接线。如果你的需求是“为每次调用都补充一点内容”，那么像下面这样使用 `pre_llm_call` 生命周期插件，通常是更合适的入口。
 
 ## 第 2 步：编写上下文注入插件

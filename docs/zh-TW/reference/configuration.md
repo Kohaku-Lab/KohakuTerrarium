@@ -55,7 +55,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 | `pwd_guard` | str | `"warn"` | 否 | 工作目錄之外的檔案存取：`warn` (對某路徑的第一次嘗試會被拒絕並給出警告，重試則放行)、`block` (一律拒絕) 或 `off` (不檢查)。工作目錄只是預設位置，不是沙箱；需要真正的能力限制請用 `sandbox` 外掛。 |
 | `tool_format` | str \| dict | `"bracket"` | 否 | `bracket`、`xml`、`native`，或自訂 dict 格式。`native` 需要設定的 LLM provider 支援結構化的 tool calling。 |
 | `mcp_servers` | list | `[]` | 否 | 每隻代理的 MCP server。見 [MCP server](#生物-config-裡的-mcp-server)。 |
-| `plugins` | list | `[]` | 否 | Lifecycle 外掛。見 [外掛](#外掛)。 |
+| `plugins` | list | `[]` | 否 | 外掛。見 [外掛](#外掛)。 |
 | `no_inherit` | list[str] | `[]` | 否 | 改成**取代**而非合併的 key。例如 `[tools, subagents]`。 |
 | `memory` | dict | `{}` | 否 | `memory.embedding.{provider,model}`。見 [記憶](#記憶)。 |
 | `output_wiring` | list | `[]` | 否 | 每隻生物的回合輸出自動路由。見 [輸出接線](#輸出接線)。 |

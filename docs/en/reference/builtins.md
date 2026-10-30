@@ -692,24 +692,20 @@ a variation group.
 
 ---
 
-## Prompt plugins
+## Prompt sections
 
-Shipped prompt plugins (loaded by `prompt/aggregator.py`). Ordered by
-priority (lower = earlier).
+`prompt/aggregator.py` composes the system prompt from gated framework
+sections: the creature's base prompt, `## Available Functions` and
+`## Function Documentation` (text tool formats or `full` doc mode),
+`## Tool guidance`, plugin contributions, `## Skills`, the group blocks
+(only for creatures in a graph), and the execution model. A section whose
+subject does not exist is not emitted.
 
-| Priority | Name | Emits |
-|---|---|---|
-| 50 | `ToolListPlugin` | Tool name + one-line description. |
-| 45 | `FrameworkHintsPlugin` | Framework command examples (`info`, `read_job`, `jobs`, `wait`, native tool usage) and tool-call format examples. |
-| 40 | `EnvInfoPlugin` | `cwd`, platform, date/time. |
-| 30 | `ProjectInstructionsPlugin` | Loads `CLAUDE.md` and `.claude/rules.md`. |
-
-Custom prompt plugins subclass `BasePlugin` and register via the
-`plugins` field in a creature config. See
-[plugin-hooks.md](plugin-hooks.md) for lifecycle and callback hooks.
-
-Separate from prompt plugins, tools may also contribute one-line or short
-paragraph guidance into the aggregated `## Tool guidance` section.
+Plugins add prose by overriding `get_prompt_content(context)` on a
+`BasePlugin` subclass registered through the `plugins` field of a creature
+config. See [plugin-hooks.md](plugin-hooks.md) for the hooks. Tools
+contribute one-line or short paragraph guidance into the aggregated
+`## Tool guidance` section through `prompt_contribution()`.
 
 ---
 

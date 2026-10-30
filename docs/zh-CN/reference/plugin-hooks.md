@@ -31,7 +31,7 @@ tags:
 | `on_load` | `async on_load(ctx: PluginContext) -> None` | 插件加载到 Agent 时。 | 忽略 |
 | `on_unload` | `async on_unload() -> None` | 插件卸载时，或 Agent 停止时。 | 忽略 |
 
-`PluginContext` 允许插件访问 Agent、其配置、scratchpad 和 logger。详细结构请参见 `kohakuterrarium.modules.plugin.context`。
+`PluginContext` 允许插件访问 Agent、其配置、scratchpad 和 logger。详细结构请参见 `kohakuterrarium.modules.plugin.base`。
 
 ---
 
@@ -92,24 +92,23 @@ tags:
 
 ---
 
-## Prompt 插件（独立类别）
+## Prompt 贡献
 
-Prompt 插件会在 system prompt 组装过程中执行，实现位于 `prompt/aggregator.py`。它们与生命周期插件分开加载。
-
-`BasePlugin`（位于 `kohakuterrarium.prompt.plugins`）包含：
+`BasePlugin`（位于 `kohakuterrarium.modules.plugin.base`）也可以向 `prompt/aggregator.py` 组装的 system prompt 贡献文本：
 
 ```python
 priority: int       # 越小越早
 name: str
-async def get_content(self, context: PromptContext) -> str | None
+prompt_renderers: frozenset[str]   # 其附加/移除会改变文本的 renderer id
+def get_prompt_content(self, context: PluginContext) -> str | None
+def presentation_contribution(self, context: PluginContext) -> str | None
 ```
 
-- `get_content(context) -> str | None`：返回要插入的文本块；返回 `None` 表示不提供内容。
-- `priority`：排序键。内置插件大致分布在 50/45/40/30。
+- `get_prompt_content(context) -> str | None`：返回要插入的文本块；返回 `None` 表示不提供内容。
+- `presentation_contribution(context) -> str | None`：返回此插件在 `## Presenting your answer` 中的部分，或 `None`。
+- `priority`：插件贡献之间的排序键。
 
-内置 Prompt 插件请参见 [内置模块参考](builtins.md#prompt-plugins)。
-
-自定义 Prompt 插件同样通过 creature config 的 `plugins` 字段注册；框架会根据插件类是生命周期 `Plugin` protocol 的子类，还是 prompt `BasePlugin`，决定走哪套调度流程。
+框架自己的区段请参见 [内置模块参考](builtins.md#prompt-区段)。自定义插件同样通过 creature config 的 `plugins` 字段注册。
 
 ---
 

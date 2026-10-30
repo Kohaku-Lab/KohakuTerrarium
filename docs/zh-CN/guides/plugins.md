@@ -1,6 +1,6 @@
 ---
 title: 插件
-summary: Prompt 插件与 lifecycle 插件：各自挂在哪里、怎么组合，以及什么时候该用。
+summary: 插件既挂在运行时事件上，也能贡献 prompt 文本：各自挂在哪里、怎么组合，以及什么时候该用。
 tags:
  - guides
  - plugin
@@ -11,7 +11,7 @@ tags:
 
 给想在模块之间的*接缝*加上行为、又不想 fork 任何模块的读者。
 
-插件修改的是 controller、工具、子代理与 LLM 之间的连接方式，而不是模块本身。分成两类： **prompt 插件 ** 会往 system prompt 塞内容， **lifecycle 插件** 则挂在执行时事件上（pre/post LLM、pre/post tool 等）。
+插件修改的是 controller、工具、子代理与 LLM 之间的连接方式，而不是模块本身。插件是一个类 `BasePlugin`：它挂在执行时事件上（pre/post LLM、pre/post tool 等），也可以往 system prompt 贡献内容。
 
 概念先读：[plugin 概念](../concepts/modules/plugin.md)、[patterns 概念](../concepts/patterns.md)。
 
@@ -23,13 +23,13 @@ tags:
 
 如果你的需求是「每次在 X 前后，都做 Y」，答案几乎总是 plugin。
 
-## Prompt 插件
+## Prompt 贡献
 
 契约：
 
 - 继承 `BasePlugin`。
-- 设置 `name`、`priority`（数字越小，越早出现在最终 prompt）。
-- 实作 `get_content(context) -> str | None`。
+- 设置 `name`、`priority`（数字越小，在插件贡献中越靠前）。
+- 实作 `get_prompt_content(context) -> str | None`。
 
 ```python
 # plugins/project_header.py
@@ -37,36 +37,27 @@ from kohakuterrarium.modules.plugin.base import BasePlugin
 
 class ProjectHeaderPlugin(BasePlugin):
     name = "project_header"
-    priority = 35          # 在 ProjectInstructionsPlugin (30) 之前
+    priority = 35
 
     def __init__(self, text: str = ""):
         super().__init__()
         self.text = text
 
-    def get_content(self, context) -> str | None:
+    def get_prompt_content(self, context) -> str | None:
         if not self.text:
             return None
         return f"## Project Header\n\n{self.text}"
 ```
 
-内置 prompt 插件（永远存在）：
-
-| Plugin | Priority | 用途 |
-|---|---|---|
-| `ProjectInstructionsPlugin` | 30 | 加载 `CLAUDE.md` / `.claude/rules.md` |
-| `EnvInfoPlugin` | 40 | 工作目录、平台和日期 |
-| `FrameworkHintsPlugin` | 45 | 工具调用语法 + 框架命令示例（`info`、`jobs`、`wait`） |
-| `ToolListPlugin` | 50 | 每个工具的一行描述 |
-
-运行时插件也可以实现 `get_prompt_content(context) -> str | None` 来贡献 prompt 文本。这些内容会被聚合到框架提示之前，并同时适用于父代理与子代理。
+prompt 聚合器会按 priority 收集这些贡献，放进 system prompt 的“插件贡献”位置，同时适用于父代理与子代理。框架自己的区段（工具清单、工具指引、skills、group 区块、执行模型）是框架区块而不是插件，参见 [prompt 聚合](../concepts/impl-notes/prompt-aggregation.md)。
 
 运行时插件还可以实现 `get_tool_visibility(context) -> ToolVisibility | None`，按请求裁剪暴露给模型的原生工具目录（`allowed_tools` / `allowed_subagents`，`None` 表示不限制）。
 
-除了 prompt 插件以外，工具本身也可以通过 `prompt_contribution()` 贡献短的 prompt 指引；位置同样在框架提示之前。
+除了插件以外，工具本身也可以通过 `prompt_contribution()` 贡献短的 prompt 指引，汇总进 `## Tool guidance` 区段。
 
 Priority 越低越早执行。你可以借此把插件插到正确位置。
 
-## Lifecycle 插件
+## Lifecycle hook
 
 继承 `BasePlugin`，并实作以下任意 hook。全部都是 async。
 

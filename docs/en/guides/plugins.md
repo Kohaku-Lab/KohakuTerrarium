@@ -1,6 +1,6 @@
 ---
 title: Plugins
-summary: Prompt plugins and lifecycle plugins. What each hooks, how they compose, and when to use them.
+summary: Plugins hook runtime events and can contribute prompt prose. What they hook, how they compose, and when to use them.
 tags:
   - guides
   - plugin
@@ -11,7 +11,7 @@ tags:
 
 For readers adding behaviour at the *seams* between modules without forking any module.
 
-Plugins modify the connections between controller, tools, sub-agents, and LLM, not the modules themselves. Two flavours: **prompt plugins** contribute to the system prompt, **lifecycle plugins** hook into runtime events (pre/post LLM, pre/post tool dispatch/execution, sub-agent runs, compaction, interrupts, and more).
+Plugins modify the connections between controller, tools, sub-agents, and LLM, not the modules themselves. A plugin is one class, `BasePlugin`. It hooks runtime events (pre/post LLM, pre/post tool dispatch/execution, sub-agent runs, compaction, interrupts, and more) and may also contribute prose to the system prompt.
 
 Concept primer: [plugin](../concepts/modules/plugin.md), [patterns](../concepts/patterns.md).
 
@@ -23,13 +23,13 @@ Concept primer: [plugin](../concepts/modules/plugin.md), [patterns](../concepts/
 
 If your answer is "before/after every X, do Y," the answer is almost always a plugin.
 
-## Prompt plugins
+## Prompt contributions
 
 Contract:
 
 - Subclass `BasePlugin`.
-- Set `name`, `priority` (lower = earlier in the final prompt).
-- Implement `get_content(context) -> str | None`.
+- Set `name` and `priority` (lower = earlier among plugin contributions).
+- Implement `get_prompt_content(context) -> str | None`.
 
 ```python
 # plugins/project_header.py
@@ -38,31 +38,23 @@ from kohakuterrarium.modules.plugin.base import BasePlugin
 
 class ProjectHeaderPlugin(BasePlugin):
     name = "project_header"
-    priority = 35          # before ProjectInstructionsPlugin (30)
+    priority = 35
 
     def __init__(self, text: str = ""):
         super().__init__()
         self.text = text
 
-    def get_content(self, context) -> str | None:
+    def get_prompt_content(self, context) -> str | None:
         if not self.text:
             return None
         return f"## Project Header\n\n{self.text}"
 ```
 
-Built-in prompt plugins (always present):
-
-| Plugin | Priority | Purpose |
-|---|---|---|
-| `ProjectInstructionsPlugin` | 30 | Loads `CLAUDE.md` / `.claude/rules.md` |
-| `EnvInfoPlugin` | 40 | Working dir, platform, date |
-| `FrameworkHintsPlugin` | 45 | Tool-call syntax + framework command examples (`info`, `jobs`, `wait`, native tool usage) |
-| `ToolListPlugin` | 50 | One-line description per tool |
-
-Runtime plugins can also contribute prompt prose by implementing
-`get_prompt_content(context) -> str | None`. Those contributions land in the
-aggregated prompt before framework hints and work for both parent agents and
-sub-agents.
+The prompt aggregator collects these contributions in priority order into
+the `## Plugin contributions` position of the system prompt, for both parent
+agents and sub-agents. The framework's own sections (tool inventory, tool
+guidance, skills, group blocks, execution model) are framework blocks, not
+plugins; see [prompt aggregation](../concepts/impl-notes/prompt-aggregation.md).
 
 A plugin that teaches the model a form its answers can take (inline
 components, full-page apps) implements
@@ -74,13 +66,13 @@ list those renderer ids in the class attribute `prompt_renderers`
 (`frozenset({"kt.ui"})`): the prompt is rebuilt when one of them comes or
 goes, as it is for tools gated by `requires_renderers`.
 
-Separate from prompt plugins, tools themselves can now contribute short
-prompt-guidance paragraphs via `prompt_contribution()`. Those land in the
-aggregated prompt before the framework hints.
+Separate from plugins, tools themselves contribute short prompt-guidance
+paragraphs via `prompt_contribution()`. Those land in the aggregated
+`## Tool guidance` section.
 
 Lower priority runs earlier. Pick your plugin's priority to slot it correctly.
 
-## Lifecycle plugins
+## Lifecycle hooks
 
 Subclass `BasePlugin` and implement any of these hooks. All are async unless noted.
 

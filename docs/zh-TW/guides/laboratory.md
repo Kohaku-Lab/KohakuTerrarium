@@ -446,7 +446,7 @@ worker 側以 WARNING 等級記錄，不會出現在主機的 log 裡。
   `?node=` query）。見 [HTTP API 參考](../reference/http.md)。
 - Python：`kohakuterrarium.terrarium.MultiNodeTerrariumService`
   （lab-host 模式）、`RemoteTerrariumService`（單 worker handle）、
-  `kohakuterrarium.laboratory.ClientConnector`（worker 的 client
+  `kohakuterrarium.laboratory._internal.client.ClientConnector`（worker 的 client
   物件，驅動你自己嵌入的 worker）。
 - 概念：[Laboratory](../concepts/laboratory.md)，涵蓋線路格式、
   session 同步、resume 語意、identity 模型。

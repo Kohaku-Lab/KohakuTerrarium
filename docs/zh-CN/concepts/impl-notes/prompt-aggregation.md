@@ -63,10 +63,8 @@ tags:
   长什么样子。
 5.**具名输出区段**。 对每个 `named_outputs.<name>`，简短说明
   何时该把文字路由到该处。
-6.**Prompt 插件区段**。 每个已注册的 prompt plugin
-  （依优先级排序，由低到高）都会贡献一个区段。内建有：
-  `ToolListPlugin`、`FrameworkHintsPlugin`、`EnvInfoPlugin`、
-  `ProjectInstructionsPlugin`。
+6.**插件贡献区段**。 每个已启用的 plugin 通过
+  `get_prompt_content` 返回的内容（依优先级排序，由低到高）。
 
 当 MCP 工具已连线时，还会额外插入一个名为
 「Available MCP Tools」的区段，依服务器用条列方式列出工具。
@@ -92,6 +90,6 @@ tags:
 
 ## 另请参阅
 
-- [Plugin](../modules/plugin.md)：如何撰写 prompt plugins。
+- [Plugin](../modules/plugin.md)：如何撰写 plugin 与它的 prompt 贡献。
 - [Tool](../modules/tool.md)：工具文件如何被注册。
 - [reference/configuration.md 的 tool_doc_mode、tool_format、include_* 参考](../../reference/configuration.md)：相关配置旋钮。

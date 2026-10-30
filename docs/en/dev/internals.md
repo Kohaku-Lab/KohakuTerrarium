@@ -207,14 +207,15 @@ See [impl-notes/prompt-aggregation.md](../concepts/impl-notes/prompt-aggregation
 
 ### 1.7 Plugin systems
 
-Two independent systems:
+One plugin class, `BasePlugin` (`modules/plugin/base.py`), loaded by
+`bootstrap/plugins.py` and run by the manager in `modules/plugin/`.
 
-**Prompt plugins** (`prompt/plugins.py`) contribute content into the
-system prompt at aggregate time. They are sorted by priority. Built-ins
-include `ToolList`, `FrameworkHints`, `EnvInfo`, `ProjectInstructions`.
+**Prompt contributions** (`get_prompt_content`, `presentation_contribution`)
+are collected by the manager in priority order and placed by the
+aggregator at aggregate time. The tool inventory, tool guidance, skills and
+group blocks are framework sections, not plugins.
 
-**Lifecycle plugins** (`bootstrap/plugins.py` + manager in
-`modules/plugin/`) hook into agent events. The manager evaluates
+**Lifecycle hooks** hook into agent events. The manager evaluates
 `should_apply` / `applies_to` before every hook call, supports
 plugin-contributed controller commands and plugin-contributed termination
 checkers, and treats `PluginBlockError` from a `pre_*` hook as a veto.

@@ -1,6 +1,6 @@
 ---
 title: 插件 (Plugin)
-summary: 在不 fork 模块的前提下修改模块之间的连接方式，分为 prompt plugins 与 lifecycle plugins 两类。
+summary: 在不 fork 模块的前提下修改模块之间的连接方式。只有一个 BasePlugin 类：lifecycle hook 加可选的 prompt 贡献。
 tags:
   - concepts
   - module
@@ -13,12 +13,12 @@ tags:
 
 **plugin** 改的是 *模块之间的连接*，不是模块本身。模块是积木；plugin 则是跑在接缝上的东西。
 
-它有两种 flavour，各自解决不同问题：
+plugin 是一个 `BasePlugin` subclass，可以做其中一件或两件事：
 
-- **Prompt plugins**：在控制器建构 system prompt 时，往里面补内容。
-- **Lifecycle plugins**：挂进运行时事件，例如 LLM 调用前后、工具调用前后、子 Agent 产生前后。
+- **挂进运行时事件**，例如 LLM 调用前后、工具调用前后、子 Agent 产生前后。
+- **贡献 prompt 文字**：控制器建构 system prompt 时，聚合器把它放进去。
 
-合起来看，plugin 是在 *不 fork 任何模块* 的前提下加行为的主要方式。
+plugin 是在 *不 fork 任何模块* 的前提下加行为的主要方式。
 
 ## 为什么它存在
 
@@ -33,18 +33,17 @@ tags:
 
 ## 我们怎么定义它
 
-### Prompt plugins
+### Prompt 贡献
 
 一个 `BasePlugin` subclass，具备：
 
-- `name` 与 `priority`（数值越低，越早出现在 prompt 里）
-- `get_content(context) → str | None`，返回一段 prompt 文字（若返回 `None`，代表不提供任何内容）
+- `name` 与 `priority`（数值越低，在插件贡献中越靠前）
+- `get_prompt_content(context) → str | None`，返回一段 prompt 文字（若返回 `None`，代表不提供任何内容）
+- 可选的 `presentation_contribution(context)`，贡献 `## Presenting your answer` 区段
 
-聚合器（`prompt/aggregator.py`）会依照 priority 排序已注册的 plugins，然后把它们的输出串接成最终的 system prompt。
+聚合器（`prompt/aggregator.py`）向 plugin manager 按 priority 取得这些贡献，放进 system prompt。工具清单、工具指引、skills 与 group 区块是框架区段，不是 plugin。
 
-内建的有：`ToolListPlugin`（自动工具索引）、`FrameworkHintsPlugin`（如何调用工具／使用 `##commands##`）、`EnvInfoPlugin`（working dir、日期、平台）、`ProjectInstructionsPlugin`（加载 `CLAUDE.md` / `.claude/rules.md`）。
-
-### Lifecycle plugins
+### Lifecycle hook
 
 一个 `BasePlugin` subclass，可以实现以下任意 hooks：
 
@@ -72,7 +71,7 @@ tags:
 - **Token 记帐**。 用 `post_llm_call` 统计 token 并写进外部储存。
 - **无缝记忆**。 用 `pre_llm_call` 对历史事件做 embedding lookup，把相关上下文插到前面；本质上就是不透过工具调用，直接对 session history 做 RAG。
 - **智慧护栏**。 用 `pre_tool_execute` plugin 跑一个小型的 *nested Agent*，判断某个动作能不能做。plugin 是 Python，Agent 也是 Python，所以这是合法的。参见 [patterns](../patterns.md)。
-- **Prompt 组合**。 用 prompt plugin 注入由 scratchpad state 或 session metadata 动态推导出的指示。
+- **Prompt 组合**。 用 plugin 的 `get_prompt_content` 注入由 scratchpad state 或 session metadata 动态推导出的指示。
 
 ## 不要被边界绑住
 
@@ -81,6 +80,6 @@ plugin 是可选的。没有 plugin 的 Creature 也能正常运作。但当你�
 ## 延伸阅读
 
 - [Controller](controller.md)：hooks 在哪里触发。
-- [Prompt aggregation](../impl-notes/prompt-aggregation.md)：prompt plugins 怎么插进去。
+- [Prompt aggregation](../impl-notes/prompt-aggregation.md)：plugin 贡献怎么插进去。
 - [Patterns（smart guard、seamless memory）](../patterns.md)：plugin 里包 Agent。
 - [reference/plugin-hooks.md 参考](../../reference/plugin-hooks.md)：每个 hook 的签章。

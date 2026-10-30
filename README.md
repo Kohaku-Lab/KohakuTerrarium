@@ -291,7 +291,7 @@ A creature has six conceptual modules. **Five are user-extensible**: you swap th
 | **Trigger** | Generates automatic events | Timer, scheduler, channel watcher |
 | **Sub-agent** | Delegated task execution | Planning, code review, research |
 
-Plus **plugins**, which modify the connections *between* modules without forking them (prompt plugins, lifecycle hooks, gating). See the [plugins guide](docs/en/guides/plugins.md).
+Plus **plugins**, which modify the connections *between* modules without forking them (lifecycle hooks, prompt contributions, gating). See the [plugins guide](docs/en/guides/plugins.md).
 
 ### Environment and session
 

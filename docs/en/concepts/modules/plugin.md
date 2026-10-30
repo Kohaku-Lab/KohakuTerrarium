@@ -1,6 +1,6 @@
 ---
 title: Plugin
-summary: Code that modifies the connections between modules without forking them. Prompt plugins and lifecycle plugins.
+summary: Code that modifies the connections between modules without forking them. One BasePlugin class: lifecycle hooks plus optional prompt contributions.
 tags:
   - concepts
   - module
@@ -15,16 +15,15 @@ A **plugin** modifies the *connections between modules*, not the
 modules themselves. Modules are the blocks. Plugins are what runs at
 the seams.
 
-There are two flavours, each solving a different problem:
+A plugin is one `BasePlugin` subclass that does either or both of:
 
-- **Prompt plugins** contribute content to the system prompt when the
-  controller builds it.
-- **Lifecycle plugins** hook into runtime events: before/after an LLM
-  call, before/after tool dispatch/execution, before/after a sub-agent
-  spawn, and at lifecycle checkpoints like compaction and interrupts.
+- **Hook runtime events**: before/after an LLM call, before/after tool
+  dispatch/execution, before/after a sub-agent spawn, and at lifecycle
+  checkpoints like compaction and interrupts.
+- **Contribute prompt prose**: text the aggregator places in the system
+  prompt when the controller builds it.
 
-Together, plugins are the main way to add behaviour *without forking
-any module*.
+Plugins are the main way to add behaviour *without forking any module*.
 
 ## Why it exists
 
@@ -44,23 +43,22 @@ Plugins let you hook the seams without touching the blocks.
 
 ## How we define it
 
-### Prompt plugins
+### Prompt contributions
 
 A `BasePlugin` subclass with:
 
-- a `name` and `priority` (lower = earlier in the prompt),
-- a `get_content(context) → str | None` that returns a section of
-  prompt text (or `None` to contribute nothing).
+- a `name` and `priority` (lower = earlier among plugin contributions),
+- a `get_prompt_content(context) → str | None` that returns a section of
+  prompt text (or `None` to contribute nothing),
+- optionally `presentation_contribution(context)` for the
+  `## Presenting your answer` section.
 
-The aggregator (`prompt/aggregator.py`) sorts registered plugins by
-priority and concatenates their outputs into the final system prompt.
+The aggregator (`prompt/aggregator.py`) asks the plugin manager for the
+contributions in priority order and places them in the system prompt.
+The tool inventory, tool guidance, skills and group blocks are framework
+sections, not plugins.
 
-Built-ins: `ToolListPlugin` (auto tool index), `FrameworkHintsPlugin`
-(how to call tools / use `##commands##`), `EnvInfoPlugin` (working
-dir, date, platform), `ProjectInstructionsPlugin` (loads
-`CLAUDE.md` / `.claude/rules.md`).
-
-### Lifecycle plugins
+### Lifecycle hooks
 
 A `BasePlugin` subclass with any of these hooks:
 
@@ -113,7 +111,7 @@ Two newer extension points live alongside the hook surface:
   *nested agent* to decide whether the action is acceptable. Plugins
   are Python, and agents are Python, so this is legal. See
   [patterns](../patterns.md).
-- **Prompt composition.** A prompt plugin that injects dynamic
+- **Prompt composition.** A plugin whose `get_prompt_content` injects dynamic
   instructions derived from scratchpad state or session metadata.
 
 ## Don't be bounded
@@ -125,6 +123,6 @@ in the loop," the answer is almost always a plugin, not a new module.
 ## See also
 
 - [Controller](controller.md): where the hooks fire.
-- [Prompt aggregation](../impl-notes/prompt-aggregation.md): how prompt plugins slot in.
+- [Prompt aggregation](../impl-notes/prompt-aggregation.md): how plugin contributions slot in.
 - [Smart guard and seamless memory in Patterns](../patterns.md): agent-inside-plugin.
 - [reference/plugin-hooks.md](../../reference/plugin-hooks.md): every hook signature.

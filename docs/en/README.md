@@ -48,7 +48,7 @@ Task-oriented docs: "how do I do X".
 - [Programmatic Usage](guides/programmatic-usage.md): `Terrarium`, `Studio`, `Creature`, and lower-level `Agent` embedding.
 - [Composition](guides/composition.md): `>>`, `&`, `|`, `*` pipelines.
 - [Custom Modules](guides/custom-modules.md): tools, inputs, outputs, triggers, sub-agents.
-- [Plugins](guides/plugins.md): prompt and lifecycle plugins.
+- [Plugins](guides/plugins.md): lifecycle hooks and prompt contributions.
 - [MCP](guides/mcp.md): Model Context Protocol servers.
 - [Packages](guides/packages.md): `kohaku.yaml`, install modes, publishing.
 - [Serving](guides/serving.md): `kt web`, `kt app`, `kt serve` daemon.

@@ -72,7 +72,7 @@ session 或圖的共用 environment 裡。一個 `send_message` 工具加上
 
 ## Plugin / 外掛
 
-修改模組之間**連接方式**的程式碼，而不是 fork 某個模組。兩種：**prompt 外掛** (為 system prompt 貢獻內容) 與 **lifecycle 外掛** (掛在 `pre_llm_call`、`post_tool_execute` 這類 hook)。`pre_*` hook 可以拋 `PluginBlockError` 來中止操作。完整說明：[外掛](modules/plugin.md)。
+修改模組之間**連接方式**的程式碼，而不是 fork 某個模組。只有一個 `BasePlugin` 類別：它掛在 `pre_llm_call`、`post_tool_execute` 這類 hook 上，也可以為 system prompt 貢獻內容。`pre_*` hook 可以拋 `PluginBlockError` 來中止操作。完整說明：[外掛](modules/plugin.md)。
 
 ## Skill mode / Skill 模式
 

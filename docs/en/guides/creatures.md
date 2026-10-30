@@ -388,7 +388,7 @@ Compaction runs in the background and does not block the controller. See [Sessio
 
 ## Plugins
 
-Attach lifecycle/prompt plugins to this creature only:
+Attach plugins to this creature only:
 
 ```yaml
 plugins:

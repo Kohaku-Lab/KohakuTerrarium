@@ -574,18 +574,11 @@ Grok 4.x (`grok-4`、`grok-4.20`、`grok-4.20-multi`、`grok-4-fast`、`grok-4.1
 
 ---
 
-## Prompt plugin
+## Prompt 區段
 
-隨附的 prompt plugin (由 `prompt/aggregator.py` 載入)。依 priority 排序 (數字越小越早執行)。
+`prompt/aggregator.py` 由帶門控的框架區段組合出 system prompt：creature 的基礎 prompt、`## Available Functions` 與 `## Function Documentation`（文字工具格式或 `full` 文件模式）、`## Tool guidance`、外掛貢獻、`## Skills`、group 區塊（僅限處於圖中的 creature）以及執行模型。主題不存在的區段不會輸出。
 
-| Priority | 名稱 | 產出 |
-|---|---|---|
-| 50 | `ToolListPlugin` | 工具名稱 + 一行描述。 |
-| 45 | `FrameworkHintsPlugin` | 框架命令範例 (`info`、`read_job`、`jobs`、`wait`) 與 tool-call 格式範例。 |
-| 40 | `EnvInfoPlugin` | `cwd`、平台、日期/時間。 |
-| 30 | `ProjectInstructionsPlugin` | 載入 `CLAUDE.md` 與 `.claude/rules.md`。 |
-
-自訂 prompt plugin 繼承 `BasePlugin`，在 creature config 的 `plugins` 欄位註冊。生命週期與 callback hook 見 [plugin-hooks.md](plugin-hooks.md)。
+外掛透過在 `BasePlugin` 子類別上覆寫 `get_prompt_content(context)` 來增加文字，並在 creature config 的 `plugins` 欄位註冊。hook 見 [plugin-hooks.md](plugin-hooks.md)。工具透過 `prompt_contribution()` 向彙整的 `## Tool guidance` 區段貢獻一行或短段落的指引。
 
 ---
 

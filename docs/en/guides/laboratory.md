@@ -481,7 +481,7 @@ won't appear in the host's logs.
   identity routes). See [HTTP API reference](../reference/http.md).
 - Python: `kohakuterrarium.terrarium.MultiNodeTerrariumService`
   (lab-host mode), `RemoteTerrariumService` (per-worker handle),
-  `kohakuterrarium.laboratory.ClientConnector` (the worker's
+  `kohakuterrarium.laboratory._internal.client.ClientConnector` (the worker's
   client object; drive your own embedded worker).
 - Concepts: [Laboratory](../concepts/laboratory.md): wire format,
   session sync, resume semantics, identity model.

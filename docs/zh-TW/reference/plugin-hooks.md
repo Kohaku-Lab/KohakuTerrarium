@@ -31,7 +31,7 @@ tags:
 | `on_load` | `async on_load(ctx: PluginContext) -> None` | 外掛被載入到 agent 時。 | 忽略 |
 | `on_unload` | `async on_unload() -> None` | 外掛被卸載，或 agent 停止時。 | 忽略 |
 
-`PluginContext` 讓外掛能存取 agent、其設定、scratchpad 與 logger。詳細結構請看 `kohakuterrarium.modules.plugin.context`。
+`PluginContext` 讓外掛能存取 agent、其設定、scratchpad 與 logger。詳細結構請看 `kohakuterrarium.modules.plugin.base`。
 
 ---
 
@@ -92,24 +92,23 @@ tags:
 
 ---
 
-## Prompt plugins（獨立類別）
+## Prompt 貢獻
 
-Prompt plugins 在 system prompt 組裝過程中執行，實作位於 `prompt/aggregator.py`。它們與 lifecycle plugins 分開載入。
-
-`BasePlugin`（位於 `kohakuterrarium.prompt.plugins`）具備：
+`BasePlugin`（位於 `kohakuterrarium.modules.plugin.base`）也可以向 `prompt/aggregator.py` 組裝的 system prompt 貢獻文字：
 
 ```python
 priority: int       # 越小越早
 name: str
-async def get_content(self, context: PromptContext) -> str | None
+prompt_renderers: frozenset[str]   # 其附加/移除會改變文字的 renderer id
+def get_prompt_content(self, context: PluginContext) -> str | None
+def presentation_contribution(self, context: PluginContext) -> str | None
 ```
 
-- `get_content(context) -> str | None`：回傳要插入的文字區塊；回傳 `None` 代表不提供內容。
-- `priority`：排序鍵。內建外掛大致落在 50/45/40/30。
+- `get_prompt_content(context) -> str | None`：回傳要插入的文字區塊；回傳 `None` 代表不提供內容。
+- `presentation_contribution(context) -> str | None`：回傳此外掛在 `## Presenting your answer` 中的部分，或 `None`。
+- `priority`：外掛貢獻之間的排序鍵。
 
-內建 prompt plugins 請看 [builtins.md：Prompt plugins](builtins.md#prompt-plugins)。
-
-自訂 prompt plugin 一樣透過 creature config 的 `plugins` 欄位註冊；框架會依 plugin class 是 subclass 自 lifecycle `Plugin` protocol，還是 prompt `BasePlugin`，來決定走哪一套調度。
+框架自己的區段請看 [builtins.md：Prompt 區段](builtins.md#prompt-區段)。自訂外掛一樣透過 creature config 的 `plugins` 欄位註冊。
 
 ---
 
