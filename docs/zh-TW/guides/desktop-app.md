@@ -1,0 +1,49 @@
+---
+title: 桌面應用程式
+summary: 已安裝的應用程式（Windows 與 macOS）與 `kt app`：各自包含什麼、本機服務如何受保護、終端機指令，以及首次執行的放行。
+tags:
+  - guides
+  - desktop
+  - install
+---
+
+# 桌面應用程式
+
+取得桌面視窗有兩種方式。它們顯示相同的介面，並共用 `~/.kohakuterrarium`（設定、工作階段、已安裝的套件），所以可以隨時切換。
+
+| | 已安裝的應用程式 | `kt app` |
+|---|---|---|
+| 取得方式 | 發佈頁面的 `.msi` / `.exe`（Windows）、`.dmg`（macOS） | `pip install kohakuterrarium` |
+| 視窗 | Tauri（系統 webview） | pywebview |
+| Python | 隨應用程式打包 | 你自己的直譯器 |
+| 更新 | 透過啟動器的更新流程安裝新版本，無需重新安裝（[應用程式更新](app-update.md)） | `pip install -U` |
+| 平台 | Windows、macOS | Windows、macOS、Linux（盡力支援） |
+
+## 已安裝的應用程式包含什麼
+
+一個直譯器、啟動器，以及一個 KohakuTerrarium 發佈版本。首次啟動時，它會把該版本解壓縮到 `~/.kohakuterrarium/runtime`，並在視窗中顯示進度。之後的啟動直接重用；更新會換入較新的版本，而不需要重新安裝應用程式。會啟動 Python 的工具（`python` 工具、MCP 伺服器、套件的相依安裝）使用隨應用程式打包的直譯器。
+
+## 終端機指令
+
+已安裝的應用程式可以把 `kt`、`kt-cli` 與 `kt-tui` 放到你的 PATH 上。預設關閉；請見[終端機指令](../../en/guides/terminal-commands.md)（英文）。
+
+## 連結
+
+指向其他網站的連結會在預設瀏覽器中開啟，不會在應用程式視窗內開啟。`kt://session/<name>` 連結會在應用程式中開啟對應已儲存工作階段的歷史。
+
+## 本機服務如何受保護
+
+視窗連線到 `127.0.0.1` 上的服務。每次啟動都會產生只有應用程式知道的一次性權杖；服務把它換成只有該視窗持有的 cookie，之後拒絕所有不帶 cookie 的請求，包括瀏覽器中其他網頁與其他程式送來的請求。`Host` 或 `Origin` 不是本機位址的請求同樣會被拒絕。`kt serve` 與 `kt web` 不受影響。
+
+## 未簽署建置的首次執行
+
+發佈建置沒有使用付費的開發者憑證簽署。
+
+- **Windows：** SmartScreen 可能顯示「Windows 已保護您的電腦」。請選擇**其他資訊 → 仍要執行**。
+- **macOS：** 應用程式使用臨時（ad-hoc）簽署。若 macOS 阻擋開啟，請到**系統設定 → 隱私權與安全性**，選擇一次**強制打開**。
+
+發佈資產附有 SHA-256 校驗碼，可用來核對下載的檔案。
+
+## Linux 上的 `kt app`
+
+`kt app` 需要 webview 後端：附 WebKit2GTK 的 GTK，或 Qt WebEngine。沒有時，它會改用預設瀏覽器開啟介面，`kt doctor` 會列出缺少的系統套件。

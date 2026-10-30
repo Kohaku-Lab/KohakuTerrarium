@@ -96,15 +96,16 @@ kohakuterrarium`, which manages PATH for you.
 ### Installed as the desktop app
 
 The desktop app is GUI-first, but it can also hand you working terminal commands
-even when you have no separate Python toolchain. From the app (or by running its
-launch binary once), use:
+even when you have no separate Python toolchain. Turn on **Settings → Preferences →
+Desktop app → Terminal command**. The switch writes small wrapper scripts into a
+per-user directory and adds that directory to your own PATH (the per-user
+registry value on Windows, a marked block in `~/.zprofile` on macOS), without
+administrator rights. Turn it off to remove both. Open a new terminal for the
+change to take effect.
 
-```bash
-kt shims install
-```
-
-Inside the desktop bundle this writes small wrapper scripts that forward to the
-app's own bundled runtime, so `kt`, `kt-cli`, and `kt-tui` work in your terminal
-without a separate install.
+The wrappers run the app's bundled interpreter and release, so `kt`, `kt-cli`,
+and `kt-tui` work without a separate install and follow the app's updates. The
+switch only appears on the machine that runs the app. The same operation is
+available as `kt shims install` / `kt shims uninstall`, which do not touch PATH.
 
 `kt doctor` reports your shim status alongside its other checks.

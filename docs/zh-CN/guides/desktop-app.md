@@ -1,0 +1,49 @@
+---
+title: 桌面应用
+summary: 已安装的应用（Windows 与 macOS）和 `kt app`：各自包含什么、本地服务如何受保护、终端命令，以及首次运行的放行。
+tags:
+  - guides
+  - desktop
+  - install
+---
+
+# 桌面应用
+
+获得桌面窗口有两种方式。它们显示相同的界面，并共享 `~/.kohakuterrarium`（设置、会话、已安装的包），所以可以随时切换。
+
+| | 已安装的应用 | `kt app` |
+|---|---|---|
+| 获取方式 | 发布页面的 `.msi` / `.exe`（Windows）、`.dmg`（macOS） | `pip install kohakuterrarium` |
+| 窗口 | Tauri（系统 webview） | pywebview |
+| Python | 随应用打包 | 你自己的解释器 |
+| 更新 | 通过启动器的更新流程安装新版本，无需重装（[应用更新](app-update.md)） | `pip install -U` |
+| 平台 | Windows、macOS | Windows、macOS、Linux（尽力支持） |
+
+## 已安装的应用包含什么
+
+一个解释器、启动器，以及一个 KohakuTerrarium 发布版本。首次启动时，它会把该版本解压到 `~/.kohakuterrarium/runtime`，并在窗口中显示进度。之后的启动直接复用；更新会换入较新的版本，而不需要重新安装应用。会启动 Python 的工具（`python` 工具、MCP 服务器、包的依赖安装）使用随应用打包的解释器。
+
+## 终端命令
+
+已安装的应用可以把 `kt`、`kt-cli` 和 `kt-tui` 放到你的 PATH 上。默认关闭；见[终端命令](../../en/guides/terminal-commands.md)（英文）。
+
+## 链接
+
+指向其他网站的链接会在默认浏览器中打开，不会在应用窗口内打开。`kt://session/<name>` 链接会在应用中打开对应已保存会话的历史。
+
+## 本地服务如何受保护
+
+窗口连接 `127.0.0.1` 上的服务。每次启动都会生成只有应用知道的一次性令牌；服务把它换成只有该窗口持有的 cookie，之后拒绝所有不带 cookie 的请求，包括浏览器中其他网页和其他程序发来的请求。`Host` 或 `Origin` 不是本机地址的请求同样会被拒绝。`kt serve` 与 `kt web` 不受影响。
+
+## 未签名构建的首次运行
+
+发布构建没有使用付费的开发者证书签名。
+
+- **Windows：** SmartScreen 可能提示“Windows 已保护你的电脑”。选择**更多信息 → 仍要运行**。
+- **macOS：** 应用使用临时（ad-hoc）签名。如果 macOS 阻止打开，请到**系统设置 → 隐私与安全性**，选择一次**仍要打开**。
+
+发布资产附有 SHA-256 校验和，可用来核对下载文件。
+
+## Linux 上的 `kt app`
+
+`kt app` 需要 webview 后端：带 WebKit2GTK 的 GTK，或 Qt WebEngine。没有时，它会改用默认浏览器打开界面，`kt doctor` 会列出缺少的系统软件包。
