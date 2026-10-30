@@ -89,6 +89,19 @@ def _load_webview():
     return webview
 
 
+WEBVIEW_SETTINGS = {
+    "ALLOW_DOWNLOADS": True,
+    "OPEN_EXTERNAL_LINKS_IN_BROWSER": True,
+}
+
+
+def configure_webview_settings(webview) -> None:
+    """Let pages save files (artifacts, exports) and hand external links to the OS."""
+    settings = getattr(webview, "settings", None)
+    if isinstance(settings, dict):
+        settings.update(WEBVIEW_SETTINGS)
+
+
 def _set_windows_app_id() -> None:
     try:
         import ctypes
@@ -337,6 +350,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     raise_fd_limit(log=True)
     os.environ["KT_STARTUP_SURFACE"] = "desktop"
     webview = _load_webview()
+    configure_webview_settings(webview)
     icons_dir = Path(__file__).parents[2] / "app_icons"
     icon_ico = icons_dir / "window.ico"
     icon_png = icons_dir / "window.png"

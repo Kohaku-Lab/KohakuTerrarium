@@ -24,6 +24,44 @@ def _isolate_native_dpi(monkeypatch):
     monkeypatch.setattr(desktop, "native_window_available", lambda: True)
 
 
+def test_webview_settings_allow_downloads_and_external_links():
+    webview = SimpleNamespace(settings={"ALLOW_DOWNLOADS": False, "OTHER": 1})
+
+    desktop.configure_webview_settings(webview)
+
+    assert webview.settings == {
+        "ALLOW_DOWNLOADS": True,
+        "OPEN_EXTERNAL_LINKS_IN_BROWSER": True,
+        "OTHER": 1,
+    }
+
+
+def test_webview_without_a_settings_table_is_left_alone():
+    desktop.configure_webview_settings(SimpleNamespace())
+
+
+def test_the_window_is_configured_before_it_is_created(monkeypatch):
+    seen = []
+    webview = _Webview([])
+    webview.settings = {}
+    original = webview.create_window
+    webview.create_window = lambda *a, **k: (
+        seen.append(dict(webview.settings)) or original(*a, **k)
+    )
+    monkeypatch.setattr(desktop, "configure_utf8_stdio", lambda **_k: None)
+    monkeypatch.setattr(desktop.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(desktop, "_load_webview", lambda: webview)
+    monkeypatch.setattr(desktop, "_start_server", lambda **_k: SimpleNamespace(pid=1))
+    monkeypatch.setattr(
+        desktop, "_wait_for_server", lambda *_a, **_k: {"status": "error", "error": "x"}
+    )
+    monkeypatch.setattr(desktop, "_stop_server_child", lambda *_a, **_k: None)
+
+    desktop.run_desktop_app(port=8001, log_level="ERROR")
+
+    assert seen and seen[0]["ALLOW_DOWNLOADS"] is True
+
+
 def test_without_a_native_backend_the_app_opens_in_the_browser(monkeypatch, capsys):
     served = []
     timers = []
