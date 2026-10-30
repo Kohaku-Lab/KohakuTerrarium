@@ -8,6 +8,7 @@ not support the standard ``PYTHONPATH`` execution model.
 
 import argparse
 import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -27,11 +28,14 @@ from kohakuterrarium.launcher.splash_server import SplashServer
 from kohakuterrarium.launcher.splash_window import run_with_splash
 from kohakuterrarium.launcher.tree_ops import read_active_pointer
 from kohakuterrarium.launcher.update_runner import (
+    ProgressCallback,
     UpdateResult,
     first_install,
     maybe_update,
     reset as runner_reset,
 )
+
+_IS_WINDOWS = os.name == "nt"
 
 
 @dataclass
@@ -80,13 +84,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return known
 
 
-def prepare(argv: list[str] | None = None) -> "PrepareResult":
+def prepare(
+    argv: list[str] | None = None,
+    *,
+    progress: ProgressCallback | None = None,
+) -> "PrepareResult":
     """Prepare the active release without executing it or changing import paths.
 
     Setup handles one-shot launcher modes, migration, first installation, and
     optional updates. The result either directs the caller to exit or provides
-    the active release paths for a process or in-process handoff. This function
-    also owns first-install splash lifecycle for both entry points.
+    the active release paths for a process or in-process handoff. First
+    installation shows the splash window unless the caller supplies ``progress``
+    and renders progress itself.
     """
     args = _parse_args(argv)
     log = get_logger()
@@ -135,7 +144,10 @@ def prepare(argv: list[str] | None = None) -> "PrepareResult":
         # First installation can block on extraction, download, and smoke
         # checks, so keep the shell visibly responsive with progress.
         log.info("launcher: no active pointer — first_install")
-        install_result = run_with_splash(_first_install_with_progress)
+        if progress is not None:
+            install_result = first_install(progress)
+        else:
+            install_result = run_with_splash(_first_install_with_progress)
         if not install_result.ok:
             log.error("launcher: first_install failed: %s", install_result.error)
             return PrepareResult(exit_code=5, error=install_result.error)
@@ -145,7 +157,7 @@ def prepare(argv: list[str] | None = None) -> "PrepareResult":
             log.error("launcher: first_install reported ok but pointer absent")
             return PrepareResult(exit_code=7, error="post-install pointer absent")
     else:
-        update_result = maybe_update()
+        update_result = maybe_update(progress)
         if not update_result.ok:
             log.warning(
                 "launcher: maybe_update reported failure (%s); "
@@ -193,7 +205,18 @@ def main(argv: list[str] | None = None) -> int:
     os.environ["KT_LAUNCHER_EXEC"] = "1"
     py = str(sys.executable)
     log.info("launcher: exec %s -m kohakuterrarium.cli %s", py, forward)
-    os.execv(py, [py, "-m", "kohakuterrarium.cli", *forward])
+    return _hand_off([py, "-m", "kohakuterrarium.cli", *forward])
+
+
+def _hand_off(command: list[str]) -> int:
+    """Replace this process with ``command``, or wait on it where exec cannot.
+
+    Windows ``execv`` starts a new process and exits immediately, which returns the
+    shell prompt before the command finishes.
+    """
+    if _IS_WINDOWS:
+        return subprocess.call(command)
+    os.execv(command[0], command)
     return 0  # Successful execv replaces the process before this return.
 
 

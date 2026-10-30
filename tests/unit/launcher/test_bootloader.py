@@ -94,6 +94,69 @@ class TestPrepare:
         assert _tree.read_active_pointer() is None
         assert "offline" in (_settings.load().runtime.last_check_error or "")
 
+    def test_caller_supplied_progress_replaces_the_splash(self, monkeypatch, headless):
+        bundled = headless / "bundled-release"
+        bundled.mkdir()
+        _make_release_tarball(
+            bundled / "kohakuterrarium-9.9.9-win-x64-py3.13.tar.gz", version="9.9.9"
+        )
+        monkeypatch.setattr(
+            _paths, "_candidate_bundled_release_dirs", lambda: [bundled]
+        )
+        monkeypatch.setattr(
+            bootloader,
+            "run_with_splash",
+            lambda *_a, **_k: pytest.fail("splash used despite a progress callback"),
+        )
+        seen = []
+
+        result = bootloader.prepare(
+            [], progress=lambda phase, percent, message: seen.append((phase, percent))
+        )
+
+        assert result.version == "9.9.9"
+        assert seen and seen[-1][1] >= 90
+
+    def test_bundled_release_dir_can_be_named_by_the_environment(
+        self, monkeypatch, tmp_path
+    ):
+        named = tmp_path / "named"
+        named.mkdir()
+        _make_release_tarball(
+            named / "kohakuterrarium-1.2.3-win-x64-py3.13.tar.gz", version="1.2.3"
+        )
+        monkeypatch.setenv("KT_BUNDLED_RELEASE_DIR", str(named))
+
+        assert _paths.bundled_release_dir() == named
+
+    def test_windows_waits_on_the_cli_instead_of_exec(self, monkeypatch):
+        monkeypatch.setattr(bootloader, "_IS_WINDOWS", True)
+        monkeypatch.setattr(
+            bootloader.os,
+            "execv",
+            lambda *_a: pytest.fail("execv returns control to the shell on Windows"),
+        )
+        ran = []
+        monkeypatch.setattr(
+            bootloader.subprocess, "call", lambda command: ran.append(command) or 7
+        )
+
+        assert bootloader._hand_off(["python", "-m", "kohakuterrarium.cli"]) == 7
+        assert ran == [["python", "-m", "kohakuterrarium.cli"]]
+
+    def test_posix_replaces_the_process(self, monkeypatch):
+        monkeypatch.setattr(bootloader, "_IS_WINDOWS", False)
+        replaced = []
+        monkeypatch.setattr(
+            bootloader.os, "execv", lambda path, argv: replaced.append((path, argv))
+        )
+
+        bootloader._hand_off(["python", "-m", "kohakuterrarium.cli", "--help"])
+
+        assert replaced == [
+            ("python", ["python", "-m", "kohakuterrarium.cli", "--help"])
+        ]
+
     def test_splash_demo_is_a_one_shot_mode(self, headless):
         result = bootloader.prepare(["--splash-demo"])
         assert result.done is True

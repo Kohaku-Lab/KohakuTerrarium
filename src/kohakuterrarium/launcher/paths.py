@@ -66,7 +66,9 @@ def _candidate_bundled_release_dirs() -> list[Path]:
     """
     here = Path(__file__).resolve()
     exe = Path(sys.executable)
+    explicit = os.environ.get("KT_BUNDLED_RELEASE_DIR")
     return [
+        *([Path(explicit)] if explicit else []),
         here.parent.parent.parent / "bundled-release",
         exe.parent / "bundled-release",
         exe.parent.parent / "bundled-release",
