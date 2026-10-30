@@ -51,6 +51,10 @@ from kohakuterrarium.modules.tool.base import (
 
 
 class _EchoTool(BaseTool):
+    def __init__(self):
+        super().__init__()
+        self.calls: list[dict] = []
+
     @property
     def tool_name(self):
         return "echo"
@@ -64,6 +68,7 @@ class _EchoTool(BaseTool):
         return ExecutionMode.DIRECT
 
     async def _execute(self, args, **kwargs):
+        self.calls.append(dict(args))
         return ToolResult(output=str(args.get("msg", "")))
 
 
@@ -319,9 +324,10 @@ class TestUserInputProcessing:
         agent = make_agent(script=["ok"])
         await _start_and_run(agent, create_user_input_event("hello"))
         msgs = agent.controller.conversation.get_messages()
-        roles = [m.role for m in msgs]
-        assert "user" in roles
-        assert "assistant" in roles
+        assert [(m.role, m.get_text_content()) for m in msgs[1:]] == [
+            ("user", "hello"),
+            ("assistant", "ok"),
+        ]
 
 
 # ── tool dispatch ────────────────────────────────────────────────
@@ -332,7 +338,7 @@ class TestToolDispatch:
         # First LLM call emits a tool block; second wraps up.
         agent = make_agent(
             script=[
-                "[/echo]msg=hi[echo/]",
+                "[/echo]\n@@msg=hi\n[echo/]",
                 "Done!",
             ]
         )
@@ -341,10 +347,14 @@ class TestToolDispatch:
         agent.registry.register_tool(tool)
         agent.executor.register_tool(tool)
         await _start_and_run(agent, create_user_input_event("run echo"))
-        # The conversation contains a tool message with the echo output.
+        assert tool.calls == [{"msg": "hi"}]
+        # The tool's output reaches the model, which then answers.
         msgs = agent.controller.conversation.get_messages()
-        # There should be a turn-completion message after the tool ran.
-        assert len(msgs) >= 3
+        assert any(
+            m.role == "user" and "hi" in m.get_text_content() for m in msgs[1:]
+        ), [(m.role, m.get_text_content()) for m in msgs]
+        last = agent.controller.conversation.get_last_assistant_message()
+        assert last.get_text_content() == "Done!"
 
 
 # ── compact manager initialised + cancelled on stop ──────────────
@@ -1082,7 +1092,7 @@ class TestMultiRoundTurn:
     async def test_tool_call_then_followup(self, make_agent):
         agent = make_agent(
             script=[
-                "[/echo]msg=hi[echo/]",
+                "[/echo]\n@@msg=hi\n[echo/]",
                 "All done!",
             ]
         )
@@ -1090,17 +1100,15 @@ class TestMultiRoundTurn:
         agent.registry.register_tool(tool)
         agent.executor.register_tool(tool)
         await _start_and_run(agent, create_user_input_event("run tool"))
-        # Conversation now contains BOTH the tool-using turn and the
-        # follow-up text.
-        last = agent.controller.conversation.get_last_assistant_message()
-        assert last is not None
-        # We expect at least 2 assistant turns.
+        assert tool.calls == [{"msg": "hi"}]
+        # One tool-using assistant turn, then the follow-up text.
         assistants = [
             m
             for m in agent.controller.conversation.get_messages()
             if m.role == "assistant"
         ]
-        assert len(assistants) >= 2
+        assert len(assistants) == 2
+        assert assistants[-1].get_text_content() == "All done!"
 
 
 # ── public API methods ───────────────────────────────────────────
@@ -2443,7 +2451,7 @@ class TestPluginVeto:
 
         agent = make_agent(
             script=[
-                "[/echo]msg=hi[echo/]",
+                "[/echo]\n@@msg=hi\n[echo/]",
                 "Sorry can't.",
             ]
         )
@@ -2457,10 +2465,14 @@ class TestPluginVeto:
         await agent.start()
         try:
             await agent._process_event(create_user_input_event("hi"))
-            # Run completes, last assistant response present.
-            assert (
-                agent.controller.conversation.get_last_assistant_message() is not None
-            )
+            assert tool.calls == []
+            queue = agent.controller._event_queue
+            queued = []
+            while not queue.empty():
+                queued.append(queue.get_nowait())
+            assert [(e.type, e.content) for e in queued] == [
+                ("tool_complete", "[veto] vetoed by policy")
+            ]
         finally:
             await agent.stop()
 
