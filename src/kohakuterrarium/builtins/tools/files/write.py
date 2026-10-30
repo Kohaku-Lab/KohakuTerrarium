@@ -81,6 +81,7 @@ class WriteTool(BaseTool):
             temp_path = file_path.parent / f".kt-write-{secrets.token_hex(12)}.tmp"
             async with aiofiles.open(temp_path, "x", encoding="utf-8") as f:
                 await f.write(content)
+            bytes_written = temp_path.stat().st_size
 
             if existing_mode is not None:
                 os.chmod(temp_path, existing_mode)
@@ -105,7 +106,7 @@ class WriteTool(BaseTool):
                 )
 
             return ToolResult(
-                output=f"{action} {file_path} ({lines} lines, {len(content)} bytes)",
+                output=f"{action} {file_path} ({lines} lines, {bytes_written} bytes)",
                 exit_code=0,
                 metadata={
                     # Inline content lets the canvas reflect the write without a
