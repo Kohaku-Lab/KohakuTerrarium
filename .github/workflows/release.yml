@@ -24,6 +24,7 @@ permissions:
   contents: write
   id-token: write
   packages: write
+  attestations: write
 
 jobs:
   # ── One resolution of version / channel / tag, consumed by every job ──
@@ -724,7 +725,14 @@ jobs:
           find all-artifacts/release-tree-* -type f -exec cp {} release/ \;
           # Briefcase desktop bundles
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
+          (cd release && sha256sum * > SHA256SUMS)
           ls -la release/
+          cat release/SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "release/*"
 
       # A plain commit list beats ``generate_release_notes``: that groups by
       # pull request, so direct pushes vanish and a branch collapses to one
