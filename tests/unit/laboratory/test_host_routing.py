@@ -24,7 +24,7 @@ from kohakuterrarium.laboratory._internal.envelope import (
 )
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory._internal.protocol import HOST_NODE_ID
-from kohakuterrarium.laboratory._internal.transport_inproc import (
+from kohakuterrarium.laboratory._internal.transport.inproc import (
     InProcTransport,
 )
 
@@ -312,7 +312,7 @@ class TestHandleAppMalformed:
     async def test_response_with_no_pending_request_silent(self):
         host, c1 = await _start_pair(port=20)
         try:
-            from kohakuterrarium.laboratory._internal.app import (
+            from kohakuterrarium.laboratory._internal.app.app import (
                 build_app_envelope,
             )
 

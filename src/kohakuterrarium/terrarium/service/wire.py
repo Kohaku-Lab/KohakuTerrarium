@@ -6,7 +6,7 @@ its arguments and return values translated between Python dataclass
 form and msgpack-compatible primitive form.
 
 The Laboratory APP layer encodes msgpack-compatible primitives only
-(:mod:`kohakuterrarium.laboratory._internal.app`).  ``kohakuvault.DataPacker("msgpack")``
+(:mod:`kohakuterrarium.laboratory._internal.app.app`).  ``kohakuvault.DataPacker("msgpack")``
 rejects raw ``bytes`` — payloads that need binary data (file bundles,
 ``read``/``write``, etc.) base64-encode it into a string field on the
 wire and decode at the receiver.  This module converts Python

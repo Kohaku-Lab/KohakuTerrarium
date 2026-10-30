@@ -10,7 +10,7 @@ user code should import the public API from this package.
 """
 
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
-from kohakuterrarium.laboratory._internal.app import (
+from kohakuterrarium.laboratory._internal.app.app import (
     AppMessage,
     AppMessageError,
     ExtensionHandler,

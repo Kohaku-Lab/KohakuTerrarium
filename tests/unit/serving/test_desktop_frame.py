@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.serving.desktop_frame import NativeFrame, Rect
+from kohakuterrarium.serving.desktop.frame import NativeFrame, Rect
 
 
 def test_size_transitions_refresh_dwm_after_maximized_focus_changes():

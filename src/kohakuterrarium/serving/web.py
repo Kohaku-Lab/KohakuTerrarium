@@ -19,8 +19,8 @@ import uvicorn
 import kohakuterrarium.session.run_state as run_state
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
-from kohakuterrarium.serving.desktop_chrome import configure_desktop_chrome
-from kohakuterrarium.serving.desktop_palette import BACKGROUND
+from kohakuterrarium.serving.desktop.chrome import configure_desktop_chrome
+from kohakuterrarium.serving.desktop.palette import BACKGROUND
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
@@ -311,7 +311,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     cmd = [
         sys.executable,
         "-m",
-        "kohakuterrarium.serving.desktop",
+        "kohakuterrarium.serving.desktop.desktop",
         "--port",
         str(port),
         "--log-level",

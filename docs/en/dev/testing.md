@@ -336,7 +336,7 @@ No Lab transport is started; these are sub-millisecond.
 
 For workflows that span the actual Lab dispatch logic
 (handshake → APP request → response), use `InProcTransport` from
-`laboratory/_internal/transport_inproc.py`. It implements the
+`laboratory/_internal/transport/inproc.py`. It implements the
 same `LabTransport` Protocol as the WebSocket transport but
 keeps everything in one event loop. See
 `tests/unit/laboratory/test_client_host.py::_start_host` for

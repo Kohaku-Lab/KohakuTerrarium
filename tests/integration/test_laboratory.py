@@ -30,7 +30,7 @@ from kohakuterrarium.laboratory._internal.client import (
     RequestTimeoutError,
 )
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_inproc import InProcTransport
+from kohakuterrarium.laboratory._internal.transport.inproc import InProcTransport
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,
@@ -1703,7 +1703,7 @@ class TestLaboratoryAdapterDirect:
         from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
         from kohakuterrarium.laboratory._internal.client import ClientConnector
         from kohakuterrarium.laboratory._internal.host import HostEngine
-        from kohakuterrarium.laboratory._internal.transport_inproc import (
+        from kohakuterrarium.laboratory._internal.transport.inproc import (
             InProcTransport,
         )
         from kohakuterrarium.laboratory.adapters import (

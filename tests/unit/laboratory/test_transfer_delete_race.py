@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.laboratory.adapters.terrarium_session import (
+from kohakuterrarium.laboratory.adapters.terrarium.session import (
     TerrariumSessionAdapter,
 )
 from kohakuterrarium.session.occupancy.gate import GATE, try_fast

@@ -13,7 +13,7 @@ import asyncio
 import pytest
 
 from kohakuterrarium.laboratory._internal.addressing import AddressDirectory
-from kohakuterrarium.laboratory._internal.app import (
+from kohakuterrarium.laboratory._internal.app.app import (
     AppMessageError,
     ExtensionNotFoundError,
     build_app_envelope,

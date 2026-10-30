@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
-from kohakuterrarium.laboratory.adapters import terrarium_session as sess_mod
-from kohakuterrarium.laboratory.adapters.terrarium_session import (
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
+from kohakuterrarium.laboratory.adapters.terrarium import session as sess_mod
+from kohakuterrarium.laboratory.adapters.terrarium.session import (
     TerrariumSessionAdapter,
 )
 from kohakuterrarium.session.occupancy.family import acquire_family

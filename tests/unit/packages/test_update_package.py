@@ -12,7 +12,7 @@ import pytest
 
 from kohakuterrarium.errors import PackageError
 from kohakuterrarium.packages import install as install_mod
-from kohakuterrarium.packages.marketplace_types import (
+from kohakuterrarium.packages.marketplace.types import (
     MarketplaceEntry,
     MarketplaceVersion,
 )

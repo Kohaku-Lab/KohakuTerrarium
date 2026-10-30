@@ -325,7 +325,7 @@ session 同步、cluster fold）至少需要一個 worker 才有意義。
 ### Integration：`InProcTransport`
 
 對於橫跨實際 Lab dispatch 邏輯的 workflow（handshake → APP
-request → response），用 `laboratory/_internal/transport_inproc.py`
+request → response），用 `laboratory/_internal/transport/inproc.py`
 的 `InProcTransport`。它實作和 WebSocket transport 同一個
 `LabTransport` Protocol，但所有東西都留在同一個 event loop
 裡。標準設定 helper 見

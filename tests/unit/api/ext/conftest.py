@@ -16,7 +16,7 @@ from kohakuterrarium.api.auth.db import (
 from kohakuterrarium.api.auth.users import create_user
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.packages import locations
-from kohakuterrarium.packages.ui_slot import invalidate_ui_cache
+from kohakuterrarium.packages.slots.ui import invalidate_ui_cache
 
 HANDLER_SOURCE = """
 import sys

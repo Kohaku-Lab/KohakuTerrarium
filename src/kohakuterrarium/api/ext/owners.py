@@ -27,7 +27,7 @@ from kohakuterrarium.modules.ui_owner import (
     parse_owner,
     resolve_runtime_owner,
 )
-from kohakuterrarium.packages.ui_slot import (
+from kohakuterrarium.packages.slots.ui import (
     UISlot,
     get_package_ui,
     packages_declaring,

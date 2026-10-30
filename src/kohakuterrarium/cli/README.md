@@ -19,10 +19,13 @@ argparse command catalog.
 | `model.py`       | `kt model list/default/show`: compatibility wrapper that delegates to `config_cli`                                      |
 | `memory.py`      | `kt embedding` / `kt search`: offline embedding build + session memory search                                           |
 | `serve.py`       | `kt serve start/stop/status`: manage a detached web server process (PID + state files under `~/.kohakuterrarium/run/`)  |
-| `config.py`      | `kt config` command group: unified LLM profile / backend / API-key / MCP management (+ `config_prompts.py`)             |
-| `identity_*.py`  | Settings backends behind `kt config` (LLM, keys, MCP registry, codex, general settings)                                  |
-| `extension.py`   | `kt extension list` / `info`: inspect installed package extension modules (tools, plugins, presets)                     |
-| `admin.py`       | Auth-layer administration (admin token, users) (+ `admin_qr.py`)                                                         |
+| `config/`        | `kt config` command group (`config.py`): unified LLM profile / backend / API-key / MCP management (+ interactive `prompts.py`) |
+| `identity/`      | Settings backends behind `kt config`: `llm`, `keys`, `mcp`, `codex`, `antigravity`, `backend`, `drive`, `settings`      |
+| `extension/`     | `kt extension list` / `info` / `new` (`extension.py`): inspect installed package extension modules; `scaffold.py` generates packages |
+| `admin/`         | Auth-layer administration (`admin.py`: admin token, users) (+ `qr.py`)                                                   |
+| `select/`        | Shared selection logic for interactive commands, with CLI and TUI front ends (`cli.py`, `tui.py`, `args.py`)             |
+| `entry/`         | Console-script entry points `kt-cli` and `kt-tui`                                                                        |
+| `mcp/`           | `kt mcp serve` / `setup`                                                                                                 |
 | `service.py`     | Multi-node service runner (+ `lab_client.py`)                                                                            |
 | `self_update.py` | Launcher-managed self-update                                                                                             |
 | `version.py`     | `kt --version` report (Python, git, platform, install source)                                                            |
@@ -33,7 +36,7 @@ The top-level `kt run` entry point invokes `cli/__init__.py:main()` via the
 ## Dependency direction
 
 Imported only as the process entry point. Imports nearly everything it
-drives: `terrarium/engine` (+ `engine_cli` / `engine_rich_cli`),
+drives: `terrarium/engine` (+ `engine/cli/`),
 `serving/web`, `serving/desktop`, `session/resume`, `session/store`, `llm/*`,
 `packages/`, `builtins/cli_rich`, `utils/logging`.
 
@@ -45,12 +48,12 @@ Nothing inside the framework imports `cli/`; it is the top of the graph.
 - `cli/run.py:run_agent_cli()`: creature / recipe launcher via the engine
 - `cli/resume.py:resume_cli()`: session resume
 - `cli/serve.py:serve_cli()`: detached web server control
-- `cli/config.py:config_cli()`: unified profile / backend / key config
+- `cli/config/config.py:config_cli()`: unified profile / backend / key config
 
 ## Notes
 
 - `web` delegates to `serving/web.py:run_web_server`; `app` and no-argument
-  startup delegate to `serving/desktop.py:launch_desktop_app`, which displays a
+  startup delegate to `serving/desktop/desktop.py:launch_desktop_app`, which displays a
   lightweight pywebview loading shell before the server graph is imported.
 - `__run-server` is a hidden internal subcommand used by `kt serve start`
   to spawn the detached worker process with the right environment.

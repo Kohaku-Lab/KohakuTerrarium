@@ -9,7 +9,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.auth.config import AuthConfig
-from kohakuterrarium.packages.ui_slot import invalidate_ui_cache
+from kohakuterrarium.packages.slots.ui import invalidate_ui_cache
 from kohakuterrarium.studio.identity import ui_extensions
 
 

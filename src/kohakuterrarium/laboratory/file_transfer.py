@@ -8,7 +8,7 @@ import base64
 import hashlib
 from typing import Any
 
-from kohakuterrarium.laboratory.adapters.terrarium_files import (
+from kohakuterrarium.laboratory.adapters.terrarium.files import (
     STREAM_CHUNK_BYTES,
     TerrariumFilesAdapter,
 )

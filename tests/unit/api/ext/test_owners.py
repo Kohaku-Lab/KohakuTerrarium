@@ -17,7 +17,7 @@ from kohakuterrarium.api.ext.owners import (
 )
 from kohakuterrarium.errors import InvalidRequestError
 from kohakuterrarium.modules.ui_owner import OwnerHasNoUIError, OwnerNotLoadedError
-from kohakuterrarium.packages.ui_slot import get_package_ui, invalidate_ui_cache
+from kohakuterrarium.packages.slots.ui import get_package_ui, invalidate_ui_cache
 from kohakuterrarium.studio.identity import ui_extensions
 
 

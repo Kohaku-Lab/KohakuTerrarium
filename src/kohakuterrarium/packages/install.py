@@ -22,7 +22,7 @@ from pathlib import Path
 
 from kohakuterrarium.errors import PackageError
 from kohakuterrarium.packages import git_backend
-from kohakuterrarium.packages import marketplace
+from kohakuterrarium.packages.marketplace import marketplace
 from kohakuterrarium.packages.locations import _packages_dir
 from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.locations import is_local_project

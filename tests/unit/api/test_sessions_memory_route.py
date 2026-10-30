@@ -17,7 +17,7 @@ from kohakuterrarium.terrarium.multi_node.service import MultiNodeTerrariumServi
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.api.routes.sessions_v2 import memory as mem_mod
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_inproc import InProcTransport
+from kohakuterrarium.laboratory._internal.transport.inproc import InProcTransport
 
 
 def _app() -> FastAPI:

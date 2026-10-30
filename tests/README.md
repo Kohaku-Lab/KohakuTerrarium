@@ -245,7 +245,7 @@ testing otherwise.
 | `studio/attach/pty/posix.py`, `studio/attach/pty/windows.py`, `studio/attach/pty/router.py` | Platform-specific PTY backends, gated at import |
 | `studio/identity/codex/oauth.py` | 3rd-party OAuth flow |
 | `session/memory/embedding.py` (non-deterministic embedders) | 3rd-party model dependency |
-| `laboratory/_internal/transport_ws.py` | `websockets` library: `InProcTransport` is the test transport |
+| `laboratory/_internal/transport/ws.py` | `websockets` library: `InProcTransport` is the test transport |
 | `builtins/inputs/cli*.py`, `builtins/inputs/tui*.py`, `builtins/outputs/*` (terminal/audio) | CLI / TUI / audio UI |
 | `serving/web.py` (the pywebview / uvicorn boot path) | Desktop bundling, manual test only |
 | `api/main.py`, `__briefcase__.py` | Server / bundler entry points: module-level side effects only |

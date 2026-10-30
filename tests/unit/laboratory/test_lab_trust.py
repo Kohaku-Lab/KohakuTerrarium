@@ -11,11 +11,11 @@ is attacker-controllable on the client-to-client hop. So:
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage, build_app_envelope
-from kohakuterrarium.laboratory._internal.app_acl import is_host_only_client_forward
+from kohakuterrarium.laboratory._internal.app.app import AppMessage, build_app_envelope
+from kohakuterrarium.laboratory._internal.app.acl import is_host_only_client_forward
 from kohakuterrarium.laboratory._internal.protocol import HOST_NODE_ID
-from kohakuterrarium.laboratory.adapters.studio_settings import StudioSettingsAdapter
-from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (
+from kohakuterrarium.laboratory.adapters.studio.settings import StudioSettingsAdapter
+from kohakuterrarium.laboratory.adapters.terrarium.runtime_drive import (
     handle_drive_request,
 )
 from kohakuterrarium.studio.identity.drive_settings import settings as _ds

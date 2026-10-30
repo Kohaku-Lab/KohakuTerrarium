@@ -20,7 +20,7 @@ import base64
 import hashlib
 from pathlib import Path
 
-from kohakuterrarium.laboratory.adapters.terrarium_files import (
+from kohakuterrarium.laboratory.adapters.terrarium.files import (
     MAX_ONESHOT_BYTES,
 )
 from kohakuterrarium.laboratory.protocols import LabSender

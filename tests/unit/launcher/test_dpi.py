@@ -12,7 +12,7 @@ def test_splash_configures_dpi_before_toolkit_and_main_reuses_it():
 import ctypes
 import time
 from kohakuterrarium.launcher import splash_window
-from kohakuterrarium.serving.desktop_chrome import _enable_per_monitor_dpi
+from kohakuterrarium.serving.desktop.chrome import _enable_per_monitor_dpi
 user = ctypes.WinDLL('user32', use_last_error=True)
 user.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
 user.AreDpiAwarenessContextsEqual.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -38,7 +38,7 @@ assert _enable_per_monitor_dpi() is True
 def test_locked_system_dpi_is_reported_instead_of_claiming_success():
     code = """
 import ctypes
-from kohakuterrarium.serving.desktop_chrome import _enable_per_monitor_dpi
+from kohakuterrarium.serving.desktop.chrome import _enable_per_monitor_dpi
 ctypes.WinDLL('user32').SetProcessDPIAware()
 ctypes.WinDLL('user32').SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
 from kohakuterrarium.utils.logging import enable_stderr_logging

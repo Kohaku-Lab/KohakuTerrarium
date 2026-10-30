@@ -17,7 +17,7 @@ from kohakuterrarium.laboratory._internal.envelope import (
 )
 from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory._internal.protocol import HOST_NODE_ID
-from kohakuterrarium.laboratory._internal.transport_inproc import (
+from kohakuterrarium.laboratory._internal.transport.inproc import (
     InProcTransport,
 )
 
@@ -366,7 +366,7 @@ class TestUnregisteredAppNamespace:
     async def test_app_request_unknown_namespace_is_dropped(self):
         host, client = await _start_pair(port=11)
         try:
-            from kohakuterrarium.laboratory._internal.app import (
+            from kohakuterrarium.laboratory._internal.app.app import (
                 build_app_envelope,
             )
 

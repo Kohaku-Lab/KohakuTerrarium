@@ -19,7 +19,7 @@ from kohakuterrarium.laboratory._internal.protocol import (
     HelloPayload,
     build_hello,
 )
-from kohakuterrarium.laboratory._internal.transport_inproc import (
+from kohakuterrarium.laboratory._internal.transport.inproc import (
     InProcTransport,
 )
 

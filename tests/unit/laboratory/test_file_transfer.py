@@ -13,8 +13,8 @@ import hashlib
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
-from kohakuterrarium.laboratory.adapters.terrarium_files import (
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
+from kohakuterrarium.laboratory.adapters.terrarium.files import (
     STREAM_CHUNK_BYTES,
     TerrariumFilesAdapter,
 )

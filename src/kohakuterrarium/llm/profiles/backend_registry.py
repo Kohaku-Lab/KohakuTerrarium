@@ -12,7 +12,7 @@ from typing import Any
 from kohakuterrarium.errors import ConfigError, LLMNotConfiguredError
 from kohakuterrarium.llm.profiles.types import LLMBackend
 from kohakuterrarium.packages.resolve import ensure_package_importable
-from kohakuterrarium.packages.slots import iter_package_llm_backend_entries
+from kohakuterrarium.packages.slots.slots import iter_package_llm_backend_entries
 from kohakuterrarium.packages.walk import packages_fingerprint
 from kohakuterrarium.utils.logging import get_logger
 

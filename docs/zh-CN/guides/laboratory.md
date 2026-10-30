@@ -193,7 +193,7 @@ host + service 搭起来：
 import asyncio
 
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
+from kohakuterrarium.laboratory._internal.transport.ws import WebSocketTransport
 from kohakuterrarium.laboratory.config import HostConfig
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,

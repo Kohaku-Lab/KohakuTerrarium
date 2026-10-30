@@ -7,8 +7,8 @@ import pytest
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.errors import ConflictError, InvalidRequestError
-from kohakuterrarium.laboratory._internal.app import AppMessage
-from kohakuterrarium.laboratory.adapters.terrarium_runtime import (
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
+from kohakuterrarium.laboratory.adapters.terrarium.runtime import (
     TerrariumRuntimeAdapter,
 )
 from kohakuterrarium.terrarium.engine.engine import Terrarium

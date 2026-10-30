@@ -1,0 +1,324 @@
+"""Unit tests for ``packages/slots/ui.py`` — the ``ui:`` manifest slot."""
+
+import dataclasses
+import os
+from pathlib import Path
+
+import pytest
+import yaml
+
+from kohakuterrarium.packages import locations
+from kohakuterrarium.packages.slots import ui as ui_slot
+from kohakuterrarium.packages.install import install_package, uninstall_package
+from kohakuterrarium.packages.slots.ui import (
+    DEFAULT_SDK_RANGE,
+    get_package_ui,
+    invalidate_ui_cache,
+    is_valid_sdk_range,
+    list_package_ui,
+    parse_ui_slot,
+    resolve_ui_asset,
+)
+
+
+def _record(root: Path, ui, name: str = "pkg", **slots) -> dict:
+    record = {
+        "name": name,
+        "version": "1.2.3",
+        "path": str(root),
+        "ui": ui,
+        "plugins": [{"name": "qq_feed"}, {"name": "x"}],
+        "tools": [{"name": "qq_send"}, {"name": "x"}],
+        "triggers": [{"name": "qq"}],
+    }
+    record.update(slots)
+    return record
+
+
+def _pkg(tmp_path: Path, name: str = "pkg", files=("ui/index.js",)) -> Path:
+    root = tmp_path / name
+    for rel in files:
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("export default () => {}\n", encoding="utf-8")
+    (root / "ui").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _slot(tmp_path: Path, ui: dict, name: str = "pkg"):
+    return parse_ui_slot(_record(_pkg(tmp_path, name), ui, name))
+
+
+class TestParse:
+    def test_valid_block_normalizes_paths_and_owners(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "styles": ["ui/style.css"],
+                "handler": "pkg_mod.ui:Handler",
+                "api": "pkg_mod.api:router",
+                "i18n": {"en": "ui/en.json"},
+                "contributes": [
+                    {"kind": "settings", "id": "bot", "label": "Bot"},
+                    {"kind": "panel", "id": "chats", "owner": "plugin:qq_feed"},
+                    {"kind": "tool-renderer", "id": "send", "owner": "tool:qq_send"},
+                    {"kind": "trigger-renderer", "id": "f", "owner": "trigger:qq"},
+                    {"kind": "tab", "id": "t", "owner": "package"},
+                    {
+                        "kind": "widget",
+                        "id": "board",
+                        "owner": "tool:qq_send",
+                        "renderer": "pkg.board",
+                    },
+                ],
+            },
+        )
+        assert slot.error == ""
+        assert slot.entry == "index.js"
+        assert slot.styles == ("style.css",)
+        assert slot.i18n == {"en": "en.json"}
+        assert slot.sdk == DEFAULT_SDK_RANGE
+        owners = {c.id: c.owner for c in slot.contributions}
+        assert owners == {
+            "bot": "package:pkg",
+            "chats": "plugin:qq_feed",
+            "send": "tool:qq_send",
+            "f": "trigger:qq",
+            "t": "package:pkg",
+            "board": "tool:qq_send",
+        }
+        record = slot.to_dict()
+        assert record["contributes"][-1]["renderer"] == "pkg.board"
+        assert record["contributes"][0]["renderer"] == ""
+        assert record["has_api"] is True and record["has_handler"] is True
+        assert record["contributes"][1]["owner"] == "plugin:qq_feed"
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "panel", "id": "p"}, "owner is required"),
+            ({"kind": "panel", "id": "p", "owner": "package"}, "owner is required"),
+            ({"kind": "settings", "id": "s", "owner": "plugin:x"}, "must be owned by"),
+            ({"kind": "tool-renderer", "id": "r", "owner": "plugin:x"}, "owned by"),
+            ({"kind": "settings", "id": "s", "owner": "package:other"}, "another"),
+            ({"kind": "panel", "id": "p", "owner": "gadget:x"}, "<kind>:<name>"),
+            ({"kind": "bogus", "id": "x"}, "kind must be one of"),
+            ({"kind": "tab", "id": "Bad Id"}, "id must match"),
+            ({"kind": "tab", "id": "t", "isolation": "shadow"}, "isolation"),
+            ({"kind": "tab", "id": "t", "minDensity": "huge"}, "minDensity"),
+            ({"kind": "tab", "id": "t", "order": "1"}, "order"),
+            ({"kind": "widget", "id": "w"}, "renderer must be a dotted id"),
+            ({"kind": "widget", "id": "w", "renderer": "board"}, "dotted id"),
+            ({"kind": "widget", "id": "w", "renderer": "kt.app"}, "reserved prefix"),
+            ({"kind": "widget", "id": "w", "renderer": "mcp.app"}, "reserved prefix"),
+            ({"kind": "tab", "id": "t", "renderer": "pkg.x"}, "only valid on a widget"),
+        ],
+    )
+    def test_bad_contribution_invalidates_only_this_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+        assert slot.contributions == ()
+
+    @pytest.mark.parametrize(
+        "ui, message",
+        [
+            ({"entry": "../evil.js"}, "without '..'"),
+            ({"entry": "/abs/index.js"}, "without '..'"),
+            ({"entry": "src/index.js"}, "under the UI root"),
+            ({"root": "missing"}, "does not exist"),
+            ({"sdk": "latest"}, "not a valid version range"),
+            ({"api": "no-colon"}, "dotted.module:attribute"),
+            ({"handler": "a.b"}, "dotted.module:attribute"),
+            ({"styles": "ui/a.css"}, "list of paths"),
+            ({"i18n": ["en"]}, "locale -> path"),
+            ({"contributes": [{"kind": "tab", "id": "t"}]}, "entry is required"),
+            (
+                {
+                    "entry": "ui/index.js",
+                    "contributes": [
+                        {"kind": "tab", "id": "t"},
+                        {"kind": "rail", "id": "t"},
+                    ],
+                },
+                "declared twice",
+            ),
+        ],
+    )
+    def test_block_errors(self, tmp_path, ui, message):
+        assert message in _slot(tmp_path, ui).error
+
+    def test_frame_only_package_needs_no_entry(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {"contributes": [{"kind": "tab", "id": "t", "isolation": "frame"}]},
+        )
+        assert slot.error == ""
+        assert slot.contributions[0].isolation == "frame"
+
+    def test_absent_and_non_mapping_blocks(self, tmp_path):
+        root = _pkg(tmp_path)
+        assert parse_ui_slot(_record(root, {})) is None
+        assert parse_ui_slot(_record(root, None)) is None
+        assert "mapping" in parse_ui_slot(_record(root, ["x"])).error
+
+    def test_sdk_range_grammar(self):
+        assert is_valid_sdk_range(">=1,<2")
+        assert is_valid_sdk_range("^1.2")
+        assert is_valid_sdk_range("1.0.0")
+        assert not is_valid_sdk_range(">=1,")
+        assert not is_valid_sdk_range("v1")
+
+
+class TestAssets:
+    def test_resolve_stays_inside_ui_root(self, tmp_path):
+        root = _pkg(tmp_path, files=("ui/index.js", "ui/sub/a.js", "secret.py"))
+        slot = parse_ui_slot(_record(root, {"entry": "ui/index.js"}))
+        assert resolve_ui_asset(slot, "sub/a.js") == (root / "ui/sub/a.js").resolve()
+        assert resolve_ui_asset(slot, "../secret.py") is None
+        assert resolve_ui_asset(slot, "/etc/passwd") is None
+        assert resolve_ui_asset(slot, "missing.js") is None
+        assert resolve_ui_asset(slot, "") is None
+
+    def test_symlink_out_of_root_is_refused(self, tmp_path):
+        root = _pkg(tmp_path, files=("ui/index.js", "secret.py"))
+        (root / "ui" / "link.py").symlink_to(root / "secret.py")
+        slot = parse_ui_slot(_record(root, {"entry": "ui/index.js"}))
+        assert resolve_ui_asset(slot, "link.py") is None
+
+    def test_invalid_slot_serves_nothing(self, tmp_path):
+        root = _pkg(tmp_path)
+        slot = parse_ui_slot(_record(root, {"entry": "../x.js"}))
+        assert resolve_ui_asset(slot, "index.js") is None
+
+
+class TestListing:
+    def _install(self, packages: Path, name: str, ui: dict) -> None:
+        root = packages / name
+        (root / "ui").mkdir(parents=True)
+        (root / "ui" / "index.js").write_text("export default () => {}\n")
+        (root / "kohaku.yaml").write_text(
+            yaml.safe_dump({"name": name, "version": "0.1", "ui": ui})
+        )
+
+    def test_lists_installed_ui_and_refreshes_on_manifest_change(
+        self, tmp_path, monkeypatch
+    ):
+        packages = tmp_path / "pkgs"
+        packages.mkdir()
+        monkeypatch.setattr(locations, "PACKAGES_DIR", packages)
+        invalidate_ui_cache()
+        self._install(packages, "alpha", {"entry": "ui/index.js"})
+        self._install(packages, "beta", {"entry": "../bad.js"})
+        (packages / "plain").mkdir()
+        (packages / "plain" / "kohaku.yaml").write_text("name: plain\n")
+
+        slots = {s.package: s for s in list_package_ui()}
+        assert set(slots) == {"alpha", "beta"}
+        assert slots["alpha"].error == "" and slots["beta"].error
+        first = get_package_ui("alpha")
+        assert get_package_ui("alpha") is first
+        assert get_package_ui("plain") is None
+
+        manifest = packages / "alpha" / "kohaku.yaml"
+        manifest.write_text(
+            yaml.safe_dump(
+                {
+                    "name": "alpha",
+                    "ui": {
+                        "entry": "ui/index.js",
+                        "contributes": [{"kind": "tab", "id": "t"}],
+                    },
+                }
+            )
+        )
+        stat = manifest.stat()
+        os.utime(manifest, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10_000_000))
+        # Edits are seen once the cache window ends (or on explicit invalidation).
+        invalidate_ui_cache()
+        refreshed = get_package_ui("alpha")
+        assert refreshed is not first
+        assert [c.id for c in refreshed.contributions] == ["t"]
+        assert refreshed.fingerprint != first.fingerprint
+        assert get_package_ui("beta").fingerprint == slots["beta"].fingerprint
+
+    def test_scan_is_cached_within_the_window_and_install_invalidates(
+        self, tmp_path, monkeypatch
+    ):
+        packages = tmp_path / "pkgs"
+        packages.mkdir()
+        monkeypatch.setattr(locations, "PACKAGES_DIR", packages)
+        invalidate_ui_cache()
+        calls = []
+        real = ui_slot.packages_fingerprint
+        monkeypatch.setattr(
+            ui_slot, "packages_fingerprint", lambda: calls.append(1) or real()
+        )
+        clock = [100.0]
+        monkeypatch.setattr(ui_slot.time, "monotonic", lambda: clock[0])
+        list_package_ui()
+        list_package_ui()
+        assert len(calls) == 1
+        clock[0] += ui_slot.SCAN_WINDOW_SECONDS + 0.1
+        list_package_ui()
+        assert len(calls) == 2
+
+        src = tmp_path / "src" / "gamma"
+        (src / "ui").mkdir(parents=True)
+        (src / "ui" / "index.js").write_text("export default () => {}\n")
+        (src / "kohaku.yaml").write_text(
+            yaml.safe_dump({"name": "gamma", "ui": {"entry": "ui/index.js"}})
+        )
+        install_package(str(src))
+        assert get_package_ui("gamma") is not None
+        uninstall_package("gamma")
+        assert get_package_ui("gamma") is None
+
+
+class TestSafety:
+    def test_ui_root_symlinked_outside_the_package_is_refused(self, tmp_path):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "index.js").write_text("export default () => {}\n")
+        (outside / "passwd").write_text("root:x")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        (root / "ui").symlink_to(outside, target_is_directory=True)
+        slot = parse_ui_slot(_record(root, {"entry": "ui/index.js"}))
+        assert "outside the package" in slot.error
+        assert resolve_ui_asset(slot, "index.js") is None
+        # Even a slot built by hand cannot serve from a root outside the package.
+        forged = dataclasses.replace(slot, error="")
+        assert resolve_ui_asset(forged, "passwd") is None
+
+    @pytest.mark.parametrize(
+        "owner",
+        ["plugin:undeclared", "tool:undeclared", "trigger:undeclared"],
+    )
+    def test_runtime_owner_must_be_declared_by_the_package(self, tmp_path, owner):
+        kind = {
+            "plugin": "panel",
+            "tool": "tool-renderer",
+            "trigger": "trigger-renderer",
+        }[owner.split(":")[0]]
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [{"kind": kind, "id": "c", "owner": owner}],
+            },
+        )
+        assert "does not declare" in slot.error
+
+    def test_declared_owner_matches_manifest_slot_entries(self, tmp_path):
+        root = _pkg(tmp_path)
+        ui = {
+            "entry": "ui/index.js",
+            "contributes": [{"kind": "panel", "id": "p", "owner": "plugin:mine"}],
+        }
+        ok = parse_ui_slot(_record(root, ui, plugins=["mine"]))
+        assert ok.error == ""
+        bad = parse_ui_slot(_record(root, ui, plugins=[{"name": "other"}]))
+        assert "does not declare plugin 'mine'" in bad.error

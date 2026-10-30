@@ -20,7 +20,8 @@ import types
 
 import pytest
 
-from kohakuterrarium.cli import entry_cli, entry_tui
+from kohakuterrarium.cli.entry import cli as entry_cli
+from kohakuterrarium.cli.entry import tui as entry_tui
 from kohakuterrarium.cli import resume as resume_mod
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.studio.identity.drive_settings.settings import save_settings

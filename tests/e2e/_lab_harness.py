@@ -54,7 +54,7 @@ from kohakuterrarium.core.agent.history import compact as _agent_compact_mod
 from kohakuterrarium.core.agent import model as _agent_model_mod
 from kohakuterrarium.laboratory import ClientConfig
 from kohakuterrarium.laboratory._internal.client import ClientConnector
-from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
+from kohakuterrarium.laboratory._internal.transport.ws import WebSocketTransport
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,

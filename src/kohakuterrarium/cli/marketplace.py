@@ -1,7 +1,7 @@
 """CLI ``kt marketplace`` subcommands — manage sources, search, info.
 
 Sits between argparse (the parser is built in :mod:`cli.__init__`)
-and :mod:`kohakuterrarium.packages.marketplace` (the data layer).
+and :mod:`kohakuterrarium.packages.marketplace.marketplace` (the data layer).
 Each function takes the parsed ``args`` Namespace and returns a CLI
 exit code; all transport-specific formatting (column alignment,
 JSON output, error rendering) lives here.
@@ -14,8 +14,8 @@ needed for that.
 import json
 import sys
 
-from kohakuterrarium.packages import marketplace
-from kohakuterrarium.packages.marketplace_types import (
+from kohakuterrarium.packages.marketplace import marketplace
+from kohakuterrarium.packages.marketplace.types import (
     MarketplaceError,
     MarketplaceUnavailableError,
 )

@@ -14,7 +14,8 @@ import pytest
 
 from kohakuterrarium.llm.media.reference import session_media_scope
 
-pytestmark = pytest.mark.real_llm_provider
+# The first test in a worker imports litellm, which is slow under parallel load.
+pytestmark = [pytest.mark.real_llm_provider, pytest.mark.timeout(240)]
 
 
 class _FakeLitellm:

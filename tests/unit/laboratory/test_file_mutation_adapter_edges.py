@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.laboratory.adapters import terrarium_file_mutations as mut
-from kohakuterrarium.laboratory.adapters import terrarium_files as files_mod
+from kohakuterrarium.laboratory.adapters.terrarium import file_mutations as mut
+from kohakuterrarium.laboratory.adapters.terrarium import files as files_mod
 from kohakuterrarium.laboratory.adapters.file_scopes import resolve_in_scope
-from kohakuterrarium.laboratory.adapters.terrarium_files import MAX_ONESHOT_BYTES
+from kohakuterrarium.laboratory.adapters.terrarium.files import MAX_ONESHOT_BYTES
 from kohakuterrarium.session.occupancy import family
 from kohakuterrarium.session.store import SessionStore
 from tests.unit.laboratory.file_mutation_enrollment_helpers import (

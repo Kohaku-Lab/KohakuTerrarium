@@ -7,11 +7,11 @@ historical ``kt model`` verb stays in place for back-compat.
 
 import argparse
 
-from kohakuterrarium.cli.identity_llm import (
+from kohakuterrarium.cli.identity.llm import (
     default_cli as _llm_default_cli,
 )
-from kohakuterrarium.cli.identity_llm import list_cli as _llm_list_cli
-from kohakuterrarium.cli.identity_llm import show_cli as _llm_show_cli
+from kohakuterrarium.cli.identity.llm import list_cli as _llm_list_cli
+from kohakuterrarium.cli.identity.llm import show_cli as _llm_show_cli
 
 
 def model_cli(args: argparse.Namespace) -> int:

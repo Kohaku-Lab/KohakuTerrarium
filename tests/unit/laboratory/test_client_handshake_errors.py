@@ -14,7 +14,7 @@ from kohakuterrarium.laboratory._internal.envelope import (
     Envelope,
     EnvelopeKind,
 )
-from kohakuterrarium.laboratory._internal.transport_base import (
+from kohakuterrarium.laboratory._internal.transport.base import (
     ConnectionClosed,
 )
 

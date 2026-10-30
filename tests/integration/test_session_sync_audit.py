@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.sync import (
     NAMESPACE,
@@ -230,7 +230,7 @@ class TestResumeOnWorkerDoesNotTeeFutureEvents:
 
         # Install the SessionAdapter, then drive its resume path
         # directly (bypassing the wire).
-        from kohakuterrarium.laboratory.adapters.terrarium_session import (
+        from kohakuterrarium.laboratory.adapters.terrarium.session import (
             TerrariumSessionAdapter,
         )
 

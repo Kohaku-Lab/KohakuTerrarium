@@ -1,10 +1,10 @@
 """Unit tests for :mod:`kohakuterrarium.laboratory.config` and
-:mod:`kohakuterrarium.laboratory._internal.transport_base`."""
+:mod:`kohakuterrarium.laboratory._internal.transport.base`."""
 
 import pytest
 
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
-from kohakuterrarium.laboratory._internal.transport_base import (
+from kohakuterrarium.laboratory._internal.transport.base import (
     AddressInUse,
     ConnectionClosed,
     ConnectionRefused,

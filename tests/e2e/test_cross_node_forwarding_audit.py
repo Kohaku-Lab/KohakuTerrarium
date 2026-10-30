@@ -1,8 +1,8 @@
 """Cross-node channel-broadcast / output-wire forwarding audit.
 
 Focused, single-purpose e2e tests that probe specific failure modes in
-``laboratory/adapters/terrarium_broadcast.py``,
-``laboratory/adapters/terrarium_output_wire.py``, and
+``laboratory/adapters/terrarium/broadcast.py``,
+``laboratory/adapters/terrarium/output_wire.py``, and
 ``terrarium/multi_node/service.py``'s cross-node subscription dance.
 
 These complement (do NOT replace) the existing ``test_multinode_real``

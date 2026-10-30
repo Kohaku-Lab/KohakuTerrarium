@@ -3,7 +3,7 @@
 import argparse
 import sys
 
-from kohakuterrarium.cli.select_args import add_run_like_args
+from kohakuterrarium.cli.select.args import add_run_like_args
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
@@ -86,7 +86,7 @@ def _dispatch_surface(command: str, args: argparse.Namespace) -> int:
             log_level=args.log_level,
         )
     else:
-        from kohakuterrarium.serving.desktop import launch_desktop_app
+        from kohakuterrarium.serving.desktop.desktop import launch_desktop_app
 
         launch_desktop_app(port=args.port, log_level=args.log_level)
     return 0
@@ -104,7 +104,7 @@ def main() -> int:
         print(format_version_report(verbose="--verbose" in argv))
         return 0
     if not argv:
-        from kohakuterrarium.serving.desktop import launch_desktop_app
+        from kohakuterrarium.serving.desktop.desktop import launch_desktop_app
 
         mark_startup("parser_ready", surface="desktop")
         mark_startup("dispatch_selected", surface="desktop", command="desktop")

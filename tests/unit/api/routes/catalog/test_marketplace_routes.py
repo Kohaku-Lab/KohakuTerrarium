@@ -3,7 +3,7 @@
 Every backend call is stubbed against the marketplace module — these
 tests cover the HTTP layer only (status codes, response shape, admin
 gate enforcement).  The data layer's behaviour is covered by
-``tests/unit/packages/test_marketplace.py``.
+``tests/unit/packages/marketplace/test_marketplace.py``.
 """
 
 import pytest
@@ -11,8 +11,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.catalog import marketplace as route_mod
-from kohakuterrarium.packages import marketplace as data_mod
-from kohakuterrarium.packages.marketplace_types import (
+from kohakuterrarium.packages.marketplace import marketplace as data_mod
+from kohakuterrarium.packages.marketplace.types import (
     IncompatibleFrameworkError,
     InvalidSpecError,
     MarketplaceEntry,

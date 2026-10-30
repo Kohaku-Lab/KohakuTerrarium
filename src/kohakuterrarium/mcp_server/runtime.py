@@ -22,7 +22,7 @@ from kohakuterrarium.core.tools.dispatch import (
 )
 from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
-from kohakuterrarium.mcp_server.delegation import DelegationRuntime
+from kohakuterrarium.mcp_server.delegation.delegation import DelegationRuntime
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.parsing import ToolCallEvent

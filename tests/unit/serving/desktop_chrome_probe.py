@@ -10,10 +10,10 @@ from pathlib import Path
 
 import webview
 
-from kohakuterrarium.serving.desktop import LOADING_HTML, _error_html
-from kohakuterrarium.serving.desktop_chrome import configure_desktop_chrome
-from kohakuterrarium.serving.desktop_frame import Rect
-from kohakuterrarium.serving.desktop_palette import (
+from kohakuterrarium.serving.desktop.desktop import LOADING_HTML, _error_html
+from kohakuterrarium.serving.desktop.chrome import configure_desktop_chrome
+from kohakuterrarium.serving.desktop.frame import Rect
+from kohakuterrarium.serving.desktop.palette import (
     BACKGROUND,
     DARK_BACKGROUND,
     DARK_FOREGROUND,

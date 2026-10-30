@@ -21,7 +21,7 @@ from kohakuterrarium.api.auth.dependencies import get_optional_user
 from kohakuterrarium.api.ext import EXT_PACKAGE_SCOPE_KEY
 from kohakuterrarium.api.ext.policy import slot_enabled
 from kohakuterrarium.api.ext.refs import import_package_ref
-from kohakuterrarium.packages.ui_slot import UISlot, get_package_ui, resolve_ui_asset
+from kohakuterrarium.packages.slots.ui import UISlot, get_package_ui, resolve_ui_asset
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

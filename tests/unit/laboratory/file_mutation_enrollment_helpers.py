@@ -5,8 +5,8 @@ import hashlib
 import time
 from pathlib import Path
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
-from kohakuterrarium.laboratory.adapters.terrarium_files import TerrariumFilesAdapter
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
+from kohakuterrarium.laboratory.adapters.terrarium.files import TerrariumFilesAdapter
 from kohakuterrarium.session.occupancy.gate import GATE, REASON_OK, try_fast
 
 

@@ -35,7 +35,7 @@ This isolation has two payoffs:
 A unit-test guard enforces no `from kohakuterrarium.api.auth.*` imports
 outside `src/kohakuterrarium/api/`: see
 `tests/unit/api/auth/test_auth_module_isolation.py`.  One documented
-carve-out (`cli/admin.py`) shares the TOML write path so the CLI and
+carve-out (`cli/admin/admin.py`) shares the TOML write path so the CLI and
 admin-rotation API routes can't drift; any future cross-boundary
 importer must be added to the allowlist with a written reason.
 

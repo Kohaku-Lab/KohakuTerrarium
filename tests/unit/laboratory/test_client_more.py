@@ -14,7 +14,7 @@ from kohakuterrarium.laboratory._internal.client import (
     NameConflictError,
 )
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_inproc import (
+from kohakuterrarium.laboratory._internal.transport.inproc import (
     InProcTransport,
 )
 

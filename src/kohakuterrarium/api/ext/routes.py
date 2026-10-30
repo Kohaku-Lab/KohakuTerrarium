@@ -8,7 +8,7 @@ from kohakuterrarium.api.auth.asset_token import mint_asset_token
 from kohakuterrarium.api.auth.dependencies import get_auth_config
 from kohakuterrarium.api.ext import require_admin, require_user
 from kohakuterrarium.api.ext.policy import default_enabled, dev_overrides, slot_enabled
-from kohakuterrarium.packages.ui_slot import get_package_ui, list_package_ui
+from kohakuterrarium.packages.slots.ui import get_package_ui, list_package_ui
 from kohakuterrarium.studio.identity import ui_extensions
 
 router = APIRouter()

@@ -64,7 +64,7 @@ from kohakuterrarium.packages.resolve import (
     resolve_package_tool,
     resolve_package_trigger,
 )
-from kohakuterrarium.packages.slots import (
+from kohakuterrarium.packages.slots.slots import (
     list_package_commands,
     list_package_drive_registrations,
     list_package_prompts,
@@ -76,7 +76,7 @@ from kohakuterrarium.packages.slots import (
     resolve_package_skills,
     resolve_package_user_command,
 )
-from kohakuterrarium.packages.ui_slot import (
+from kohakuterrarium.packages.slots.ui import (
     get_package_ui,
     list_package_ui,
     resolve_ui_asset,

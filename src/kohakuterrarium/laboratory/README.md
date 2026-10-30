@@ -44,10 +44,10 @@ from kohakuterrarium.laboratory._internal.client import (
     ProtocolMismatchError,
     NameConflictError,
 )
-from kohakuterrarium.laboratory._internal.transport_ws import (
+from kohakuterrarium.laboratory._internal.transport.ws import (
     WebSocketTransport,
 )
-from kohakuterrarium.laboratory._internal.transport_inproc import (
+from kohakuterrarium.laboratory._internal.transport.inproc import (
     InProcTransport,  # for tests / embedded use
 )
 ```
@@ -63,7 +63,7 @@ import asyncio
 from kohakuterrarium.laboratory import Channel, ClientConfig, HostConfig
 from kohakuterrarium.laboratory._internal.client import ClientConnector
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_ws import (
+from kohakuterrarium.laboratory._internal.transport.ws import (
     WebSocketTransport,
 )
 

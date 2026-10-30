@@ -40,7 +40,7 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
 from kohakuterrarium.laboratory._internal.client import ClientConnector
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_inproc import InProcTransport
+from kohakuterrarium.laboratory._internal.transport.inproc import InProcTransport
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,
@@ -51,7 +51,7 @@ from kohakuterrarium.laboratory.adapters import (
     TerrariumSessionAdapter,
 )
 from kohakuterrarium.laboratory.adapters._worker_session import WorkerSessionAttacher
-from kohakuterrarium.laboratory.adapters.studio_identity import (
+from kohakuterrarium.laboratory.adapters.studio.identity import (
     StudioIdentityAdapter,
 )
 from kohakuterrarium.laboratory.identity_cache import IdentityCache

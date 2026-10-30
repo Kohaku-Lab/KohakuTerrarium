@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.serving import desktop
-from kohakuterrarium.serving.desktop_palette import BACKGROUND, FOREGROUND
+from kohakuterrarium.serving.desktop import desktop
+from kohakuterrarium.serving.desktop.palette import BACKGROUND, FOREGROUND
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC = ROOT / "src"
@@ -18,7 +18,7 @@ SRC = ROOT / "src"
 @pytest.fixture(autouse=True)
 def _isolate_native_dpi(monkeypatch):
     monkeypatch.setattr(
-        "kohakuterrarium.serving.desktop_chrome._enable_per_monitor_dpi", lambda: None
+        "kohakuterrarium.serving.desktop.chrome._enable_per_monitor_dpi", lambda: None
     )
 
 
@@ -94,7 +94,7 @@ def test_desktop_module_import_stays_lightweight():
         [
             sys.executable,
             "-c",
-            "import json, sys; import kohakuterrarium.serving.desktop; "
+            "import json, sys; import kohakuterrarium.serving.desktop.desktop; "
             "print(json.dumps(sorted(sys.modules)))",
         ],
         cwd=ROOT,
@@ -126,7 +126,11 @@ def test_launcher_detaches_lightweight_desktop_process(monkeypatch, tmp_path):
 
     assert result is child
     assert (tmp_path / "config" / "app.log").exists()
-    assert calls[0][0][:3] == [sys.executable, "-m", "kohakuterrarium.serving.desktop"]
+    assert calls[0][0][:3] == [
+        sys.executable,
+        "-m",
+        "kohakuterrarium.serving.desktop.desktop",
+    ]
     assert "8123" in calls[0][0]
 
 
@@ -248,7 +252,7 @@ def test_windows_startup_passes_window_icon_to_webview(monkeypatch):
 
     desktop.run_desktop_app(port=8001, log_level="ERROR")
 
-    expected = Path(desktop.__file__).parent.parent / "app_icons" / "window.ico"
+    expected = Path(desktop.__file__).parents[2] / "app_icons" / "window.ico"
     assert starts and starts[0].get("icon") == str(expected)
 
 
@@ -456,7 +460,7 @@ def test_window_close_stops_server_child(monkeypatch):
 
 
 def test_server_child_publishes_ready_state(monkeypatch, tmp_path):
-    from kohakuterrarium.serving import desktop_server
+    from kohakuterrarium.serving.desktop import server as desktop_server
 
     state = tmp_path / "state.json"
     server = SimpleNamespace(should_exit=True)
@@ -471,7 +475,7 @@ def test_server_child_publishes_ready_state(monkeypatch, tmp_path):
 
 
 def test_server_child_publishes_startup_error(monkeypatch, tmp_path):
-    from kohakuterrarium.serving import desktop_server
+    from kohakuterrarium.serving.desktop import server as desktop_server
 
     state = tmp_path / "state.json"
     monkeypatch.setattr(
@@ -501,7 +505,7 @@ def test_in_process_server_waits_for_uvicorn_thread():
 
 
 def test_server_child_reports_runtime_exit(monkeypatch, tmp_path):
-    from kohakuterrarium.serving import desktop_server
+    from kohakuterrarium.serving.desktop import server as desktop_server
 
     state = tmp_path / "state.json"
     thread = SimpleNamespace(is_alive=lambda: False)
@@ -520,7 +524,7 @@ def test_server_child_reports_runtime_exit(monkeypatch, tmp_path):
 
 
 def test_windows_pid_probe_uses_process_handle(monkeypatch):
-    from kohakuterrarium.serving import desktop_server
+    from kohakuterrarium.serving.desktop import server as desktop_server
 
     calls = []
     kernel32 = SimpleNamespace(
@@ -542,7 +546,7 @@ def test_windows_pid_probe_uses_process_handle(monkeypatch):
 
 
 def test_server_child_exits_when_ui_parent_dies(monkeypatch, tmp_path):
-    from kohakuterrarium.serving import desktop_server
+    from kohakuterrarium.serving.desktop import server as desktop_server
 
     state = tmp_path / "state.json"
     joined = []
@@ -563,7 +567,7 @@ def test_server_child_exits_when_ui_parent_dies(monkeypatch, tmp_path):
 
 
 def test_server_child_honors_shutdown_state(monkeypatch, tmp_path):
-    from kohakuterrarium.serving import desktop_server
+    from kohakuterrarium.serving.desktop import server as desktop_server
 
     state = tmp_path / "state.json"
     server = SimpleNamespace(should_exit=False)

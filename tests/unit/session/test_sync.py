@@ -4,7 +4,7 @@ import asyncio
 import base64
 import logging
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.sync import (
     NAMESPACE,

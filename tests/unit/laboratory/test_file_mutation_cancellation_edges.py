@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.laboratory.adapters import terrarium_file_mutations as mut
-from kohakuterrarium.laboratory.adapters import terrarium_files as files_mod
-from kohakuterrarium.laboratory.adapters.terrarium_file_mutations import (
+from kohakuterrarium.laboratory.adapters.terrarium import file_mutations as mut
+from kohakuterrarium.laboratory.adapters.terrarium import files as files_mod
+from kohakuterrarium.laboratory.adapters.terrarium.file_mutations import (
     replace_enrolled,
     run_mutation_worker,
 )

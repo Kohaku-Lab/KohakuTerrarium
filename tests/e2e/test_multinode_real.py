@@ -2693,7 +2693,7 @@ async def test_identity_sync_host_to_worker(tmp_path, monkeypatch):
         "provider": "openai",
     }
     monkeypatch.setattr(
-        "kohakuterrarium.laboratory.adapters.studio_identity.list_profiles_payload",
+        "kohakuterrarium.laboratory.adapters.studio.identity.list_profiles_payload",
         lambda: [synced_profile],
     )
 

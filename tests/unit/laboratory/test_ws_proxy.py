@@ -20,10 +20,10 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory._internal.client import ClientConnector
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_inproc import (
+from kohakuterrarium.laboratory._internal.transport.inproc import (
     InProcTransport,
 )
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig

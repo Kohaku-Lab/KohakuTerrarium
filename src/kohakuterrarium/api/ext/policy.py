@@ -3,7 +3,7 @@
 import os
 
 from kohakuterrarium.api.auth.config import AuthConfig
-from kohakuterrarium.packages.ui_slot import UISlot
+from kohakuterrarium.packages.slots.ui import UISlot
 from kohakuterrarium.studio.identity import ui_extensions
 
 UI_DEV_ENV = "KT_UI_DEV"

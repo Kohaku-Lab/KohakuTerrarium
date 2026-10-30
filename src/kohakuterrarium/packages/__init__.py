@@ -75,12 +75,12 @@ _EXPORTS = {
     "resolve_package_io": "kohakuterrarium.packages.resolve",
     "resolve_package_trigger": "kohakuterrarium.packages.resolve",
     # slots
-    "resolve_package_command": "kohakuterrarium.packages.slots",
-    "resolve_package_user_command": "kohakuterrarium.packages.slots",
-    "resolve_package_prompt": "kohakuterrarium.packages.slots",
-    "resolve_package_skills": "kohakuterrarium.packages.slots",
-    "resolve_package_drive_registration": "kohakuterrarium.packages.slots",
-    "list_package_drive_registrations": "kohakuterrarium.packages.slots",
+    "resolve_package_command": "kohakuterrarium.packages.slots.slots",
+    "resolve_package_user_command": "kohakuterrarium.packages.slots.slots",
+    "resolve_package_prompt": "kohakuterrarium.packages.slots.slots",
+    "resolve_package_skills": "kohakuterrarium.packages.slots.slots",
+    "resolve_package_drive_registration": "kohakuterrarium.packages.slots.slots",
+    "list_package_drive_registrations": "kohakuterrarium.packages.slots.slots",
     # walk
     "list_packages": "kohakuterrarium.packages.walk",
     "get_package_modules": "kohakuterrarium.packages.walk",

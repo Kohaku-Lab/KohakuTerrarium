@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from kohakuterrarium.laboratory.config import ClientConfig
-from kohakuterrarium.laboratory._internal.app import (
+from kohakuterrarium.laboratory._internal.app.app import (
     AppMessageError,
     ExtensionHandler,
     build_app_envelope,
@@ -34,7 +34,7 @@ from kohakuterrarium.laboratory._internal.protocol import (
     parse_reject,
     parse_welcome,
 )
-from kohakuterrarium.laboratory._internal.transport_base import (
+from kohakuterrarium.laboratory._internal.transport.base import (
     Connection,
     ConnectionClosed,
     ConnectionRefused,

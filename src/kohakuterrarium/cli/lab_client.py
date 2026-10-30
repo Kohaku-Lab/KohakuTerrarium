@@ -17,7 +17,7 @@ import sys
 from kohakuterrarium.cli._config_layers import load_layered_config
 from kohakuterrarium.laboratory import ClientConfig
 from kohakuterrarium.laboratory._internal.client import ClientConnector
-from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
+from kohakuterrarium.laboratory._internal.transport.ws import WebSocketTransport
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,

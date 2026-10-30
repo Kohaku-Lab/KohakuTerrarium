@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.laboratory.adapters.terrarium_session import (
+from kohakuterrarium.laboratory.adapters.terrarium.session import (
     _MAX_RESUME_TOKENS,
     _transfer_path,
 )

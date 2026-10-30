@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory.protocols import (
     LabNotifier,
     LabRegistrar,

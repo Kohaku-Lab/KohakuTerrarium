@@ -9,7 +9,7 @@ import asyncio
 import pytest
 
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
-from kohakuterrarium.laboratory._internal.app import build_app_envelope
+from kohakuterrarium.laboratory._internal.app.app import build_app_envelope
 from kohakuterrarium.laboratory._internal.backpressure import BackpressureError
 from kohakuterrarium.laboratory._internal.client import (
     ClientConnector,
@@ -17,7 +17,7 @@ from kohakuterrarium.laboratory._internal.client import (
     RequestTimeoutError,
 )
 from kohakuterrarium.laboratory._internal.host import HostEngine
-from kohakuterrarium.laboratory._internal.transport_inproc import InProcTransport
+from kohakuterrarium.laboratory._internal.transport.inproc import InProcTransport
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
 from kohakuterrarium.laboratory.ws_proxy import WSFrameSink, WSProxyAdapter
 

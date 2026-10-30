@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory.protocols import LabNotifier, LabRegistrar
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger

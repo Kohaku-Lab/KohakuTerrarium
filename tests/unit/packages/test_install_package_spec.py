@@ -14,7 +14,7 @@ are covered by the existing test_packages_install.py suite.
 import pytest
 
 from kohakuterrarium.packages import install as install_mod
-from kohakuterrarium.packages.marketplace_types import (
+from kohakuterrarium.packages.marketplace.types import (
     MarketplaceEntry,
     MarketplaceVersion,
 )
@@ -124,7 +124,7 @@ class TestSpecRouting:
     def test_marketplace_resolve_propagates(self, monkeypatch):
         # MarketplaceNotFoundError must bubble through unchanged so the
         # CLI / API layer can surface its message.
-        from kohakuterrarium.packages.marketplace_types import (
+        from kohakuterrarium.packages.marketplace.types import (
             MarketplaceNotFoundError,
         )
 
@@ -139,7 +139,7 @@ class TestSpecRouting:
         # ``kt install @kt-biome/creatures/general`` is a config *path
         # reference*, not an install spec — the error must say so and
         # point at ``kt install @kt-biome``.
-        from kohakuterrarium.packages.marketplace_types import (
+        from kohakuterrarium.packages.marketplace.types import (
             MarketplaceNotFoundError,
         )
 

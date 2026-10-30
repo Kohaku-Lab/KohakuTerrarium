@@ -4,7 +4,7 @@ This module owns the ``@`` *path-reference* grammar
 (``@<package>[/sub/path]`` → filesystem path; the empty package name is
 the local project, so ``@/sub/path``).  The marketplace
 *install-spec* grammar (``@name`` / ``@name@version`` / ``@source/name``)
-lives in :mod:`kohakuterrarium.packages.marketplace` — the two look alike
+lives in :mod:`kohakuterrarium.packages.marketplace.marketplace` — the two look alike
 but are routed by context: config loaders call :func:`resolve_any_path`,
 installers call ``install_package_spec``.
 """

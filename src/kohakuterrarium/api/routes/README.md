@@ -35,7 +35,7 @@ namespaces and the `Terrarium` engine (via `api/deps.get_engine`),
 - `files`-style routes resolve paths against each agent's working
   directory and refuse requests that escape the root.
 - Identity routes write to `~/.kohakuterrarium/` files using the same
-  helpers `cli/config.py` uses, so CLI and web UI stay in sync.
+  helpers `cli/config/config.py` uses, so CLI and web UI stay in sync.
 
 ## See also
 

@@ -14,14 +14,14 @@ from typing import Any
 
 from kohakuterrarium.laboratory.config import HostConfig
 from kohakuterrarium.laboratory._internal.addressing import AddressDirectory
-from kohakuterrarium.laboratory._internal.app import (
+from kohakuterrarium.laboratory._internal.app.app import (
     AppMessageError,
     ExtensionHandler,
     build_app_envelope,
     new_request_id,
     parse_app_envelope,
 )
-from kohakuterrarium.laboratory._internal.app_acl import is_host_only_client_forward
+from kohakuterrarium.laboratory._internal.app.acl import is_host_only_client_forward
 from kohakuterrarium.laboratory._internal.auth import TokenAuth
 from kohakuterrarium.laboratory._internal.client import (
     RequestAbortedError,
@@ -52,7 +52,7 @@ from kohakuterrarium.laboratory._internal.protocol import (
     parse_hello,
     protocol_compatible,
 )
-from kohakuterrarium.laboratory._internal.transport_base import (
+from kohakuterrarium.laboratory._internal.transport.base import (
     Connection,
     ConnectionClosed,
     Server,

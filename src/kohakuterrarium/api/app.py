@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI):
     if lab_mode == "lab-host":
         from kohakuterrarium.laboratory import HostConfig
         from kohakuterrarium.laboratory._internal.host import HostEngine
-        from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
+        from kohakuterrarium.laboratory._internal.transport.ws import WebSocketTransport
         from kohakuterrarium.laboratory.adapters import (
             StudioCatalogAdapter,
             StudioIdentityAdapter,
@@ -728,7 +728,7 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     # Marketplace — TerrariumMarket-backed browse + install + source mgmt.
     # Separate from /api/catalog/registry (which is the legacy bundled
     # static index) — this one hits live remote sources via
-    # ``packages/marketplace.py``.
+    # ``packages/marketplace/marketplace.py``.
     app.include_router(
         catalog_marketplace.router,
         prefix="/api/catalog/marketplace",

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory.streams import (
     RemoteStream,
     RemoteStreamError,

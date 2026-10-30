@@ -327,7 +327,7 @@ session 同步、cluster fold）至少需要一个工作节点才有意义。
 
 对于横跨真实 Lab 派发逻辑的工作流（握手 → APP request →
 response），使用
-`laboratory/_internal/transport_inproc.py` 中的
+`laboratory/_internal/transport/inproc.py` 中的
 `InProcTransport`。它实现了与 WebSocket 传输相同的
 `LabTransport` Protocol，但把一切都保留在同一个 event loop
 里。规范的 setup helper 请见

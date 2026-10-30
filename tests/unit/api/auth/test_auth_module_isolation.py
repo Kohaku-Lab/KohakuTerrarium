@@ -11,7 +11,7 @@ This test walks the source tree and asserts:
 
 1. **No upward imports.**  No module outside ``src/kohakuterrarium/api/``
    (or its known carve-outs) imports ``kohakuterrarium.api.auth.*``.
-2. **Carve-outs are documented.**  ``cli/admin.py`` is the one legitimate
+2. **Carve-outs are documented.**  ``cli/admin/admin.py`` is the one legitimate
    non-api consumer (it shares the auth DB + write paths so the CLI
    and API admin-rotation routes can't drift).  Anything else is a
    bug.
@@ -36,16 +36,16 @@ _AUTH_MOD = "kohakuterrarium.api.auth"
 # discussion — the bar is "this code conceptually owns auth state,
 # not just consumes it."
 _ALLOWED_OUTSIDE_API: dict[str, str] = {
-    "cli/admin.py": (
+    "cli/admin/admin.py": (
         "kt admin shares the auth.db + config.toml write paths with the "
         "admin-rotation API routes via api.auth.config_write — both "
         "callers must converge on one TOML writer to avoid wire-format "
         "drift between CLI and frontend."
     ),
-    "cli/admin_qr.py": (
+    "cli/admin/qr.py": (
         "``kt admin show-host-qr`` reads ``host_token`` from the auth "
         "config to build the ``ktconnect://`` URI; same boundary "
-        "rationale as cli/admin.py.  Split out only to keep "
+        "rationale as cli/admin/admin.py.  Split out only to keep "
         "admin.py under the 600-line file-size budget."
     ),
 }

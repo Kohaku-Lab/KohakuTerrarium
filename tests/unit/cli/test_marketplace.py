@@ -10,8 +10,8 @@ import json
 
 
 from kohakuterrarium.cli import marketplace as cli_mod
-from kohakuterrarium.packages import marketplace as data_mod
-from kohakuterrarium.packages.marketplace_types import (
+from kohakuterrarium.packages.marketplace import marketplace as data_mod
+from kohakuterrarium.packages.marketplace.types import (
     MarketplaceEntry,
     MarketplaceNotFoundError,
     MarketplaceSource,

@@ -19,6 +19,7 @@ The runtime path is:
 | File                 | Description                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------- |
 | `web.py`             | Static frontend / FastAPI launcher used by `kt web`, `kt serve`, and `kt app`.                     |
+| `desktop/`           | The pywebview desktop app: `desktop.py` (`launch_desktop_app`), `chrome`, `frame`, `palette`, `titlebar`, `attention`, `server`. |
 | `process_metrics.py` | Process-wide metrics aggregator: the canonical subscriber to the metrics hook.                    |
 | `events.py`          | Legacy serving event dataclasses for older transport-facing code.                                  |
 | `__init__.py`        | Empty public export surface; new code should import `Studio` / `Terrarium` from `kohakuterrarium`. |

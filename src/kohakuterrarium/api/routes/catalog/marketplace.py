@@ -11,8 +11,8 @@ from pydantic import BaseModel
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth import verify_admin_token
-from kohakuterrarium.packages import marketplace
-from kohakuterrarium.packages.marketplace_types import (
+from kohakuterrarium.packages.marketplace import marketplace
+from kohakuterrarium.packages.marketplace.types import (
     IncompatibleFrameworkError,
     InvalidSpecError,
     MarketplaceEntry,

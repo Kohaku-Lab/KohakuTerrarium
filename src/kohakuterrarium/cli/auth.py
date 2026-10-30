@@ -1,8 +1,8 @@
 """Authentication CLI dispatcher — codex OAuth vs API key per provider."""
 
-from kohakuterrarium.cli.identity_antigravity import login_cli as _antigravity_login
-from kohakuterrarium.cli.identity_codex import login_cli as _codex_login
-from kohakuterrarium.cli.identity_keys import login_with_api_key
+from kohakuterrarium.cli.identity.antigravity import login_cli as _antigravity_login
+from kohakuterrarium.cli.identity.codex import login_cli as _codex_login
+from kohakuterrarium.cli.identity.keys import login_with_api_key
 from kohakuterrarium.llm.profiles.backend_registry import package_backend
 from kohakuterrarium.studio.identity.llm.backends import get_backend
 

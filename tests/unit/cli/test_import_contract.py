@@ -30,7 +30,7 @@ def test_cli_package_import_does_not_load_command_runtimes():
 
     assert "kohakuterrarium.serving.web" not in loaded
     assert "kohakuterrarium.cli.run" not in loaded
-    assert "kohakuterrarium.cli.admin" not in loaded
+    assert "kohakuterrarium.cli.admin.admin" not in loaded
     assert not any(name.startswith("fastapi") for name in loaded)
     assert not any(name.startswith("textual") for name in loaded)
     assert not any(name.startswith("prompt_toolkit") for name in loaded)
@@ -52,7 +52,7 @@ def test_version_dispatch_does_not_load_command_runtimes():
 
 def test_default_desktop_dispatch_does_not_load_web_runtime(monkeypatch):
     loaded = _loaded_modules(
-        "import json, sys; import kohakuterrarium.serving.desktop as desktop; "
+        "import json, sys; import kohakuterrarium.serving.desktop.desktop as desktop; "
         "desktop.launch_desktop_app = lambda **kwargs: None; "
         "from kohakuterrarium import cli; sys.argv = ['kt']; cli.main(); "
         "print(json.dumps(sorted(sys.modules)))"
@@ -81,7 +81,7 @@ def test_web_help_does_not_load_terminal_surfaces():
 
 def test_standalone_cli_import_does_not_load_tui_or_web():
     loaded = _loaded_modules(
-        "import json, sys; import kohakuterrarium.cli.entry_cli; "
+        "import json, sys; import kohakuterrarium.cli.entry.cli; "
         "print(json.dumps(sorted(sys.modules)))"
     )
 
@@ -92,7 +92,7 @@ def test_standalone_cli_import_does_not_load_tui_or_web():
 
 def test_standalone_tui_import_does_not_load_rich_cli_or_web():
     loaded = _loaded_modules(
-        "import json, sys; import kohakuterrarium.cli.entry_tui; "
+        "import json, sys; import kohakuterrarium.cli.entry.tui; "
         "print(json.dumps(sorted(sys.modules)))"
     )
 

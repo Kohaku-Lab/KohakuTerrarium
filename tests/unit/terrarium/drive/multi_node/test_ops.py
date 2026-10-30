@@ -8,8 +8,8 @@ as a typed error (never a silent second writer).
 
 import pytest
 
-from kohakuterrarium.laboratory._internal.app import AppMessage
-from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (
+from kohakuterrarium.laboratory._internal.app.app import AppMessage
+from kohakuterrarium.laboratory.adapters.terrarium.runtime_drive import (
     handle_drive_request,
 )
 from kohakuterrarium.terrarium.creature.host import Creature
