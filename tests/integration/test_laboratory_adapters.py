@@ -420,52 +420,48 @@ class TestTerrariumSessionAdapter:
             try:
                 await _wait_joined(host, "w-sess")
 
-                # stores — verb 1 (list session stores on worker)
-                resp = await host.request(
-                    to_node="w-sess",
-                    namespace="terrarium.session",
-                    type="stores",
-                    body={},
-                    timeout=5.0,
-                )
-                assert resp is not None
+                async def call(type_, body):
+                    return await host.request(
+                        to_node="w-sess",
+                        namespace="terrarium.session",
+                        type=type_,
+                        body=body,
+                        timeout=5.0,
+                    )
 
-                # history — verb 2 (read history for a session id; even if
-                # empty, the verb itself must respond cleanly)
-                resp = await host.request(
-                    to_node="w-sess",
-                    namespace="terrarium.session",
-                    type="history",
-                    body={"session_id": "nonexistent"},
-                    timeout=5.0,
-                )
-                assert resp is not None
+                # A fresh worker holds no session stores.
+                assert await call("stores", {}) == {"session_ids": []}
 
-                # search — verb 3
-                resp = await host.request(
-                    to_node="w-sess",
-                    namespace="terrarium.session",
-                    type="search",
-                    body={"session_id": "nonexistent", "query": "test"},
-                    timeout=5.0,
-                )
-                assert resp is not None
+                # history and search name their missing argument.
+                resp = await call("history", {"session_id": "nonexistent"})
+                assert resp["error"] == {
+                    "kind": "invalid",
+                    "message": "agent is required",
+                }
+                resp = await call("search", {"session_id": "nonexistent"})
+                assert resp["error"] == {
+                    "kind": "invalid",
+                    "message": "query is required",
+                }
 
-                # resume — verb 4 (will error since no session exists, but
-                # the verb dispatch path is exercised)
-                resp = await host.request(
-                    to_node="w-sess",
-                    namespace="terrarium.session",
-                    type="resume",
-                    body={
-                        "session_id": "nonexistent",
-                        "kohakutr_path": "/does/not/exist",
-                    },
-                    timeout=5.0,
+                # With complete arguments, a session with no live store is not_found.
+                resp = await call(
+                    "history", {"session_id": "nonexistent", "agent": "ghost"}
                 )
-                # Error is expected for nonexistent session — the verb
-                # dispatch reached the handler.
-                assert resp is not None
+                assert resp["error"]["kind"] == "not_found"
+                assert "nonexistent" in resp["error"]["message"]
+                resp = await call("search", {"session_id": "nonexistent", "query": "q"})
+                assert resp["error"]["kind"] == "not_found"
+                assert "nonexistent" in resp["error"]["message"]
+
+                # resume needs a path (or scope + rel) to a saved session.
+                resp = await call("resume", {"session_id": "nonexistent"})
+                assert resp["error"] == {
+                    "kind": "invalid",
+                    "message": "path or scope+rel is required",
+                }
+                resp = await call("resume", {"path": "/does/not/exist"})
+                assert resp["error"]["kind"] == "session"
                 for operation in ("delete_transfer", "rollback_resume"):
                     target = transfer_root / (operation + ".kohakutr")
                     target.write_bytes(b"transfer")
@@ -607,40 +603,39 @@ class TestStudioIdentityAdapter:
             try:
                 await _wait_joined(host, "w-id")
 
-                # get_api_key — verb 1
-                # Try cached fetch; if backend isn't registered, drive
-                # the verb via raw RPC.
-                try:
-                    key = await identity.get_api_key("openai")
-                    assert key == "sk-test-key", f"got key={key!r}"
-                except Exception:
-                    # Fall back to raw RPC — verb dispatch path still
-                    # exercised even if the backend isn't loaded.
-                    resp = await client.request(
-                        to_node="_host",
-                        namespace="studio.identity",
-                        type="get_api_key",
-                        body={"provider": "openai"},
-                        timeout=5.0,
-                    )
-                    assert resp is not None
-
-                # Drive the remaining verbs via raw RPC for full sweep.
-                for verb, body in [
-                    ("list_profiles", {}),
-                    ("get_profile", {"name": "openai/test-preset"}),
-                    ("list_mcp_servers", {}),
-                    ("get_mcp_server", {"name": "nonexistent"}),
-                    ("get_codex_token", {}),
-                ]:
-                    resp = await client.request(
+                async def call(verb, body):
+                    return await client.request(
                         to_node="_host",
                         namespace="studio.identity",
                         type=verb,
                         body=body,
                         timeout=5.0,
                     )
-                    assert resp is not None, f"verb {verb} returned None"
+
+                # The worker resolves the host's key through the identity cache.
+                assert await identity.get_api_key("openai") == "sk-test-key"
+
+                profiles = (await call("list_profiles", {}))["profiles"]
+                assert [(p["name"], p["provider"], p["model"]) for p in profiles] == [
+                    ("test-preset", "openai", "test-model")
+                ]
+                assert (profiles[0]["max_context"], profiles[0]["max_output"]) == (
+                    4096,
+                    256,
+                )
+
+                resp = await call("get_profile", {"name": "no-such-preset"})
+                assert resp["error"]["kind"] == "not_found"
+                assert "no-such-preset" in resp["error"]["message"]
+
+                assert await call("list_mcp_servers", {}) == {"servers": []}
+                resp = await call("get_mcp_server", {"name": "nonexistent"})
+                assert resp["error"]["kind"] == "not_found"
+                assert "nonexistent" in resp["error"]["message"]
+
+                resp = await call("get_codex_token", {})
+                assert resp["error"]["kind"] == "not_found"
+                assert "Codex tokens" in resp["error"]["message"]
             finally:
                 clear_api_key_resolver()
                 await client.stop()
@@ -686,36 +681,28 @@ class TestStudioCatalogAdapter:
                     "worker-local"
                 ] == str(local_config)
 
-                # list — verb 1
-                resp = await host.request(
-                    to_node="w-cat",
-                    namespace="studio.catalog",
-                    type="list",
-                    body={},
-                    timeout=5.0,
-                )
-                assert resp is not None
+                async def call(type_, body):
+                    return await host.request(
+                        to_node="w-cat",
+                        namespace="studio.catalog",
+                        type=type_,
+                        body=body,
+                        timeout=5.0,
+                    )
 
-                # install — verb 2 (will error on nonexistent package
-                # but the verb dispatch is exercised)
-                resp = await host.request(
-                    to_node="w-cat",
-                    namespace="studio.catalog",
-                    type="install",
-                    body={"name": "@nonexistent/pkg"},
-                    timeout=5.0,
-                )
-                assert resp is not None
+                # No package is installed on the worker, and removing an
+                # absent one reports that nothing was removed.
+                assert await call("list", {}) == {"packages": []}
+                assert await call("uninstall", {"name": "@nonexistent/pkg"}) == {
+                    "removed": False
+                }
 
-                # uninstall — verb 3
-                resp = await host.request(
-                    to_node="w-cat",
-                    namespace="studio.catalog",
-                    type="uninstall",
-                    body={"name": "@nonexistent/pkg"},
-                    timeout=5.0,
-                )
-                assert resp is not None
+                # install names its missing argument.
+                resp = await call("install", {"name": "@nonexistent/pkg"})
+                assert resp["error"] == {
+                    "kind": "invalid",
+                    "message": "source is required",
+                }
             finally:
                 await client.stop()
         finally:
