@@ -28,7 +28,7 @@ from kohakuterrarium.session.history.replay import (
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+    from kohakuterrarium.builtins.cli_rich.app.app import RichCLIApp
 
 logger = get_logger(__name__)
 

@@ -18,7 +18,7 @@ from kohakuterrarium.builtins.plugins.apps.plugin import FULL_PAGE_PART
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
     inline_ui_section,
 )
-from kohakuterrarium.builtins.tools.show_app import ShowAppTool
+from kohakuterrarium.builtins.tools.app.show import ShowAppTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS

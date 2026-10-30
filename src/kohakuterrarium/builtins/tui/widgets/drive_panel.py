@@ -23,7 +23,7 @@ from textual.widgets import (
     TabPane,
 )
 
-from kohakuterrarium.builtins.cli_rich.dialogs.drive_format import (
+from kohakuterrarium.builtins.cli_rich.dialogs.drive.format import (
     TERMINAL_STATUSES,
     enabled_actions,
     next_wake,

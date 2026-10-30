@@ -6,15 +6,15 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
-from kohakuterrarium.builtins.tools.edit import EditTool
-from kohakuterrarium.builtins.tools.glob import GlobTool
-from kohakuterrarium.builtins.tools.grep import GrepTool
-from kohakuterrarium.builtins.tools.multi_edit import MultiEditTool
-from kohakuterrarium.builtins.tools.notebook_edit import NotebookEditTool
-from kohakuterrarium.builtins.tools.notebook_read import NotebookReadTool
-from kohakuterrarium.builtins.tools.read import ReadTool
-from kohakuterrarium.builtins.tools.tree import TreeTool
-from kohakuterrarium.builtins.tools.write import WriteTool
+from kohakuterrarium.builtins.tools.files.edit import EditTool
+from kohakuterrarium.builtins.tools.files.glob import GlobTool
+from kohakuterrarium.builtins.tools.files.grep import GrepTool
+from kohakuterrarium.builtins.tools.files.multi_edit import MultiEditTool
+from kohakuterrarium.builtins.tools.notebook.edit import NotebookEditTool
+from kohakuterrarium.builtins.tools.notebook.read import NotebookReadTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.files.tree import TreeTool
+from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import PluginBlockError, PluginContext
 from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult

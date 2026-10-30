@@ -7,8 +7,8 @@ non-interactive configs, pushes context, and tracks running instances.
 
 import pytest
 
-from kohakuterrarium.builtins.tools.read import ReadTool
-from kohakuterrarium.builtins.tools.write import WriteTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.core.tools.execution_context import ExecutionBinding
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry

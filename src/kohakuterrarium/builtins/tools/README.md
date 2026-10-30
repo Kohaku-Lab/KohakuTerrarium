@@ -5,35 +5,31 @@ Built-in tool implementations. Each tool extends `BaseTool` and uses the
 The `__init__.py` imports every module to trigger registration and re-exports
 the public API from `builtins.tool_catalog`.
 
-## Files
+## Layout
 
-| File                                    | Registered names / description                                                                                    |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`                           | Imports all tools (triggers registration), re-exports catalog API                                                 |
-| `registry.py`                           | Backward-compatible re-exports from `builtins.tool_catalog`                                                       |
-| `bash.py`                               | `bash`: shell commands (+ `bash_windows.py`, `subprocess/shell_utils.py`)                                          |
-| `python.py`                             | `python`: subprocess python execution                                                                              |
-| `read.py`                               | `read`: read file contents with optional line range                                                               |
-| `write.py`                              | `write`: create or overwrite files                                                                                |
-| `edit.py`                               | `edit`: single-diff edit with guard rails; exports `check_edit_guards` / `build_result_diff` used by `multi_edit` |
-| `multi_edit.py`                         | `multi_edit`: atomic or policy-driven batch of ordered search/replace edits on one file                           |
-| `notebook_read.py` / `notebook_edit.py` | `notebook_read` / `notebook_edit`: cell-aware Jupyter `.ipynb` read and batch edit tools                          |
-| `notebook_utils.py`                     | Shared notebook parsing, cell-id, output-summary, and mutation helpers                                            |
-| `glob.py`                               | `glob`: find files by pattern                                                                                     |
-| `grep.py`                               | `grep`: ripgrep-backed regex search with type filtering                                                           |
-| `tree.py`                               | `tree`: list directory structure (.gitignore-aware, line-limited)                                                 |
-| `scratchpad_tool.py`                    | `scratchpad`: session-scoped key-value working memory                                                             |
-| `ask_user.py`                           | `ask_user`: request human input mid-execution                                                                     |
-| `send_message.py`                       | `send_message`: send to a named channel                                                                           |
-| `info.py`                               | `info`: load full documentation for a tool or sub-agent on demand                                                 |
-| `stop_task.py`                          | `stop_task`: cancel a running background tool, sub-agent, or trigger by id                                        |
-| `search_memory.py`                      | `search_memory`: FTS5 + semantic search over the current session's event log                                      |
-| `web_fetch.py`                          | `web_fetch`: read a URL through the extractor chain or the direct DeepSeek Fetch API                                    |
-| `web_search.py`                         | `web_search`: DuckDuckGo, Codex subscription, direct DeepSeek Search, or legacy DeepSeek Responses                           |
-| `skill.py`                              | `skill`: load a named skill's full documentation                                                                  |
-| `image_gen.py`                          | `image_gen`: provider-backed image generation                                                                     |
-| `canvas_preview.py` / `show_card.py`    | UI surfaces: canvas preview + structured cards                                                                    |
-| `delete_trigger.py`                     | Remove an installed setup-able trigger                                                                            |
+Tool families are sub-packages with the family prefix dropped; single tools
+stay at the top level.
+
+| Path                         | Registered names / description                                                                                    |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`                | Imports all tools (triggers registration), re-exports catalog API                                                 |
+| `registry.py`                | Backward-compatible re-exports from `builtins.tool_catalog`                                                       |
+| `files/`                     | `read`, `write`, `edit` (guard rails; exports `check_edit_guards` / `build_result_diff`), `multi_edit` (atomic or policy-driven batch of ordered edits), `glob`, `grep` (ripgrep-backed), `tree` (.gitignore-aware) |
+| `bash/`                      | `bash` (shell commands) and its Windows backend                                                                   |
+| `notebook/`                  | `notebook_read` / `notebook_edit` (cell-aware Jupyter `.ipynb`), shared parsing and mutation `utils`              |
+| `web/`                       | `web_fetch` (extractor chain or direct DeepSeek Fetch), `web_search` (DuckDuckGo, Codex subscription, DeepSeek Search / legacy Responses), the DeepSeek adapter |
+| `media/`                     | `image_gen`, `video_gen`, `grok_image_gen`, `canvas_image`, `canvas_preview`                                      |
+| `app/`                       | `show_app` plus the app `documents` and `hosts` helpers                                                           |
+| `python.py`                  | `python`: subprocess python execution                                                                             |
+| `scratchpad_tool.py`         | `scratchpad`: session-scoped key-value working memory                                                             |
+| `ask_user.py`                | `ask_user`: request human input mid-execution                                                                     |
+| `send_message.py`            | `send_message`: send to a named channel                                                                           |
+| `info.py`                    | `info`: load full documentation for a tool or sub-agent on demand                                                 |
+| `stop_task.py`               | `stop_task`: cancel a running background tool, sub-agent, or trigger by id                                        |
+| `search_memory.py`           | `search_memory`: FTS5 + semantic search over the current session's event log                                      |
+| `skill.py`                   | `skill`: load a named skill's full documentation                                                                  |
+| `show_card.py`               | `show_card`: structured cards                                                                                     |
+| `delete_trigger.py`          | Remove an installed setup-able trigger                                                                            |
 
 Graph management tools (`send_channel`, `group_send`, and the privileged
 `group_*` surface) are NOT here; they live in `terrarium/tools/`.
@@ -50,7 +46,7 @@ names a builtin tool. Imports:
 - `kohakuterrarium.utils.logging`
 
 No tool imports another tool's implementation except `multi_edit` and
-`notebook_edit` reusing `edit.py` result/guard helpers.
+`notebook_edit` reusing the `files/edit.py` result/guard helpers.
 
 ## Key entry points
 

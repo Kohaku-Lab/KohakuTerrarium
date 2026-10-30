@@ -30,13 +30,13 @@
     "reason": "test-only fake_test backend; FakeLLMProvider imported lazily so production runtime never loads the testing package"
   },
   {
-    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "file": "src/kohakuterrarium/builtins/tools/web/fetch.py",
     "function": "_fetch_crawl4ai",
     "target": "trafilatura",
     "reason": "trafilatura is invoked only when the crawl4ai backend produced HTML to parse"
   },
   {
-    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "file": "src/kohakuterrarium/builtins/tools/web/fetch.py",
     "function": "_fetch_trafilatura",
     "target": "trafilatura",
     "reason": "trafilatura backend imported only when the user picked it"
@@ -422,7 +422,7 @@
   {
     "file": "src/kohakuterrarium/core/controller/controller.py",
     "function": "_resolve_file_part",
-    "target": "kohakuterrarium.builtins.tools.read",
+    "target": "kohakuterrarium.builtins.tools.files.read",
     "reason": "Read tool implementation is loaded only for inline file-part fallback."
   },
   {
@@ -438,7 +438,7 @@
     "reason": "Web module import remains lightweight until the server constructs its app."
   },
   {
-    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "file": "src/kohakuterrarium/builtins/tools/web/fetch.py",
     "function": "_fetch_crawl4ai",
     "target": "crawl4ai",
     "reason": "Optional extractor is loaded only when the web_fetch tool executes the Crawl4AI backend."

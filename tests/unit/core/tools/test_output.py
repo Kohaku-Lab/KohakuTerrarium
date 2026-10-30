@@ -9,7 +9,7 @@ from urllib.parse import unquote
 
 import pytest
 
-from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.core.tools.output import (
     NormalizedToolOutput,
     OutputStats,

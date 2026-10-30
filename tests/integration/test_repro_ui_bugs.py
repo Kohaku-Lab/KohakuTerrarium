@@ -63,7 +63,7 @@ class TestRichCliCancelOnSecondInput:
 
     def _wire_cli(self, agent):
         """Build a RichCLIApp over ``agent`` with terminal-free stubs."""
-        from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+        from kohakuterrarium.builtins.cli_rich.app.app import RichCLIApp
 
         cli_app = RichCLIApp(agent)
 
@@ -219,7 +219,7 @@ class TestRichCliMidTurnInjectionFix:
         ``_mid_turn_inject`` and DOES NOT touch ``_pending_task``."""
         from kohakuterrarium.bootstrap import agent_init as _ainit
         from kohakuterrarium.bootstrap import llm as _bllm
-        from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+        from kohakuterrarium.builtins.cli_rich.app.app import RichCLIApp
         from kohakuterrarium.testing.llm import ScriptEntry
 
         scripted = ScriptedLLM(
@@ -318,7 +318,7 @@ class TestRichCliMidTurnInjectionFix:
         """
         from kohakuterrarium.bootstrap import agent_init as _ainit
         from kohakuterrarium.bootstrap import llm as _bllm
-        from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+        from kohakuterrarium.builtins.cli_rich.app.app import RichCLIApp
         from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 
         scripted = ScriptedLLM(["ok"])
@@ -383,7 +383,7 @@ class TestRichCliMidTurnInjectionFix:
         and shouldn't have to wait for the LLM to finish streaming."""
         from kohakuterrarium.bootstrap import agent_init as _ainit
         from kohakuterrarium.bootstrap import llm as _bllm
-        from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+        from kohakuterrarium.builtins.cli_rich.app.app import RichCLIApp
 
         scripted = ScriptedLLM(["ok"])
 

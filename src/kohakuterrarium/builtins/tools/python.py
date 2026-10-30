@@ -12,7 +12,7 @@ import sys
 import traceback
 from typing import Any
 
-from kohakuterrarium.builtins.tools.bash import (
+from kohakuterrarium.builtins.tools.bash.bash import (
     _format_timeout,
     _subprocess_runner,
     _wait_timeout,

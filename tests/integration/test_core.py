@@ -39,9 +39,9 @@ from PIL import Image
 import kohakuterrarium.core.agent.history.message_history as branch_history
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
-from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
-from kohakuterrarium.builtins.tools.read import ReadTool
-from kohakuterrarium.builtins.tools.show_app import ShowAppTool
+from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.app.show import ShowAppTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.conversation.continuation import (

@@ -263,7 +263,7 @@ interactive app in the web UI canvas or chat. It is the full-page option for
 when inline UI is not enough. The tool, its guidance and its part of
 `## Presenting your answer` are visible to the model only while an attached
 client renders `kt.app`. Implementation: `src/kohakuterrarium/builtins/plugins/apps/plugin.py`
-and `src/kohakuterrarium/builtins/tools/show_app.py`.
+and `src/kohakuterrarium/builtins/tools/app/show.py`.
 
 ### Options
 

@@ -142,7 +142,7 @@ class TestSimpleStreamingResponse:
 class TestToolCallDispatch:
     async def test_tool_call_emits_parse_event(self):
         """Parser emits a ToolCallEvent for ``[/<tool>]...[<tool>/]`` syntax."""
-        from kohakuterrarium.builtins.tools.read import ReadTool
+        from kohakuterrarium.builtins.tools.files.read import ReadTool
 
         env = (
             TestAgentBuilder()
@@ -807,7 +807,7 @@ class TestResolveFilePart:
         import base64
         from pathlib import Path
 
-        from kohakuterrarium.builtins.tools.write import WriteTool
+        from kohakuterrarium.builtins.tools.files.write import WriteTool
         from kohakuterrarium.utils.file.guard import FileReadState
 
         env = TestAgentBuilder().with_llm_script(["x"]).build()
@@ -1526,7 +1526,7 @@ class TestResolveMessageFilesNoExecutor:
 
 class TestResolveFilePartRegistryReadTool:
     async def test_path_text_output_returned_as_single_part(self, tmp_path):
-        from kohakuterrarium.builtins.tools.read import ReadTool
+        from kohakuterrarium.builtins.tools.files.read import ReadTool
         from kohakuterrarium.llm.message import FilePart
 
         f = tmp_path / "a.txt"
@@ -1839,7 +1839,7 @@ class TestResolveFilesFilePathKey:
     async def test_file_map_uses_path_key(self, tmp_path):
         f = tmp_path / "doc.txt"
         f.write_text("CONTENT-XYZ")
-        from kohakuterrarium.builtins.tools.read import ReadTool
+        from kohakuterrarium.builtins.tools.files.read import ReadTool
 
         env = TestAgentBuilder().with_llm_script(["x"]).with_tool(ReadTool()).build()
         msgs = [

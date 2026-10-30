@@ -31,7 +31,7 @@ def test_web_module_import_defers_api_application_graph():
     assert "kohakuterrarium.api.app" not in loaded
     assert "kohakuterrarium.terrarium.engine.engine" not in loaded
     assert "kohakuterrarium.llm.anthropic.provider" not in loaded
-    assert "kohakuterrarium.builtins.tools.web_fetch" not in loaded
+    assert "kohakuterrarium.builtins.tools.web.fetch" not in loaded
 
 
 def test_engine_pool_import_defers_terrarium_runtime():
@@ -53,5 +53,5 @@ def test_api_app_import_defers_provider_and_tool_implementations():
 
     assert "kohakuterrarium.llm.anthropic.provider" not in loaded
     assert "kohakuterrarium.llm.openai.provider" not in loaded
-    assert "kohakuterrarium.builtins.tools.web_fetch" not in loaded
-    assert "kohakuterrarium.builtins.tools.web_search" not in loaded
+    assert "kohakuterrarium.builtins.tools.web.fetch" not in loaded
+    assert "kohakuterrarium.builtins.tools.web.search" not in loaded

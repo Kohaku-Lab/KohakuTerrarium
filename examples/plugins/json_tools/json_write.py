@@ -5,7 +5,7 @@ from typing import Any
 
 import aiofiles
 
-from kohakuterrarium.builtins.tools.edit import (
+from kohakuterrarium.builtins.tools.files.edit import (
     check_edit_guards,
     update_edit_read_state,
 )

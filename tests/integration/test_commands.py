@@ -63,7 +63,7 @@ from kohakuterrarium.builtins.plugins.ui_declarative.plugin import (
     UiDeclarativePlugin,
 )
 from kohakuterrarium.builtins.tools.info import InfoTool
-from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.user_commands.skill import SkillUserCommand
 from kohakuterrarium.modules.plugin.base import BasePlugin

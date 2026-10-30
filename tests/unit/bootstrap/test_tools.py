@@ -109,7 +109,7 @@ class TestCreateToolBuiltin:
         assert tool.config.timeout == 30.0
 
     def test_lenient_web_search_keeps_unavailable_config_editable(self, monkeypatch):
-        from kohakuterrarium.builtins.tools import web_search
+        from kohakuterrarium.builtins.tools.web import search as web_search
 
         monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
         cfg = ToolConfigItem(
@@ -270,7 +270,7 @@ class TestStrictMode:
             create_tool(cfg, loader=None, strict=True)
 
     def test_deepseek_search_without_key_raises(self, monkeypatch):
-        from kohakuterrarium.builtins.tools import web_search
+        from kohakuterrarium.builtins.tools.web import search as web_search
         from kohakuterrarium.errors import ConfigError
 
         monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)

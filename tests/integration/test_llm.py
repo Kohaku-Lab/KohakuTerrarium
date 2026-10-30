@@ -58,8 +58,8 @@ from kohakuterrarium.session.history.replay import (
     normalize_resumable_events,
 )
 from kohakuterrarium.bootstrap.llm import _create_from_profile
-from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
-from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.media.grok_image_gen import GrokImageGenTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tools.output import normalize_tool_result
 from kohakuterrarium.llm.profiles import api_keys as ak
@@ -937,7 +937,7 @@ class TestLlmIntegration:
         registry = Registry()
 
         # ``read`` is a real builtin tool with an entry in _BUILTIN_SCHEMAS.
-        from kohakuterrarium.builtins.tools.read import ReadTool
+        from kohakuterrarium.builtins.tools.files.read import ReadTool
 
         registry.register_tool(ReadTool())
         registry.register_tool(_TranslateTool())

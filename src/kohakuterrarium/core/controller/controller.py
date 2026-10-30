@@ -693,7 +693,7 @@ class Controller:
 
         tool = self.registry.get_tool("read") if self.registry else None
         if tool is None:
-            from kohakuterrarium.builtins.tools.read import ReadTool
+            from kohakuterrarium.builtins.tools.files.read import ReadTool
 
             tool = ReadTool()
         if self.executor:

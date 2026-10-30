@@ -9,7 +9,7 @@ from kohakuterrarium.builtins.subagent_catalog import (
     get_builtin_subagent_config,
     list_builtin_subagents,
 )
-from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.manager import SubAgentManager
 from kohakuterrarium.session.store import SessionStore

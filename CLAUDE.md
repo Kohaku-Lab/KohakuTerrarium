@@ -437,11 +437,12 @@ src/kohakuterrarium/
 │   ├── tool_catalog.py       # Global builtin tool lookup (deferred loaders)
 │   ├── subagent_catalog.py   # Global builtin sub-agent lookup
 │   ├── plugin_catalog.py     # Global builtin plugin lookup
-│   ├── tools/                # ~30 general tool classes (read, write, edit, multi_edit,
-│   │                         # glob, grep, tree, bash, python, notebook_read/edit,
-│   │                         # web_search, web_fetch, info, ask_user,
-│   │                         # scratchpad_tool, send_message, stop_task, search_memory,
-│   │                         # skill, image_gen, canvas_preview, show_card, …)
+│   ├── tools/                # ~30 general tool classes, families as sub-packages:
+│   │                         # files/ (read, write, edit, multi_edit, glob, grep, tree),
+│   │                         # bash/, notebook/ (read, edit), web/ (fetch, search),
+│   │                         # media/ (image_gen, video_gen, canvas_*), app/ (show_app);
+│   │                         # singles: python, info, ask_user, scratchpad_tool,
+│   │                         # send_message, stop_task, search_memory, skill, show_card, …
 │   │                         #: group_* terrarium tools live in terrarium/tools/
 │   ├── subagents/            # Built-in sub-agent configs
 │   │                         # (coordinator, critic, explore, plan, research, response,
@@ -453,8 +454,9 @@ src/kohakuterrarium/
 │   │                         # env, exit, fork, help, jobs, model, module, plugin,
 │   │                         # regen, registry, scratchpad, …)
 │   ├── cli_rich/             # Rich-based CLI UI (default `kt run` frontend)
-│   │                         #: app, runtime, input, output, composer, completer,
-│   │                         #   live_region, blocks/
+│   │                         #: app/ (RichCLIApp + output, multi, pickers, drive parts), runtime,
+│   │                         #   input, output, composer, completer, live_region, blocks/,
+│   │                         #   dialogs/ (settings/, drive/, module_picker/, ...)
 │   └── tui/                  # Textual-based alternative TUI
 │       ├── app.py            # AgentTUI Textual app
 │       ├── input.py          # TUIInput module

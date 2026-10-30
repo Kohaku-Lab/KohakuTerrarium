@@ -43,14 +43,16 @@ from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.plugins.ui_declarative.plugin import UiDeclarativePlugin
-from kohakuterrarium.builtins.tools import deepseek_web, web_fetch, web_search
-from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
-from kohakuterrarium.builtins.tools.edit import EditTool
-from kohakuterrarium.builtins.tools.read import ReadTool
-from kohakuterrarium.builtins.tools.glob import GlobTool
-from kohakuterrarium.builtins.tools.grep import GrepTool
-from kohakuterrarium.builtins.tools.web_search import WebSearchTool
-from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
+from kohakuterrarium.builtins.tools.web import deepseek as deepseek_web
+from kohakuterrarium.builtins.tools.web import fetch as web_fetch
+from kohakuterrarium.builtins.tools.web import search as web_search
+from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
+from kohakuterrarium.builtins.tools.files.edit import EditTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.files.glob import GlobTool
+from kohakuterrarium.builtins.tools.files.grep import GrepTool
+from kohakuterrarium.builtins.tools.web.search import WebSearchTool
+from kohakuterrarium.builtins.tools.web.fetch import WebFetchTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config.types import (
     AgentConfig,

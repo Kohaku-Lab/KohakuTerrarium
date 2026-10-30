@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
+from kohakuterrarium.builtins.tools.media.image_gen import ImageGenTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.responses import ws as responses_ws

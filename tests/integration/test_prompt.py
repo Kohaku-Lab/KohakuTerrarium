@@ -38,7 +38,7 @@ from kohakuterrarium.builtins.plugins.apps.plugin import (
     AppsPlugin,
 )
 from kohakuterrarium.builtins.plugins.ui_declarative import UiDeclarativePlugin
-from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.config import SubAgentConfig

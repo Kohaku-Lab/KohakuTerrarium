@@ -9,8 +9,8 @@ from textual.widgets import DataTable, Input, Select, Switch, TabbedContent
 from kohakuterrarium.core.agent.tools.options import ToolOptions
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.profiles.api_keys import save_api_key
-from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
-from kohakuterrarium.builtins.tools.web_search import WebSearchTool
+from kohakuterrarium.builtins.tools.web.fetch import WebFetchTool
+from kohakuterrarium.builtins.tools.web.search import WebSearchTool
 from kohakuterrarium.builtins.tui.widgets.modules_modal import (
     ModuleEditModal,
     ModulesModal,

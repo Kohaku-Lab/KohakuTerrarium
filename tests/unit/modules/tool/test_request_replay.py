@@ -2,7 +2,7 @@
 
 import pytest
 
-from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
+from kohakuterrarium.builtins.tools.media.image_gen import ImageGenTool
 from kohakuterrarium.modules.tool.base import ToolConfig
 from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 

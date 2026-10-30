@@ -307,7 +307,7 @@ tools:
 ```
 
 Programmatic construction uses `ImageGenTool(config=ToolConfig(request_replay="forbid"))`.
-Both classes are available from `kohakuterrarium.builtins.tools.image_gen` and
+Both classes are available from `kohakuterrarium.builtins.tools.media.image_gen` and
 `kohakuterrarium.modules.tool.base`, respectively. Custom and package tool
 configuration accepts the same reserved option without forwarding it to the
 tool constructor. There is no Studio control for this field.

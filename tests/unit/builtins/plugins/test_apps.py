@@ -10,7 +10,7 @@ from kohakuterrarium.builtins.plugins.apps.plugin import (
     WITH_INLINE_LINE,
     AppsPlugin,
 )
-from kohakuterrarium.builtins.tools.show_app import ShowAppTool
+from kohakuterrarium.builtins.tools.app.show import ShowAppTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import PluginContext, ToolVisibility
 from tests.unit.test_tool_doc_shape import DISCOURAGING

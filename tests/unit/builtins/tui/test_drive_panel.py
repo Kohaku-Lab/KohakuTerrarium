@@ -18,7 +18,7 @@ from kohakuterrarium.builtins.tui.widgets.drive_panel import (
 from kohakuterrarium.builtins.tui.widgets.drive_settings_pane import (
     build_settings_from_values,
 )
-from kohakuterrarium.builtins.cli_rich.dialogs.drive_format import (
+from kohakuterrarium.builtins.cli_rich.dialogs.drive.format import (
     enabled_actions,
     project_view,
 )

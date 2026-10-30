@@ -43,7 +43,7 @@ the TUI when topology visibility matters.
 
 import asyncio
 
-from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+from kohakuterrarium.builtins.cli_rich.app.app import RichCLIApp
 from kohakuterrarium.builtins.cli_rich.input import RichCLIInput
 from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.builtins.inputs.cli import CLIInput, NonBlockingCLIInput

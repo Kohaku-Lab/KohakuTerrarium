@@ -11,7 +11,7 @@ from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.utils.file.guard import FileReadState
-from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
