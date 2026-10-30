@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
-from kohakuterrarium.llm.responses_ws import ResponsesWSSession
+from kohakuterrarium.llm.responses.reasoning import ResponsesReasoningCollector
+from kohakuterrarium.llm.responses.ws import ResponsesWSSession
 
 
 class CodexWSMixin:

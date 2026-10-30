@@ -18,7 +18,7 @@ from websockets.frames import Close
 from kohakuterrarium.llm.codex import provider as cp
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.codex.provider import CODEX_BASE_URL, CodexOAuthProvider
-from kohakuterrarium.llm.responses_ws import ResponsesWSError
+from kohakuterrarium.llm.responses.ws import ResponsesWSError
 
 pytestmark = [
     pytest.mark.skipif(not cp.HAS_OPENAI, reason="openai SDK not installed"),

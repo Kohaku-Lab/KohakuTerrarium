@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP, get_api_key
+from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP, get_api_key
 
 _REAL_CONFIG_DIR = Path.home() / ".kohakuterrarium"
 

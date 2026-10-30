@@ -13,12 +13,12 @@ from dataclasses import asdict
 from typing import Any
 
 from kohakuterrarium.laboratory.protocols import LabSender
-from kohakuterrarium.llm.api_keys import (
+from kohakuterrarium.llm.profiles.api_keys import (
     PROVIDER_KEY_MAP,
     _load_api_keys,
 )
 from kohakuterrarium.llm.codex.auth import CodexTokens, _default_token_path
-from kohakuterrarium.llm.profiles import get_profile as _local_get_profile
+from kohakuterrarium.llm.profiles.resolve import get_profile as _local_get_profile
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

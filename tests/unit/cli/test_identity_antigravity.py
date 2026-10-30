@@ -4,7 +4,7 @@ import pytest
 
 from kohakuterrarium.cli import _main
 from kohakuterrarium.cli.config import config_cli
-from kohakuterrarium.llm import antigravity_auth as auth
+from kohakuterrarium.llm.antigravity import auth
 
 
 def test_status_command_is_offline_and_reports_missing_login(monkeypatch, capsys):

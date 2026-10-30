@@ -10,7 +10,10 @@ from kohakuterrarium.core.agent_budget_recovery import attach_recovery_hooks
 from kohakuterrarium.core.agent_selection import persist_model_selection
 from kohakuterrarium.core.provider_tools import sync_provider_tools
 from kohakuterrarium.core.token_ledger import context_window
-from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
+from kohakuterrarium.llm.profiles.resolve import (
+    profile_to_identifier,
+    resolve_controller_llm,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 import kohakuterrarium.terrarium.tools_group_lifecycle as lifecycle_mod
-from kohakuterrarium.llm.presets import get_all_presets
+from kohakuterrarium.llm.presets.catalog import get_all_presets
 
 # ── helpers ───────────────────────────────────────────────────
 

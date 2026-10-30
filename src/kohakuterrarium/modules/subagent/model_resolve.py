@@ -6,8 +6,8 @@ Selectors may name a full profile or a raw model ID on the parent provider.
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.llm.base import LLMProvider, fork_llm
-from kohakuterrarium.llm.preset_store import get_subagent_models
-from kohakuterrarium.llm.profiles import get_profile
+from kohakuterrarium.llm.presets.store import get_subagent_models
+from kohakuterrarium.llm.profiles.resolve import get_profile
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 

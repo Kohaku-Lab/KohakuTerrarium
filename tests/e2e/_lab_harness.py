@@ -70,7 +70,7 @@ from kohakuterrarium.laboratory.adapters import (
 )
 from kohakuterrarium.laboratory.adapters._worker_session import WorkerSessionAttacher
 from kohakuterrarium.laboratory.identity_cache import IdentityCache
-from kohakuterrarium.llm.api_keys import (
+from kohakuterrarium.llm.profiles.api_keys import (
     clear_api_key_resolver,
     register_api_key_resolver,
 )

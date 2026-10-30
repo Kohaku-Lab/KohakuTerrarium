@@ -3,7 +3,7 @@
 from kohakuterrarium.cli.identity_antigravity import login_cli as _antigravity_login
 from kohakuterrarium.cli.identity_codex import login_cli as _codex_login
 from kohakuterrarium.cli.identity_keys import login_with_api_key
-from kohakuterrarium.llm.backend_registry import package_backend
+from kohakuterrarium.llm.profiles.backend_registry import package_backend
 from kohakuterrarium.studio.identity.llm_backends import get_backend
 
 

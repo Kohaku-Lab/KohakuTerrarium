@@ -3,10 +3,10 @@
 import json as _json
 from typing import Any
 
-from kohakuterrarium.llm.artifact_resolve import (
+from kohakuterrarium.llm.media.artifacts import (
     resolve_artifact_url as _resolve_artifact_url,
 )
-from kohakuterrarium.llm.artifact_resolve import resolve_message_image_urls
+from kohakuterrarium.llm.media.artifacts import resolve_message_image_urls
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

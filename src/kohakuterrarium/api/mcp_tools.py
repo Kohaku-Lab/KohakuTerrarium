@@ -18,7 +18,7 @@ from kohakuterrarium.api.auth.mcp_secret import MCPSecretPath
 from kohakuterrarium.api.mcp_delegation import call_delegation, delegation_tools
 from kohakuterrarium.core.backgroundify import PromotionResult
 from kohakuterrarium.llm.message import ImagePart
-from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
+from kohakuterrarium.llm.media.artifacts import resolve_artifact_url
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig, MCPToolsConfig
 from kohakuterrarium.mcp_server.runtime import (
     JobOperationResult,

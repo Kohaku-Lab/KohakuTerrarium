@@ -11,7 +11,7 @@ from PIL import Image
 
 from kohakuterrarium.builtins.tools.read import MAX_IMAGE_BYTES
 from kohakuterrarium.builtins.tools.video_gen import VideoGenTool
-from kohakuterrarium.llm.grok_video import GrokVideoResult
+from kohakuterrarium.llm.grok.video import GrokVideoResult
 from kohakuterrarium.modules.tool.base import ToolContext
 
 

@@ -3,7 +3,7 @@
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.llm.grok_image_gen import (
+from kohakuterrarium.llm.grok.image_gen import (
     DEFAULT_GROK_IMAGE_MODEL,
     GROK_IMAGE_MODEL_SUGGESTIONS,
     GrokImageClient,

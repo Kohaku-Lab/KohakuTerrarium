@@ -33,7 +33,7 @@ from kohakuterrarium.builtins.tools.web_search_types import (
     SearchBackendUnavailable,
     SearchResponse,
 )
-from kohakuterrarium.llm.api_keys import get_api_key, has_api_key
+from kohakuterrarium.llm.profiles.api_keys import get_api_key, has_api_key
 from kohakuterrarium.llm.codex.web_search import (
     CODEX_SEARCH_MODELS,
     DEFAULT_CODEX_SEARCH_MODEL,

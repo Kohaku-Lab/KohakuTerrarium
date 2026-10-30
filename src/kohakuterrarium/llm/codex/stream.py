@@ -14,11 +14,11 @@ from kohakuterrarium.llm.codex.rate_limits import (
     UsageSnapshot,
     set_cached,
 )
-from kohakuterrarium.llm.openai_sanitize import strip_surrogates
-from kohakuterrarium.llm.openai_ws import record_ws_assistant_echo
-from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
-from kohakuterrarium.llm.responses_ws import ResponsesWSSession
-from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
+from kohakuterrarium.llm.openai.sanitize import strip_surrogates
+from kohakuterrarium.llm.openai.ws import record_ws_assistant_echo
+from kohakuterrarium.llm.responses.reasoning import ResponsesReasoningCollector
+from kohakuterrarium.llm.responses.ws import ResponsesWSSession
+from kohakuterrarium.llm.responses.ws_recovery import WSRecovery
 
 
 async def stream_codex_ws_turn(

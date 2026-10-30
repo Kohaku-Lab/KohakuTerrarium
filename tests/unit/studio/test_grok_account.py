@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from kohakuterrarium.llm import grok_auth
-from kohakuterrarium.llm.grok_auth import GROK_CLI_SOURCE, OPENCODE_SOURCE, GrokToken
+from kohakuterrarium.llm.grok import auth as grok_auth
+from kohakuterrarium.llm.grok.auth import GROK_CLI_SOURCE, OPENCODE_SOURCE, GrokToken
 from kohakuterrarium.studio.identity import grok_account
 from tests.helpers.loop_witness import LoopWitness
 

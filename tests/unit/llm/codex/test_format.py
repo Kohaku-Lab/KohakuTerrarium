@@ -12,7 +12,7 @@ from copy import deepcopy
 import pytest
 
 from kohakuterrarium.errors import MediaReferenceError
-from kohakuterrarium.llm import artifact_resolve
+from kohakuterrarium.llm.media import artifacts as artifact_resolve
 from kohakuterrarium.llm.codex.format import (
     _resolve_artifact_url,
     fix_tool_call_pairing,

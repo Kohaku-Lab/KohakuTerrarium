@@ -23,7 +23,7 @@ import httpx
 import yaml
 
 from kohakuterrarium.llm.message import ImagePart, Message, TextPart
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.utils.logging import get_logger
 
 from botcore.emoji_db import DEFAULT_DB_PATH, EmojiDatabase, EmojiRecord, save_emoji_db

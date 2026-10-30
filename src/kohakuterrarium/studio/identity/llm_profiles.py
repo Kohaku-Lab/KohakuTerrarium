@@ -1,13 +1,13 @@
 """LLM preset (profile) CRUD — list/save/delete user presets.
 
-Wraps :mod:`kohakuterrarium.llm.profiles` with Studio-facing payloads and
+Wraps :mod:`kohakuterrarium.llm.profiles.resolve` with Studio-facing payloads and
 identifier handling. The legacy bare-name delete remains a compatibility shim;
 canonical profile identity is ``(provider, name)``.
 """
 
 from typing import Any
 
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.resolve import (
     LLMPreset,
     _get_preset_definition,
     delete_profile,

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from kohakuterrarium.llm.base import ToolSchema
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 
 
 async def main() -> None:

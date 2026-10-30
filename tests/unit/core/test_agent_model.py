@@ -9,8 +9,8 @@ from kohakuterrarium import Agent
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.core.agent_compact import AgentCompactMixin
 from kohakuterrarium.core.agent_model import AgentModelMixin
-from kohakuterrarium.llm.backends import save_yaml_store
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.profiles.backends import save_yaml_store
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 
 
 @pytest.mark.real_llm_provider

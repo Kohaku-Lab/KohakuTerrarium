@@ -1,6 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.studio.identity.llm_profiles`.
 
-Most functions are thin wrappers over ``kohakuterrarium.llm.profiles``.
+Most functions are thin wrappers over ``kohakuterrarium.llm.profiles.resolve``.
 We focus on pure helpers and the input-validation logic.
 """
 

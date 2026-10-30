@@ -9,13 +9,13 @@ from openai import BadRequestError
 from websockets import serve
 
 from kohakuterrarium.llm.codex.format import fix_tool_call_pairing, to_responses_input
-from kohakuterrarium.llm import artifact_resolve
+from kohakuterrarium.llm.media import artifacts as artifact_resolve
 from kohakuterrarium.llm.codex.image.budget import (
     limit_codex_images,
     reported_image_limit,
 )
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
-from kohakuterrarium.llm.responses_ws import ResponsesWSSession, ResponsesWSError
+from kohakuterrarium.llm.responses.ws import ResponsesWSSession, ResponsesWSError
 
 pytestmark = pytest.mark.real_llm_provider
 

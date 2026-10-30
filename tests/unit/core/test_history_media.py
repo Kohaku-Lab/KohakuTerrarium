@@ -13,7 +13,7 @@ from kohakuterrarium.core.history_media import (
     missing_history_images,
     repair_history_images,
 )
-from kohakuterrarium.llm.media_reference import (
+from kohakuterrarium.llm.media.reference import (
     file_reference_path,
     resolve_session_image_urls,
 )

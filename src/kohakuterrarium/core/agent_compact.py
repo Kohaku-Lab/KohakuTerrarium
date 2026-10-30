@@ -23,7 +23,10 @@ from kohakuterrarium.core.snapshot_history import (
     replayed_compact_state,
 )
 from kohakuterrarium.llm.base import fork_llm
-from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
+from kohakuterrarium.llm.profiles.resolve import (
+    profile_to_identifier,
+    resolve_controller_llm,
+)
 from kohakuterrarium.session.snapshot import load_branch_snapshot
 from kohakuterrarium.utils.logging import get_logger
 

@@ -6,7 +6,7 @@ from typing import Any, AsyncIterator
 
 from kohakuterrarium.llm.base import ChatResponse
 from kohakuterrarium.llm.message import Message
-from kohakuterrarium.llm.media_reference import (
+from kohakuterrarium.llm.media.reference import (
     current_media_session_path,
     resolve_session_image_urls,
 )

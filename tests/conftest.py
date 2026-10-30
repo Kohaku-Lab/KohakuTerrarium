@@ -45,7 +45,7 @@ os.environ["KT_CONFIG_DIR"] = str(_SESSION_CONFIG_DIR)
 # The operator's home, captured before any fixture redirects HOME; read-only.
 os.environ.setdefault("KT_TEST_REAL_HOME", str(Path.home()))
 
-from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP  # noqa: E402
+from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP  # noqa: E402
 from kohakuterrarium.testing.llm_seam import (  # noqa: E402
     forbid_real_providers,
     install_llm_seam,
@@ -115,7 +115,7 @@ def isolate_global_state():
     """Snapshot every module-global registry used by the framework.
 
     Tests routinely mutate ``lifecycle._meta``, ``api.deps._service``,
-    ``llm.api_keys._resolver``, etc.  Without isolation a failure in
+    ``llm.profiles.api_keys._resolver``, etc.  Without isolation a failure in
     one test poisons the next; we've already had several "passes
     alone, fails in suite" episodes in the old suite.
     """
@@ -136,7 +136,7 @@ def isolate_global_state():
         pass
 
     try:
-        from kohakuterrarium.llm import api_keys
+        from kohakuterrarium.llm.profiles import api_keys
 
         snapshots["api_keys._resolver"] = getattr(api_keys, "_resolver", None)
     except Exception:
@@ -150,7 +150,8 @@ def isolate_global_state():
         pass
 
     try:
-        from kohakuterrarium.llm import backends, preset_store
+        from kohakuterrarium.llm.profiles import backends
+        from kohakuterrarium.llm.presets import store as preset_store
 
         snapshots["preset_store._remote_presets"] = dict(preset_store._remote_presets)
         snapshots["backends._remote_backends"] = dict(backends._remote_backends)
@@ -169,7 +170,7 @@ def isolate_global_state():
         pass
 
     try:
-        from kohakuterrarium.llm import api_keys
+        from kohakuterrarium.llm.profiles import api_keys
 
         api_keys._resolver = snapshots.get("api_keys._resolver")
     except Exception:
@@ -183,7 +184,8 @@ def isolate_global_state():
         pass
 
     try:
-        from kohakuterrarium.llm import backends, preset_store
+        from kohakuterrarium.llm.profiles import backends
+        from kohakuterrarium.llm.presets import store as preset_store
 
         preset_store._remote_presets.clear()
         preset_store._remote_presets.update(

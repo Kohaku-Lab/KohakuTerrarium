@@ -52,7 +52,7 @@ from kohakuterrarium.core.config_types import AgentConfig, ToolConfigItem
 from kohakuterrarium.core.controller import Controller, ControllerConfig
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.events import create_user_input_event
-from kohakuterrarium.llm import antigravity_auth as agy_auth
+from kohakuterrarium.llm.antigravity import auth as agy_auth
 from kohakuterrarium.session.history import (
     replay_conversation,
     normalize_resumable_events,
@@ -62,11 +62,11 @@ from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tool_output import normalize_tool_result
-from kohakuterrarium.llm import api_keys as ak
-from kohakuterrarium.llm import artifact_resolve
-from kohakuterrarium.llm import backends as backends_mod
-from kohakuterrarium.llm import presets as presets_mod
-from kohakuterrarium.llm.backends import (
+from kohakuterrarium.llm.profiles import api_keys as ak
+from kohakuterrarium.llm.media import artifacts as artifact_resolve
+from kohakuterrarium.llm.profiles import backends as backends_mod
+from kohakuterrarium.llm.presets import catalog as presets_mod
+from kohakuterrarium.llm.profiles.backends import (
     _normalize_backend_type,
     legacy_provider_from_data,
     validate_backend_type,
@@ -80,9 +80,9 @@ from kohakuterrarium.llm.base import (
 )
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
-from kohakuterrarium.llm.grok_auth import GROK_CLI_BASE_URL, GrokToken, GrokTokens
-from kohakuterrarium.llm.grok_image_gen import GrokImageClient
-from kohakuterrarium.llm.grok_media import GrokMediaClient
+from kohakuterrarium.llm.grok.auth import GROK_CLI_BASE_URL, GrokToken, GrokTokens
+from kohakuterrarium.llm.grok.image_gen import GrokImageClient
+from kohakuterrarium.llm.grok.media import GrokMediaClient
 from kohakuterrarium.llm.message import (
     AssistantMessage,
     FilePart,
@@ -97,11 +97,11 @@ from kohakuterrarium.llm.message import (
     make_multimodal_content,
     messages_to_dicts,
 )
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
-from kohakuterrarium.llm.presets import iter_all_presets, resolve_alias
-from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset, LLMProfile
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.presets.catalog import iter_all_presets, resolve_alias
+from kohakuterrarium.llm.profiles.types import LLMBackend, LLMPreset, LLMProfile
+from kohakuterrarium.llm.profiles.resolve import (
     delete_backend,
     delete_profile,
     get_api_key,
@@ -115,9 +115,12 @@ from kohakuterrarium.llm.profiles import (
     save_profile,
     set_default_model,
 )
-from kohakuterrarium.llm.recovery import RetryPolicy
-from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
-from kohakuterrarium.llm.variations import (
+from kohakuterrarium.llm.recovery.errors import RetryPolicy
+from kohakuterrarium.llm.tools.build import (
+    build_provider_native_tools,
+    build_tool_schemas,
+)
+from kohakuterrarium.llm.profiles.variations import (
     apply_patch_map,
     apply_variation_groups,
     deep_merge_dicts,
@@ -130,7 +133,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.llm.turn_segments import KT_ASSISTANT_SEGMENTS
+from kohakuterrarium.llm.stream.segments import KT_ASSISTANT_SEGMENTS
 from kohakuterrarium.session.store import SessionStore
 from tests.helpers.anthropic_stream import ANSWER as ANTHROPIC_ANSWER
 from tests.helpers.anthropic_stream import anthropic_provider
@@ -154,7 +157,7 @@ pytestmark = [pytest.mark.timeout(60), pytest.mark.real_llm_provider]
 def isolated_llm_store(tmp_path, monkeypatch):
     """Isolate ``llm_profiles.yaml`` + ``api_keys.yaml`` via ``KT_CONFIG_DIR``.
 
-    Both ``llm/backends.py`` and ``llm/api_keys.py`` resolve their file
+    Both ``llm/profiles/backends.py`` and ``llm/profiles/api_keys.py`` resolve their file
     paths through ``utils.config_dir.config_dir`` — ``KT_CONFIG_DIR``
     is the single isolation seam (and keeps the suite from writing the
     operator's real ``~/.kohakuterrarium/``).  Tests that write the
@@ -192,7 +195,7 @@ def isolated_llm_store(tmp_path, monkeypatch):
 class _TranslateTool(BaseTool):
     """A real ``BaseTool`` with no builtin-schema entry.
 
-    Because ``translate`` is not in ``llm/tool_schemas.py:_BUILTIN_SCHEMAS``,
+    Because ``translate`` is not in ``llm/tools/schemas.py:_BUILTIN_SCHEMAS``,
     ``build_tool_schemas`` falls through to the tool's own
     ``get_parameters_schema()`` — the path custom / package tools take.
     """

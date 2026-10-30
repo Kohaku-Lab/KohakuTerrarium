@@ -12,9 +12,9 @@ from kohakuterrarium.core.agent_budget_recovery import (
     sync_emergency_drop_conversation,
 )
 from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.llm.context_repair import ContextRepair
+from kohakuterrarium.llm.recovery.context_repair import ContextRepair
 from kohakuterrarium.llm.message import ImagePart, TextPart
-from kohakuterrarium.llm.recovery import drop_last_tool_round
+from kohakuterrarium.llm.recovery.errors import drop_last_tool_round
 
 
 def _conversation():

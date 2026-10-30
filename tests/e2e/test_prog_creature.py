@@ -38,7 +38,7 @@ from kohakuterrarium.core.events import (
     TriggerEvent,
     create_user_input_event,
 )
-from kohakuterrarium.llm.profile_types import LLMProfile
+from kohakuterrarium.llm.profiles.types import LLMProfile
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.base import BaseTrigger

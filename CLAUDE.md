@@ -475,28 +475,30 @@ src/kohakuterrarium/
 │
 ├── llm/                      # LLM abstraction
 │   ├── base.py               # LLMProvider protocol
-│   ├── openai.py             # OpenAI-compatible provider (also OpenRouter)
-│   │                         #   (+ openai_helpers.py, openai_sanitize.py, openai_ws.py)
-│   ├── responses_ws.py       # Responses-API WebSocket session (incremental
-│   │                         #   previous_response_id continuation; openai + codex)
-│   ├── anthropic_provider.py # Native Anthropic Messages API provider (official SDK)
-│   │                         #   (+ anthropic_format.py, anthropic_pairing.py, anthropic_cache.py)
-│   ├── codex/                # Codex OAuth provider package (ChatGPT-subscription):
-│   │                         #   provider, ws, stream, auth, format, rate_limits,
-│   │                         #   web_search, presets, claims, image/{budget,gen}
+│   ├── message.py            # Message types (multimodal-aware ContentPart, etc.)
 │   ├── litellm_provider.py   # LiteLLM provider (optional dep)
 │   ├── deferred_provider.py  # Placeholder provider for "no model configured yet"
-│   ├── message.py            # Message types (multimodal-aware ContentPart, etc.)
-│   ├── tools.py              # Native tool schema builders (+ tool_schemas.py)
-│   ├── presets.py            # 50+ model presets (pure data) (+ preset_aliases.py,
-│   │                         #   preset_store.py)
-│   ├── backends.py           # Backend (provider) persistence: YAML store shared with presets
-│   ├── backend_registry.py   # Package-provided backend types (`llm_backends:` manifest slot)
-│   ├── profile_types.py      # LLMBackend / LLMPreset / LLMProfile dataclasses
-│   ├── profiles.py           # Profile resolution + management
-│   ├── variations.py         # `name@group=option` variation selectors
-│   ├── recovery.py           # Provider-boundary recovery helpers
-│   └── api_keys.py           # API key storage/retrieval
+│   ├── openai/               # OpenAI-compatible provider (also OpenRouter):
+│   │                         #   provider, helpers, sanitize, tool_calls, ws
+│   ├── anthropic/            # Native Anthropic Messages API provider (official SDK):
+│   │                         #   provider, format, pairing, cache, images
+│   ├── codex/                # Codex OAuth provider (ChatGPT-subscription):
+│   │                         #   provider, ws, stream, auth, format, rate_limits,
+│   │                         #   web_search, presets, claims, image/{budget,gen}
+│   ├── antigravity/          # Google Antigravity provider (agy credentials)
+│   ├── grok/                 # Grok subscription provider + xAI image/video clients
+│   ├── responses/            # Responses-API transport shared by openai + codex:
+│   │                         #   ws (previous_response_id continuation), ws_options,
+│   │                         #   ws_recovery, reasoning, tools
+│   ├── stream/               # Streaming-turn helpers: segments, tool_progress, replay
+│   ├── recovery/             # errors, context_repair, request_budget, status
+│   ├── media/                # Image preparation, media references, artifact resolution
+│   ├── tools/                # Native tool schema builders (build) + schemas
+│   ├── presets/              # 50+ model presets (catalog, pure data), aliases,
+│   │                         #   groups, packages, store
+│   └── profiles/             # resolve (profile resolution), types (LLMBackend /
+│                             #   LLMPreset / LLMProfile), variations, backends,
+│                             #   backend_registry, api_keys
 │
 ├── prompt/                   # Prompt assembly and templating
 │   ├── aggregator.py         # Gated composition of every framework section
@@ -701,7 +703,7 @@ Pure async combinators with zero framework coupling beyond `terrarium/`. Nothing
 
 Two payloads reach the model each turn: the assembled system prompt and the
 native tool schemas. For a 20-callable creature the schemas are the larger half,
-so prompt-size work that ignores `llm/tools.py` is optimizing the smaller one.
+so prompt-size work that ignores `llm/tools/build.py` is optimizing the smaller one.
 
 `prompt/aggregator.py` composes the prompt from **gated** sections. The rule:
 **a block whose subject does not exist is not emitted.** An inapplicable block

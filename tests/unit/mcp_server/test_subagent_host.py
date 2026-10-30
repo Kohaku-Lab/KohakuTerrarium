@@ -5,7 +5,7 @@ import json
 import pytest
 
 from kohakuterrarium.core.job import JobStore
-from kohakuterrarium.llm.backends import save_yaml_store
+from kohakuterrarium.llm.profiles.backends import save_yaml_store
 from kohakuterrarium.mcp_server.delegation_history import DelegationHistory
 from kohakuterrarium.mcp_server.subagent_host import SubagentHost
 from kohakuterrarium.testing.llm import ScriptedLLM

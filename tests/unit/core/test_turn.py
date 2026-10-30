@@ -36,7 +36,7 @@ from kohakuterrarium.core.turn import (
     TurnEnded,
 )
 from kohakuterrarium.llm.message import ImagePart, TextPart
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.terrarium.service import _completed_branch_result

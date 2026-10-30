@@ -6,7 +6,7 @@ import pytest
 
 from kohakuterrarium.core.agent_tool_options import ToolOptions
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.llm.api_keys import save_api_key
+from kohakuterrarium.llm.profiles.api_keys import save_api_key
 from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.builtins.cli_rich.dialogs.module_picker import ModulePicker

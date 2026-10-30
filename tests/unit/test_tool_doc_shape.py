@@ -29,7 +29,7 @@ from kohakuterrarium.builtins.subagent_catalog import (
     list_builtin_subagents,
 )
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool, list_builtin_tools
-from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
+from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS
 from kohakuterrarium.skill_docs import load_skill_doc
 
 MAX_DESCRIPTION = 160

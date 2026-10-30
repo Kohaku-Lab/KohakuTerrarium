@@ -2,7 +2,7 @@
 
 import pytest
 
-from kohakuterrarium.llm.antigravity_format import STATE_KEY, signed_state
+from kohakuterrarium.llm.antigravity.format import STATE_KEY, signed_state
 from kohakuterrarium.session import history
 
 from kohakuterrarium.session.history import (

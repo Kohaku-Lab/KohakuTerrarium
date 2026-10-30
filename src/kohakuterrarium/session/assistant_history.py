@@ -10,7 +10,7 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from kohakuterrarium.llm.antigravity_format import replay_target
+from kohakuterrarium.llm.antigravity.format import replay_target
 from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS, ImagePart
 
 _DISPLAY_TYPES = frozenset(

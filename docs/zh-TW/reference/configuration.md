@@ -81,7 +81,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 | `extra_body` | dict | `{}` | 深層合併到解析後 preset 的 `extra_body` 上 (後者可能已經帶有 variation patch)。 |
 | `tool_doc_mode`、`include_tools_in_prompt`、`include_hints_in_prompt`、`max_messages`、`ephemeral`、`tool_format` | | | 對映頂層同名欄位。 |
 
-每回合解析順序 (見 `llm/profiles.py:resolve_controller_llm`)：
+每回合解析順序 (見 `llm/profiles/resolve.py:resolve_controller_llm`)：
 
 1. CLI 旗標 `--llm` 勝過 YAML 裡的 `controller.llm`。
 2. 否則用 `controller.llm` (preset 名稱 + 可選的 `@group=option` selector)。

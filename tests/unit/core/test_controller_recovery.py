@@ -5,8 +5,8 @@ import asyncio
 import pytest
 
 from kohakuterrarium.core.controller_recovery import chat_with_recovery
-from kohakuterrarium.llm.artifact_resolve import resolve_message_image_urls
-from kohakuterrarium.llm.media_reference import (
+from kohakuterrarium.llm.media.artifacts import resolve_message_image_urls
+from kohakuterrarium.llm.media.reference import (
     current_media_session_path,
     session_media_scope,
 )

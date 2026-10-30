@@ -11,7 +11,7 @@ from kohakuterrarium.core.budget import (
 )
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.context_snapshot import ContextSnapshot
-from kohakuterrarium.llm.media_reference import session_media_scope
+from kohakuterrarium.llm.media.reference import session_media_scope
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tool_output import (
@@ -21,7 +21,7 @@ from kohakuterrarium.core.tool_output import (
 )
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.message import ContentPart, ImagePart, TextPart
-from kohakuterrarium.llm.tools import build_tool_schemas
+from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,

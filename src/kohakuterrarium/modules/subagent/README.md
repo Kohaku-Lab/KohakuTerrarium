@@ -26,5 +26,5 @@ queue/append, flush/replace).
 - `kohakuterrarium.core.job` (JobStore, JobResult, JobStatus)
 - `kohakuterrarium.core.registry` (Registry)
 - `kohakuterrarium.llm.base` (LLMProvider)
-- `kohakuterrarium.llm.tools` (build_tool_schemas)
+- `kohakuterrarium.llm.tools.build` (build_tool_schemas)
 - `kohakuterrarium.utils.logging`

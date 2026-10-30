@@ -19,8 +19,11 @@ from kohakuterrarium.llm.base import (
     fork_llm,
 )
 from kohakuterrarium.llm.message import Message
-from kohakuterrarium.llm.recovery import ErrorClass
-from kohakuterrarium.llm.request_budget import MAX_REQUEST_SHRINKS, RequestMeasure
+from kohakuterrarium.llm.recovery.errors import ErrorClass
+from kohakuterrarium.llm.recovery.request_budget import (
+    MAX_REQUEST_SHRINKS,
+    RequestMeasure,
+)
 
 pytestmark = pytest.mark.real_llm_provider
 

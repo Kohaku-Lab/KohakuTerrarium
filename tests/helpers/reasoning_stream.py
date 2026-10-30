@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 
 REASONING_PIECES = ("Let me ", "think ", "about it")
 ANSWER = "The answer is 42."

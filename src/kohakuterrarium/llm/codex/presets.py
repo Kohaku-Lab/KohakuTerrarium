@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from kohakuterrarium.llm.preset_groups import (
+from kohakuterrarium.llm.presets.groups import (
     _CODEX_SPEED_GROUP,
     _GPT56_REASONING_GROUP,
     _GPT6_REASONING_GROUP,

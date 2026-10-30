@@ -70,7 +70,7 @@ from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
 )
-from kohakuterrarium.llm.profiles import list_all as list_all_presets
+from kohakuterrarium.llm.profiles.resolve import list_all as list_all_presets
 from kohakuterrarium.modules.user_command.base import parse_slash_command
 from kohakuterrarium.utils.logging import get_logger
 

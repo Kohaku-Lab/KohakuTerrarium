@@ -10,8 +10,8 @@ from kohakuterrarium.builtins.user_commands.clear import ClearCommand
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
-from kohakuterrarium.llm.openai import OpenAIProvider
-from kohakuterrarium.llm.responses_ws import ResponsesWSSession
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
+from kohakuterrarium.llm.responses.ws import ResponsesWSSession
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.skills.hints import inject_skill_path_hint

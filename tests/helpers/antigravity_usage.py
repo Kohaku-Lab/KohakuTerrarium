@@ -5,7 +5,7 @@ import time
 
 import httpx
 
-from kohakuterrarium.llm import antigravity_auth as auth
+from kohakuterrarium.llm.antigravity import auth
 
 
 def install_quota_script(monkeypatch):

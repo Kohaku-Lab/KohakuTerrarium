@@ -21,8 +21,8 @@ from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
 from kohakuterrarium.builtins.tools.show_app import ShowAppTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config import load_agent_config
-from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
-from kohakuterrarium.llm.tools import build_tool_schemas
+from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS
+from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.prompt.presentation import CLOSING, HEADING, OPENING
 from kohakuterrarium.testing.llm import ScriptedLLM
 

@@ -7,7 +7,7 @@ import time
 import httpx
 import pytest
 
-from kohakuterrarium.llm import antigravity_auth as auth
+from kohakuterrarium.llm.antigravity import auth
 from kohakuterrarium.studio.identity import antigravity
 
 

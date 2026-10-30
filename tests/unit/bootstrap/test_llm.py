@@ -8,7 +8,7 @@ since each requires live API keys.
 
 import pytest
 
-from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
+from kohakuterrarium.llm.antigravity.provider import AntigravityProvider
 
 from kohakuterrarium.bootstrap import llm as llm_mod
 from kohakuterrarium.bootstrap.llm import (
@@ -23,12 +23,12 @@ from kohakuterrarium.bootstrap.llm import (
 )
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.errors import LLMNotConfiguredError
-from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
+from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
-from kohakuterrarium.llm.grok_auth import GrokToken
-from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
-from kohakuterrarium.llm.openai import OpenAIProvider
-from kohakuterrarium.llm.profile_types import LLMProfile
+from kohakuterrarium.llm.grok.auth import GrokToken
+from kohakuterrarium.llm.grok.provider import GrokSubscriptionProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
+from kohakuterrarium.llm.profiles.types import LLMProfile
 
 from tests.unit._fakes.package_backend import (
     echo_backend,
@@ -283,7 +283,7 @@ class TestCreateFromProfile:
 
     def test_grok_subscription_backend_builds_dedicated_provider(self, monkeypatch):
         monkeypatch.setattr(
-            "kohakuterrarium.llm.grok_provider.GrokTokens.load_candidates",
+            "kohakuterrarium.llm.grok.provider.GrokTokens.load_candidates",
             lambda: [GrokToken(access_token="secret", source="grok-cli")],
         )
         profile = LLMProfile(
@@ -518,7 +518,7 @@ class TestFakeTestBackend:
 
     def test_builds_provider_when_key_present(self, monkeypatch, tmp_path):
         from kohakuterrarium.bootstrap import llm as boot_llm
-        from kohakuterrarium.llm.profile_types import LLMProfile
+        from kohakuterrarium.llm.profiles.types import LLMProfile
         from kohakuterrarium.testing.fake_llm_provider import FakeLLMProvider
 
         monkeypatch.setattr(boot_llm, "get_api_key", lambda provider: "sk-real")
@@ -542,7 +542,7 @@ class TestFakeTestBackend:
 
     def test_missing_key_raises(self, monkeypatch):
         from kohakuterrarium.bootstrap import llm as boot_llm
-        from kohakuterrarium.llm.profile_types import LLMProfile
+        from kohakuterrarium.llm.profiles.types import LLMProfile
 
         monkeypatch.setattr(boot_llm, "get_api_key", lambda provider: "")
         profile = LLMProfile(

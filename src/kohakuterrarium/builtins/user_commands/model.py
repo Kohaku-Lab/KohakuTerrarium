@@ -1,7 +1,7 @@
 """List available LLM profiles or switch the focused agent's model."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
-from kohakuterrarium.llm.profiles import list_all
+from kohakuterrarium.llm.profiles.resolve import list_all
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

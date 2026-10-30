@@ -386,19 +386,19 @@
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_profile",
-    "target": "kohakuterrarium.llm.grok_provider",
+    "target": "kohakuterrarium.llm.grok.provider",
     "reason": "Provider implementation is loaded only for a selected Grok profile."
   },
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_profile",
-    "target": "kohakuterrarium.llm.anthropic_provider",
+    "target": "kohakuterrarium.llm.anthropic.provider",
     "reason": "Provider implementation is loaded only for a selected Anthropic profile."
   },
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_profile",
-    "target": "kohakuterrarium.llm.openai",
+    "target": "kohakuterrarium.llm.openai.provider",
     "reason": "Provider implementation is loaded only for an OpenAI-compatible profile."
   },
   {
@@ -410,13 +410,13 @@
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_inline",
-    "target": "kohakuterrarium.llm.anthropic_provider",
+    "target": "kohakuterrarium.llm.anthropic.provider",
     "reason": "Provider implementation is loaded only for selected inline Anthropic auth."
   },
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_inline",
-    "target": "kohakuterrarium.llm.openai",
+    "target": "kohakuterrarium.llm.openai.provider",
     "reason": "Provider implementation is loaded only for inline OpenAI-compatible auth."
   },
   {
@@ -512,7 +512,7 @@
   {
     "file": "src/kohakuterrarium/bootstrap/llm.py",
     "function": "_create_from_profile",
-    "target": "kohakuterrarium.llm.antigravity_provider",
+    "target": "kohakuterrarium.llm.antigravity.provider",
     "reason": "Load the Google consumer transport only for a selected Antigravity profile."
   },
   {

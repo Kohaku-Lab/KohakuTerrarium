@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.resolve import (
     get_default_model,
     list_all,
     profile_to_identifier,

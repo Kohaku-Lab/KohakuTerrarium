@@ -37,7 +37,7 @@ import yaml
 
 from kohakuterrarium import Terrarium
 from kohakuterrarium.errors import PackageNotInstalledError
-from kohakuterrarium.llm.backends import (
+from kohakuterrarium.llm.profiles.backends import (
     load_backends,
     load_yaml_store,
     validate_backend_type,

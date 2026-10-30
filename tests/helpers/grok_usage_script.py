@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 
-from kohakuterrarium.llm import grok_auth
+from kohakuterrarium.llm.grok import auth as grok_auth
 from kohakuterrarium.studio.identity.grok_account import BILLING_URL
 
 BILLING_HOST = "cli-chat-proxy.grok.com"

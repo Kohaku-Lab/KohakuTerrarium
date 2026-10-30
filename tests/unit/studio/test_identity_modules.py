@@ -1,7 +1,7 @@
 """Unit tests for the studio.identity.* helpers.
 
 Focuses on the wrapper logic + validation; the underlying
-``kohakuterrarium.llm.profiles`` operations are mocked.
+``kohakuterrarium.llm.profiles.resolve`` operations are mocked.
 """
 
 from pathlib import Path
@@ -28,7 +28,7 @@ from tests.unit._fakes.package_backend import (
 
 class TestLlmBackends:
     def test_list_backends(self, monkeypatch):
-        from kohakuterrarium.llm.profiles import LLMBackend
+        from kohakuterrarium.llm.profiles.resolve import LLMBackend
 
         backend = LLMBackend(
             name="openai",

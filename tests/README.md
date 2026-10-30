@@ -140,7 +140,7 @@ protection on `main` come from the unit + integration tiers.
    exactly as `cli/serve.py` does, not a hand-wired host/client rig.)
 
 4. **No global state leaks.** Tests that mutate a module-global registry
-   (`api.deps._service`, `llm.api_keys._resolver`, …) must snapshot +
+   (`api.deps._service`, `llm.profiles.api_keys._resolver`, …) must snapshot +
    restore; the `isolate_global_state` autouse fixture in
    `tests/conftest.py` handles the known ones. (Studio session
    bookkeeping is no longer module-global: it lives per-engine/service
@@ -240,7 +240,7 @@ testing otherwise.
 |---|---|
 | `cli/` | argparse + interactive prompts; covered by e2e for the resumable paths |
 | `builtins/cli_rich/`, `builtins/tui/` | Rich / Textual terminal UI; visual |
-| `llm/openai.py`, `llm/codex/`, `llm/litellm_provider.py` | Need a live provider |
+| `llm/openai/provider.py`, `llm/codex/`, `llm/litellm_provider.py` | Need a live provider |
 | `terrarium/engine_cli.py`, `terrarium/engine_rich_cli.py`, `terrarium/cli_output.py` | CLI / TTY UI |
 | `studio/attach/pty_posix.py`, `studio/attach/pty_windows.py`, `studio/attach/pty_router.py` | Platform-specific PTY backends, gated at import |
 | `studio/identity/codex_oauth.py` | 3rd-party OAuth flow |

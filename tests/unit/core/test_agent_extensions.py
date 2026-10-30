@@ -16,7 +16,7 @@ from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputCo
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.function import FunctionTool
-from kohakuterrarium.llm.tools import build_tool_schemas
+from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 

@@ -9,31 +9,28 @@ provides typed message structures compatible with the OpenAI API format.
 
 ## Files
 
-| File                    | Description                                                                                                               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`           | Re-exports all provider classes, message types, and tool schema utilities                                                 |
-| `base.py`               | `LLMProvider` protocol, `BaseLLMProvider` ABC, `LLMConfig`, `ChatChunk`, `ChatResponse`, `ToolSchema`, `NativeToolCall`   |
-| `openai.py`             | `OpenAIProvider`: OpenAI/OpenRouter/compatible API provider (+ `openai_helpers.py`, `openai_sanitize.py`, `openai_ws.py`) |
-| `responses_reasoning.py` | Shared Responses-API reasoning-event collector (used by the Codex provider and OpenAI WebSocket path)                |
-| `turn_segments.py`     | Ordered reasoning/text/tool-call segment builder stored as `_kt_assistant_segments`                                      |
-| `responses_ws.py`       | `ResponsesWSSession`: persistent Responses-API WebSocket transport with `previous_response_id` incremental continuation (shared by the openai + codex providers; enabled via `extra_body.websocket_mode`) |
-| `anthropic_provider.py` | Native Anthropic Messages API provider using the official SDK (+ `anthropic_format.py`, `anthropic_pairing.py`, `anthropic_cache.py`) |
-| `anthropic_images.py`   | Outgoing Anthropic image dimensions, including images nested in tool results; saved history is unchanged |
-| `codex/`                | Codex (ChatGPT subscription) provider package: `CodexOAuthProvider`, OAuth, Responses format, rate limits, image limits, web search; see `codex/README.md` |
-| `litellm_provider.py`   | LiteLLM provider (optional dep)                                                                                           |
-| `deferred_provider.py`  | Placeholder provider for the "no model configured yet" state                                                              |
-| `message.py`            | Typed message classes (`SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolMessage`) with multimodal content support |
-| `tools.py`              | `build_tool_schemas`: converts registered tools into `ToolSchema` objects (+ `tool_schemas.py` builtin parameter schemas) |
-| `presets.py`            | Built-in model presets, pure data (+ `preset_aliases.py`, `preset_store.py`)                                              |
-| `backends.py`           | Backend (provider) persistence: YAML store shared with presets                                                           |
-| `profile_types.py`      | `LLMBackend` / `LLMPreset` / `LLMProfile` dataclasses                                                                     |
-| `profiles.py`           | Profile resolution + management                                                                                           |
-| `variations.py`         | `name@group=option` variation-selector machinery                                                                          |
-| `recovery.py`           | Provider-boundary recovery helpers for LLM calls                                                                          |
-| `context_repair.py`     | `ContextRepair`: pure edits that remove refused media or a tool round, replayed on the request and the host conversation |
-| `image_preparation.py`  | Cached image compression toward a per-image and whole-body byte target                                                    |
-| `request_budget.py`     | `fit_request` (compress + measure a request body) and `RequestCeiling`, the byte ceiling learned from size refusals       |
-| `api_keys.py`           | API key storage and retrieval                                                                                             |
+Top-level files are the provider contracts; every family lives in its own
+package, with the family prefix dropped from file names.
+
+| Path                     | Description                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`            | Lazy facade: provider classes, message types, tool schema utilities                                                       |
+| `base.py`                | `LLMProvider` protocol, `BaseLLMProvider` ABC, `LLMConfig`, `ChatChunk`, `ChatResponse`, `ToolSchema`, `NativeToolCall`   |
+| `message.py`             | Typed message classes (`SystemMessage`, `UserMessage`, `AssistantMessage`, `ToolMessage`) with multimodal content support |
+| `litellm_provider.py`    | LiteLLM provider (optional dep)                                                                                           |
+| `deferred_provider.py`   | Placeholder provider for the "no model configured yet" state                                                              |
+| `openai/`                | `provider.py` (`OpenAIProvider`: OpenAI/OpenRouter/compatible), `helpers`, `sanitize`, `tool_calls`, `ws` (Responses WebSocket driver) |
+| `anthropic/`             | `provider.py` (native Messages API, official SDK), `format`, `pairing`, `cache`, `images` (outgoing image dimension limits) |
+| `codex/`                 | Codex (ChatGPT subscription) provider: OAuth, Responses format, rate limits, image limits, web search; see `codex/README.md` |
+| `antigravity/`           | Google Antigravity provider: `provider`, `client`, `auth`, `format`, `presets`, `stream`                                  |
+| `grok/`                  | Grok subscription provider: `provider`, `auth`, and the xAI `image_gen`, `video`, `media` clients                         |
+| `responses/`             | Responses-API transport shared by the OpenAI and Codex providers: `ws` (persistent WebSocket, `previous_response_id` continuation), `ws_options`, `ws_recovery`, `reasoning`, `tools` |
+| `stream/`                | `segments` (ordered reasoning/text/tool-call segments), `tool_progress`, `replay`                                         |
+| `recovery/`              | `errors` (error classes, retry policy, tool-round drop), `context_repair`, `request_budget` (`fit_request`, `RequestCeiling`), `status` |
+| `media/`                 | `preparation` (cached image compression), `reference` (local image references), `artifacts` (session/Studio artifact resolution) |
+| `tools/`                 | `build` (`build_tool_schemas`), `schemas` (builtin tool parameter schemas)                                                |
+| `presets/`               | `catalog` (built-in presets, pure data), `aliases`, `groups`, `packages`, `store`                                         |
+| `profiles/`              | `resolve` (profile resolution + management), `types` (`LLMBackend`/`LLMPreset`/`LLMProfile`), `variations`, `backends`, `backend_registry`, `api_keys` |
 
 ## Codex image limits
 

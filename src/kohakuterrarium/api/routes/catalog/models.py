@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
-from kohakuterrarium.llm.profiles import list_all as list_all_models
+from kohakuterrarium.llm.profiles.resolve import list_all as list_all_models
 
 router = APIRouter()
 

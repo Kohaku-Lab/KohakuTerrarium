@@ -1,6 +1,6 @@
 """Tests for redacted Grok subscription status."""
 
-from kohakuterrarium.llm.grok_auth import GrokToken
+from kohakuterrarium.llm.grok.auth import GrokToken
 from kohakuterrarium.studio.identity.grok_subscription import get_status
 
 

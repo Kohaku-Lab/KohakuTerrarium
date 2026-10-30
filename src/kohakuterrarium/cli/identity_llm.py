@@ -16,7 +16,7 @@ from kohakuterrarium.cli.config_prompts import (
 from kohakuterrarium.cli.config_prompts import (
     prompt_variation_groups as _prompt_variation_groups,
 )
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.resolve import (
     PROFILES_PATH,
     LLMPreset,
     load_backends,

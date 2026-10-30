@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.llm.media_reference import session_media_scope
+from kohakuterrarium.llm.media.reference import session_media_scope
 
 pytestmark = pytest.mark.real_llm_provider
 

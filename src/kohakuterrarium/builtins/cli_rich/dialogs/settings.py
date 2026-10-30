@@ -30,15 +30,19 @@ from kohakuterrarium.builtins.cli_rich.dialogs.settings_drives import (
 )
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_model import TABS
 from kohakuterrarium.builtins.cli_rich.dialogs.settings_render import render_overlay
-from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP, get_api_key, save_api_key
-from kohakuterrarium.llm.profile_types import LLMBackend
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.api_keys import (
+    PROVIDER_KEY_MAP,
+    get_api_key,
+    save_api_key,
+)
+from kohakuterrarium.llm.profiles.types import LLMBackend
+from kohakuterrarium.llm.profiles.resolve import (
     delete_backend,
     delete_profile,
     get_default_model,
 )
-from kohakuterrarium.llm.profiles import list_all as list_all_presets
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.resolve import list_all as list_all_presets
+from kohakuterrarium.llm.profiles.resolve import (
     load_backends,
     load_presets,
     save_backend,

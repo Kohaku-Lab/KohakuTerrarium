@@ -8,8 +8,8 @@ import json
 from typing import Any
 
 from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
-from kohakuterrarium.llm.profile_types import LLMProfile
-from kohakuterrarium.llm.profiles import _get_preset_definition
+from kohakuterrarium.llm.profiles.types import LLMProfile
+from kohakuterrarium.llm.profiles.resolve import _get_preset_definition
 
 
 def prompt(label: str, default: str = "") -> str:

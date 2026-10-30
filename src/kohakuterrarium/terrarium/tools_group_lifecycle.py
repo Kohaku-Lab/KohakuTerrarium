@@ -6,7 +6,7 @@ from typing import Any
 import kohakuterrarium.terrarium.group_hooks as group_hooks
 from kohakuterrarium.builtins.tool_catalog import register_builtin
 from kohakuterrarium.core.events import create_creature_output_event
-from kohakuterrarium.llm.profiles import resolve_controller_llm
+from kohakuterrarium.llm.profiles.resolve import resolve_controller_llm
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,

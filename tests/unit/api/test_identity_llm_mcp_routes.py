@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.identity import llm as llm_mod
 from kohakuterrarium.api.routes.identity import mcp as mcp_mod
-from kohakuterrarium.llm import profiles
+from kohakuterrarium.llm.profiles import resolve as profiles
 
 from tests.unit._fakes.package_backend import (
     echo_backend,

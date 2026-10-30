@@ -10,8 +10,8 @@ from typing import Any
 
 import httpx2
 
-from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
-from kohakuterrarium.llm.recovery import RetryPolicy
+from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
+from kohakuterrarium.llm.recovery.errors import RetryPolicy
 
 ANSWER = "The answer is 42."
 

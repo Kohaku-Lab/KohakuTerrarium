@@ -138,7 +138,7 @@ class TestBuiltinsRoute:
     def test_list_models(self):
         r = _client(builtins_mod.router).get(PREFIX + "/models")
         assert r.status_code == 200
-        from kohakuterrarium.llm.profiles import list_all as list_all_models
+        from kohakuterrarium.llm.profiles.resolve import list_all as list_all_models
 
         # Route is a thin pass-through to llm.profiles.list_all.
         assert r.json() == list_all_models()

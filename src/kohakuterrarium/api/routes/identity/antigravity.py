@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.auth.dependencies import verify_admin_token
 from kohakuterrarium.api.routes.identity.node_routing import is_host_target
-from kohakuterrarium.llm.antigravity_auth import AntigravityError
+from kohakuterrarium.llm.antigravity.auth import AntigravityError
 from kohakuterrarium.studio.identity import antigravity
 
 router = APIRouter(dependencies=[Depends(verify_admin_token)])

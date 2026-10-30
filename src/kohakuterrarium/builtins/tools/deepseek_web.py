@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from kohakuterrarium.builtins.tools.web_search_types import SearchResponse
-from kohakuterrarium.llm.api_keys import get_api_key
+from kohakuterrarium.llm.profiles.api_keys import get_api_key
 
 BASE_URL = "https://api.deepseek.com/v1/tools"
 REQUEST_TIMEOUT = 30.0

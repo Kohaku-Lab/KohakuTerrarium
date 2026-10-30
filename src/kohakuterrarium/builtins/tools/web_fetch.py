@@ -15,7 +15,7 @@ from kohakuterrarium.builtins.tools.deepseek_web import (
     validate_url,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.llm.api_keys import has_api_key
+from kohakuterrarium.llm.profiles.api_keys import has_api_key
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.utils.logging import DEFAULT_LOG_DIR, get_logger
 

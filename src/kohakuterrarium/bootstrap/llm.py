@@ -8,15 +8,15 @@ from typing import Any
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
-from kohakuterrarium.llm import api_keys as _api_keys
-from kohakuterrarium.llm.backend_registry import (
+from kohakuterrarium.llm.profiles import api_keys as _api_keys
+from kohakuterrarium.llm.profiles.backend_registry import (
     BUILTIN_BACKEND_TYPES,
     INTERNAL_BACKEND_TYPES,
     PackageBackendError,
     load_backend_class,
     package_backend,
 )
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.resolve import (
     LLMProfile,
     get_api_key,
     profile_to_identifier,
@@ -226,7 +226,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "google-antigravity":
-        from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
+        from kohakuterrarium.llm.antigravity.provider import AntigravityProvider
 
         if _api_keys._resolver is not None:
             raise ValueError("Antigravity: local_host_only")
@@ -247,7 +247,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "grok-subscription":
-        from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
+        from kohakuterrarium.llm.grok.provider import GrokSubscriptionProvider
 
         provider = GrokSubscriptionProvider(
             model=profile.model,
@@ -302,7 +302,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
     base_url = _resolved_base_url(profile)
     if profile.backend_type == "anthropic":
-        from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
+        from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
 
         provider = AnthropicProvider(
             api_key=api_key,
@@ -315,7 +315,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             retry_policy=retry_policy,
         )
     else:
-        from kohakuterrarium.llm.openai import OpenAIProvider
+        from kohakuterrarium.llm.openai.provider import OpenAIProvider
 
         provider = OpenAIProvider(
             api_key=api_key,
@@ -423,7 +423,7 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         )
 
     if config.auth_mode == "anthropic":
-        from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
+        from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
 
         return AnthropicProvider(
             api_key=api_key,
@@ -436,7 +436,7 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
             retry_policy=config.retry_policy,
         )
 
-    from kohakuterrarium.llm.openai import OpenAIProvider
+    from kohakuterrarium.llm.openai.provider import OpenAIProvider
 
     return OpenAIProvider(
         api_key=api_key,

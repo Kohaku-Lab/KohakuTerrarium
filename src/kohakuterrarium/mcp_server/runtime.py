@@ -20,7 +20,7 @@ from kohakuterrarium.core.tool_dispatch import (
     start_tool_task,
     tool_background_handle,
 )
-from kohakuterrarium.llm.tools import build_tool_schemas
+from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
 from kohakuterrarium.mcp_server.delegation import DelegationRuntime
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext

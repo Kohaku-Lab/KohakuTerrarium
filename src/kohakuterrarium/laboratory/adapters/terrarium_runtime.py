@@ -13,9 +13,9 @@ from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (
     is_drive_verb,
 )
 from kohakuterrarium.laboratory.protocols import LabRegistrar
-from kohakuterrarium.llm.backends import set_remote_backend
-from kohakuterrarium.llm.preset_store import preset_from_data, set_remote_preset
-from kohakuterrarium.llm.profile_types import LLMBackend
+from kohakuterrarium.llm.profiles.backends import set_remote_backend
+from kohakuterrarium.llm.presets.store import preset_from_data, set_remote_preset
+from kohakuterrarium.llm.profiles.types import LLMBackend
 from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.creature_ops import (
     agent_command_inventory,

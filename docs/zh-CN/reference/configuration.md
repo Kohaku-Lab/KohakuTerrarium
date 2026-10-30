@@ -81,7 +81,7 @@ Config 中引用其他文件或套件的字段时，解析顺序如下：
 | `extra_body` | dict | `{}` | 与解析后 preset 的 `extra_body` 做深度合并 (preset 里可能已带有 variation patch)。 |
 | `tool_doc_mode`、`include_tools_in_prompt`、`include_hints_in_prompt`、`max_messages`、`ephemeral`、`tool_format` | | | 对映顶层同名字段。 |
 
-每回合解析顺序 (见 `llm/profiles.py:resolve_controller_llm`)：
+每回合解析顺序 (见 `llm/profiles/resolve.py:resolve_controller_llm`)：
 
 1. CLI 旗标 `--llm` 优先于 YAML 的 `controller.llm`。
 2. 否则使用 `controller.llm` (preset 名称 + 可选的 `@group=option` 选择器)。

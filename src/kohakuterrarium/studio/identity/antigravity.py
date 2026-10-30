@@ -7,19 +7,19 @@ from datetime import datetime
 
 import httpx
 
-from kohakuterrarium.llm.antigravity_auth import (
+from kohakuterrarium.llm.antigravity.auth import (
     AgyCredentials,
     AntigravityError,
     load_credential,
 )
-from kohakuterrarium.llm.antigravity_client import (
+from kohakuterrarium.llm.antigravity.client import (
     BASE_URL,
     RequestError,
     discover_models,
     headers,
     load_project,
 )
-from kohakuterrarium.llm.recovery import RetryPolicy
+from kohakuterrarium.llm.recovery.errors import RetryPolicy
 
 
 def get_status() -> dict:

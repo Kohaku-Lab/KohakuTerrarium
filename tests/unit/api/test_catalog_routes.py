@@ -70,7 +70,7 @@ class TestModelsRoute:
     def test_list_models(self):
         r = _client(models_mod.router).get(PREFIX)
         assert r.status_code == 200
-        from kohakuterrarium.llm.profiles import list_all
+        from kohakuterrarium.llm.profiles.resolve import list_all
 
         # Route is a thin pass-through to llm.profiles.list_all.
         assert r.json() == list_all()

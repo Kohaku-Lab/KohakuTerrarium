@@ -1,20 +1,20 @@
 """LLM backend (provider) CRUD — list/save/delete provider definitions.
 
-Wraps :mod:`kohakuterrarium.llm.profiles` with plain records consumed by CLI
+Wraps :mod:`kohakuterrarium.llm.profiles.resolve` with plain records consumed by CLI
 and HTTP adapters. The lower-level ``llm`` package remains the persistence owner;
 this module validates and orchestrates Studio operations.
 """
 
 from typing import Any
 
-from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP
-from kohakuterrarium.llm.backend_registry import (
+from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP
+from kohakuterrarium.llm.profiles.backend_registry import (
     BUILTIN_BACKEND_TYPES,
     package_backend,
     package_backends,
 )
-from kohakuterrarium.llm.backends import package_provider_records
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.backends import package_provider_records
+from kohakuterrarium.llm.profiles.resolve import (
     LLMBackend,
     _is_available,
     delete_backend,

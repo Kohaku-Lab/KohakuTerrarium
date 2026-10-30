@@ -9,14 +9,17 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Protocol, runtime_checkable
 
 from kohakuterrarium.llm.message import Message
-from kohakuterrarium.llm.context_repair import CONTENT_REPAIR_LADDER, ContextRepair
-from kohakuterrarium.llm.recovery import (
+from kohakuterrarium.llm.recovery.context_repair import (
+    CONTENT_REPAIR_LADDER,
+    ContextRepair,
+)
+from kohakuterrarium.llm.recovery.errors import (
     ErrorClass,
     RetryPolicy,
     drop_last_tool_round,
     provider_error_text,
 )
-from kohakuterrarium.llm.request_budget import (
+from kohakuterrarium.llm.recovery.request_budget import (
     MAX_REQUEST_SHRINKS,
     RequestCeiling,
     RequestMeasure,

@@ -3,7 +3,7 @@
 import asyncio
 import json
 
-from kohakuterrarium.llm.antigravity_auth import AntigravityError
+from kohakuterrarium.llm.antigravity.auth import AntigravityError
 from kohakuterrarium.studio.identity.antigravity import (
     get_models,
     get_status,

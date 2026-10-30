@@ -36,7 +36,7 @@ import pytest
 from fastapi.testclient import TestClient
 from kohakuvault import KVault
 
-from kohakuterrarium.llm import antigravity_auth as agy_auth
+from kohakuterrarium.llm.antigravity import auth as agy_auth
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps

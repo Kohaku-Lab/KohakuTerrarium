@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kohakuterrarium.llm import presets as presets_mod
+from kohakuterrarium.llm.presets import catalog as presets_mod
 
 PROVIDER_SOURCE = '''
 from kohakuterrarium.llm.base import BaseLLMProvider, ChatResponse, LLMConfig

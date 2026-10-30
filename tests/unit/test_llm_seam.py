@@ -12,7 +12,7 @@ from kohakuterrarium.core.compact import CompactConfig
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.llm.codex import auth as codex_auth
 from kohakuterrarium.llm.base import BaseLLMProvider
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.llm_seam import (
     LLM_FACTORY_TARGETS,

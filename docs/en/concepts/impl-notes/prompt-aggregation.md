@@ -94,7 +94,7 @@ block appears.
 
 ### Schema construction
 
-`llm/tools.py` states framework semantics once rather than per tool:
+`llm/tools/build.py` states framework semantics once rather than per tool:
 
 - `run_in_background` appears only on tools declaring `supports_background`.
   Mid-flight promotion (`core/backgroundify.py`) covers a direct call that turns

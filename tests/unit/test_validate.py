@@ -14,7 +14,7 @@ from kohakuterrarium.errors import (
     PackageNotInstalledError,
 )
 from kohakuterrarium.cli.doctor import doctor_cli
-from kohakuterrarium.llm.profile_types import LLMProfile
+from kohakuterrarium.llm.profiles.types import LLMProfile
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 from tests.unit._fakes.package_backend import (

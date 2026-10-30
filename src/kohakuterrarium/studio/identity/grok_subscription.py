@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from kohakuterrarium.llm.grok_auth import GrokTokens
+from kohakuterrarium.llm.grok.auth import GrokTokens
 from kohakuterrarium.studio.identity.grok_account import get_usage
 
 __all__ = ["get_status", "get_usage"]

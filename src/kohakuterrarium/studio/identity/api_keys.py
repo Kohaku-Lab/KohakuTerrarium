@@ -3,9 +3,9 @@
 import os
 from typing import Any
 
-from kohakuterrarium.llm.api_keys import KEYS_PATH, list_api_keys
-from kohakuterrarium.llm.backend_registry import package_backend
-from kohakuterrarium.llm.profiles import (
+from kohakuterrarium.llm.profiles.api_keys import KEYS_PATH, list_api_keys
+from kohakuterrarium.llm.profiles.backend_registry import package_backend
+from kohakuterrarium.llm.profiles.resolve import (
     PROVIDER_KEY_MAP,
     _is_available,
     get_api_key,

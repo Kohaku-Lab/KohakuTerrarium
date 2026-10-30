@@ -9,8 +9,14 @@ import asyncio
 
 from kohakuterrarium import validate
 from kohakuterrarium.cli.shims import shims_summary
-from kohakuterrarium.llm.backend_registry import backend_doctor, package_backend
-from kohakuterrarium.llm.profiles import get_default_model, resolve_controller_llm
+from kohakuterrarium.llm.profiles.backend_registry import (
+    backend_doctor,
+    package_backend,
+)
+from kohakuterrarium.llm.profiles.resolve import (
+    get_default_model,
+    resolve_controller_llm,
+)
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger

@@ -6,7 +6,7 @@ import pytest
 
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.llm.context_repair import ContextRepair
+from kohakuterrarium.llm.recovery.context_repair import ContextRepair
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager

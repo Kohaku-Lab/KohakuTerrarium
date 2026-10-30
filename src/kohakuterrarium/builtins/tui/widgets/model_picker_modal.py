@@ -19,7 +19,7 @@ from textual.widgets import (
     TabPane,
 )
 
-from kohakuterrarium.llm.profiles import list_all
+from kohakuterrarium.llm.profiles.resolve import list_all
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

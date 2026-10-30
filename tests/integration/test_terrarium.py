@@ -70,7 +70,7 @@ from kohakuterrarium.terrarium.drive.registration import (
     GenericDriveRegistration,
 )
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DriveQuery
-from kohakuterrarium.llm.presets import get_all_presets
+from kohakuterrarium.llm.presets.catalog import get_all_presets
 from kohakuterrarium.testing.llm import ScriptEntry
 from kohakuterrarium.terrarium.creature_ops import build_runtime_graph_snapshot_for
 from kohakuterrarium.terrarium.engine import Terrarium

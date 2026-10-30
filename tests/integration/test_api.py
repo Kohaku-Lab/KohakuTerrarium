@@ -46,7 +46,7 @@ import kohakuterrarium.api.routes.persistence.preflight_metadata as _preflight_m
 import kohakuterrarium.api.routes.persistence.resume_cluster as _resume_cluster
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import get_service_legacy, set_service
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.metadata_candidate import read_metadata_candidate

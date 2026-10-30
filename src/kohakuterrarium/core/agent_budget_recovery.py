@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.llm.context_repair import ContextRepair
-from kohakuterrarium.llm.recovery import drop_last_tool_round
+from kohakuterrarium.llm.recovery.context_repair import ContextRepair
+from kohakuterrarium.llm.recovery.errors import drop_last_tool_round
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

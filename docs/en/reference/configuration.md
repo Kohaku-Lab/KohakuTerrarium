@@ -100,7 +100,7 @@ All fields may also be set at the top level for backward compatibility.
 
 Canonical model identifiers are now `provider/name[@group=option,...]`. The runtime stores and surfaces this full identifier (for `/model`, session-info events, and UI display), so a round-trip like `/model openai/gpt-5.4-api@reasoning=high` is stable.
 
-Resolution order per turn (see `llm/profiles.py:resolve_controller_llm`):
+Resolution order per turn (see `llm/profiles/resolve.py:resolve_controller_llm`):
 
 1. `--llm` CLI flag wins over the YAML `controller.llm`.
 2. Otherwise `controller.llm` (preset name + optional `@group=option` selector).

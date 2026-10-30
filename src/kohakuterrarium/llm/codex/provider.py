@@ -17,7 +17,7 @@ except ImportError:
     AsyncOpenAI = None  # type: ignore[assignment,misc]
     HAS_OPENAI = False
 
-from kohakuterrarium.llm import responses_ws_options as ws_options
+from kohakuterrarium.llm.responses import ws_options
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -45,20 +45,20 @@ from kohakuterrarium.llm.codex.rate_limits import (
 )
 from kohakuterrarium.llm.codex.stream import process_codex_event, stream_codex_ws_turn
 from kohakuterrarium.llm.codex.ws import CodexWSMixin
-from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
-from kohakuterrarium.llm.recovery import (
+from kohakuterrarium.llm.responses.reasoning import ResponsesReasoningCollector
+from kohakuterrarium.llm.recovery.errors import (
     RetryPolicy,
     backoff_delay,
     classify_openai_error,
 )
-from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
-from kohakuterrarium.llm.stream_replay import ReplayFilter
-from kohakuterrarium.llm.responses_ws_recovery import (
+from kohakuterrarium.llm.responses.ws import ResponsesWSError, ResponsesWSSession
+from kohakuterrarium.llm.stream.replay import ReplayFilter
+from kohakuterrarium.llm.responses.ws_recovery import (
     WSRecovery,
     fresh_recovery,
     server_rejected,
 )
-from kohakuterrarium.llm.responses_tools import prepare_request_tools
+from kohakuterrarium.llm.responses.tools import prepare_request_tools
 from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 from kohakuterrarium.utils.logging import get_logger
 

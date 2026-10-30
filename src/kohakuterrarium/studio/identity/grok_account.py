@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from kohakuterrarium.llm.grok_auth import (
+from kohakuterrarium.llm.grok.auth import (
     GROK_CLI_SOURCE,
     GrokAuthError,
     GrokToken,

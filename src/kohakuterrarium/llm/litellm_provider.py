@@ -14,15 +14,15 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
-from kohakuterrarium.llm.artifact_resolve import resolve_message_image_urls
-from kohakuterrarium.llm.openai_helpers import (
+from kohakuterrarium.llm.media.artifacts import resolve_message_image_urls
+from kohakuterrarium.llm.openai.helpers import (
     delta_field,
     delta_field_present,
     merge_reasoning_detail_stream,
     pack_reasoning_fields,
 )
-from kohakuterrarium.llm.openai_sanitize import strip_internal_message_fields
-from kohakuterrarium.llm.turn_segments import TurnSegmentsBuilder
+from kohakuterrarium.llm.openai.sanitize import strip_internal_message_fields
+from kohakuterrarium.llm.stream.segments import TurnSegmentsBuilder
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -3,8 +3,8 @@
 import importlib
 
 _EXPORTS = {
-    "ANTHROPIC_BASE_URL": "kohakuterrarium.llm.anthropic_provider",
-    "AnthropicProvider": "kohakuterrarium.llm.anthropic_provider",
+    "ANTHROPIC_BASE_URL": "kohakuterrarium.llm.anthropic.provider",
+    "AnthropicProvider": "kohakuterrarium.llm.anthropic.provider",
     "AssistantMessage": "kohakuterrarium.llm.message",
     "BaseLLMProvider": "kohakuterrarium.llm.base",
     "ChatChunk": "kohakuterrarium.llm.base",
@@ -15,9 +15,9 @@ _EXPORTS = {
     "Message": "kohakuterrarium.llm.message",
     "MessageList": "kohakuterrarium.llm.message",
     "NativeToolCall": "kohakuterrarium.llm.base",
-    "OPENAI_BASE_URL": "kohakuterrarium.llm.openai",
-    "OPENROUTER_BASE_URL": "kohakuterrarium.llm.openai",
-    "OpenAIProvider": "kohakuterrarium.llm.openai",
+    "OPENAI_BASE_URL": "kohakuterrarium.llm.openai.provider",
+    "OPENROUTER_BASE_URL": "kohakuterrarium.llm.openai.provider",
+    "OpenAIProvider": "kohakuterrarium.llm.openai.provider",
     "SystemMessage": "kohakuterrarium.llm.message",
     "ToolMessage": "kohakuterrarium.llm.message",
     "ToolSchema": "kohakuterrarium.llm.base",

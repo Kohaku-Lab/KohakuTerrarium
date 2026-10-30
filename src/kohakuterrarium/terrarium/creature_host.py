@@ -31,7 +31,7 @@ from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.token_ledger import context_window, token_snapshot
 from kohakuterrarium.core.turn import AgentEventStream, TurnResult
-from kohakuterrarium.llm.profiles import _login_provider_for
+from kohakuterrarium.llm.profiles.resolve import _login_provider_for
 from kohakuterrarium.packages.walk import package_snapshot
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.creature_ids import _safe_creature_id

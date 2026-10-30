@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 
-from kohakuterrarium.llm.openai import OpenAIProvider
+from kohakuterrarium.llm.openai.provider import OpenAIProvider
 
 FIXTURE = Path(__file__).parents[1] / "unit/llm/fixtures/gemini_parallel_deltas.json"
 RECORDED_CALLS = json.loads(FIXTURE.read_text(encoding="utf-8"))

@@ -55,7 +55,10 @@ from kohakuterrarium.llm.message import (
     TextPart,
     content_part_from_dict,
 )
-from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
+from kohakuterrarium.llm.tools.build import (
+    build_provider_native_tools,
+    build_tool_schemas,
+)
 from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE
 from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import ToolInfo

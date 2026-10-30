@@ -13,7 +13,7 @@ from typing import Any
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 
-from kohakuterrarium.llm.presets import iter_all_presets
+from kohakuterrarium.llm.presets.catalog import iter_all_presets
 
 
 def _model_completions(prefix: str, agent: Any | None = None) -> list[tuple[str, str]]:
