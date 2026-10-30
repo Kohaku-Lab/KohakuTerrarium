@@ -456,6 +456,138 @@ jobs:
           name: desktop-${{ matrix.platform }}
           path: artifacts/
 
+  # ── Tauri desktop shell: bundled interpreter + launcher + one release tree ─
+  # Builds the installer, installs it on the runner and runs the headless
+  # self-check (app serves behind its launch token, kt runs, python tool runs).
+  build-desktop-tauri:
+    needs: [meta, build-release-tree]
+    # Advisory until its first green nightly: a failure must not block the wheel,
+    # PyPI, docker or the release trees.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            plat_tag: win-x64
+            abi: cp313
+          - os: macos-latest
+            platform: macos
+            plat_tag: macos-arm64
+            abi: cp313
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+          submodules: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Stamp the dispatched version
+        if: needs.meta.outputs.stamp == 'true'
+        run: python scripts/set_pyproject_version.py write "${{ needs.meta.outputs.version }}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-tree-${{ matrix.plat_tag }}-${{ matrix.abi }}
+          path: release-tree/
+
+      - name: Stage interpreter, launcher and release tree
+        run: >
+          python packaging/desktop/stage_runtime.py
+          --platform ${{ matrix.plat_tag }}
+          --release-dir release-tree
+          --stamp-version
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packaging/desktop/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install the Tauri CLI
+        run: npm install --global @tauri-apps/cli@2
+
+      - name: Build installers (Windows)
+        if: matrix.platform == 'windows'
+        working-directory: packaging/desktop/src-tauri
+        run: tauri build --bundles msi,nsis
+
+      - name: Build and ad-hoc sign the app bundle (macOS)
+        if: matrix.platform == 'macos'
+        working-directory: packaging/desktop/src-tauri
+        shell: bash
+        run: |
+          tauri build --bundles app
+          app=$(find target/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)
+          # Every Mach-O in the bundle needs a signature on Apple silicon.
+          find "${app}" -type f \( -name '*.so' -o -name '*.dylib' -o -perm -u+x \) \
+            -exec sh -c 'file -b "$1" | grep -q Mach-O && codesign --force --sign - --timestamp=none "$1"' _ {} \;
+          codesign --force --deep --sign - --timestamp=none "${app}"
+          codesign --verify --deep --strict "${app}"
+          version=$(python -c "import json;print(json.load(open('tauri.conf.json'))['version'])")
+          mkdir -p target/release/bundle/dmg
+          hdiutil create -volname KohakuTerrarium -srcfolder "${app}" -ov -format UDZO \
+            "target/release/bundle/dmg/KohakuTerrarium_${version}_aarch64.dmg"
+
+      - name: Install and self-check (Windows MSI)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem packaging/desktop/src-tauri/target/release/bundle/msi/*.msi | Select-Object -First 1
+          $process = Start-Process msiexec -ArgumentList "/i", "`"$($msi.FullName)`"", "/qn", "/norestart" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "msiexec exited $($process.ExitCode)" }
+          $dir = "$env:ProgramFiles\KohakuTerrarium"
+          $exe = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch 'uninstall|unins' } | Select-Object -First 1
+          python packaging/desktop/installed_smoke.py --exe $exe.FullName --resources $dir
+          if ($LASTEXITCODE -ne 0) { throw "installed self-check failed" }
+          Start-Process msiexec -ArgumentList "/x", "`"$($msi.FullName)`"", "/qn", "/norestart" -Wait
+
+      - name: Install and self-check (Windows per-user installer)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem packaging/desktop/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/S" -Wait
+          $dir = "$env:LOCALAPPDATA\KohakuTerrarium"
+          $exe = Get-ChildItem $dir -Filter *.exe | Where-Object { $_.Name -notmatch 'uninstall|unins' } | Select-Object -First 1
+          python packaging/desktop/installed_smoke.py --exe $exe.FullName --resources $dir
+          if ($LASTEXITCODE -ne 0) { throw "installed self-check failed" }
+
+      - name: Install and self-check (macOS)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          dmg=$(find packaging/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' | head -n 1)
+          hdiutil attach "${dmg}" -mountpoint /Volumes/KohakuTerrarium -nobrowse
+          cp -R /Volumes/KohakuTerrarium/KohakuTerrarium.app /Applications/
+          hdiutil detach /Volumes/KohakuTerrarium
+          app=/Applications/KohakuTerrarium.app
+          exe=$(find "${app}/Contents/MacOS" -type f | head -n 1)
+          python packaging/desktop/installed_smoke.py --exe "${exe}" --resources "${app}/Contents/Resources"
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          find packaging/desktop/src-tauri/target/release/bundle -type f \
+            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' \) -exec cp {} artifacts/ \;
+          ls -la artifacts/
+          test -n "$(find artifacts -maxdepth 1 -type f | head -n 1)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-tauri-${{ matrix.platform }}
+          path: artifacts/
+
   # ── Docker images (unchanged) ──────────────────────────────────────
   build-docker:
     needs: [meta, build-wheel]
@@ -552,7 +684,7 @@ jobs:
 
   # ── GitHub Release (release-tree tarballs + briefcase artifacts) ──
   github-release:
-    needs: [meta, build-wheel, build-release-tree, build-desktop, publish-channel-manifests]
+    needs: [meta, build-wheel, build-release-tree, build-desktop, build-desktop-tauri, publish-channel-manifests]
     runs-on: ubuntu-latest
     steps:
       # Checkout first: the action cleans its destination directory, which

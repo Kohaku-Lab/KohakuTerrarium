@@ -119,6 +119,27 @@ jobs:
       - name: Run dep-graph lint guard
         run: pytest tests/unit/test_dep_graph_lint.py -n 0 -v --tb=short
 
+  desktop-shell:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: packaging/desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packaging/desktop/src-tauri
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
   frontend-check:
     runs-on: ubuntu-latest
     defaults:
