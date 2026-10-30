@@ -22,7 +22,7 @@ from kohakuterrarium.session.sync import (
 )
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.terrarium.session_coord import apply_merge
-from kohakuterrarium.terrarium.topology import TopologyDelta
+from kohakuterrarium.terrarium.graph.topology import TopologyDelta
 
 pytestmark = pytest.mark.timeout(60)
 

@@ -31,7 +31,7 @@ from kohakuterrarium.terrarium.drive.requests import (
     DriveTransitionProposal,
 )
 from kohakuterrarium.terrarium.drive.runtime import DriveRuntime
-from kohakuterrarium.terrarium.topology import GraphTopology, TopologyState
+from kohakuterrarium.terrarium.graph.topology import GraphTopology, TopologyState
 
 USER = ActorRef("user", "alice")
 

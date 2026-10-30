@@ -13,7 +13,7 @@ from uuid import uuid4
 from kohakuterrarium.errors import KTError
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.policy import is_terminal
 from kohakuterrarium.terrarium.drive.repository.repository import Mutation, new_audit, new_outbox

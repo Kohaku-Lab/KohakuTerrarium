@@ -19,7 +19,7 @@ Adding a type requires one entry in :data:`_TYPE_DISPATCH`.
 from typing import Any
 
 from kohakuterrarium.studio.sessions import creature_plugins, creature_state
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.studio._runtime import as_engine
 

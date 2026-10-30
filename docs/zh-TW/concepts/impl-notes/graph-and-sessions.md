@@ -45,7 +45,7 @@ tags:
 
 ## 我們實際怎麼做
 
-### 純資料圖（`terrarium/topology.py`）
+### 純資料圖（`terrarium/graph/topology.py`）
 
 拓樸活在一個樸素的 `TopologyState` 值裡：
 
@@ -172,17 +172,17 @@ scratchpad、觸發器）。
 
 ## 它住在程式碼哪裡
 
-- `src/kohakuterrarium/terrarium/topology.py`：`TopologyState`、
+- `src/kohakuterrarium/terrarium/graph/topology.py`：`TopologyState`、
   `GraphTopology`、`TopologyDelta`、純 mutation 函數、
   `find_components`、`_normalize_components`、`_merge_graphs`。
-- `src/kohakuterrarium/terrarium/engine.py`：`Terrarium` 編排。
+- `src/kohakuterrarium/terrarium/engine/engine.py`：`Terrarium` 編排。
   `add_creature`、`remove_creature`、`connect`、`disconnect`、
   `add_channel`、`remove_channel`，加 environment / session store
   registry。
-- `src/kohakuterrarium/terrarium/channels.py`：`connect_creatures`、
+- `src/kohakuterrarium/terrarium/channels/channels.py`：`connect_creatures`、
   `_merge_environment_into`、`_ensure_channel_persistence`、
   `inject_channel_trigger`、`_teardown_existing_trigger`。
-- `src/kohakuterrarium/terrarium/channel_lifecycle.py`：
+- `src/kohakuterrarium/terrarium/channels/lifecycle.py`：
   `apply_split_bookkeeping`、頻道移除流程、environment 重新分配。
 - `src/kohakuterrarium/terrarium/session_coord.py`：`apply_merge`、
   `apply_split`、`merge_session_stores`、`split_session_store`、

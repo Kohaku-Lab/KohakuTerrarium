@@ -3,7 +3,7 @@
 Defines the identity/topology :class:`CreatureInfo` snapshot and the small
 serialization helpers Local, Remote, and MultiNode services share at their
 boundary. The live
-:class:`~kohakuterrarium.terrarium.creature_host.Creature` is not serializable
+:class:`~kohakuterrarium.terrarium.creature.host.Creature` is not serializable
 (it holds the Agent, channels, …), so the service Protocol returns these DTOs.
 """
 
@@ -73,7 +73,7 @@ class CreatureInfo:
     """Identity + topology snapshot of a single creature.
 
     Serializable; safe to send over Lab. The live
-    :class:`~kohakuterrarium.terrarium.creature_host.Creature` object
+    :class:`~kohakuterrarium.terrarium.creature.host.Creature` object
     is *not* serializable (holds Agent, channels, etc.), so the
     Protocol returns this DTO instead.
     """

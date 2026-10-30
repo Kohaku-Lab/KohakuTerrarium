@@ -19,7 +19,7 @@ from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (
     handle_drive_request,
 )
 from kohakuterrarium.studio.identity import drive_settings as _ds
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
@@ -27,7 +27,7 @@ from kohakuterrarium.terrarium.drive.config import (
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.drive.wire import pack_create_request
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 

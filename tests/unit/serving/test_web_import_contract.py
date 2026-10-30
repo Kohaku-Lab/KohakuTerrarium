@@ -29,7 +29,7 @@ def test_web_module_import_defers_api_application_graph():
     )
 
     assert "kohakuterrarium.api.app" not in loaded
-    assert "kohakuterrarium.terrarium.engine" not in loaded
+    assert "kohakuterrarium.terrarium.engine.engine" not in loaded
     assert "kohakuterrarium.llm.anthropic.provider" not in loaded
     assert "kohakuterrarium.builtins.tools.web_fetch" not in loaded
 
@@ -40,7 +40,7 @@ def test_engine_pool_import_defers_terrarium_runtime():
         "print(json.dumps(sorted(sys.modules)))"
     )
 
-    assert "kohakuterrarium.terrarium.engine" not in loaded
+    assert "kohakuterrarium.terrarium.engine.engine" not in loaded
     assert "kohakuterrarium.core.agent" not in loaded
     assert "kohakuterrarium.llm.anthropic.provider" not in loaded
 

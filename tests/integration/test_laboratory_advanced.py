@@ -71,7 +71,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.parsing import ToolCallEvent
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 pytestmark = pytest.mark.timeout(60)

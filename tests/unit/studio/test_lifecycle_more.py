@@ -14,8 +14,8 @@ import pytest
 from kohakuterrarium.errors import InvalidRequestError
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.config import CreatureConfig
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 
@@ -552,7 +552,7 @@ class TestFindCreatureRoot:
     async def test_root_by_creature_id(self):
         # Build a terrarium where the privileged creature has the literal
         # creature_id "root".
-        from kohakuterrarium.terrarium.creature_host import Creature
+        from kohakuterrarium.terrarium.creature.host import Creature
 
         t = await TestTerrariumBuilder().with_creature("alice").build()
         svc = LocalTerrariumService(t)
@@ -572,7 +572,7 @@ class TestFindCreatureRoot:
             await t.shutdown()
 
     async def test_root_by_name(self):
-        from kohakuterrarium.terrarium.creature_host import Creature
+        from kohakuterrarium.terrarium.creature.host import Creature
 
         t = await TestTerrariumBuilder().with_creature("alice").build()
         svc = LocalTerrariumService(t)

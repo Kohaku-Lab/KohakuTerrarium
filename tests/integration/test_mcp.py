@@ -55,8 +55,8 @@ from kohakuterrarium.mcp.client import (
     normalize_mcp_transport,
 )
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 

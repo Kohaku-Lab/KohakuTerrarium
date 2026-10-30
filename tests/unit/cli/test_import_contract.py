@@ -73,8 +73,8 @@ def test_web_help_does_not_load_terminal_surfaces():
     )
 
     assert "kohakuterrarium.cli._main" not in loaded
-    assert "kohakuterrarium.terrarium.engine_cli" not in loaded
-    assert "kohakuterrarium.terrarium.engine_rich_cli" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.tui" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.rich" not in loaded
     assert not any(name.startswith("textual") for name in loaded)
     assert not any(name.startswith("prompt_toolkit") for name in loaded)
 
@@ -85,7 +85,7 @@ def test_standalone_cli_import_does_not_load_tui_or_web():
         "print(json.dumps(sorted(sys.modules)))"
     )
 
-    assert "kohakuterrarium.terrarium.engine_cli" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.tui" not in loaded
     assert "kohakuterrarium.serving.web" not in loaded
     assert not any(name.startswith("textual") for name in loaded)
 
@@ -96,6 +96,6 @@ def test_standalone_tui_import_does_not_load_rich_cli_or_web():
         "print(json.dumps(sorted(sys.modules)))"
     )
 
-    assert "kohakuterrarium.terrarium.engine_rich_cli" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.rich" not in loaded
     assert "kohakuterrarium.serving.web" not in loaded
     assert not any(name.startswith("prompt_toolkit") for name in loaded)

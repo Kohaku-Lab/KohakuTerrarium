@@ -10,13 +10,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import kohakuterrarium.terrarium.autosession as _autosession
-import kohakuterrarium.terrarium.channels as channel_module
-import kohakuterrarium.terrarium.graph_manifest as _manifest
+import kohakuterrarium.terrarium.channels.channels as channel_module
+import kohakuterrarium.terrarium.graph.manifest as _manifest
 from kohakuterrarium.studio._runtime import as_engine
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.terrarium import TerrariumService
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.file.path import env_fs_path_text
 from kohakuterrarium.utils.logging import get_logger

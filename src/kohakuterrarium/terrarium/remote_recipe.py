@@ -3,7 +3,7 @@
 from typing import Any
 
 from kohakuterrarium.terrarium.service import CreatureInfo
-from kohakuterrarium.terrarium.topology import GraphTopology
+from kohakuterrarium.terrarium.graph.topology import GraphTopology
 from kohakuterrarium.terrarium.wire import (
     unpack_creature_info,
     unpack_graph_topology,

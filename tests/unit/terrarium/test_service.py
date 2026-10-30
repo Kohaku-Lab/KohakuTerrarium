@@ -16,7 +16,7 @@ import pytest
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import (
     CreatureInfo,
@@ -360,7 +360,7 @@ class TestConnectDisconnect:
         try:
             # Add a new creature carol that's in the same graph.
             engine = svc.engine
-            from kohakuterrarium.terrarium.creature_host import Creature
+            from kohakuterrarium.terrarium.creature.host import Creature
             from kohakuterrarium.testing.terrarium import _FakeAgent
 
             graphs = await svc.list_graphs()
@@ -476,7 +476,7 @@ class TestSubscribe:
     async def test_returns_async_iterator(self):
         import asyncio
 
-        from kohakuterrarium.terrarium.creature_host import Creature
+        from kohakuterrarium.terrarium.creature.host import Creature
 
         svc = await _make_service()
         try:
@@ -505,7 +505,7 @@ class TestSubscribe:
     async def test_subscribe_with_filter(self):
         import asyncio
 
-        from kohakuterrarium.terrarium.creature_host import Creature
+        from kohakuterrarium.terrarium.creature.host import Creature
 
         svc = await _make_service()
         try:

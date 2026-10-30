@@ -72,8 +72,8 @@ from kohakuterrarium.terrarium.drive.registration.registration import (
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DriveQuery
 from kohakuterrarium.llm.presets.catalog import get_all_presets
 from kohakuterrarium.testing.llm import ScriptEntry
-from kohakuterrarium.terrarium.creature_ops import build_runtime_graph_snapshot_for
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.ops import build_runtime_graph_snapshot_for
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.output_log import OutputLogCapture
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -1793,7 +1793,7 @@ class TestTerrariumIntegration:
         assert len(writer_log) == writer_pre + 2
         assert "are you there" in str(writer_log[-2])
         # Unknown targets fail closed at wiring time; no dead edge is stored.
-        from kohakuterrarium.terrarium.graph_identity import TargetNotFoundError
+        from kohakuterrarium.terrarium.graph.identity import TargetNotFoundError
 
         with pytest.raises(TargetNotFoundError):
             await service.wire_output(

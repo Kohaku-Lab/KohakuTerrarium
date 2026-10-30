@@ -8,7 +8,7 @@ introducing a lifecycle import cycle.
 from typing import TYPE_CHECKING
 
 from kohakuterrarium.studio._runtime import as_engine
-from kohakuterrarium.terrarium.creature_host import (
+from kohakuterrarium.terrarium.creature.host import (
     apply_creature_name as _engine_apply_creature_name,
 )
 
@@ -20,7 +20,7 @@ def apply_creature_name(creature, name: str) -> None:
     """Push a display-name change onto every nested object that caches it.
 
     Delegates to the engine's canonical implementation
-    (:func:`kohakuterrarium.terrarium.creature_host.apply_creature_name`)
+    (:func:`kohakuterrarium.terrarium.creature.host.apply_creature_name`)
     so studio renames and engine spawn-time renames stay byte-identical.
     This used to be a hand-maintained duplicate; it drifted when the
     canonical copy learned to retarget the live ``SessionOutput`` event

@@ -32,7 +32,7 @@ from kohakuterrarium.api.auth.engine_pool import (
 )
 from kohakuterrarium.api.auth.users import create_user
 from kohakuterrarium.terrarium import host_resources_allowed
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.terrarium import _FakeAgent
 

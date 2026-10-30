@@ -9,7 +9,7 @@ from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.core.jobs.job import JobState, JobStore, JobType
 from kohakuterrarium.mcp_server.subagent_host import SubagentHost
 from kohakuterrarium.studio.studio import Studio
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
 
 

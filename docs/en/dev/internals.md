@@ -284,14 +284,14 @@ for the full reasoning.
 
 ### 3.1 Terrarium engine
 
-`terrarium/engine.py:Terrarium` is the runtime engine, one per
+`terrarium/engine/engine.py:Terrarium` is the runtime engine, one per
 process, hosting every creature. The engine owns:
 
 - `_topology: TopologyState`: pure-data graph model
-  (`terrarium/topology.py`) tracking which creatures share which
+  (`terrarium/graph/topology.py`) tracking which creatures share which
   graphs, which channels exist, who listens / sends.
 - `_creatures: dict[str, Creature]`: live wrappers
-  (`terrarium/creature_host.py`).
+  (`terrarium/creature/host.py`).
 - `_environments: dict[str, Environment]`: one per graph; holds
   `shared_channels`.
 - `_session_stores: dict[str, SessionStore]`: one per attached graph.
@@ -307,7 +307,7 @@ they are in a terrarium except through their channels and (optionally)
 the topology hint baked into their system prompt.
 
 **Channel injection.** When a creature joins a graph that has channels
-it listens to, `terrarium/channels.py:inject_channel_trigger` adds a
+it listens to, `terrarium/channels/channels.py:inject_channel_trigger` adds a
 `ChannelTrigger` to its `trigger_manager`. This is the one sanctioned
 downward injection in the layer model: a creature in a graph does
 know it has peers (it has to), but only via the handles the engine
@@ -319,7 +319,7 @@ pool, attached session stores merge into one via
 `terrarium/session_coord.py:apply_merge`). `Terrarium.disconnect` may
 split a graph (parent session is duplicated to each side via
 `apply_split`). The pure-data topology mutators in
-`terrarium/topology.py` return a `TopologyDelta` whose
+`terrarium/graph/topology.py` return a `TopologyDelta` whose
 `kind in {"nothing", "merge", "split"}` drives the live updates.
 
 **Session merge / split.** The unit of session is the connected

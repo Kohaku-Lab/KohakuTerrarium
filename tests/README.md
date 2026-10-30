@@ -169,7 +169,7 @@ Each mirrors how the **real consumer** drives that folder.
 
 | File | Folder | The workflow it runs | Real consumer it mirrors |
 |---|---|---|---|
-| `test_core.py` | `core/` | build an `Agent` → inject input → controller loop → direct + background tool dispatch → sub-agent dispatch → output routing → compaction → termination → interrupt → history ops | `terrarium/creature_host.py`, `bootstrap/agent_init.py` |
+| `test_core.py` | `core/` | build an `Agent` → inject input → controller loop → direct + background tool dispatch → sub-agent dispatch → output routing → compaction → termination → interrupt → history ops | `terrarium/creature/host.py`, `bootstrap/agent_init.py` |
 | `test_bootstrap.py` | `bootstrap/` | `Agent.from_path` on a real on-disk config → every factory fires → run a turn proving the wiring is live | `terrarium/factory.py`, `core/agent.py.__init__` |
 | `test_session.py` | `session/` | init store → creature writes events → record turns → read back → close → resume → verify → memory search → fork → migration | `terrarium/persistence.py`, `studio/sessions/lifecycle.py`, `session/resume/resume.py` |
 | `test_terrarium.py` | `terrarium/` | build graph → add creatures → wire channels → broadcast → privileged node mutates → auto-merge/split → session lineage → hot-plug → recipe apply: driven through `LocalTerrariumService` | `studio/sessions/lifecycle.py` |
@@ -241,7 +241,7 @@ testing otherwise.
 | `cli/` | argparse + interactive prompts; covered by e2e for the resumable paths |
 | `builtins/cli_rich/`, `builtins/tui/` | Rich / Textual terminal UI; visual |
 | `llm/openai/provider.py`, `llm/codex/`, `llm/litellm_provider.py` | Need a live provider |
-| `terrarium/engine_cli.py`, `terrarium/engine_rich_cli.py`, `terrarium/cli_output.py` | CLI / TTY UI |
+| `terrarium/engine/cli/tui.py`, `terrarium/engine/cli/rich.py`, `terrarium/engine/cli/output.py` | CLI / TTY UI |
 | `studio/attach/pty_posix.py`, `studio/attach/pty_windows.py`, `studio/attach/pty_router.py` | Platform-specific PTY backends, gated at import |
 | `studio/identity/codex_oauth.py` | 3rd-party OAuth flow |
 | `session/memory/embedding.py` (non-deterministic embedders) | 3rd-party model dependency |

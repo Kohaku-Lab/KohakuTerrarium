@@ -605,7 +605,7 @@ class TestTuiStdinStealFix:
         )
         from kohakuterrarium.builtins.inputs.none import NoneInput
         from kohakuterrarium.builtins.tui.input import TUIInput
-        from kohakuterrarium.terrarium.engine_cli import _input_steals_stdin
+        from kohakuterrarium.terrarium.engine.cli.tui import _input_steals_stdin
 
         # Stdin-stealing inputs that would race Textual.
         assert _input_steals_stdin(CLIInput()) is True
@@ -753,7 +753,7 @@ class TestTuiStdinStealFix:
         # ``cli_rich/app.py:RichCLIApp._handle_slash`` does it).
         import asyncio as _asyncio
 
-        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+        from kohakuterrarium.terrarium.engine.cli.tui import _handle_tui_slash
 
         modal_calls: list[tuple[str, Any]] = []
 
@@ -781,7 +781,7 @@ class TestTuiStdinStealFix:
         # ``/module`` and ``/modules`` open the modules modal.
         import asyncio as _asyncio
 
-        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+        from kohakuterrarium.terrarium.engine.cli.tui import _handle_tui_slash
 
         for variant in ("/module", "/modules", "/mod"):
             modal_calls: list[str] = []
@@ -808,7 +808,7 @@ class TestTuiStdinStealFix:
         # ``/drives`` and ``/drive`` open the Drive record + settings panel.
         import asyncio as _asyncio
 
-        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+        from kohakuterrarium.terrarium.engine.cli.tui import _handle_tui_slash
 
         for variant in ("/drives", "/drive"):
             calls: list[str] = []
@@ -845,7 +845,9 @@ class TestTuiStdinStealFix:
             / "src"
             / "kohakuterrarium"
             / "terrarium"
-            / "engine_cli.py"
+            / "engine"
+            / "cli"
+            / "tui.py"
         )
         text = engine_cli_py.read_text(encoding="utf-8")
         start_idx = text.index("await tui.start()")
@@ -872,7 +874,9 @@ class TestTuiStdinStealFix:
             / "src"
             / "kohakuterrarium"
             / "terrarium"
-            / "engine_cli.py"
+            / "engine"
+            / "cli"
+            / "tui.py"
         )
         text = engine_cli_py.read_text(encoding="utf-8")
         assert "tui.host_agent = focus" in text, (
@@ -897,7 +901,9 @@ class TestTuiStdinStealFix:
             / "src"
             / "kohakuterrarium"
             / "terrarium"
-            / "engine_cli.py"
+            / "engine"
+            / "cli"
+            / "tui.py"
         )
         text = engine_cli_py.read_text(encoding="utf-8")
         # The submit path must use ``_spawn_inject(...)`` (or
@@ -951,7 +957,7 @@ class TestTuiStdinStealFix:
         # False, so the engine's main loop runs ``focus.inject_input``.
         import asyncio as _asyncio
 
-        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+        from kohakuterrarium.terrarium.engine.cli.tui import _handle_tui_slash
 
         class _NoModalTUI:
             async def show_model_picker_modal(self, agent: Any) -> None:
@@ -994,7 +1000,7 @@ class TestTuiStdinStealFix:
         # root's model.
         import asyncio as _asyncio
 
-        from kohakuterrarium.terrarium.engine_cli import _handle_tui_slash
+        from kohakuterrarium.terrarium.engine.cli.tui import _handle_tui_slash
 
         focus_agent = object()
         bob_agent = object()
@@ -1092,7 +1098,9 @@ class TestTuiStdinStealFix:
             / "src"
             / "kohakuterrarium"
             / "terrarium"
-            / "engine_cli.py"
+            / "engine"
+            / "cli"
+            / "tui.py"
         )
         text = engine_cli_py.read_text(encoding="utf-8")
         try_idx = text.index(
@@ -1118,7 +1126,9 @@ class TestTuiStdinStealFix:
             / "src"
             / "kohakuterrarium"
             / "terrarium"
-            / "engine_cli.py"
+            / "engine"
+            / "cli"
+            / "tui.py"
         )
         text = engine_cli_py.read_text(encoding="utf-8")
         # The pre-publish loop must exist and run BEFORE the

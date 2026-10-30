@@ -32,12 +32,12 @@ from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     UserCommandResult,
 )
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent as _EngineFakeAgent

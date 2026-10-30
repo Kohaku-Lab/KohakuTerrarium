@@ -14,7 +14,7 @@ async def store_attach_hook(engine, creature, *, config_path="", config_type="ag
 
 
 def name_apply_hook(creature, name: str) -> None:
-    from kohakuterrarium.terrarium.creature_host import apply_creature_name
+    from kohakuterrarium.terrarium.creature.host import apply_creature_name
 
     apply_creature_name(creature, name)
 

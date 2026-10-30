@@ -429,7 +429,7 @@ Because the snapshot is *full* (not a delta log), user removals are
 also reflected: anything the user removed simply isn't in the
 snapshot.
 
-Implementation: `src/kohakuterrarium/terrarium/topology_snapshot.py`.
+Implementation: `src/kohakuterrarium/terrarium/graph/snapshot.py`.
 Tested by `tests/integration/test_runtime_topology_resume.py`.
 
 ### Known limits today

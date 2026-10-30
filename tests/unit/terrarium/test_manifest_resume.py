@@ -13,9 +13,9 @@ from kohakuterrarium.errors import GraphManifestError, SessionNotResumableError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.terrarium import resume_manifest as manifest_resume_mod
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 from kohakuterrarium.testing.llm import ScriptedLLM
 

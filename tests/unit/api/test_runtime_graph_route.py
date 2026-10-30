@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes import runtime_graph as rg_mod
-from kohakuterrarium.terrarium.topology import ChannelInfo, GraphTopology
+from kohakuterrarium.terrarium.graph.topology import ChannelInfo, GraphTopology
 
 # ── helpers / fakes ────────────────────────────────────────────
 

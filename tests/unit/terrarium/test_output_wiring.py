@@ -11,7 +11,7 @@ from kohakuterrarium.terrarium.output_wiring import (
     _log_task_error,
     _safe_deliver,
 )
-from kohakuterrarium.terrarium.topology import GraphTopology, TopologyState
+from kohakuterrarium.terrarium.graph.topology import GraphTopology, TopologyState
 
 # ── fakes ─────────────────────────────────────────────────────────
 
@@ -362,7 +362,10 @@ class TestGraphLocalOutputResolution:
     def test_same_name_in_other_graph_does_not_win(self):
         from types import SimpleNamespace
 
-        from kohakuterrarium.terrarium.topology import GraphTopology, TopologyState
+        from kohakuterrarium.terrarium.graph.topology import (
+            GraphTopology,
+            TopologyState,
+        )
 
         source = _FakeCreature("source", creature_id="source")
         local = _FakeCreature("worker", creature_id="local")

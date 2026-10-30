@@ -17,7 +17,7 @@ from kohakuterrarium.session.readonly.metadata import (
 )
 from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.graph_manifest import (
+from kohakuterrarium.terrarium.graph.manifest import (
     GraphManifest,
     ManifestCreature,
     save_manifest,
@@ -25,7 +25,7 @@ from kohakuterrarium.terrarium.graph_manifest import (
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 from kohakuterrarium.terrarium.config import TerrariumConfig
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 
 # ── _resolve_store_path ───────────────────────────────────────
 
@@ -433,7 +433,7 @@ class TestResumeIntoEngine:
         )
 
         from kohakuterrarium.terrarium.config import TerrariumConfig
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
@@ -583,7 +583,7 @@ class TestResumeIntoEngine:
         # must NOT be swept by the failed adoption's rollback. Only the
         # exact ids this adoption created are removed — never a global
         # before/after diff of the engine's creatures.
-        import kohakuterrarium.terrarium.topology as _topo
+        import kohakuterrarium.terrarium.graph.topology as _topo
 
         path = self._write_terrarium_session(tmp_path)
 
@@ -675,7 +675,7 @@ class TestResumeIntoEngine:
             DriveRuntimeConfig,
             default_registrations,
         )
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
         monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "agent")
         fake_agent = _FakeAgent(name="alice")

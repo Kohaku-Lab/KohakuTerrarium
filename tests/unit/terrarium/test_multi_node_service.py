@@ -20,7 +20,7 @@ from kohakuterrarium.terrarium.multi_node_service import (
     MultiNodeTerrariumService,
 )
 from kohakuterrarium.terrarium.service import CreatureInfo
-from kohakuterrarium.terrarium.topology import ChannelInfo, GraphTopology
+from kohakuterrarium.terrarium.graph.topology import ChannelInfo, GraphTopology
 
 # ── fakes ─────────────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ class _FakeService:
         return ChannelInfo(name=name, description=description)
 
     async def remove_channel(self, gid, name):
-        from kohakuterrarium.terrarium.topology import TopologyDelta
+        from kohakuterrarium.terrarium.graph.topology import TopologyDelta
 
         self.calls.append(("remove_channel", gid, name))
         return TopologyDelta(kind="nothing")

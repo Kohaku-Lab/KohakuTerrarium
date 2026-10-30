@@ -22,13 +22,13 @@ from kohakuterrarium.api.auth.users import create_user
 from kohakuterrarium.api.app import drive_error_handler
 from kohakuterrarium.api.deps import get_service, set_service
 from kohakuterrarium.api.routes.sessions_v2 import drives as drives_mod
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
 )
 from kohakuterrarium.terrarium.drive.errors import DriveError
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 

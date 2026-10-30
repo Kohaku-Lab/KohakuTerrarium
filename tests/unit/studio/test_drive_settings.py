@@ -31,7 +31,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.drive.snapshot.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.utils.config_dir import config_dir
 

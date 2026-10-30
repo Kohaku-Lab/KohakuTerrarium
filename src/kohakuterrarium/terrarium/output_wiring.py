@@ -29,7 +29,7 @@ from kohakuterrarium.core.output_wiring import (
     OutputWiringEntry,
     render_prompt,
 )
-from kohakuterrarium.terrarium.graph_identity import (
+from kohakuterrarium.terrarium.graph.identity import (
     GraphIdentityError,
     resolve_local_graph_target,
 )
@@ -37,7 +37,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent
-    from kohakuterrarium.terrarium.creature import CreatureHandle
+    from kohakuterrarium.terrarium.creature.handle import CreatureHandle
 
 logger = get_logger(__name__)
 

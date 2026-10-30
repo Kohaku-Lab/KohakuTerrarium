@@ -28,18 +28,18 @@ def test_run_module_import_defers_engine_and_terminal_surfaces():
         "print(json.dumps(sorted(sys.modules)))"
     )
 
-    assert "kohakuterrarium.terrarium.engine" not in loaded
-    assert "kohakuterrarium.terrarium.engine_rich_cli" not in loaded
-    assert "kohakuterrarium.terrarium.engine_cli" not in loaded
+    assert "kohakuterrarium.terrarium.engine.engine" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.rich" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.tui" not in loaded
     assert not any(name.startswith("textual") for name in loaded)
     assert not any(name.startswith("prompt_toolkit") for name in loaded)
 
 
 def test_rich_cli_runtime_does_not_load_textual():
     loaded = _loaded_modules(
-        "import json, sys; import kohakuterrarium.terrarium.engine_rich_cli; "
+        "import json, sys; import kohakuterrarium.terrarium.engine.cli.rich; "
         "print(json.dumps(sorted(sys.modules)))"
     )
 
-    assert "kohakuterrarium.terrarium.engine_cli" not in loaded
+    assert "kohakuterrarium.terrarium.engine.cli.tui" not in loaded
     assert not any(name.startswith("textual") for name in loaded)

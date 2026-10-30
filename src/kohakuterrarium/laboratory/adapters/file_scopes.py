@@ -8,7 +8,7 @@ inside the resolved root and may not be absolute or contain parent traversal.
 import os
 from pathlib import Path
 
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
 
 

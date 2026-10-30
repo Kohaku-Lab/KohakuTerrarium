@@ -30,13 +30,13 @@ from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 from kohakuterrarium.terrarium.config import TerrariumConfig, load_terrarium_config
-from kohakuterrarium.terrarium.creature_host import Creature, build_creature
-from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
+from kohakuterrarium.terrarium.creature.host import Creature, build_creature
+from kohakuterrarium.terrarium.graph.identity import ensure_graph_name_available
 from kohakuterrarium.terrarium.recipe_apply import apply_resolved_recipe
-from kohakuterrarium.terrarium.topology import GraphTopology
+from kohakuterrarium.terrarium.graph.topology import GraphTopology
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 CreatureBuilder = Callable[..., Creature]
 

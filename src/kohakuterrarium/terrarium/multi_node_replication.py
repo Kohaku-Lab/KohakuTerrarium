@@ -21,7 +21,7 @@ from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
 )
-from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
+from kohakuterrarium.terrarium.graph.identity import GraphNameConflictError
 from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
 from kohakuterrarium.utils.logging import get_logger
 

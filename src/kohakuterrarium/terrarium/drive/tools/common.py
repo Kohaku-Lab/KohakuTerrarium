@@ -8,7 +8,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.channels import DRIVE_SERVICE_KEY
+from kohakuterrarium.terrarium.channels.channels import DRIVE_SERVICE_KEY
 from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,
     DriveError,

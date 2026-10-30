@@ -22,7 +22,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory_build import (
     build_index as _build_index,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

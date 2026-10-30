@@ -10,7 +10,7 @@ from typing import Any
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.core.agent.tools.options import agent_tool_inventory
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.studio._runtime import as_engine
 

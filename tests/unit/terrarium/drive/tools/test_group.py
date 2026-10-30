@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
@@ -20,7 +20,7 @@ from kohakuterrarium.terrarium.drive.config import (
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import DriveQuery
 from kohakuterrarium.terrarium.drive.tools.group import GroupDriveTool
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.tools_group_wire import GroupWireTool
 from kohakuterrarium.testing.terrarium import _FakeAgent
 

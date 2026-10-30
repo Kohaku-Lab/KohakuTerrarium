@@ -13,7 +13,7 @@ import pytest
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.core.config.load import build_agent_config
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.resume import (
     prepare_resume_workspace,
     resume_into_engine,

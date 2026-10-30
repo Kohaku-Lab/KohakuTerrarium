@@ -148,19 +148,19 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 ### 3.1 Terrarium 引擎
 
-`terrarium/engine.py:Terrarium` 是运行时引擎，每进程一个，托管所有 Creature。引擎拥有：
+`terrarium/engine/engine.py:Terrarium` 是运行时引擎，每进程一个，托管所有 Creature。引擎拥有：
 
-- `_topology: TopologyState`：纯数据 graph 模型 (`terrarium/topology.py`)，记录哪些 Creature 共用哪个 graph、哪些频道存在、谁 listen / send。
-- `_creatures: dict[str, Creature]`：运行中的 wrapper (`terrarium/creature_host.py`)。
+- `_topology: TopologyState`：纯数据 graph 模型 (`terrarium/graph/topology.py`)，记录哪些 Creature 共用哪个 graph、哪些频道存在、谁 listen / send。
+- `_creatures: dict[str, Creature]`：运行中的 wrapper (`terrarium/creature/host.py`)。
 - `_environments: dict[str, Environment]`：每个 graph 一份；持有 `shared_channels`。
 - `_session_stores: dict[str, SessionStore]`：每个挂著 store 的 graph 一份。
 - `_subscribers: list[_Subscriber]`：`EngineEvent` 发布订阅。
 
 独立 Agent 是 1-creature graph；recipe 是用频道连起来的 connected graph。`Terrarium.with_creature(config)` 是独立 Agent 的捷径；`Terrarium.from_recipe(recipe)` 通过 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、启动一切)。Creature 除了通过频道和 (可选的) 嵌进 system prompt 的 topology hint 外，不会知道自己处于 Terrarium 中。
 
-**频道注入**。当一只 Creature 加入了一个有它要 listen 的频道的 graph，`terrarium/channels.py:inject_channel_trigger` 会往它的 `trigger_manager` 加一个 `ChannelTrigger`。这是 layer 模型里唯一被允许的向下注入：在 graph 里的 Creature *会* 知道自己有同伴 (它得知道)，但只透过引擎给它的 handle。独立 Creature 不会有任何注入。
+**频道注入**。当一只 Creature 加入了一个有它要 listen 的频道的 graph，`terrarium/channels/channels.py:inject_channel_trigger` 会往它的 `trigger_manager` 加一个 `ChannelTrigger`。这是 layer 模型里唯一被允许的向下注入：在 graph 里的 Creature *会* 知道自己有同伴 (它得知道)，但只透过引擎给它的 handle。独立 Creature 不会有任何注入。
 
-**热插拔**。拓扑可以在运行时变更。`Terrarium.connect(a, b, channel=...)` 可能合并两个 graph (environment 取联集，频道汇集，挂著的 session store 透过 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透过 `apply_split` 复制到两边)。`terrarium/topology.py` 里的纯数据拓扑 mutator 返回 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驱动这些 live 更新。
+**热插拔**。拓扑可以在运行时变更。`Terrarium.connect(a, b, channel=...)` 可能合并两个 graph (environment 取联集，频道汇集，挂著的 session store 透过 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透过 `apply_split` 复制到两边)。`terrarium/graph/topology.py` 里的纯数据拓扑 mutator 返回 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驱动这些 live 更新。
 
 **Session 合并 / 分裂**。Session 的单位是 graph 的连通分量。不影响 graph 成员的拓扑变更会沿用既有的 store。`terrarium/session_coord.py` 实作两条分支并发出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
 

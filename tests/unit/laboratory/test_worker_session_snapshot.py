@@ -14,7 +14,7 @@ import pytest
 from kohakuterrarium.laboratory.adapters._worker_session import (
     WorkerSessionAttacher,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 
 def _write_dummy_agent_cfg(root: Path, name: str) -> Path:

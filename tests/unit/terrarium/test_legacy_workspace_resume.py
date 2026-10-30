@@ -11,9 +11,9 @@ from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.terrarium.config import TerrariumConfig
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
-from kohakuterrarium.terrarium.topology_snapshot import META_KEY as TOPOLOGY_KEY
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.graph.snapshot import META_KEY as TOPOLOGY_KEY
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 
 

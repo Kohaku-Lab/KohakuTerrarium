@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.graph_manifest import (
+from kohakuterrarium.terrarium.graph.manifest import (
     GraphManifest,
     ManifestCreature,
     save_manifest,

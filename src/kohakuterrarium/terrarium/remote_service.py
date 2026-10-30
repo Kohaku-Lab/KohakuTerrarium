@@ -38,7 +38,7 @@ from kohakuterrarium.laboratory._internal.client import (
 )
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
 from kohakuterrarium.session.history.raw import UserMessageSelector
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.multi_node.remote_ops import (
     RemoteDriveServiceMixin,
 )
@@ -56,7 +56,7 @@ from kohakuterrarium.terrarium.remote_recipe import RemoteRecipeServiceMixin
 from kohakuterrarium.terrarium.service import CreatureInfo
 from kohakuterrarium.terrarium.service_dto import BranchMutationResult
 from kohakuterrarium.terrarium.subagent_service import RemoteSubagentServiceMixin
-from kohakuterrarium.terrarium.topology import (
+from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
     GraphTopology,
     TopologyDelta,

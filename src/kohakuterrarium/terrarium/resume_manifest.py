@@ -3,10 +3,10 @@
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
-import kohakuterrarium.terrarium.channels as _channels
-import kohakuterrarium.terrarium.graph_checkpoint as _checkpoint
-import kohakuterrarium.terrarium.graph_manifest as _manifest
-import kohakuterrarium.terrarium.topology as _topology
+import kohakuterrarium.terrarium.channels.channels as _channels
+import kohakuterrarium.terrarium.graph.checkpoint as _checkpoint
+import kohakuterrarium.terrarium.graph.manifest as _manifest
+import kohakuterrarium.terrarium.graph.topology as _topology
 import kohakuterrarium.terrarium.workspace_resume as _workspace
 from kohakuterrarium.errors import (
     GraphManifestCollisionError,
@@ -16,7 +16,7 @@ from kohakuterrarium.session.resume.resume import _open_store_with_migration
 from kohakuterrarium.session.resume.async_flow import inject_saved_state_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.open import open_owned_store
-from kohakuterrarium.terrarium.creature_host import (
+from kohakuterrarium.terrarium.creature.host import (
     Creature,
     apply_creature_name,
 )
@@ -25,7 +25,7 @@ from kohakuterrarium.utils.logging import get_logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 logger = get_logger(__name__)
 _MISSING = object()

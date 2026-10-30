@@ -101,7 +101,7 @@ class TestWireOutput:
 
     async def test_cross_graph_target_is_rejected_without_merge(self):
         import pytest
-        from kohakuterrarium.terrarium.graph_identity import TargetNotFoundError
+        from kohakuterrarium.terrarium.graph.identity import TargetNotFoundError
 
         source = _Creature("source-id", "source", graph_id="g1")
         target = _Creature("target-id", "worker", graph_id="g2")
@@ -117,7 +117,7 @@ class TestWireOutput:
 
     async def test_duplicate_local_name_is_ambiguous(self):
         import pytest
-        from kohakuterrarium.terrarium.graph_identity import AmbiguousTargetError
+        from kohakuterrarium.terrarium.graph.identity import AmbiguousTargetError
 
         source = _Creature("source-id", "source")
         first = _Creature("first-id", "worker")

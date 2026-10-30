@@ -23,7 +23,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent.history import compact as _agent_compact
 from kohakuterrarium.core.agent import model as _agent_model
-from kohakuterrarium.terrarium import graph_checkpoint
+from kohakuterrarium.terrarium.graph import checkpoint as graph_checkpoint
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
@@ -38,8 +38,8 @@ from kohakuterrarium.terrarium.drive.requests import (
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.readonly.metadata import read_session_meta
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -597,7 +597,7 @@ class TestRuntimeTopologyResume:
         ``group_wire`` path) must drain pending Drive row movement BEFORE
         returning, so the survivor lists both graphs' Drives immediately —
         not only after some later unrelated topology operation."""
-        import kohakuterrarium.terrarium.channels as channels
+        import kohakuterrarium.terrarium.channels.channels as channels
 
         _write_creature_dir(tmp_path, "alice")
         _write_creature_dir(tmp_path, "bob")

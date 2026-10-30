@@ -44,7 +44,7 @@ from kohakuterrarium.api.auth.db import (
 )
 from kohakuterrarium.api.auth.users import create_user
 from kohakuterrarium.api.deps import set_service
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 _TEST_ROUNDS = 4

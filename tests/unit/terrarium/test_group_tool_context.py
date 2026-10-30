@@ -7,7 +7,7 @@ import pytest
 
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.terrarium import group_tool_context as gtc
-from kohakuterrarium.terrarium.channels import TERRARIUM_ENGINE_KEY
+from kohakuterrarium.terrarium.channels.channels import TERRARIUM_ENGINE_KEY
 
 # ── fakes ──────────────────────────────────────────────────────
 

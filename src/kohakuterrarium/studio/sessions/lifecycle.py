@@ -50,7 +50,7 @@ from kohakuterrarium.terrarium.config import (
 )
 from kohakuterrarium.studio._runtime import as_engine, host_engine_or_none
 from kohakuterrarium.terrarium import TerrariumService
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import default_workdir

@@ -3,14 +3,14 @@
 import asyncio
 from typing import TYPE_CHECKING
 
-import kohakuterrarium.terrarium.graph_checkpoint as checkpoint
+import kohakuterrarium.terrarium.graph.checkpoint as checkpoint
 import kohakuterrarium.terrarium.wiring as wiring
-from kohakuterrarium.terrarium.channels import remove_channel_trigger
+from kohakuterrarium.terrarium.channels.channels import remove_channel_trigger
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 
 async def unload_session_graph(engine: "Terrarium", graph_id: str) -> tuple[str, ...]:

@@ -5,21 +5,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-import kohakuterrarium.terrarium.channels as _channels
-import kohakuterrarium.terrarium.topology as _topo
+import kohakuterrarium.terrarium.channels.channels as _channels
+import kohakuterrarium.terrarium.graph.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.terrarium.config import CreatureConfig, TerrariumConfig
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.recipe_transaction import (
     RecipeApplyTransaction,
     rollback_shielded,
 )
-from kohakuterrarium.terrarium.topology import GraphTopology
+from kohakuterrarium.terrarium.graph.topology import GraphTopology
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 CreatureBuilder = Callable[..., Creature]
 logger = get_logger(__name__)

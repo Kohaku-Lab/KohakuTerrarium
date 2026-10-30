@@ -2445,7 +2445,7 @@ class TestModulesIntegration:
         from kohakuterrarium.terrarium.drive.tools.self_service import (
             SELF_SERVICE_TOOL_NAMES,
         )
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
         llm_box.set(["ok"] * 8)
 
@@ -2532,7 +2532,7 @@ class TestModulesIntegration:
 
         from kohakuterrarium.modules.user_command.base import UserCommandContext
         from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
         from kohakuterrarium.terrarium.service import LocalTerrariumService
 
         alice = ActorRef("user", "alice")

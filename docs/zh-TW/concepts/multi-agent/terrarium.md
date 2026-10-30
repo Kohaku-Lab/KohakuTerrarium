@@ -140,15 +140,15 @@ terrarium:
 
 ## 我們怎麼實作它
 
-- `terrarium/engine.py`：`Terrarium` 類別。每個行程一個。擁有拓樸狀態、live 生物、environment、掛著的 session store、訂閱者列表。是 async context manager (`async with Terrarium() as t:`)，並附 classmethod factory (`from_recipe`、`with_creature`、`resume`，最後一個尚未實作)。
-- `terrarium/topology.py`：純資料 graph 模型 (`TopologyState`、
+- `terrarium/engine/engine.py`：`Terrarium` 類別。每個行程一個。擁有拓樸狀態、live 生物、environment、掛著的 session store、訂閱者列表。是 async context manager (`async with Terrarium() as t:`)，並附 classmethod factory (`from_recipe`、`with_creature`、`resume`，最後一個尚未實作)。
+- `terrarium/graph/topology.py`：純資料 graph 模型 (`TopologyState`、
   `GraphTopology`、`ChannelInfo`、`TopologyDelta`)。沒有 live agent 參
   考；不需 asyncio 就能測。連通分量透過 BFS 在「creature ↔ channel」
   二部圖上算出；mutation 會回傳一個 delta 描述 `merge` /
   `split` / `nothing`。引擎在它上面疊 live state。
-- `terrarium/creature_host.py`：`Creature`，引擎對每隻生物的 wrapper。把以前獨立 agent 與頻道感知的兩個面合成同一個型別。
+- `terrarium/creature/host.py`：`Creature`，引擎對每隻生物的 wrapper。把以前獨立 agent 與頻道感知的兩個面合成同一個型別。
 - `terrarium/recipe.py`：走完一份 `TerrariumConfig` 套到引擎上：宣告頻道、為每隻生物加一條 direct channel、若有 root 加 `report_to_root`、接 listen / send 邊、注入頻道觸發器、啟動一切。
-- `terrarium/channels.py`：頻道注入 (當一隻生物加入了一個有它要 listen 的頻道的 graph，引擎會往它的 agent 加一個 `ChannelTrigger`)，以及 `connect_creatures` / `disconnect_creatures` 的本體。
+- `terrarium/channels/channels.py`：頻道注入 (當一隻生物加入了一個有它要 listen 的頻道的 graph，引擎會往它的 agent 加一個 `ChannelTrigger`)，以及 `connect_creatures` / `disconnect_creatures` 的本體。
 - `terrarium/root.py`：`assign_root` 輔助函數。給一隻已經在 graph 裡的生物，把它指定為該 graph 的 Root：宣告（或重用）一個 `report_to_root` 頻道、把 graph 內每隻其它生物接成在該頻道上送訊息、讓 Root 在每個既有頻道上 listen，並把 `creature.is_root = True` 翻起來。純粹是 channel + wiring；工具註冊和使用者 IO 掛接留給上層處理。當你以 imperative 方式建 graph 又想要傳統「一團隊一 Root」拓樸而不走 recipe 檔案時使用。
 - `terrarium/session_coord.py`：Session 合併 / 分裂策略。Graph 合併時把兩邊舊 store 合成一份新的；Graph 分裂時把 parent store 複製到兩邊。
 - `terrarium/events.py`：`EngineEvent` 分類，加 `EventFilter`、`ConnectionResult`、`DisconnectionResult`。

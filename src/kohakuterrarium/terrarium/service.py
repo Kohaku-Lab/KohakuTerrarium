@@ -4,7 +4,7 @@ The :class:`TerrariumService` Protocol captures every operation Studio
 performs on a terrarium runtime. Three implementations:
 
 - :class:`LocalTerrariumService` — direct in-process calls on a
-  :class:`~kohakuterrarium.terrarium.engine.Terrarium`. Used in
+  :class:`~kohakuterrarium.terrarium.engine.engine.Terrarium`. Used in
   single-host deployments. Zero serialization, zero envelope overhead.
 - :class:`~kohakuterrarium.terrarium.remote_service.RemoteTerrariumService`
   — Lab APP-backed proxy. Same Protocol surface; method calls translate
@@ -25,7 +25,7 @@ DTOs vs live objects:
   a creature's identity + topology binding. Used for cross-process
   transit and for code that only needs identity/topology data.
 - The :attr:`LocalTerrariumService.engine` escape hatch returns the live
-  :class:`~kohakuterrarium.terrarium.engine.Terrarium` for rare local callers
+  :class:`~kohakuterrarium.terrarium.engine.engine.Terrarium` for rare local callers
   that need access not exposed by the Protocol.
 """
 
@@ -50,7 +50,7 @@ from kohakuterrarium.terrarium.service_dto import (
     completed_branch_result as _completed_branch_result,
     creature_to_info,
 )
-from kohakuterrarium.terrarium.creature_ops import (
+from kohakuterrarium.terrarium.creature.ops import (
     agent_env as _agent_env,
     agent_get_module_options as _agent_get_module_options,
     agent_get_native_tool_options as _agent_get_native_tool_options,
@@ -79,15 +79,15 @@ from kohakuterrarium.terrarium.history_service import (
     HistoryServiceProtocol,
     LocalHistoryServiceMixin,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
     EngineEvent,
     EventFilter,
 )
-from kohakuterrarium.terrarium.graph_identity import resolve_local_graph_target
-from kohakuterrarium.terrarium.topology import (
+from kohakuterrarium.terrarium.graph.identity import resolve_local_graph_target
+from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
     GraphTopology,
     TopologyDelta,
@@ -103,7 +103,7 @@ class TerrariumService(
     """Operations Studio needs from a terrarium runtime.
 
     Method semantics match the underlying
-    :class:`~kohakuterrarium.terrarium.engine.Terrarium` engine
+    :class:`~kohakuterrarium.terrarium.engine.engine.Terrarium` engine
     exactly; an implementation that diverges from engine behavior is
     a bug. The Drive surface comes from ``DriveServiceProtocol``.
     """

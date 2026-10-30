@@ -54,7 +54,7 @@ freeze the topology at start) breaks one of those three.
 
 ## What we actually do
 
-### Pure-data graph (`terrarium/topology.py`)
+### Pure-data graph (`terrarium/graph/topology.py`)
 
 Topology lives in a plain `TopologyState` value:
 
@@ -210,17 +210,17 @@ topology returns to the recipe's natural shape.
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/terrarium/topology.py`: `TopologyState`,
+- `src/kohakuterrarium/terrarium/graph/topology.py`: `TopologyState`,
   `GraphTopology`, `TopologyDelta`, pure mutation functions,
   `find_components`, `_normalize_components`, `_merge_graphs`.
-- `src/kohakuterrarium/terrarium/engine.py`: `Terrarium`
+- `src/kohakuterrarium/terrarium/engine/engine.py`: `Terrarium`
   orchestrator. `add_creature`, `remove_creature`, `connect`,
   `disconnect`, `add_channel`, `remove_channel`, plus the
   environment / session-store registries.
-- `src/kohakuterrarium/terrarium/channels.py`: `connect_creatures`,
+- `src/kohakuterrarium/terrarium/channels/channels.py`: `connect_creatures`,
   `_merge_environment_into`, `_ensure_channel_persistence`,
   `inject_channel_trigger`, `_teardown_existing_trigger`.
-- `src/kohakuterrarium/terrarium/channel_lifecycle.py`:
+- `src/kohakuterrarium/terrarium/channels/lifecycle.py`:
   `apply_split_bookkeeping`, channel removal flow, environment
   reallocation.
 - `src/kohakuterrarium/terrarium/session_coord.py`: `apply_merge`,

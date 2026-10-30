@@ -10,9 +10,9 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-import kohakuterrarium.terrarium.graph_checkpoint as _checkpoint
-import kohakuterrarium.terrarium.graph_manifest as _manifest
-import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
+import kohakuterrarium.terrarium.graph.checkpoint as _checkpoint
+import kohakuterrarium.terrarium.graph.manifest as _manifest
+import kohakuterrarium.terrarium.graph.snapshot as _topo_snap
 import kohakuterrarium.terrarium.workspace_resume as _workspace
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.builtins.inputs.none import NoneInput
@@ -35,7 +35,7 @@ from kohakuterrarium.session.resume.async_flow import (
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.open import open_owned_store
 from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.creature_host import (
+from kohakuterrarium.terrarium.creature.host import (
     Creature,
     _safe_creature_id,
 )
@@ -46,7 +46,7 @@ from kohakuterrarium.terrarium.resume_manifest import (
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 logger = get_logger(__name__)
 _MISSING = object()

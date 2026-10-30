@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import session_coord as sc
-from kohakuterrarium.terrarium.topology import TopologyDelta
+from kohakuterrarium.terrarium.graph.topology import TopologyDelta
 
 # ---------------------------------------------------------------------------
 # copy_events_into — flush failure tolerance + branch-path preservation

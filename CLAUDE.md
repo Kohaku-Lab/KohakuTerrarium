@@ -189,7 +189,7 @@ engine. Six namespaces: `catalog`, `identity`, `sessions`, `persistence`,
 adapters over Studio. Studio is *not* a UI; it's the shared Python surface UIs
 delegate to.
 
-**Terrarium** (`src/kohakuterrarium/terrarium/engine.py`): the runtime engine
+**Terrarium** (`src/kohakuterrarium/terrarium/engine/engine.py`): the runtime engine
 that hosts every running creature in the process. It runs no LLM and has no
 reasoning loop; those live in the creatures it hosts. What it owns is
 *structure*: which creatures share a connected component, which channels
@@ -200,7 +200,7 @@ multiple disconnected graphs may coexist inside it.
 
 **Creature**: dual concept. (1) Config: a folder with `agent.yaml` +
 `system.md` defining an agent. (2) Runtime: a `Creature` handle
-(`terrarium/creature_host.py`) wrapping a live `Agent` with engine-side
+(`terrarium/creature/host.py`) wrapping a live `Agent` with engine-side
 metadata (`graph_id`, `is_privileged`, `listen_channels`, `send_channels`,
 `parent_creature_id`). Same agent config can run privileged in one terrarium
 and unprivileged in another. Sub-agents inside a creature are VERTICAL
@@ -247,7 +247,7 @@ Tools registered ONLY on privileged nodes:
 
 These are the runtime "graph editor": an LLM-driven privileged node uses
 them to evolve the team mid-run. Mutations go through topology pure
-functions (`terrarium/topology.py`) → environment updates → session
+functions (`terrarium/graph/topology.py`) → environment updates → session
 coordination → emit `EngineEvent`.
 
 ### Channels are broadcast-only at the graph layer
@@ -533,15 +533,18 @@ src/kohakuterrarium/
 │   └── process_metrics.py    # Process-wide metrics aggregator (canonical subscriber)
 │
 ├── terrarium/                # Terrarium runtime engine (multi-agent graphs)
-│   ├── engine.py             # Terrarium engine: graph/session lifecycle, add/remove
+│   ├── engine/               # Terrarium engine: graph/session lifecycle, add/remove
 │   │                         #   creatures, connect/disconnect, subscribe, output wiring
-│   ├── creature_host.py      # Creature handle: chat(), inject_input(), graph metadata
-│   ├── creature.py           # CreatureHandle dataclass (config-level wrapper)
-│   ├── creature_ops.py       # Pure agent-touching helpers shared with studio.sessions
-│   ├── topology.py           # Pure-data graph/channel topology + merge/split deltas
-│   │                         #   (+ topology_snapshot.py runtime snapshot/replay)
+│   │                         #   (engine, creature_add, observability) + cli/ (tui, rich,
+│   │                         #   commands, tabs, output: engine launchers)
+│   ├── creature/             # host (Creature: chat(), inject_input(), graph metadata),
+│   │                         #   handle (CreatureHandle), ids, ops (agent-touching helpers
+│   │                         #   shared with studio.sessions), host_resources
+│   ├── graph/                # topology (pure-data graph/channel model + merge/split deltas),
+│   │                         #   snapshot (runtime snapshot/replay), leftovers, manifest,
+│   │                         #   checkpoint, identity, identity_engine
 │   ├── events.py             # EngineEvent / EventKind / EventFilter observable surface
-│   ├── channels.py           # Channel layer for the engine (+ channel_lifecycle.py)
+│   ├── channels/             # Channel layer for the engine (channels) + lifecycle
 │   ├── autosession.py        # Engine-owned session persistence (session_dir autosession)
 │   ├── session_coord.py      # Session merge/split coordination across graphs
 │   ├── recipe.py             # Apply a TerrariumConfig recipe to an engine
@@ -558,10 +561,7 @@ src/kohakuterrarium/
 │   ├── wiring.py             # Output-wiring helpers (+ output_wiring.py resolver)
 │   ├── observer.py           # ChannelObserver for non-destructive monitoring
 │   ├── output_log.py         # Capture and log creature output
-│   ├── config.py             # Terrarium config loading + topology prompt
-│   ├── engine_cli.py         # Engine TUI launcher (kt run full-screen mode)
-│   ├── engine_rich_cli.py    # Engine rich inline-CLI launcher (--mode cli)
-│   └── cli_output.py         # CLIOutput for headless mode
+│   └── config.py             # Terrarium config loading + topology prompt
 │
 ├── api/                      # FastAPI HTTP API (in-package)
 │   ├── app.py                # FastAPI factory + middleware + lifespan

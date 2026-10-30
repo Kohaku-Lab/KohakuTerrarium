@@ -19,7 +19,7 @@ from kohakuterrarium.studio.sessions.registry import (
     registry_for,
     stores_for,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 
 

@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.terrarium.channels import TERRARIUM_ENGINE_KEY
-from kohakuterrarium.terrarium.graph_identity import (
+from kohakuterrarium.terrarium.channels.channels import TERRARIUM_ENGINE_KEY
+from kohakuterrarium.terrarium.graph.identity import (
     CallerGraphNotFoundError,
     GraphIdentityError,
     UnknownCallerError,
@@ -25,9 +25,9 @@ from kohakuterrarium.terrarium.graph_identity import (
 )
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.creature_host import Creature
-    from kohakuterrarium.terrarium.engine import Terrarium
-    from kohakuterrarium.terrarium.topology import GraphTopology
+    from kohakuterrarium.terrarium.creature.host import Creature
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
+    from kohakuterrarium.terrarium.graph.topology import GraphTopology
 
 
 class GroupToolError(Exception):

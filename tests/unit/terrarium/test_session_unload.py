@@ -8,9 +8,9 @@ import pytest
 
 from kohakuterrarium.bootstrap import agent_init, llm
 from kohakuterrarium.session.readonly.metadata import read_session_meta
-from kohakuterrarium.terrarium import graph_checkpoint
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.graph import checkpoint as graph_checkpoint
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.session_unload import unload_session_graph
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

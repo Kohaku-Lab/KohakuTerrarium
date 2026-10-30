@@ -8,11 +8,11 @@ import inspect
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.terrarium.channels import remove_channel_trigger
+from kohakuterrarium.terrarium.channels.channels import remove_channel_trigger
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 logger = get_logger(__name__)
 _NO_STORE = object()

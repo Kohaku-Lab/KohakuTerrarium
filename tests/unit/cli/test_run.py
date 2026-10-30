@@ -61,15 +61,15 @@ class TestCliTopology:
         )()
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.channels.inject_channel_trigger",
+            "kohakuterrarium.terrarium.channels.channels.inject_channel_trigger",
             lambda *_args, **_kwargs: None,
         )
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.topology.set_listen",
+            "kohakuterrarium.terrarium.graph.topology.set_listen",
             lambda *_args, **_kwargs: None,
         )
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.topology.set_send",
+            "kohakuterrarium.terrarium.graph.topology.set_send",
             lambda *_args, **_kwargs: None,
         )
 
@@ -107,7 +107,7 @@ class TestRunStartupTrace:
             assert creature_id == "focus"
 
         from kohakuterrarium.studio.identity import drive_settings
-        from kohakuterrarium.terrarium import engine as engine_module
+        from kohakuterrarium.terrarium.engine import engine as engine_module
 
         monkeypatch.setattr(drive_settings, "resolve_drive_kwargs", lambda: {})
         monkeypatch.setattr(
@@ -124,7 +124,7 @@ class TestRunStartupTrace:
         monkeypatch.setattr(
             run, "_apply_cli_topology", lambda *_args, **_kwargs: _async_none()
         )
-        from kohakuterrarium.terrarium import engine_rich_cli
+        from kohakuterrarium.terrarium.engine.cli import rich as engine_rich_cli
 
         monkeypatch.setattr(engine_rich_cli, "run_engine_with_rich_cli", _run_cli)
         monkeypatch.setattr(

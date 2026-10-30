@@ -45,7 +45,7 @@ class TestDeploy:
 
 class TestNodeHandle:
     def test_local_runtime_no_remote_handles(self):
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
         engine = Terrarium()
         try:
@@ -76,7 +76,7 @@ class TestNodeHandle:
 
 class TestNodeMap:
     def test_local_returns_handle(self):
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
         engine = Terrarium()
         try:

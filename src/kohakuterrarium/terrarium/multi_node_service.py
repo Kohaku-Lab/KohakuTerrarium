@@ -39,7 +39,7 @@ from kohakuterrarium.terrarium.drive.service.protocol import (
     DriveServiceUnsupportedMixin,
 )
 from kohakuterrarium.terrarium.history_remote import MultiNodeHistoryServiceMixin
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
@@ -82,7 +82,7 @@ from kohakuterrarium.terrarium.service import (
 )
 from kohakuterrarium.terrarium.service_dto import BranchMutationResult
 from kohakuterrarium.terrarium.subagent_service import MultiNodeSubagentServiceMixin
-from kohakuterrarium.terrarium.topology import (
+from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
     GraphTopology,
     TopologyDelta,

@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kohakuterrarium.terrarium.events import ConnectionResult, DisconnectionResult
-from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
+from kohakuterrarium.terrarium.graph.identity import GraphNameConflictError
 
 from tests.unit.terrarium.test_multi_node_service import (
     _info,

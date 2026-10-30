@@ -9,7 +9,7 @@ import pytest
 
 from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 

@@ -9,7 +9,7 @@ from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium import TerrariumService
-from kohakuterrarium.terrarium.graph_identity import resolve_local_graph_target
+from kohakuterrarium.terrarium.graph.identity import resolve_local_graph_target
 from kohakuterrarium.studio._runtime import as_engine
 
 

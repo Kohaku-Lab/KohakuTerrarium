@@ -9,7 +9,7 @@ from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
 )
-from kohakuterrarium.terrarium.topology import (
+from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
     TopologyDelta,
 )

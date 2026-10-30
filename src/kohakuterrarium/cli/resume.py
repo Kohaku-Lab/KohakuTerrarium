@@ -18,7 +18,7 @@ from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity.drive_settings import resolve_drive_kwargs
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
@@ -28,7 +28,7 @@ from kohakuterrarium.utils.logging import (
 
 
 async def run_engine_with_rich_cli(engine, focus, store):
-    from kohakuterrarium.terrarium.engine_rich_cli import (
+    from kohakuterrarium.terrarium.engine.cli.rich import (
         run_engine_with_rich_cli as run,
     )
 
@@ -36,7 +36,7 @@ async def run_engine_with_rich_cli(engine, focus, store):
 
 
 async def run_engine_with_tui(engine, focus, store):
-    from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui as run
+    from kohakuterrarium.terrarium.engine.cli.tui import run_engine_with_tui as run
 
     await run(engine, focus, store)
 

@@ -12,7 +12,7 @@ from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.laboratory.protocols import LabNotifier
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.sync import SessionEventTee
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.store_observers import observe_session_stores
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger

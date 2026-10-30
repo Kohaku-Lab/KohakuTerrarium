@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
@@ -26,7 +26,7 @@ from kohakuterrarium.terrarium.drive.tools.self_service import (
     DriveTransitionTool,
     DriveUpdateTool,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

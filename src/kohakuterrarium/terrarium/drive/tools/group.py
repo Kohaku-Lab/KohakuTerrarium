@@ -14,7 +14,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.channels import DRIVE_SERVICE_KEY
+from kohakuterrarium.terrarium.channels.channels import DRIVE_SERVICE_KEY
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveRecord
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DriveQuery

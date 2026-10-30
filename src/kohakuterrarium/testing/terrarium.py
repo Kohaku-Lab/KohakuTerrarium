@@ -7,8 +7,8 @@ from typing import Any
 from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 
 class _FakeTriggerManager:

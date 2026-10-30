@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.sessions.find import apply_creature_name
 from kohakuterrarium.studio.sessions.registry import meta_for, stores_for
-from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
+from kohakuterrarium.terrarium.graph.identity import ensure_graph_name_available
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

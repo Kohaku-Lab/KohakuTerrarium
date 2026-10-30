@@ -240,7 +240,7 @@ async for ev in agent.run_stream("Refactor utils.py"):
 
 ## Terrarium 引擎
 
-模組：`kohakuterrarium.terrarium.engine` (re-export 為
+模組：`kohakuterrarium.terrarium.engine.engine` (re-export 為
 `kohakuterrarium.Terrarium`)。多代理執行期引擎：托管行程內
 所有運行中的生物 (creature)；獨立 agent 就是一張單生物圖。
 
@@ -362,7 +362,7 @@ async with kt.Terrarium(session_dir="runs/") as engine:
 
 ## Creature
 
-模組：`kohakuterrarium.terrarium.creature_host` (re-export 為
+模組：`kohakuterrarium.terrarium.creature.host` (re-export 為
 `kohakuterrarium.Creature`)。引擎對一隻運行中 agent 的 handle。
 由 `add_creature` / `with_creature` 回傳；不直接建構。
 

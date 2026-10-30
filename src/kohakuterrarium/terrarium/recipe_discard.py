@@ -16,13 +16,13 @@ from kohakuterrarium.session.occupancy.mutation import (
     await_mutation,
     run_admitted_mutation,
 )
-from kohakuterrarium.terrarium import graph_checkpoint
-from kohakuterrarium.terrarium.channels import remove_channel_trigger
+from kohakuterrarium.terrarium.graph import checkpoint as graph_checkpoint
+from kohakuterrarium.terrarium.channels.channels import remove_channel_trigger
 from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 logger = get_logger(__name__)
 

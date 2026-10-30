@@ -66,7 +66,7 @@ from kohakuterrarium.terrarium.events import (
     EventKind,
 )
 from kohakuterrarium.terrarium.service import CreatureInfo
-from kohakuterrarium.terrarium.topology import (
+from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
     GraphTopology,
     TopologyDelta,

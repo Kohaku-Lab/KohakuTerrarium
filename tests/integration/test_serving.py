@@ -59,8 +59,8 @@ from kohakuterrarium.serving.web import (
     _resolve_config_dirs,
     find_free_port,
 )
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 # ---------------------------------------------------------------------------

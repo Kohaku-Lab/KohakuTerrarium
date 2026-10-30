@@ -14,7 +14,7 @@ from kohakuterrarium.studio.persistence.session_index import (
     get_session_index_default,
 )
 from kohakuterrarium.studio.persistence.session_index.hooks import push_index_update
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 
 
 def _error_message(error: dict | str, fallback: str) -> str:

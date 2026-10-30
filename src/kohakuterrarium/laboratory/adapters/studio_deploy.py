@@ -20,7 +20,7 @@ from kohakuterrarium.laboratory.adapters.file_scopes import (
 from kohakuterrarium.laboratory.adapters.terrarium_files import (
     TerrariumFilesAdapter,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

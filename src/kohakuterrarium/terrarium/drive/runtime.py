@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.terrarium.channels import register_drive_service
-from kohakuterrarium.terrarium.creature_ids import (
+from kohakuterrarium.terrarium.channels.channels import register_drive_service
+from kohakuterrarium.terrarium.creature.ids import (
     _clean_creature_name,
     _decode_creature_name,
 )

@@ -20,8 +20,8 @@ from kohakuterrarium.session.occupancy.mutation import (
 )
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
 from kohakuterrarium.terrarium.session_unload import unload_session_graph
 from kohakuterrarium.terrarium.workspace_resume import (
     preflight_session_workspaces,

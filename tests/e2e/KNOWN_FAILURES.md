@@ -35,7 +35,7 @@ Relevant code:
 
 - `src/kohakuterrarium/studio/sessions/stop.py`: remote teardown and host cleanup.
 - `src/kohakuterrarium/laboratory/adapters/terrarium_runtime.py`: remove-creature dispatch.
-- `src/kohakuterrarium/terrarium/engine.py`: last-creature removal.
+- `src/kohakuterrarium/terrarium/engine/engine.py`: last-creature removal.
 - `src/kohakuterrarium/laboratory/adapters/terrarium_files.py`: active-store protection.
 - `src/kohakuterrarium/api/routes/persistence/remote_resume_transfer.py`: repeated transfer destination.
 

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from kohakuterrarium.terrarium.creature_ops import (
+from kohakuterrarium.terrarium.creature.ops import (
     agent_command_inventory,
     agent_execute_command,
     normalize_command_args,

@@ -10,15 +10,15 @@ topology edges, and live triggers change together.
 
 from typing import TYPE_CHECKING
 
-import kohakuterrarium.terrarium.channels as _channels
+import kohakuterrarium.terrarium.channels.channels as _channels
 import kohakuterrarium.terrarium.drive.injection as _drive_injection
-import kohakuterrarium.terrarium.topology as _topo
+import kohakuterrarium.terrarium.graph.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 from kohakuterrarium.terrarium.events import RootAssignment
 from kohakuterrarium.terrarium.tools_group import force_register_privileged_tools
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import CreatureRef, Terrarium
+    from kohakuterrarium.terrarium.engine.engine import CreatureRef, Terrarium
 
 
 async def assign_root_to(

@@ -13,8 +13,8 @@ from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.terrarium import resume_manifest as manifest_mod
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 

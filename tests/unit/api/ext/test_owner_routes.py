@@ -19,7 +19,7 @@ from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.ui_owner import OwnerArgumentError
 from kohakuterrarium.studio.identity import ui_extensions
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 

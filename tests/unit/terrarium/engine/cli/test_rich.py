@@ -1,0 +1,184 @@
+"""Unit tests for :mod:`kohakuterrarium.terrarium.engine.cli.rich`."""
+
+from types import SimpleNamespace
+
+import pytest
+
+from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
+from kohakuterrarium.builtins.cli_rich.input import RichCLIInput
+from kohakuterrarium.builtins.inputs.cli import CLIInput
+from kohakuterrarium.terrarium.engine.cli import rich as engine_rich_cli
+from kohakuterrarium.terrarium.engine.cli.rich import (
+    _input_conflicts_with_terminal,
+    run_engine_with_rich_cli,
+)
+
+
+class _FocusAgent(AgentInitMixin):
+    """Minimal agent stub with slash-command wiring from :class:`AgentInitMixin`."""
+
+    def __init__(self) -> None:
+        self.input = CLIInput()
+        self.session = None
+        self._pending_resume_events = None
+        self.config = SimpleNamespace(name="focus")
+        self.output_router = SimpleNamespace(default_output=None)
+        self.llm = SimpleNamespace(model="test-model", _profile_max_context=0)
+
+    def llm_identifier(self) -> str:
+        return "test/test-model"
+
+
+class _FocusCreature:
+    creature_id = "focus"
+
+    def __init__(self) -> None:
+        self.agent = _FocusAgent()
+        self._running = False
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    async def start(self) -> None:
+        self._running = True
+
+
+class _FakeEngine:
+    def __init__(self, creature: _FocusCreature) -> None:
+        self._creature = creature
+        self.start_calls: list[str] = []
+
+    def get_creature(self, creature_id: str) -> _FocusCreature:
+        assert creature_id == self._creature.creature_id
+        return self._creature
+
+    def list_creatures(self) -> list[_FocusCreature]:
+        return [self._creature]
+
+    async def start(self, creature: _FocusCreature) -> None:
+        self.start_calls.append(creature.creature_id)
+        await creature.start()
+
+
+class TestInputConflictsWithTerminal:
+    def test_cli_input_conflicts(self) -> None:
+        assert _input_conflicts_with_terminal(CLIInput()) is True
+
+    def test_rich_cli_input_does_not_conflict(self) -> None:
+        assert _input_conflicts_with_terminal(RichCLIInput()) is False
+
+
+class TestRichCliInputSwapRewiresSlashCommands:
+    """Mirrors the ``swap_input`` block in :func:`run_engine_with_rich_cli`."""
+
+    def test_fresh_rich_cli_input_has_no_slash_registry(self) -> None:
+        agent = _FocusAgent()
+        agent.input = RichCLIInput()
+        assert not agent.input._user_commands
+
+    def test_reinit_user_commands_after_swap_registers_builtins(self) -> None:
+        agent = _FocusAgent()
+        AgentInitMixin._init_user_commands(agent)
+        assert "clear" in agent.input._user_commands
+
+        agent.input = RichCLIInput()
+        assert not agent.input._user_commands
+        AgentInitMixin._init_user_commands(agent)
+        assert "clear" in agent.input._user_commands
+        assert "help" in agent.input._user_commands
+
+    @pytest.mark.asyncio
+    async def test_try_slash_command_text_unknown_without_rewire(self) -> None:
+        agent = _FocusAgent()
+        agent.input = RichCLIInput()
+        result = await agent._try_slash_command_text("/help")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_try_slash_command_text_resolves_after_rewire(self) -> None:
+        agent = _FocusAgent()
+        agent.input = RichCLIInput()
+        AgentInitMixin._init_user_commands(agent)
+        result = await agent._try_slash_command_text("/help")
+        assert result is not None
+
+
+class TestRunEngineWithRichCli:
+    @pytest.mark.asyncio
+    async def test_input_swap_reinits_slash_commands(self, monkeypatch) -> None:
+        """``run_engine_with_rich_cli`` must re-wire commands onto ``RichCLIInput``."""
+        creature = _FocusCreature()
+        engine = _FakeEngine(creature)
+        during_run: dict[str, object] = {}
+
+        async def _immediate_run(self) -> None:
+            # ``finally`` restores the previous stdin-owning input after ``run()``.
+            during_run["input_type"] = type(self.agent.input)
+            during_run["commands"] = set(self.agent.input._user_commands)
+
+        class _PassthroughOutput:
+            def __init__(self, app) -> None:
+                pass
+
+        milestones = []
+        monkeypatch.setattr(engine_rich_cli.RichCLIApp, "run", _immediate_run)
+        monkeypatch.setattr(engine_rich_cli, "RichCLIOutput", _PassthroughOutput)
+        monkeypatch.setattr(
+            engine_rich_cli,
+            "mark_startup",
+            lambda event, **fields: milestones.append((event, fields)),
+            raising=False,
+        )
+
+        await run_engine_with_rich_cli(engine, creature.creature_id)
+
+        assert milestones == [
+            ("rich_cli_creature_started", {"surface": "cli", "creature_id": "focus"}),
+            ("rich_cli_run_enter", {"surface": "cli", "creature_id": "focus"}),
+        ]
+        assert during_run["input_type"] is RichCLIInput
+        assert "clear" in during_run["commands"]
+        assert "help" in during_run["commands"]
+        assert isinstance(creature.agent.input, CLIInput)
+        assert engine.start_calls == [creature.creature_id]
+
+
+class TestSingleCreatureDriveWiring:
+    """R1-31: engine/service/focus must be injected for every engine-backed run.
+
+    Single-creature was the common mode where the wiring was missing, so bare
+    ``/drives`` and live settings apply could not resolve the runtime.
+    """
+
+    @pytest.mark.asyncio
+    async def test_single_creature_run_wires_engine_and_focus(
+        self, monkeypatch
+    ) -> None:
+        creature = _FocusCreature()
+        engine = _FakeEngine(creature)
+        captured: dict[str, object] = {}
+
+        async def _immediate_run(self) -> None:
+            captured["engine"] = self.engine
+            captured["drive_engine"] = self.drive_overlay._get_engine()
+            captured["settings_engine"] = (
+                self.settings_overlay.drive_section._get_engine()
+            )
+            captured["focus_id"] = self._drive_focus_id()
+
+        class _PassthroughOutput:
+            def __init__(self, app) -> None:
+                pass
+
+        monkeypatch.setattr(engine_rich_cli.RichCLIApp, "run", _immediate_run)
+        monkeypatch.setattr(engine_rich_cli, "RichCLIOutput", _PassthroughOutput)
+
+        await run_engine_with_rich_cli(engine, creature.creature_id)
+
+        # The Drive overlay + settings-Drives tab resolve the live engine, and
+        # the "assigned to me" scope resolves to the focus creature.
+        assert captured["engine"] is engine
+        assert captured["drive_engine"] is engine
+        assert captured["settings_engine"] is engine
+        assert captured["focus_id"] == "focus"

@@ -13,7 +13,7 @@ from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.migrations import latest_readable_version
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.graph_manifest import (
+from kohakuterrarium.terrarium.graph.manifest import (
     MANIFEST_KEY,
     GraphManifest,
     parse_manifest,

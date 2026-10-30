@@ -24,8 +24,8 @@ from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium import resume as terrarium_resume_mod
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.terrarium.workspace_resume import (
     WorkspaceResumeError,

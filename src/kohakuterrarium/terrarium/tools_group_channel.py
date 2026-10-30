@@ -13,9 +13,9 @@ when target listens; caller listens when target sends).
 
 from typing import Any
 
-import kohakuterrarium.terrarium.channel_lifecycle as _lifecycle
-import kohakuterrarium.terrarium.channels as _channels
-import kohakuterrarium.terrarium.topology as _topo
+import kohakuterrarium.terrarium.channels.lifecycle as _lifecycle
+import kohakuterrarium.terrarium.channels.channels as _channels
+import kohakuterrarium.terrarium.graph.topology as _topo
 from kohakuterrarium.builtins.tool_catalog import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,

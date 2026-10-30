@@ -14,7 +14,7 @@ from kohakuterrarium.session.resume.resume import (
 from kohakuterrarium.session.readonly.view import SessionReadView
 from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium.session_successor import (
     publish_successors,

@@ -17,7 +17,7 @@ from kohakuterrarium.llm.profiles.backends import set_remote_backend
 from kohakuterrarium.llm.presets.store import preset_from_data, set_remote_preset
 from kohakuterrarium.llm.profiles.types import LLMBackend
 from kohakuterrarium.session.history.raw import UserMessageSelector
-from kohakuterrarium.terrarium.creature_ops import (
+from kohakuterrarium.terrarium.creature.ops import (
     agent_command_inventory,
     agent_env,
     agent_execute_command,
@@ -44,7 +44,7 @@ from kohakuterrarium.terrarium.creature_ops import (
     wire_creature_on_engine,
 )
 from kohakuterrarium.terrarium.recipe_discard import discard_recipe_graph_shielded
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import (
     LocalTerrariumService,
     _completed_branch_result,

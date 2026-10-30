@@ -171,7 +171,7 @@ class TestBuildRuntimeGraphSection:
             t._creatures.pop("local-worker")
             t._creatures[foreign.creature_id] = foreign
             t._topology.graphs[alice.graph_id].creature_ids.discard("local-worker")
-            from kohakuterrarium.terrarium.topology import GraphTopology
+            from kohakuterrarium.terrarium.graph.topology import GraphTopology
 
             t._topology.graphs[foreign.graph_id] = GraphTopology(
                 graph_id=foreign.graph_id,
@@ -195,7 +195,7 @@ class TestBuildRuntimeGraphSection:
             alice = t.get_creature("alice")
             alice.is_privileged = True
             # Manually add a fake spawned creature in a different graph.
-            from kohakuterrarium.terrarium.creature_host import Creature
+            from kohakuterrarium.terrarium.creature.host import Creature
             from kohakuterrarium.testing.terrarium import _FakeAgent
 
             child = Creature(

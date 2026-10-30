@@ -46,7 +46,7 @@ tags:
 ## 我們怎麼實作它
 
 `core/channel.py` 定義頻道原語與 registry。Terrarium 引擎一律把圖頻道
-註冊成廣播（`terrarium/channels.py`），所以監聽某條頻道的生物會按到
+註冊成廣播（`terrarium/channels/channels.py`），所以監聽某條頻道的生物會按到
 達順序看見每一次送出。`modules/trigger/channel.py` 實作了把頻道橋接
 進生物事件佇列的觸發器。在單一生物內部還有一個 queue 原語
 （`SubAgentChannel`）用於子代理 stdout / 父控制器接線，那是私有實

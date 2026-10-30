@@ -22,7 +22,7 @@ from kohakuterrarium.studio.attach.widget_frames import (
     apply_client_hello,
     handle_widget_frame,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

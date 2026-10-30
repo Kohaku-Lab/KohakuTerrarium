@@ -25,7 +25,7 @@ from kohakuterrarium.cli import resume as resume_mod
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.studio.identity.drive_settings import save_settings
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 

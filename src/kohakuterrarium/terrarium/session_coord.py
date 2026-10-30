@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.drive.topology as _drive_topology
-import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
+import kohakuterrarium.terrarium.graph.leftovers as _topo_leftovers
 from kohakuterrarium.terrarium.session_event_copy import copy_events_into
 from kohakuterrarium.terrarium.session_successor import stage_successor
 from kohakuterrarium.errors import SessionNotResumableError
@@ -34,8 +34,8 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.engine import Terrarium
-    from kohakuterrarium.terrarium.topology import TopologyDelta
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
+    from kohakuterrarium.terrarium.graph.topology import TopologyDelta
 
 logger = get_logger(__name__)
 

@@ -20,7 +20,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,
 )
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 pytestmark = pytest.mark.timeout(30)
 

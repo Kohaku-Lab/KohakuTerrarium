@@ -7,7 +7,7 @@ and hosted exactly the way the real consumers do it:
 * :mod:`kohakuterrarium.bootstrap.agent_init` builds the agent from an
   ``AgentConfig`` (``Agent(config)`` runs the whole ``AgentInitMixin``
   chain — LLM, registry, executor, sub-agents, controller, I/O).
-* :mod:`kohakuterrarium.terrarium.creature_host` wraps that live
+* :mod:`kohakuterrarium.terrarium.creature.host` wraps that live
   ``Agent`` in a :class:`Creature` and adds it to a real
   :class:`Terrarium` engine; ``Creature.chat`` is the canonical
   inject-input + drain-output cycle every HTTP / WS / CLI endpoint
@@ -92,8 +92,8 @@ from kohakuterrarium.modules.tool.base import (
 )
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.parsing import ToolCallEvent
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 

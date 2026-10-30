@@ -46,7 +46,7 @@ tags:
 ## 我们怎么实现它
 
 `core/channel.py` 定义频道原语与 registry。Terrarium 引擎一律把图频道
-注册成广播（`terrarium/channels.py`），所以监听某条频道的 Creature 会
+注册成广播（`terrarium/channels/channels.py`），所以监听某条频道的 Creature 会
 按到达顺序看见每一次送出。`modules/trigger/channel.py` 实现了把频道
 桥接进 Creature 事件队列的触发器。在单一 Creature 内部还有一个 queue
 原语（`SubAgentChannel`）用于子 agent stdout / 父控制器接线；那是

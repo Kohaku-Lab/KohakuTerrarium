@@ -52,7 +52,7 @@ whenever a message arrives, a `channel_message` event is pushed.
 
 `core/channel.py` defines the channel primitive and the registry.
 The terrarium engine always registers graph channels as broadcast
-(`terrarium/channels.py`), so a creature listening on a channel sees
+(`terrarium/channels/channels.py`), so a creature listening on a channel sees
 every send to that channel, in the order they arrived.
 `modules/trigger/channel.py` implements the trigger that bridges a
 channel into a creature's event queue. There is also an internal

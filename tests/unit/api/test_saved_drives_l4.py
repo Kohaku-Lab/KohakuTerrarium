@@ -30,13 +30,13 @@ from kohakuterrarium.api.auth.routes import router as auth_router
 from kohakuterrarium.api.auth.users import create_user
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.persistence import saved_drives as mod
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 

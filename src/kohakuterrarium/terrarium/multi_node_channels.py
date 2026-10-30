@@ -16,7 +16,7 @@ Free functions keep cluster fan-out and merge logic separate from the
 from typing import Any
 
 from kohakuterrarium.terrarium.multi_node_cluster import cluster_groups
-from kohakuterrarium.terrarium.topology import ChannelInfo
+from kohakuterrarium.terrarium.graph.topology import ChannelInfo
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

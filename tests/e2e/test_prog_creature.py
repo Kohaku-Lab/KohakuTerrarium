@@ -48,8 +48,8 @@ from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.resume.resume import resume_agent
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.studio import Studio
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
 from kohakuterrarium.mcp_server.runtime import ToolRuntime
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry

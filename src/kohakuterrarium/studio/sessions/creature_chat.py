@@ -4,7 +4,7 @@ from typing import Any, AsyncIterator
 
 from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
 
 

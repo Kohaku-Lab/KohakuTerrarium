@@ -31,7 +31,7 @@ from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.occupancy.gate import GATE, ResourceReleaseError, try_fast
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.vault.handles import dispose
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 
 
 @pytest.fixture

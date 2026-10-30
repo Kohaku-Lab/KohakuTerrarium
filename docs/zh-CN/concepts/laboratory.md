@@ -408,7 +408,7 @@ Resume 时，`_resume_terrarium_into_engine` 先重建 recipe 描述
 为快照是*完整的*（不是 delta log），用户的移除也被反映出来：
 任何被用户移除的东西就是不在快照里。
 
-实现：`src/kohakuterrarium/terrarium/topology_snapshot.py`。
+实现：`src/kohakuterrarium/terrarium/graph/snapshot.py`。
 测试：`tests/integration/test_runtime_topology_resume.py`。
 
 ### 当前已知的限制

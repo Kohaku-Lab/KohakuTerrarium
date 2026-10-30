@@ -10,7 +10,7 @@ import pytest
 
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.errors import ConflictError, InvalidRequestError
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.remote_service import (
     TURN_REQUEST_TIMEOUT,
@@ -20,7 +20,7 @@ from kohakuterrarium.terrarium.remote_service import (
     _maybe_raise,
 )
 from kohakuterrarium.terrarium.service import CreatureInfo
-from kohakuterrarium.terrarium.topology import (
+from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
     TopologyDelta,
 )

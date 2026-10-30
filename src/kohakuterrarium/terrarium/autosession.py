@@ -27,8 +27,8 @@ from kohakuterrarium.utils.file.path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.creature_host import Creature
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.creature.host import Creature
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 logger = get_logger(__name__)
 

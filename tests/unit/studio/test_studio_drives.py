@@ -13,7 +13,7 @@ from kohakuterrarium.studio.identity.drive_settings import (
     RegistrationSetting,
 )
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 
 
 def _enable_generic():

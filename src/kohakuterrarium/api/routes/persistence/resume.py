@@ -56,7 +56,7 @@ from kohakuterrarium.api.routes.persistence.resume_response import (
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY, parse_manifest
 from kohakuterrarium.terrarium.workspace_resume import (
     WorkspaceResumeError,
     plan_workspace_resume,

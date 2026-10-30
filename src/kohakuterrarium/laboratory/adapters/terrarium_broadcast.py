@@ -11,7 +11,7 @@ from typing import Any
 from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.protocols import LabNode
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

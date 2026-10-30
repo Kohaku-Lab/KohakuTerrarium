@@ -15,7 +15,7 @@ import pytest
 
 from kohakuterrarium.terrarium import multi_node_service as mns_mod
 from kohakuterrarium.terrarium.events import EventKind
-from kohakuterrarium.terrarium.topology import ChannelInfo, GraphTopology
+from kohakuterrarium.terrarium.graph.topology import ChannelInfo, GraphTopology
 
 # Re-import fakes from the sibling test module.
 from tests.unit.terrarium.test_multi_node_service import (

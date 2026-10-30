@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.terrarium import recipe as recipe_mod
-from kohakuterrarium.terrarium import graph_checkpoint as checkpoint_mod
+from kohakuterrarium.terrarium.graph import checkpoint as checkpoint_mod
 from kohakuterrarium.terrarium import recipe_apply as recipe_apply_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
@@ -19,8 +19,8 @@ from kohakuterrarium.terrarium.config import (
     RootConfig,
     TerrariumConfig,
 )
-from kohakuterrarium.terrarium.creature_host import Creature
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 
@@ -684,7 +684,7 @@ class TestRecipeRollback:
             raise RuntimeError("checkpoint failed")
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            "kohakuterrarium.terrarium.graph.checkpoint.checkpoint",
             fail_checkpoint,
         )
         session_path = tmp_path / "run.kohakutr"
@@ -717,7 +717,7 @@ class TestRecipeRollback:
             raise RuntimeError("checkpoint failed")
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            "kohakuterrarium.terrarium.graph.checkpoint.checkpoint",
             fail_checkpoint,
         )
         with pytest.raises(RuntimeError, match="checkpoint failed"):
@@ -757,7 +757,7 @@ class TestRecipeRollback:
             raise RuntimeError("checkpoint failed")
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            "kohakuterrarium.terrarium.graph.checkpoint.checkpoint",
             fail_checkpoint,
         )
         with pytest.raises(RuntimeError, match="checkpoint failed"):
@@ -791,7 +791,7 @@ class TestRecipeRollback:
             raise RuntimeError("checkpoint failed")
 
         monkeypatch.setattr(
-            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            "kohakuterrarium.terrarium.graph.checkpoint.checkpoint",
             fail_checkpoint,
         )
         with pytest.raises(RuntimeError, match="checkpoint failed"):

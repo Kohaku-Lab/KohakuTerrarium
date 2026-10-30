@@ -282,7 +282,7 @@ async for ev in agent.run_stream("Refactor utils.py"):
 
 ## Terrarium engine
 
-Module: `kohakuterrarium.terrarium.engine` (re-exported as
+Module: `kohakuterrarium.terrarium.engine.engine` (re-exported as
 `kohakuterrarium.Terrarium`). The multi-agent runtime engine. It hosts
 every running creature in the process; a solo agent is a 1-creature
 graph.
@@ -415,7 +415,7 @@ async with kt.Terrarium(session_dir="runs/") as engine:
 
 ## Creature
 
-Module: `kohakuterrarium.terrarium.creature_host` (re-exported as
+Module: `kohakuterrarium.terrarium.creature.host` (re-exported as
 `kohakuterrarium.Creature`). The engine's handle for one running agent.
 Returned by `add_creature` / `with_creature`; not constructed directly.
 

@@ -25,7 +25,7 @@ from kohakuterrarium.laboratory.adapters.terrarium_file_mutations import (
     write_bytes_enrolled,
 )
 from kohakuterrarium.laboratory.protocols import LabRegistrar
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

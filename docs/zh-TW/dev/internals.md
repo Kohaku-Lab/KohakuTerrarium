@@ -152,19 +152,19 @@ Resume (`session/resume/resume.py`)：載入 `meta`、每個代理的 conversati
 
 ### 3.1 生態瓶引擎
 
-`terrarium/engine.py:Terrarium` 是執行期引擎：每行程一個，托管所有生物。引擎擁有：
+`terrarium/engine/engine.py:Terrarium` 是執行期引擎：每行程一個，托管所有生物。引擎擁有：
 
-- `_topology: TopologyState`：純資料 graph 模型 (`terrarium/topology.py`)，記錄哪些生物共用哪個 graph、哪些頻道存在、誰 listen / send。
-- `_creatures: dict[str, Creature]`：運行中的 wrapper (`terrarium/creature_host.py`)。
+- `_topology: TopologyState`：純資料 graph 模型 (`terrarium/graph/topology.py`)，記錄哪些生物共用哪個 graph、哪些頻道存在、誰 listen / send。
+- `_creatures: dict[str, Creature]`：運行中的 wrapper (`terrarium/creature/host.py`)。
 - `_environments: dict[str, Environment]`：每個 graph 一份；持有 `shared_channels`。
 - `_session_stores: dict[str, SessionStore]`：每個掛著 store 的 graph 一份。
 - `_subscribers: list[_Subscriber]`：`EngineEvent` 發布訂閱。
 
 獨立 agent 是 1-creature graph；recipe 是用頻道連起來的 connected graph。`Terrarium.with_creature(config)` 是獨立 agent 的捷徑；`Terrarium.from_recipe(recipe)` 透過 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告頻道、為每隻生物加一條 direct channel、若有 root 加 `report_to_root`、接 listen / send 邊、啟動一切)。生物除了透過頻道和 (選擇性的) 嵌進 system prompt 的拓樸提示外，不會知道自己處於生態瓶中。
 
-**頻道注入**。當一隻生物加入了一個有它要 listen 的頻道的 graph，`terrarium/channels.py:inject_channel_trigger` 會往它的 `trigger_manager` 加一個 `ChannelTrigger`。這是 layer 模型裡唯一被允許的向下注入：在 graph 裡的生物 *會* 知道自己有同伴 (它得知道)，但只透過引擎給它的 handle。獨立生物不會有任何注入。
+**頻道注入**。當一隻生物加入了一個有它要 listen 的頻道的 graph，`terrarium/channels/channels.py:inject_channel_trigger` 會往它的 `trigger_manager` 加一個 `ChannelTrigger`。這是 layer 模型裡唯一被允許的向下注入：在 graph 裡的生物 *會* 知道自己有同伴 (它得知道)，但只透過引擎給它的 handle。獨立生物不會有任何注入。
 
-**熱插拔**。拓樸可以在執行期變更。`Terrarium.connect(a, b, channel=...)` 可能合併兩個 graph (environment 取聯集，頻道彙集，掛著的 session store 透過 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透過 `apply_split` 複製到兩邊)。`terrarium/topology.py` 裡的純資料拓樸 mutator 回傳 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驅動這些 live 更新。
+**熱插拔**。拓樸可以在執行期變更。`Terrarium.connect(a, b, channel=...)` 可能合併兩個 graph (environment 取聯集，頻道彙集，掛著的 session store 透過 `terrarium/session_coord.py:apply_merge` 合成一份)。`Terrarium.disconnect` 可能拆 graph (parent session 透過 `apply_split` 複製到兩邊)。`terrarium/graph/topology.py` 裡的純資料拓樸 mutator 回傳 `TopologyDelta`，其 `kind in {"nothing", "merge", "split"}` 驅動這些 live 更新。
 
 **Session 合併 / 分裂**。Session 的單位是 graph 的連通分量。不影響 graph 成員的拓樸變更會沿用既有的 store。`terrarium/session_coord.py` 實作兩條分支並發出 `SESSION_FORKED` / `TOPOLOGY_CHANGED` 事件。
 

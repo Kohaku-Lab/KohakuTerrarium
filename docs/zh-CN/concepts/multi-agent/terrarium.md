@@ -140,15 +140,15 @@ Creature 建立一条频道（名称就是它自己的名字，方便其他成�
 
 ## 我们怎么实现它
 
-- `terrarium/engine.py`：`Terrarium` 类。每个进程一个。拥有拓扑状态、live Creature、environment、挂著的 session store、订阅者列表。是 async context manager (`async with Terrarium() as t:`)，并附 classmethod factory (`from_recipe`、`with_creature`、`resume`，最后一个尚未实现)。
-- `terrarium/topology.py`：纯数据 graph 模型 (`TopologyState`、
+- `terrarium/engine/engine.py`：`Terrarium` 类。每个进程一个。拥有拓扑状态、live Creature、environment、挂著的 session store、订阅者列表。是 async context manager (`async with Terrarium() as t:`)，并附 classmethod factory (`from_recipe`、`with_creature`、`resume`，最后一个尚未实现)。
+- `terrarium/graph/topology.py`：纯数据 graph 模型 (`TopologyState`、
   `GraphTopology`、`ChannelInfo`、`TopologyDelta`)。没有 live agent 引
   用；不需 asyncio 就能测。连通分量透过 BFS 在「creature ↔ channel」
   二部图上算出；mutation 会回传一个 delta 描述 `merge` /
   `split` / `nothing`。引擎在它上面叠 live state。
-- `terrarium/creature_host.py`：`Creature`，引擎对每只 Creature 的 wrapper。把以前独立 Agent 与频道感知的两个面合成同一个型别。
+- `terrarium/creature/host.py`：`Creature`，引擎对每只 Creature 的 wrapper。把以前独立 Agent 与频道感知的两个面合成同一个型别。
 - `terrarium/recipe.py`：走完一份 `TerrariumConfig` 套到引擎上：宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、注入频道触发器、启动一切。
-- `terrarium/channels.py`：频道注入 (当一只 Creature 加入了一个有它要 listen 的频道的 graph，引擎会往它的 agent 加一个 `ChannelTrigger`)，以及 `connect_creatures` / `disconnect_creatures` 的本体。
+- `terrarium/channels/channels.py`：频道注入 (当一只 Creature 加入了一个有它要 listen 的频道的 graph，引擎会往它的 agent 加一个 `ChannelTrigger`)，以及 `connect_creatures` / `disconnect_creatures` 的本体。
 - `terrarium/root.py`：`assign_root` 辅助函数。给一只已经在 graph 里的 Creature，把它指定为该 graph 的 Root：宣告（或重用）一个 `report_to_root` 频道、把 graph 内每只其它 Creature 接成在该频道上送讯息、让 Root 在每个既有频道上 listen，并把 `creature.is_root = True` 翻起来。纯粹是 channel + wiring；工具注册和使用者 IO 挂接留给上层处理。当你以 imperative 方式建 graph 又想要传统「一团队一 Root」拓扑而不走 recipe 档案时使用。
 - `terrarium/session_coord.py`：Session 合并 / 分裂策略。Graph 合并时把两边旧 store 合成一份新的；Graph 分裂时把 parent store 复制到两边。
 - `terrarium/events.py`：`EngineEvent` 分类，加 `EventFilter`、`ConnectionResult`、`DisconnectionResult`。

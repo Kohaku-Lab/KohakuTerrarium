@@ -15,7 +15,7 @@ from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.session.resume.resume import resume_agent
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.llm_seam import real_llm_providers
 

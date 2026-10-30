@@ -114,7 +114,7 @@
     "reason": "platform-selected PTY backend: ConPTY on win32, fcntl/pty/termios elsewhere — each imported only inside its `sys.platform` branch"
   },
   {
-    "file": "src/kohakuterrarium/terrarium/engine_rich_cli.py",
+    "file": "src/kohakuterrarium/terrarium/engine/cli/rich.py",
     "function": "_input_conflicts_with_terminal",
     "target": "kohakuterrarium.builtins.tui.input",
     "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
@@ -206,25 +206,25 @@
   {
     "file": "src/kohakuterrarium/cli/resume.py",
     "function": "run_engine_with_rich_cli",
-    "target": "kohakuterrarium.terrarium.engine_rich_cli",
+    "target": "kohakuterrarium.terrarium.engine.cli.rich",
     "reason": "Rich terminal UI dependencies are loaded only for resumed CLI sessions."
   },
   {
     "file": "src/kohakuterrarium/cli/resume.py",
     "function": "run_engine_with_tui",
-    "target": "kohakuterrarium.terrarium.engine_cli",
+    "target": "kohakuterrarium.terrarium.engine.cli.tui",
     "reason": "Textual dependencies are loaded only for resumed TUI sessions."
   },
   {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_run",
-    "target": "kohakuterrarium.terrarium.engine_rich_cli",
+    "target": "kohakuterrarium.terrarium.engine.cli.rich",
     "reason": "Rich terminal UI dependencies are loaded only after the CLI surface is selected."
   },
   {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_run",
-    "target": "kohakuterrarium.terrarium.engine_cli",
+    "target": "kohakuterrarium.terrarium.engine.cli.tui",
     "reason": "Textual dependencies are loaded only after the TUI surface is selected."
   },
   {
@@ -236,7 +236,7 @@
   {
     "file": "src/kohakuterrarium/studio/hooks.py",
     "function": "name_apply_hook",
-    "target": "kohakuterrarium.terrarium.creature_host",
+    "target": "kohakuterrarium.terrarium.creature.host",
     "reason": "Creature runtime loads only when a group tool applies a spawned name."
   },
   {
@@ -464,19 +464,19 @@
   {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_run",
-    "target": "kohakuterrarium.terrarium.engine",
+    "target": "kohakuterrarium.terrarium.engine.engine",
     "reason": "The engine graph is deferred until after CLI dispatch and runnable resolution."
   },
   {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_apply_cli_topology",
-    "target": "kohakuterrarium.terrarium.channels",
+    "target": "kohakuterrarium.terrarium.channels.channels",
     "reason": "Channel mutation helpers are loaded only when --add or --channel topology is requested."
   },
   {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_apply_cli_topology",
-    "target": "kohakuterrarium.terrarium.topology",
+    "target": "kohakuterrarium.terrarium.graph.topology",
     "reason": "Topology mutation helpers are loaded only when --add or --channel is requested."
   },
   {

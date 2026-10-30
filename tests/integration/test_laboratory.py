@@ -55,7 +55,7 @@ from kohakuterrarium.studio.nodes import NodeMap
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.studio.sessions import lifecycle as session_lifecycle
 from kohakuterrarium.session.readonly.metadata import read_session_meta
-from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.studio.attach.io import attach_io
 from kohakuterrarium.studio.catalog.packages import install_package_op
 from kohakuterrarium.terrarium import Terrarium
@@ -1092,7 +1092,7 @@ class TestLaboratoryDeepWorkflows:
         """
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
         from kohakuterrarium.session.store import SessionStore
         from kohakuterrarium.core.config.load import load_agent_config
         from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
@@ -1710,7 +1710,7 @@ class TestLaboratoryAdapterDirect:
             TerrariumEventsAdapter,
             TerrariumRuntimeAdapter,
         )
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
         from kohakuterrarium.testing.llm import ScriptedLLM
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod

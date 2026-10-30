@@ -13,8 +13,8 @@ from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import session_coord as sc
 from kohakuterrarium.terrarium.autosession import close_attached_stores
-from kohakuterrarium.terrarium.topology import TopologyDelta
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.graph.topology import TopologyDelta
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -467,7 +467,7 @@ class TestApplyMerge:
         # An unresolved replay remnant keyed under the dropped graph
         # must follow the merge — the post-merge snapshot for the
         # survivor otherwise erases the unresolved edge permanently.
-        import kohakuterrarium.terrarium.topology_snapshot as topo_snap
+        import kohakuterrarium.terrarium.graph.snapshot as topo_snap
 
         eng = _make_engine(tmp_path)
         eng._topology.graphs["g2"] = SimpleNamespace(graph_id="g2", creature_ids=set())

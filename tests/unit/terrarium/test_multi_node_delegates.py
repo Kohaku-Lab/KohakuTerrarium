@@ -377,7 +377,7 @@ class TestRuntimeGraphRemoteFailure:
 
 class TestConstructorAndProps:
     def test_init_with_stub_host(self, monkeypatch):
-        from kohakuterrarium.terrarium.engine import Terrarium
+        from kohakuterrarium.terrarium.engine.engine import Terrarium
 
         # Patch HostEngine so we don't actually start a transport.
         class _StubHost:

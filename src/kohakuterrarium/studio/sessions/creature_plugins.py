@@ -8,7 +8,7 @@ from typing import Any
 
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium import TerrariumService
-from kohakuterrarium.terrarium.creature_ops import agent_toggle_plugin
+from kohakuterrarium.terrarium.creature.ops import agent_toggle_plugin
 from kohakuterrarium.studio._runtime import as_engine
 
 

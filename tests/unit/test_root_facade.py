@@ -58,7 +58,7 @@ def test_root_exports_resolve_to_real_objects_and_cache():
     from kohakuterrarium.core.agent import Agent
     from kohakuterrarium.session.store import SessionStore
     from kohakuterrarium.studio.studio import Studio
-    from kohakuterrarium.terrarium.engine import Terrarium
+    from kohakuterrarium.terrarium.engine.engine import Terrarium
 
     assert kt.ContextSnapshot is ContextSnapshot
     assert kt.__dict__["ContextSnapshot"] is ContextSnapshot

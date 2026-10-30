@@ -12,7 +12,7 @@ Two halves:
 
 import pytest
 
-from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
@@ -27,7 +27,7 @@ from kohakuterrarium.terrarium.drive.service.protocol import (
     DriveServiceUnsupportedMixin,
 )
 from kohakuterrarium.terrarium.drive.service.wire import DriveRuntimeStatus, DriveView
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
