@@ -189,7 +189,9 @@ timeout_method = "thread"
 addopts = "-n auto --dist loadgroup"
 
 [tool.ruff.lint]
-select = ["F401", "F841"]
+preview = true
+explicit-preview-rules = true
+select = ["F401", "F841", "PLW1514"]
 
 [tool.briefcase]
 project_name = "KohakuTerrarium"

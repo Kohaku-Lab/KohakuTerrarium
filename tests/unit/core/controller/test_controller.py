@@ -698,7 +698,7 @@ class TestMaterializeInlineFile:
         part = FilePart(name="x.txt", content="hello", is_inline=True)
         path = await env.controller._materialize_inline_file(part)
         assert path is not None
-        assert Path(path).read_text() == "hello"
+        assert Path(path).read_text(encoding="utf-8") == "hello"
 
     async def test_no_data_returns_none(self):
         from kohakuterrarium.llm.message import FilePart
@@ -761,7 +761,7 @@ class TestMaterializeInlineFile:
 
         path = await env.controller._materialize_inline_file(part)
 
-        assert Path(path).read_text() == "long name"
+        assert Path(path).read_text(encoding="utf-8") == "long name"
         assert len(Path(path).name.encode()) <= 255
 
 
@@ -840,7 +840,7 @@ class TestResolveFilePart:
         assert "hello world" in reread_text
         rebuilt_path = reread_text.split("Path: ", 1)[1].split()[0]
         assert rebuilt_path != path
-        assert Path(path).read_text() == "updated attachment"
+        assert Path(path).read_text(encoding="utf-8") == "updated attachment"
         dynamic = await env.controller._resolve_file_part(
             FilePart(name="working copy", path=path)
         )

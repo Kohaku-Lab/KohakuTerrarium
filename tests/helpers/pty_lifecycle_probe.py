@@ -68,7 +68,7 @@ def main() -> None:
     pty.openpty, os.fork, os.waitpid = openpty, fork, waitpid
     pty_posix._find_shell = lambda: "/bin/bash"
     Path(directory, ".bash_profile").write_text(
-        "PS1='kt-test> '\nunset PROMPT_COMMAND\n"
+        "PS1='kt-test> '\nunset PROMPT_COMMAND\n", encoding="utf-8"
     )
     os.environ["HOME"] = directory
     for key in ("BASH_ENV", "ENV", "PROMPT_COMMAND"):
