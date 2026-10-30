@@ -8,6 +8,7 @@ from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.llm.base import LLMProvider, fork_llm
 from kohakuterrarium.llm.presets.store import get_subagent_models
 from kohakuterrarium.llm.profiles.resolve import get_profile
+from kohakuterrarium.llm.profiles.variations import parse_variation_selector
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 
@@ -34,14 +35,23 @@ def resolve_subagent_llm(
     parent_llm: LLMProvider, config: SubAgentConfig
 ) -> LLMProvider:
     """Resolve a profile selector or a same-provider model as the sub-agent's own provider."""
-    name = (config.model or "").strip()
-    lowered = name.lower()
-    if lowered in _INHERIT_PARENT_SENTINELS:
-        return fork_llm(parent_llm)
-    if not name or lowered in _NAMED_DEFAULT_SENTINELS:
-        name = get_subagent_models().get(config.name, "").strip()
-        if not name:
+    configured = (config.model or "").strip()
+    lowered = configured.lower()
+    table_name = get_subagent_models().get(config.name, "").strip()
+    uses_table = bool(table_name) and (
+        not configured
+        or lowered in _NAMED_DEFAULT_SENTINELS | _INHERIT_PARENT_SENTINELS
+    )
+    name = table_name if uses_table else configured
+    if name.startswith("@"):
+        try:
+            parse_variation_selector(name)
+        except ValueError:
             return fork_llm(parent_llm)
+    if not uses_table and (
+        not name or lowered in _NAMED_DEFAULT_SENTINELS | _INHERIT_PARENT_SENTINELS
+    ):
+        return fork_llm(parent_llm)
 
     # Direct lookup avoids warning for valid raw model IDs that are not profiles.
     profile = get_profile(name)

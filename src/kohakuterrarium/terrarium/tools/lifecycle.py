@@ -5,8 +5,15 @@ from typing import Any
 
 import kohakuterrarium.terrarium.tools.hooks as group_hooks
 from kohakuterrarium.builtins.tool_catalog import register_builtin
+from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.core.events import create_creature_output_event
 from kohakuterrarium.llm.profiles.resolve import resolve_controller_llm
+from kohakuterrarium.terrarium.child_model import (
+    model_payload,
+    resolve_spawn_model,
+    spawn_config,
+    spawn_llm_args,
+)
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -52,24 +59,6 @@ _LLM_PARAM = {
     "type": "string",
     "description": "Model selector; default is the config's model, else yours.",
 }
-
-
-def _resolve_worker_target(
-    gctx: GroupContext, ident: str, verb: str
-) -> tuple[Any, ToolResult | None]:
-    """Resolve a worker while reserving privileged lifecycle control for Studio."""
-    try:
-        target = resolve_group_target(gctx, ident)
-    except Exception as exc:
-        return None, err(str(exc))
-    if target is None:
-        return None, err(cross_cluster_target_error(gctx.engine, ident))
-    if target.is_privileged:
-        return None, err(
-            f"cannot {verb} privileged creature {target.name!r}; "
-            "only the user can do that via Studio"
-        )
-    return target, None
 
 
 @register_builtin("group_add_node")
@@ -121,18 +110,23 @@ class GroupAddNodeTool(BaseTool):
         cap_error = population_cap_error(gctx)
         if cap_error is not None:
             return cap_error
+        caller = _caller_llm(gctx)
+        try:
+            loaded = load_agent_config(config_path)
+            choice = resolve_spawn_model(loaded, args.get("llm"), caller)
+        except Exception as exc:
+            return err(f"failed to spawn creature from {config_path!r}: {exc}")
         try:
             # Joining at creation avoids a transient singleton graph and session.
             new = await gctx.engine.add_creature(
-                config_path,
+                spawn_config(config_path, loaded, choice),
                 graph=gctx.caller.graph_id,
-                llm=args.get("llm") or None,
-                fallback_llm=_caller_llm(gctx),
                 pwd=pwd,
                 name=name or None,
                 is_privileged=False,
                 parent_creature_id=gctx.caller.creature_id,
                 io="none",
+                **spawn_llm_args(choice, caller),
             )
         except Exception as exc:
             return err(f"failed to spawn creature from {config_path!r}: {exc}")
@@ -159,6 +153,7 @@ class GroupAddNodeTool(BaseTool):
                 "graph_id": new.graph_id,
                 "parent_creature_id": new.parent_creature_id,
                 "caller_graph_id": gctx.caller.graph_id,
+                **model_payload(choice),
             }
         )
 
@@ -423,17 +418,22 @@ class GroupSpawnChildTool(BaseTool):
 
         pwd = args.get("pwd") or _caller_pwd(gctx)
         name = (args.get("name") or "").strip()
+        caller = _caller_llm(gctx)
+        try:
+            loaded = load_agent_config(config_ref)
+            choice = resolve_spawn_model(loaded, args.get("llm"), caller)
+        except Exception as exc:
+            return err(f"failed to spawn creature from {config_ref!r}: {exc}")
         try:
             child = await gctx.engine.add_creature(
-                config_ref,
+                spawn_config(config_ref, loaded, choice),
                 graph=gctx.caller.graph_id,
-                llm=args.get("llm") or None,
-                fallback_llm=_caller_llm(gctx),
                 pwd=pwd,
                 name=name or None,
                 is_privileged=False,
                 parent_creature_id=gctx.caller.creature_id,
                 io="none",
+                **spawn_llm_args(choice, caller),
             )
         except Exception as exc:
             return err(f"failed to spawn creature from {config_ref!r}: {exc}")
@@ -464,8 +464,25 @@ class GroupSpawnChildTool(BaseTool):
                 "graph_id": child.graph_id,
                 "task_delivered": delivered,
                 "caller_graph_id": gctx.caller.graph_id,
+                **model_payload(choice),
             }
         )
+
+
+def _resolve_worker_target(gctx, ident: str, verb: str):
+    """Resolve a non-privileged worker, or return a tool error."""
+    try:
+        target = resolve_group_target(gctx, ident)
+    except Exception as exc:
+        return None, err(str(exc))
+    if target is None:
+        return None, err(cross_cluster_target_error(gctx.engine, ident))
+    if target.is_privileged:
+        return None, err(
+            f"cannot {verb} privileged creature {target.name!r}; "
+            "only the user can do that via Studio"
+        )
+    return target, None
 
 
 @register_builtin("group_pause_node")

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.packages import locations as loc_mod
+from kohakuterrarium.packages import resolve as resolve_mod
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.studio.catalog.packages import scan as scan_mod
 
@@ -92,22 +93,22 @@ class TestBuildPackageRootMap:
     def test_with_packages(self, monkeypatch, tmp_path):
         monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
         monkeypatch.setattr(
-            scan_mod,
+            resolve_mod,
             "list_packages",
             lambda: [{"name": "demo", "path": str(tmp_path)}],
         )
-        monkeypatch.setattr(scan_mod, "get_package_root", lambda n: tmp_path)
+        monkeypatch.setattr(resolve_mod, "get_package_root", lambda n: tmp_path)
         out = scan_mod._build_package_root_map()
         assert str(tmp_path.resolve()) in out
 
     def test_get_package_root_none_skipped(self, monkeypatch, tmp_path):
         monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
         monkeypatch.setattr(
-            scan_mod,
+            resolve_mod,
             "list_packages",
             lambda: [{"name": "demo", "path": str(tmp_path)}],
         )
-        monkeypatch.setattr(scan_mod, "get_package_root", lambda n: None)
+        monkeypatch.setattr(resolve_mod, "get_package_root", lambda n: None)
         assert scan_mod._build_package_root_map() == {}
 
 

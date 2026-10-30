@@ -176,6 +176,9 @@ class AgentConfig:
 
     agent_path: Path | None = None
 
+    # ``@pkg/...`` identity of this creature, then each packaged ancestor.
+    package_config_refs: list[str] = field(default_factory=list)
+
     # Session key for shared state isolation (None = use agent name)
     session_key: str | None = None
 

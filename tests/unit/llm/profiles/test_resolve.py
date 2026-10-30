@@ -605,7 +605,17 @@ class TestBackendCrud:
             "explore": "anthropic/worker@reasoning=high",
             "Reviewer": "raw-review-model",
         }
-        save_yaml_store({"version": 3, "subagent_models": mapping})
+        child_models = {
+            "default": "openrouter/cheap",
+            "@biome/creatures/swe": "codex/gpt",
+        }
+        save_yaml_store(
+            {
+                "version": 3,
+                "subagent_models": mapping,
+                "child_models": child_models,
+            }
+        )
 
         save_backend(LLMBackend(name="proxy", backend_type="openai"))
         save_profile(LLMPreset(name="worker", model="m1", provider="proxy"))
@@ -617,6 +627,7 @@ class TestBackendCrud:
 
         stored = load_yaml_store()
         assert stored["subagent_models"] == mapping
+        assert stored["child_models"] == child_models
         assert stored["default_model"] == "proxy/worker"
         assert stored["backends"]["proxy"]["backend_type"] == "openai"
         assert stored["presets"]["proxy"]["worker"]["model"] == "m1"

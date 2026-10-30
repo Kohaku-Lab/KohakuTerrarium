@@ -626,6 +626,12 @@ subagent_models:
   explore: openrouter/mimo-v2.5-pro
   worker: codex/gpt-5.5
 
+# 選用：group_add_node 與 group_spawn_child 的子 creature 預設模型。
+# 鍵是正規化後的 @pkg/...；default 是全域 child 預設。
+child_models:
+  default: openrouter/mimo-v2.5-pro
+  "@kt-biome/creatures/swe": codex/gpt-5.5
+
 backends:
   <provider-name>:
     backend_type: openai | anthropic | codex  # transport 實作
@@ -658,7 +664,9 @@ presets:
 
 內建 provider 名稱 (`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`、`kimi-code`、`glm-coding`) 不能刪除；它們的 base URL 與 `api_key_env` 由內建預設值寫死。每隻代理仍然可以用 `controller.base_url` / `controller.api_key_env` 覆寫。
 
-`subagent_models` 讓使用者不用修改上游 creature 套件，就能設定各 subagent 的預設模型。鍵會與最終的 `SubAgentConfig.name` 精確匹配。creature 或 subagent 模組中的具體 `model` 仍然優先；`parent`、`inherit`、`default` 明確表示繼承父 LLM。未設定模型、使用 `subagent-default` 或 `subagent_default` 時會優先採用同名設定，未命中則繼承父模型。此映射在建立 subagent 時讀取，因此修改只影響之後建立的 job。Conversation 與 Inspector Trace 會記錄每個新 job 實際綁定的模型，優先顯示正規化 profile selector，缺少時 fallback 到 raw model id。
+`subagent_models` 讓使用者不用修改上游 creature 套件，就能設定各 subagent 的預設模型。鍵會與最終的 `SubAgentConfig.name` 精確匹配。命中的使用者設定會覆蓋未設定的模型，以及 `parent`、`inherit`、`default`、`subagent-default`、`subagent_default`。直接寫在該 subagent 設定上的具體 selector 仍然優先；沒有命中時繼承父 LLM。此映射在建立 subagent 時讀取，因此修改只影響之後建立的 job。Conversation 與 Inspector Trace 會記錄每個新 job 實際綁定的模型，優先顯示正規化 profile selector，缺少時 fallback 到 raw model id。
+
+`child_models` 為 `group_add_node` 與 `group_spawn_child` 提供同類的使用者預設模型。它不影響 `kt run`、Studio、recipe 與直接 Python API。本次呼叫的 `llm` 參數優先。具名 `@pkg/...` 設定會覆蓋具體模型，但表內 `default` 不會；它只用於未寫模型或 `parent`、`inherit`、`default`。結果回傳 `requested_llm`、`llm`、`llm_source`、`matched_key`、`llm_fallback_from` 與 `fallback_reason`。查表時按正規化的 `@pkg/...`，從目前 creature 到 `base_config` 祖先，由近到遠使用第一個命中的鍵。鍵不匹配 `config.name`、spawn 的 `name` 或本機路徑。表內 `default` 是全域 child 預設，與設定哨兵 `default` 不是同一個意思。表中的 selector 不可用時，回退到呼叫者模型，再回退到 `default_model`。工具回傳 `llm`、`llm_source` 與 `llm_fallback_from`。檔案在 spawn 時讀取，修改只影響之後的 spawn。
 
 ### 新增自訂 LLM backend provider
 
