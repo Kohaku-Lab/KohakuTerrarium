@@ -134,7 +134,7 @@ class TestApplyAndUninstall:
         shims.apply_plan(plan)
         for n in NAMES:
             assert (tgt / n).is_symlink()
-            assert shims._is_ours(tgt / n)
+            assert shims.is_ours(tgt / n)
         shims.apply_plan(plan)  # again
         assert sorted(p.name for p in tgt.iterdir()) == sorted(NAMES)
 
@@ -170,7 +170,7 @@ class TestApplyAndUninstall:
         shims.apply_plan(plan)
         kc = tgt / "kt-cli"
         assert kc.exists()
-        assert shims._is_ours(kc)
+        assert shims.is_ours(kc)
         if os.name == "posix":
             assert os.access(kc, os.X_OK)
 
