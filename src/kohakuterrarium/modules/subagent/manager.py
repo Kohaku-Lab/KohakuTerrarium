@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from kohakuterrarium.core.budget import IterationBudget
-from kohakuterrarium.core.context_snapshot import ContextSnapshot
+from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.modules.subagent.side import SideConversationMixin, side_title
-from kohakuterrarium.core.job import JobState, JobStatus, JobStore, JobType
-from kohakuterrarium.core.job import generate_job_id
+from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobStore, JobType
+from kohakuterrarium.core.jobs.job import generate_job_id
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider

@@ -7,7 +7,7 @@ from kohakuterrarium.core.agent.turn.budget_recovery import (
     sync_emergency_drop_conversation,
 )
 from kohakuterrarium.core.agent.turn.input import drive_input
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     continue_on_branch,
     normalize_branch_view,
 )

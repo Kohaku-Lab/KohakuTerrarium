@@ -4,11 +4,11 @@ import json
 from collections.abc import Hashable
 from typing import Any, Iterable
 
-from kohakuterrarium.core.compact_branch import (
+from kohakuterrarium.core.compact.branch import (
     CompactRule,
     compact_rule_from_event,
 )
-from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
+from kohakuterrarium.core.jobs.label import canonical_tool_name, make_job_label
 from kohakuterrarium.llm.message import coalesce_user_contents
 from kohakuterrarium.session.assistant_history import (
     _coerce_tool_args_to_json,

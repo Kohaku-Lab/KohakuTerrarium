@@ -13,7 +13,7 @@ import pytest
 
 from kohakuterrarium.bootstrap import llm as bootstrap_llm
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.core.events import (
     TriggerEvent,
     create_tool_complete_event,

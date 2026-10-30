@@ -87,7 +87,7 @@ tags:
 - `src/kohakuterrarium/prompt/aggregator.py`：组合函数。
 - `src/kohakuterrarium/prompt/templates.py`：Jinja 安全渲染。
 - `src/kohakuterrarium/terrarium/config.py`：频道拓扑区块。
-- `src/kohakuterrarium/core/Agent.py`：`_init_controller()` 会在
+- `src/kohakuterrarium/core/agent/assembly.py`：`_init_controller()` 会在
   启动时调用 aggregator 一次。
 
 ## 另请参阅

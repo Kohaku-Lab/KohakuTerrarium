@@ -316,7 +316,7 @@ LLM 可输出的内嵌指令，可替换工具调用。它们会直接与框架�
 
 ## LLM presets
 
-随附于 `src/kohakuterrarium/llm/presets.py`。可作为 `llm:` 或
+随附于 `src/kohakuterrarium/llm/presets/catalog.py`。可作为 `llm:` 或
 `--llm` 的值。
 
 命名惯例 (2026-04 重构后)：
@@ -473,7 +473,7 @@ LLM 可输出的内嵌指令，可替换工具调用。它们会直接与框架�
 - `ministral-3-14b` (`ministral`)
 - `ministral-3-8b`
 
-每个 preset 的 token 窗口 (`max_context` / `max_output`) 各自设定，确切值请见 `src/kohakuterrarium/llm/presets.py`，或跑 `kt config llm show <name>` 查看。`controller.max_tokens` 会覆盖 `max_output`；要调整 compaction 窗口，请设 `compact.max_tokens`。
+每个 preset 的 token 窗口 (`max_context` / `max_output`) 各自设定，确切值请见 `src/kohakuterrarium/llm/presets/catalog.py`，或跑 `kt config llm show <name>` 查看。`controller.max_tokens` 会覆盖 `max_output`；要调整 compaction 窗口，请设 `compact.max_tokens`。
 
 内置 preset 合并时也会吃进已安装套件贡献的 `llm_presets`；见 [configuration.md 的套件 manifest 一节](configuration.md#套件-manifest-kohakuyaml)。
 

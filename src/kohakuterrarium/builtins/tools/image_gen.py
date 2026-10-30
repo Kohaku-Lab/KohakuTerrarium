@@ -7,7 +7,7 @@ never invokes it. Explicit configuration overrides provider defaults.
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
+from kohakuterrarium.core.tools.native_validation import validate_native_tool_options
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 
 

@@ -15,7 +15,7 @@ from kohakuterrarium.builtin_skills import (
     read_skill_body,
 )
 from kohakuterrarium.commands.base import BaseCommand, CommandResult, parse_command_args
-from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.core.tools.output import render_content_text
 from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.skill_docs import SkillDoc, load_skill_doc
 

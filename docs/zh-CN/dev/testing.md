@@ -278,8 +278,8 @@ er.assert_before("tool_complete", "channel_message")
 | 你改了什么 | 测试加到哪里 |
 |---|---|
 | `core/agent.py` | `tests/unit/test_phase5.py` 或新文件 |
-| `core/controller.py` | `tests/unit/test_phase3_4.py` |
-| `core/executor.py` | `tests/unit/test_phase3_4.py` |
+| `core/controller/controller.py` | `tests/unit/test_phase3_4.py` |
+| `core/jobs/executor.py` | `tests/unit/test_phase3_4.py` |
 | `parsing/` | `tests/unit/test_phase2.py` |
 | `modules/subagent/` | `tests/unit/test_phase6.py` |
 | `modules/trigger/` | `tests/unit/test_phase7.py` |

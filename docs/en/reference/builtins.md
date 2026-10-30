@@ -388,7 +388,7 @@ Canonical backend types are `openai`, `anthropic`, and `codex`. Legacy
 
 ## LLM presets
 
-Shipped in `src/kohakuterrarium/llm/presets.py`. Use them as `llm:` or
+Shipped in `src/kohakuterrarium/llm/presets/catalog.py`. Use them as `llm:` or
 `--llm` values.
 
 Naming convention (post-2026-04 refactor):
@@ -570,7 +570,7 @@ provider. Adding these presets does not change an existing default model.
 - `ministral-3-8b`
 
 Preset token windows (`max_context` / `max_output`) are set per preset;
-see `src/kohakuterrarium/llm/presets.py` for the exact values, or
+see `src/kohakuterrarium/llm/presets/catalog.py` for the exact values, or
 `kt config llm show <name>`. `controller.max_tokens` overrides
 `max_output`; to adjust the compaction window, set `compact.max_tokens`.
 

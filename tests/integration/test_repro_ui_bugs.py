@@ -12,7 +12,7 @@ from typing import Any
 
 from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,

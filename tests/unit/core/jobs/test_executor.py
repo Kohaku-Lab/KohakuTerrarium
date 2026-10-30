@@ -1,0 +1,1201 @@
+"""Unit tests for :mod:`kohakuterrarium.core.jobs.executor`."""
+
+import asyncio
+import base64
+import types
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from kohakuterrarium.core.events import EventType
+from kohakuterrarium.core.tools.execution_context import ExecutionBinding
+from kohakuterrarium.core.jobs.executor import Executor
+from kohakuterrarium.core.jobs.job import JobState, JobStore
+from kohakuterrarium.modules.plugin.base import BasePlugin
+from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolConfig,
+    ToolContext,
+    ToolResult,
+)
+from kohakuterrarium.llm.message import ImagePart
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
+from kohakuterrarium.parsing.events import ToolCallEvent
+
+# ── tool fixtures ────────────────────────────────────────────────
+
+
+class _EchoTool(BaseTool):
+    """Returns ``args["msg"]`` as output. Direct-mode."""
+
+    def __init__(self, *, mode=ExecutionMode.DIRECT, max_output=0):
+        super().__init__(ToolConfig(max_output=max_output))
+        self._mode = mode
+
+    @property
+    def tool_name(self):
+        return "echo"
+
+    @property
+    def description(self):
+        return "echo"
+
+    @property
+    def execution_mode(self):
+        return self._mode
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output=str(args.get("msg", "")))
+
+
+class _FailTool(BaseTool):
+    @property
+    def tool_name(self):
+        return "fail"
+
+    @property
+    def description(self):
+        return "fail"
+
+    async def _execute(self, args, **kwargs):
+        raise RuntimeError("boom")
+
+
+class _ManualReadTool(BaseTool):
+    require_manual_read = True
+
+    @property
+    def tool_name(self):
+        return "manual"
+
+    @property
+    def description(self):
+        return "manual"
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="never reached")
+
+
+class _UnsafeTool(BaseTool):
+    is_concurrency_safe = False
+
+    def __init__(self, hold_seconds=0.05, *, timeout=60.0, name="unsafe", gate=None):
+        super().__init__(ToolConfig(timeout=timeout))
+        self.hold = hold_seconds
+        self.name = name
+        self.gate = gate
+        self.starts: list[float] = []
+        self.active = 0
+        self.max_active = 0
+
+    @property
+    def tool_name(self):
+        return self.name
+
+    @property
+    def description(self):
+        return "unsafe"
+
+    async def _execute(self, args, **kwargs):
+        self.starts.append(asyncio.get_event_loop().time())
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            if self.gate is not None:
+                await self.gate.wait()
+            else:
+                await asyncio.sleep(self.hold)
+        finally:
+            self.active -= 1
+        return ToolResult(output="ok")
+
+
+class _SlowTool(BaseTool):
+    @property
+    def tool_name(self):
+        return "slow"
+
+    @property
+    def description(self):
+        return "slow"
+
+    async def _execute(self, args, **kwargs):
+        await asyncio.sleep(args.get("seconds", 0.1))
+        return ToolResult(output="done")
+
+
+class _BashFileTool(BaseTool):
+    """Return Bash-shaped output metadata without spawning a subprocess."""
+
+    def __init__(self, path: Path, output: str, *, max_output: int, **result_kwargs):
+        super().__init__(ToolConfig(max_output=max_output))
+        self.path = path
+        self.output = output
+        self.result_kwargs = result_kwargs
+
+    @property
+    def tool_name(self):
+        return "bash"
+
+    @property
+    def description(self):
+        return "bash-shaped test tool"
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(
+            output=self.output,
+            metadata={"raw_output_path": str(self.path)},
+            **self.result_kwargs,
+        )
+
+
+class _GeneratedImageTool(BaseTool):
+    @property
+    def tool_name(self):
+        return "generated_image"
+
+    @property
+    def description(self):
+        return "generated image"
+
+    async def _execute(self, args, **kwargs):
+        encoded = base64.b64encode(b"IMAGE").decode()
+        return ToolResult(
+            output=[ImagePart(url=f"data:image/png;base64,{encoded}")],
+            metadata={
+                "_image_artifact_subdir": "generated_images",
+                "session_metadata": {
+                    "artifacts": [
+                        {
+                            "kind": "file",
+                            "relative_path": "existing.txt",
+                            "url": "/api/sessions/session-1/artifacts/existing.txt",
+                        }
+                    ]
+                },
+            },
+        )
+
+
+class _ReferenceImageTool(BaseTool):
+    """A tool whose images are looked at, not produced."""
+
+    media_policy = MediaPolicy(persist=False, pinned=False)
+
+    @property
+    def tool_name(self):
+        return "reference_image"
+
+    @property
+    def description(self):
+        return "reference image"
+
+    async def _execute(self, args, **kwargs):
+        encoded = base64.b64encode(b"IMAGE").decode()
+        metadata = {}
+        if args.get("generated"):
+            metadata["media_policy"] = {"persist": True}
+        return ToolResult(
+            output=[ImagePart(url=f"data:image/png;base64,{encoded}")],
+            metadata=metadata,
+        )
+
+
+class _ArtifactStore:
+    session_id = "session-1"
+
+    def __init__(self, root):
+        self.root = root
+
+    def write_artifact(self, filename, data):
+        path = self.root / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+
+# ── basic submit / wait_for ──────────────────────────────────────
+
+
+class TestSubmitWaitFor:
+    async def test_register_and_submit(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        jid = await ex.submit("echo", {"msg": "hi"})
+        result = await ex.wait_for(jid)
+        assert result is not None
+        assert result.output == "hi"
+        assert result.success is True
+        status = ex.get_status(jid)
+        assert status.state == JobState.DONE
+        assert ex.get_result(jid) is not None
+
+    async def test_unknown_tool_raises(self):
+        ex = Executor()
+        with pytest.raises(ValueError, match="not registered"):
+            await ex.submit("nope", {})
+
+    async def test_custom_job_id(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        await ex.submit("echo", {"msg": "x"}, job_id="custom-1")
+        assert ex.get_status("custom-1") is not None
+
+    async def test_submit_from_event(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        evt = ToolCallEvent(name="echo", args={"msg": "via-event"}, raw="")
+        jid = await ex.submit_from_event(evt)
+        result = await ex.wait_for(jid)
+        assert result.output == "via-event"
+
+    async def test_get_tool_and_list(self):
+        ex = Executor()
+        tool = _EchoTool()
+        ex.register_tool(tool)
+        assert ex.get_tool("echo") is tool
+        assert ex.get_tool("missing") is None
+        assert ex.list_tools() == ["echo"]
+
+    async def test_generated_image_subdir_and_reference_metadata(self, tmp_path):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(session_store=_ArtifactStore(tmp_path))
+        ex.register_tool(_GeneratedImageTool())
+
+        result = await ex.wait_for(await ex.submit("generated_image", {}))
+
+        assert result is not None
+        assert "_image_artifact_subdir" not in result.metadata
+        artifacts = result.metadata["session_metadata"]["artifacts"]
+        assert artifacts[0]["relative_path"] == "existing.txt"
+        artifact = artifacts[1]
+        assert artifact["relative_path"].startswith("generated_images/")
+        assert artifact["url"].startswith(
+            "/api/sessions/session-1/artifacts/generated_images/"
+        )
+        artifact_file = tmp_path / artifact["relative_path"]
+        assert artifact_file.parent.parent == tmp_path / "generated_images"
+        assert artifact_file.suffix == ".png"
+        assert artifact_file.read_bytes() == b"IMAGE"
+
+    async def test_tool_media_policy_skips_persistence_and_reaches_metadata(
+        self, tmp_path
+    ):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(session_store=_ArtifactStore(tmp_path))
+        ex.register_tool(_ReferenceImageTool())
+
+        result = await ex.wait_for(await ex.submit("reference_image", {}))
+
+        assert result is not None
+        assert result.output[0].url.startswith("data:image/png;base64,")
+        assert not list(tmp_path.rglob("*.png"))
+        assert "artifacts" not in result.metadata.get("session_metadata", {})
+        assert result.metadata["session_metadata"]["media"] == {
+            "persist": False,
+            "pinned": False,
+            "inline_fallback": False,
+        }
+        # The raw override key never leaks into the stored result.
+        assert "media_policy" not in result.metadata
+
+    async def test_result_metadata_overrides_the_tool_media_policy(self, tmp_path):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(session_store=_ArtifactStore(tmp_path))
+        ex.register_tool(_ReferenceImageTool())
+
+        result = await ex.wait_for(
+            await ex.submit("reference_image", {"generated": True})
+        )
+
+        assert result.output[0].url.startswith("/api/sessions/session-1/artifacts/")
+        assert list(tmp_path.rglob("*.png"))
+        assert result.metadata["session_metadata"]["media"] == {
+            "persist": True,
+            "pinned": False,
+            "inline_fallback": False,
+        }
+
+
+# ── error paths ──────────────────────────────────────────────────
+
+
+class TestErrorPaths:
+    async def test_tool_exception_becomes_error_result(self):
+        ex = Executor()
+        ex.register_tool(_FailTool())
+        jid = await ex.submit("fail", {})
+        result = await ex.wait_for(jid)
+        # ``BaseTool.execute`` swallows the exception and wraps it.
+        assert result.error is not None
+        # Job state stays DONE (error captured in result, not raised).
+        # ``result.success`` is False because ``error`` is set.
+        assert result.success is False
+
+    async def test_require_manual_read_blocks(self):
+        ex = Executor()
+        ex.register_tool(_ManualReadTool())
+        jid = await ex.submit("manual", {})
+        result = await ex.wait_for(jid)
+        assert result.error is not None
+        assert "info" in result.error.lower()
+        assert result.exit_code == 1
+        status = ex.get_status(jid)
+        assert status.state == JobState.ERROR
+        assert ex.get_result(jid) is result
+
+
+def _agent(tool_doc_mode="standard", has_info=True):
+    """Minimal agent stub exposing the fields the manual-read gate reads."""
+    tools = {"info": object()} if has_info else {}
+    registry = types.SimpleNamespace(get_tool=tools.get)
+    return types.SimpleNamespace(
+        config=types.SimpleNamespace(tool_doc_mode=tool_doc_mode),
+        registry=registry,
+    )
+
+
+class _PlainTool(BaseTool):
+    """An ordinary tool that declares no documentation requirement."""
+
+    @property
+    def tool_name(self):
+        return "plain"
+
+    @property
+    def description(self):
+        return "Plain"
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="ran")
+
+
+class TestManualReadGate:
+    async def test_dynamic_with_info_still_blocks(self):
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="standard", has_info=True)
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is not None
+        assert result.exit_code == 1
+
+    async def test_full_doc_mode_bypasses_gate(self):
+        # Full docs already live in the prompt — the info-read gate is moot.
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="full")
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is None
+        assert result.output == "never reached"
+
+    async def test_brief_mode_gates_a_tool_that_does_not_declare_it(self):
+        # brief strips the parameter prose, so the model cannot call the tool
+        # correctly without reading its docs first — the mode implies the gate.
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="brief")
+        ex.register_tool(_PlainTool())
+        result = await ex.wait_for(await ex.submit("plain", {}))
+        assert result.error is not None
+        assert "info(name=plain)" in result.error
+
+    async def test_standard_mode_does_not_gate_an_ordinary_tool(self):
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="standard")
+        ex.register_tool(_PlainTool())
+        result = await ex.wait_for(await ex.submit("plain", {}))
+        assert result.error is None
+
+    async def test_missing_info_tool_bypasses_gate(self):
+        # Without an ``info`` tool the block is unsatisfiable, so the tool
+        # would be permanently undispatchable — the gate must relax.
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="standard", has_info=False)
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is None
+        assert result.output == "never reached"
+
+
+# ── on_complete callback + event queue ───────────────────────────
+
+
+class TestOnCompleteCallback:
+    async def test_callback_fires_for_background(self):
+        seen = []
+
+        ex = Executor(on_complete=lambda e: seen.append(e))
+        ex.register_tool(_EchoTool())
+        jid = await ex.submit("echo", {"msg": "x"})
+        await ex.wait_for(jid)
+        # Callback delivered exactly one TriggerEvent.
+        assert len(seen) == 1
+        assert seen[0].type == EventType.TOOL_COMPLETE
+        # Event also enqueued.
+        evt = ex.get_next_event_nowait()
+        assert evt is not None
+
+    async def test_is_direct_skips_callback_and_event(self):
+        seen = []
+        ex = Executor(on_complete=lambda e: seen.append(e))
+        ex.register_tool(_EchoTool())
+        jid = await ex.submit("echo", {"msg": "x"}, is_direct=True)
+        await ex.wait_for(jid)
+        assert seen == []
+        assert ex.get_next_event_nowait() is None
+
+    async def test_get_next_event_with_timeout(self):
+        ex = Executor()
+        evt = await ex.get_next_event(timeout=0.01)
+        assert evt is None
+
+    async def test_get_next_event_blocking(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+
+        async def submit_later():
+            await asyncio.sleep(0.01)
+            await ex.submit("echo", {"msg": "x"})
+
+        asyncio.create_task(submit_later())
+        evt = await ex.get_next_event(timeout=1.0)
+        assert evt is not None
+        assert evt.type == EventType.TOOL_COMPLETE
+
+    async def test_event_failed_carries_error(self):
+        ex = Executor()
+        ex.register_tool(_FailTool())
+        jid = await ex.submit("fail", {})
+        await ex.wait_for(jid)
+        evt = ex.get_next_event_nowait()
+        # Error captured in result; the on-complete path sees the error string.
+        assert evt is not None
+        # Status reflects the error captured in result.
+        status = ex.get_status(jid)
+        # The BaseTool execute path catches the exception and returns a
+        # ToolResult with ``error`` set; ``state`` follows ``result.success``.
+        # So state should be ERROR.
+        assert status.state == JobState.ERROR
+
+
+# ── cancel ───────────────────────────────────────────────────────
+
+
+class TestCancel:
+    async def test_cancel_running_job(self):
+        ex = Executor()
+        ex.register_tool(_SlowTool())
+        jid = await ex.submit("slow", {"seconds": 1.0})
+        # Give the task a tick to start.
+        await asyncio.sleep(0.01)
+        ok = await ex.cancel(jid)
+        assert ok is True
+        result = await ex.wait_for(jid, timeout=1.0)
+        assert result is not None
+        assert "interrupted" in (result.error or "").lower()
+        status = ex.get_status(jid)
+        assert status.state == JobState.CANCELLED
+
+    async def test_cancel_unknown_returns_false(self):
+        ex = Executor()
+        assert await ex.cancel("nope") is False
+
+    async def test_cancel_completed_returns_false(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        jid = await ex.submit("echo", {"msg": "x"})
+        await ex.wait_for(jid)
+        assert await ex.cancel(jid) is False
+
+
+# ── concurrency-safety serial lock ───────────────────────────────
+
+
+class TestExecutorException:
+    async def test_unexpected_exception_path(self, monkeypatch):
+        """Force an exception OUTSIDE the BaseTool wrapper (raw exception
+        in ``_run_tool``) — covers the ``except Exception`` arm. We do
+        this by mocking ``normalize_tool_result`` to raise."""
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        from kohakuterrarium.core.jobs import executor as ex_mod
+
+        def explode(*a, **k):
+            raise RuntimeError("normalize boom")
+
+        monkeypatch.setattr(ex_mod, "normalize_tool_result", explode)
+        jid = await ex.submit("echo", {"msg": "hi"})
+        result = await ex.wait_for(jid)
+        assert result is not None
+        assert "normalize boom" in (result.error or "")
+        status = ex.get_status(jid)
+        assert status.state == JobState.ERROR
+
+
+class TestEventsAsyncGen:
+    async def test_events_yields_in_order(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        events = []
+
+        async def consume():
+            async for evt in ex.events():
+                events.append(evt)
+                if len(events) >= 2:
+                    return
+
+        task = asyncio.create_task(consume())
+        await ex.submit("echo", {"msg": "a"})
+        await ex.submit("echo", {"msg": "b"})
+        await asyncio.wait_for(task, timeout=2.0)
+        assert len(events) == 2
+
+
+class TestEventQueueOnException:
+    async def test_failing_tool_emits_event(self):
+        ex = Executor()
+        ex.register_tool(_FailTool())
+        await ex.submit("fail", {})
+        evt = await ex.get_next_event(timeout=2.0)
+        assert evt is not None
+        assert evt.type == EventType.TOOL_COMPLETE
+
+
+class TestSerialLock:
+    async def test_unsafe_tools_serialised(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.03)
+        ex.register_tool(tool)
+        await asyncio.gather(
+            ex.submit("unsafe", {}),
+            ex.submit("unsafe", {}),
+            ex.submit("unsafe", {}),
+        )
+        results = await ex.wait_all(timeout=5.0)
+        assert len(results) == 3
+        assert len(tool.starts) == 3
+        assert tool.max_active == 1
+
+    async def test_allow_concurrent_skips_serial_lock(self):
+        ex = Executor()
+        gate = asyncio.Event()
+        tool = _UnsafeTool(gate=gate)
+        ex.register_tool(tool)
+        first = await ex.submit("unsafe", {})
+        await asyncio.sleep(0)
+        concurrent = await ex.submit("unsafe", {"allow_concurrent": True})
+        for _ in range(100):
+            if len(tool.starts) == 2:
+                break
+            await asyncio.sleep(0.01)
+        assert tool.max_active == 2, "allow_concurrent waited for the serial lock"
+        gate.set()
+        await ex.wait_for(concurrent, timeout=5.0)
+        await ex.wait_for(first, timeout=5.0)
+
+    async def test_text_allow_concurrent_skips_serial_lock(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.03)
+        ex.register_tool(tool)
+        await ex.submit("unsafe", {})
+        await asyncio.sleep(0)
+        concurrent = await ex.submit("unsafe", {"allow_concurrent": "true"})
+        await ex.wait_for(concurrent, timeout=1.0)
+
+        assert len(tool.starts) == 2
+
+    async def test_bash_timeout_includes_lock_wait(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.08, timeout=0.02, name="bash")
+        ex.register_tool(tool)
+        await ex.submit("bash", {})
+        await asyncio.sleep(0)
+        blocked = await ex.submit("bash", {"timeout": 0.01})
+        result = await ex.wait_for(blocked, timeout=1.0)
+
+        assert result is not None
+        assert result.metadata["blocked"] is True
+        assert result.metadata["command_started"] is False
+        assert len(tool.starts) == 1
+
+    async def test_bash_timeout_budget_is_forwarded_after_lock(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.01, timeout=0.2, name="bash")
+        ex.register_tool(tool)
+        first = await ex.submit("bash", {})
+        await ex.wait_for(first, timeout=1.0)
+        second = await ex.submit("bash", {"timeout": 0.2})
+        await ex.wait_for(second, timeout=1.0)
+
+        assert len(tool.starts) == 2
+
+    async def test_bash_timeout_rejects_negative_values(self):
+        ex = Executor()
+        tool = _UnsafeTool(name="bash")
+        ex.register_tool(tool)
+        job_id = await ex.submit("bash", {"timeout": -1})
+        result = await ex.wait_for(job_id, timeout=1.0)
+
+        assert result is not None
+        assert result.error == "timeout must be >= 0"
+        assert tool.starts == []
+
+    async def test_bash_timeout_rejects_non_finite_values(self):
+        ex = Executor()
+        tool = _UnsafeTool(name="bash")
+        ex.register_tool(tool)
+        job_id = await ex.submit("bash", {"timeout": "nan"})
+        result = await ex.wait_for(job_id, timeout=1.0)
+
+        assert result is not None
+        assert result.error == "timeout must be finite"
+        assert tool.starts == []
+
+
+# ── wait_for / wait_all timeouts ─────────────────────────────────
+
+
+class TestWaitTimeouts:
+    async def test_wait_for_returns_cached_result(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        jid = await ex.submit("echo", {"msg": "x"})
+        await ex.wait_for(jid)
+        await asyncio.sleep(0)
+        assert ex.get_task(jid) is None
+        cached = await ex.wait_for(jid)
+        assert cached is not None
+        assert cached.output == "x"
+
+    async def test_wait_for_missing(self):
+        ex = Executor()
+        assert await ex.wait_for("ghost") is None
+
+    async def test_wait_for_timeout(self):
+        ex = Executor()
+        ex.register_tool(_SlowTool())
+        jid = await ex.submit("slow", {"seconds": 0.05})
+        out = await ex.wait_for(jid, timeout=0.005)
+        assert out is None
+        assert ex.get_status(jid).state == JobState.RUNNING
+        task = ex.get_task(jid)
+        assert task is not None
+        assert task.done() is False
+
+        completed = await ex.wait_for(jid, timeout=1.0)
+        assert completed is not None
+        assert completed.output == "done"
+        assert completed.error is None
+
+    async def test_wait_all_empty(self):
+        ex = Executor()
+        assert await ex.wait_all() == {}
+
+    async def test_wait_all_collects_results(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        await ex.submit("echo", {"msg": "a"})
+        await ex.submit("echo", {"msg": "b"})
+        results = await ex.wait_all(timeout=5.0)
+        outputs = sorted(r.output for r in results.values())
+        assert outputs == ["a", "b"]
+
+    async def test_wait_all_timeout_returns_done_so_far(self):
+        ex = Executor()
+        ex.register_tool(_SlowTool())
+        jid = await ex.submit("slow", {"seconds": 0.05})
+        await asyncio.sleep(0.001)
+        out = await ex.wait_all(timeout=0.005)
+        assert jid not in out
+        assert ex.get_status(jid).state == JobState.RUNNING
+
+        completed = await ex.wait_for(jid, timeout=1.0)
+        assert completed is not None
+        assert completed.output == "done"
+
+
+# ── output normalisation hook ────────────────────────────────────
+
+
+class TestOutputNormalisation:
+    async def test_max_output_truncates(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool(max_output=10))
+        jid = await ex.submit("echo", {"msg": "x" * 1000})
+        result = await ex.wait_for(jid)
+        assert "truncated" in result.output
+        assert result.metadata.get("truncated") is True
+
+    async def test_truncation_note_points_at_bash_output_file(self):
+        # Bash materializes full output to a temp file and exposes the path
+        # as metadata["raw_output_path"]; the truncation hint must surface it.
+        class _BashLikeTool(_EchoTool):
+            @property
+            def tool_name(self):
+                return "bash"
+
+            async def _execute(self, args, **kwargs):
+                return ToolResult(
+                    output=str(args.get("msg", "")),
+                    metadata={
+                        "raw_output_path": "/tmp/kohakuterrarium-bash/bash_1.log"
+                    },
+                )
+
+        ex = Executor()
+        ex.register_tool(_BashLikeTool(max_output=10))
+        jid = await ex.submit("bash", {"msg": "x" * 1000})
+        result = await ex.wait_for(jid)
+        assert (
+            "Full output saved to /tmp/kohakuterrarium-bash/bash_1.log" in result.output
+        )
+        assert "use read to view it" in result.output
+
+    async def test_complete_bash_output_file_is_removed(self, tmp_path):
+        raw_path = tmp_path / "bash.log"
+        raw_path.write_text("complete output", encoding="utf-8")
+        ex = Executor()
+        ex.register_tool(
+            _BashFileTool(raw_path, "complete output", max_output=1024, exit_code=0)
+        )
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.output == "complete output"
+        assert result.metadata["truncated"] is False
+        assert "raw_output_path" not in result.metadata
+        assert raw_path.exists() is False
+
+    @pytest.mark.parametrize(
+        ("exit_code", "error"),
+        [
+            (7, "Command exited with code 7"),
+            (-1, "Command timed out after 1s"),
+        ],
+    )
+    async def test_complete_failed_bash_output_file_is_removed(
+        self, tmp_path, exit_code, error
+    ):
+        raw_path = tmp_path / "bash.log"
+        raw_path.write_text("failure output", encoding="utf-8")
+        ex = Executor()
+        ex.register_tool(
+            _BashFileTool(
+                raw_path,
+                "failure output",
+                max_output=1024,
+                exit_code=exit_code,
+                error=error,
+            )
+        )
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.error == error
+        assert result.exit_code == exit_code
+        assert "raw_output_path" not in result.metadata
+        assert raw_path.exists() is False
+
+    async def test_truncated_bash_output_file_is_retained(self, tmp_path):
+        raw_path = tmp_path / "bash.log"
+        full_output = "x" * 100
+        raw_path.write_text(full_output, encoding="utf-8")
+        ex = Executor()
+        ex.register_tool(_BashFileTool(raw_path, full_output, max_output=10))
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.metadata["truncated"] is True
+        assert result.metadata["raw_output_path"] == str(raw_path)
+        assert raw_path.read_text(encoding="utf-8") == full_output
+
+    async def test_bash_cleanup_failure_does_not_change_result(
+        self, tmp_path, monkeypatch
+    ):
+        raw_path = tmp_path / "bash.log"
+        raw_path.write_text("complete output", encoding="utf-8")
+        original_unlink = Path.unlink
+
+        def _fail_raw_unlink(path, *args, **kwargs):
+            if path == raw_path:
+                raise OSError("busy")
+            return original_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", _fail_raw_unlink)
+        ex = Executor()
+        ex.register_tool(_BashFileTool(raw_path, "complete output", max_output=1024))
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.output == "complete output"
+        assert result.error is None
+        assert result.exit_code is None
+        assert "raw_output_path" not in result.metadata
+        assert raw_path.exists() is True
+        original_unlink(raw_path)
+
+
+# ── pending / running / task accessors ───────────────────────────
+
+
+class TestAccessors:
+    async def test_get_pending_count(self):
+        ex = Executor()
+        ex.register_tool(_SlowTool())
+        assert ex.get_pending_count() == 0
+        jid = await ex.submit("slow", {"seconds": 1.0})
+        assert ex.get_pending_count() == 1
+        await ex.cancel(jid)
+        await ex.wait_for(jid)
+        assert ex.get_pending_count() == 0
+
+    async def test_completed_tasks_follow_job_store_retention(self):
+        ex = Executor(job_store=JobStore(max_completed=2))
+        ex.register_tool(_EchoTool())
+        job_ids = []
+        for index in range(5):
+            job_id = await ex.submit("echo", {"msg": str(index)})
+            job_ids.append(job_id)
+            await ex.wait_for(job_id)
+        await asyncio.sleep(0)
+
+        assert ex._tasks == {}
+        assert ex.get_pending_count() == 0
+        assert ex.get_result(job_ids[0]) is None
+        assert ex.get_result(job_ids[-1]).output == "4"
+        assert set(await ex.wait_all()) == set(job_ids[-2:])
+
+    async def test_get_task(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+        jid = await ex.submit("echo", {"msg": "x"})
+        task = ex.get_task(jid)
+        assert task is not None
+        await task
+        await asyncio.sleep(0)
+        assert ex.get_task(jid) is None
+        assert ex.get_task("nope") is None
+
+    async def test_get_running_jobs(self):
+        ex = Executor()
+        ex.register_tool(_SlowTool())
+        jid = await ex.submit("slow", {"seconds": 1.0})
+        await asyncio.sleep(0.01)
+        running = ex.get_running_jobs()
+        assert any(j.job_id == jid for j in running)
+        await ex.cancel(jid)
+
+
+# ── ToolContext build / plugin runtime_services ──────────────────
+
+
+class TestEmitToolWaitEdges:
+    def test_no_agent_no_op(self):
+        ex = Executor()
+        ex._agent = None
+        # Must not raise.
+        ex._emit_tool_wait("bash", 10.0, "serial_lock")
+
+    def test_no_router_no_op(self):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(output_router=None)
+        # Must not raise.
+        ex._emit_tool_wait("bash", 10.0, "serial_lock")
+
+
+class TestWrapToolExecuteBuildsContext:
+    def test_called_with_none_context_builds_one(self):
+        ex = Executor()
+        tool = _EchoTool()
+        ex.register_tool(tool)
+        # Call with context=None — builds a fresh ToolContext (line 144).
+        out = ex._wrap_tool_execute(tool, {}, job_id="x", context=None)
+        # Without plugins, returns tool.execute directly (identity by ref
+        # may differ due to bound-method per-access; verify it's callable).
+        assert callable(out)
+
+    async def test_pre_tool_hooks_receive_the_tool_instance(self, tmp_path):
+        seen = []
+
+        class _Recorder(BasePlugin):
+            name = "recorder"
+
+            async def pre_tool_execute(self, args, **kwargs):
+                seen.append(kwargs.get("tool"))
+
+        plugins = PluginManager()
+        plugins.register(_Recorder())
+        binding = ExecutionBinding(
+            context=ToolContext(agent_name="a", session=None, working_dir=tmp_path),
+            plugins=plugins,
+        )
+        ex = Executor(binding=binding)
+        tool = _EchoTool()
+        ex.register_tool(tool)
+        job = await ex.submit("echo", {"msg": "hi"})
+        assert (await ex.wait_for(job)).output == "hi"
+        assert seen == [tool]
+
+
+class TestRunToolExceptionWithDirect:
+    async def test_exception_in_run_tool_direct_skips_event(self, monkeypatch):
+        """Force an exception in _run_tool with is_direct=True so we
+        cover the ``if not is_direct:`` skip-path in the except handler."""
+        ex = Executor()
+        ex.register_tool(_FailTool())
+        from kohakuterrarium.core.jobs import executor as ex_mod
+
+        def explode(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(ex_mod, "normalize_tool_result", explode)
+        jid = await ex.submit("fail", {}, is_direct=True)
+        result = await ex.wait_for(jid)
+        # No event was queued (is_direct skip).
+        assert ex.get_next_event_nowait() is None
+        assert result.error
+
+
+class TestGetNextEventBlocking:
+    async def test_blocks_until_event_arrives(self):
+        ex = Executor()
+        ex.register_tool(_EchoTool())
+
+        async def submit_later():
+            await asyncio.sleep(0.005)
+            await ex.submit("echo", {"msg": "x"})
+
+        asyncio.create_task(submit_later())
+        evt = await ex.get_next_event()  # no timeout → blocks
+        assert evt is not None
+
+
+class TestRunToolExceptionWithCallbackBackground:
+    async def test_exception_background_fires_on_complete(self, monkeypatch):
+        """In background mode (is_direct=False), exception in run_tool
+        fires the on_complete callback (line 401)."""
+        called = []
+
+        ex = Executor(on_complete=lambda e: called.append(e))
+        ex.register_tool(_FailTool())
+        from kohakuterrarium.core.jobs import executor as ex_mod
+
+        def explode(*a, **k):
+            raise RuntimeError("normalize boom")
+
+        monkeypatch.setattr(ex_mod, "normalize_tool_result", explode)
+        jid = await ex.submit("fail", {}, is_direct=False)
+        await ex.wait_for(jid)
+        # Callback fired for the failed job.
+        assert called
+
+
+class TestCancelledToolWithCallback:
+    async def test_cancelled_background_fires_on_complete(self):
+        """A cancelled background tool fires the on_complete callback
+        (line 375)."""
+        called = []
+
+        ex = Executor(on_complete=lambda e: called.append(e))
+        ex.register_tool(_SlowTool())
+        jid = await ex.submit("slow", {"seconds": 5.0}, is_direct=False)
+        await asyncio.sleep(0.001)
+        await ex.cancel(jid)
+        await ex.wait_for(jid, timeout=1.0)
+        # Callback received the cancellation event.
+        assert len(called) == 1
+        assert called[0].context["cancelled"] is True
+        assert called[0].context["final_state"] == "cancelled"
+
+
+class TestWaitForDeterministicTimeout:
+    async def test_timeout_returns_none(self):
+        ex = Executor()
+
+        async def forever():
+            await asyncio.sleep(60)
+            return JobResult(job_id="x")
+
+        ex._tasks["x"] = asyncio.create_task(forever())
+        # Forced timeout returns None.
+        out = await ex.wait_for("x", timeout=0.005)
+        assert out is None
+        ex._tasks["x"].cancel()
+
+
+class TestToolContextBuild:
+    async def test_context_passed_to_needs_context_tool(self):
+        captured: dict[str, Any] = {}
+
+        class _NeedsCtx(BaseTool):
+            needs_context = True
+
+            @property
+            def tool_name(self):
+                return "needs"
+
+            @property
+            def description(self):
+                return "needs"
+
+            async def _execute(self, args, context=None, **kwargs):
+                captured["ctx"] = context
+                captured["agent_name"] = context.agent_name
+                captured["creature_id"] = context.creature_id
+                return ToolResult(output="ok")
+
+        ex = Executor()
+        ex.register_tool(_NeedsCtx())
+        ex._agent_name = "alice"
+        ex._creature_id = "creature-alice"
+        ex._working_dir = Path.cwd()
+        jid = await ex.submit("needs", {})
+        await ex.wait_for(jid)
+        assert captured["agent_name"] == "alice"
+        assert captured["creature_id"] == "creature-alice"
+
+    async def test_emit_tool_wait_through_router(self):
+        ex = Executor()
+        ex.register_tool(_UnsafeTool(hold_seconds=0.03))
+        notes: list[tuple] = []
+
+        class _Router:
+            def notify_activity(self, kind, msg, metadata=None):
+                notes.append((kind, msg, metadata))
+
+        ex._agent = types.SimpleNamespace(output_router=_Router())
+        # Two concurrent unsafe calls — second one waits on the serial lock.
+        await asyncio.gather(
+            ex.submit("unsafe", {}),
+            ex.submit("unsafe", {}),
+        )
+        await ex.wait_all(timeout=5.0)
+        assert any(n[0] == "tool_wait" for n in notes)
+
+    async def test_runtime_services_pulled_from_plugins(self):
+        captured = {}
+
+        class _NeedsCtx(BaseTool):
+            needs_context = True
+
+            @property
+            def tool_name(self):
+                return "needs"
+
+            @property
+            def description(self):
+                return "needs"
+
+            async def _execute(self, args, context=None, **kwargs):
+                captured["services"] = dict(context.runtime_services)
+                return ToolResult(output="ok")
+
+        class _FakePlugins:
+            def collect_runtime_services(self, ctx):
+                return {"db": "sqlite-conn"}
+
+            def wrap_method(self, *a, **k):
+                # No-op wrapper; the actual exec_fn is passed through.
+                return a[2]
+
+        ex = Executor()
+        ex.register_tool(_NeedsCtx())
+        ex._agent = types.SimpleNamespace(plugins=_FakePlugins())
+        jid = await ex.submit("needs", {})
+        await ex.wait_for(jid)
+        assert captured["services"] == {"db": "sqlite-conn"}
+
+
+class TestCompletionQueuePolicy:
+    @pytest.mark.parametrize("bound", [True, False])
+    @pytest.mark.parametrize("queue_enabled", [True, False])
+    @pytest.mark.parametrize(
+        "outcome",
+        ["success", "failure", "exception", "cancel", "cancel_before_start", "direct"],
+    )
+    async def test_completion_delivery(self, tmp_path, bound, queue_enabled, outcome):
+        class RaisesOnExecute(_FailTool):
+            async def execute(self, args, **kwargs):
+                raise RuntimeError("uncaught tool failure")
+
+        seen = []
+        binding = (
+            ExecutionBinding(
+                context=ToolContext(
+                    agent_name="mcp", session=None, working_dir=tmp_path
+                ),
+                plugins=PluginManager(),
+                job_namespace="workspace_runtime",
+            )
+            if bound
+            else None
+        )
+        ex = Executor(
+            on_complete=seen.append,
+            binding=binding,
+            queue_completion_events=queue_enabled,
+        )
+        tool = (
+            _SlowTool()
+            if outcome.startswith("cancel")
+            else (
+                RaisesOnExecute()
+                if outcome == "exception"
+                else _FailTool() if outcome == "failure" else _EchoTool()
+            )
+        )
+        ex.register_tool(tool)
+        job = await ex.submit(
+            tool.tool_name,
+            {"msg": "payload", "seconds": 10},
+            is_direct=outcome == "direct",
+        )
+        prefix = "workspace_runtime_" if bound else ""
+        assert job.startswith(f"{prefix}{tool.tool_name}_")
+        if outcome.startswith("cancel"):
+            if outcome == "cancel":
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+            assert await ex.cancel(job)
+        await ex.wait_for(job)
+        await asyncio.sleep(0)
+        result = ex.get_result(job)
+        assert result is not None
+        if outcome.startswith("cancel"):
+            assert ex.get_status(job).state == JobState.CANCELLED
+        elif outcome in ("failure", "exception"):
+            assert result.error
+        else:
+            assert result.output == "payload"
+        assert len(seen) == (0 if outcome == "direct" else 1)
+        queued = ex.get_next_event_nowait()
+        if queue_enabled and outcome != "direct":
+            assert queued is seen[0]
+        else:
+            assert queued is None
+        assert ex.get_next_event_nowait() is None
+
+    async def test_callback_only_does_not_retain_completed_payloads(self):
+        completions = 0
+
+        def completed(event):
+            nonlocal completions
+            completions += 1
+            assert len(event.content) == 4096
+
+        ex = Executor(
+            JobStore(max_completed=2), completed, queue_completion_events=False
+        )
+        ex.register_tool(_EchoTool())
+        for _ in range(250):
+            job = await ex.submit("echo", {"msg": "x" * 4096})
+            assert (await ex.wait_for(job)).output == "x" * 4096
+        assert completions == 250
+        assert ex._event_queue.qsize() == 0
+        assert len(ex.job_store.get_completed_jobs()) == 2

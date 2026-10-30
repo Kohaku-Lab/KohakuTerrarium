@@ -1,6 +1,6 @@
 """Behavior tests for :mod:`kohakuterrarium.studio.editors.validators`.
 
-``validators.py`` is the pydantic mirror of ``core.config_types.AgentConfig``
+``validators.py`` is the pydantic mirror of ``core.config.types.AgentConfig``
 used at the HTTP boundary to validate creature-save bodies. The contract:
 
 * a minimal body (just ``name``) validates and fills documented defaults;
@@ -28,7 +28,7 @@ from kohakuterrarium.studio.editors.validators import (
 class TestAgentConfigInDefaults:
     def test_minimal_body_fills_documented_defaults(self):
         cfg = AgentConfigIn(name="alice")
-        # Defaults mirror core/config_types.AgentConfig.
+        # Defaults mirror core/config/types.AgentConfig.
         assert cfg.version == "1.0"
         assert cfg.temperature == 0.7
         assert cfg.reasoning_effort == "medium"

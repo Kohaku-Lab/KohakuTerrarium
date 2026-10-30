@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from kohakuterrarium.core.pinned import pin_message, unpin_message
+from kohakuterrarium.core.conversation.pinned import pin_message, unpin_message
 from kohakuterrarium.modules.ui_owner import UIOwnerMixin
 from kohakuterrarium.modules.plugin.option_validation import (
     validate_plugin_options,
@@ -21,8 +21,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent
-    from kohakuterrarium.core.compact import CompactManager
-    from kohakuterrarium.core.controller import Controller
+    from kohakuterrarium.core.compact.manager import CompactManager
+    from kohakuterrarium.core.controller.controller import Controller
     from kohakuterrarium.core.registry import Registry
     from kohakuterrarium.core.scratchpad import Scratchpad
     from kohakuterrarium.modules.subagent.manager import SubAgentManager

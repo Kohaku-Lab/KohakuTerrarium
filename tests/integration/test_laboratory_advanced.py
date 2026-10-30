@@ -13,11 +13,11 @@ Modules targeted (gap-filling):
   real Agent.
 * :mod:`core.agent_messages` — edit-and-rerun + regenerate on a live
   conversation with an attached SessionStore.
-* :mod:`core.native_tool_validation` — provider-native option override
+* :mod:`core.tools.native_validation` — provider-native option override
   validation (success + every error arm).
 * :mod:`core.agent_pre_dispatch` — pre_tool_dispatch rewrite + veto
   through a live LLM-driven turn.
-* :mod:`core.tool_output` — multimodal + large + image-elision result
+* :mod:`core.tools.output` — multimodal + large + image-elision result
   rendering through the real executor.
 * :mod:`core.termination` — max_turns + keyword + plugin checker votes
   observed on a live controller loop.
@@ -37,14 +37,14 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.agent.turn.pre_dispatch import run_pre_tool_dispatch
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,
 )
 from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
-from kohakuterrarium.core.native_tool_validation import (
+from kohakuterrarium.core.tools.native_validation import (
     NativeToolOptionError,
     validate_native_tool_options,
 )
@@ -53,7 +53,7 @@ from kohakuterrarium.core.termination import (
     TerminationConfig,
     TerminationDecision,
 )
-from kohakuterrarium.core.tool_output import (
+from kohakuterrarium.core.tools.output import (
     normalize_tool_output,
     render_content_text,
     truncate_text_utf8,
@@ -928,7 +928,7 @@ class TestLaboratoryAgentMessagesWorkflow:
 
         engine = Terrarium(session_dir=str(tmp_path / "sess"))
         try:
-            from kohakuterrarium.core.config import load_agent_config
+            from kohakuterrarium.core.config.load import load_agent_config
 
             a_cfg = load_agent_config(str(cdir))
             creature = await engine.add_creature(
@@ -1024,7 +1024,7 @@ class TestLaboratoryRuntimePromptWorkflow:
             )
 
         engine = Terrarium(session_dir=str(tmp_path / "sess"))
-        from kohakuterrarium.core.config import load_agent_config
+        from kohakuterrarium.core.config.load import load_agent_config
 
         try:
             engine._runtime_prompt.attach()

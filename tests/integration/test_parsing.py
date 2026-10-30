@@ -4,7 +4,7 @@ This file is the comprehensive usage example of ``kohakuterrarium.parsing``.
 Each test method runs one COMPLETE workflow end-to-end — never a granular
 per-method probe.
 
-The real consumer of ``StreamParser`` is ``core/controller.py``: it builds a
+The real consumer of ``StreamParser`` is ``core/controller/controller.py``: it builds a
 parser from the registry, feeds the LLM's streamed output to ``feed()``
 chunk-by-chunk, drains the tail with ``flush()``, handles ``CommandEvent``
 inline and yields every other ``ParseEvent``. These tests mirror that exact

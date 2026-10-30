@@ -56,7 +56,7 @@ loop:
 
 ## 我們怎麼實作它
 
-主要類別是 `Controller`（`core/controller.py`）。它持有事件用的
+主要類別是 `Controller`（`core/controller/controller.py`）。它持有事件用的
 `asyncio.Queue`、LLM 輸出串流的 parser 狀態機，以及對生物
 `Registry`（工具）、`SubAgentManager`、`Executor` 與
 `OutputRouter` 的參照。

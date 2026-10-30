@@ -93,7 +93,7 @@ Iterate a two-agent pipeline until the reviewer approves:
 ```python
 import asyncio
 from kohakuterrarium.compose import agent
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 
 def make(name, prompt):
     c = load_agent_config("@kt-biome/creatures/general")

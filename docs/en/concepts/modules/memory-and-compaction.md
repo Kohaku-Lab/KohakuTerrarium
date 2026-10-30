@@ -86,7 +86,7 @@ the compact manager kicks off a background task.
 - `session/memory.py`: FTS5 queries and vector search.
 - `session/embedding.py`: model2vec / sentence-transformer / API
   providers for embeddings.
-- `core/compact.py`: `CompactManager` with the atomic-splice trick.
+- `core/compact/manager.py`: `CompactManager` with the atomic-splice trick.
   See [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md).
 
 Embedding providers (`kt embedding`):

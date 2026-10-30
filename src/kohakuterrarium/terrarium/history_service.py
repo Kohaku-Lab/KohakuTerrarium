@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     encode_branch_view,
     selected_branch_view,
 )

@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium

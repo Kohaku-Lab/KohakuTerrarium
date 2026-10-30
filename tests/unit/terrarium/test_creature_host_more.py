@@ -75,7 +75,7 @@ class TestBuildCreatureDispatch:
         assert out.name == "alice"
 
     def test_agent_config_path(self, monkeypatch):
-        from kohakuterrarium.core.config_types import AgentConfig
+        from kohakuterrarium.core.config.types import AgentConfig
 
         captured = {}
 
@@ -131,7 +131,7 @@ class TestBuildCreatureDispatch:
             a.config = SimpleNamespace(name=cfg.name)
             return a
 
-        from kohakuterrarium.core.config_types import AgentConfig
+        from kohakuterrarium.core.config.types import AgentConfig
 
         monkeypatch.setattr(ch_mod, "Agent", _agent_ctor)
         monkeypatch.setattr(

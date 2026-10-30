@@ -9,9 +9,9 @@ import pytest
 import kohakuterrarium.core.agent.history.compact as compact_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.agent.history.message_history import replay_with_settled_tools
-from kohakuterrarium.core.branch_continuation import persist_branch_view
-from kohakuterrarium.core.config_types import AgentConfig
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.continuation import persist_branch_view
+from kohakuterrarium.core.config.types import AgentConfig
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.session.resume import inject_saved_state
 from kohakuterrarium.session.resume_build import build_conversation
 from kohakuterrarium.session.store import SessionStore

@@ -4,8 +4,8 @@ import asyncio
 from typing import Any
 
 from kohakuterrarium.errors import ConflictError
-from kohakuterrarium.core.context_snapshot import capture_context
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.context_snapshot import capture_context
+from kohakuterrarium.core.conversation.conversation import Conversation
 
 
 def side_title(task: str) -> str:

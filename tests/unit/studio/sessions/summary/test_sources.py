@@ -1,6 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.studio.sessions.summary.sources`."""
 
-from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
+from kohakuterrarium.core.conversation.elide import TOOL_FEEDBACK_KIND
 from kohakuterrarium.studio.sessions.summary import sources
 from kohakuterrarium.testing.llm import ScriptedLLM
 

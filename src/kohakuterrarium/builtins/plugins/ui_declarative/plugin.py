@@ -22,7 +22,7 @@ from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
     component_line,
     inline_ui_section,
 )
-from kohakuterrarium.core.tool_gate import visible_tool_names
+from kohakuterrarium.core.tools.gate import visible_tool_names
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 
 RENDERER = "kt.ui"

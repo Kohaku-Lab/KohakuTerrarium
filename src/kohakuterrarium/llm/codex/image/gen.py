@@ -5,7 +5,7 @@ Translate Codex image-generation tools and decode their streamed results.
 
 from typing import Any
 
-from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
+from kohakuterrarium.core.tools.native_validation import validate_native_tool_options
 from kohakuterrarium.llm.message import ImagePart
 
 # Unknown output formats use PNG so the resulting data URL remains valid.

@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from kohakuterrarium.core.compact import CompactManager
+from kohakuterrarium.core.compact.manager import CompactManager
 from kohakuterrarium.llm.antigravity import auth
 from kohakuterrarium.llm.antigravity.auth import AntigravityError, BorrowedCredential
 from kohakuterrarium.llm.antigravity.provider import AntigravityProvider

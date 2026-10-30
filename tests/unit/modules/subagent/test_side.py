@@ -5,7 +5,7 @@ from contextlib import closing
 
 from kohakuterrarium import Agent
 from kohakuterrarium.builtins.user_commands.btw import BtwCommand
-from kohakuterrarium.core.config_types import AgentConfig, ToolConfigItem
+from kohakuterrarium.core.config.types import AgentConfig, ToolConfigItem
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry

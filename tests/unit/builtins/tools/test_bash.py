@@ -6,7 +6,7 @@ import pytest
 
 from kohakuterrarium.builtins.tools import bash as bash_module
 from kohakuterrarium.builtins.tools.bash import ShellTool
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.modules.tool.base import ToolConfig
 
 

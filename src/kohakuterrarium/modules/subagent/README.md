@@ -19,11 +19,11 @@ queue/append, flush/replace).
 
 ## Dependencies
 
-- `kohakuterrarium.core.controller` (Controller)
-- `kohakuterrarium.core.conversation` (Conversation)
+- `kohakuterrarium.core.controller.controller` (Controller)
+- `kohakuterrarium.core.conversation.conversation` (Conversation)
 - `kohakuterrarium.core.events` (TriggerEvent)
-- `kohakuterrarium.core.executor` (Executor)
-- `kohakuterrarium.core.job` (JobStore, JobResult, JobStatus)
+- `kohakuterrarium.core.jobs.executor` (Executor)
+- `kohakuterrarium.core.jobs.job` (JobStore, JobResult, JobStatus)
 - `kohakuterrarium.core.registry` (Registry)
 - `kohakuterrarium.llm.base` (LLMProvider)
 - `kohakuterrarium.llm.tools.build` (build_tool_schemas)

@@ -4,8 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.config_serde import pack_agent_config, unpack_agent_config
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.serde import pack_agent_config, unpack_agent_config
 from kohakuterrarium.errors import (
     GraphManifestError,
     GraphManifestPersistenceError,

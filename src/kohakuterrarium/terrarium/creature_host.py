@@ -20,13 +20,13 @@ from kohakuterrarium.bootstrap.llm import config_names_llm
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config import (
+from kohakuterrarium.core.config.load import (
     AgentConfig,
     build_agent_config,
     load_agent_config,
 )
-from kohakuterrarium.core.config_serde import pack_agent_config
-from kohakuterrarium.core.context_snapshot import ContextSnapshot
+from kohakuterrarium.core.config.serde import pack_agent_config
+from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.token_ledger import context_window, token_snapshot

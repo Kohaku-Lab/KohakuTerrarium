@@ -26,7 +26,7 @@ tags:
 
 CLI 入口在 `cli/run.py:run_agent_cli()`。它會驗證設定檔路徑、挑一種 I/O 模式 (`cli` / TUI)，然後一切都走 Terrarium 引擎：`Terrarium(pwd=…)` 加 `engine.add_creature(…)` (配方則用 `engine.apply_recipe(…)`)，再把引擎交給 `run_engine_with_rich_cli()` / `run_engine_with_tui()`。程式化嵌入則直接用 `await Agent.build(…)` 建構 agent。
 
-`Agent.__init__` (`src/kohakuterrarium/core/agent.py`) 會依固定順序跑一連串 bootstrap：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。Mixin 的堆疊是 `AgentInitMixin` (`bootstrap/agent_init.py`) + `AgentHandlersMixin` (`core/agent/turn/handlers.py`) + `AgentToolsMixin` (`core/agent/tools/dispatch.py`)，加上 2.0 之後的 mixin：`AgentConstructMixin` (`Agent.build` / `Agent.from_path`)、`AgentTurnMixin` (有型別的 `run` / `run_stream`)、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
+`Agent.__init__` (`src/kohakuterrarium/core/agent/assembly.py`) 會依固定順序跑一連串 bootstrap：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。Mixin 的堆疊是 `AgentInitMixin` (`bootstrap/agent_init.py`) + `AgentHandlersMixin` (`core/agent/turn/handlers.py`) + `AgentToolsMixin` (`core/agent/tools/dispatch.py`)，加上 2.0 之後的 mixin：`AgentConstructMixin` (`Agent.build` / `Agent.from_path`)、`AgentTurnMixin` (有型別的 `run` / `run_stream`)、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
 
 Registry 初始化現在有三個明確的階段：接上生物宣告的工具、丟掉當前 provider 不支援的 provider-native 工具，再自動注入該 provider 宣告的 provider-native 工具 (除非生物明確退出)。
 
@@ -40,7 +40,7 @@ Registry 初始化現在有三個明確的階段：接上生物宣告的工具�
 
 一切都走 `TriggerEvent` (`core/events.py`)。欄位：`type, content, context, timestamp, job_id?, prompt_override?, stackable`。型別包含 `user_input`、`idle`、`timer`、`context_update`、`tool_complete`、`subagent_output`、`channel_message`、`monitor`、`error`、`startup`、`shutdown`。
 
-事件佇列在 `core/controller.py:push_event` / `_collect_events` (第 252-299 行)。同一個 tick 收集到的可堆疊事件會合併成同一回合的 user message；不可堆疊事件會把當前批次切斷；超出這一批的部分存到 `_pending_events`，留到下一回合。
+事件佇列在 `core/controller/controller.py:push_event` / `_collect_events` (第 252-299 行)。同一個 tick 收集到的可堆疊事件會合併成同一回合的 user message；不可堆疊事件會把當前批次切斷；超出這一批的部分存到 `_pending_events`，留到下一回合。
 
 每回合的流程在 `agent_handlers.py:_run_controller_loop`：
 
@@ -57,7 +57,7 @@ Registry 初始化現在有三個明確的階段：接上生物宣告的工具�
 
 串流 parser (`parsing/`) 在偵測到設定 `tool_format` 裡的工具區塊時就會發出事件：bracket (預設：`[/bash]@@command=ls\n[bash/]`)、XML (`<bash command="ls"></bash>`)、或 native (LLM provider 自己的 function-calling 包裝)。每個偵測到的工具都會透過 `executor.submit_from_event()` 變成一個 executor task。
 
-Executor (`core/executor.py`) 把 `{job_id: asyncio.Task}` 存起來，並為每次呼叫建一個 `ToolContext`，裡面有 `working_dir`、`session`、`environment`、file guards、檔案讀取狀態表、job store、代理名稱。
+Executor (`core/jobs/executor.py`) 把 `{job_id: asyncio.Task}` 存起來，並為每次呼叫建一個 `ToolContext`，裡面有 `working_dir`、`session`、`environment`、file guards、檔案讀取狀態表、job store、代理名稱。
 
 三種模式：
 
@@ -142,7 +142,7 @@ Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快�
 
 ### 2.2 上下文壓縮
 
-`core/compact.py:CompactManager` 在每回合結束後執行。`should_compact(prompt_tokens)` 判斷 prompt tokens 有沒有超過 `max_context` 的 80% (可由 `compact.threshold` 與 `compact.max_tokens` 設定)。觸發時它會發一個 `compact_start` activity 事件、開一個背景 task 跑 summariser LLM (主 LLM，或設了 `compact_model` 時用那個)，然後在回合**之間**原子地把摘要塞進對話。活動區（最後 `keep_recent_turns` 個回合）永遠不會被摘要掉。
+`core/compact/manager.py:CompactManager` 在每回合結束後執行。`should_compact(prompt_tokens)` 判斷 prompt tokens 有沒有超過 `max_context` 的 80% (可由 `compact.threshold` 與 `compact.max_tokens` 設定)。觸發時它會發一個 `compact_start` activity 事件、開一個背景 task 跑 summariser LLM (主 LLM，或設了 `compact_model` 時用那個)，然後在回合**之間**原子地把摘要塞進對話。活動區（最後 `keep_recent_turns` 個回合）永遠不會被摘要掉。
 
 原子替換的設計讓控制器永遠不會在回合中間看到訊息突然消失。完整推理請看 [impl-notes/non-blocking-compaction.md](../concepts/impl-notes/non-blocking-compaction.md)。
 

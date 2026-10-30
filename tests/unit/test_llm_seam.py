@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.compact import CompactConfig
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.compact.manager import CompactConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.llm.codex import auth as codex_auth
 from kohakuterrarium.llm.base import BaseLLMProvider
 from kohakuterrarium.llm.openai.provider import OpenAIProvider

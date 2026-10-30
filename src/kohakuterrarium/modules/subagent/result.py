@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.core.constants import TOOL_OUTPUT_PREVIEW_CHARS
-from kohakuterrarium.core.job import JobResult, JobState, JobStatus, JobType
+from kohakuterrarium.core.jobs.job import JobResult, JobState, JobStatus, JobType
 from kohakuterrarium.parsing.format import (
     BRACKET_FORMAT,
     ToolCallFormat,

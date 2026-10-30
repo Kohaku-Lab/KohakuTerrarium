@@ -18,7 +18,7 @@ else is pure async combinators.
 Imported by: user code only (examples, notebooks, application scripts).
 Nothing inside the framework imports `compose/`.
 
-Imports: `terrarium` (`Terrarium`), `core/config_types` (`AgentConfig`),
+Imports: `terrarium` (`Terrarium`), `core/config/types` (`AgentConfig`),
 `utils/logging`, and stdlib `asyncio` / `inspect`.
 
 ## Key entry points

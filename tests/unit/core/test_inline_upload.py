@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.core.inline_upload import materialize_upload
+from kohakuterrarium.core.controller.inline_upload import materialize_upload
 
 
 class TestMaterializeUpload:

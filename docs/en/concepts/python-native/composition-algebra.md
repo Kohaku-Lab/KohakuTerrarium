@@ -81,7 +81,7 @@ via `inject_input` + output collection.
 ```python
 import asyncio
 from kohakuterrarium.compose import agent, factory
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 
 def make_agent(name, prompt):
     c = load_agent_config("@kt-biome/creatures/general")

@@ -33,10 +33,10 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent.history import message_history as _message_history_mod
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.branch_continuation import selected_branch_view
+from kohakuterrarium.core.conversation.continuation import selected_branch_view
 from kohakuterrarium.core.events import create_user_input_event
-from kohakuterrarium.core.pinned import pin_message, unpin_message
-from kohakuterrarium.core.pinned import state_key as pinned_state_key
+from kohakuterrarium.core.conversation.pinned import pin_message, unpin_message
+from kohakuterrarium.core.conversation.pinned import state_key as pinned_state_key
 from kohakuterrarium.errors import RendererUnavailable
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.builtins.kt_ui.inline_state import block_ids

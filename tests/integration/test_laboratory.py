@@ -397,7 +397,7 @@ class TestLaboratoryMultiNodeService:
             assert len(creatures) == 0
 
             # ── 5. add_creature on w1 (path-form via studio.deploy) ──
-            from kohakuterrarium.core.config import load_agent_config
+            from kohakuterrarium.core.config.load import load_agent_config
 
             with pytest.raises(KeyError, match="Package not installed"):
                 await service.add_creature("@missing/creatures/general", on_node="w1")
@@ -624,7 +624,7 @@ class TestLaboratoryMultiNodeService:
             # session stores, then connect them so the engine
             # auto-merges + the SessionCoordinator copies / preserves
             # session state.  Hits terrarium/session_coord.py paths.
-            from kohakuterrarium.core.config import load_agent_config
+            from kohakuterrarium.core.config.load import load_agent_config
             from kohakuterrarium.session.store import SessionStore
             from pathlib import Path as _P
 
@@ -1094,7 +1094,7 @@ class TestLaboratoryDeepWorkflows:
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.terrarium.engine import Terrarium
         from kohakuterrarium.session.store import SessionStore
-        from kohakuterrarium.core.config import load_agent_config
+        from kohakuterrarium.core.config.load import load_agent_config
         from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
         sessions_dir = tmp_path / "sess"
@@ -1218,7 +1218,7 @@ class TestLaboratoryModulesViaAgent:
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.core.agent import Agent
-        from kohakuterrarium.core.config_types import (
+        from kohakuterrarium.core.config.types import (
             AgentConfig,
             InputConfig,
             OutputConfig,
@@ -1359,7 +1359,7 @@ class TestLaboratoryModulesViaAgent:
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.core.agent import Agent
-        from kohakuterrarium.core.config_types import (
+        from kohakuterrarium.core.config.types import (
             AgentConfig,
             InputConfig,
             OutputConfig,
@@ -1470,13 +1470,13 @@ class TestLaboratoryModulesViaAgent:
         self, tmp_path, monkeypatch
     ):
         """Deep chat workflow exercising core/agent_messages,
-        core/conversation, core/tool_output, core/controller,
+        core/conversation, core/tools/output, core/controller,
         core/agent_handlers, core/agent_tools through multiple tool
         calls + tool result feedback into the controller."""
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.core.agent import Agent
-        from kohakuterrarium.core.config_types import (
+        from kohakuterrarium.core.config.types import (
             AgentConfig,
             InputConfig,
             OutputConfig,
@@ -1603,7 +1603,7 @@ class TestLaboratoryModulesViaAgent:
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.core.agent import Agent
-        from kohakuterrarium.core.config_types import (
+        from kohakuterrarium.core.config.types import (
             AgentConfig,
             InputConfig,
             OutputConfig,
@@ -1714,7 +1714,7 @@ class TestLaboratoryAdapterDirect:
         from kohakuterrarium.testing.llm import ScriptedLLM
         from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
         from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
-        from kohakuterrarium.core.config import load_agent_config
+        from kohakuterrarium.core.config.load import load_agent_config
 
         cdir = tmp_path / "evt_creature"
         cdir.mkdir(parents=True, exist_ok=True)

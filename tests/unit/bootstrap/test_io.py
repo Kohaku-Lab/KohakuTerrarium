@@ -7,7 +7,7 @@ from kohakuterrarium.bootstrap import io as io_mod
 from kohakuterrarium.bootstrap.io import create_input, create_output
 from kohakuterrarium.builtins.inputs.cli import CLIInput
 from kohakuterrarium.builtins.outputs.stdout import StdoutOutput
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,

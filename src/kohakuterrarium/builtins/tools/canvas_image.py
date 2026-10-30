@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image, UnidentifiedImageError
 
-from kohakuterrarium.core.tool_output import artifact_served_url
+from kohakuterrarium.core.tools.output import artifact_served_url
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.builtins.tools.canvas_preview import build_image_canvas_preview

@@ -4,24 +4,24 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from kohakuterrarium.core.branch_conversation import build_branch_conversation
-from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.core.conversation_elide import (
+from kohakuterrarium.core.conversation.branch import build_branch_conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
+from kohakuterrarium.core.conversation.elide import (
     ELISION_MARKER,
     TOOL_FEEDBACK_KIND,
     elide_stale_tool_results,
     estimate_tokens,
 )
-from kohakuterrarium.core.message_locator import (
+from kohakuterrarium.core.conversation.locator import (
     user_message_indices_for_content,
     user_message_indices_for_turn,
 )
-from kohakuterrarium.core.settled_identity import pending_snapshot_jobs
-from kohakuterrarium.core.snapshot_history import (
+from kohakuterrarium.core.conversation.settled_identity import pending_snapshot_jobs
+from kohakuterrarium.core.conversation.snapshot import (
     prepare_snapshot,
     replayed_compact_state,
 )
-from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.core.tools.output import render_content_text
 from kohakuterrarium.session.history import (
     compact_covered_event_ids,
     index_parent_paths,

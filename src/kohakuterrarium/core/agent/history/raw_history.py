@@ -7,13 +7,16 @@ from kohakuterrarium.core.agent.history.message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
 )
-from kohakuterrarium.core.compact_branch import (
+from kohakuterrarium.core.compact.branch import (
     compact_rule_from_event,
     is_summary_message,
 )
-from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.core.history_source import PreparedHistorySource, copy_conversation
-from kohakuterrarium.core.snapshot_history import (
+from kohakuterrarium.core.conversation.conversation import Conversation
+from kohakuterrarium.core.conversation.source import (
+    PreparedHistorySource,
+    copy_conversation,
+)
+from kohakuterrarium.core.conversation.snapshot import (
     prepare_snapshot,
     replayed_compact_state,
 )

@@ -1,6 +1,6 @@
 """Inspect and explicitly replace missing historical local image references."""
 
-from kohakuterrarium.core.history_media import repair_history_images
+from kohakuterrarium.core.conversation.media import repair_history_images
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,

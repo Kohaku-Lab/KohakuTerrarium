@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,

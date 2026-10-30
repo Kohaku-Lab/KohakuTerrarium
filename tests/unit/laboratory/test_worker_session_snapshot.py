@@ -129,7 +129,7 @@ async def test_meta_is_populated_before_session_store_publish(tmp_path):
 @pytest.mark.asyncio
 async def test_inline_config_spawn_persists_snapshot(tmp_path):
     """An ``AgentConfig`` spawn (no ``agent_path``) must save a snapshot."""
-    from kohakuterrarium.core.config_types import (
+    from kohakuterrarium.core.config.types import (
         AgentConfig,
         InputConfig,
         OutputConfig,

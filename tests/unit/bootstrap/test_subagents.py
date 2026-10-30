@@ -9,7 +9,7 @@ from kohakuterrarium.bootstrap.subagents import (
     init_subagents,
 )
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     SubAgentConfigItem,
 )
@@ -234,7 +234,7 @@ class TestUnknownType:
 
 class TestInitSubAgents:
     def test_registers_into_manager_and_registry(self, tmp_path):
-        from kohakuterrarium.core.executor import Executor
+        from kohakuterrarium.core.jobs.executor import Executor
 
         cfg = AgentConfig(
             name="a",
@@ -260,7 +260,7 @@ class TestInitSubAgents:
         assert "inline_sa" in registry.list_subagents()
 
     def test_skips_failed_entries(self, tmp_path):
-        from kohakuterrarium.core.executor import Executor
+        from kohakuterrarium.core.jobs.executor import Executor
 
         cfg = AgentConfig(
             name="a",

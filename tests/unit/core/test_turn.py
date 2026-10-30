@@ -27,7 +27,7 @@ from kohakuterrarium.errors import (
     TurnTimeoutError,
 )
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.turn import (
     Activity,

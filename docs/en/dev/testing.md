@@ -286,8 +286,8 @@ Mirror `src/` layout under `tests/unit/`:
 | You changed             | Add tests under                    |
 |-------------------------|------------------------------------|
 | `core/agent.py`         | `tests/unit/test_phase5.py` or a new file |
-| `core/controller.py`    | `tests/unit/test_phase3_4.py`      |
-| `core/executor.py`      | `tests/unit/test_phase3_4.py`      |
+| `core/controller/controller.py`    | `tests/unit/test_phase3_4.py`      |
+| `core/jobs/executor.py`      | `tests/unit/test_phase3_4.py`      |
 | `parsing/`              | `tests/unit/test_phase2.py`        |
 | `modules/subagent/`     | `tests/unit/test_phase6.py`        |
 | `modules/trigger/`      | `tests/unit/test_phase7.py`        |

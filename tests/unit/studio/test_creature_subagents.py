@@ -13,7 +13,7 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.errors import ConflictError, InvalidRequestError, NotFoundError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig

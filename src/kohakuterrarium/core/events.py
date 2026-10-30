@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.core.tools.output import render_content_text
 from kohakuterrarium.llm.message import ContentPart, normalize_content_parts
 
 EventContent = str | list[ContentPart]

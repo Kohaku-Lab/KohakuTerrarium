@@ -8,8 +8,8 @@ from copy import deepcopy
 import httpx
 
 import kohakuterrarium.core.agent.history.message_history as branch_history
-from kohakuterrarium.core.branch_continuation import live_branch_path
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.conversation.continuation import live_branch_path
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult

@@ -10,8 +10,8 @@ from kohakuterrarium.core.agent.history.compact import (
 )
 from kohakuterrarium.core.agent.history.selection import track_plugin_selection
 from kohakuterrarium.core.agent.mcp import init_mcp, inject_mcp_tools_into_prompt
-from kohakuterrarium.core.compact import CompactConfig, CompactManager
-from kohakuterrarium.core.controller_plugins import register_plugin_and_package_commands
+from kohakuterrarium.core.compact.manager import CompactConfig, CompactManager
+from kohakuterrarium.core.controller.plugins import register_plugin_and_package_commands
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.plugins_context import spawn_child_agent
 from kohakuterrarium.utils.logging import get_logger
@@ -262,7 +262,7 @@ class AgentStartupMixin:
 
         Plugin hooks fire at the call site — the executor invokes
         ``pre_tool_execute`` / ``post_tool_execute`` per tool call (see
-        ``core/executor.py``) and the dispatch layer fires
+        ``core/jobs/executor.py``) and the dispatch layer fires
         ``pre_subagent_run`` (see ``core/agent/turn/pre_dispatch.py``).
         We must NOT mutate ``tool.execute`` here: tool instances are
         shared between the parent's registry and every sub-agent's

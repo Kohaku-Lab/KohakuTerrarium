@@ -17,9 +17,9 @@ from kohakuterrarium.bootstrap.agent_init import AgentInitMixin
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
-from kohakuterrarium.core.config_types import AgentConfig
-from kohakuterrarium.core.context_snapshot import ContextSnapshot
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.config.types import AgentConfig
+from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.output.router import OutputRouter

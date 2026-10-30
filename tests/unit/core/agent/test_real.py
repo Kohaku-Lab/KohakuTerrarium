@@ -25,7 +25,7 @@ from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.parsing import SubAgentCallEvent
 from kohakuterrarium.bootstrap import llm as bootstrap_llm
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,
@@ -1450,7 +1450,7 @@ class TestStopFinalizesInflightJobs:
         # append the interrupted role=tool result (provider call id) so
         # the pair survives provider-safe serialization + snapshot +
         # resume rebuild.
-        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
         from kohakuterrarium.session.resume import _build_conversation
 
         agent = make_agent()
@@ -1597,7 +1597,7 @@ class TestStopFinalizesInflightJobs:
     async def test_stop_does_not_orphan_text_mode_jobs(self, make_agent):
         # Text-mode jobs have no announcement — the sweep must not
         # append an orphan role=tool message for them.
-        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
 
         agent = make_agent()
         await agent.start()
@@ -1662,7 +1662,7 @@ class TestStopFinalizesInflightJobs:
         # A repeat sweep (second stop(), engine + CLI both stopping)
         # must not emit a second terminal: the first sweep transitions
         # the job status off RUNNING.
-        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
 
         agent = make_agent()
         await agent.start()
@@ -1775,7 +1775,7 @@ class TestCancelJobPaths:
 
             task = asyncio.create_task(slow())
             agent.executor._tasks["bash_slow"] = task
-            from kohakuterrarium.core.job import JobStatus, JobState, JobType
+            from kohakuterrarium.core.jobs.job import JobStatus, JobState, JobType
 
             agent.executor.job_store.register(
                 JobStatus(
@@ -2039,7 +2039,7 @@ class TestOutputWiringEmit:
         # must NOT emit its output wire (the creator would read it as the
         # child having finished / "turned off"); the emit fires only once
         # the last background job is done.
-        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
         from kohakuterrarium.core.output_wiring import OutputWiringEntry
 
         agent = make_agent(script=["text"])
@@ -2087,7 +2087,7 @@ class TestOutputWiringEmit:
         # deliverable background work (a persistent stateful tool, an
         # interactive sub-agent, or work from a prior turn) must NOT strand
         # the wire — otherwise the creator gets NO output at all.
-        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
         from kohakuterrarium.core.output_wiring import OutputWiringEntry
 
         agent = make_agent(script=["text"])
@@ -2788,7 +2788,7 @@ class TestCollectAndPushFeedback:
         agent = make_agent(script=["x"])
         await agent.start()
         try:
-            from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+            from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
             from unittest.mock import MagicMock
 
             handle = MagicMock(spec=BackgroundifyHandle)
@@ -2877,7 +2877,7 @@ class TestPromoteHandle:
     async def test_promote_existing_handle_via_event_loop(self, make_agent):
         from unittest.mock import MagicMock
 
-        from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+        from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 
         agent = make_agent()
         await agent.start()
@@ -2894,7 +2894,7 @@ class TestPromoteHandle:
     async def test_promote_returns_false_when_promote_fails(self, make_agent):
         from unittest.mock import MagicMock
 
-        from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+        from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 
         agent = make_agent()
         await agent.start()
@@ -3840,7 +3840,7 @@ class TestCollectAndPushFeedbackNative:
         await agent.start()
         try:
             # had_promotions=True via wait_handles returns no results.
-            from kohakuterrarium.core.backgroundify import (
+            from kohakuterrarium.core.jobs.backgroundify import (
                 BackgroundifyHandle,
             )
             from unittest.mock import MagicMock
@@ -3946,7 +3946,7 @@ class TestOnEmergencyDropWiring:
         import unittest.mock as um
 
         from kohakuterrarium.core.agent import Agent
-        from kohakuterrarium.core.config_types import (
+        from kohakuterrarium.core.config.types import (
             AgentConfig,
             InputConfig,
             OutputConfig,
@@ -4330,10 +4330,10 @@ class TestDispatchToolPromotedPlaceholder:
 
 class TestCollectFeedbackNativeResultsAdded:
     async def test_native_mode_with_results_appends_to_conversation(self, make_agent):
-        from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+        from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
         from unittest.mock import MagicMock
 
-        from kohakuterrarium.core.job import JobResult
+        from kohakuterrarium.core.jobs.job import JobResult
 
         agent = make_agent()
         await agent.start()
@@ -5230,7 +5230,7 @@ class TestInitCompactManagerNoProfileContext:
             delattr(agent.llm, "_profile_max_context")
         agent._init_compact_manager()
         # Uses CompactConfig default.
-        from kohakuterrarium.core.compact import CompactConfig
+        from kohakuterrarium.core.compact.manager import CompactConfig
 
         assert agent.compact_manager.config.max_tokens == CompactConfig.max_tokens
 
@@ -5295,7 +5295,7 @@ class TestInterruptWithRunningTask:
         cancels both (lines 565, 569)."""
         from unittest.mock import MagicMock
 
-        from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+        from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 
         agent = make_agent()
         await agent.start()
@@ -5458,7 +5458,7 @@ class TestPromoteHandleOffLoop:
         import asyncio as _asyncio
         from unittest.mock import MagicMock
 
-        from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+        from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 
         agent = make_agent()
         # In production ``Agent.start()`` stashes the running loop on
@@ -5484,7 +5484,7 @@ class TestPromoteHandleOffLoop:
         """Inner ``get_event_loop`` raises RuntimeError → returns False."""
         from unittest.mock import MagicMock
 
-        from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+        from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 
         agent = make_agent()
         h = MagicMock(spec=BackgroundifyHandle)
@@ -5736,7 +5736,7 @@ class TestAttachSessionStoreCompactCountBadValue:
         agent = make_agent()
         await agent.start()
         try:
-            from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+            from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
             from unittest.mock import MagicMock
 
             h = MagicMock(spec=BackgroundifyHandle)
@@ -5959,7 +5959,7 @@ class TestMidTurnBatchDrain:
         # alive must carry the live-jobs status so the model doesn't
         # re-dispatch or assume the sibling failed.
         from kohakuterrarium.core.events import create_tool_complete_event
-        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
 
         agent = make_agent()
         await agent.start()

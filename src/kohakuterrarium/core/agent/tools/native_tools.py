@@ -10,7 +10,7 @@ scratchpad values are migrated when applied.
 import json
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
+from kohakuterrarium.core.tools.native_validation import validate_native_tool_options
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

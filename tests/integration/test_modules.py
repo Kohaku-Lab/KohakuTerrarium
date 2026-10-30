@@ -7,7 +7,7 @@ implementations into a *real* :class:`Agent` and drives them the same
 way the production runtime does:
 
 * ``bootstrap/*`` builds the agent and wires modules into it.
-* ``core/executor.py`` fires plugin ``pre_tool_execute`` /
+* ``core/jobs/executor.py`` fires plugin ``pre_tool_execute`` /
   ``post_tool_execute`` around every tool call (and a
   ``PluginBlockError`` in a pre-hook becomes the tool result).
 * ``core/trigger_manager.py`` runs each trigger's ``wait_for_trigger``
@@ -52,7 +52,7 @@ from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,
@@ -556,8 +556,8 @@ class TestModulesIntegration:
         ``on_agent_stop`` / ``on_unload``), runtime prompt contribution,
         and ``applies_to`` declarative gating.
 
-        Mirrors: ``core/executor.py`` wrapping ``tool.execute``,
-        ``core/controller.py`` firing ``pre_llm_call`` /
+        Mirrors: ``core/jobs/executor.py`` wrapping ``tool.execute``,
+        ``core/controller/controller.py`` firing ``pre_llm_call`` /
         ``post_llm_call``, ``core/agent.py`` + ``agent_lifecycle`` +
         ``agent_handlers`` firing the lifecycle callbacks, and
         ``PluginManager._applicable_plugins`` enforcing ``applies_to``.
@@ -1949,7 +1949,7 @@ class TestModulesIntegration:
         LLM turn can see it.
 
         Mirrors: ``core/agent/turn/handlers.py._dispatch_tool_event`` →
-        ``core/executor.py.submit`` → result collection back into the
+        ``core/jobs/executor.py.submit`` → result collection back into the
         controller loop.
         """
         agent = make_agent(

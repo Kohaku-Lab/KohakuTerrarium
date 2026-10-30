@@ -10,8 +10,11 @@ from kohakuterrarium.core.agent.history.raw_history import (
     prepare_raw_prefix_for_target,
     reload_raw_prefix_for_target,
 )
-from kohakuterrarium.core.conversation import Conversation, ConversationConfig
-from kohakuterrarium.core.message_locator import user_message_indices_for_turn
+from kohakuterrarium.core.conversation.conversation import (
+    Conversation,
+    ConversationConfig,
+)
+from kohakuterrarium.core.conversation.locator import user_message_indices_for_turn
 from kohakuterrarium.session.raw_history import (
     UserMessageSelector,
     select_raw_history_prefix,

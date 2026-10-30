@@ -6,7 +6,7 @@ _EXPORTS = {
     "Activity": "kohakuterrarium.core.turn",
     "Agent": "kohakuterrarium.core.agent",
     "ConnectionResult": "kohakuterrarium.terrarium",
-    "ContextSnapshot": "kohakuterrarium.core.context_snapshot",
+    "ContextSnapshot": "kohakuterrarium.core.conversation.context_snapshot",
     "Creature": "kohakuterrarium.terrarium",
     "DisconnectionResult": "kohakuterrarium.terrarium",
     "EngineEvent": "kohakuterrarium.terrarium",

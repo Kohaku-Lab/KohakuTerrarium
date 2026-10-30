@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from kohakuterrarium.api.mcp_tools import _job_reply, _reply, create_app
-from kohakuterrarium.core.job import JobResult
+from kohakuterrarium.core.jobs.job import JobResult
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.mcp_server.config import MCPToolsConfig, GlobalToolsConfig
 from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry

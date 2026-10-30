@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.core.compact import CompactConfig, CompactManager
+from kohakuterrarium.core.compact.manager import CompactConfig, CompactManager
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.modules.plugin.base import PluginContext

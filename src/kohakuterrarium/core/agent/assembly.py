@@ -25,7 +25,7 @@ from kohakuterrarium.core.agent.turn.event_loop import AgentEventLoopMixin
 from kohakuterrarium.core.agent.turn.handlers import AgentHandlersMixin
 from kohakuterrarium.core.agent.turn.interrupt import AgentInterruptMixin
 from kohakuterrarium.core.agent.turn.run import AgentTurnMixin
-from kohakuterrarium.core.config import AgentConfig, load_agent_config
+from kohakuterrarium.core.config.load import AgentConfig, load_agent_config
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.input.base import InputModule

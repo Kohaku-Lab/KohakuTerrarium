@@ -19,8 +19,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.fs_path import coerce_fs_path

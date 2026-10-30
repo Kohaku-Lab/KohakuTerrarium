@@ -8,10 +8,10 @@ import pytest
 
 from kohakuterrarium.core.agent.turn.event_loop import AgentEventLoopMixin
 from kohakuterrarium.core.agent.tools.dispatch import AgentToolsMixin, _TurnResult
-from kohakuterrarium.core.backgroundify import BackgroundifyHandle
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.event_inbox import EventInbox
-from kohakuterrarium.core.job import JobResult
+from kohakuterrarium.core.jobs.job import JobResult
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.parsing import ToolCallEvent
 
@@ -841,7 +841,7 @@ class TestEmitDirectCompletionSubagentError:
 class TestStartToolAsync:
     async def test_basic_start(self, agent):
         # Wire a real executor + tool.
-        from kohakuterrarium.core.executor import Executor
+        from kohakuterrarium.core.jobs.executor import Executor
         from kohakuterrarium.modules.tool.base import (
             BaseTool,
             ExecutionMode,
@@ -873,7 +873,7 @@ class TestStartToolAsync:
         await task
 
     async def test_unknown_tool_returns_error_job(self, agent):
-        from kohakuterrarium.core.executor import Executor
+        from kohakuterrarium.core.jobs.executor import Executor
 
         agent.executor = Executor()
         evt = ToolCallEvent(name="ghost", args={}, raw="")
@@ -887,7 +887,7 @@ class TestStartToolAsync:
         """When ``executor.get_task`` returns None right after submit,
         the helper wraps a synthetic coro that yields the cached
         result."""
-        from kohakuterrarium.core.executor import Executor
+        from kohakuterrarium.core.jobs.executor import Executor
         from kohakuterrarium.modules.tool.base import (
             BaseTool,
             ExecutionMode,

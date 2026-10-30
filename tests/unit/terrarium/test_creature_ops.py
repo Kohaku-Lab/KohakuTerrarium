@@ -26,7 +26,7 @@ class TestEnvHelpers:
 
     def test_agent_env_uses_working_dir(self):
         # The working directory is owned by the agent's *executor*
-        # (matching the real Agent — see core/executor.py:86), NOT a
+        # (matching the real Agent — see core/jobs/executor.py:86), NOT a
         # bare ``agent._working_dir`` attribute. agent_env must report
         # that executor dir as ``pwd``.
         ag = SimpleNamespace(executor=SimpleNamespace(_working_dir="/some/dir"))

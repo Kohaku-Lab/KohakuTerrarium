@@ -9,7 +9,7 @@ while a turn is running.
 
 import kohakuterrarium as kt
 from kohakuterrarium.builtins.outputs.none import NoneOutput
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM

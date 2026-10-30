@@ -420,7 +420,7 @@
     "reason": "Provider implementation is loaded only for inline OpenAI-compatible auth."
   },
   {
-    "file": "src/kohakuterrarium/core/controller.py",
+    "file": "src/kohakuterrarium/core/controller/controller.py",
     "function": "_resolve_file_part",
     "target": "kohakuterrarium.builtins.tools.read",
     "reason": "Read tool implementation is loaded only for inline file-part fallback."

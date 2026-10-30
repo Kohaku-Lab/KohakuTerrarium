@@ -6,7 +6,7 @@ import pytest
 
 from kohakuterrarium.core.agent import model as am
 from kohakuterrarium import Agent
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.agent.history.compact import AgentCompactMixin
 from kohakuterrarium.core.agent.model import AgentModelMixin
 from kohakuterrarium.llm.profiles.backends import save_yaml_store

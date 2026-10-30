@@ -37,7 +37,7 @@ class TestStartCreatureLocal:
     async def test_with_in_memory_config(self, monkeypatch, tmp_path):
         engine = Terrarium()
         svc = LocalTerrariumService(engine)
-        from kohakuterrarium.core.config_types import AgentConfig
+        from kohakuterrarium.core.config.types import AgentConfig
         from kohakuterrarium.terrarium.creature_host import Creature
 
         # Stub engine.add_creature to return a fake creature.

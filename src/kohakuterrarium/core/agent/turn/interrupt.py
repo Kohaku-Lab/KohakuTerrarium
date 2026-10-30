@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from kohakuterrarium.core.event_inbox import TurnOutcome
-from kohakuterrarium.core.job import JobState
+from kohakuterrarium.core.jobs.job import JobState
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

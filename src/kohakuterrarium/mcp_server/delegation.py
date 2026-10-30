@@ -4,7 +4,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 
-from kohakuterrarium.core.job import JobResult, JobState, JobStatus
+from kohakuterrarium.core.jobs.job import JobResult, JobState, JobStatus
 from kohakuterrarium.mcp_server.delegation_history import DelegationHistory
 from kohakuterrarium.mcp_server.delegation_adapters import (
     DelegationAdapters,

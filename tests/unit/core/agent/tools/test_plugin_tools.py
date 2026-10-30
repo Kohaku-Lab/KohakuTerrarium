@@ -8,7 +8,7 @@ name clash fails the load without changing the registry.
 import pytest
 
 import kohakuterrarium as kt
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.errors import ConflictError, KTError, PluginToolConflictError
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult

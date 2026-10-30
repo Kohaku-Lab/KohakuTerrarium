@@ -16,8 +16,8 @@ from kohakuterrarium.api.deps import (
 )
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
 from kohakuterrarium.api.routes.persistence.resume_request import canonical_resume_path
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.handles import Session

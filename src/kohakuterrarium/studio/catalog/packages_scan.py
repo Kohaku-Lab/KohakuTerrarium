@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.walk import list_packages
 

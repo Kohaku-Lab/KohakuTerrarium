@@ -3,7 +3,7 @@
 import pytest
 
 from kohakuterrarium import Agent
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.testing.llm import ScriptedLLM
 

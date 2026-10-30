@@ -9,12 +9,12 @@ from kohakuterrarium.core.budget import (
     BudgetExhausted,
     IterationBudget,
 )
-from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.core.context_snapshot import ContextSnapshot
+from kohakuterrarium.core.conversation.conversation import Conversation
+from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.llm.media.reference import session_media_scope
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.tool_output import (
+from kohakuterrarium.core.tools.output import (
     discard_raw_output_file,
     normalize_tool_output,
     render_content_text,

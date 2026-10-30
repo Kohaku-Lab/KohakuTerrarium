@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.core.backgroundify import PromotionResult
+from kohakuterrarium.core.jobs.backgroundify import PromotionResult
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
 from kohakuterrarium.mcp_server.runtime import ToolRuntime
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError

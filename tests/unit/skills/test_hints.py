@@ -8,7 +8,7 @@ import pytest
 
 from kohakuterrarium.builtins.user_commands.clear import ClearCommand
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.llm.responses.ws import ResponsesWSSession

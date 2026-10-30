@@ -13,8 +13,8 @@ from kohakuterrarium.core.agent.history.message_history import (
     snapshot_needs_settled_tool_replay,
 )
 from kohakuterrarium.core.agent.history.messages import AgentMessagesMixin
-from kohakuterrarium.core.compact_splice import splice_conversation
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.compact.splice import splice_conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.session.history import InvalidBranchViewError
 from kohakuterrarium.session.raw_history import UserMessageSelector

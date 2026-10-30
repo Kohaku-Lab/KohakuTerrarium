@@ -75,11 +75,11 @@ Flow:
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/core/compact.py`: `CompactManager` with the
+- `src/kohakuterrarium/core/compact/manager.py`: `CompactManager` with the
   start/pending/done state machine.
-- `src/kohakuterrarium/core/agent.py`: `_init_compact_manager()` wires
+- `src/kohakuterrarium/core/agent/assembly.py`: `_init_compact_manager()` wires
   the manager into the agent on `start()`.
-- `src/kohakuterrarium/core/controller.py`: the post-turn hook that
+- `src/kohakuterrarium/core/controller/controller.py`: the post-turn hook that
   asks the manager to consider compaction.
 - `src/kohakuterrarium/builtins/user_commands/compact.py`: `/compact`
   for manual trigger.

@@ -6,7 +6,7 @@ import time
 from collections import deque
 from typing import Any
 
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     encode_branch_view,
     selected_branch_view,
 )

@@ -9,8 +9,8 @@ import pytest
 
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.write import WriteTool
-from kohakuterrarium.core.execution_context import ExecutionBinding
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.tools.execution_context import ExecutionBinding
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.tool.base import ToolContext

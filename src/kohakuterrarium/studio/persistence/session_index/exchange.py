@@ -8,7 +8,7 @@ feedback skipped), the last reply text after it, and the number of prompts.
 import json
 from typing import Any
 
-from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
+from kohakuterrarium.core.conversation.elide import TOOL_FEEDBACK_KIND
 
 QUOTE_LIMIT = 400
 EMPTY_EXCHANGE = {"last_user": "", "last_reply": "", "turn_count": 0}

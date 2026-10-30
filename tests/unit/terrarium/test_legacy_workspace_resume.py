@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod

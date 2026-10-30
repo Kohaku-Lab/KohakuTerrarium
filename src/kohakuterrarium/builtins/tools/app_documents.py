@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from kohakuterrarium.core.tool_output import artifact_served_url
+from kohakuterrarium.core.tools.output import artifact_served_url
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -9,7 +9,7 @@ from typing import Any
 
 from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
-from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig

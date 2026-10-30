@@ -22,7 +22,7 @@ from kohakuterrarium.compose.agent import (
     agent,
     factory,
 )
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 _REPLY = "compose-engine-session reply"

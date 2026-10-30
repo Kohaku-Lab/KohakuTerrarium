@@ -56,7 +56,7 @@ loop:
 
 ## 我们怎么实现它
 
-主要类别是 `Controller`（`core/controller.py`）。它持有事件用的
+主要类别是 `Controller`（`core/controller/controller.py`）。它持有事件用的
 `asyncio.Queue`、LLM 输出串流的 parser 状态机，以及对Creature
 `Registry`（工具）、`SubAgentManager`、`Executor` 与
 `OutputRouter` 的参照。

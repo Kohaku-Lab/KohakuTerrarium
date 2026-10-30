@@ -34,12 +34,12 @@ from dataclasses import is_dataclass
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.core.config_serde import (
+from kohakuterrarium.core.config.serde import (
     pack_agent_config,
     stringify_paths as _stringify_paths,
     unpack_agent_config,
 )
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.terrarium.drive.errors import (
     CrossNodeDriveNotSupportedError,
     DriveBackpressureError,
@@ -292,7 +292,7 @@ def unpack_event_filter(d: dict[str, Any] | None) -> EventFilter | None:
 
 
 # ---------------------------------------------------------------------------
-# AgentConfig pack/unpack lives in :mod:`kohakuterrarium.core.config_serde`
+# AgentConfig pack/unpack lives in :mod:`kohakuterrarium.core.config.serde`
 # so the resume path can import it without dragging in this module's
 # engine-coupled dependencies.  Re-exported above for back-compat.
 # ---------------------------------------------------------------------------

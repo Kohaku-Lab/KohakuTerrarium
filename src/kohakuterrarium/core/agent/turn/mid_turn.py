@@ -10,8 +10,8 @@ session records, while background completions share a delivery banner.
 import asyncio
 from typing import Any
 
-from kohakuterrarium.core.controller import Controller
-from kohakuterrarium.core.controller_context import format_events_for_context
+from kohakuterrarium.core.controller.controller import Controller
+from kohakuterrarium.core.controller.context import format_events_for_context
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.pending_input import pending_id_of
 from kohakuterrarium.llm.message import coalesce_user_contents, content_parts_to_dicts

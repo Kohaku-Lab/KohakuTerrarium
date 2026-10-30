@@ -12,8 +12,8 @@ Pins the headline contracts:
 
 import kohakuterrarium as kt
 from kohakuterrarium.bootstrap.plugins import _load_one
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.function import FunctionTool
 from kohakuterrarium.llm.tools.build import build_tool_schemas

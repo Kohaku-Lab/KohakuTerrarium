@@ -17,7 +17,7 @@ from kohakuterrarium.compose.agent import (
     agent,
     factory,
 )
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 
 # ``compose/__init__.py`` does ``from .agent import agent``, so the
 # attribute ``kohakuterrarium.compose.agent`` is the *function*, not

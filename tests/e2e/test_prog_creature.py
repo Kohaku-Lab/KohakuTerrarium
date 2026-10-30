@@ -32,7 +32,7 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tools import search_memory as _search_memory_mod
 from kohakuterrarium.core.agent import model as _agent_model_mod
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.events import (
     EventType,
     TriggerEvent,

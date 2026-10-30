@@ -10,8 +10,13 @@ from kohakuterrarium.core.agent.observability import (
     wire_plugin_hook_timing,
     wire_scratchpad_observer,
 )
-from kohakuterrarium.core.context_snapshot import ContextSnapshot, capture_agent_context
-from kohakuterrarium.core.pinned import sync_with_store as sync_pinned_with_store
+from kohakuterrarium.core.conversation.context_snapshot import (
+    ContextSnapshot,
+    capture_agent_context,
+)
+from kohakuterrarium.core.conversation.pinned import (
+    sync_with_store as sync_pinned_with_store,
+)
 from kohakuterrarium.core.token_ledger import context_window
 from kohakuterrarium.session.agent_attach import attach_to_session as _attach_to_session
 from kohakuterrarium.session.agent_attach import (

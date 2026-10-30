@@ -71,11 +71,11 @@ prompt 会超出模型的上下文预算。标准解法是进行压缩：
 
 ## 代码中的位置
 
-- `src/kohakuterrarium/core/compact.py`：带有
+- `src/kohakuterrarium/core/compact/manager.py`：带有
   start/pending/done 状态机的 `CompactManager`。
-- `src/kohakuterrarium/core/Agent.py`：`_init_compact_manager()` 会在
+- `src/kohakuterrarium/core/agent/assembly.py`：`_init_compact_manager()` 会在
   `start()` 时把 manager 接到 Agent 上。
-- `src/kohakuterrarium/core/controller.py`：每轮结束后的 hook，
+- `src/kohakuterrarium/core/controller/controller.py`：每轮结束后的 hook，
   会请 manager 评估是否需要压缩。
 - `src/kohakuterrarium/builtins/user_commands/compact.py`：手动触发的
   `/compact`。

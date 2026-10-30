@@ -25,7 +25,7 @@ from kohakuterrarium.commands.read import (
     _render_skill_from_path,
     _render_skill_info,
 )
-from kohakuterrarium.core.job import (
+from kohakuterrarium.core.jobs.job import (
     JobResult,
     JobState,
     JobStatus,

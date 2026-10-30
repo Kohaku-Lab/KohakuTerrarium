@@ -29,7 +29,7 @@ manifest-slot plumbing:
 - skill discovery reads ``SKILL.md`` from each ``skills:`` entry via
   :mod:`kohakuterrarium.skills.discovery`.
 - controller command registration loads each ``commands:`` /
-  ``user_commands:`` entry via :mod:`kohakuterrarium.core.controller_plugins`.
+  ``user_commands:`` entry via :mod:`kohakuterrarium.core.controller.plugins`.
 - Jinja ``{% include %}`` of ``prompts:`` fragments is wired through
   :func:`resolve_package_prompt` and the helper in
   :mod:`kohakuterrarium.prompt.template`.

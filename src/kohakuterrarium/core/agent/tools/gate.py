@@ -8,7 +8,7 @@ idle, or at the next LLM request while a turn is running.
 
 from typing import Any
 
-from kohakuterrarium.core.tool_gate import (
+from kohakuterrarium.core.tools.gate import (
     visible_catalog,
     visible_subagent_names,
     visible_tool_names,

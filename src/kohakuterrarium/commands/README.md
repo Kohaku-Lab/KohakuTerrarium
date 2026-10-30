@@ -16,4 +16,4 @@ lightweight, and do not create background jobs.
 ## Dependencies
 
 - `kohakuterrarium.builtin_skills` (documentation lookup for InfoCommand)
-- `kohakuterrarium.core.job` (job store access for ReadCommand, WaitCommand)
+- `kohakuterrarium.core.jobs.job` (job store access for ReadCommand, WaitCommand)

@@ -17,7 +17,7 @@ from kohakuterrarium.builtins.outputs import (
     create_builtin_output,
     is_builtin_output,
 )
-from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule

@@ -15,10 +15,10 @@ from kohakuterrarium.core.agent.tools.dispatch import (
     _make_job_label,
     _TurnResult,
 )
-from kohakuterrarium.core.tool_dispatch import tool_background_handle
-from kohakuterrarium.core.backgroundify import BackgroundifyHandle, backgroundify
+from kohakuterrarium.core.tools.dispatch import tool_background_handle
+from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle, backgroundify
 from kohakuterrarium.core.budget import BudgetExhausted
-from kohakuterrarium.core.controller import Controller
+from kohakuterrarium.core.controller.controller import Controller
 from kohakuterrarium.core.event_inbox import EventEnvelope
 from kohakuterrarium.core.events import (
     EventType,

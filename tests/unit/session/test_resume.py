@@ -18,14 +18,14 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
-from kohakuterrarium.core.compact import CompactConfig, CompactManager
+from kohakuterrarium.core.compact.manager import CompactConfig, CompactManager
 from kohakuterrarium.core.agent.turn.handlers import _BG_PLACEHOLDER
 from kohakuterrarium.core.agent.history.message_history import replay_with_settled_tools
-from kohakuterrarium.core.controller_context import format_events_for_context
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.controller.context import format_events_for_context
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.events import create_tool_complete_event
-from kohakuterrarium.core.branch_continuation import persist_branch_view
-from kohakuterrarium.core.conversation_elide import ELISION_MARKER, TOOL_FEEDBACK_KIND
+from kohakuterrarium.core.conversation.continuation import persist_branch_view
+from kohakuterrarium.core.conversation.elide import ELISION_MARKER, TOOL_FEEDBACK_KIND
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.resume_branch import (
     snapshot_mismatches_branch,
@@ -3431,7 +3431,7 @@ class TestResumeAgent:
                     assert agent.compact_manager._last_compact_time == cooldown
                     assert not agent.compact_manager.should_compact(2000)
                 assert counting.get_events_calls == 1
-            from kohakuterrarium.core.conversation_elide import ELISION_MARKER
+            from kohakuterrarium.core.conversation.elide import ELISION_MARKER
 
             contents = [
                 m.get("content", "")

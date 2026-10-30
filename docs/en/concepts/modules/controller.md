@@ -62,7 +62,7 @@ Three design choices worth naming:
 
 ## How we implement it
 
-The main class is `Controller` (`core/controller.py`). It owns an
+The main class is `Controller` (`core/controller/controller.py`). It owns an
 `asyncio.Queue` for events, a parser state machine for the LLM's
 output stream, and a reference to the creature's `Registry` (tools),
 `SubAgentManager`, `Executor`, and `OutputRouter`.

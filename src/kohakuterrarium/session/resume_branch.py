@@ -11,9 +11,9 @@ from kohakuterrarium.core.agent.history.message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay as snapshot_needs_settled_tool_replay,
 )
-from kohakuterrarium.core.branch_continuation import load_persisted_branch_view
-from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
-from kohakuterrarium.core.snapshot_history import prepare_snapshot
+from kohakuterrarium.core.conversation.continuation import load_persisted_branch_view
+from kohakuterrarium.core.conversation.elide import TOOL_FEEDBACK_KIND
+from kohakuterrarium.core.conversation.snapshot import prepare_snapshot
 from kohakuterrarium.session.history import (
     index_parent_paths,
     resolve_selected_branches,

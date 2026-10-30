@@ -18,8 +18,11 @@ from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
 from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
-from kohakuterrarium.core.conversation import Conversation, ConversationConfig
-from kohakuterrarium.core.pinned import PinnedContext
+from kohakuterrarium.core.conversation.conversation import (
+    Conversation,
+    ConversationConfig,
+)
+from kohakuterrarium.core.conversation.pinned import PinnedContext
 from kohakuterrarium.session.store import SessionStore
 
 # ── agent_lifecycle.AgentLifecycleMixin ──────────────────────────
@@ -506,7 +509,7 @@ class TestBuildCompactLLM:
             name="alice",
         )
         a._llm_selector = None
-        from kohakuterrarium.core.compact import CompactConfig
+        from kohakuterrarium.core.compact.manager import CompactConfig
 
         out = a._build_compact_llm(CompactConfig())
         assert out is a.llm
@@ -535,7 +538,7 @@ class TestBuildCompactLLM:
             name="alice",
         )
         a._llm_selector = None
-        from kohakuterrarium.core.compact import CompactConfig
+        from kohakuterrarium.core.compact.manager import CompactConfig
 
         out = a._build_compact_llm(CompactConfig(compact_model="my-profile"))
         assert out == "compact-llm-instance"
@@ -562,7 +565,7 @@ class TestBuildCompactLLM:
             name="alice",
         )
         a._llm_selector = None
-        from kohakuterrarium.core.compact import CompactConfig
+        from kohakuterrarium.core.compact.manager import CompactConfig
 
         out = a._build_compact_llm(CompactConfig(compact_model="bad-profile"))
         assert out is a.llm
@@ -602,7 +605,7 @@ class TestBuildCompactLLM:
             name="alice",
         )
         a._llm_selector = None
-        from kohakuterrarium.core.compact import CompactConfig
+        from kohakuterrarium.core.compact.manager import CompactConfig
 
         out = a._build_compact_llm(CompactConfig())
         # resolve_controller_llm was invoked.

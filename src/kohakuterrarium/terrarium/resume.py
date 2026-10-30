@@ -17,7 +17,7 @@ import kohakuterrarium.terrarium.workspace_resume as _workspace
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.resume_target import (
     active_resume_graph,

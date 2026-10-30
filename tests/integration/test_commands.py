@@ -47,13 +47,13 @@ from kohakuterrarium.commands.base import (
     parse_command_args,
 )
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,
 )
 from kohakuterrarium.core.events import create_user_input_event
-from kohakuterrarium.core.job import JobResult, JobState, JobStatus, JobType
+from kohakuterrarium.core.jobs.job import JobResult, JobState, JobStatus, JobType
 from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.skills.discovery import load_skill_from_path
 from kohakuterrarium.skills.registry import Skill

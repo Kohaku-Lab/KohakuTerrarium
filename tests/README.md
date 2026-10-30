@@ -25,7 +25,7 @@ pytest tests/ -q
 pytest tests/unit/ -q --cov=src/kohakuterrarium --cov-report=term-missing
 
 # One focused test: skip the worker spawn
-pytest tests/unit/core/test_executor.py::TestSerialLock -n 0
+pytest tests/unit/core/jobs/test_executor.py::TestSerialLock -n 0
 ```
 
 `pytest` is configured in `pyproject.toml` with `asyncio_mode = "auto"`
@@ -178,7 +178,7 @@ Each mirrors how the **real consumer** drives that folder.
 | `test_api.py` | `api/` | `create_app()` + `TestClient` → create session → WS chat → settings → history → hot-plug → save/resume → delete | frontend `utils/api.js` call sequence |
 | `test_modules.py` | `modules/` | load real plugin/tool/trigger/subagent/output/user_command modules into a real `Agent` → exercise each protocol through a real turn | `bootstrap/*` loads, `core/agent_*` invokes |
 | `test_prompt.py` | `prompt/` | assemble a real agent's system prompt through the aggregator → on-demand `##info##` skill load → template rendering | `core/agent_init`, `bootstrap` |
-| `test_parsing.py` | `parsing/` | feed real streamed LLM output through `StreamParser` across chunk boundaries → exact tool-call/command/text events | `core/controller.py` |
+| `test_parsing.py` | `parsing/` | feed real streamed LLM output through `StreamParser` across chunk boundaries → exact tool-call/command/text events | `core/controller/controller.py` |
 | `test_commands.py` | `commands/` | a real controller turn emits `##info##` / `##read##` → command resolves docs/skills into the conversation | `core/controller`, `core/agent_handlers` |
 | `test_mcp.py` | `mcp/` | real in-process stdio MCP server → connect → list → call → disconnect, cross-task as `core/agent/mcp.py` drives it | `core/agent/mcp.py` |
 | `test_compose.py` | `compose/` | build real `>>` / `&` / `\|` / `*` pipelines over engine-backed runnables and run them | user code (compose is a public API) |

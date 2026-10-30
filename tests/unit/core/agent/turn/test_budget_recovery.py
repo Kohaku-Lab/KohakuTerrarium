@@ -11,7 +11,7 @@ from kohakuterrarium.core.agent.turn.budget_recovery import (
     repair_controller,
     sync_emergency_drop_conversation,
 )
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.llm.recovery.context_repair import ContextRepair
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.llm.recovery.errors import drop_last_tool_round

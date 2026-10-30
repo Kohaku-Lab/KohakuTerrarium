@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from kohakuterrarium.errors import SessionNotResumableError
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     persist_branch_view,
 )

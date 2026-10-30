@@ -10,7 +10,7 @@ from kohakuterrarium.core.agent.tools.runtime_tools import (
     AgentRuntimeToolsMixin,
     _make_job_label,
 )
-from kohakuterrarium.core.backgroundify import BackgroundifyHandle
+from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.event_inbox import EventInbox
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart

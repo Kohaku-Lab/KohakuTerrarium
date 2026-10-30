@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 
 
 from kohakuterrarium.session.history import replay_conversation

@@ -5,7 +5,7 @@ tool format, and SubAgentJob's job-status / job-result derivation from
 the underlying SubAgentResult.
 """
 
-from kohakuterrarium.core.job import JobState, JobType
+from kohakuterrarium.core.jobs.job import JobState, JobType
 from kohakuterrarium.modules.subagent.result import (
     SUBAGENT_FRAMEWORK_HINTS,
     SubAgentJob,

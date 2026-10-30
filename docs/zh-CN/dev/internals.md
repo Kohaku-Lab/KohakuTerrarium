@@ -25,7 +25,7 @@ tags:
 
 CLI 入口位于 `cli/run.py:run_agent_cli()`。它会先检查配置路径，再选择 I/O 模式（`cli` / TUI），然后一切都走 Terrarium 引擎：`Terrarium(pwd=…)` 加 `engine.add_creature(…)`（配方则用 `engine.apply_recipe(…)`），再把引擎交给 `run_engine_with_rich_cli()` / `run_engine_with_tui()`。编程式嵌入方直接用 `await Agent.build(…)` 构造 agent。
 
-`Agent.__init__`（`src/kohakuterrarium/core/agent.py`）会按固定顺序初始化：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。mixin 布局为 `AgentInitMixin`（`bootstrap/agent_init.py`）+ `AgentHandlersMixin`（`core/agent/turn/handlers.py`）+ `AgentToolsMixin`（`core/agent/tools/dispatch.py`），外加 2.0 之后的 mixin：`AgentConstructMixin`（`Agent.build` / `Agent.from_path`）、`AgentTurnMixin`（带类型的 `run` / `run_stream`）、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
+`Agent.__init__`（`src/kohakuterrarium/core/agent/assembly.py`）会按固定顺序初始化：`_init_llm`、`_init_registry`、`_init_executor`、`_init_subagents`、`_init_output`、`_init_controller`、`_init_input`、`_init_user_commands`、`_init_triggers`。mixin 布局为 `AgentInitMixin`（`bootstrap/agent_init.py`）+ `AgentHandlersMixin`（`core/agent/turn/handlers.py`）+ `AgentToolsMixin`（`core/agent/tools/dispatch.py`），外加 2.0 之后的 mixin：`AgentConstructMixin`（`Agent.build` / `Agent.from_path`）、`AgentTurnMixin`（带类型的 `run` / `run_stream`）、`AgentExtensionsMixin`、`AgentMessagesMixin`、`AgentModelMixin`、`AgentCompactMixin`、`AgentLifecycleMixin`。
 
 `await agent.start()`（`core/agent.py`）会启动 input 和 output 模块；如果存在 TUI，就挂上回调；接着启动 trigger manager、注册 completion callback、初始化 MCP、将 tool 描述注入 prompt、初始化 `CompactManager`、加载 plugin、发布 session 信息，最后启动 termination checker。
 
@@ -40,7 +40,7 @@ CLI 入口位于 `cli/run.py:run_agent_cli()`。它会先检查配置路径，�
 `type, content, context, timestamp, job_id?, prompt_override?, stackable`。
 类型包括 `user_input`、`idle`、`timer`、`context_update`、`tool_complete`、`subagent_output`、`channel_message`、`monitor`、`error`、`startup`、`shutdown`。
 
-事件队列位于 `core/controller.py:push_event` / `_collect_events`（252-299 行）。同一个 tick 中收集到的 stackable event，会合并为这一轮中的同一条 user message；非 stackable event 会直接打断当前 batch；超出当前 batch 的事件会先放入 `_pending_events`，下一轮再处理。
+事件队列位于 `core/controller/controller.py:push_event` / `_collect_events`（252-299 行）。同一个 tick 中收集到的 stackable event，会合并为这一轮中的同一条 user message；非 stackable event 会直接打断当前 batch；超出当前 batch 的事件会先放入 `_pending_events`，下一轮再处理。
 
 每一轮的流程位于 `agent_handlers.py:_run_controller_loop`：
 
@@ -57,7 +57,7 @@ CLI 入口位于 `cli/run.py:run_agent_cli()`。它会先检查配置路径，�
 
 stream parser（`parsing/`）在识别到配置好的 `tool_format` 中的 tool block 时，会发出事件。支持 bracket（默认：`[/bash]@@command=ls\n[bash/]`）、XML（`<bash command="ls"></bash>`）和 native（LLM provider 自带的 function-calling 封装）。每个识别出的 tool，都会通过 `executor.submit_from_event()` 转成一个 executor task。
 
-executor（`core/executor.py`）会维护 `{job_id: asyncio.Task}`，每次调用都会创建一个 `ToolContext`。其中包含 `working_dir`、`session`、`environment`、文件保护设置、文件读取状态 map、job store，以及 agent 名称。
+executor（`core/jobs/executor.py`）会维护 `{job_id: asyncio.Task}`，每次调用都会创建一个 `ToolContext`。其中包含 `working_dir`、`session`、`environment`、文件保护设置、文件读取状态 map、job store，以及 agent 名称。
 
 共有三种模式：
 
@@ -138,7 +138,7 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 
 ### 2.2 上下文压缩
 
-`core/compact.py:CompactManager` 每轮结束后都会运行。`should_compact(prompt_tokens)` 会检查 prompt token 是否超过 `max_context` 的 80%（可通过 `compact.threshold` 和 `compact.max_tokens` 调整）。触发后，它会先发出一个 `compact_start` activity event，再启动后台 task 运行 summarizer LLM。默认使用主 LLM，也可以单独配置 `compact_model`。summary 会在 **轮与轮之间** 以原子方式插入对话。live zone，也就是最近 `keep_recent_turns` 轮，永远不会被总结。
+`core/compact/manager.py:CompactManager` 每轮结束后都会运行。`should_compact(prompt_tokens)` 会检查 prompt token 是否超过 `max_context` 的 80%（可通过 `compact.threshold` 和 `compact.max_tokens` 调整）。触发后，它会先发出一个 `compact_start` activity event，再启动后台 task 运行 summarizer LLM。默认使用主 LLM，也可以单独配置 `compact_model`。summary 会在 **轮与轮之间** 以原子方式插入对话。live zone，也就是最近 `keep_recent_turns` 轮，永远不会被总结。
 
 这样可以保证 controller 不会在一轮执行到一半时，突然发现前面的消息消失。完整原因见 [impl-notes/non-blocking-compaction.md](../concepts/impl-notes/non-blocking-compaction.md)。
 

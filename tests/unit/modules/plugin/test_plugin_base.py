@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.core.pinned import PinnedContext
-from kohakuterrarium.core.pinned import state_key as pinned_state_key
+from kohakuterrarium.core.conversation.pinned import PinnedContext
+from kohakuterrarium.core.conversation.pinned import state_key as pinned_state_key
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,

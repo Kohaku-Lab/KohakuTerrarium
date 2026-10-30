@@ -5,7 +5,7 @@ import textwrap
 
 from kohakuterrarium.bootstrap import triggers as trig_mod
 from kohakuterrarium.bootstrap.triggers import create_trigger, init_triggers
-from kohakuterrarium.core.config_types import AgentConfig, TriggerConfig
+from kohakuterrarium.core.config.types import AgentConfig, TriggerConfig
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.modules.trigger import (

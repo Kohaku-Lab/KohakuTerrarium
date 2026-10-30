@@ -6,7 +6,7 @@ Centralizes warm-pause and orderly shutdown behavior for agents.
 import asyncio
 from typing import Any
 
-from kohakuterrarium.core.job import JobState, JobType
+from kohakuterrarium.core.jobs.job import JobState, JobType
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.utils.logging import get_logger
 

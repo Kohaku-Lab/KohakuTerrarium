@@ -36,7 +36,7 @@ def spawn_child_agent(
     if isinstance(config_path_or_dict, str):
         child = Agent.from_path(config_path_or_dict)
     elif isinstance(config_path_or_dict, dict):
-        AgentConfig = sys.modules["kohakuterrarium.core.config"].AgentConfig
+        AgentConfig = sys.modules["kohakuterrarium.core.config.load"].AgentConfig
         cfg = AgentConfig(**config_path_or_dict)
         child = Agent(cfg)
     else:

@@ -20,8 +20,8 @@ from kohakuterrarium.api.deps import get_service_factory
 from kohakuterrarium.api.routes.persistence.preflight_metadata import (
     local_metadata_reader,
 )
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.metadata_candidate import (
     MetadataReadError,
     read_metadata_candidate,

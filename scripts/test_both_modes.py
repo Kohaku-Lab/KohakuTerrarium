@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-from kohakuterrarium.core.controller import Controller, ControllerConfig
+from kohakuterrarium.core.controller.controller import Controller, ControllerConfig
 from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.openai.provider import OpenAIProvider

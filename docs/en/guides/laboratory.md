@@ -315,7 +315,7 @@ For inline `AgentConfig` (no folder on disk anywhere), pass the
 config object directly; it crosses the wire as a packed dict:
 
 ```python
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 
 cfg = AgentConfig(
     name="ephemeral",

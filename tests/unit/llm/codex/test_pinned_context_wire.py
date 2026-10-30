@@ -7,7 +7,7 @@ turns and the image.
 
 import pytest
 
-from kohakuterrarium.core.pinned import PinnedContext
+from kohakuterrarium.core.conversation.pinned import PinnedContext
 from kohakuterrarium.llm.anthropic.format import prepare_messages
 from kohakuterrarium.llm.antigravity.format import encode_messages
 from kohakuterrarium.llm.codex.format import to_responses_input

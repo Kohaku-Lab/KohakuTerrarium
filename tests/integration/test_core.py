@@ -44,27 +44,27 @@ from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.show_app import ShowAppTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     load_persisted_branch_view,
     persist_branch_view,
     selected_branch_view,
 )
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
     OutputConfig,
 )
 from kohakuterrarium.builtins.user_commands.clear import ClearCommand
 from kohakuterrarium.builtins.user_commands.repair_images import RepairImagesCommand
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.events import (
     EventType,
     TriggerEvent,
     create_tool_complete_event,
     create_user_input_event,
 )
-from kohakuterrarium.core.pinned import pin_message
+from kohakuterrarium.core.conversation.pinned import pin_message
 from kohakuterrarium.core.turn import Activity, TurnCapture
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.media.artifacts import resolve_artifact_url

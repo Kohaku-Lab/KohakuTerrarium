@@ -288,7 +288,7 @@ info = await service.add_creature(target_path, on_node="worker-gpu-1")
 直接把 config 对象传过去，它会以 packed dict 的形式过 wire：
 
 ```python
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 
 cfg = AgentConfig(
     name="ephemeral",

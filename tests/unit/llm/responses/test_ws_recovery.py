@@ -9,7 +9,7 @@ from openai import APIConnectionError
 
 from kohakuterrarium.bootstrap.tools import create_tool
 from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
-from kohakuterrarium.core.config_types import ToolConfigItem
+from kohakuterrarium.core.config.types import ToolConfigItem
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.recovery.status import observe_model_recovery
 from kohakuterrarium.llm.responses.ws import ResponsesWSError

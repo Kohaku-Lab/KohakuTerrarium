@@ -37,7 +37,7 @@ the Terrarium engine: `Terrarium(pwd=…)` plus `engine.add_creature(…)`
 `run_engine_with_rich_cli()` / `run_engine_with_tui()`. Programmatic
 embedders construct the agent directly with `await Agent.build(…)`.
 
-`Agent.__init__` (`src/kohakuterrarium/core/agent.py`) runs
+`Agent.__init__` (`src/kohakuterrarium/core/agent/assembly.py`) runs
 bootstrap in a fixed order: `_init_llm`, `_init_registry`,
 `_init_executor`, `_init_subagents`, `_init_output`, `_init_controller`,
 `_init_input`, `_init_user_commands`, `_init_triggers`. The mixin
@@ -82,7 +82,7 @@ Types include `user_input`, `idle`, `timer`, `context_update`,
 `tool_complete`, `subagent_output`, `channel_message`, `monitor`,
 `error`, `startup`, `shutdown`.
 
-The event queue is in `core/controller.py:push_event` /
+The event queue is in `core/controller/controller.py:push_event` /
 `_collect_events` (lines 252-299). Stackable events collected in the
 same tick are merged into one turn's user message; non-stackable events
 break a batch; anything past the batch is saved in `_pending_events`
@@ -110,7 +110,7 @@ or native (the LLM provider's own function-calling envelope). Each
 detected tool becomes an executor task via
 `executor.submit_from_event()`.
 
-The executor (`core/executor.py`) stores `{job_id: asyncio.Task}` and
+The executor (`core/jobs/executor.py`) stores `{job_id: asyncio.Task}` and
 builds a `ToolContext` for each invocation with `working_dir`,
 `session`, `environment`, file guards, a file-read-state map, the job
 store, and the agent name.
@@ -264,7 +264,7 @@ See [impl-notes/session-persistence.md](../concepts/impl-notes/session-persisten
 
 ### 2.2 Context compaction
 
-`core/compact.py:CompactManager` runs after every turn.
+`core/compact/manager.py:CompactManager` runs after every turn.
 `should_compact(prompt_tokens)` checks whether prompt tokens exceed
 80% of `max_context` (configurable via `compact.threshold` and
 `compact.max_tokens`). On trigger it emits a `compact_start` activity

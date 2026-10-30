@@ -33,8 +33,8 @@ state; engine-level terrarium resume lives in `terrarium/resume.py`.
 - `kohakuterrarium.builtins.inputs` (create_builtin_input, for resume IO)
 - `kohakuterrarium.builtins.outputs` (create_builtin_output, for resume IO)
 - `kohakuterrarium.core.agent` (Agent)
-- `kohakuterrarium.core.config_serde` (unpack_agent_config)
-- `kohakuterrarium.core.conversation` (Conversation)
+- `kohakuterrarium.core.config.serde` (unpack_agent_config)
+- `kohakuterrarium.core.conversation.conversation` (Conversation)
 - `kohakuterrarium.laboratory.protocols` (LabNotifier / LabRegistrar, for sync)
 - `kohakuterrarium.modules.input.base` / `modules.output.base`
 - `kohakuterrarium.packages.resolve` (resolve_any_path)

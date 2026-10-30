@@ -8,7 +8,7 @@ all persistence goes through the host class's write-behind queue.
 import json
 from typing import Any
 
-from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
+from kohakuterrarium.core.jobs.label import canonical_tool_name, make_job_label
 from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS
 from kohakuterrarium.utils.logging import get_logger
 

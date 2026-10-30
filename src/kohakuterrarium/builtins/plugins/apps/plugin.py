@@ -8,7 +8,7 @@ until an attached client renders ``kt.app``.
 from typing import Any
 
 from kohakuterrarium.builtins.tools.show_app import ShowAppTool
-from kohakuterrarium.core.tool_gate import visible_tool_names
+from kohakuterrarium.core.tools.gate import visible_tool_names
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.modules.tool.base import BaseTool
 

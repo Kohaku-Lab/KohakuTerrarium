@@ -97,7 +97,7 @@ block appears.
 `llm/tools/build.py` states framework semantics once rather than per tool:
 
 - `run_in_background` appears only on tools declaring `supports_background`.
-  Mid-flight promotion (`core/backgroundify.py`) covers a direct call that turns
+  Mid-flight promotion (`core/jobs/backgroundify.py`) covers a direct call that turns
   out to be slow.
 - Sub-agent context isolation is explained in `## Execution model`, not inside
   every `task` parameter.
@@ -137,7 +137,7 @@ than written by hand, so they cannot drift from what the parser accepts.
 - `src/kohakuterrarium/prompt/aggregator.py` — the composition function.
 - `src/kohakuterrarium/prompt/framework_hints.py` — the canonical blocks.
 - `src/kohakuterrarium/prompt/tool_contributions.py` — `## Tool guidance`.
-- `src/kohakuterrarium/llm/tools.py` — native schema construction.
+- `src/kohakuterrarium/llm/tools/build.py` — native schema construction.
 - `src/kohakuterrarium/modules/tool/doc_mode.py` — tier resolution.
 - `src/kohakuterrarium/terrarium/runtime_prompt.py` — the live graph block.
 - `src/kohakuterrarium/builtin_skills/` — the tiered documentation corpus.

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.core.channel import ChannelMessage
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory._internal.protocol import HOST_NODE_ID
 from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (

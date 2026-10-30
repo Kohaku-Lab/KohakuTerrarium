@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.errors import ConflictError, InvalidRequestError
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.events import EventFilter, EventKind

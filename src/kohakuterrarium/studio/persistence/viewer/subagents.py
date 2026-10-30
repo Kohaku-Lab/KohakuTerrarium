@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.errors import ConflictError, InvalidRequestError, NotFoundError
 from kohakuterrarium.session.store import SessionStore
 

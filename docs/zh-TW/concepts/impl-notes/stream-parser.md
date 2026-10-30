@@ -73,9 +73,9 @@ LLM 輸出的串流會逐塊送入 parser 狀態機。Parser 會依照目前設�
 
 - `src/kohakuterrarium/parsing/`：parser 狀態機；每種 tool-format
   變體（bracket、XML、native）各有一個模組。
-- `src/kohakuterrarium/core/controller.py`：消費 parser 事件。
-- `src/kohakuterrarium/core/executor.py`：把工具執行包成 tasks。
-- `src/kohakuterrarium/core/agent_tools.py`：submit-from-event 路徑，
+- `src/kohakuterrarium/core/controller/controller.py`：消費 parser 事件。
+- `src/kohakuterrarium/core/jobs/executor.py`：把工具執行包成 tasks。
+- `src/kohakuterrarium/core/agent/tools/dispatch.py`：submit-from-event 路徑，
   將 parser 輸出接到 executor。
 
 ## 另請參閱

@@ -10,9 +10,9 @@ from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.agent.history.compact import stage_resume_compact_state
 from kohakuterrarium.core.agent.history.message_history import replay_with_settled_tools
 from kohakuterrarium.core.agent.history.selection import restore_selections
-from kohakuterrarium.core.branch_continuation import load_persisted_branch_view
-from kohakuterrarium.core.config_serde import unpack_agent_config
-from kohakuterrarium.core.conversation_elide import (
+from kohakuterrarium.core.conversation.continuation import load_persisted_branch_view
+from kohakuterrarium.core.config.serde import unpack_agent_config
+from kohakuterrarium.core.conversation.elide import (
     elide_stale_tool_results,
     estimate_tokens,
 )

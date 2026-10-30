@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from kohakuterrarium.core.job import JobState
+from kohakuterrarium.core.jobs.job import JobState
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
 from kohakuterrarium.mcp_server.delegation_adapters import DelegationAdapters
 from kohakuterrarium.mcp_server.delegation_history import DelegationHistory

@@ -4,8 +4,8 @@ Kept separate from :mod:`kohakuterrarium.session.resume` so the resume
 facade stays under the source-file size guard.
 """
 
-from kohakuterrarium.core.conversation import Conversation
-from kohakuterrarium.core.conversation_sanitize import normalize_tool_names
+from kohakuterrarium.core.conversation.conversation import Conversation
+from kohakuterrarium.core.conversation.sanitize import normalize_tool_names
 
 
 def build_conversation(messages: list[dict]) -> Conversation:

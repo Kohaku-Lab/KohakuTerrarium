@@ -24,7 +24,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 
 ## 生物設定 (`config.yaml`)
 
-由 `kohakuterrarium.core.config.load_agent_config` 載入。檔案查找順序：`config.yaml` → `config.yml` → `config.json` → `config.toml`。
+由 `kohakuterrarium.core.config.load.load_agent_config` 載入。檔案查找順序：`config.yaml` → `config.yml` → `config.json` → `config.toml`。
 
 ### 頂層欄位
 

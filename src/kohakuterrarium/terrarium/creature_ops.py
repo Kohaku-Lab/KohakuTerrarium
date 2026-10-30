@@ -32,7 +32,7 @@ from kohakuterrarium.core.agent.tools.options import (
     agent_set_tool_options,
     agent_tool_inventory,
 )
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     encode_branch_view,
     selected_branch_view,
 )

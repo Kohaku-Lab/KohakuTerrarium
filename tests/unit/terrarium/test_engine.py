@@ -871,7 +871,7 @@ class TestEnvironmentChannelAccessors:
 class TestAddCreatureExtensionInjection:
     async def test_tools_reach_the_agent_registry(self, tmp_path):
         from kohakuterrarium import tool
-        from kohakuterrarium.core.config_types import (
+        from kohakuterrarium.core.config.types import (
             AgentConfig,
             InputConfig,
             OutputConfig,

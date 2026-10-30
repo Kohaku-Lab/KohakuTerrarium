@@ -13,7 +13,7 @@ from typing import Any
 
 from kohakuterrarium.builtin_skills import get_all_subagent_docs, get_all_tool_docs
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.tool_gate import visible_subagent_names, visible_tool_names
+from kohakuterrarium.core.tools.gate import visible_subagent_names, visible_tool_names
 from kohakuterrarium.parsing.format import (
     BRACKET_FORMAT,
     XML_FORMAT,

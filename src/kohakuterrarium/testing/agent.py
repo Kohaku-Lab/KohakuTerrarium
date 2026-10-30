@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
-from kohakuterrarium.core.controller import Controller, ControllerConfig
+from kohakuterrarium.core.controller.controller import Controller, ControllerConfig
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session, set_session
 from kohakuterrarium.modules.output.base import OutputModule

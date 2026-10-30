@@ -357,23 +357,21 @@ src/kohakuterrarium/
 │   │                         #   budget_recovery), tools/ (dispatch, gate, options, ...),
 │   │                         #   history/ (messages, message_history, selection, compact)
 │   ├── turn.py               # TurnResult / TextChunk / Activity / TurnEnded: typed turn events
-│   ├── controller.py         # Controller: LLM conversation loop + event queue
-│   │                         #   (+ controller_metrics.py, controller_plugins.py)
-│   ├── conversation.py       # Context management (multimodal aware)
-│   ├── compact.py            # Non-blocking context compaction (+ compact_text.py)
-│   ├── config.py             # Config loading and parsing
-│   ├── config_merge.py       # Inheritance/override merging for agent configs
-│   ├── config_serde.py       # AgentConfig <-> primitive-dict (de)serialization
-│   ├── config_types.py       # Config dataclasses (AgentConfig, InputConfig, etc.)
+│   ├── controller/           # Controller: LLM conversation loop + event queue
+│   │                         #   (controller, context, messages, metrics, plugins, recovery)
+│   ├── conversation/         # Context management (multimodal aware): conversation, elide,
+│   │                         #   sanitize, snapshot, branch, continuation, pinned, ...
+│   ├── compact/              # Non-blocking context compaction (manager, branch, splice, text)
+│   ├── config/               # load (parsing), types (AgentConfig, ...), merge, serde, resolve
+│   ├── jobs/                 # Background job runner: executor, job, label, single_flight,
+│   │                         #   backgroundify (mid-flight direct→background promotion)
+│   ├── tools/                # Tool-call plumbing: dispatch, output (normalization),
+│   │                         #   gate, native_validation, provider_tools, execution_context
 │   ├── constants.py          # Shared constants
 │   ├── channel.py            # Channel primitives (SubAgentChannel, AgentChannel)
 │   ├── events.py             # TriggerEvent + related event types
-│   ├── executor.py           # Background job runner (+ job.py, single_flight.py,
-│   │                         #   backgroundify.py mid-flight direct→background promotion)
 │   ├── budget.py             # Shared budget primitives for agent / sub-agent loops
-│   ├── tool_output.py        # Tool-output normalization + rendering
 │   ├── metrics_hook.py       # Process-wide metrics observation hook
-│   ├── native_tool_validation.py # Provider-native tool option validation
 │   ├── loader.py             # Custom module loading from paths
 │   ├── output_wiring.py      # Turn-end output wiring hook (routes to creature sinks)
 │   ├── registry.py           # Per-agent module registration

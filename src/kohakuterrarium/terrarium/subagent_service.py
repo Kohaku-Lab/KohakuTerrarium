@@ -2,7 +2,7 @@
 
 from typing import Any, Protocol
 
-from kohakuterrarium.core.context_snapshot import ContextSnapshot
+from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 
 from kohakuterrarium.terrarium.subagent_conversations import (
     read_subagent_conversation,

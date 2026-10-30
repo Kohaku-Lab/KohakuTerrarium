@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.errors import SessionNotResumableError
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.session.resume import _load_conversation_with_replay_fallback
 from kohakuterrarium.session.readonly_view import SessionReadView

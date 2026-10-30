@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from kohakuterrarium.builtins.tools.read import MAX_IMAGE_BYTES, ReadTool
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.core.tool_output import artifact_served_url
+from kohakuterrarium.core.tools.output import artifact_served_url
 from kohakuterrarium.llm.media.artifacts import resolve_artifact_url
 from kohakuterrarium.llm.grok.video import (
     DEFAULT_GROK_VIDEO_MODEL,

@@ -9,7 +9,7 @@ import kohakuterrarium.bootstrap.agent_init as agent_init
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.builtins.outputs.stdout import StdoutOutput
-from kohakuterrarium.core.config import build_agent_config
+from kohakuterrarium.core.config.load import build_agent_config
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import CreatureConfig

@@ -6,7 +6,7 @@ from dataclasses import MISSING, fields
 from typing import Any
 
 from kohakuterrarium.errors import LLMNotConfiguredError
-from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.profiles import api_keys as _api_keys
 from kohakuterrarium.llm.profiles.backend_registry import (

@@ -19,22 +19,22 @@ from kohakuterrarium.core.agent.history.raw_history import (
     prepare_raw_prefix_for_target,
     raw_target_content,
 )
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     persist_branch_view,
     require_no_active_compact,
     require_no_running_jobs,
 )
-from kohakuterrarium.core.compact_branch import (
+from kohakuterrarium.core.compact.branch import (
     compact_source_path_from_event,
     is_summary_message,
 )
 from kohakuterrarium.core.events import EventType, TriggerEvent
-from kohakuterrarium.core.history_source import (
+from kohakuterrarium.core.conversation.source import (
     PreparedHistorySource,
     prepare_branch_source,
 )
-from kohakuterrarium.core.settled_refresh import prepare_mutation_prefix
+from kohakuterrarium.core.conversation.settled_refresh import prepare_mutation_prefix
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.llm.message import content_parts_to_dicts, normalize_content_parts
 from kohakuterrarium.session.history import replay_conversation

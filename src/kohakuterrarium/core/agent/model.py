@@ -8,7 +8,7 @@ from typing import Any
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.agent.turn.budget_recovery import attach_recovery_hooks
 from kohakuterrarium.core.agent.history.selection import persist_model_selection
-from kohakuterrarium.core.provider_tools import sync_provider_tools
+from kohakuterrarium.core.tools.provider_tools import sync_provider_tools
 from kohakuterrarium.core.token_ledger import context_window
 from kohakuterrarium.llm.profiles.resolve import (
     profile_to_identifier,

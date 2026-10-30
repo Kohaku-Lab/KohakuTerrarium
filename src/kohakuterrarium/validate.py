@@ -23,7 +23,7 @@ from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.errors import ConfigError, LLMNotConfiguredError
-from kohakuterrarium.core.config import AgentConfig, load_agent_config
+from kohakuterrarium.core.config.load import AgentConfig, load_agent_config
 from kohakuterrarium.llm.profiles.resolve import (
     profile_to_identifier,
     resolve_controller_llm,

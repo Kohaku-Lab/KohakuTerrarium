@@ -10,7 +10,7 @@ import asyncio
 from typing import Any
 
 from kohakuterrarium.core.agent.turn.mid_turn import _to_serializable_content
-from kohakuterrarium.core.controller_context import declare_message_origin
+from kohakuterrarium.core.controller.context import declare_message_origin
 from kohakuterrarium.core.agent.tools.runtime_tools import _make_job_label
 from kohakuterrarium.core.event_inbox import EventEnvelope, EventInbox, TurnOutcome
 from kohakuterrarium.core.events import TriggerEvent

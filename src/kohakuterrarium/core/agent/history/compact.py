@@ -13,12 +13,12 @@ from kohakuterrarium.core.agent.history.message_history import (
     replay_with_settled_tools,
     snapshot_needs_settled_tool_replay,
 )
-from kohakuterrarium.core.branch_continuation import (
+from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     load_persisted_branch_view,
 )
-from kohakuterrarium.core.compact import CompactConfig, CompactManager
-from kohakuterrarium.core.snapshot_history import (
+from kohakuterrarium.core.compact.manager import CompactConfig, CompactManager
+from kohakuterrarium.core.conversation.snapshot import (
     prepare_snapshot,
     replayed_compact_state,
 )

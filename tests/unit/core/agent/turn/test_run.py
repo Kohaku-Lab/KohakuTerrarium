@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.turn import Activity, AgentEventStream, TurnCapture
 from kohakuterrarium.core.agent.turn import run as agent_turn

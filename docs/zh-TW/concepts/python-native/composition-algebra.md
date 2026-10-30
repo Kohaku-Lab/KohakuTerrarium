@@ -62,7 +62,7 @@ agent-factory wrappers 會處理生命週期樣板：進入／離開時 start / 
 ```python
 import asyncio
 from kohakuterrarium.compose import agent, factory
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 
 def make_agent(name, prompt):
     c = load_agent_config("@kt-biome/creatures/general")

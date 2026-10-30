@@ -1,8 +1,8 @@
-"""Pydantic mirror of ``core.config_types.AgentConfig``.
+"""Pydantic mirror of ``core.config.types.AgentConfig``.
 
 These models validate creature-save payloads at the HTTP boundary. Runtime
 configuration continues to use the core dataclass system, so fields and defaults
-must remain aligned with ``kohakuterrarium/core/config_types.py``.
+must remain aligned with ``kohakuterrarium/core/config/types.py``.
 """
 
 from typing import Any, Literal

@@ -20,14 +20,14 @@ from kohakuterrarium.builtins.user_commands import (
     list_builtin_user_commands,
 )
 from kohakuterrarium.core.budget import IterationBudget
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.controller import Controller, ControllerConfig
-from kohakuterrarium.core.executor import Executor
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.controller.controller import Controller, ControllerConfig
+from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.session import Session, get_session
 from kohakuterrarium.core.termination import TerminationChecker, TerminationConfig
-from kohakuterrarium.core.tool_gate import is_subagent_visible, visible_catalog
+from kohakuterrarium.core.tools.gate import is_subagent_visible, visible_catalog
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.router import OutputRouter

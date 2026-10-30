@@ -10,7 +10,7 @@ import asyncio
 import pytest
 
 from kohakuterrarium.core.budget import IterationBudget
-from kohakuterrarium.core.job import JobState, JobType
+from kohakuterrarium.core.jobs.job import JobState, JobType
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.manager import SubAgentManager
@@ -436,7 +436,7 @@ class TestRunSubagentOutcomes:
         # job.run() itself raising (not the LLM, but the job wrapper) is
         # caught by _run_subagent's generic handler → failed result +
         # ERROR job status.
-        from kohakuterrarium.core.job import JobStatus, JobType
+        from kohakuterrarium.core.jobs.job import JobStatus, JobType
         from kohakuterrarium.modules.subagent.result import SubAgentJob
 
         mgr = _manager(ScriptedLLM(["x"]))

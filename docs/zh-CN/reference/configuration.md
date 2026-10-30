@@ -24,7 +24,7 @@ Config 中引用其他文件或套件的字段时，解析顺序如下：
 
 ## Creature配置 (`config.yaml`)
 
-由 `kohakuterrarium.core.config.load_agent_config` 加载。文件查找顺序：`config.yaml` → `config.yml` → `config.json` → `config.toml`。
+由 `kohakuterrarium.core.config.load.load_agent_config` 加载。文件查找顺序：`config.yaml` → `config.yml` → `config.json` → `config.toml`。
 
 ### 顶层字段
 

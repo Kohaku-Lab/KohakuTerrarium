@@ -2,7 +2,7 @@
 
 import pytest
 
-from kohakuterrarium.core.branch_continuation import load_persisted_branch_view
+from kohakuterrarium.core.conversation.continuation import load_persisted_branch_view
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.history import (
     replay_conversation,

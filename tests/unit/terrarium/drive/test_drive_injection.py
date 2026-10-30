@@ -6,7 +6,7 @@ a fresh agent reports no injection until installed.
 """
 
 import kohakuterrarium as kt
-from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.terrarium.drive.injection import (
     has_drive_injection,
     install_drive_runtime,

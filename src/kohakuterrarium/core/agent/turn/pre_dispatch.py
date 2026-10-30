@@ -7,7 +7,7 @@ executor dispatch, or veto the call via ``PluginBlockError``.
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kohakuterrarium.core.tool_dispatch import ToolDispatchBlocked, dispatch_tool_hooks
+from kohakuterrarium.core.tools.dispatch import ToolDispatchBlocked, dispatch_tool_hooks
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.modules.plugin.base import (
     PluginBlockError,
@@ -18,7 +18,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent
-    from kohakuterrarium.core.controller import Controller
+    from kohakuterrarium.core.controller.controller import Controller
 
 logger = get_logger(__name__)
 

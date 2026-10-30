@@ -34,7 +34,7 @@ order:
 
 ## Creature config (`config.yaml`)
 
-Loaded by `kohakuterrarium.core.config.load_agent_config`. File lookup
+Loaded by `kohakuterrarium.core.config.load.load_agent_config`. File lookup
 order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 
 ### Top-level fields

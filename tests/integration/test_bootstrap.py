@@ -44,8 +44,8 @@ from kohakuterrarium.bootstrap.subagents import create_subagent_config
 from kohakuterrarium.bootstrap.tools import create_tool
 from kohakuterrarium.bootstrap.triggers import create_trigger
 from kohakuterrarium.core.agent import Agent
-from kohakuterrarium.core.config import build_agent_config
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.load import build_agent_config
+from kohakuterrarium.core.config.types import (
     SubAgentConfigItem,
     ToolConfigItem,
     TriggerConfig,

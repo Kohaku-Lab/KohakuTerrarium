@@ -59,7 +59,7 @@ Nothing inside the framework imports `cli/`; it is the top of the graph.
   the per-command modules.
 - `@package/path` syntax (e.g. `@kt-biome/creatures/swe`) passes through
   the dispatchers verbatim; resolution happens once, inside the config
-  loaders (`core/config.py:load_agent_config` /
+  loaders (`core/config/load.py:load_agent_config` /
   `terrarium/config.py:load_terrarium_config`), for every entry point.
 
 ## See also

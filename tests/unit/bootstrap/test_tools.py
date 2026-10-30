@@ -11,7 +11,7 @@ from kohakuterrarium.bootstrap.tools import (
     create_tool,
     init_tools,
 )
-from kohakuterrarium.core.config_types import (
+from kohakuterrarium.core.config.types import (
     AgentConfig,
     ToolConfigItem,
 )

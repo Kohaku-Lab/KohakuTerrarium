@@ -2,7 +2,7 @@
 
 import json
 
-from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
+from kohakuterrarium.core.conversation.elide import TOOL_FEEDBACK_KIND
 from kohakuterrarium.studio.persistence.session_index.exchange import (
     EMPTY_EXCHANGE,
     flatten_text,

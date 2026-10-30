@@ -48,9 +48,9 @@ from websockets import serve
 from kohakuterrarium import Terrarium
 from kohakuterrarium.errors import MediaReferenceError
 from kohakuterrarium.core.agent.turn.budget_recovery import apply_context_repair
-from kohakuterrarium.core.config_types import AgentConfig, ToolConfigItem
-from kohakuterrarium.core.controller import Controller, ControllerConfig
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.config.types import AgentConfig, ToolConfigItem
+from kohakuterrarium.core.controller.controller import Controller, ControllerConfig
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.llm.antigravity import auth as agy_auth
 from kohakuterrarium.session.history import (
@@ -61,7 +61,7 @@ from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.tool_output import normalize_tool_result
+from kohakuterrarium.core.tools.output import normalize_tool_result
 from kohakuterrarium.llm.profiles import api_keys as ak
 from kohakuterrarium.llm.media import artifacts as artifact_resolve
 from kohakuterrarium.llm.profiles import backends as backends_mod

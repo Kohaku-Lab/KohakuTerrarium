@@ -81,7 +81,7 @@ compact manager 就会启动一个背景 task。
 - `session/memory.py`：FTS5 查询与向量搜寻。
 - `session/embedding.py`：model2vec / sentence-transformer / API
   provider 的 embeddings。
-- `core/compact.py`：使用 atomic-splice 技巧的 `CompactManager`。
+- `core/compact/manager.py`：使用 atomic-splice 技巧的 `CompactManager`。
   见 [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md)。
 
 Embedding provider（`kt embedding`）：

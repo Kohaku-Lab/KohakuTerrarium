@@ -38,7 +38,7 @@ The test pins both halves:
 
 The framework logger sets ``propagate=False`` on the
 ``kohakuterrarium`` root; we attach a plain ``logging.Handler``
-directly to ``kohakuterrarium.core.conversation`` for capture.
+directly to ``kohakuterrarium.core.conversation.conversation`` for capture.
 """
 
 import asyncio
@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.session.history import (
     normalize_resumable_events,
     replay_conversation,
@@ -176,7 +176,9 @@ class TestMultinodeB8OrphanToolCalls:
 
         # Attach our log handler BEFORE any creature is built so we
         # capture the WARNINGs that the orphan-sanitiser logs.
-        conv_logger = logging.getLogger("kohakuterrarium.core.conversation")
+        conv_logger = logging.getLogger(
+            "kohakuterrarium.core.conversation.conversation"
+        )
         handler = _CapturingHandler()
         prior_level = conv_logger.level
         conv_logger.addHandler(handler)
@@ -334,7 +336,7 @@ class TestMultinodeB8OrphanToolCalls:
                     # right logger before asserting on absence.
                     assert handler.records or sanitised == messages, (
                         "no log records captured from "
-                        "kohakuterrarium.core.conversation — the test's "
+                        "kohakuterrarium.core.conversation.conversation — the test's "
                         "handler attachment is wrong, not the framework."
                     )
                     surviving_tool_msgs = [

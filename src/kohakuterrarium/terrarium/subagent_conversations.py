@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from kohakuterrarium.errors import ConflictError, InvalidRequestError, NotFoundError
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.modules.subagent.interactive import InteractiveSubAgent
 
 _JOB_ID_RE = re.compile(r"^agent_(?P<name>.+)_[0-9a-f]{8}$")

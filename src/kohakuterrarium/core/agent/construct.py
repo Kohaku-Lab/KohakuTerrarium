@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
-from kohakuterrarium.core.config import AgentConfig, load_agent_config
+from kohakuterrarium.core.config.load import AgentConfig, load_agent_config
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule

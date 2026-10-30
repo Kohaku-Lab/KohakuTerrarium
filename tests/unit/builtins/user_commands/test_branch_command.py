@@ -1,7 +1,7 @@
 """Unit tests for the /branch command helpers."""
 
 from kohakuterrarium.builtins.user_commands.branch import _rebuild_conv
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation.conversation import Conversation
 
 
 def test_rebuild_conv_preserves_user_turn_metadata():

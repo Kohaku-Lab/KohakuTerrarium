@@ -21,7 +21,7 @@ from kohakuterrarium.bootstrap.llm import (
     create_llm_provider,
     create_llm_from_profile_name,
 )
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider

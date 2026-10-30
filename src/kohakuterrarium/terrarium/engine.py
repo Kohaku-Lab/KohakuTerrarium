@@ -30,7 +30,7 @@ import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 import kohakuterrarium.terrarium.drive.runtime as _drive_runtime
-from kohakuterrarium.core.context_snapshot import ContextSnapshot
+from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import (

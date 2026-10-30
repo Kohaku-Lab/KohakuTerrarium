@@ -76,9 +76,9 @@ and feeds them back to the LLM for the next turn.
 
 - `src/kohakuterrarium/parsing/`: the parser state machine, one
   module per tool-format variant (bracket, XML, native).
-- `src/kohakuterrarium/core/controller.py`: consumes parser events.
-- `src/kohakuterrarium/core/executor.py`: wraps tool runs as tasks.
-- `src/kohakuterrarium/core/agent_tools.py`: submit-from-event path
+- `src/kohakuterrarium/core/controller/controller.py`: consumes parser events.
+- `src/kohakuterrarium/core/jobs/executor.py`: wraps tool runs as tasks.
+- `src/kohakuterrarium/core/agent/tools/dispatch.py`: submit-from-event path
   that ties parser output to executor.
 
 ## See also

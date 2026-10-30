@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Protocol
 
 from kohakuterrarium.compose.core import BaseRunnable
-from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 

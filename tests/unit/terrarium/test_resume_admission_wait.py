@@ -7,8 +7,8 @@ from contextlib import closing
 
 import pytest
 
-from kohakuterrarium.core.config import build_agent_config
-from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.core.config.load import build_agent_config
+from kohakuterrarium.core.config.serde import pack_agent_config
 from kohakuterrarium.session.resource_gate import GATE, try_fast
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod

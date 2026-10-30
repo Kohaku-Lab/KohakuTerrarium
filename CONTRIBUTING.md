@@ -237,7 +237,7 @@ We removed the inline code snippets from this document on purpose; they drift fr
 
 - **A built-in tool**: read [`src/kohakuterrarium/builtins/tools/README.md`](src/kohakuterrarium/builtins/tools/README.md) and copy the pattern from a small existing tool such as `glob.py` or `grep.py`. Add the matching skill doc under [`src/kohakuterrarium/builtin_skills/tools/`](src/kohakuterrarium/builtin_skills/tools/).
 - **A built-in sub-agent**: read [`src/kohakuterrarium/builtins/subagents/README.md`](src/kohakuterrarium/builtins/subagents/README.md) and use an existing config such as `explore.py` or `research.py` as the template. Add the matching skill doc under [`src/kohakuterrarium/builtin_skills/subagents/`](src/kohakuterrarium/builtin_skills/subagents/).
-- **An LLM preset**: see `src/kohakuterrarium/llm/presets.py` for the dict shape, or use `kt config llm add` to register a user preset.
+- **An LLM preset**: see `src/kohakuterrarium/llm/presets/catalog.py` for the dict shape, or use `kt config llm add` to register a user preset.
 - **An example agent or terrarium**: copy an existing folder under `examples/agent-apps/` or `examples/terrariums/` and adapt the config + system prompt.
 - **A package (shareable creature/terrarium bundle)**: see the package system documented under `kt install --help` and `kt info`.
 

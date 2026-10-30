@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium import Agent
-from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.core.context_snapshot import capture_context
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.conversation.context_snapshot import capture_context
+from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.utils.file_guard import FileReadState

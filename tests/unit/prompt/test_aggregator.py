@@ -6,7 +6,7 @@ gate is asserted in both directions: present when true, absent when false.
 """
 
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.tool_gate import renderer_visibility
+from kohakuterrarium.core.tools.gate import renderer_visibility
 from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolConfig
 from kohakuterrarium.modules.tool.base import ToolResult

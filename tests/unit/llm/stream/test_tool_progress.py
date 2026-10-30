@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.controller import Controller, ControllerConfig
+from kohakuterrarium.core.controller.controller import Controller, ControllerConfig
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.anthropic.provider import AnthropicProvider
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
