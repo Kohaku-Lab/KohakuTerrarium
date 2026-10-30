@@ -7,6 +7,7 @@ import pytest
 from kohakuterrarium.builtins.tools import python as python_mod
 from kohakuterrarium.builtins.tools.python import PythonTool
 from kohakuterrarium.modules.tool.base import ToolConfig
+from tests.helpers.waiting import wait_until
 
 
 def _make_tool() -> PythonTool:
@@ -44,11 +45,7 @@ class TestPythonToolSubprocess:
         task = asyncio.create_task(
             tool._execute({"code": "import time; time.sleep(60)"})
         )
-        for _ in range(500):
-            if spawned:
-                break
-            await asyncio.sleep(0.01)
-        assert spawned, "subprocess was never spawned"
+        await wait_until(lambda: spawned, what="subprocess spawn")
 
         task.cancel()
         with pytest.raises(asyncio.CancelledError):

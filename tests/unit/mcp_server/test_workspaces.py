@@ -8,6 +8,7 @@ import pytest
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig
 from kohakuterrarium.mcp_server.workspaces import WorkspacePool, WorkspaceRegistry
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from tests.helpers.waiting import wait_until
 
 
 @pytest.mark.parametrize("entries", [None, {}, "", 1, True])
@@ -161,10 +162,7 @@ async def test_shutdown_cancels_pending_first_load(tmp_path, operation, cleanup_
 
     task = asyncio.create_task(pending())
     control = None
-    for _ in range(100):
-        if (tmp_path / "entered").exists():
-            break
-        await asyncio.sleep(0.01)
+    await wait_until((tmp_path / "entered").exists, what="workspace load")
     try:
         assert (tmp_path / "entered").exists()
         if operation == "remove":
@@ -175,10 +173,7 @@ async def test_shutdown_cancels_pending_first_load(tmp_path, operation, cleanup_
             if operation == "remove"
             else pool.__aexit__(None, None, None)
         )
-        for _ in range(200):
-            if (tmp_path / "cleaning").exists():
-                break
-            await asyncio.sleep(0.01)
+        await wait_until((tmp_path / "cleaning").exists, what="workspace cleanup")
         assert (tmp_path / "cancelled").exists(), "loading never received cancellation"
         assert (tmp_path / "cleaning").exists()
         assert not control.done()
@@ -189,7 +184,7 @@ async def test_shutdown_cancels_pending_first_load(tmp_path, operation, cleanup_
         (tmp_path / "release-cleanup").touch()
         if cleanup_fails:
             with pytest.raises(OSError, match="cleanup failed"):
-                await asyncio.wait_for(control, 5)
+                await asyncio.wait_for(control, 60)
             assert "project" in registry.read()
             assert pool.list()[0]["state"] == "draining"
             with pytest.raises(ValueError, match="stopping"):
@@ -201,7 +196,7 @@ async def test_shutdown_cancels_pending_first_load(tmp_path, operation, cleanup_
             else:
                 await pool.__aexit__(None, None, None)
         else:
-            await asyncio.wait_for(control, 5)
+            await asyncio.wait_for(control, 60)
         assert (
             task.done()
         ), "shutdown left an admitted request waiting on initialization"

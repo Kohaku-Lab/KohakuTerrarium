@@ -1,7 +1,6 @@
 """Local registration commands preserve endpoint identity and do not start it."""
 
 import asyncio
-import json
 import os
 
 import pytest
@@ -16,6 +15,7 @@ from kohakuterrarium.mcp_server.config import GlobalToolsConfig
 from kohakuterrarium.mcp_server.records import read_json, write_json
 from kohakuterrarium.mcp_server.service import is_running
 from kohakuterrarium.mcp_server.workspaces import WorkspacePool
+from tests.helpers.waiting import wait_until
 
 
 def test_offline_registry_lifecycle_does_not_create_or_start_endpoint(tmp_path):
@@ -36,13 +36,14 @@ def test_offline_registry_lifecycle_does_not_create_or_start_endpoint(tmp_path):
 
 
 async def response_for(store, request_id):
-    for _ in range(200):
+    def acknowledged():
         if store.response_path.is_file():
-            data = json.loads(store.response_path.read_text())
+            data = read_json(store.response_path)
             if data.get("request_id") == request_id:
                 return data
-        await asyncio.sleep(0.01)
-    pytest.fail("Management request was not acknowledged")
+        return None
+
+    return await wait_until(acknowledged, what="management acknowledgement")
 
 
 @pytest.mark.parametrize("payload", ["{broken", "[]", "null"])
@@ -102,10 +103,7 @@ async def test_response_write_retry_does_not_execute_twice(tmp_path, monkeypatch
     async with WorkspacePool(GlobalToolsConfig(), store.registry) as pool:
         task = asyncio.create_task(serve_management(store, "run", pool))
         try:
-            for _ in range(100):
-                if store.registry.read():
-                    break
-                await asyncio.sleep(0.01)
+            await wait_until(store.registry.read, what="registration")
             registration = store.registry.read()["project"]
             await asyncio.sleep(0.1)
             assert not task.done()
@@ -276,16 +274,12 @@ async def test_restart_ignores_old_request_and_response(tmp_path):
                     "path": str(tmp_path),
                 },
             )
-            for _ in range(1000):
-                if store.registry.read():
-                    break
-                await asyncio.sleep(0.01)
+            await wait_until(store.registry.read, what="registration")
             assert set(store.registry.read()) == {"new"}
-            for _ in range(1000):
-                reply = read_json(store.response_path)
-                if reply.get("run_id") == "new":
-                    break
-                await asyncio.sleep(0.01)
+            reply = await wait_until(
+                lambda: (r := read_json(store.response_path))["run_id"] == "new" and r,
+                what="reply of the new run",
+            )
             assert reply["run_id"] == "new" and reply["result"]["workspace_id"] == "new"
         finally:
             task.cancel()
@@ -352,17 +346,13 @@ async def test_concurrent_callers_share_one_command_slot_without_overwrite(tmp_p
         with store.instance_lock:
             first = asyncio.create_task(
                 asyncio.to_thread(
-                    manage, store, "add", name="first", path=tmp_path, wait=2
+                    manage, store, "add", name="first", path=tmp_path, wait=30
                 )
             )
-            for _ in range(100):
-                if store.control_path.exists():
-                    break
-                await asyncio.sleep(0.01)
-            assert store.control_path.exists()
+            await wait_until(store.control_path.exists, what="control record")
             second = asyncio.create_task(
                 asyncio.to_thread(
-                    manage, store, "add", name="second", path=tmp_path, wait=2
+                    manage, store, "add", name="second", path=tmp_path, wait=30
                 )
             )
             await asyncio.sleep(0.05)

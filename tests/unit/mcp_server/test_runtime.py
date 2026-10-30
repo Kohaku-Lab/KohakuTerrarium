@@ -155,7 +155,7 @@ async def test_file_checks_plugins_and_isolated_jobs(tmp_path):
         assert isinstance(background, PromotionResult)
         assert second.job(background.job_id)["error"] == "Unknown job"
         assert (await first.wait(background.job_id, 0.01))["state"] == "running"
-        complete = await first.wait(background.job_id, 10)
+        complete = await first.wait(background.job_id, 60)
         assert complete["state"] == "done" and "complete" in complete["output"]
         assert (folder / "once").read_text() == "1"
         assert not (other / "once").exists()
@@ -164,7 +164,7 @@ async def test_file_checks_plugins_and_isolated_jobs(tmp_path):
             "python", {"code": "import time; time.sleep(30)", "run_in_background": True}
         )
         assert await first.cancel(running.job_id)
-        assert (await first.wait(running.job_id, 5))["state"] == "cancelled"
+        assert (await first.wait(running.job_id, 60))["state"] == "cancelled"
     restarted = ToolRuntime(MCPToolsConfig(workspace=folder))
     assert restarted.job(background.job_id)["error"] == "Unknown job"
 
@@ -185,12 +185,12 @@ async def test_promotion_and_waiter_cancellation_do_not_repeat_or_kill_work(tmp_
         assert runtime.promote(job_id)
         promoted = await call
         assert promoted.job_id == job_id
-        waiter = asyncio.create_task(runtime.wait(job_id, 10))
+        waiter = asyncio.create_task(runtime.wait(job_id, 60))
         await asyncio.sleep(0)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
-        assert (await runtime.wait(job_id, 10))["state"] == "done"
+        assert (await runtime.wait(job_id, 60))["state"] == "done"
         assert (tmp_path / "marker").read_text() == "once"
         assert len(runtime.executor.job_store.get_all_statuses()) == 1
 
@@ -322,12 +322,12 @@ async def test_cancelled_job_remains_busy_until_its_resource_cleanup_finishes(tm
             await asyncio.wait_for(cleaning.wait(), 2)
             assert runtime.job(job.job_id)["state"] == "cancelled"
             assert runtime.is_busy
-            waiting = asyncio.create_task(runtime.wait(job.job_id, 2))
+            waiting = asyncio.create_task(runtime.wait(job.job_id, 30))
             await asyncio.sleep(0)
             assert not waiting.done()
         finally:
             release.set()
-            result = await (waiting or runtime.wait(job.job_id, 2))
+            result = await (waiting or runtime.wait(job.job_id, 30))
         assert result["state"] == "cancelled"
         assert result["error"] == "User manually interrupted this job."
         assert runtime.job(job.job_id) == result

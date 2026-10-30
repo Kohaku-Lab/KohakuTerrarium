@@ -1,7 +1,5 @@
 """Unit tests for :mod:`kohakuterrarium.studio.sessions.live.run_classes`."""
 
-import asyncio
-
 import kohakuterrarium.session.job_reaper as job_reaper
 import kohakuterrarium.session.run_state as rs
 from kohakuterrarium.session.store import SessionStore
@@ -13,6 +11,7 @@ from kohakuterrarium.studio.sessions.live.run_classes import (
     read_run_classes,
 )
 from kohakuterrarium.terrarium import Terrarium
+from tests.helpers.waiting import wait_until
 
 
 def test_read_run_classes_reads_every_agent_of_a_file(tmp_path, monkeypatch):
@@ -63,15 +62,9 @@ async def test_apply_stops_stopped_creatures_and_nudges_interrupted_ones(
         await apply_run_classes(
             engine, keep.graph_id, {"keep": "interrupted"}, nudge=True
         )
-        for _ in range(100):
-            users = [
-                m["content"]
-                for m in keep.agent.controller.conversation.to_messages()
-                if m["role"] == "user"
-            ]
-            if users:
-                break
-            await asyncio.sleep(0.02)
+        users = await wait_until(
+            lambda: _user_messages(keep), interval=0.02, what="continue nudge"
+        )
         assert users == [CONTINUE_NUDGE]
         assert keep.is_running is True
         empty = {"stopped": [], "interrupted": [], "killed": {}}
@@ -84,6 +77,14 @@ async def test_apply_stops_stopped_creatures_and_nudges_interrupted_ones(
         )
     finally:
         await engine.shutdown()
+
+
+def _user_messages(creature):
+    return [
+        m["content"]
+        for m in creature.agent.controller.conversation.to_messages()
+        if m["role"] == "user"
+    ]
 
 
 def _job(job_id, name="bash", kind="tool", detail="command='sleep 9'"):
@@ -174,15 +175,12 @@ async def test_idle_creature_with_killed_jobs_is_told_once_and_jobs_marked(
         assert applied["killed"] == {
             "keep": [{"job_id": "bg", "kind": "tool", "name": "bash"}]
         }
-        for _ in range(200):
-            users = [
-                m["content"]
-                for m in keep.agent.controller.conversation.to_messages()
-                if m["role"] == "user"
-            ]
-            if users and job_reaper.reaped_ids(store, "keep"):
-                break
-            await asyncio.sleep(0.02)
+        await wait_until(
+            lambda: _user_messages(keep) and job_reaper.reaped_ids(store, "keep"),
+            interval=0.02,
+            what="restart notice and reaped job",
+        )
+        users = _user_messages(keep)
         assert len(users) == 1 and "job bg" in users[0]
         assert users[0].startswith("[The server restarted. These jobs")
         assert job_reaper.reaped_ids(store, "keep") == {"bg"}

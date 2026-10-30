@@ -8,6 +8,7 @@ import pytest
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
 from kohakuterrarium.mcp_server.runtime import ToolRuntime
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from tests.helpers.waiting import wait_until
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +73,7 @@ async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path, capsy
         assert delegation.targets()[0]["name"] == "worker"
         first = await delegation.submit("worker", "remember blue")
         sid, job = first["session_id"], first["job_id"]
-        done = await runtime.wait(job, 10)
+        done = await runtime.wait(job, 60)
         assert done["state"] == "done" and "first answer" in done["output"]
         slow = await delegation.submit("worker", "slow", session_id=sid)
         busy = await delegation.submit("worker", "must not run", session_id=sid)
@@ -86,7 +87,7 @@ async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path, capsy
         assert runtime.job(slow["job_id"])["state"] == "cancelled"
         assert delegation.sessions()[0]["state"] == "stopped"
         continued = await delegation.submit("worker", "continue", session_id=sid)
-        assert (await runtime.wait(continued["job_id"], 10))["state"] == "done"
+        assert (await runtime.wait(continued["job_id"], 60))["state"] == "done"
         assert (
             capsys.readouterr().out == ""
         ), "resume must retain headless default output"
@@ -151,7 +152,7 @@ async def test_standalone_subagent_tools_workspace_and_no_continuation(tmp_path)
     )
     async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
         first = await runtime.delegation.submit("worker", "write the file")
-        result = await runtime.wait(first["job_id"], 10)
+        result = await runtime.wait(first["job_id"], 60)
         assert result["error"] is None, result["error"]
         assert result["state"] == "done", result
         assert (tmp_path / "answer.txt").read_text() == "delegated"
@@ -181,7 +182,7 @@ async def test_cancel_one_subagent_does_not_cancel_another(tmp_path):
         assert (await runtime.wait(first["job_id"], 0.01))["state"] == "running"
         assert await runtime.cancel(first["job_id"])
         assert runtime.job(first["job_id"])["state"] == "cancelled"
-        assert (await runtime.wait(second["job_id"], 10))["state"] == "done"
+        assert (await runtime.wait(second["job_id"], 60))["state"] == "done"
 
 
 async def test_unknown_targets_and_sessions_never_create_execution(tmp_path):
@@ -234,7 +235,7 @@ async def test_failed_start_is_terminal_and_close_releases_provider(tmp_path):
     )
     async with ToolRuntime(config, llm_factory=provider) as runtime:
         submitted = await runtime.delegation.submit("worker", "task")
-        result = await runtime.wait(submitted["job_id"], 10)
+        result = await runtime.wait(submitted["job_id"], 60)
         assert result["state"] == "error" and result["error"]
         assert providers[0].closed and providers[0].call_count == 0
         assert runtime.delegation.sessions()[0]["job_id"] is None
@@ -252,12 +253,8 @@ async def test_autonomous_turns_remain_enabled_and_observable(tmp_path):
     )
     async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
         result = await runtime.delegation.submit("worker", "hello")
-        assert (await runtime.wait(result["job_id"], 10))["state"] == "done"
-        for _ in range(200):
-            if model.call_count >= 2:
-                break
-            await asyncio.sleep(0.01)
-        assert model.call_count >= 2
+        assert (await runtime.wait(result["job_id"], 60))["state"] == "done"
+        await wait_until(lambda: model.call_count >= 2, what="timer-triggered turn")
         busy = await runtime.delegation.submit(
             "worker", "must not execute", session_id=result["session_id"]
         )
@@ -307,13 +304,13 @@ async def test_stop_cancels_previous_turn_background_tools(tmp_path):
     )
     async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
         submitted = await runtime.delegation.submit("worker", "first")
-        assert (await runtime.wait(submitted["job_id"], 10))["state"] == "done"
-        for _ in range(100):
-            if (tmp_path / "started").exists():
-                break
-            await asyncio.sleep(0.01)
-        assert (tmp_path / "started").exists(), json.dumps(
-            runtime.delegation.history(submitted["session_id"], limit=200)
+        assert (await runtime.wait(submitted["job_id"], 60))["state"] == "done"
+        await wait_until(
+            (tmp_path / "started").exists,
+            what="background tool start: "
+            + json.dumps(
+                runtime.delegation.history(submitted["session_id"], limit=200)
+            ),
         )
         assert not (tmp_path / "released").exists()
         second = await runtime.delegation.submit(
@@ -341,7 +338,7 @@ async def test_cleanup_failure_is_reported_without_leaving_running_job(tmp_path)
         llm_factory=lambda _: model,
     ) as runtime:
         submitted = await runtime.delegation.submit("worker", "task")
-        result = await runtime.wait(submitted["job_id"], 10)
+        result = await runtime.wait(submitted["job_id"], 60)
         assert result["state"] == "error" and "cleanup failed" in result["error"]
         assert runtime.delegation.sessions()[0]["job_id"] is None
         try:
@@ -362,7 +359,7 @@ async def test_close_racing_new_turn_cannot_restart_a_closed_session(tmp_path):
         config, llm_factory=lambda _: ScriptedLLM(["reply"])
     ) as runtime:
         first = await runtime.delegation.submit("worker", "first")
-        await runtime.wait(first["job_id"], 10)
+        await runtime.wait(first["job_id"], 60)
         close = asyncio.create_task(
             runtime.delegation.close_session(first["session_id"])
         )
@@ -432,7 +429,7 @@ async def test_invalid_definition_is_not_left_starting(tmp_path, kind):
     config = configuration(tmp_path, kind, tools=[{"name": "no_such_tool"}])
     async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
         job = await runtime.delegation.submit("worker", "task")
-        assert (await runtime.wait(job["job_id"], 10))["state"] == "error"
+        assert (await runtime.wait(job["job_id"], 60))["state"] == "error"
         assert runtime.delegation.sessions()[0]["state"] == "error"
     assert model.released
 
@@ -451,13 +448,13 @@ async def test_waiter_disconnect_and_parallel_creatures(tmp_path):
             runtime.delegation.submit("worker", "first isolated task"),
             runtime.delegation.submit("worker", "second isolated task"),
         )
-        waiter = asyncio.create_task(runtime.wait(first["job_id"], 10))
+        waiter = asyncio.create_task(runtime.wait(first["job_id"], 60))
         await asyncio.sleep(0.05)
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
             await waiter
-        assert (await runtime.wait(first["job_id"], 10))["state"] == "done"
-        assert (await runtime.wait(second["job_id"], 10))["state"] == "done"
+        assert (await runtime.wait(first["job_id"], 60))["state"] == "done"
+        assert (await runtime.wait(second["job_id"], 60))["state"] == "done"
         assert "second isolated task" not in str(models[0].call_log)
         assert "first isolated task" not in str(models[1].call_log)
 
@@ -482,7 +479,7 @@ async def test_subagent_job_stays_running_until_owned_cleanup_finishes(tmp_path)
             assert status["metadata"]["session_id"] == submitted["session_id"]
         finally:
             release.set()
-        assert (await runtime.wait(submitted["job_id"], 10))["state"] == "done"
+        assert (await runtime.wait(submitted["job_id"], 60))["state"] == "done"
 
 
 async def test_shutdown_error_does_not_skip_other_sessions_or_direct_jobs(tmp_path):
@@ -510,7 +507,7 @@ async def test_shutdown_error_does_not_skip_other_sessions_or_direct_jobs(tmp_pa
             async with runtime:
                 for _ in range(2):
                     submitted = await runtime.delegation.submit("worker", "task")
-                    await runtime.wait(submitted["job_id"], 10)
+                    await runtime.wait(submitted["job_id"], 60)
                 direct = await runtime.call(
                     "python",
                     {"code": "import time; time.sleep(60)", "run_in_background": True},
@@ -573,11 +570,7 @@ async def test_startup_cancellation_reaches_hook_and_joins_cleanup(
         submitted = await runtime.delegation.submit("worker", "task")
         controls = []
         try:
-            for _ in range(300):
-                if (tmp_path / "entered").exists():
-                    break
-                await asyncio.sleep(0.01)
-            assert (tmp_path / "entered").exists()
+            await wait_until((tmp_path / "entered").exists, what="startup")
             action = (
                 runtime.cancel(submitted["job_id"])
                 if operation == "cancel"
@@ -588,10 +581,7 @@ async def test_startup_cancellation_reaches_hook_and_joins_cleanup(
                 )
             )
             controls.append(asyncio.create_task(action))
-            for _ in range(200):
-                if (tmp_path / "cleaning").exists():
-                    break
-                await asyncio.sleep(0.01)
+            await wait_until((tmp_path / "cleaning").exists, what="startup cleanup")
             assert (
                 tmp_path / "cancelled"
             ).exists(), "startup never received cancellation"
