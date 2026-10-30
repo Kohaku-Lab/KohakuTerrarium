@@ -445,8 +445,8 @@ src/kohakuterrarium/
 │   │                         # send_message, stop_task, search_memory, skill, show_card, …
 │   │                         #: group_* terrarium tools live in terrarium/tools/
 │   ├── subagents/            # Built-in sub-agent configs
-│   │                         # (coordinator, critic, explore, plan, research, response,
-│   │                         #  summarize, worker, memory_read, memory_write)
+│   │                         # (critic, explore, fork, response, summarize,
+│   │                         #  memory_read, memory_write)
 │   ├── plugins/              # Built-in plugins (sandbox, budget, permgate, compact)
 │   ├── inputs/               # cli, none
 │   ├── outputs/              # stdout, tts, none
