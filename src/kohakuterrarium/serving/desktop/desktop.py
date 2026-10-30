@@ -13,9 +13,20 @@ from pathlib import Path
 
 from kohakuterrarium.serving.desktop.attention import expose_desktop_attention
 from kohakuterrarium.serving.desktop.chrome import configure_desktop_chrome
+from kohakuterrarium.serving.desktop.links import AppLinks
 from kohakuterrarium.serving.desktop.palette import BACKGROUND, FOREGROUND
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.desktop_launch import (
+    LAUNCH_ENV,
+    home_url,
+    launch_url,
+    new_launch_token,
+)
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
+from kohakuterrarium.utils.interpreter import (
+    is_briefcase_runtime as _is_briefcase_runtime,
+)
+from kohakuterrarium.utils.interpreter import python_command
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -60,16 +71,6 @@ html,body{{height:100%;margin:0;background:{BACKGROUND};color:{FOREGROUND};font:
 body{{display:grid;place-items:center}}.shell{{max-width:640px;padding:32px}}h2{{color:#b42318}}
 pre{{white-space:pre-wrap;color:{FOREGROUND}}}</style></head><body><div class="shell">
 <h2>Startup failed</h2><pre>{escaped}</pre></div></body></html>"""
-
-
-def _is_briefcase_runtime() -> bool:
-    if os.environ.get("KT_LAUNCHER_EXEC") == "1":
-        return True
-    try:
-        exe_dir = Path(sys.executable).resolve().parent
-    except OSError:
-        return False
-    return any(exe_dir.glob("python3*._pth"))
 
 
 def _load_webview():
@@ -143,7 +144,7 @@ def launch_desktop_app(port: int = 8001, log_level: str = "INFO"):
         run_desktop_app(port=port, log_level=log_level)
         return None
     cmd = [
-        sys.executable,
+        *python_command(),
         "-m",
         "kohakuterrarium.serving.desktop.desktop",
         "--port",
@@ -173,9 +174,11 @@ def launch_desktop_app(port: int = 8001, log_level: str = "INFO"):
     return child
 
 
-def _start_subprocess_server(*, port: int, log_level: str, state_path: Path):
+def _start_subprocess_server(
+    *, port: int, log_level: str, state_path: Path, token: str = ""
+):
     cmd = [
-        sys.executable,
+        *python_command(),
         "-m",
         "kohakuterrarium.serving.desktop.server",
         "--port",
@@ -197,6 +200,8 @@ def _start_subprocess_server(*, port: int, log_level: str, state_path: Path):
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
+    if token:
+        kwargs["env"] = {**os.environ, LAUNCH_ENV: token}
     child = subprocess.Popen(cmd, **kwargs)
     log_file.close()
     mark_startup(
@@ -208,23 +213,30 @@ def _start_subprocess_server(*, port: int, log_level: str, state_path: Path):
     return child
 
 
-def _start_in_process_server(*, port: int, log_level: str, state_path: Path):
+def _start_in_process_server(
+    *, port: int, log_level: str, state_path: Path, token: str = ""
+):
     from kohakuterrarium.serving.desktop.server import start_desktop_server
 
-    server, actual_port = start_desktop_server(port, log_level)
+    if token:
+        os.environ[LAUNCH_ENV] = token
+    try:
+        server, actual_port = start_desktop_server(port, log_level)
+    finally:
+        os.environ.pop(LAUNCH_ENV, None)
     state_path.write_text(
         json.dumps({"status": "ready", "port": actual_port}), encoding="utf-8"
     )
     return _InProcessServer(server)
 
 
-def _start_server(*, port: int, log_level: str, state_path: Path):
+def _start_server(*, port: int, log_level: str, state_path: Path, token: str = ""):
     if _is_briefcase_runtime():
         return _start_in_process_server(
-            port=port, log_level=log_level, state_path=state_path
+            port=port, log_level=log_level, state_path=state_path, token=token
         )
     return _start_subprocess_server(
-        port=port, log_level=log_level, state_path=state_path
+        port=port, log_level=log_level, state_path=state_path, token=token
     )
 
 
@@ -269,11 +281,15 @@ def _run_startup(
     state_path: Path,
     child_ref: list,
     closed: threading.Event,
+    token: str = "",
+    links: AppLinks | None = None,
 ) -> None:
     try:
         if closed.is_set():
             return
-        child = _start_server(port=port, log_level=log_level, state_path=state_path)
+        child = _start_server(
+            port=port, log_level=log_level, state_path=state_path, token=token
+        )
         child_ref.append(child)
         if closed.is_set():
             _stop_server_child(child, state_path)
@@ -285,7 +301,11 @@ def _run_startup(
         if result.get("status") == "ready":
             actual_port = int(result["port"])
             mark_startup("desktop_server_ready", surface="desktop", port=actual_port)
-            window.load_url(f"http://127.0.0.1:{actual_port}")
+            if links is not None:
+                links.set_home(home_url(actual_port))
+            window.load_url(
+                launch_url(actual_port, token) if token else home_url(actual_port)
+            )
             return
         error = str(result.get("error") or "Unknown desktop startup error")
     except Exception as exc:
@@ -320,6 +340,8 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
         background_color=BACKGROUND,
     )
     expose_desktop_attention(window)
+    links = AppLinks(window)
+    links.attach()
     configure_desktop_chrome(window)
     mark_startup("desktop_window_created", surface="desktop", window="loading")
 
@@ -351,6 +373,8 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
             "state_path": state_path,
             "child_ref": child_ref,
             "closed": closed,
+            "token": new_launch_token(),
+            "links": links,
         },
         daemon=True,
         name="desktop-server-startup",

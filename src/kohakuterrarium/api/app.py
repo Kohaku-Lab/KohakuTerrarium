@@ -19,6 +19,7 @@ from kohakuterrarium.api.auth.asset_token import new_asset_secret
 from kohakuterrarium.api.boot_restore import auto_resume_enabled, restore_on_boot
 from kohakuterrarium.api.auth.db import ensure_migrated as ensure_auth_migrated
 from kohakuterrarium.api.auth.engine_pool import EnginePool, user_is_admin
+from kohakuterrarium.api.auth.launch_token import LaunchGate, LaunchTokenMiddleware
 from kohakuterrarium.api.auth.middleware import HostTokenMiddleware
 from kohakuterrarium.api.deps import _session_dir, get_engine, set_service
 from kohakuterrarium.api.ext import owner_routes as ext_owner_routes
@@ -556,6 +557,11 @@ def create_app(
     # Authorization headers; the browser sends the real request only
     # after preflight succeeds).
     app.add_middleware(HostTokenMiddleware)
+
+    # Desktop shells set a per-launch token; outermost so nothing runs before it.
+    launch_gate = LaunchGate.from_env()
+    if launch_gate is not None:
+        app.add_middleware(LaunchTokenMiddleware, gate=launch_gate)
 
     # Configure config discovery directories on the new catalog scan routers.
     if creatures_dirs or terrariums_dirs:
