@@ -30,6 +30,8 @@ task-oriented paths, read [Guides](../guides/README.md).
   compact.auto: hooks, options, behaviour.
 - [Plugin hooks](plugin-hooks.md): every lifecycle, LLM, tool,
   sub-agent, callback, and prompt hook, with signatures and timing.
+- [Module layout in 2.2](module-layout-2.2.md): where modules moved and how
+  to update imports in plugins, tools, and packages.
 - [v1.3.0 release notes](release-notes-1.3.0.md): final changelog,
   compatibility notes, packaging flow, and validation summary.
 
