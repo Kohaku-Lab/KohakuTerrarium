@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 HOST_NODE = "_host"
 NAMESPACE = "studio.identity"

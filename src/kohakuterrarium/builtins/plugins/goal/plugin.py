@@ -35,7 +35,7 @@ from kohakuterrarium.terrarium.drive.goal import (
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 # Current objectives arrive through Drive events, so the static prompt only
 # explains durable completion and budget semantics.

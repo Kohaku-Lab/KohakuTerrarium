@@ -7,8 +7,6 @@ is the piece that was NOT wired before: the saved ``/history/{target}`` route
 only ever returned the full snapshot.
 """
 
-from __future__ import annotations
-
 import pytest
 from kohakuvault import KVault
 

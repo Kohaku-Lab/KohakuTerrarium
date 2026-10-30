@@ -88,7 +88,7 @@ recipe 物件不變——recipe 從不攜帶 Drive 欄位（見
 呼叫上重新檢查授權，所以持有一個 service 物件本身從來不是權限。
 
 ```python
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 

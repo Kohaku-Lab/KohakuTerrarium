@@ -14,7 +14,7 @@ from kohakuterrarium.api.routes.persistence.live_paths import live_store_entry
 from kohakuterrarium.api.schemas import ForkRequest, ForkResponse
 from kohakuterrarium.studio.persistence.fork import fork_session_handler
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

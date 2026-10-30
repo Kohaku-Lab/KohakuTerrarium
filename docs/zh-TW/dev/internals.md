@@ -160,7 +160,7 @@ Resume (`session/resume/resume.py`)：載入 `meta`、每個代理的 conversati
 - `_session_stores: dict[str, SessionStore]`：每個掛著 store 的 graph 一份。
 - `_subscribers: list[_Subscriber]`：`EngineEvent` 發布訂閱。
 
-獨立 agent 是 1-creature graph；recipe 是用頻道連起來的 connected graph。`Terrarium.with_creature(config)` 是獨立 agent 的捷徑；`Terrarium.from_recipe(recipe)` 透過 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告頻道、為每隻生物加一條 direct channel、若有 root 加 `report_to_root`、接 listen / send 邊、啟動一切)。生物除了透過頻道和 (選擇性的) 嵌進 system prompt 的拓樸提示外，不會知道自己處於生態瓶中。
+獨立 agent 是 1-creature graph；recipe 是用頻道連起來的 connected graph。`Terrarium.with_creature(config)` 是獨立 agent 的捷徑；`Terrarium.from_recipe(recipe)` 透過 `terrarium/recipe/loader.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告頻道、為每隻生物加一條 direct channel、若有 root 加 `report_to_root`、接 listen / send 邊、啟動一切)。生物除了透過頻道和 (選擇性的) 嵌進 system prompt 的拓樸提示外，不會知道自己處於生態瓶中。
 
 **頻道注入**。當一隻生物加入了一個有它要 listen 的頻道的 graph，`terrarium/channels/channels.py:inject_channel_trigger` 會往它的 `trigger_manager` 加一個 `ChannelTrigger`。這是 layer 模型裡唯一被允許的向下注入：在 graph 裡的生物 *會* 知道自己有同伴 (它得知道)，但只透過引擎給它的 handle。獨立生物不會有任何注入。
 

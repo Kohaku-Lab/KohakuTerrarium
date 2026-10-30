@@ -5,8 +5,6 @@ serializers and typed request builders, then re-export the public helpers for
 compatibility.
 """
 
-from __future__ import annotations
-
 from datetime import datetime, timezone
 from typing import Any
 

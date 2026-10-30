@@ -81,7 +81,7 @@ from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.skills.registry import Skill
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import (

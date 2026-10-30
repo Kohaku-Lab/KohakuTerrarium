@@ -38,7 +38,7 @@ class _FakeService:
         return self._connect_result
 
     async def list_creatures(self):
-        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+        from kohakuterrarium.terrarium.service.dto import CreatureInfo
 
         if self._creatures is not None:
             return tuple(self._creatures)
@@ -407,7 +407,7 @@ class TestConnectDisconnect:
         assert captured == {"sender": "a", "receiver": "b"}
 
     def test_disconnect_rejects_creature_outside_url_session(self, monkeypatch):
-        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+        from kohakuterrarium.terrarium.service.dto import CreatureInfo
 
         called = False
 
@@ -473,7 +473,7 @@ class TestWireRoutes:
         assert captured == {"creature_id": "a"}
 
     def test_wire_rejects_creature_outside_url_session(self, monkeypatch):
-        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+        from kohakuterrarium.terrarium.service.dto import CreatureInfo
 
         called = False
 

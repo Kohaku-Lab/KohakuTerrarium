@@ -32,7 +32,7 @@ class TestStudioInitHooks:
         # The hook bridges engine creature-add into the session layer:
         # after it runs, the creature's graph must have a live store.
         from kohakuterrarium.studio.sessions import lifecycle, store_attach
-        from kohakuterrarium.terrarium.service import LocalTerrariumService
+        from kohakuterrarium.terrarium.service.service import LocalTerrariumService
         from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
         monkeypatch.setattr(store_attach, "session_dir", lambda: str(tmp_path))

@@ -8,7 +8,7 @@ from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 from kohakuterrarium.studio.sessions import recipe_merge
 from kohakuterrarium.studio.sessions.registry import meta_for
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 _RECIPE = """\
 terrarium:

@@ -4,8 +4,6 @@ Provides the typed ``studio.persistence`` namespaces while delegating storage,
 indexing, resume, fork, and viewer behavior to their owning persistence modules.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -41,7 +39,7 @@ if TYPE_CHECKING:
 class _PersistenceNS:
     """Saved-session list / resume / fork / viewer / memory."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
         self.viewer = _PersistenceViewer()
 
@@ -56,7 +54,7 @@ class _PersistenceNS:
         status: str | None = None,
         config_type: str | None = None,
         node_id: str | None = None,
-    ) -> list[dict]:
+    ) -> "list[dict]":
         """Return every indexed session matching the supplied filters.
 
         Listing reads only the sidecar index and deliberately does not paginate.

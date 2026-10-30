@@ -1,7 +1,5 @@
 """Capability-gated native attention for the pywebview desktop shell."""
 
-from __future__ import annotations
-
 import ctypes
 import sys
 from typing import Any, Callable

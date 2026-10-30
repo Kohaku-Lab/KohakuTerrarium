@@ -76,7 +76,7 @@ from kohakuterrarium.terrarium.creature.ops import build_runtime_graph_snapshot_
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.output_log import OutputLogCapture
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.terrarium.tools_group_channel import GroupChannelTool
 from kohakuterrarium.terrarium.tools_group_lifecycle import (
     GroupAddNodeTool,

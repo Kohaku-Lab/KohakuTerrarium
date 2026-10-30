@@ -499,10 +499,12 @@ from kohakuterrarium.terrarium.drive.multi_node.homes import (  # noqa: E402
     DriveHomeUnavailableError,
 )
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest  # noqa: E402
-from kohakuterrarium.terrarium.multi_node_service import (  # noqa: E402
+from kohakuterrarium.terrarium.multi_node.service import (  # noqa: E402
     MultiNodeTerrariumService,
 )
-from kohakuterrarium.terrarium.service import LocalTerrariumService  # noqa: E402
+from kohakuterrarium.terrarium.service.service import (
+    LocalTerrariumService,
+)  # noqa: E402
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry  # noqa: E402
 from tests.integration.test_laboratory import (  # noqa: E402
     _attach_worker_stack,

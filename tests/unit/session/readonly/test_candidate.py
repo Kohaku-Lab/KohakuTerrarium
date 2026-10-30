@@ -1,7 +1,5 @@
 """Metadata candidate: gate first, then one read-only KohakuVault handle."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import sqlite3

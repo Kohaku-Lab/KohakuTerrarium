@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import kohakuterrarium.terrarium.channels.channels as _channels
 import kohakuterrarium.terrarium.drive.injection as _drive_injection
 import kohakuterrarium.terrarium.graph.topology as _topo
-import kohakuterrarium.terrarium.wiring as _wiring
+import kohakuterrarium.terrarium.wiring.wiring as _wiring
 from kohakuterrarium.terrarium.events import RootAssignment
 from kohakuterrarium.terrarium.tools_group import force_register_privileged_tools
 

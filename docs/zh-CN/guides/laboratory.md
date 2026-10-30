@@ -163,7 +163,7 @@ curl -X POST http://localhost:8001/api/sessions/active/creature \
 from fastapi import Depends, APIRouter
 
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

@@ -25,7 +25,7 @@ from kohakuterrarium.studio.identity.codex_oauth import (
     get_usage_async,
     login_async,
 )
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

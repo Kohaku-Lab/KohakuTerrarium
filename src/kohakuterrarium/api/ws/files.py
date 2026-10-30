@@ -20,7 +20,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.attach.workspace_watch import watch_directory
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

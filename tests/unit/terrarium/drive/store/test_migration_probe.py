@@ -1,7 +1,5 @@
 """Drive source occupancy around the immutable legacy probe."""
 
-from __future__ import annotations
-
 import sqlite3
 import threading
 

@@ -24,7 +24,7 @@ from kohakuterrarium.terrarium.drive.store.store import (
     drive_sidecar_path,
 )
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 from kohakuterrarium.utils.file.lock import FileLock
 

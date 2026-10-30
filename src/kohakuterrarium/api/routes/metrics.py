@@ -7,8 +7,6 @@ single endpoint. Histograms are recomputed on every request because the
 calculation is cheap and caching would make the snapshot stale.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -16,7 +14,7 @@ from fastapi import APIRouter, Depends
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.serving.process_metrics import get_aggregator
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

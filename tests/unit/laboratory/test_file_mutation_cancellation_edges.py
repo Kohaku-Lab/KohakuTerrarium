@@ -1,7 +1,5 @@
 """Cancellation edges for mutation workers, bundle publish, and source acquire."""
 
-from __future__ import annotations
-
 import asyncio
 import os
 import threading

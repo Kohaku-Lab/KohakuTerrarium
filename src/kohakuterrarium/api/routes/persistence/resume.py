@@ -67,7 +67,7 @@ from kohakuterrarium.terrarium.workspace_resume import (
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.terrarium.resume import prepare_resume_workspace
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

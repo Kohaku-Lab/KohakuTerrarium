@@ -4,7 +4,7 @@ import pytest
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import lifecycle, stop
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 

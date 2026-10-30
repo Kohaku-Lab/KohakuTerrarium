@@ -11,7 +11,7 @@ from kohakuterrarium.studio.persistence.viewer.subagents import (
     build_subagent_conversation_payload,
     build_subagent_runs_payload,
 )
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 from .viewer import (
     _build_single,

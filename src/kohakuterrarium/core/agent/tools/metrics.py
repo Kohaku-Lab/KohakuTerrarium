@@ -1,7 +1,5 @@
 """Bridge tool and sub-agent completion events to the metrics hook."""
 
-from __future__ import annotations
-
 from kohakuterrarium.core.metrics_hook import metrics
 
 

@@ -25,7 +25,7 @@ from kohakuterrarium.laboratory.ws_proxy import proxy_ws_to_lab
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.attach.pty_router import pty_session, session_cwd
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

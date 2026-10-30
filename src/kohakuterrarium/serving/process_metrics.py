@@ -6,8 +6,6 @@ to controlled runtime dimensions, and histogram access is locked so percentile
 snapshots remain consistent while writers continue recording samples.
 """
 
-from __future__ import annotations
-
 import threading
 import time
 from collections import defaultdict, deque

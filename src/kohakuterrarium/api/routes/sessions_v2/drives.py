@@ -19,7 +19,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.sessions import drives as _drives
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

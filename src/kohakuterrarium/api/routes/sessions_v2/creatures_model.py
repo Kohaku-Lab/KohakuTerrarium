@@ -6,7 +6,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import ModelSwitch
 from kohakuterrarium.studio.sessions import lifecycle as _session_lifecycle
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

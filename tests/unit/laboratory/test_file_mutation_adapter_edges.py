@@ -7,8 +7,6 @@ bug (staged-hash re-verify after write) are named in the closest test
 docstring rather than mocked into existence.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest

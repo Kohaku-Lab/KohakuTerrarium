@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2 import creatures_subagents as sub_mod
 from kohakuterrarium.errors import ConflictError, InvalidRequestError, NotFoundError
-from kohakuterrarium.terrarium.service import CreatureInfo
+from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
 def _info(cid="cid", name="alice") -> CreatureInfo:

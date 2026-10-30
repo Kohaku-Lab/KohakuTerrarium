@@ -31,8 +31,6 @@ exact streamed string, or an observable side effect (a file written,
 a port bound, a snapshot field).
 """
 
-from __future__ import annotations
-
 import json
 import socket
 

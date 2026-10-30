@@ -4,8 +4,6 @@ Offline SQLite fixtures only: these tests never open SessionStore / KohakuVault
 on the same file as CPython sqlite3.
 """
 
-from __future__ import annotations
-
 import sqlite3
 import time
 

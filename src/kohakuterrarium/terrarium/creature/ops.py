@@ -39,7 +39,7 @@ from kohakuterrarium.core.conversation.continuation import (
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.session.history.replay import project_branch_metadata
-from kohakuterrarium.terrarium.command_inventory import build_command_inventory
+from kohakuterrarium.terrarium.service.command_inventory import build_command_inventory
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.graph.topology import GraphTopology

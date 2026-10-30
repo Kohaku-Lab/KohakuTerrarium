@@ -17,7 +17,7 @@ from kohakuterrarium.api.ws import (
     pty as ws_pty,
     runtime_graph as ws_rg,
 )
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 

@@ -6,8 +6,6 @@ must never be closed. Closures are verified by store ``_closed`` /
 native vault handles, not by waiting for weakref collection.
 """
 
-from __future__ import annotations
-
 import asyncio
 import threading
 from pathlib import Path

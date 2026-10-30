@@ -7,8 +7,6 @@ include them. Both shapes expose allowed actions, while mutations still enforce
 permissions in the service.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.studio.sessions.drives_serde import (
@@ -30,11 +28,11 @@ from kohakuterrarium.terrarium.drive.service.wire import DriveView
 
 if TYPE_CHECKING:
     # Runtime import would cycle through the engine and built-in Drive command.
-    from kohakuterrarium.terrarium.service import TerrariumService
+    from kohakuterrarium.terrarium.service.service import TerrariumService
 
 
 async def list_records(
-    service: TerrariumService,
+    service: "TerrariumService",
     *,
     graph_id: str,
     actor: ActorRef,
@@ -62,7 +60,7 @@ async def list_records(
 
 
 async def _bind_graph(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     graph_id: str | None,
     *,
@@ -83,7 +81,7 @@ async def _bind_graph(
 
 
 async def get_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     actor: ActorRef,
@@ -101,7 +99,7 @@ async def get_record(
 
 
 async def create_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     *,
     graph_id: str,
     actor: ActorRef,
@@ -121,7 +119,7 @@ async def create_record(
 
 
 async def update_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     expected_revision: int,
@@ -146,7 +144,7 @@ async def update_record(
 
 
 async def assign_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     assignee_creature_id: str,
@@ -175,7 +173,7 @@ async def assign_record(
 
 
 async def unassign_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     expected_revision: int,
@@ -198,7 +196,7 @@ async def unassign_record(
 
 
 async def propose_terminal_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     target_status: str,
@@ -233,7 +231,7 @@ async def propose_terminal_record(
 
 
 async def approve_proposal_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     proposal_id: str,
     *,
     actor: ActorRef,
@@ -256,7 +254,7 @@ async def approve_proposal_record(
 
 
 async def transfer_owner_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     new_owner: str,
@@ -284,7 +282,7 @@ async def transfer_owner_record(
 
 
 async def transition_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     target_status: str,
@@ -311,7 +309,7 @@ async def transition_record(
 
 
 async def wake_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     actor: ActorRef,
@@ -332,7 +330,7 @@ async def wake_record(
 
 
 async def report_progress_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     summary: str,
@@ -357,7 +355,7 @@ async def report_progress_record(
 
 
 async def retire_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     expected_revision: int,
@@ -380,7 +378,7 @@ async def retire_record(
 
 
 async def list_deliveries_records(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     actor: ActorRef,
@@ -397,7 +395,7 @@ async def list_deliveries_records(
 
 
 async def list_progress_records(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     actor: ActorRef,
@@ -414,7 +412,7 @@ async def list_progress_records(
 
 
 async def list_audit_records(
-    service: TerrariumService,
+    service: "TerrariumService",
     drive_id: str,
     *,
     actor: ActorRef,
@@ -432,7 +430,7 @@ async def list_audit_records(
 
 
 async def replay_delivery_record(
-    service: TerrariumService,
+    service: "TerrariumService",
     delivery_id: str,
     *,
     actor: ActorRef,

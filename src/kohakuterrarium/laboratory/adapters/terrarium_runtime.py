@@ -43,15 +43,15 @@ from kohakuterrarium.terrarium.creature.ops import (
     session_attach_policies_for,
     wire_creature_on_engine,
 )
-from kohakuterrarium.terrarium.recipe_discard import discard_recipe_graph_shielded
+from kohakuterrarium.terrarium.recipe.discard import discard_recipe_graph_shielded
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import (
+from kohakuterrarium.terrarium.service.service import (
     LocalTerrariumService,
     _completed_branch_result,
     _normalize_command_args,
     creature_to_info,
 )
-from kohakuterrarium.terrarium.wire import (
+from kohakuterrarium.terrarium.service.wire import (
     pack_channel_info,
     pack_connection_result,
     pack_creature_info,

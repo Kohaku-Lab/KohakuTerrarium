@@ -30,7 +30,7 @@ from kohakuterrarium.studio.sessions import lifecycle, remote_meta
 from kohakuterrarium.studio.sessions.recipe_merge import apply_recipe_to_session
 from kohakuterrarium.studio.sessions.registry import session_pwd
 from kohakuterrarium.terrarium.config import CreatureConfig
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

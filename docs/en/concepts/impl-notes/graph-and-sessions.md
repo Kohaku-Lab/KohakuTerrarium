@@ -173,7 +173,7 @@ channel, and resubscribes against the new live one. The
 this for every affected creature × channel pair.
 
 ### Recipe as the source of truth on resume (`terrarium/resume.py`,
-`terrarium/recipe.py`)
+`terrarium/recipe/loader.py`)
 
 `resume_into_engine` does **not** persist the live topology to disk
 and play it back. It loads `meta.config_path` (the recipe path

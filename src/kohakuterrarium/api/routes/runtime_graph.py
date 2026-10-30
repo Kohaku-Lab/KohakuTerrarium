@@ -15,7 +15,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.creature.ops import saved_session_name
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.terrarium.graph.topology import GraphTopology
 
 router = APIRouter()

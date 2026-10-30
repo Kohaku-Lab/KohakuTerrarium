@@ -1,7 +1,5 @@
 """Drive source occupancy around outer migrate lock order."""
 
-from __future__ import annotations
-
 import asyncio
 import sqlite3
 import threading

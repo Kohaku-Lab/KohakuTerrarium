@@ -1,7 +1,5 @@
 """Write-handle close proof and handle-free replace/unlink occupancy."""
 
-from __future__ import annotations
-
 import pytest
 
 from kohakuterrarium.laboratory.adapters import terrarium_file_mutations as mut

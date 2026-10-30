@@ -7,8 +7,6 @@ capacity. The anonymous key preserves a shared-engine slot. A shared lock serial
 construction and registry mutation, while slow shutdown work runs after releasing it.
 """
 
-from __future__ import annotations
-
 import asyncio
 import threading
 import time
@@ -97,7 +95,7 @@ class EnginePool:
 
     def get_or_create(
         self, user_id: int | None, *, is_admin: bool | None = None
-    ) -> Terrarium:
+    ) -> "Terrarium":
         """Return the user's engine, touching LRU state and evicting at capacity.
 
         Only admin users' engines get ``host_resources=True``; ``is_admin=None``
@@ -145,7 +143,7 @@ class EnginePool:
             _try_shutdown_sync(engine_to_shut_down)
         return engine
 
-    def peek(self, user_id: int | None) -> Terrarium | None:
+    def peek(self, user_id: int | None) -> "Terrarium | None":
         """Return the user's live engine without creating or touching it."""
         with self._lock:
             return self._engines.get(self._key(user_id))
@@ -178,7 +176,7 @@ class EnginePool:
         _try_shutdown_sync(engine)
         return True
 
-    def evict_others(self, keep: Terrarium | None) -> list[int | None]:
+    def evict_others(self, keep: "Terrarium | None") -> list[int | None]:
         """Evict all engines except ``keep`` so they rebuild with current policy.
 
         The returned identifiers include ``None`` for the anonymous shared slot.
@@ -222,7 +220,7 @@ class EnginePool:
             return _ANONYMOUS_KEY
         return str(int(user_id))
 
-    def _evict_oldest_idle_locked(self) -> Terrarium | None:
+    def _evict_oldest_idle_locked(self) -> "Terrarium | None":
         """Remove the least-recently-used engine that hosts no creatures.
 
         The caller shuts the engine down unlocked. When every engine hosts
@@ -238,7 +236,7 @@ class EnginePool:
             return None
         return self._evict_key_locked(min(idle, key=self._last_used.get))
 
-    def _evict_key_locked(self, key: str) -> Terrarium | None:
+    def _evict_key_locked(self, key: str) -> "Terrarium | None":
         engine = self._engines.pop(key, None)
         self._last_used.pop(key, None)
         if engine is not None:
@@ -250,7 +248,7 @@ class EnginePool:
         return engine
 
 
-def _try_shutdown_sync(engine: Terrarium) -> None:
+def _try_shutdown_sync(engine: "Terrarium") -> None:
     """Start sync or async engine shutdown without propagating cleanup failures."""
     shutdown = getattr(engine, "shutdown", None)
     if shutdown is None:  # pragma: no cover - production Terrarium always has shutdown
@@ -271,7 +269,7 @@ def _try_shutdown_sync(engine: Terrarium) -> None:
         logger.exception("engine_pool: shutdown raised")
 
 
-async def _try_shutdown_async(engine: Terrarium) -> None:
+async def _try_shutdown_async(engine: "Terrarium") -> None:
     """Await engine shutdown so lifecycle teardown completes before loop closure."""
     shutdown = getattr(engine, "shutdown", None)
     if shutdown is None:  # pragma: no cover - production Terrarium always has shutdown

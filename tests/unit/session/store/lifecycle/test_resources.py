@@ -1,7 +1,5 @@
 """SessionStore occupancy enrollment around native open and close."""
 
-from __future__ import annotations
-
 import threading
 import time
 

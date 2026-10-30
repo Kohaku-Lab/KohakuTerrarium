@@ -30,7 +30,7 @@ from kohakuterrarium.terrarium.drive.multi_node.remote_ops import (
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DrivePatch
 from kohakuterrarium.terrarium.drive.service.wire import DriveRuntimeStatus, DriveView
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

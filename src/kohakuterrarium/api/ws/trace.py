@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, WebSocket
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.attach.trace import run_trace_attach
 from kohakuterrarium.studio.sessions.registry import stores_for
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

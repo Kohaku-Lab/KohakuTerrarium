@@ -88,7 +88,7 @@ recipe 对象不变——recipe 从不携带 Drive 字段（见
 调用上重新检查授权，所以持有一个 service 对象本身从来不是权限。
 
 ```python
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 

@@ -24,7 +24,7 @@ from kohakuterrarium.terrarium.drive.requests import DriveQuery
 from kohakuterrarium.terrarium.drive.snapshot.saved import DriveSidecarMissingError
 from kohakuterrarium.terrarium.drive.store.store import open_drive_repository_readonly
 from kohakuterrarium.terrarium.drive.store.migration import drive_sidecar_path
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

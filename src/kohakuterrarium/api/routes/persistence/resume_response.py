@@ -6,7 +6,7 @@ from typing import Any
 
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions.lifecycle import now_iso, register_session_meta
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 
 def build_single_remote_response(

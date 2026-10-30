@@ -21,7 +21,7 @@ from kohakuterrarium.session.history.paging import (
     require_bounded_history_page,
 )
 from kohakuterrarium.session.history.raw import UserMessageSelector
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

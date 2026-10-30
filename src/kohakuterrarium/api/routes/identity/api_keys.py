@@ -20,7 +20,7 @@ from kohakuterrarium.studio.identity.api_keys import (
     remove_key,
     set_key,
 )
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

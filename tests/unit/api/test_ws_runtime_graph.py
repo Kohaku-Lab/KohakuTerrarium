@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from kohakuterrarium.api.ws import runtime_graph as rg_mod
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 # ── Pure helpers ──────────────────────────────────────────────
 

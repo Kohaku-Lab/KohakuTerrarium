@@ -2,8 +2,8 @@
 
 from fastapi import HTTPException
 
-from kohakuterrarium.terrarium.multi_node_cluster import cluster_groups
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.multi_node.cluster import cluster_groups
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 
 def _cluster_scope(service: TerrariumService, session_id: str) -> set[str]:

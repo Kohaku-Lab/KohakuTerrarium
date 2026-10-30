@@ -300,7 +300,7 @@ process, hosting every creature. The engine owns:
 A standalone agent is a 1-creature graph; a recipe is a connected
 graph with channels. `Terrarium.with_creature(config)` is the solo
 shortcut; `Terrarium.from_recipe(recipe)` walks a `TerrariumConfig`
-via `terrarium/recipe.py:apply_recipe` (declare channels, add direct
+via `terrarium/recipe/loader.py:apply_recipe` (declare channels, add direct
 channels per creature, add `report_to_root` when a root is declared,
 wire listen / send edges, start everything). Creatures never learn
 they are in a terrarium except through their channels and (optionally)

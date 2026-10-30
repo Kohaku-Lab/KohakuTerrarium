@@ -15,7 +15,7 @@ from kohakuterrarium.studio.attach import io as io_mod
 from kohakuterrarium.studio.attach import io_cluster as io_cluster_mod
 from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 
 class _FakeWebSocket:
@@ -934,7 +934,7 @@ class TestAttachIoRemoteFallback:
         t = await TestTerrariumBuilder().build()
         svc = LocalTerrariumService(t)
         # Override service to make get_creature_info return a fake info.
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         info = CreatureInfo(
             creature_id="remote-cid",
@@ -1019,7 +1019,7 @@ class TestAttachIoLabHostNameResolution:
     ``creature '<name>' not found`` and the user can't attach."""
 
     async def test_attach_by_name_resolves_to_remote(self, monkeypatch):
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         info = CreatureInfo(
             creature_id="alice_abc12345",
@@ -1048,7 +1048,7 @@ class TestAttachIoLabHostNameResolution:
 
     async def test_attach_by_id_still_resolves(self, monkeypatch):
         # The id form must keep working alongside name resolution.
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         info = CreatureInfo(
             creature_id="bob_def67890",

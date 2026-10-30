@@ -6,8 +6,6 @@ the viewer never opens the saved sidecar as a writable database and never create
 companions beside it.
 """
 
-from __future__ import annotations
-
 import sqlite3
 import tempfile
 from pathlib import Path

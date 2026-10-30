@@ -183,7 +183,7 @@ others can DM it via `send_channel`) and, if a root exists, a
 - `terrarium/creature/host.py`: `Creature`, the engine's per-creature
   wrapper. Combines the old standalone-agent and channel-aware
   surfaces into one type.
-- `terrarium/recipe.py`: walks a `TerrariumConfig` and applies it to
+- `terrarium/recipe/loader.py`: walks a `TerrariumConfig` and applies it to
   the engine: declare channels, auto-direct channels per creature,
   `report_to_root` when a root is declared, wire listen / send edges,
   inject channel triggers, start everything.

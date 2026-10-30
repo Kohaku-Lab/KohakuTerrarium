@@ -1,6 +1,6 @@
 """Service-level Drive result DTOs + their schema-versioned wire packers.
 
-The :class:`~kohakuterrarium.terrarium.service.TerrariumService` Drive surface
+The :class:`~kohakuterrarium.terrarium.service.service.TerrariumService` Drive surface
 returns richer *views* than the raw records: a :class:`DriveView` folds a record
 together with its live assignment summary, derived availability, durability, and
 the actor-scoped ``allowed_actions`` (design §9.4). :class:`DriveRuntimeStatus`

@@ -6,8 +6,6 @@ At most one NEW occupant is admitted per path. Callers prove source disposal
 through :meth:`ResourceLease.finish`; this module never opens session files.
 """
 
-from __future__ import annotations
-
 import os
 import threading
 import time
@@ -58,7 +56,7 @@ class ResourceLease:
 
     __slots__ = ("kind", "token", "_gate", "_key")
 
-    def __init__(self, gate: ResourceGate, token: int, kind: str, key: str) -> None:
+    def __init__(self, gate: "ResourceGate", token: int, kind: str, key: str) -> None:
         self._gate = gate
         self.token = token
         self.kind = kind

@@ -5,8 +5,6 @@ swap files, and unknown sidecars are out of scope and must remain untouched.
 Production code does not call ``try_fast``.
 """
 
-from __future__ import annotations
-
 import asyncio
 import threading
 from pathlib import Path

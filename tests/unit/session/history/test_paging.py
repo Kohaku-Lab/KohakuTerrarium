@@ -1,7 +1,5 @@
 """Unit tests for :mod:`kohakuterrarium.session.history.paging`."""
 
-from __future__ import annotations
-
 import json
 
 import pytest

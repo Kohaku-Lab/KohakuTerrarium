@@ -27,7 +27,7 @@ from kohakuterrarium.studio.sessions.summary.edit import (
     set_title,
     set_user_summary,
 )
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

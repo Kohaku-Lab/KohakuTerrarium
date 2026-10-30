@@ -1,7 +1,5 @@
 """Per-store single-thread executor for off-loop SessionStore work."""
 
-from __future__ import annotations
-
 import asyncio
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor

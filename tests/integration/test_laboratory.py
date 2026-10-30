@@ -70,8 +70,8 @@ from kohakuterrarium.terrarium.drive.errors import (
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.multi_node.homes import DriveHomeUnavailableError
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
-from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.multi_node.service import MultiNodeTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 from tests.helpers.grok_usage_script import (
@@ -333,7 +333,7 @@ class TestLaboratoryMultiNodeService:
             # The service routes recipe spawn through the host engine.
             # In lab-host mode the API endpoint 501s, but the host engine
             # itself can still load + apply a recipe — exercising
-            # terrarium/recipe.py, terrarium/root.py, terrarium/config.py.
+            # terrarium/recipe/loader.py, terrarium/root.py, terrarium/config.py.
             from pathlib import Path
             from kohakuterrarium.terrarium.config import (
                 ChannelConfig,
@@ -1768,7 +1768,7 @@ class TestLaboratoryAdapterDirect:
             try:
                 # Build the MultiNodeTerrariumService so the demux is
                 # constructed once and used by every RemoteTerrariumService.
-                from kohakuterrarium.terrarium.multi_node_service import (
+                from kohakuterrarium.terrarium.multi_node.service import (
                     MultiNodeTerrariumService,
                 )
 

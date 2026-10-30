@@ -8,7 +8,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.ws import files as files_mod
 from kohakuterrarium.api.ws import pty as pty_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 
 def _build_app(router, service):

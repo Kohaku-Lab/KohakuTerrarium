@@ -3120,7 +3120,7 @@ class TestMultiNodeApiIntegration:
     """The api folder driven against a lab-host service shape."""
 
     def _client(self, monkeypatch, tmp_path) -> tuple[TestClient, str, str]:
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         session_dir = tmp_path / "sessions"
         session_dir.mkdir()
@@ -3198,7 +3198,7 @@ class TestMultiNodeApiIntegration:
         # through the service and bridge via ``service.connect`` — the
         # pre-fix route walked the empty host coordination engine and
         # returned 404 for every cross-node merge.
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         session_dir = tmp_path / "sessions"
         session_dir.mkdir()
@@ -3258,7 +3258,7 @@ class TestMultiNodeApiIntegration:
         user's, breaking the "user channel name is meaningful" UX
         invariant.
         """
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         session_dir = tmp_path / "sessions"
         session_dir.mkdir()
@@ -3318,7 +3318,7 @@ class TestMultiNodeApiIntegration:
         the route did — full e2e proof lives in
         ``tests/e2e/test_multinode_real.py``.
         """
-        from kohakuterrarium.terrarium.service import CreatureInfo
+        from kohakuterrarium.terrarium.service.service import CreatureInfo
 
         session_dir = tmp_path / "sessions"
         session_dir.mkdir()

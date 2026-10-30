@@ -16,7 +16,10 @@ from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import (
+    CreatureInfo,
+    LocalTerrariumService,
+)
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 
 # Session bookkeeping is instance-scoped (studio.sessions.registry) —

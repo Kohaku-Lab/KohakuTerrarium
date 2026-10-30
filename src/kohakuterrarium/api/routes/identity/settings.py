@@ -21,7 +21,7 @@ from kohakuterrarium.studio.nodes import (
     _LocalNodeDriveSettings,
     build_node_map_if_multi_node,
 )
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

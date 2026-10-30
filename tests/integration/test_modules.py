@@ -2533,7 +2533,7 @@ class TestModulesIntegration:
         from kohakuterrarium.modules.user_command.base import UserCommandContext
         from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
         from kohakuterrarium.terrarium.engine.engine import Terrarium
-        from kohakuterrarium.terrarium.service import LocalTerrariumService
+        from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
         alice = ActorRef("user", "alice")
 

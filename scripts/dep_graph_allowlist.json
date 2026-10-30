@@ -338,7 +338,7 @@
   {
     "file": "src/kohakuterrarium/api/app.py",
     "function": "lifespan",
-    "target": "kohakuterrarium.terrarium.multi_node_channels",
+    "target": "kohakuterrarium.terrarium.multi_node.channels",
     "reason": "Cluster membership lookup is loaded only in lab-host mode."
   },
   {

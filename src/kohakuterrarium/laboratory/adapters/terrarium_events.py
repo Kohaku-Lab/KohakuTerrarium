@@ -12,7 +12,7 @@ from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.protocols import LabNode
 from kohakuterrarium.laboratory.streams import StreamDemux
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.wire import (
+from kohakuterrarium.terrarium.service.wire import (
     pack_engine_event,
     unpack_content,
     unpack_event_filter,

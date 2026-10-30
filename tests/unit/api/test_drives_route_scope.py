@@ -28,7 +28,7 @@ from kohakuterrarium.terrarium.drive.registration.registration import (
     GenericDriveRegistration,
 )
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

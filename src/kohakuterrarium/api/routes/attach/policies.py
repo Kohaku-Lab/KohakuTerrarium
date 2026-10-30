@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.attach import policies as policy_lib
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

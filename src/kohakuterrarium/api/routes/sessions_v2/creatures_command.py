@@ -7,7 +7,7 @@ from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.schemas import SlashCommand
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 from ._helpers import resolve_creature_id
 

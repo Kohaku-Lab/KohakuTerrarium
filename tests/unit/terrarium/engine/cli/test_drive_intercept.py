@@ -31,7 +31,7 @@ from kohakuterrarium.terrarium.engine.cli.commands import (
     _dispatch_engine_command,
     _engine_command_context,
 )
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 

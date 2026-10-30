@@ -1,7 +1,5 @@
 """Shared helpers for laboratory exact-path mutation occupancy tests."""
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import time

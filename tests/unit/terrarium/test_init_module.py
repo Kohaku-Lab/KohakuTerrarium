@@ -8,14 +8,14 @@ import kohakuterrarium.terrarium as terr
 def test_remote_service_lazy_import():
     out = terr.RemoteTerrariumService
     # Same import via the submodule path resolves to the same object.
-    from kohakuterrarium.terrarium.remote_service import RemoteTerrariumService
+    from kohakuterrarium.terrarium.service.remote import RemoteTerrariumService
 
     assert out is RemoteTerrariumService
 
 
 def test_multi_node_service_lazy_import():
     out = terr.MultiNodeTerrariumService
-    from kohakuterrarium.terrarium.multi_node_service import (
+    from kohakuterrarium.terrarium.multi_node.service import (
         MultiNodeTerrariumService,
     )
 

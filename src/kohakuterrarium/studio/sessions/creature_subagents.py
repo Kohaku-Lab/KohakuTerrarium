@@ -5,8 +5,8 @@ from typing import Any
 from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.sessions.find import find_creature
-from kohakuterrarium.terrarium.service import TerrariumService
-from kohakuterrarium.terrarium.subagent_conversations import (
+from kohakuterrarium.terrarium.service.service import TerrariumService
+from kohakuterrarium.terrarium.service.subagent_conversations import (
     _subagent_name_from_job_id,  # noqa: F401
     read_subagent_conversation as _read_local,
     send_to_subagent as _send_local,

@@ -4,7 +4,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 import kohakuterrarium.terrarium.graph.checkpoint as checkpoint
-import kohakuterrarium.terrarium.wiring as wiring
+import kohakuterrarium.terrarium.wiring.wiring as wiring
 from kohakuterrarium.terrarium.channels.channels import remove_channel_trigger
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY

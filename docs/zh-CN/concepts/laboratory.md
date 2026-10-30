@@ -169,7 +169,7 @@ msgpack body。两端按命名空间注册 *扩展处理器*；分发表是它�
 ## 透明化目标 1：Studio 只看到一套系统
 
 Studio 永远不知道某个生物是跑在进程内、还是远端机器上。
-`TerrariumService` Protocol（`src/kohakuterrarium/terrarium/service.py`）
+`TerrariumService` Protocol（`src/kohakuterrarium/terrarium/service/service.py`）
 有 `add_creature`、`list_creatures`、`chat`、`connect` 这些方法。
 有三个实现：
 
@@ -193,7 +193,7 @@ Studio 永远不知道某个生物是跑在进程内、还是远端机器上。
 （包括 worker-2 上的 listener），就像两个生物住在同一个进程里一
 样。Lab 通过两个机制实现这一点：
 
-- **跨节点 connect**（`terrarium/multi_node_replication.py`）。
+- **跨节点 connect**（`terrarium/multi_node/replication.py`）。
   当用户调用 `service.connect(creatureA, creatureB)`、两个生物
   住在不同的工作节点上时，主机会：
   1. 在两个工作节点的图上都添加该通道对象。

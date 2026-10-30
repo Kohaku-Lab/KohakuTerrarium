@@ -24,8 +24,6 @@ real custom plugin module that contributes a prompt fragment — and then
 runs a *real* turn through a ``ScriptedLLM``. The LLM is the only seam.
 """
 
-from __future__ import annotations
-
 import asyncio
 import textwrap
 from collections import deque

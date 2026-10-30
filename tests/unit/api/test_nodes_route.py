@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes import nodes as nodes_mod
 from kohakuterrarium.studio.deploy import DeployError
-from kohakuterrarium.terrarium.service import CreatureInfo
+from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
 def _info(cid="cid", name="alice"):

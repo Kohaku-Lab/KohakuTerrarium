@@ -156,7 +156,7 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 - `_session_stores: dict[str, SessionStore]`：每个挂著 store 的 graph 一份。
 - `_subscribers: list[_Subscriber]`：`EngineEvent` 发布订阅。
 
-独立 Agent 是 1-creature graph；recipe 是用频道连起来的 connected graph。`Terrarium.with_creature(config)` 是独立 Agent 的捷径；`Terrarium.from_recipe(recipe)` 通过 `terrarium/recipe.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、启动一切)。Creature 除了通过频道和 (可选的) 嵌进 system prompt 的 topology hint 外，不会知道自己处于 Terrarium 中。
+独立 Agent 是 1-creature graph；recipe 是用频道连起来的 connected graph。`Terrarium.with_creature(config)` 是独立 Agent 的捷径；`Terrarium.from_recipe(recipe)` 通过 `terrarium/recipe/loader.py:apply_recipe` 走完一份 `TerrariumConfig` (宣告频道、为每只 Creature 加一条 direct channel、若有 root 加 `report_to_root`、接 listen / send 边、启动一切)。Creature 除了通过频道和 (可选的) 嵌进 system prompt 的 topology hint 外，不会知道自己处于 Terrarium 中。
 
 **频道注入**。当一只 Creature 加入了一个有它要 listen 的频道的 graph，`terrarium/channels/channels.py:inject_channel_trigger` 会往它的 `trigger_manager` 加一个 `ChannelTrigger`。这是 layer 模型里唯一被允许的向下注入：在 graph 里的 Creature *会* 知道自己有同伴 (它得知道)，但只透过引擎给它的 handle。独立 Creature 不会有任何注入。
 

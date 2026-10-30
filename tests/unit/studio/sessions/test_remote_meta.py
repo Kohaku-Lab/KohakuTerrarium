@@ -5,7 +5,7 @@ from kohakuterrarium.studio.sessions.remote_meta import (
     refresh_all_remote_creature_meta,
     refresh_remote_creature_meta,
 )
-from kohakuterrarium.terrarium.service_dto import CreatureInfo
+from kohakuterrarium.terrarium.service.dto import CreatureInfo
 
 
 def _info(**overrides) -> CreatureInfo:

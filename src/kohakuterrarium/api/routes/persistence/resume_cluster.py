@@ -16,7 +16,7 @@ from kohakuterrarium.api.routes.persistence.cluster_resume_compensation import (
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions.lifecycle import now_iso, register_session_meta
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 
 class ClusterMember(BaseModel):

@@ -1,7 +1,5 @@
 """Creature construction and insertion helpers for the Terrarium engine."""
 
-from __future__ import annotations
-
 import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -11,7 +9,7 @@ import kohakuterrarium.terrarium.channels.channels as _channels
 import kohakuterrarium.terrarium.graph.checkpoint as _checkpoint
 import kohakuterrarium.terrarium.graph.identity_engine as _identity
 import kohakuterrarium.terrarium.graph.topology as _topo
-import kohakuterrarium.terrarium.wiring as _wiring
+import kohakuterrarium.terrarium.wiring.wiring as _wiring
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature.host import (
@@ -28,10 +26,10 @@ if TYPE_CHECKING:
 
 
 async def add_creature(
-    engine: Terrarium,
+    engine: "Terrarium",
     config: CreatureBuildInput | Creature,
     *,
-    graph: GraphTopology | str | None = None,
+    graph: "GraphTopology | str | None" = None,
     creature_id: str | None = None,
     llm: Any = None,
     fallback_llm: str | None = None,
@@ -160,7 +158,7 @@ async def add_creature(
 
 
 def _prepare_creature(
-    engine: Terrarium,
+    engine: "Terrarium",
     config: CreatureBuildInput | Creature,
     *,
     creature_id: str | None,

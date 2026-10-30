@@ -1,7 +1,5 @@
 """FastAPI application factory."""
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import os
@@ -184,7 +182,7 @@ async def lifespan(app: FastAPI):
         from kohakuterrarium.studio.sessions.registry import get_session_meta
         from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
         from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-        from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
+        from kohakuterrarium.terrarium.multi_node.channels import cluster_members_for
 
         # Initialize shared mutable state before request tasks begin, avoiding
         # concurrent first-write handling in the lab-clients route.
@@ -423,8 +421,8 @@ def _parse_bind(bind: str) -> tuple[str, int]:
 
 
 async def _watch_membership(
-    host_engine: HostEngine,
-    service: MultiNodeTerrariumService,
+    host_engine: "HostEngine",
+    service: "MultiNodeTerrariumService",
 ) -> None:
     """Mirror host membership into remote routing state.
 

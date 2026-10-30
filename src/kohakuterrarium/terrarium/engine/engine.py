@@ -22,13 +22,13 @@ import kohakuterrarium.terrarium.engine.creature_add as _engine_creature_add
 import kohakuterrarium.terrarium.engine.observability as _observability
 import kohakuterrarium.terrarium.graph.checkpoint as _checkpoint
 import kohakuterrarium.terrarium.graph.identity_engine as _identity
-import kohakuterrarium.terrarium.recipe as _recipe
-import kohakuterrarium.terrarium.recipe_identity as _recipe_identity
-import kohakuterrarium.terrarium.recipe_transaction as _recipe_transaction
+import kohakuterrarium.terrarium.recipe.loader as _recipe
+import kohakuterrarium.terrarium.recipe.identity as _recipe_identity
+import kohakuterrarium.terrarium.recipe.transaction as _recipe_transaction
 import kohakuterrarium.terrarium.resume as _resume
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.graph.topology as _topo
-import kohakuterrarium.terrarium.wiring as _wiring
+import kohakuterrarium.terrarium.wiring.wiring as _wiring
 import kohakuterrarium.terrarium.drive.runtime as _drive_runtime
 from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.core.environment import Environment

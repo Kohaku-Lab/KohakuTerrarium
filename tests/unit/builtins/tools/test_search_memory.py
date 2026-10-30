@@ -12,7 +12,7 @@ from kohakuterrarium.core.session import Session
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.terrarium.history_service import LocalHistoryServiceMixin
+from kohakuterrarium.terrarium.service.history import LocalHistoryServiceMixin
 from kohakuterrarium.builtins.tools.search_memory import (
     SEARCH_RESULT_DISPLAY_CHARS,
     SearchMemoryTool,

@@ -26,7 +26,7 @@ from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_st
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
 from kohakuterrarium.studio.sessions.registry import stores_for
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

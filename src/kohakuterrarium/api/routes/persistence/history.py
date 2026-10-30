@@ -39,7 +39,7 @@ from kohakuterrarium.studio.persistence.history import (
 )
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 from kohakuterrarium.terrarium.creature.ops import agent_live_job_ids
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

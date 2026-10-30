@@ -9,8 +9,8 @@ from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
-from kohakuterrarium.terrarium.wire import pack_drive_error
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.wire import pack_drive_error
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

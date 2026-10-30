@@ -141,7 +141,7 @@ delta 报告 `kind="split"` 与受影响的 Creature。
 `apply_split_bookkeeping` 与 `_merge_environment_into` 路径会对每一对
 受影响的 Creature × channel 呼叫它。
 
-### Resume 时 recipe 是真理来源（`terrarium/resume.py`、`terrarium/recipe.py`）
+### Resume 时 recipe 是真理来源（`terrarium/resume.py`、`terrarium/recipe/loader.py`）
 
 `resume_into_engine` **不会**把活动拓扑写到磁盘再播回。它会读
 `meta.config_path`（session 建立时记下的 recipe 路径），并在新的引擎

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from kohakuterrarium.studio import nodes as nodes_mod
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 # ── _Pending ────────────────────────────────────────────────
 

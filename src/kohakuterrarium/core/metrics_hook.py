@@ -4,8 +4,6 @@ Core retains no metric state and depends on no aggregation backend. Subscriber
 failures are isolated because telemetry must never interrupt an agent turn.
 """
 
-from __future__ import annotations
-
 from typing import Any, Protocol
 
 from kohakuterrarium.utils.logging import get_logger

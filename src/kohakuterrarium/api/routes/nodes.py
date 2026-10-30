@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio.deploy import DeployError, deploy_creature_to_node
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

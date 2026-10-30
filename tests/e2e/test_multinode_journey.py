@@ -144,7 +144,7 @@ class _CapturingHandler(logging.Handler):
 
     The project's logger sets ``propagate=False`` on the
     ``kohakuterrarium`` root, so pytest's stock ``caplog`` doesn't see
-    records emitted by ``kohakuterrarium.terrarium.output_wiring``. The
+    records emitted by ``kohakuterrarium.terrarium.wiring.output``. The
     journey attaches one of these directly to that logger to assert on
     B7's misleading "target unresolved" WARN.
     """
@@ -429,7 +429,7 @@ class TestMultinodeJourney:
                 # ``caplog`` would not see them).
                 wiring_handler = _CapturingHandler()
                 wiring_logger = logging.getLogger(
-                    "kohakuterrarium.terrarium.output_wiring"
+                    "kohakuterrarium.terrarium.wiring.output"
                 )
                 wiring_prior_level = wiring_logger.level
                 wiring_logger.addHandler(wiring_handler)
@@ -2631,7 +2631,7 @@ async def _drive_journey(
             )
 
     # === 29b2. recipe-driven terrarium spawn on the host ============
-    # Exercises ``terrarium/recipe.py``, ``terrarium/root.py``,
+    # Exercises ``terrarium/recipe/loader.py``, ``terrarium/root.py``,
     # ``terrarium/factory.py`` and the recipe → topology pipeline
     # that the dashboard's "New Terrarium" modal uses.
     async with bugs.step("29b2 recipe-driven terrarium spawn"):

@@ -29,7 +29,7 @@ from kohakuterrarium.terrarium.drive.config import (
 )
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

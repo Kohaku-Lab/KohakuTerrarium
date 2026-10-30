@@ -98,7 +98,7 @@ context; the manager re-checks authorization on every call, so holding a
 service object is never itself permission.
 
 ```python
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 

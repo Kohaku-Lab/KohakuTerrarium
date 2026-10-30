@@ -10,7 +10,7 @@ from kohakuterrarium.studio.sessions.creature_subagents import (
     read_subagent_conversation_async as read_subagent_conversation,
     send_to_subagent,
 )
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

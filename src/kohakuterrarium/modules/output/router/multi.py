@@ -3,8 +3,6 @@
 An additional named-output map supports direct writes with cascaded lifecycle.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule

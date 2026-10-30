@@ -1,4 +1,4 @@
-"""Audit findings against ``terrarium/multi_node_service.py``.
+"""Audit findings against ``terrarium/multi_node/service.py``.
 
 Each test method targets ONE specific suspected bug found during a
 static read of :class:`MultiNodeTerrariumService`, exercised through

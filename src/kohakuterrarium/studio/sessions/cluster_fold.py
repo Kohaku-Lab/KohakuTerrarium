@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.handles import SessionListing
-from kohakuterrarium.terrarium.multi_node_cluster import cluster_groups
+from kohakuterrarium.terrarium.multi_node.cluster import cluster_groups
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

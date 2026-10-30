@@ -41,7 +41,7 @@ from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DrivePatch
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventKind
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.terrarium.tools_group_channel import GroupChannelTool
 from kohakuterrarium.terrarium.tools_group_lifecycle import (
     GroupAddNodeTool,

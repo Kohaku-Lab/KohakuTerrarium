@@ -8,7 +8,7 @@ coordination-only multi-node hosts.
 """
 
 from kohakuterrarium.terrarium import Terrarium
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 
 def as_engine(runtime) -> Terrarium:

@@ -14,7 +14,7 @@ from kohakuterrarium.api.routes.sessions_v2 import (
 from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_model as model_mod,
 )
-from kohakuterrarium.terrarium.service import CreatureInfo
+from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
 def _info(cid="cid-1", name="alice") -> CreatureInfo:

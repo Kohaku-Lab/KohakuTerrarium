@@ -7,8 +7,6 @@ raises. Lines that require a production hash-race or a magic empty
 ``last_exc`` after a PermissionError loop are named in the closest docstring.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest

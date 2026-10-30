@@ -58,7 +58,7 @@ from kohakuterrarium.builtins.cli_rich.roster import RosterWidget
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 # These commands require engine and focused-creature context.

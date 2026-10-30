@@ -1,7 +1,5 @@
 """Worker-owned occupancy for exact-path Laboratory file mutations."""
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 

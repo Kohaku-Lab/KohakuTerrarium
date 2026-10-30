@@ -15,7 +15,7 @@ import asyncio
 from kohakuterrarium.api.ws import runtime_graph as ws_rg
 from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 

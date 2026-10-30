@@ -6,7 +6,7 @@ from importlib.metadata import version as _pkg_version
 from fastapi import APIRouter, Depends
 
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

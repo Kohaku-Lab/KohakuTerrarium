@@ -40,7 +40,7 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 pytestmark = pytest.mark.timeout(60)

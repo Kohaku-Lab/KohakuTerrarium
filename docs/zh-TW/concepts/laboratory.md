@@ -169,7 +169,7 @@ msgpack body。兩端各自註冊 namespace 的*擴充 handler*；雙方唯一
 
 Studio 永遠不需要知道一隻生物住在行程內還是遠端機器上。
 `TerrariumService` Protocol
-（`src/kohakuterrarium/terrarium/service.py`）有 `add_creature`、
+（`src/kohakuterrarium/terrarium/service/service.py`）有 `add_creature`、
 `list_creatures`、`chat`、`connect` 之類的方法。三個實作滿足它：
 
 - `LocalTerrariumService`：直接呼叫行程內的 Terrarium。
@@ -191,7 +191,7 @@ Studio 永遠不需要知道一隻生物住在行程內還是遠端機器上。
 包括 worker-2 上的 listener，就好像兩隻生物住在同一個行程裡
 一樣。Lab 用兩個機制達成這點：
 
-- **跨節點 connect**（`terrarium/multi_node_replication.py`）。
+- **跨節點 connect**（`terrarium/multi_node/replication.py`）。
   當使用者呼叫 `service.connect(creatureA, creatureB)` 且兩隻
   生物住在不同 worker 時，主機會：
   1. 在兩個 worker 的圖上各加一個頻道物件。

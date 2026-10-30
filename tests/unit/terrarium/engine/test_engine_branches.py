@@ -17,11 +17,11 @@ import pytest
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.channels import lifecycle as cl
 from kohakuterrarium.terrarium.creature import ops as co
-from kohakuterrarium.terrarium import recipe as recipe_mod
-from kohakuterrarium.terrarium import recipe_apply as recipe_apply_mod
+from kohakuterrarium.terrarium.recipe import loader as recipe_mod
+from kohakuterrarium.terrarium.recipe import apply as recipe_apply_mod
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.terrarium import root as root_mod
-from kohakuterrarium.terrarium import wire as wire_mod
+from kohakuterrarium.terrarium.service import wire as wire_mod
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.events import EventKind
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent

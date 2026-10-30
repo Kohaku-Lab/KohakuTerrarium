@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
-from kohakuterrarium.terrarium.service import CreatureInfo
+from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
 class _FakeService:

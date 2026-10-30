@@ -17,7 +17,7 @@ from kohakuterrarium.terrarium.drive.service.wire import (
     pack_drive_view,
     pack_runtime_status,
 )
-from kohakuterrarium.terrarium.wire import pack_drive_error
+from kohakuterrarium.terrarium.service.wire import pack_drive_error
 
 _DRIVE_VERB_PREFIX = "drive_"
 

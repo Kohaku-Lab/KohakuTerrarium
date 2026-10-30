@@ -19,7 +19,7 @@ from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.drive.topology import _reconcile_graph
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

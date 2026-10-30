@@ -1,7 +1,5 @@
 """Shared interactive reply submission for the TUI renderer."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from kohakuterrarium.modules.output.event import UIReply

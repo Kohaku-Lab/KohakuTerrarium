@@ -14,7 +14,7 @@ from kohakuterrarium.modules.user_command.base import (
     parse_slash_command,
 )
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 
 def _engine_command_context(

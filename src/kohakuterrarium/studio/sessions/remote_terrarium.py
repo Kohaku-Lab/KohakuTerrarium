@@ -8,7 +8,7 @@ from kohakuterrarium.studio.deploy import deploy_creature_to_node
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions.registry import meta_for
 from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
+from kohakuterrarium.terrarium.multi_node.service import MultiNodeTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

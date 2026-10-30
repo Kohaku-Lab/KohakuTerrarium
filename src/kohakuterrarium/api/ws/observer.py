@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -31,7 +31,7 @@ from kohakuterrarium.terrarium.drive.service.wire import (
     unpack_drive_view,
     unpack_runtime_status,
 )
-from kohakuterrarium.terrarium.wire import drive_error_from_body
+from kohakuterrarium.terrarium.service.wire import drive_error_from_body
 
 
 def _raise_for_drive_error(body: Any) -> Any:

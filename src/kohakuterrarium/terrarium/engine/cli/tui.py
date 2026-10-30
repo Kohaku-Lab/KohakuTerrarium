@@ -43,7 +43,7 @@ from kohakuterrarium.terrarium.engine.cli.tabs import (
     _update_terrarium_panel,
     _wire_new_channels,
 )
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.utils.async_utils import cancel_tasks
 from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
 from kohakuterrarium.utils.startup_trace import mark as mark_startup

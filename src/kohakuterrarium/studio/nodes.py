@@ -13,8 +13,11 @@ from typing import Any
 from kohakuterrarium.studio.deploy import deploy_creature_to_node
 from kohakuterrarium.studio.files import RemoteFiles
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
-from kohakuterrarium.terrarium.service import LocalTerrariumService, TerrariumService
-from kohakuterrarium.terrarium.wire import drive_error_from_body
+from kohakuterrarium.terrarium.service.service import (
+    LocalTerrariumService,
+    TerrariumService,
+)
+from kohakuterrarium.terrarium.service.wire import drive_error_from_body
 
 
 def _raise_settings_error(body: Any) -> Any:

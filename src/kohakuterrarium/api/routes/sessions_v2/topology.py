@@ -10,7 +10,7 @@ from kohakuterrarium.api.routes.sessions_v2._helpers import (
 )
 from kohakuterrarium.api.schemas import ChannelAdd, ChannelSend, WireChannel
 from kohakuterrarium.studio.sessions import topology as topology_lib
-from kohakuterrarium.terrarium.service import TerrariumService
+from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
 

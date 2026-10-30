@@ -26,7 +26,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.output_wiring import notify_inbound_delivery
+from kohakuterrarium.terrarium.wiring.output import notify_inbound_delivery
 from kohakuterrarium.terrarium.tools_group_common import (
     err,
     missing_channel_error,

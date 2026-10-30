@@ -13,8 +13,6 @@ The selected node decides which filesystem the working-dir path resolves on
 (B5), so the picker MUST be the field the user fills first.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

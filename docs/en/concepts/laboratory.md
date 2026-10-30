@@ -175,7 +175,7 @@ need to agree on.
 
 Studio never knows whether a creature lives in-process or on a remote
 machine. The `TerrariumService` Protocol
-(`src/kohakuterrarium/terrarium/service.py`) has methods like
+(`src/kohakuterrarium/terrarium/service/service.py`) has methods like
 `add_creature`, `list_creatures`, `chat`, `connect`. Three
 implementations satisfy it:
 
@@ -199,7 +199,7 @@ every listener (including listeners on worker-2) exactly as if both
 creatures lived in the same process. The Lab achieves this with two
 mechanisms:
 
-- **Cross-node connect** (`terrarium/multi_node_replication.py`).
+- **Cross-node connect** (`terrarium/multi_node/replication.py`).
   When the user calls `service.connect(creatureA, creatureB)` and the
   two creatures live on different workers, the host:
   1. Adds the channel object on both workers' graphs.

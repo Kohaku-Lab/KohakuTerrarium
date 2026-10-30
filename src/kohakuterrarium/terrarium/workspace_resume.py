@@ -1,7 +1,5 @@
 """Pure workspace validation and replacement planning for manifest resume."""
 
-from __future__ import annotations
-
 import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace

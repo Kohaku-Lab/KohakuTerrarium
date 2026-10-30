@@ -14,7 +14,7 @@ from kohakuterrarium.studio.attach import (
     policies as policies_mod,
     trace as trace_mod,
 )
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 # ── attach.policies ──────────────────────────────────────────

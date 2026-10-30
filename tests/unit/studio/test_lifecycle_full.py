@@ -19,7 +19,10 @@ from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import (
+    CreatureInfo,
+    LocalTerrariumService,
+)
 from kohakuterrarium.testing.terrarium import (
     TestTerrariumBuilder,
     _FakeAgent,

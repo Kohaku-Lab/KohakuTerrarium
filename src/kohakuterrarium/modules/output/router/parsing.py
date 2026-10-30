@@ -3,8 +3,6 @@
 Parse events drive output suppression state, named routing, and pending call queues.
 """
 
-from __future__ import annotations
-
 from kohakuterrarium.modules.output.router.state import CompletedOutput, OutputState
 from kohakuterrarium.parsing import (
     AssistantImageEvent,

@@ -6,8 +6,6 @@ engines. ``get_engine`` exposes only the local or coordination engine and theref
 cannot provide cross-node creature visibility.
 """
 
-from __future__ import annotations
-
 import os
 import sys
 from typing import TYPE_CHECKING, Any
@@ -63,7 +61,7 @@ def _runtime_types():
     return LocalTerrariumService, Terrarium, get_session_meta
 
 
-def set_service(service: TerrariumService | None) -> None:
+def set_service(service: "TerrariumService | None") -> None:
     """Install or clear the process-wide service and invalidate its engine view."""
     global _service, _engine_legacy
     _service = service
@@ -74,7 +72,7 @@ def set_service(service: TerrariumService | None) -> None:
 def get_service(
     conn_info: HTTPConnection,
     user: User | None = Depends(get_optional_user),
-) -> TerrariumService:
+) -> "TerrariumService":
     """Return the service scoped to an HTTP or WebSocket connection.
 
     Multi-node services route requests themselves. On a single host, enabled user
@@ -123,11 +121,11 @@ def get_service(
 def get_service_factory(
     conn_info: HTTPConnection,
     user: User | None = Depends(get_optional_user),
-) -> Callable[[], TerrariumService]:
+) -> "Callable[[], TerrariumService]":
     """Return a request-scoped lazy service resolver."""
     resolved: TerrariumService | None = None
 
-    def resolve() -> TerrariumService:
+    def resolve() -> "TerrariumService":
         nonlocal resolved
         if resolved is None:
             resolved = get_service(conn_info, user)
@@ -162,7 +160,7 @@ def resolve_request_session_dir(
     return Path(_session_dir())
 
 
-def get_service_legacy() -> TerrariumService:
+def get_service_legacy() -> "TerrariumService":
     """Return the process-wide service when no request identity is available."""
     global _service
     register_group_hooks()
@@ -174,7 +172,7 @@ def get_service_legacy() -> TerrariumService:
     return _service
 
 
-def get_engine() -> Terrarium:
+def get_engine() -> "Terrarium":
     """Return the local engine view of the process-wide service.
 
     In Laboratory host mode this is the agent-free coordination engine, so callers

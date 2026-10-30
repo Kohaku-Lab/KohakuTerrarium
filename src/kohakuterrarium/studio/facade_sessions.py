@@ -6,8 +6,6 @@ surface discoverable and aligned with the HTTP adapters without duplicating
 session logic.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -38,7 +36,7 @@ if TYPE_CHECKING:
 class _SessionsNS:
     """Active engine-backed sessions."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
         self.chat = _SessionsChat(studio)
         self.ctl = _SessionsCtl(studio)
@@ -84,7 +82,7 @@ class _SessionsNS:
             on_node=on_node,
         )
 
-    def list(self) -> list[_session_handles.SessionListing]:
+    def list(self) -> "list[_session_handles.SessionListing]":
         return _session_lifecycle.list_sessions(self._studio._service)
 
     def get(self, session_id: str) -> _session_handles.Session:
@@ -172,7 +170,7 @@ class _SessionsNS:
             self._studio._service, creature_id, edge_id
         )
 
-    def list_output_wiring(self, creature_id: str) -> list[dict[str, Any]]:
+    def list_output_wiring(self, creature_id: str) -> "list[dict[str, Any]]":
         return _session_wiring.list_output_wiring(self._studio._service, creature_id)
 
     async def wire_output_sink(self, creature_id: str, sink: Any) -> str:
@@ -216,7 +214,7 @@ class _SessionsNS:
 class _SessionsChat:
     """Per-creature chat — chat HTTP fallback, regenerate, edit, rewind."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
     def chat(
@@ -294,7 +292,7 @@ class _SessionsChat:
 class _SessionsCtl:
     """Per-creature control — interrupt, jobs, cancel, promote."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
     async def interrupt(self, session_id: str, creature_id: str) -> None:
@@ -319,7 +317,7 @@ class _SessionsCtl:
 class _SessionsState:
     """Per-creature state — scratchpad, triggers, env, system prompt, working dir."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
     def scratchpad(self, session_id: str, creature_id: str) -> dict[str, str]:
@@ -361,10 +359,10 @@ class _SessionsState:
 class _SessionsPlugins:
     """Per-creature plugin list / toggle."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
-    def list(self, session_id: str, creature_id: str) -> list[dict]:
+    def list(self, session_id: str, creature_id: str) -> "list[dict]":
         return _session_plugins.list_plugins(
             self._studio._service, session_id, creature_id
         )
@@ -378,7 +376,7 @@ class _SessionsPlugins:
 class _SessionsModel:
     """Per-creature model + native-tool-options."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
     def switch(self, session_id: str, creature_id: str, profile_name: str) -> str:
@@ -395,7 +393,7 @@ class _SessionsModel:
 class _SessionsCommand:
     """Per-creature slash command execution."""
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
     async def execute(
@@ -415,7 +413,7 @@ class _SessionsDrives:
     sensitive specification and evidence details.
     """
 
-    def __init__(self, studio: Studio) -> None:
+    def __init__(self, studio: "Studio") -> None:
         self._studio = studio
 
     @staticmethod
@@ -438,7 +436,7 @@ class _SessionsDrives:
         assignee_creature_id: str | None = None,
         mine: bool = False,
         include_terminal: bool = True,
-    ) -> list[dict]:
+    ) -> "list[dict]":
         return await _session_drives.list_records(
             self._studio._service,
             graph_id=session_id,
@@ -570,7 +568,7 @@ class _SessionsDrives:
         *,
         actor: ActorRef | str | None = None,
         is_privileged: bool = True,
-    ) -> list[dict]:
+    ) -> "list[dict]":
         return await _session_drives.list_deliveries_records(
             self._studio._service,
             drive_id,

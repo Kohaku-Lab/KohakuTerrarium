@@ -4,8 +4,6 @@ The helper is exercised against an offline SQLite fixture so these tests never
 open KohakuVault / SessionStore on the same file.
 """
 
-from __future__ import annotations
-
 import sqlite3
 import threading
 import time

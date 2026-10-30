@@ -40,7 +40,7 @@ from kohakuterrarium.terrarium.drive.errors import (
 from kohakuterrarium.terrarium.drive.goal import GoalSpecError, build_goal_spec
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

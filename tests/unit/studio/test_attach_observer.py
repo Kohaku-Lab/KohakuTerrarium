@@ -7,7 +7,7 @@ import pytest
 
 from kohakuterrarium.studio.attach import observer as obs_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
 # ── stream_creature_channels happy path with fast cancel ────
 

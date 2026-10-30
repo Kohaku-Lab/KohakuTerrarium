@@ -25,8 +25,6 @@ Lanczos resizes on a transparent canvas (the Android template
 composites them over the configured launcher background colour).
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from PIL import Image, ImageDraw

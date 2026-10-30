@@ -39,8 +39,8 @@ from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
-from kohakuterrarium.terrarium.service import _completed_branch_result
-from kohakuterrarium.terrarium.remote_service import _branch_mutation_result
+from kohakuterrarium.terrarium.service.service import _completed_branch_result
+from kohakuterrarium.terrarium.service.remote import _branch_mutation_result
 
 
 def _drive_event(delivery_id="d-1", *, corr_key="delivery_id"):

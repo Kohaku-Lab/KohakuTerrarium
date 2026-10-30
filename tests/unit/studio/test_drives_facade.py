@@ -18,7 +18,7 @@ from kohakuterrarium.terrarium.drive.config import (
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)

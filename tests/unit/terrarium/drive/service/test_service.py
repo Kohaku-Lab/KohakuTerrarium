@@ -28,7 +28,7 @@ from kohakuterrarium.terrarium.drive.service.protocol import (
 )
 from kohakuterrarium.terrarium.drive.service.wire import DriveRuntimeStatus, DriveView
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
 
 pytestmark = pytest.mark.timeout(30)
@@ -355,8 +355,8 @@ def test_remote_and_multinode_override_the_unsupported_floor():
     one method that stays a typed-unsupported cross-node case (registration
     instances are not serializable — design §8.6).
     """
-    from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
-    from kohakuterrarium.terrarium.remote_service import RemoteTerrariumService
+    from kohakuterrarium.terrarium.multi_node.service import MultiNodeTerrariumService
+    from kohakuterrarium.terrarium.service.remote import RemoteTerrariumService
 
     assert issubclass(RemoteTerrariumService, DriveServiceUnsupportedMixin)
     assert issubclass(MultiNodeTerrariumService, DriveServiceUnsupportedMixin)

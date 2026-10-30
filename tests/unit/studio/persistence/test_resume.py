@@ -13,7 +13,7 @@ from kohakuterrarium.studio.persistence.session_index import reconcile as reconc
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
 from kohakuterrarium.studio.sessions import index_hooks
 from kohakuterrarium.terrarium import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 
