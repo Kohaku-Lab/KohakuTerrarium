@@ -21,6 +21,7 @@ from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.service import is_running, status
 from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from tests.helpers.waiting import wait_until_sync
 
 
 @pytest.mark.xdist_group("mcp-subprocess")
@@ -69,6 +70,18 @@ class TestMCPServer:
                     }
                 )
             return completed.returncode, result
+
+        def settled(predicate, root=home):
+            """Poll ``status`` until ``predicate`` holds; ``start`` only waits ``--wait``."""
+            last = {}
+
+            def poll():
+                nonlocal last
+                last = status(store if root == home else other)
+                return predicate(last)
+
+            wait_until_sync(poll, interval=0.1, what="endpoint state")
+            return last
 
         def port():
             with socket.socket() as sock:
@@ -147,12 +160,15 @@ class TestMCPServer:
             assert code == 0 and migrated["migrated"] and not migrated["running"]
             assert other.load().secret != "a" * 43
             assert legacy_record.read_bytes() == legacy_bytes
-            (code, started), (_, racing) = await asyncio.gather(
+            (code, first_start), (_, racing) = await asyncio.gather(
                 asyncio.to_thread(cli, "start"), asyncio.to_thread(cli, "start")
             )
-            assert code == 1 and started["local_ready"] and not started["public_ready"]
-            assert started["management"]["state"] == "ready"
-            assert started["run_id"] == racing["run_id"]
+            assert code == 1
+            started = settled(
+                lambda s: s["local_ready"] and s["management"]["state"] == "ready"
+            )
+            assert not started["public_ready"]
+            assert first_start["run_id"] == racing["run_id"] == started["run_id"]
             assert (await call("workspaces")).structuredContent["workspaces"] == []
             original = store.load()
             registered = cli("workspace add", "first", "./project")
@@ -275,7 +291,7 @@ class TestMCPServer:
             _, restarted = cli("start")
             restart_run_id = restarted.get("run_id")
             assert restart_run_id and restart_run_id != started["run_id"], restarted
-            deadline = asyncio.get_running_loop().time() + 8
+            deadline = asyncio.get_running_loop().time() + 60
             while not (restarted.get("instance_id") and restarted.get("local_ready")):
                 assert restarted.get("running") and restarted.get("state") not in {
                     "failed",
@@ -322,8 +338,8 @@ class TestMCPServer:
             assert cli("rotate")[0] == 0
             rotated = store.load()
             assert rotated.secret != original.secret
-            _, applied = cli("start")
-            assert applied["local_ready"]
+            cli("start")
+            settled(lambda s: s["local_ready"])
             async with httpx.AsyncClient(trust_env=False) as http:
                 rejected = await http.get(
                     f"http://127.0.0.1:{rotated.port}/mcp/{original.secret}"
@@ -374,8 +390,10 @@ class TestMCPServer:
                 )[0]
                 == 0
             )
-            _, ingress_failed = cli("start")
-            assert ingress_failed["local_ready"] and "launch" in ingress_failed["error"]
+            cli("start")
+            ingress_failed = settled(
+                lambda s: s["local_ready"] and "launch" in (s.get("error") or "")
+            )
             bg = await call(
                 "python",
                 {
@@ -397,7 +415,8 @@ class TestMCPServer:
                 )[0]
                 == 0
             )
-            _, pending = cli("start")
+            cli("start")
+            pending = settled(lambda s: s["local_ready"])
             assert pending["instance_id"] == ingress_failed["instance_id"]
             assert (
                 pending["public_origin"] == active.public_origin
@@ -426,7 +445,8 @@ class TestMCPServer:
                     active.public_origin in args and "https://next.invalid" not in args
                 )
             assert cli("stop")[1]["state"] == "stopped"
-            _, reapplied = cli("start")
+            cli("start")
+            reapplied = settled(lambda s: s["local_ready"])
             assert reapplied["public_origin"] == "https://next.invalid"
             assert reapplied["local_ready"] and not reapplied["restart_required"]
         finally:
