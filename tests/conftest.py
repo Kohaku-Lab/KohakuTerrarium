@@ -18,6 +18,7 @@ These rules are how we earn the right to claim "covered."
 
 import ipaddress
 import os
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -46,6 +47,19 @@ os.environ["KT_CONFIG_DIR"] = str(_SESSION_CONFIG_DIR)
 os.environ.setdefault("KT_TEST_REAL_HOME", str(Path.home()))
 # LiteLLM reads its bundled cost map instead of retrying a blocked download.
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+
+if sys.platform == "win32":
+    # A detached parent has no console, so every console child (xdist workers,
+    # import-contract probes, git) would open its own window; hide them all.
+    _popen_init = subprocess.Popen.__init__
+
+    def _popen_init_hidden(self, *args, **kwargs):
+        flags = kwargs.get("creationflags", 0)
+        if not flags & (subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS):
+            kwargs["creationflags"] = flags | subprocess.CREATE_NO_WINDOW
+        _popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _popen_init_hidden
 
 from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP  # noqa: E402
 from kohakuterrarium.testing.llm_seam import (  # noqa: E402
