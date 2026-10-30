@@ -25,7 +25,7 @@ _EXPORTS = {
     "validate": "kohakuterrarium.validate",
 }
 
-__version__ = "2.1.9"
+__version__ = "2.2.0"
 
 __all__ = [
     "Activity",
