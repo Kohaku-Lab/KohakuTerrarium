@@ -13,7 +13,7 @@ from kohakuterrarium.mcp_server.management import (
     management_snapshot,
 )
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig
-from kohakuterrarium.mcp_server.records import write_json
+from kohakuterrarium.mcp_server.records import read_json, write_json
 from kohakuterrarium.mcp_server.service import is_running
 from kohakuterrarium.mcp_server.workspaces import WorkspacePool
 
@@ -282,7 +282,7 @@ async def test_restart_ignores_old_request_and_response(tmp_path):
                 await asyncio.sleep(0.01)
             assert set(store.registry.read()) == {"new"}
             for _ in range(1000):
-                reply = json.loads(store.response_path.read_text())
+                reply = read_json(store.response_path)
                 if reply.get("run_id") == "new":
                     break
                 await asyncio.sleep(0.01)

@@ -44,6 +44,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.studio.catalog.packages import packages as _catalog_packages_ops
 from kohakuterrarium.studio.attach.pty import posix as pty_posix
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.session.vault.io import FIRST_READ_CHUNK
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -875,16 +876,17 @@ class TestApiStudioJourney:
             assert full_response.status_code == 200
             expected = full_response.json()["events"]
             reads = []
-            original_read = KVault.__getitem__
+            original_read = KVault.get_many
 
-            def read_event_value(table, key):
-                text = key.decode() if isinstance(key, bytes) else key
-                if isinstance(text, str) and text.startswith("viewer:e"):
-                    reads.append(text)
-                return original_read(table, key)
+            def read_event_values(table, keys, *args, **kwargs):
+                for key in keys:
+                    text = key.decode() if isinstance(key, bytes) else key
+                    if isinstance(text, str) and text.startswith("viewer:e"):
+                        reads.append(text)
+                return original_read(table, keys, *args, **kwargs)
 
             with monkeypatch.context() as counters:
-                counters.setattr(KVault, "__getitem__", read_event_value)
+                counters.setattr(KVault, "get_many", read_event_values)
                 cursor = None
                 for index in range(2):
                     reads.clear()
@@ -897,7 +899,7 @@ class TestApiStudioJourney:
                     assert page["events"] == expected[index : index + 1]
                     cursor = expected[index]["event_id"]
                     assert page["next_cursor"] == cursor
-                    assert len(reads) == index + 1
+                    assert len(reads) == min(len(expected), FIRST_READ_CHUNK)
                 reads.clear()
                 response = client.get(url, params={"types": "not-present", "limit": 1})
                 assert response.status_code == 200
