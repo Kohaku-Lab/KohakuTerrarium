@@ -21,6 +21,47 @@ def _isolate_native_dpi(monkeypatch):
     monkeypatch.setattr(
         "kohakuterrarium.serving.desktop.chrome._enable_per_monitor_dpi", lambda: None
     )
+    monkeypatch.setattr(desktop, "native_window_available", lambda: True)
+
+
+def test_without_a_native_backend_the_app_opens_in_the_browser(monkeypatch, capsys):
+    served = []
+    timers = []
+    monkeypatch.setattr(desktop, "native_window_available", lambda: False)
+    monkeypatch.setattr(
+        desktop.subprocess,
+        "Popen",
+        lambda *a, **k: pytest.fail("a window process was started"),
+    )
+
+    class _Timer:
+        def __init__(self, delay, function, args=()):
+            timers.append((delay, function, args))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(desktop.threading, "Timer", _Timer)
+    monkeypatch.setattr(
+        desktop.importlib,
+        "import_module",
+        lambda name: type(
+            "Web",
+            (),
+            {"run_web_server": staticmethod(lambda **kw: served.append((name, kw)))},
+        ),
+    )
+
+    assert desktop.launch_desktop_app(port=8123, log_level="ERROR") is None
+
+    assert served == [
+        (
+            "kohakuterrarium.serving.web",
+            {"host": "127.0.0.1", "port": 8123, "dev": False, "log_level": "ERROR"},
+        )
+    ]
+    assert timers == [(2.0, desktop.webbrowser.open, ("http://127.0.0.1:8123/",))]
+    assert "No native webview backend" in capsys.readouterr().err
 
 
 class _Events:

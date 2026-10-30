@@ -2,6 +2,7 @@
 
 import argparse
 import html
+import importlib
 import json
 import os
 import subprocess
@@ -9,12 +10,17 @@ import sys
 import tempfile
 import threading
 import time
+import webbrowser
 from pathlib import Path
 
 from kohakuterrarium.serving.desktop.attention import expose_desktop_attention
 from kohakuterrarium.serving.desktop.chrome import configure_desktop_chrome
 from kohakuterrarium.serving.desktop.links import AppLinks
 from kohakuterrarium.serving.desktop.palette import BACKGROUND, FOREGROUND
+from kohakuterrarium.serving.desktop.webview_probe import (
+    INSTALL_HINT,
+    native_window_available,
+)
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.desktop_launch import (
     LAUNCH_ENV,
@@ -138,8 +144,19 @@ def _state_path() -> Path:
     return Path(handle.name)
 
 
+def _open_in_browser(port: int, log_level: str) -> None:
+    """Serve the app and open it in the default browser (no native webview)."""
+    print(INSTALL_HINT, file=sys.stderr)
+    threading.Timer(2.0, webbrowser.open, args=(home_url(port),)).start()
+    web = importlib.import_module("kohakuterrarium.serving.web")
+    web.run_web_server(host="127.0.0.1", port=port, dev=False, log_level=log_level)
+
+
 def launch_desktop_app(port: int = 8001, log_level: str = "INFO"):
     """Detach a lightweight desktop UI process from a regular interpreter."""
+    if not native_window_available():
+        _open_in_browser(port, log_level)
+        return None
     if _is_briefcase_runtime():
         run_desktop_app(port=port, log_level=log_level)
         return None

@@ -9,6 +9,9 @@ import asyncio
 
 from kohakuterrarium import validate
 from kohakuterrarium.cli.shims import shims_summary
+from kohakuterrarium.serving.desktop.webview_probe import (
+    describe as describe_native_window,
+)
 from kohakuterrarium.llm.profiles.backend_registry import (
     backend_doctor,
     package_backend,
@@ -82,6 +85,7 @@ def doctor_cli(
 
     # Shim status is informational and never raises for missing installations.
     run("terminal shims", shims_summary)
+    run("desktop window", describe_native_window)
 
     selector = llm or get_default_model() or None
     if selector or llm is None:
