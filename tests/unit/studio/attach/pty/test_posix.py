@@ -53,7 +53,7 @@ def test_real_terminal_shutdown_preserves_event_loop(tmp_path, mode, loop_kind):
             str(tmp_path),
             loop_kind,
         ],
-        cwd=Path(__file__).resolve().parents[3],
+        cwd=Path(__file__).resolve().parents[5],
         capture_output=True,
         text=True,
         timeout=12,
