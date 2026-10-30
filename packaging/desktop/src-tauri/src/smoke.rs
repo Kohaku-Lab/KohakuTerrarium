@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::backend::Backend;
 
@@ -40,9 +41,46 @@ pub fn http_status(port: u16, path: &str) -> Option<u16> {
     head.split_whitespace().nth(1)?.parse().ok()
 }
 
-pub fn report(port: u16, page_loaded: bool, ipc: bool) -> Value {
+/// With `KT_DESKTOP_SMOKE_UPDATE` set the self-check also fetches the update feed
+/// and downloads the advertised build, which verifies its signature.
+pub fn update_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_UPDATE").is_some()
+}
+
+fn update_probe(app: &AppHandle) -> Value {
+    tauri::async_runtime::block_on(async {
+        let updater = match app.updater() {
+            Ok(updater) => updater,
+            Err(error) => return json!({ "available": false, "error": error.to_string() }),
+        };
+        match updater.check().await {
+            Ok(Some(update)) => match update.download(|_, _| {}, || {}).await {
+                Ok(bytes) => json!({
+                    "available": true,
+                    "version": update.version,
+                    "downloadVerified": true,
+                    "bytes": bytes.len(),
+                }),
+                Err(error) => json!({
+                    "available": true,
+                    "version": update.version,
+                    "downloadVerified": false,
+                    "error": error.to_string(),
+                }),
+            },
+            Ok(None) => json!({ "available": false, "downloadVerified": false }),
+            Err(error) => json!({ "available": false, "error": error.to_string() }),
+        }
+    })
+}
+
+pub fn report(port: u16, page_loaded: bool, ipc: bool, update: Option<Value>) -> Value {
+    let update_ok = update
+        .as_ref()
+        .is_none_or(|probe| probe["downloadVerified"] == true);
     json!({
-        "ok": page_loaded && ipc,
+        "ok": page_loaded && ipc && update_ok,
+        "shellUpdate": update,
         "port": port,
         "pageLoaded": page_loaded,
         "ipcFromAppPage": ipc,
@@ -75,7 +113,8 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
         while !backend.ipc_confirmed() && Instant::now() < ipc_deadline {
             thread::sleep(Duration::from_millis(100));
         }
-        let value = report(port, backend.page_loaded(), backend.ipc_confirmed());
+        let update = update_probe_requested().then(|| update_probe(&app));
+        let value = report(port, backend.page_loaded(), backend.ipc_confirmed(), update);
         write_report(&out, &value);
         app.exit(if value["ok"] == true { 0 } else { 1 });
     });
@@ -131,10 +170,16 @@ mod tests {
     fn a_report_is_ok_only_when_the_page_loaded_and_could_call_native_commands() {
         for (loaded, ipc) in [(false, false), (true, false), (false, true)] {
             let port = serve_once("HTTP/1.1 401 Unauthorized");
-            assert_eq!(report(port, loaded, ipc)["ok"], false);
+            assert_eq!(report(port, loaded, ipc, None)["ok"], false);
         }
         let port = serve_once("HTTP/1.1 401 Unauthorized");
-        let healthy = report(port, true, true);
+        let unverified = report(port, true, true, Some(json!({ "downloadVerified": false })));
+        assert_eq!(unverified["ok"], false);
+        let port = serve_once("HTTP/1.1 401 Unauthorized");
+        let verified = report(port, true, true, Some(json!({ "downloadVerified": true })));
+        assert_eq!(verified["ok"], true);
+        let port = serve_once("HTTP/1.1 401 Unauthorized");
+        let healthy = report(port, true, true, None);
         assert_eq!(healthy["ok"], true);
         assert_eq!(healthy["ipcFromAppPage"], true);
         assert_eq!(healthy["unauthenticatedStatus"], 401);

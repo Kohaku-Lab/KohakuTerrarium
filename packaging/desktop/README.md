@@ -49,6 +49,23 @@ KT_DESKTOP_RESOURCES=<stage dir> cargo run
 backend is ready and the page has loaded the shell writes a JSON report there and
 exits (status 0 when the page loaded).
 
+With `KT_DESKTOP_SMOKE_UPDATE` also set, the self-check fetches the update feed and
+downloads the advertised build, which verifies its signature; the report's
+`shellUpdate` says what happened. To try it locally: build a signed installer
+(`TAURI_SIGNING_PRIVATE_KEY=<key> tauri build --bundles nsis --config
+tauri.updater.conf.json --config <{"version": "9.9.9"}>`), publish it with
+`updater_manifest.py` on a local HTTP server, and build the shell with an override
+config that points `plugins.updater.endpoints` there and sets
+`dangerousInsecureTransportProtocol`.
+
+## Updates
+
+The shell updates itself from `latest.json` on the latest stable release, signed
+with the key whose public half is in `tauri.conf.json`. The private half is the
+`TAURI_SIGNING_PRIVATE_KEY` repository secret; builds without it produce unsigned
+installers and no updater artifacts. The Python runtime updates separately through
+the launcher.
+
 ## Signing
 
 Builds are unsigned for Windows and ad-hoc signed for macOS. Signing steps in CI run
