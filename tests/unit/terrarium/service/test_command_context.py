@@ -64,7 +64,7 @@ async def _service_with_drive():
     )
     await engine.add_creature(root)
     svc = LocalTerrariumService(engine)
-    from kohakuterrarium.studio.sessions import drives as facade
+    from kohakuterrarium.studio.sessions.drives import drives as facade
 
     await facade.create_record(
         svc,

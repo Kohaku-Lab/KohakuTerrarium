@@ -41,8 +41,8 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
-from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
-from kohakuterrarium.studio.attach import pty_posix
+from kohakuterrarium.studio.catalog.packages import packages as _catalog_packages_ops
+from kohakuterrarium.studio.attach.pty import posix as pty_posix
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM

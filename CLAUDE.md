@@ -15,8 +15,8 @@ KohakuTerrarium is a Python framework that enables building any kind of agent sy
 - Terrarium templates: `terrariums/`
 - Examples: `examples/` (agent-apps, terrariums, plugins, code)
 - Documentation: `docs/` (en, zh-CN, zh-TW)
-- Max lines per file: 600 (hard max: 1000, enforced by `tests/unit/test_file_sizes.py`)
-- Highly modularized - one responsibility per module
+- File size is capped by AST statements (imports and docstrings excluded): over 500 warns, keep it only for one large coherent unit; over 1000 fails (`tests/unit/test_file_sizes.py`)
+- Highly modularized - one responsibility per module; a family of files sharing a prefix is a sub-package with the prefix dropped, and a class too large for one file is a pseudo-class package (mixins per concern, each owning its state via `_init_<part>_state()`, assembled in one module; see `session/store/README.md` and `core/agent/README.md`)
 
 ### Coding style rules
 
@@ -568,6 +568,17 @@ src/kohakuterrarium/
 │   ├── observer.py           # ChannelObserver for non-destructive monitoring
 │   ├── output_log.py         # Capture and log creature output
 │   └── config.py             # Terrarium config loading + topology prompt
+│
+├── studio/                   # Management framework above the engine (see studio/README.md)
+│   ├── studio.py             # Studio facade: catalog / identity / sessions / persistence /
+│   │                         #   editors / attach namespaces
+│   ├── catalog/  identity/   # packages (+ packages/), creatures, modules; settings, API keys,
+│   │                         #   llm/, codex/, grok/, mcp/, drive_settings/
+│   ├── sessions/             # live sessions: creature/ (chat, command, ctl, model, ...),
+│   │                         #   drives/, memory/, cluster/, lifecycle, registry, topology
+│   ├── persistence/          # saved sessions: store, fork, history, resume, artifacts, viewer
+│   ├── editors/              # creature / module editing: codegen/, workspace/, yaml/, CRUD
+│   └── attach/               # attach policies, I/O streams, pty/, workspace/
 │
 ├── api/                      # FastAPI HTTP API (in-package)
 │   ├── app.py                # FastAPI factory + middleware + lifespan

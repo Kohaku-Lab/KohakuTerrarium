@@ -7,7 +7,7 @@ from kohakuterrarium.api.routes.identity.node_routing import (
     call_node_identity,
     is_host_target,
 )
-from kohakuterrarium.studio.identity.grok_subscription import get_status, get_usage
+from kohakuterrarium.studio.identity.grok.subscription import get_status, get_usage
 from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()

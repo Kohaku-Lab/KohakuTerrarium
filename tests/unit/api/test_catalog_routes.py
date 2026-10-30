@@ -11,8 +11,6 @@ from fastapi.testclient import TestClient
 from kohakuterrarium.api.routes.catalog import (
     _deps as catalog_deps,
     commands as commands_mod,
-    creatures as creatures_mod,
-    creatures_scan as creatures_scan_mod,
     manifest as manifest_mod,
     models as models_mod,
     packages as packages_mod,
@@ -23,8 +21,10 @@ from kohakuterrarium.api.routes.catalog import (
     terrariums_scan as terrariums_scan_mod,
     workspace as workspace_mod,
 )
+from kohakuterrarium.api.routes.catalog.creatures import creatures as creatures_mod
+from kohakuterrarium.api.routes.catalog.creatures import scan as creatures_scan_mod
 from kohakuterrarium.packages import locations as loc_mod
-from kohakuterrarium.studio.catalog.packages_scan import (
+from kohakuterrarium.studio.catalog.packages.scan import (
     invalidate_scan_caches,
     scan_creatures_in_dirs,
 )
@@ -83,7 +83,7 @@ class TestRegistryRoute:
     def test_list_remote(self):
         r = _client(registry_mod.router).get(PREFIX)
         assert r.status_code == 200
-        from kohakuterrarium.studio.catalog.packages_remote import (
+        from kohakuterrarium.studio.catalog.packages.remote import (
             load_remote_registry,
         )
 
@@ -110,8 +110,8 @@ class TestServerInfoRoute:
 
 class TestCreaturesScanRoute:
     def test_empty_dirs(self, monkeypatch):
-        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
-        from kohakuterrarium.studio.catalog.packages_scan import (
+        from kohakuterrarium.studio.catalog.packages import scan as scan_mod
+        from kohakuterrarium.studio.catalog.packages.scan import (
             invalidate_scan_caches,
         )
 
@@ -126,8 +126,8 @@ class TestCreaturesScanRoute:
         assert r.json() == []
 
     def test_set_dirs_then_scan(self, monkeypatch, tmp_path):
-        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
-        from kohakuterrarium.studio.catalog.packages_scan import (
+        from kohakuterrarium.studio.catalog.packages import scan as scan_mod
+        from kohakuterrarium.studio.catalog.packages.scan import (
             invalidate_scan_caches,
         )
 
@@ -159,8 +159,8 @@ class TestCreaturesScanRoute:
         # silently returned ``[]``, which is why the "New creature"
         # modal stayed empty on Android even after kt-biome had been
         # installed via the catalog tab and an app restart.
-        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
-        from kohakuterrarium.studio.catalog.packages_scan import (
+        from kohakuterrarium.studio.catalog.packages import scan as scan_mod
+        from kohakuterrarium.studio.catalog.packages.scan import (
             invalidate_scan_caches,
         )
 
@@ -206,8 +206,8 @@ class TestCreaturesScanRoute:
 
 class TestTerrariumsScanRoute:
     def test_empty_dirs(self, monkeypatch):
-        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
-        from kohakuterrarium.studio.catalog.packages_scan import (
+        from kohakuterrarium.studio.catalog.packages import scan as scan_mod
+        from kohakuterrarium.studio.catalog.packages.scan import (
             invalidate_scan_caches,
         )
 
@@ -219,8 +219,8 @@ class TestTerrariumsScanRoute:
         assert r.json() == []
 
     def test_set_dirs(self, monkeypatch, tmp_path):
-        from kohakuterrarium.studio.catalog import packages_scan as scan_mod
-        from kohakuterrarium.studio.catalog.packages_scan import (
+        from kohakuterrarium.studio.catalog.packages import scan as scan_mod
+        from kohakuterrarium.studio.catalog.packages.scan import (
             invalidate_scan_caches,
         )
 
@@ -250,7 +250,7 @@ class TestPackagesRoute:
     def test_list_local(self):
         r = _client(packages_mod.router).get(PREFIX)
         assert r.status_code == 200
-        from kohakuterrarium.studio.catalog.packages_scan import scan_catalog
+        from kohakuterrarium.studio.catalog.packages.scan import scan_catalog
 
         # Route projects each catalog entry through as_registry_dict.
         assert r.json() == [e.as_registry_dict() for e in scan_catalog()]
@@ -459,7 +459,7 @@ class TestWorkspaceRoute:
 
 @pytest.fixture
 def _workspace(tmp_path):
-    from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+    from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
     ws = LocalWorkspace.open(str(tmp_path))
     catalog_deps.set_workspace(ws)

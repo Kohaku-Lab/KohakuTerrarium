@@ -11,12 +11,8 @@ from typing import Any
 
 from kohakuterrarium.errors import InvalidRequestError, NotFoundError
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions import (
-    cluster_fold,
-    remote_meta,
-    remote_terrarium,
-    stop as _stop,
-)
+from kohakuterrarium.studio.sessions import remote_meta, remote_terrarium, stop as _stop
+from kohakuterrarium.studio.sessions.cluster import fold as cluster_fold
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions import live as _live
 from kohakuterrarium.studio.sessions import summary as _summary

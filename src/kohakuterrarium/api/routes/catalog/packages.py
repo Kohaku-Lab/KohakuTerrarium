@@ -14,13 +14,13 @@ from pydantic import BaseModel
 from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.packages.locations import packages_dir
-from kohakuterrarium.studio.catalog.packages import (
+from kohakuterrarium.studio.catalog.packages.packages import (
     install_package_op,
     uninstall_package_op,
     update_all_packages_op,
     update_package_op,
 )
-from kohakuterrarium.studio.catalog.packages_scan import scan_catalog
+from kohakuterrarium.studio.catalog.packages.scan import scan_catalog
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

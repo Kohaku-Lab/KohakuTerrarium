@@ -7,7 +7,7 @@ so the HTTP API and the CLI cannot drift.
 
 from pathlib import Path
 
-from kohakuterrarium.studio.catalog.packages import (
+from kohakuterrarium.studio.catalog.packages.packages import (
     install_package_op,
     list_installed_packages,
     load_agent_info,

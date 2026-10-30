@@ -4,15 +4,15 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+from kohakuterrarium.api.routes.persistence.resume.coordinator import (
     ResumeCoordinator,
     session_coordination_key,
 )
-from kohakuterrarium.api.routes.persistence.resume import (
+from kohakuterrarium.api.routes.persistence.resume.resume import (
     ClusterMember,
     ResumeRequest,
 )
-from kohakuterrarium.api.routes.persistence.resume_request import resume_intent
+from kohakuterrarium.api.routes.persistence.resume.request import resume_intent
 from kohakuterrarium.session.store import SessionStore
 
 

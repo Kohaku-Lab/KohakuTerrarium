@@ -8,8 +8,8 @@ need a real creature/LLM.
 import pytest
 
 from kohakuterrarium.cli import run as run_mod
-from kohakuterrarium.studio.identity import drive_settings as ds
-from kohakuterrarium.studio.identity.drive_settings import (
+from kohakuterrarium.studio.identity.drive_settings import settings as ds
+from kohakuterrarium.studio.identity.drive_settings.settings import (
     DriveSettings,
     RegistrationSetting,
 )

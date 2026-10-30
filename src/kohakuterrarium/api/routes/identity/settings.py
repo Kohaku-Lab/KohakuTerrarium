@@ -16,7 +16,7 @@ from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.api.auth.dependencies import get_auth_config
 from kohakuterrarium.api.auth.engine_pool import EnginePool
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.studio.identity.drive_settings import APPLIED_LIVE
+from kohakuterrarium.studio.identity.drive_settings.settings import APPLIED_LIVE
 from kohakuterrarium.studio.nodes import (
     _LocalNodeDriveSettings,
     build_node_map_if_multi_node,

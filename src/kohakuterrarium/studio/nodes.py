@@ -12,7 +12,7 @@ from typing import Any
 
 from kohakuterrarium.studio.deploy import deploy_creature_to_node
 from kohakuterrarium.studio.files import RemoteFiles
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings
+from kohakuterrarium.studio.identity.drive_settings import settings as _drive_settings
 from kohakuterrarium.terrarium.service.service import (
     LocalTerrariumService,
     TerrariumService,

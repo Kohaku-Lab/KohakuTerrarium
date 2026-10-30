@@ -33,7 +33,7 @@ from kohakuterrarium.studio.attach.widget_frames import (
     apply_client_hello,
     handle_widget_frame,
 )
-from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
+from kohakuterrarium.studio.sessions.cluster.fold import cluster_groups
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.utils.logging import get_logger

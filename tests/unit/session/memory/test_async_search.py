@@ -16,7 +16,7 @@ from kohakuterrarium.session.memory.async_search import (
     live_memory_for_store,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions import memory_search
+from kohakuterrarium.studio.sessions.memory import search as memory_search
 
 # Budget for work that must finish; never a bound on how fast it finishes.
 SETTLE = 30

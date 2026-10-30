@@ -190,7 +190,9 @@ async def _run(
     extra_channels: list[str],
 ) -> int:
     from kohakuterrarium.session.store import SessionStore
-    from kohakuterrarium.studio.identity import drive_settings
+    from kohakuterrarium.studio.identity.drive_settings import (
+        settings as drive_settings,
+    )
     from kohakuterrarium.terrarium.config import load_terrarium_config
     from kohakuterrarium.terrarium.engine.engine import Terrarium
 

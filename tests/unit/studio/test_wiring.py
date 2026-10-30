@@ -6,10 +6,10 @@ import pytest
 from ruamel.yaml.comments import CommentedMap
 
 from kohakuterrarium.packages import locations as loc_mod
-from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
+from kohakuterrarium.studio.catalog.packages.scan import invalidate_scan_caches
 from kohakuterrarium.studio.editors import wiring
-from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
-from kohakuterrarium.studio.editors.yaml_creature import load_creature_file
+from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
+from kohakuterrarium.studio.editors.yaml.creature import load_creature_file
 
 
 @pytest.fixture

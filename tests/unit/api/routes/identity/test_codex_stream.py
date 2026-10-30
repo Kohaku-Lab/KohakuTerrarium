@@ -7,7 +7,7 @@ user code BEFORE the OAuth poll loop completes (the original
 device code to the UI).
 
 The route wraps ``login_async(on_device_code=...)`` from
-:mod:`kohakuterrarium.studio.identity.codex_oauth`. We replace that
+:mod:`kohakuterrarium.studio.identity.codex.oauth`. We replace that
 with deterministic stubs so the tests never touch the real OAuth
 endpoints + can drive every emit case (device_code → completed,
 device_code → error, worker-node 400).

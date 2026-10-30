@@ -5,7 +5,7 @@ A single active workspace is an explicit local, single-user constraint.
 
 from fastapi import HTTPException
 
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 _active: Workspace | None = None
 

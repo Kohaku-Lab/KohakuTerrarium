@@ -18,7 +18,7 @@ from kohakuterrarium.studio.catalog.introspect import (
     custom_schema,
     resolve_module_source,
 )
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

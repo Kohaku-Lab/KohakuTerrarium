@@ -7,7 +7,7 @@ from kohakuterrarium.api.routes.catalog._deps import get_workspace
 from kohakuterrarium.builtins.subagent_catalog import list_builtin_subagents
 from kohakuterrarium.builtins.tool_catalog import list_builtin_tools
 from kohakuterrarium.studio.editors.validators import AgentConfigIn
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

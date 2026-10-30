@@ -41,7 +41,7 @@ from kohakuterrarium.laboratory._internal.client import (
 )
 from kohakuterrarium.laboratory._internal.membership import MembershipEvent
 from kohakuterrarium.serving.process_metrics import get_aggregator
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings
+from kohakuterrarium.studio.identity.drive_settings import settings as _drive_settings
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -59,8 +59,8 @@ from kohakuterrarium.api.routes.attach import files as catalog_attach_files
 from kohakuterrarium.api.routes.attach import policies as attach_policies
 from kohakuterrarium.api.routes.catalog import builtins as catalog_builtins
 from kohakuterrarium.api.routes.catalog import commands as catalog_commands
-from kohakuterrarium.api.routes.catalog import creatures as catalog_creatures
-from kohakuterrarium.api.routes.catalog import creatures_scan as catalog_creatures_scan
+from kohakuterrarium.api.routes.catalog.creatures import creatures as catalog_creatures
+from kohakuterrarium.api.routes.catalog.creatures import scan as catalog_creatures_scan
 from kohakuterrarium.api.routes.catalog import extensions as catalog_extensions
 from kohakuterrarium.api.routes.catalog import manifest as catalog_manifest
 from kohakuterrarium.api.routes.catalog import marketplace as catalog_marketplace
@@ -99,7 +99,7 @@ from kohakuterrarium.api.routes.persistence import open_sessions as persistence_
 from kohakuterrarium.api.routes.persistence import (
     restore_state as persistence_restore_state,
 )
-from kohakuterrarium.api.routes.persistence import resume as persistence_resume
+from kohakuterrarium.api.routes.persistence.resume import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import subagents as persistence_subagents
 from kohakuterrarium.api.routes.persistence import (
@@ -110,18 +110,34 @@ from kohakuterrarium.api.routes.persistence import saved_drives as persistence_d
 from kohakuterrarium.api.routes import runtime_graph as runtime_graph_route
 from kohakuterrarium.api.routes.sessions_v2 import (
     active as sessions_active,
-    creatures_chat as sessions_creatures_chat,
-    creatures_command as sessions_creatures_command,
-    creatures_ctl as sessions_creatures_ctl,
-    creatures_model as sessions_creatures_model,
-    creatures_modules as sessions_creatures_modules,
-    creatures_plugins as sessions_creatures_plugins,
-    creatures_state as sessions_creatures_state,
-    creatures_subagents as sessions_creatures_subagents,
     drives as sessions_drives,
     memory as sessions_memory,
     topology as sessions_topology,
     wiring as sessions_wiring,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    chat as sessions_creatures_chat,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    command as sessions_creatures_command,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    ctl as sessions_creatures_ctl,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    model as sessions_creatures_model,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    modules as sessions_creatures_modules,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    plugins as sessions_creatures_plugins,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    state as sessions_creatures_state,
+)
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    subagents as sessions_creatures_subagents,
 )
 from kohakuterrarium.api.studio import build_studio_router
 from kohakuterrarium.studio.persistence.session_index import close_session_index

@@ -106,7 +106,9 @@ class TestRunStartupTrace:
         async def _run_cli(_engine, creature_id, _store):
             assert creature_id == "focus"
 
-        from kohakuterrarium.studio.identity import drive_settings
+        from kohakuterrarium.studio.identity.drive_settings import (
+            settings as drive_settings,
+        )
         from kohakuterrarium.terrarium.engine import engine as engine_module
 
         monkeypatch.setattr(drive_settings, "resolve_drive_kwargs", lambda: {})

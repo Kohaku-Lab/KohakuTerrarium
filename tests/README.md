@@ -242,8 +242,8 @@ testing otherwise.
 | `builtins/cli_rich/`, `builtins/tui/` | Rich / Textual terminal UI; visual |
 | `llm/openai/provider.py`, `llm/codex/`, `llm/litellm_provider.py` | Need a live provider |
 | `terrarium/engine/cli/tui.py`, `terrarium/engine/cli/rich.py`, `terrarium/engine/cli/output.py` | CLI / TTY UI |
-| `studio/attach/pty_posix.py`, `studio/attach/pty_windows.py`, `studio/attach/pty_router.py` | Platform-specific PTY backends, gated at import |
-| `studio/identity/codex_oauth.py` | 3rd-party OAuth flow |
+| `studio/attach/pty/posix.py`, `studio/attach/pty/windows.py`, `studio/attach/pty/router.py` | Platform-specific PTY backends, gated at import |
+| `studio/identity/codex/oauth.py` | 3rd-party OAuth flow |
 | `session/memory/embedding.py` (non-deterministic embedders) | 3rd-party model dependency |
 | `laboratory/_internal/transport_ws.py` | `websockets` library: `InProcTransport` is the test transport |
 | `builtins/inputs/cli*.py`, `builtins/inputs/tui*.py`, `builtins/outputs/*` (terminal/audio) | CLI / TUI / audio UI |

@@ -24,7 +24,7 @@ CLI overlay, ``kt config``, and the settings page stay in lock-step.
 from dataclasses import dataclass, field
 from typing import Any
 
-from kohakuterrarium.studio.identity.mcp_servers import load_servers, save_servers
+from kohakuterrarium.studio.identity.mcp.servers import load_servers, save_servers
 from kohakuterrarium.builtins.cli_rich.dialogs.settings.drives import (
     DriveSettingsSection,
 )

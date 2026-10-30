@@ -8,7 +8,7 @@ façade without touching a real engine.
 import pytest
 
 from kohakuterrarium.cli import identity_drive as cd
-from kohakuterrarium.studio.identity import drive_settings as ds
+from kohakuterrarium.studio.identity.drive_settings import settings as ds
 
 
 @pytest.fixture

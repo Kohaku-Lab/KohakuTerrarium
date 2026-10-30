@@ -37,10 +37,10 @@ from kohakuterrarium.studio.catalog import (
     creatures as _catalog_creatures,
     introspect as _catalog_introspect,
     modules as _catalog_modules,
-    packages as _catalog_packages,
-    packages_remote as _catalog_remote,
-    packages_scan as _catalog_scan,
 )
+from kohakuterrarium.studio.catalog.packages import packages as _catalog_packages
+from kohakuterrarium.studio.catalog.packages import remote as _catalog_remote
+from kohakuterrarium.studio.catalog.packages import scan as _catalog_scan
 from kohakuterrarium.studio.editors import creatures_crud as _editor_creatures
 from kohakuterrarium.studio.editors import modules_crud as _editor_modules
 from kohakuterrarium.studio.facade_persistence import _PersistenceNS
@@ -48,16 +48,16 @@ from kohakuterrarium.studio.facade_sessions import _SessionsNS
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity import (
     api_keys as _identity_keys,
-    codex_oauth as _identity_codex,
-    drive_settings as _identity_drives,
-    llm_backends as _identity_backends,
-    llm_default as _identity_default,
-    llm_native_tools as _identity_native_tools,
-    llm_profiles as _identity_profiles,
-    mcp_servers as _identity_mcp,
     settings as _identity_settings,
     ui_prefs as _identity_ui_prefs,
 )
+from kohakuterrarium.studio.identity.codex import oauth as _identity_codex
+from kohakuterrarium.studio.identity.drive_settings import settings as _identity_drives
+from kohakuterrarium.studio.identity.llm import backends as _identity_backends
+from kohakuterrarium.studio.identity.llm import default as _identity_default
+from kohakuterrarium.studio.identity.llm import native_tools as _identity_native_tools
+from kohakuterrarium.studio.identity.llm import profiles as _identity_profiles
+from kohakuterrarium.studio.identity.mcp import servers as _identity_mcp
 from kohakuterrarium.studio.nodes import NodeMap, build_node_map_if_multi_node
 from kohakuterrarium.terrarium import LocalTerrariumService, TerrariumService
 from kohakuterrarium.terrarium.engine.engine import Terrarium

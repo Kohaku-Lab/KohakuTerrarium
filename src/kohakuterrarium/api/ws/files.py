@@ -1,7 +1,7 @@
 """WebSocket endpoint for watching file changes in a creature's working directory.
 
 Host-local: thin shell over
-:func:`kohakuterrarium.studio.attach.workspace_watch.watch_directory`.
+:func:`kohakuterrarium.studio.attach.workspace.watch.watch_directory`.
 Remote creatures receive a structured error because workspace watching
 requires a worker-side filesystem event stream; ``terrarium.files`` currently
 supports only one-shot file operations.
@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from kohakuterrarium.api.auth.ws_auth import accept_with_auth_echo
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.attach.workspace_watch import watch_directory
+from kohakuterrarium.studio.attach.workspace.watch import watch_directory
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.utils.logging import get_logger

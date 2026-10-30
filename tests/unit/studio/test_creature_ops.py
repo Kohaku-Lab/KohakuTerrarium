@@ -3,7 +3,7 @@
 These modules forward to the TerrariumService Protocol — tests verify
 the forwarding contract using a fake service."""
 
-from kohakuterrarium.studio.sessions.creature_ctl import (
+from kohakuterrarium.studio.sessions.creature.ctl import (
     cancel_job,
     interrupt,
     list_jobs,

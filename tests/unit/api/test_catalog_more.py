@@ -23,7 +23,7 @@ def _client(router) -> TestClient:
 
 @pytest.fixture
 def _workspace(tmp_path):
-    from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+    from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
     ws = LocalWorkspace.open(str(tmp_path))
     catalog_deps.set_workspace(ws)

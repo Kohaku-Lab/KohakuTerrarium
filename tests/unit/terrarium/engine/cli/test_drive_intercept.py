@@ -18,7 +18,7 @@ from kohakuterrarium.builtins.user_commands import (
 )
 from kohakuterrarium.builtins.user_commands import drives as drives_mod
 from kohakuterrarium.modules.user_command.base import UserCommandContext
-from kohakuterrarium.studio.sessions import drives as drives_facade
+from kohakuterrarium.studio.sessions.drives import drives as drives_facade
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

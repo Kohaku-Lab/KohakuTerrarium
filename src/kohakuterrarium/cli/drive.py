@@ -3,7 +3,7 @@
 Operator automation over a saved session: resume it through the managed
 :class:`~kohakuterrarium.studio.studio.Studio` surface (which resolves the node's
 Drive settings), run one record operation through the
-:mod:`kohakuterrarium.studio.sessions.drives` façade, print a stable table or
+:mod:`kohakuterrarium.studio.sessions.drives.drives` façade, print a stable table or
 ``--json`` (the service DTO shape), then shut the engine down.
 
 Mutations that omit ``--revision`` fail with a refetch instruction rather than
@@ -17,7 +17,7 @@ import json
 from typing import Any
 
 from kohakuterrarium.cli.run import _resolve_session
-from kohakuterrarium.studio.sessions import drives as _drives
+from kohakuterrarium.studio.sessions.drives import drives as _drives
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,

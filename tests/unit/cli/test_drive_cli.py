@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.cli import drive as drive_cli_mod
-from kohakuterrarium.studio.sessions import drives as facade
+from kohakuterrarium.studio.sessions.drives import drives as facade
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

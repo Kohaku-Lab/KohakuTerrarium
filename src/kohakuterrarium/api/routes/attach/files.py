@@ -7,7 +7,7 @@ layer while preserving the URL shapes expected by existing frontend callers.
 from fastapi import APIRouter, Response
 
 from kohakuterrarium.api.schemas import FileDelete, FileMkdir, FileRename, FileWrite
-from kohakuterrarium.studio.attach import workspace_files
+from kohakuterrarium.studio.attach.workspace import files as workspace_files
 
 router = APIRouter()
 

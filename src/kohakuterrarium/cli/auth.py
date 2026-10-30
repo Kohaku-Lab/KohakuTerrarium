@@ -4,7 +4,7 @@ from kohakuterrarium.cli.identity_antigravity import login_cli as _antigravity_l
 from kohakuterrarium.cli.identity_codex import login_cli as _codex_login
 from kohakuterrarium.cli.identity_keys import login_with_api_key
 from kohakuterrarium.llm.profiles.backend_registry import package_backend
-from kohakuterrarium.studio.identity.llm_backends import get_backend
+from kohakuterrarium.studio.identity.llm.backends import get_backend
 
 
 def login_cli(provider: str) -> int:

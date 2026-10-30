@@ -14,7 +14,7 @@ from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
 )
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
-from kohakuterrarium.studio.sessions.memory_build import (
+from kohakuterrarium.studio.sessions.memory.build import (
     build_index as _build_index,
     index_status as _index_status,
 )

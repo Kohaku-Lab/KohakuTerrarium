@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from kohakuterrarium.studio.editors.codegen_tool import (
+from kohakuterrarium.studio.editors.codegen.tool import (
     BASE_IMPORTS as TOOL_BASE_IMPORTS,
 )
 from kohakuterrarium.studio.editors.templates import import_block, render

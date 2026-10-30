@@ -724,7 +724,7 @@ class TestApiSettingsJourney:
         # SCHEMA validation (raw save = validated-persist only, design §8.4):
         # an invalid runtime block is a 400, never a silent enable.
         from kohakuterrarium.api.deps import get_service_legacy
-        from kohakuterrarium.studio.identity import drive_settings as ds
+        from kohakuterrarium.studio.identity.drive_settings import settings as ds
 
         current_drive_file = client.get(
             "/api/settings/config-files/drive-settings/content"

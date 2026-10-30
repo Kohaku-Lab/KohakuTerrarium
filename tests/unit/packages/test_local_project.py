@@ -13,8 +13,8 @@ from kohakuterrarium.packages.locations import (
     project_dir,
 )
 from kohakuterrarium.packages.walk import list_packages
-from kohakuterrarium.studio.catalog import packages_scan
-from kohakuterrarium.studio.catalog.packages_scan import (
+from kohakuterrarium.studio.catalog.packages import scan as packages_scan
+from kohakuterrarium.studio.catalog.packages.scan import (
     invalidate_scan_caches,
     scan_catalog,
     scan_creatures_in_dirs,

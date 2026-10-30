@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from kohakuterrarium.api.routes.sessions_v2 import creatures_command
+from kohakuterrarium.api.routes.sessions_v2.creatures import (
+    command as creatures_command,
+)
 
 
 @pytest.fixture

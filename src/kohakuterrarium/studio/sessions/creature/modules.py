@@ -1,0 +1,257 @@
+"""Dispatch per-creature module configuration across supported types.
+
+A module is any runtime-configurable creature component, such as a plugin,
+ordinary tool, or provider-native tool. All types expose a common shape::
+
+    {
+        "type": "plugin" | "native_tool" | ...,
+        "name": "permgate",
+        "description": "...",
+        "schema":  {<option_key>: {<spec>}},
+        "options": {<option_key>: <value>},
+        "enabled": True | False | None,
+    }
+
+Each type delegates inventory, options, and toggling to its existing backend.
+Adding a type requires one entry in :data:`_TYPE_DISPATCH`.
+"""
+
+from typing import Any
+
+from kohakuterrarium.studio.sessions.creature import plugins as creature_plugins
+from kohakuterrarium.studio.sessions.creature import state as creature_state
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.studio._runtime import as_engine
+
+
+def _inventory_plugins(
+    engine: Terrarium, session_id: str, creature_id: str
+) -> list[dict]:
+    return [
+        {
+            "type": "plugin",
+            "name": entry["name"],
+            "description": entry.get("description", ""),
+            "schema": entry.get("schema", {}),
+            "options": entry.get("options", {}),
+            "enabled": entry.get("enabled", True),
+            "priority": entry.get("priority"),
+        }
+        for entry in creature_plugins.plugin_inventory(engine, session_id, creature_id)
+    ]
+
+
+def _inventory_native_tools(
+    engine: Terrarium, session_id: str, creature_id: str
+) -> list[dict]:
+    return [
+        {
+            "type": "native_tool",
+            "name": entry["name"],
+            "description": entry.get("description", ""),
+            "schema": entry.get("option_schema", {}),
+            "options": entry.get("values", {}),
+            "enabled": None,
+        }
+        for entry in creature_state.native_tool_inventory(
+            engine, session_id, creature_id
+        )
+    ]
+
+
+def _inventory_tools(
+    engine: Terrarium, session_id: str, creature_id: str
+) -> list[dict]:
+    return [
+        {
+            "type": "tool",
+            "name": entry["name"],
+            "description": entry.get("description", ""),
+            "schema": entry.get("option_schema", {}),
+            "options": entry.get("values", {}),
+            "enabled": None,
+        }
+        for entry in creature_state.tool_inventory(engine, session_id, creature_id)
+    ]
+
+
+def _get_options_plugin(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    payload = creature_plugins.get_plugin_options(engine, session_id, creature_id, name)
+    return {
+        "type": "plugin",
+        "name": payload["name"],
+        "schema": payload.get("schema", {}),
+        "options": payload.get("options", {}),
+    }
+
+
+def _get_options_native_tool(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    for entry in creature_state.native_tool_inventory(engine, session_id, creature_id):
+        if entry["name"] == name:
+            return {
+                "type": "native_tool",
+                "name": name,
+                "schema": entry.get("option_schema", {}),
+                "options": entry.get("values", {}),
+            }
+    raise KeyError(name)
+
+
+def _get_options_tool(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    for entry in creature_state.tool_inventory(engine, session_id, creature_id):
+        if entry["name"] == name:
+            return {
+                "type": "tool",
+                "name": name,
+                "schema": entry.get("option_schema", {}),
+                "options": entry.get("values", {}),
+            }
+    raise KeyError(name)
+
+
+def _set_options_plugin(
+    engine: Terrarium,
+    session_id: str,
+    creature_id: str,
+    name: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    return creature_plugins.set_plugin_options(
+        engine, session_id, creature_id, name, values or {}
+    )
+
+
+def _set_options_native_tool(
+    engine: Terrarium,
+    session_id: str,
+    creature_id: str,
+    name: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    return creature_state.set_native_tool_options(
+        engine, session_id, creature_id, name, values or {}
+    )
+
+
+def _set_options_tool(
+    engine: Terrarium,
+    session_id: str,
+    creature_id: str,
+    name: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    return creature_state.set_tool_options(
+        engine, session_id, creature_id, name, values or {}
+    )
+
+
+async def _toggle_plugin(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    return await creature_plugins.toggle_plugin(engine, session_id, creature_id, name)
+
+
+async def _toggle_unsupported(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    raise ValueError("Module type does not support toggle")
+
+
+_TYPE_DISPATCH: dict[str, dict[str, Any]] = {
+    "plugin": {
+        "inventory": _inventory_plugins,
+        "get_options": _get_options_plugin,
+        "set_options": _set_options_plugin,
+        "toggle": _toggle_plugin,
+    },
+    "native_tool": {
+        "inventory": _inventory_native_tools,
+        "get_options": _get_options_native_tool,
+        "set_options": _set_options_native_tool,
+        "toggle": _toggle_unsupported,
+    },
+    "tool": {
+        "inventory": _inventory_tools,
+        "get_options": _get_options_tool,
+        "set_options": _set_options_tool,
+        "toggle": _toggle_unsupported,
+    },
+}
+
+
+def supported_types() -> list[str]:
+    return list(_TYPE_DISPATCH.keys())
+
+
+def _adapter(module_type: str, op: str):
+    type_entry = _TYPE_DISPATCH.get(module_type)
+    if type_entry is None:
+        raise ValueError(f"Unknown module type: {module_type!r}")
+    fn = type_entry.get(op)
+    if fn is None:
+        raise ValueError(f"Module type {module_type!r} does not support {op!r}")
+    return fn
+
+
+def list_modules(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> list[dict]:
+    """Return every configurable module across all known types."""
+    engine = as_engine(service)
+    out: list[dict] = []
+    for entry in _TYPE_DISPATCH.values():
+        try:
+            out.extend(entry["inventory"](engine, session_id, creature_id))
+        except KeyError:
+            raise
+        except Exception:
+            # One unavailable backend must not hide modules from other types.
+            continue
+    return out
+
+
+def get_module_options(
+    service: "TerrariumService",
+    session_id: str,
+    creature_id: str,
+    module_type: str,
+    name: str,
+) -> dict:
+    """Return ``{type, name, schema, options}`` for a single module."""
+    engine = as_engine(service)
+    fn = _adapter(module_type, "get_options")
+    return fn(engine, session_id, creature_id, name)
+
+
+def set_module_options(
+    service: "TerrariumService",
+    session_id: str,
+    creature_id: str,
+    module_type: str,
+    name: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply runtime option overrides for a module of any supported type."""
+    engine = as_engine(service)
+    fn = _adapter(module_type, "set_options")
+    return fn(engine, session_id, creature_id, name, values or {})
+
+
+async def toggle_module(
+    service: "TerrariumService",
+    session_id: str,
+    creature_id: str,
+    module_type: str,
+    name: str,
+) -> dict:
+    """Flip a module's enabled state (only supported for some types)."""
+    engine = as_engine(service)
+    fn = _adapter(module_type, "toggle")
+    return await fn(engine, session_id, creature_id, name)

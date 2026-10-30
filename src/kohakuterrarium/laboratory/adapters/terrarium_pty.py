@@ -6,7 +6,7 @@ from typing import Any
 
 from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.laboratory.ws_proxy import WSFrameSink, WSProxyAdapter
-from kohakuterrarium.studio.attach.pty_router import pty_session, session_cwd
+from kohakuterrarium.studio.attach.pty.router import pty_session, session_cwd
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 

@@ -19,7 +19,7 @@ from kohakuterrarium.packages.marketplace_types import (
     MarketplaceNotFoundError,
     MarketplaceUnavailableError,
 )
-from kohakuterrarium.studio.catalog.packages import install_package_op
+from kohakuterrarium.studio.catalog.packages.packages import install_package_op
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 
 from kohakuterrarium.llm.grok import auth as grok_auth
-from kohakuterrarium.studio.identity.grok_account import BILLING_URL
+from kohakuterrarium.studio.identity.grok.account import BILLING_URL
 
 BILLING_HOST = "cli-chat-proxy.grok.com"
 FAKE_ACCESS = "workflow-grok-access"

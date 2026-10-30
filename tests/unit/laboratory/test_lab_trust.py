@@ -18,7 +18,7 @@ from kohakuterrarium.laboratory.adapters.studio_settings import StudioSettingsAd
 from kohakuterrarium.laboratory.adapters.terrarium_runtime_drive import (
     handle_drive_request,
 )
-from kohakuterrarium.studio.identity import drive_settings as _ds
+from kohakuterrarium.studio.identity.drive_settings import settings as _ds
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

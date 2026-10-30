@@ -54,14 +54,14 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.packages.locations import ensure_local_project
-from kohakuterrarium.studio.catalog.packages_scan import scan_creatures_in_dirs
+from kohakuterrarium.studio.catalog.packages.scan import scan_creatures_in_dirs
 from kohakuterrarium.session.memory.embedding import BaseEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.occupancy.gate import GATE, try_fast
-from kohakuterrarium.studio.identity import grok_subscription
+from kohakuterrarium.studio.identity.grok import subscription as grok_subscription
 from kohakuterrarium.studio.persistence import store as _persistence_store_mod
 from kohakuterrarium.studio.persistence.session_index import close_session_index
-from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
+from kohakuterrarium.studio.sessions.memory import search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.llm_seam import real_llm_providers
@@ -228,7 +228,7 @@ class TestStudioIntegration:
         workspace_root.mkdir()
         session_dir = isolated_paths["session_dir"]
 
-        from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+        from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
         async with Studio() as studio:
             # --- editors: scaffold + edit a workspace creature ----------
@@ -1839,8 +1839,8 @@ class TestStudioIntegration:
         Mirrors the managed CLI/TUI/web path: Studio is the settings owner and
         every Drive op funnels through ``TerrariumService`` (design §8.4, §9.2).
         """
-        from kohakuterrarium.studio.identity import drive_settings as ds
-        from kohakuterrarium.studio.identity.drive_settings import (
+        from kohakuterrarium.studio.identity.drive_settings import settings as ds
+        from kohakuterrarium.studio.identity.drive_settings.settings import (
             DriveSettings,
             RegistrationSetting,
         )

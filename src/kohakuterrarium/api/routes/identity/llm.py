@@ -6,20 +6,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.auth import verify_admin_token
-from kohakuterrarium.studio.identity.llm_backends import (
+from kohakuterrarium.studio.identity.llm.backends import (
     list_backend_types,
     list_backends,
     remove_backend,
     save_backend_record,
 )
-from kohakuterrarium.studio.identity.llm_default import (
+from kohakuterrarium.studio.identity.llm.default import (
     get_default,
     list_all_models_combined,
     resolve_and_set_default,
     set_default,
 )
-from kohakuterrarium.studio.identity.llm_native_tools import list_native_tools
-from kohakuterrarium.studio.identity.llm_profiles import (
+from kohakuterrarium.studio.identity.llm.native_tools import list_native_tools
+from kohakuterrarium.studio.identity.llm.profiles import (
     list_profiles_payload,
     remove_profile,
     save_profile_record,

@@ -9,8 +9,8 @@ fresh default generic + goal runtimes from ``Terrarium``.
 import pytest
 
 from kohakuterrarium.api.auth.engine_pool import EnginePool
-from kohakuterrarium.studio.identity import drive_settings as ds
-from kohakuterrarium.studio.identity.drive_settings import (
+from kohakuterrarium.studio.identity.drive_settings import settings as ds
+from kohakuterrarium.studio.identity.drive_settings.settings import (
     DriveSettings,
     RegistrationSetting,
 )

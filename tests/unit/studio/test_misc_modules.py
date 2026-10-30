@@ -8,15 +8,11 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.studio.attach import workspace_watch as ww_mod
-from kohakuterrarium.studio.catalog import (
-    modules as catalog_modules,
-    packages_remote as remote_mod,
-)
-from kohakuterrarium.studio.editors import (
-    codegen_init,
-    codegen_pending,
-)
+from kohakuterrarium.studio.attach.workspace import watch as ww_mod
+from kohakuterrarium.studio.catalog import modules as catalog_modules
+from kohakuterrarium.studio.catalog.packages import remote as remote_mod
+from kohakuterrarium.studio.editors.codegen import init as codegen_init
+from kohakuterrarium.studio.editors.codegen import pending as codegen_pending
 
 # ── catalog/modules.py ──────────────────────────────────────
 
@@ -26,7 +22,7 @@ class TestCatalogModules:
     are exercised against actual on-disk module files."""
 
     def test_list_modules_returns_workspace_modules(self, tmp_path):
-        from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+        from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
         kd = tmp_path / "modules" / "tools"
         kd.mkdir(parents=True)
@@ -36,7 +32,7 @@ class TestCatalogModules:
         assert [m["name"] for m in out] == ["mytool"]
 
     def test_load_module_returns_parsed_envelope(self, tmp_path):
-        from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+        from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
         kd = tmp_path / "modules" / "tools"
         kd.mkdir(parents=True)
@@ -47,7 +43,7 @@ class TestCatalogModules:
         assert out["kind"] == "tools"
 
     def test_load_module_doc_returns_sidecar_envelope(self, tmp_path):
-        from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+        from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
         kd = tmp_path / "modules" / "tools"
         kd.mkdir(parents=True)

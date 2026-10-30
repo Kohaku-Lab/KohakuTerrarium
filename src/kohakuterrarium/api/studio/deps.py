@@ -10,7 +10,7 @@ from kohakuterrarium.api.routes.catalog._deps import (
     get_workspace_optional,
     set_workspace,
 )
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 __all__ = [
     "Workspace",

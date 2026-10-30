@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.studio.sessions.drives`.
+"""Unit tests for :mod:`kohakuterrarium.studio.sessions.drives.drives`.
 
 The façade is exercised against a REAL Drive-enabled ``LocalTerrariumService``
 (its genuine dependency): parse/build helpers, row redaction, detail
@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kohakuterrarium.studio.sessions import drives as facade
+from kohakuterrarium.studio.sessions.drives import drives as facade
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

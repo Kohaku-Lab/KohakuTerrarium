@@ -8,10 +8,10 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.sessions import cluster_fold
+from kohakuterrarium.studio.sessions.cluster import fold as cluster_fold
 from kohakuterrarium.terrarium.service.service import TerrariumService
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
-from kohakuterrarium.studio.sessions.memory_search import search_session_memory
+from kohakuterrarium.studio.sessions.memory.search import search_session_memory
 from kohakuterrarium.api.routes.persistence.live_paths import live_store_path
 
 router = APIRouter()

@@ -6,7 +6,7 @@ from typing import Any
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory._internal.protocol import HOST_NODE_ID
 from kohakuterrarium.laboratory.protocols import LabRegistrar
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings
+from kohakuterrarium.studio.identity.drive_settings import settings as _drive_settings
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService

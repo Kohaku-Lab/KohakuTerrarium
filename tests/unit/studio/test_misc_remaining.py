@@ -11,10 +11,8 @@ from kohakuterrarium.studio.editors import (
     skills_state as ss_mod,
     utils_paths as up_mod,
 )
-from kohakuterrarium.studio.sessions import (
-    creature_command as cc_mod,
-    creature_model as cm_mod,
-)
+from kohakuterrarium.studio.sessions.creature import command as cc_mod
+from kohakuterrarium.studio.sessions.creature import model as cm_mod
 
 # ── editors/utils_paths ─────────────────────────────────────
 

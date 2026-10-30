@@ -9,7 +9,7 @@ in this package.
 from fastapi import APIRouter
 
 from kohakuterrarium.api.routes.catalog import builtins as catalog_builtins
-from kohakuterrarium.api.routes.catalog import creatures as catalog_creatures
+from kohakuterrarium.api.routes.catalog.creatures import creatures as catalog_creatures
 from kohakuterrarium.api.routes.catalog import manifest as catalog_manifest
 from kohakuterrarium.api.routes.catalog import modules as catalog_modules
 from kohakuterrarium.api.routes.catalog import schema as catalog_schema

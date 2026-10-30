@@ -1,7 +1,7 @@
 """A tool's argument schema and flags survive the form: read, edited, written back."""
 
 from kohakuterrarium.core.loader import ModuleLoader
-from kohakuterrarium.studio.editors import codegen_tool
+from kohakuterrarium.studio.editors.codegen import tool as codegen_tool
 from kohakuterrarium.studio.editors.modules_crud import render_module
 from kohakuterrarium.studio.editors.tool_params import rows_to_schema, schema_to_rows
 from kohakuterrarium.studio.editors.wiring import first_class_name

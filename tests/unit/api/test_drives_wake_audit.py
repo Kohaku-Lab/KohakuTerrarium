@@ -57,7 +57,7 @@ def _client(service, *, user=None):
 
 
 async def _make_drive(service, graph_id):
-    from kohakuterrarium.studio.sessions import drives as facade
+    from kohakuterrarium.studio.sessions.drives import drives as facade
 
     view = await facade.create_record(
         service,

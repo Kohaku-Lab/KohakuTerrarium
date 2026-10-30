@@ -24,7 +24,7 @@ from kohakuterrarium.studio.catalog.catalog_sources import (
     workspace_manifest_entries,
 )
 from kohakuterrarium.studio.editors.plugin_hooks import PLUGIN_HOOKS
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

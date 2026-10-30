@@ -3,7 +3,7 @@
 import pytest
 from fastapi import HTTPException
 
-from kohakuterrarium.api.routes.persistence import resume_cluster
+from kohakuterrarium.api.routes.persistence.resume import cluster as resume_cluster
 
 
 class _ExistingPath:

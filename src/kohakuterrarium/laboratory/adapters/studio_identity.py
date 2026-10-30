@@ -11,18 +11,18 @@ from kohakuterrarium.studio.identity.api_keys import (
     remove_key,
     set_key,
 )
-from kohakuterrarium.studio.identity.codex_oauth import (
+from kohakuterrarium.studio.identity.codex.oauth import (
     consume_reset_credit_async as codex_consume_reset_credit,
     get_status as codex_get_status,
     get_usage_async as codex_get_usage,
     login_async as codex_login_async,
 )
-from kohakuterrarium.studio.identity.llm_profiles import list_profiles_payload
-from kohakuterrarium.studio.identity.grok_subscription import (
+from kohakuterrarium.studio.identity.llm.profiles import list_profiles_payload
+from kohakuterrarium.studio.identity.grok.subscription import (
     get_status as grok_get_status,
     get_usage as grok_get_usage,
 )
-from kohakuterrarium.studio.identity.mcp_servers import load_servers
+from kohakuterrarium.studio.identity.mcp.servers import load_servers
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

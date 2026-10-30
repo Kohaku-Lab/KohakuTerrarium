@@ -1,11 +1,11 @@
 """CLI MCP management — global registry CRUD + per-agent lister.
 
 Delegates global and per-agent MCP operations to the canonical parser
-:mod:`kohakuterrarium.studio.identity.mcp_servers`.
+:mod:`kohakuterrarium.studio.identity.mcp.servers`.
 """
 
 from kohakuterrarium.cli.config_prompts import prompt as _prompt
-from kohakuterrarium.studio.identity.mcp_servers import (
+from kohakuterrarium.studio.identity.mcp.servers import (
     MCP_SERVERS_PATH,
     delete_server,
     find_server,

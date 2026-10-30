@@ -108,9 +108,9 @@
     "reason": "mcp.client.stdio is loaded on the stdio-transport path"
   },
   {
-    "file": "src/kohakuterrarium/studio/attach/pty_router.py",
+    "file": "src/kohakuterrarium/studio/attach/pty/router.py",
     "function": "pty_session",
-    "target": "kohakuterrarium.studio.attach",
+    "target": "kohakuterrarium.studio.attach.pty",
     "reason": "platform-selected PTY backend: ConPTY on win32, fcntl/pty/termios elsewhere — each imported only inside its `sys.platform` branch"
   },
   {
@@ -134,7 +134,7 @@
   {
     "file": "src/kohakuterrarium/builtins/user_commands/drives.py",
     "function": "_drive_call",
-    "target": "kohakuterrarium.studio.sessions",
+    "target": "kohakuterrarium.studio.sessions.drives",
     "reason": "Drive persistence is a Studio-only runtime path; deferring it keeps core Agent imports from pulling the full Studio session graph."
   },
   {
@@ -248,7 +248,7 @@
   {
     "file": "src/kohakuterrarium/studio/hooks.py",
     "function": "resolve_workspace_hook",
-    "target": "kohakuterrarium.studio.editors.workspace_fs",
+    "target": "kohakuterrarium.studio.editors.workspace.fs",
     "reason": "Workspace editor dependencies load only when a group tool requests workspace resolution."
   },
   {
@@ -350,7 +350,7 @@
   {
     "file": "src/kohakuterrarium/api/deps.py",
     "function": "_host_drive_kwargs",
-    "target": "kohakuterrarium.studio.identity",
+    "target": "kohakuterrarium.studio.identity.drive_settings",
     "reason": "Drive settings are loaded only when constructing a standalone engine."
   },
   {
@@ -452,7 +452,7 @@
   {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_run",
-    "target": "kohakuterrarium.studio.identity",
+    "target": "kohakuterrarium.studio.identity.drive_settings",
     "reason": "Drive settings are loaded only when constructing the runtime engine."
   },
   {

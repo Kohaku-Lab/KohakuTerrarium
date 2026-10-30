@@ -7,7 +7,7 @@ in isolation; the two renderers (:mod:`.select_cli`, :mod:`.select_tui`)
 sit on top of it.
 
 The single discovery entry point is :func:`enumerate_runnables`, which
-projects :func:`kohakuterrarium.studio.catalog.packages_scan.scan_catalog`
+projects :func:`kohakuterrarium.studio.catalog.packages.scan.scan_catalog`
 into ``RunnableGroup``s grouped by source (``"local"`` first, then
 installed packages alphabetically).  Each :class:`Runnable` carries a
 portable ``ref`` (``@pkg/...`` where possible, else an absolute path)
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
-from kohakuterrarium.studio.catalog.packages_scan import scan_catalog, to_ref
+from kohakuterrarium.studio.catalog.packages.scan import scan_catalog, to_ref
 
 LOCAL_SOURCE = "local"
 

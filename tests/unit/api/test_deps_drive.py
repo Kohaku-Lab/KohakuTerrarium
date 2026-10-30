@@ -9,8 +9,8 @@ opt out (design §8.5).
 import pytest
 
 from kohakuterrarium.api.deps import get_service_legacy, set_service
-from kohakuterrarium.studio.identity import drive_settings as ds
-from kohakuterrarium.studio.identity.drive_settings import (
+from kohakuterrarium.studio.identity.drive_settings import settings as ds
+from kohakuterrarium.studio.identity.drive_settings.settings import (
     DriveSettings,
     RegistrationSetting,
 )

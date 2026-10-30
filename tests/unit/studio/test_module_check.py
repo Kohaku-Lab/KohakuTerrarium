@@ -4,7 +4,7 @@ import pytest
 
 from kohakuterrarium.studio.editors.module_check import check_module
 from kohakuterrarium.studio.editors.starters import list_starters
-from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
 
 @pytest.fixture

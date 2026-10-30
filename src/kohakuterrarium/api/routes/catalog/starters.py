@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.routes.catalog._deps import get_workspace_optional
-from kohakuterrarium.studio.editors.codegen_init import get_codegen
+from kohakuterrarium.studio.editors.codegen.init import get_codegen
 from kohakuterrarium.studio.editors.creatures_crud import render_creature
 from kohakuterrarium.studio.editors.modules_crud import render_module
 from kohakuterrarium.studio.editors.starters import (
@@ -18,7 +18,7 @@ from kohakuterrarium.studio.editors.wiring import (
     first_class_name,
     wiring_entry,
 )
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

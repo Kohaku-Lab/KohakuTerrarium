@@ -49,7 +49,9 @@ def _session_dir() -> str:
 
 def _host_drive_kwargs() -> dict:
     """Resolve one immutable host Drive configuration for a new engine."""
-    from kohakuterrarium.studio.identity import drive_settings
+    from kohakuterrarium.studio.identity.drive_settings import (
+        settings as drive_settings,
+    )
 
     return drive_settings.resolve_drive_kwargs()
 

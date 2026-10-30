@@ -45,7 +45,7 @@ from kohakuterrarium.llm.codex.auth import (
     register_codex_resolver,
 )
 from kohakuterrarium.studio.hooks import register_group_hooks
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings
+from kohakuterrarium.studio.identity.drive_settings import settings as _drive_settings
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (

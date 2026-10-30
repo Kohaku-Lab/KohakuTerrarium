@@ -14,19 +14,19 @@ from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence import store as _persistence_store
 from kohakuterrarium.studio.sessions import (
-    creature_chat as _session_chat,
-    creature_command as _session_command,
-    creature_ctl as _session_ctl,
-    creature_model as _session_model,
-    creature_plugins as _session_plugins,
-    creature_state as _session_state,
-    drives as _session_drives,
     handles as _session_handles,
     lifecycle as _session_lifecycle,
-    memory_search as _session_memory,
     topology as _session_topology,
     wiring as _session_wiring,
 )
+from kohakuterrarium.studio.sessions.creature import chat as _session_chat
+from kohakuterrarium.studio.sessions.creature import command as _session_command
+from kohakuterrarium.studio.sessions.creature import ctl as _session_ctl
+from kohakuterrarium.studio.sessions.creature import model as _session_model
+from kohakuterrarium.studio.sessions.creature import plugins as _session_plugins
+from kohakuterrarium.studio.sessions.creature import state as _session_state
+from kohakuterrarium.studio.sessions.drives import drives as _session_drives
+from kohakuterrarium.studio.sessions.memory import search as _session_memory
 from kohakuterrarium.terrarium.drive.models import ActorRef
 
 if TYPE_CHECKING:

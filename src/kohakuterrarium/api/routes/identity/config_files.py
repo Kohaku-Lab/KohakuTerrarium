@@ -17,8 +17,10 @@ from pydantic import BaseModel
 from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.studio.identity import api_keys as _api_keys_mod
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings_mod
-from kohakuterrarium.studio.identity import llm_profiles as _llm_profiles_mod
+from kohakuterrarium.studio.identity.drive_settings import (
+    settings as _drive_settings_mod,
+)
+from kohakuterrarium.studio.identity.llm import profiles as _llm_profiles_mod
 from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,

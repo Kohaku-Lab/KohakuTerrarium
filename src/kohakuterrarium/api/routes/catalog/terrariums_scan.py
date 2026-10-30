@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from kohakuterrarium.api._io_executor import run_in_io_executor
-from kohakuterrarium.studio.catalog.packages_scan import (
+from kohakuterrarium.studio.catalog.packages.scan import (
     dedupe_dirs,
     scan_terrariums_in_dirs,
 )

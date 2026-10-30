@@ -43,7 +43,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import kohakuterrarium.api.routes.persistence.preflight_metadata as _preflight_metadata
-import kohakuterrarium.api.routes.persistence.resume_cluster as _resume_cluster
+import kohakuterrarium.api.routes.persistence.resume.cluster as _resume_cluster
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import get_service_legacy, set_service
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
@@ -58,10 +58,10 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent import model as _agent_model
 from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.session.memory.embedding import NullEmbedder
-from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
+from kohakuterrarium.studio.catalog.packages import packages as _catalog_packages_ops
 from kohakuterrarium.studio.sessions import lifecycle
-from kohakuterrarium.studio.sessions import memory_build as _memory_build
-from kohakuterrarium.studio.sessions import memory_search as _memory_search
+from kohakuterrarium.studio.sessions.memory import build as _memory_build
+from kohakuterrarium.studio.sessions.memory import search as _memory_search
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.llm_seam import real_llm_providers
@@ -293,7 +293,7 @@ class TestApiIntegration:
         # the configs scan silently hid it.  PACKAGES_DIR is pinned to
         # tmp so the step never touches the developer's real installs.
         from kohakuterrarium.packages import locations as _pkg_locations
-        from kohakuterrarium.studio.catalog import packages_scan as _packages_scan
+        from kohakuterrarium.studio.catalog.packages import scan as _packages_scan
 
         monkeypatch.setattr(_pkg_locations, "PACKAGES_DIR", tmp_path / "pkgs")
         _packages_scan.invalidate_scan_caches()
@@ -2882,8 +2882,8 @@ async def test_managed_local_engine_receives_settings_derived_drive_runtime(
     registry; absent settings create and use enabled generic + goal defaults.
     """
     from kohakuterrarium.api.deps import get_service_legacy, set_service
-    from kohakuterrarium.studio.identity import drive_settings as ds
-    from kohakuterrarium.studio.identity.drive_settings import (
+    from kohakuterrarium.studio.identity.drive_settings import settings as ds
+    from kohakuterrarium.studio.identity.drive_settings.settings import (
         DriveSettings,
         RegistrationSetting,
     )

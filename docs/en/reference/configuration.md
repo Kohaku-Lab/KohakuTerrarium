@@ -792,7 +792,7 @@ explicit arguments:
 - Canonical path: `config_dir() / "drive-settings.yaml"`, normally
   `~/.kohakuterrarium/drive-settings.yaml` (honours `KT_CONFIG_DIR`). It
   is **not** the launcher's `app-settings.json`.
-- Loaded/validated by `kohakuterrarium.studio.identity.drive_settings`.
+- Loaded/validated by `kohakuterrarium.studio.identity.drive_settings.settings`.
 - Stores serializable selections and options only — never live Python
   objects and never Drive records (those live in the Drive repository /
   session sidecar).

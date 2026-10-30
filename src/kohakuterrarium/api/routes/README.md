@@ -11,8 +11,8 @@ appropriate prefix.
 | `__init__.py`      | Package marker                                                                          |
 | `catalog/`         | Package / registry / marketplace / config discovery, module + creature CRUD, workspace, templates, validation, server info |
 | `identity/`        | LLM backends + profiles, API keys, Codex OAuth, MCP server registry, UI prefs, config files |
-| `sessions_v2/`     | Engine-backed active sessions: per-creature chat / control / model / plugins / state, topology, wiring, memory search |
-| `persistence/`     | Saved `.kohakutr` sessions: list / delete, resume into the engine, fork, history, viewer, artifacts, memory index |
+| `sessions_v2/`     | Engine-backed active sessions: `creatures/` (per-creature chat / command / ctl / model / modules / plugins / state / sub-agents), topology, wiring, memory search |
+| `persistence/`     | Saved `.kohakutr` sessions: list / delete, `resume/` (single, cluster, remote, coordinator, request / response, compensation), fork, history, viewer, artifacts, memory index |
 | `attach/`          | Workspace files + attach policy hints                                                   |
 | `app_update.py`    | App-update API for the Vue `Admin → Updates` tab                                        |
 | `health.py`        | Liveness + readiness endpoints                                                          |
@@ -25,7 +25,7 @@ appropriate prefix.
 Imported by `api/app.py` only. Imports: `fastapi`, `pydantic`; `studio/`
 namespaces and the `Terrarium` engine (via `api/deps.get_engine`),
 `session/` (resume, store, memory, embedding), `llm/` (profiles +
-codex_auth), `packages/`, `core/config`, `terrarium/config`.
+`codex/auth`), `packages/`, `core/config`, `terrarium/config`.
 
 ## Notes
 

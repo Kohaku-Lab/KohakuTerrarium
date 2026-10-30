@@ -44,7 +44,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.attach.policies import Policy
-from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 from kohakuterrarium.studio.persistence import store as _persistence_store_mod
 from kohakuterrarium.studio.persistence.session_index import close_session_index
 from kohakuterrarium.studio.studio import Studio

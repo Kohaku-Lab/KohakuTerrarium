@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from kohakuterrarium.studio.catalog.packages_remote import load_remote_registry
+from kohakuterrarium.studio.catalog.packages.remote import load_remote_registry
 
 router = APIRouter()
 

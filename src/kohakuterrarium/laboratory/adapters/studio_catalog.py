@@ -5,12 +5,12 @@ from typing import Any
 
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.protocols import LabRegistrar
-from kohakuterrarium.studio.catalog.packages import (
+from kohakuterrarium.studio.catalog.packages.packages import (
     install_package_op,
     list_installed_packages,
     uninstall_package_op,
 )
-from kohakuterrarium.studio.catalog.packages_scan import scan_worker_creatures
+from kohakuterrarium.studio.catalog.packages.scan import scan_worker_creatures
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

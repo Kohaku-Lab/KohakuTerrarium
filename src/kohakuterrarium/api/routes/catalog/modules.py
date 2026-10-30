@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.routes.catalog._deps import get_workspace
-from kohakuterrarium.studio.editors.codegen_init import RoundTripError
+from kohakuterrarium.studio.editors.codegen.init import RoundTripError
 from kohakuterrarium.studio.editors.module_check import check_module
 from kohakuterrarium.studio.editors.starters import UnknownStarterError
-from kohakuterrarium.studio.editors.workspace_fs import KNOWN_KINDS
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.fs import KNOWN_KINDS
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

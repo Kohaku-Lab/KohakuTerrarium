@@ -19,7 +19,7 @@ from kohakuterrarium.api.auth.db import (
 from kohakuterrarium.api.auth.engine_pool import EnginePool
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.identity import settings as settings_mod
-from kohakuterrarium.studio.identity import drive_settings as ds
+from kohakuterrarium.studio.identity.drive_settings import settings as ds
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 

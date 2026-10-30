@@ -10,7 +10,8 @@ from kohakuterrarium.api.routes.identity import antigravity as routes
 from kohakuterrarium.api.routes.identity import api_keys as key_routes
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.llm.antigravity import auth
-from kohakuterrarium.studio.identity import api_keys, llm_backends
+from kohakuterrarium.studio.identity import api_keys
+from kohakuterrarium.studio.identity.llm import backends as llm_backends
 from kohakuterrarium.cli.auth import login_cli
 
 

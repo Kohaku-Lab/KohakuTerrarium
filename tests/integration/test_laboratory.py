@@ -17,7 +17,7 @@ from fastapi import WebSocketDisconnect
 
 from kohakuterrarium.api.routes.identity.grok import grok_usage
 from kohakuterrarium.errors import ConflictError
-from kohakuterrarium.studio.sessions.creature_subagents import (
+from kohakuterrarium.studio.sessions.creature.subagents import (
     read_subagent_conversation_async,
     send_to_subagent,
 )
@@ -57,7 +57,7 @@ from kohakuterrarium.studio.sessions import lifecycle as session_lifecycle
 from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.terrarium.graph.manifest import MANIFEST_KEY
 from kohakuterrarium.studio.attach.io import attach_io
-from kohakuterrarium.studio.catalog.packages import install_package_op
+from kohakuterrarium.studio.catalog.packages.packages import install_package_op
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,

@@ -32,7 +32,7 @@ _TRANSITIONS = {"pause": "paused", "resume": "active", "cancel": "cancelled"}
 
 
 async def _drive_call(name: str, *args, **kwargs):
-    from kohakuterrarium.studio.sessions import drives
+    from kohakuterrarium.studio.sessions.drives import drives
 
     return await getattr(drives, name)(*args, **kwargs)
 

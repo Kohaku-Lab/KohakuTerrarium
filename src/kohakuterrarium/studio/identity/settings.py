@@ -5,7 +5,7 @@ from pathlib import Path
 
 from kohakuterrarium.llm.profiles.api_keys import _keys_path
 from kohakuterrarium.llm.profiles.backends import _profiles_path
-from kohakuterrarium.studio.identity.mcp_servers import mcp_config_path
+from kohakuterrarium.studio.identity.mcp.servers import mcp_config_path
 from kohakuterrarium.studio.identity.ui_prefs import ui_prefs_path
 from kohakuterrarium.utils.config_dir import config_dir
 

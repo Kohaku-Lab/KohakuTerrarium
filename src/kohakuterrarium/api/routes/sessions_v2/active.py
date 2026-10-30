@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
-from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+from kohakuterrarium.api.routes.persistence.resume.coordinator import (
     conversation_coordination_key,
     resume_coordinator,
 )

@@ -50,7 +50,8 @@ from tests.e2e._lab_harness import (
 )
 from kohakuterrarium.api.deps import get_service_legacy as get_service
 from kohakuterrarium.session.memory.embedding import BaseEmbedder
-from kohakuterrarium.studio.sessions import cluster_fold, memory_search
+from kohakuterrarium.studio.sessions.cluster import fold as cluster_fold
+from kohakuterrarium.studio.sessions.memory import search as memory_search
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.testing.llm import ScriptEntry

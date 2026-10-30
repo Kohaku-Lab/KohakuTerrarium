@@ -7,11 +7,11 @@ before delegating here.
 
 from pathlib import Path
 
-from kohakuterrarium.studio.editors.codegen_common import RoundTripError
-from kohakuterrarium.studio.editors.codegen_init import get_codegen
+from kohakuterrarium.studio.editors.codegen.common import RoundTripError
+from kohakuterrarium.studio.editors.codegen.init import get_codegen
 from kohakuterrarium.studio.editors.starters import starter_form
 from kohakuterrarium.studio.editors.utils_paths import sanitize_name
-from kohakuterrarium.studio.editors.workspace_manifest import (
+from kohakuterrarium.studio.editors.workspace.manifest import (
     save_sidecar_doc,
     write_codegen_sidecars,
 )

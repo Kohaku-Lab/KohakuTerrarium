@@ -23,12 +23,12 @@ from kohakuterrarium.llm.profiles.resolve import (
     load_profiles,
     save_profile,
 )
-from kohakuterrarium.studio.identity.llm_default import (
+from kohakuterrarium.studio.identity.llm.default import (
     get_default,
     resolve_and_set_default,
     set_default,
 )
-from kohakuterrarium.studio.identity.llm_profiles import (
+from kohakuterrarium.studio.identity.llm.profiles import (
     get_preset_definition,
     get_profile_for_identifier,
     list_all_models,

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.api.routes.catalog import creatures_scan
+from kohakuterrarium.api.routes.catalog.creatures import scan as creatures_scan
 
 
 class _CatalogSender:

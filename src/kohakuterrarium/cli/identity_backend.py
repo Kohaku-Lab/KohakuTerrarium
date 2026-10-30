@@ -5,7 +5,7 @@ from kohakuterrarium.cli.config_prompts import prompt_choice as _prompt_choice
 from kohakuterrarium.cli.config_prompts import (
     prompt_native_tools as _prompt_native_tools,
 )
-from kohakuterrarium.studio.identity.llm_backends import (
+from kohakuterrarium.studio.identity.llm.backends import (
     get_backend,
     list_backends,
     remove_backend,

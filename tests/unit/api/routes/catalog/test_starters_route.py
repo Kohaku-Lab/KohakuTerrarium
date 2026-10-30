@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps
 from kohakuterrarium.api.routes.catalog import starters as starters_mod
 from kohakuterrarium.packages import locations as loc_mod
-from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
-from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+from kohakuterrarium.studio.catalog.packages.scan import invalidate_scan_caches
+from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
 
 @pytest.fixture

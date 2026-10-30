@@ -1,8 +1,8 @@
 """CLI memory commands — terminal formatters around session memory.
 
 The actual indexing logic lives in
-:mod:`kohakuterrarium.studio.sessions.memory_build` (write path) and
-:mod:`kohakuterrarium.studio.sessions.memory_search` (read path); this
+:mod:`kohakuterrarium.studio.sessions.memory.build` (write path) and
+:mod:`kohakuterrarium.studio.sessions.memory.search` (read path); this
 module is strictly the rich-CLI presentation layer.
 """
 
@@ -10,7 +10,7 @@ from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions.memory_build import build_index
+from kohakuterrarium.studio.sessions.memory.build import build_index
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

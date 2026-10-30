@@ -10,7 +10,7 @@ from typing import Any
 
 from kohakuterrarium.core.channel import ChannelMessage
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.sessions import cluster_fold
+from kohakuterrarium.studio.sessions.cluster import fold as cluster_fold
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 

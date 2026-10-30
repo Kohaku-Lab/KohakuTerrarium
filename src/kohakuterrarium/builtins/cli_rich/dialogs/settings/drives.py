@@ -19,7 +19,7 @@ from typing import Any, Callable
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from kohakuterrarium.studio.identity.drive_settings import (
+from kohakuterrarium.studio.identity.drive_settings.settings import (
     RegistrationSetting,
     apply_runtime,
     load_settings,

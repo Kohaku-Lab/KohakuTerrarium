@@ -16,7 +16,7 @@ from starlette.requests import HTTPConnection
 from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_user
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.studio.sessions import drives as _drives
+from kohakuterrarium.studio.sessions.drives import drives as _drives
 from kohakuterrarium.terrarium.drive.errors import DriveError
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.service.service import TerrariumService

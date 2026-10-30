@@ -3,13 +3,13 @@
 import pytest
 import yaml
 
-from kohakuterrarium.studio.editors import codegen_plugin
+from kohakuterrarium.studio.editors.codegen import plugin as codegen_plugin
 from kohakuterrarium.studio.editors import (
     creatures_crud as cc_mod,
     modules_crud as mc_mod,
 )
 from kohakuterrarium.studio.editors.starters import UnknownStarterError
-from kohakuterrarium.studio.editors.yaml_creature import load_creature_file
+from kohakuterrarium.studio.editors.yaml.creature import load_creature_file
 
 # ── creatures_crud ──────────────────────────────────────────
 
@@ -169,7 +169,7 @@ class TestScaffoldModule:
         path = mc_mod.scaffold_module(tmp_path, "tools", "my_tool", template=None)
         assert path == tmp_path / "my_tool.py"
         # Scaffolded file is a valid tool module parseable by codegen.
-        from kohakuterrarium.studio.editors import codegen_tool
+        from kohakuterrarium.studio.editors.codegen import tool as codegen_tool
 
         back = codegen_tool.parse_back(path.read_text(encoding="utf-8"))
         assert back["mode"] == "simple"
@@ -238,7 +238,7 @@ class TestSaveModule:
             fallback_path=tmp_path / "newt.py",
         )
         # The written file round-trips through the tool codegen parser.
-        from kohakuterrarium.studio.editors import codegen_tool
+        from kohakuterrarium.studio.editors.codegen import tool as codegen_tool
 
         back = codegen_tool.parse_back(out.read_text())
         assert back["mode"] == "simple"
@@ -301,7 +301,7 @@ class TestSaveModule:
             fallback_path=existing,
         )
         # In-place update: tool_name patched, class identity preserved.
-        from kohakuterrarium.studio.editors import codegen_tool
+        from kohakuterrarium.studio.editors.codegen import tool as codegen_tool
 
         back = codegen_tool.parse_back(existing.read_text())
         assert back["form"]["tool_name"] == "new"

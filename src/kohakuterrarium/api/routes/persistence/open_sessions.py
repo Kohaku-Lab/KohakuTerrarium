@@ -11,7 +11,7 @@ from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
 from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
 )
-from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+from kohakuterrarium.api.routes.persistence.resume.coordinator import (
     conversation_coordination_key,
     resume_coordinator,
     session_coordination_key,
@@ -24,7 +24,7 @@ from kohakuterrarium.studio.persistence.session_index.refresh import reconcile_g
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.sessions import lifecycle
-from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
+from kohakuterrarium.studio.sessions.cluster.fold import cluster_groups
 from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.terrarium.service.service import TerrariumService
 

@@ -14,7 +14,7 @@ writer, the real ``kohaku.yaml`` manifest loader, the real
 
 The workflows mirror how the codebase actually drives ``packages/``:
 
-- ``cli/packages.py`` → ``studio/catalog/packages.py`` runs the
+- ``cli/packages.py`` → ``studio/catalog/packages/packages.py`` runs the
   ``kt install`` / ``kt list`` / ``kt info`` / ``kt uninstall``
   lifecycle: ``install_package_op`` → ``list_installed_packages`` →
   ``load_agent_info`` / ``get_package_modules`` → ``uninstall_package_op``.
@@ -83,8 +83,8 @@ from kohakuterrarium.packages.ui_slot import (
 )
 from kohakuterrarium.packages.walk import get_package_modules, list_packages
 from kohakuterrarium.studio.catalog import drive_registrations as drive_catalog
-from kohakuterrarium.studio.catalog import packages as studio_packages
-from kohakuterrarium.studio.identity.llm_backends import save_backend_record
+from kohakuterrarium.studio.catalog.packages import packages as studio_packages
+from kohakuterrarium.studio.identity.llm.backends import save_backend_record
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.registration.registration import (
     resolve_registration,
@@ -384,7 +384,7 @@ class TestPackagesIntegration:
         install-2nd → ``uninstall`` → ``list`` lifecycle.
 
         This is the exact path a user takes with the ``kt`` CLI, driven
-        through the same ``studio/catalog/packages.py`` ops the CLI
+        through the same ``studio/catalog/packages/packages.py`` ops the CLI
         calls, cross-checked against the low-tier library.
         """
         # ---- before any install: the packages dir does not exist yet,

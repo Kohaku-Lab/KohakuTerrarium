@@ -9,13 +9,13 @@ from pydantic import BaseModel
 
 from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
-from kohakuterrarium.studio.identity.mcp_servers import (
+from kohakuterrarium.studio.identity.mcp.servers import (
     delete_server,
     find_server,
     load_servers,
     upsert_server,
 )
-from kohakuterrarium.studio.identity.mcp_usage import find_creatures_using_server
+from kohakuterrarium.studio.identity.mcp.usage import find_creatures_using_server
 
 router = APIRouter()
 

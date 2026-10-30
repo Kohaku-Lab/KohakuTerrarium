@@ -16,7 +16,7 @@ from kohakuterrarium.studio.editors.skills_state import (
     save_state,
     serialize,
 )
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

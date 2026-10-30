@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.manifest import _load_manifest
 from kohakuterrarium.packages.walk import get_package_modules
-from kohakuterrarium.studio.catalog.packages import list_installed_packages
+from kohakuterrarium.studio.catalog.packages.packages import list_installed_packages
 
 router = APIRouter()
 

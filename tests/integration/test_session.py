@@ -14,7 +14,7 @@ The workflows mirror how the codebase actually drives session:
 ``init_meta``, then ``agent.attach_session_store(store)``; the agent's
 ``SessionOutput`` sink records every turn; ``session/resume/resume.py`` rebuilds
 the agent from the ``config_path`` in meta and re-injects state;
-``studio/sessions/memory_search.py`` indexes events and searches.
+``studio/sessions/memory/search.py`` indexes events and searches.
 """
 
 import asyncio
@@ -1273,7 +1273,7 @@ class TestSessionIntegration:
     ):
         """Run an agent, then index + search its session memory.
 
-        Mirrors ``studio/sessions/memory_search.py``: open the store,
+        Mirrors ``studio/sessions/memory/search.py``: open the store,
         build a ``SessionMemory`` over an embedder, ``index_events`` per
         agent, then ``search``. Asserts the EXACT recorded user turn is
         the top hit for both FTS and semantic modes.

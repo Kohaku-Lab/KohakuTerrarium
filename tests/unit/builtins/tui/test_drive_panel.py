@@ -22,7 +22,7 @@ from kohakuterrarium.builtins.cli_rich.dialogs.drive.format import (
     enabled_actions,
     project_view,
 )
-from kohakuterrarium.studio.identity.drive_settings import DriveSettings
+from kohakuterrarium.studio.identity.drive_settings.settings import DriveSettings
 from kohakuterrarium.terrarium.drive.models import (
     ActorRef,
     DriveProgress,

@@ -48,8 +48,10 @@ class TestCreateApp:
         from pathlib import Path
 
         from kohakuterrarium.api.routes.catalog import (
-            creatures_scan as catalog_creatures_scan,
             terrariums_scan as catalog_terrariums_scan,
+        )
+        from kohakuterrarium.api.routes.catalog.creatures import (
+            scan as catalog_creatures_scan,
         )
 
         try:

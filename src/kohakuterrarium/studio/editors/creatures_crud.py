@@ -7,7 +7,7 @@ filesystem mutation here and handles higher-level loading and response shaping.
 import shutil
 from pathlib import Path
 
-from kohakuterrarium.studio.catalog.packages_scan import package_ref
+from kohakuterrarium.studio.catalog.packages.scan import package_ref
 from kohakuterrarium.studio.editors.starters import starter_form
 from kohakuterrarium.studio.editors.templates import (
     render_creature_config,
@@ -15,7 +15,7 @@ from kohakuterrarium.studio.editors.templates import (
     render_system_prompt,
 )
 from kohakuterrarium.studio.editors.utils_paths import ensure_in_root, sanitize_name
-from kohakuterrarium.studio.editors.yaml_creature import (
+from kohakuterrarium.studio.editors.yaml.creature import (
     load_creature_file,
     merge_yaml_text,
     save_creature_merged,

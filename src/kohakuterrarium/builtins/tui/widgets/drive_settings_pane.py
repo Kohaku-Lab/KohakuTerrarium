@@ -11,7 +11,7 @@ from typing import Any, Callable
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Input, Label, Static, Switch
 
-from kohakuterrarium.studio.identity.drive_settings import (
+from kohakuterrarium.studio.identity.drive_settings.settings import (
     DriveSettings,
     RegistrationSetting,
     apply_runtime,

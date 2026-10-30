@@ -26,7 +26,7 @@ def spawnable_hook(workspace):
 
 
 def resolve_workspace_hook(engine, creature):
-    from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+    from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 
     pwd = ""
     executor = getattr(creature.agent, "executor", None)

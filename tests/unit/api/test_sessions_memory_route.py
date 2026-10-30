@@ -12,7 +12,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.laboratory.config import HostConfig
 from kohakuterrarium.session.memory.embedding import NullEmbedder
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.sessions import memory_search as search_mod
+from kohakuterrarium.studio.sessions.memory import search as search_mod
 from kohakuterrarium.terrarium.multi_node.service import MultiNodeTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.api.routes.sessions_v2 import memory as mem_mod

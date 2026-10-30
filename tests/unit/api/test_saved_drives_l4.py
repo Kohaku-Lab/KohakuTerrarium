@@ -64,7 +64,7 @@ async def _make_saved_session(session_dir: Path) -> str:
     await engine.add_creature(root, session=True)
     gid = root.graph_id
     svc = LocalTerrariumService(engine)
-    from kohakuterrarium.studio.sessions import drives as facade
+    from kohakuterrarium.studio.sessions.drives import drives as facade
 
     await facade.create_record(
         svc,

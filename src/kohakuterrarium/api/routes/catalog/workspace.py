@@ -11,8 +11,8 @@ from kohakuterrarium.packages.locations import (
     project_dir,
 )
 from kohakuterrarium.packages.resolve import is_package_ref, resolve_package_path
-from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
-from kohakuterrarium.studio.editors.workspace_manifest import Workspace
+from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
+from kohakuterrarium.studio.editors.workspace.manifest import Workspace
 
 router = APIRouter()
 

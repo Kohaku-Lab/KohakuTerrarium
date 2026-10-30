@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.editors.workspace_fs import LocalWorkspace
+from kohakuterrarium.studio.editors.workspace.fs import LocalWorkspace
 from kohakuterrarium.studio.studio import Studio
 
 # ── catalog.packages — real package dir / bundled registry ─────

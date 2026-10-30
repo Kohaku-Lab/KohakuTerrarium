@@ -7,7 +7,7 @@ scan with a function that checks the loop stays live while it runs.
 
 import asyncio
 
-from kohakuterrarium.api.routes.catalog import creatures_scan as creatures_mod
+from kohakuterrarium.api.routes.catalog.creatures import scan as creatures_mod
 from kohakuterrarium.api.routes.catalog import models as models_mod
 from kohakuterrarium.api.routes.catalog import terrariums_scan as terrariums_mod
 from tests.helpers.loop_witness import LoopWitness

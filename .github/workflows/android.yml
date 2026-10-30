@@ -34,7 +34,7 @@ on:
       - "packaging/android/**"
       - ".github/workflows/android.yml"
       - "src/kohakuterrarium/utils/mobile_sandbox.py"
-      - "src/kohakuterrarium/builtins/tools/bash.py"
+      - "src/kohakuterrarium/builtins/tools/bash/bash.py"
       - "tests/unit/packaging/**"
       - "tests/unit/utils/test_mobile_sandbox.py"
   workflow_dispatch:

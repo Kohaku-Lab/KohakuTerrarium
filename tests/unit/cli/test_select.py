@@ -14,7 +14,7 @@ from kohakuterrarium.cli.select import (
     enumerate_runnables,
     flatten_rows,
 )
-from kohakuterrarium.studio.catalog.packages_scan import CatalogEntry
+from kohakuterrarium.studio.catalog.packages.scan import CatalogEntry
 
 
 def _r(name, kind="creature", source="local", desc="", members=()):

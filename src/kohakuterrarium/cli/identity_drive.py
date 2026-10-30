@@ -1,6 +1,6 @@
 """``kt config drive`` — operator CLI over the Studio Drive settings façade.
 
-Thin terminal wrapper around :mod:`kohakuterrarium.studio.identity.drive_settings`:
+Thin terminal wrapper around :mod:`kohakuterrarium.studio.identity.drive_settings.settings`:
 ``show`` / ``set`` / ``registrations`` manage the canonical
 ``drive-settings.yaml``; ``apply`` validates that the saved settings resolve. A
 raw save is deliberately distinct from live apply — the CLI has no running engine
@@ -10,7 +10,7 @@ a live runtime changed.
 
 from typing import Any
 
-from kohakuterrarium.studio.identity import drive_settings as ds
+from kohakuterrarium.studio.identity.drive_settings import settings as ds
 from kohakuterrarium.terrarium.drive.errors import DriveError
 
 

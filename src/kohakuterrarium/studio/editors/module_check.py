@@ -15,7 +15,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool
 from kohakuterrarium.modules.trigger.base import BaseTrigger
-from kohakuterrarium.studio.editors.workspace_wiring import module_wiring
+from kohakuterrarium.studio.editors.workspace.wiring import module_wiring
 
 BASE_TYPES: dict[str, type] = {
     "tools": BaseTool,

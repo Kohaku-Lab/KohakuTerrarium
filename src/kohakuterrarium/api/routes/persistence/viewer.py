@@ -56,7 +56,7 @@ from kohakuterrarium.studio.persistence.viewer.timeline import (
 )
 from kohakuterrarium.studio.persistence.viewer.tree import build_tree_payload
 from kohakuterrarium.studio.persistence.viewer.turns import build_turns_payload
-from kohakuterrarium.studio.sessions import cluster_fold
+from kohakuterrarium.studio.sessions.cluster import fold as cluster_fold
 from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()

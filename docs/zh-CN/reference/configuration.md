@@ -507,7 +507,7 @@ Root（面向用户的特权节点）：
 - 规范路径：`config_dir() / "drive-settings.yaml"`，通常是
   `~/.kohakuterrarium/drive-settings.yaml`（尊重 `KT_CONFIG_DIR`）。它
   **不是** launcher 的 `app-settings.json`。
-- 由 `kohakuterrarium.studio.identity.drive_settings` 加载 / 校验。
+- 由 `kohakuterrarium.studio.identity.drive_settings.settings` 加载 / 校验。
 - 只存可序列化的选择和选项——绝不存活的 Python 对象，也绝不存 Drive
   记录（那些活在 Drive 仓库 / session sidecar 里）。
 - **缺失** 的文件解析为运行时 **禁用** 的默认。**格式错误** 的文件抛一个

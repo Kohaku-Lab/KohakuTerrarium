@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import WebSocketDisconnect
 
-from kohakuterrarium.studio.attach import pty_posix
+from kohakuterrarium.studio.attach.pty import posix as pty_posix
 
 
 def main() -> None:

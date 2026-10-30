@@ -11,7 +11,7 @@ import pytest
 from kohakuterrarium.builtins.cli_rich.dialogs.settings.drives import (
     DriveSettingsSection,
 )
-from kohakuterrarium.studio.identity.drive_settings import load_settings
+from kohakuterrarium.studio.identity.drive_settings.settings import load_settings
 
 
 @pytest.fixture()

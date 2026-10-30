@@ -9,13 +9,11 @@ from pathlib import Path
 import pytest
 import yaml
 
-from kohakuterrarium.studio.identity import (
-    llm_backends as backends_mod,
-    llm_default as default_mod,
-    llm_native_tools as native_mod,
-    llm_profiles as profiles_mod,
-    settings as settings_mod,
-)
+from kohakuterrarium.studio.identity import settings as settings_mod
+from kohakuterrarium.studio.identity.llm import backends as backends_mod
+from kohakuterrarium.studio.identity.llm import default as default_mod
+from kohakuterrarium.studio.identity.llm import native_tools as native_mod
+from kohakuterrarium.studio.identity.llm import profiles as profiles_mod
 
 from tests.unit._fakes.package_backend import (
     echo_backend,

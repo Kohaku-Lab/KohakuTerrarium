@@ -147,7 +147,7 @@ class TestAuthorization:
 
 
 async def _drive_rows(service):
-    from kohakuterrarium.studio.sessions import drives as facade
+    from kohakuterrarium.studio.sessions.drives import drives as facade
 
     info = await service.list_creatures()
     gid = info[0].graph_id
