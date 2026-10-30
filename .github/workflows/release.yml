@@ -589,7 +589,11 @@ jobs:
         with:
           name: dist
           path: dist/
+      # A nightly re-dispatched on the same day rebuilds the same dated version;
+      # PyPI already has those files and that is not a failure.
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: ${{ needs.meta.outputs.channel == 'nightly' }}
 
   # ── GitHub Release (release-tree tarballs + desktop installers) ──
   github-release:
