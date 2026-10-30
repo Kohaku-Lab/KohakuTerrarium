@@ -520,7 +520,7 @@ jobs:
       - name: Build installers (Windows)
         if: matrix.platform == 'windows'
         working-directory: packaging/desktop/src-tauri
-        run: tauri build --bundles msi,nsis
+        run: tauri build --bundles "msi,nsis"
 
       - name: Build and ad-hoc sign the app bundle (macOS)
         if: matrix.platform == 'macos'
