@@ -3,12 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   DESKTOP_PROTOCOL,
   desktopCapabilities,
+  getAutostart,
   hasDesktopHost,
   hostKind,
   hostSupports,
   onHostReady,
   openExternalViaHost,
   requestDesktopAttention,
+  setAutostart,
+  showDesktopNotification,
+  takeDeepLink,
 } from "@/utils/hostBridge"
 
 afterEach(() => {
@@ -93,6 +97,38 @@ describe("hostBridge", () => {
     window.pywebview = { api: {} }
     expect(hostSupports("open_external")).toBe(false)
     expect(await openExternalViaHost("https://example.test")).toBe(false)
+  })
+
+  it("shows notifications and reads or changes autostart through the shell", async () => {
+    const api = {
+      show_notification: vi.fn(async () => true),
+      get_autostart: vi.fn(async () => true),
+      set_autostart: vi.fn(async () => true),
+      take_deep_link: vi.fn(async () => "kt://session/x"),
+    }
+    window.pywebview = { api }
+
+    expect(await showDesktopNotification("Title", "Body")).toBe(true)
+    expect(api.show_notification).toHaveBeenCalledWith("Title", "Body")
+    expect(await getAutostart()).toBe(true)
+    expect(await setAutostart(false)).toBe(false)
+    expect(api.set_autostart).toHaveBeenCalledWith(false)
+    expect(await takeDeepLink()).toBe("kt://session/x")
+  })
+
+  it("reports the state the shell actually reached when it refuses a change", async () => {
+    window.pywebview = { api: { set_autostart: vi.fn(async () => false) } }
+
+    expect(await setAutostart(true)).toBe(false)
+  })
+
+  it("answers null or false for the optional operations of a shell without them", async () => {
+    window.pywebview = { api: {} }
+
+    expect(await showDesktopNotification("a", "b")).toBe(false)
+    expect(await getAutostart()).toBeNull()
+    expect(await setAutostart(true)).toBeNull()
+    expect(await takeDeepLink()).toBeNull()
   })
 
   it("onHostReady fires immediately when hosted and again on pywebviewready", () => {

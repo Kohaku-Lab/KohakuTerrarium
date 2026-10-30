@@ -85,6 +85,47 @@ export async function openExternalViaHost(url) {
   }
 }
 
+/** Show a system notification through the shell. Resolves ``false`` when it cannot. */
+export async function showDesktopNotification(title, body) {
+  if (!hostSupports("show_notification")) return false
+  try {
+    return (await call("show_notification", String(title), String(body))) === true
+  } catch {
+    return false
+  }
+}
+
+/** Whether the shell starts the app at login, or ``null`` when it cannot say. */
+export async function getAutostart() {
+  if (!hostSupports("get_autostart")) return null
+  try {
+    return (await call("get_autostart")) === true
+  } catch {
+    return null
+  }
+}
+
+/** Ask the shell to start (or stop starting) the app at login. Resolves the new state. */
+export async function setAutostart(enabled) {
+  if (!hostSupports("set_autostart")) return null
+  try {
+    const applied = await call("set_autostart", Boolean(enabled))
+    return applied === true ? Boolean(enabled) : !enabled
+  } catch {
+    return null
+  }
+}
+
+/** The deep link that arrived before the page could ask for it, or ``null``. */
+export async function takeDeepLink() {
+  if (!hostSupports("take_deep_link")) return null
+  try {
+    return (await call("take_deep_link")) || null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Run `listener` once a shell is available: immediately when one already is,
  * otherwise when pywebview announces itself. Returns an unsubscribe function.

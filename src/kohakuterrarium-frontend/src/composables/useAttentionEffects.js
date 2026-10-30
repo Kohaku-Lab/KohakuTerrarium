@@ -9,6 +9,7 @@ import {
   hostSupports,
   onHostReady,
   requestDesktopAttention as requestHostAttention,
+  showDesktopNotification,
 } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
@@ -126,6 +127,22 @@ export function useAttentionEffects() {
     }
   }
 
+  function notifyDesktop(event) {
+    if (
+      !desktopSurface ||
+      hostCapabilities?.notifications !== true ||
+      !prefs.state.systemNotifications
+    ) {
+      return
+    }
+    const enabled =
+      (event.kind === "waiting-input" && prefs.state.notifyWaiting) ||
+      (event.kind === "completed" && prefs.state.notifyCompletion)
+    if (!enabled) return
+    const { title, body } = notificationContent(event)
+    void showDesktopNotification(title, body)
+  }
+
   function requestDesktopAttention() {
     if (!desktopSurface || !prefs.state.desktopAttention) return
     if (!hostSupports("request_desktop_attention")) return
@@ -142,6 +159,7 @@ export function useAttentionEffects() {
     if (inactive) {
       requestDesktopAttention()
       notifyBrowser(event)
+      notifyDesktop(event)
     }
     playSound(event.kind)
   }

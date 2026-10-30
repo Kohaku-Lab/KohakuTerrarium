@@ -46,6 +46,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
 import { useThemeStore } from "@/stores/theme"
 import { useTabsStore } from "@/stores/tabs"
+import { installDeepLinks } from "@/utils/deepLink"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
 
 const theme = useThemeStore()
@@ -112,6 +113,7 @@ if (typeof window !== "undefined") {
   // shell has no back button, so a same-window external navigation is a
   // dead end.
   const uninstallExternalLinkGuard = installExternalLinkGuard()
+  const uninstallDeepLinks = installDeepLinks()
   // Auto-open when an Android ``ktconnect://`` deep-link is
   // queued — the modal's own watcher will consume + apply the URI.
   const { pendingUri } = useConnectIntent()
@@ -122,6 +124,7 @@ if (typeof window !== "undefined") {
     window.removeEventListener("kt-open-host-picker", openHostPicker)
     window.removeEventListener("kt:open-saved-session-history", openSavedSessionHistory)
     uninstallExternalLinkGuard()
+    uninstallDeepLinks()
   })
 }
 </script>

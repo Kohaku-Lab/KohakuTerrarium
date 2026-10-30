@@ -204,6 +204,66 @@ describe("useAttentionEffects", () => {
     wrapper.unmount()
   })
 
+  it("sends enabled inactive edges to the shell's native notifications when it offers them", async () => {
+    const show = vi.fn().mockResolvedValue(true)
+    window.pywebview = {
+      api: {
+        get_desktop_capabilities: vi.fn().mockResolvedValue({
+          surface: "desktop",
+          protocol: 1,
+          notifications: true,
+        }),
+        show_notification: show,
+      },
+    }
+    const Notification = vi.fn()
+    Notification.permission = "granted"
+    vi.stubGlobal("Notification", Notification)
+    const wrapper = mountEffects()
+    await nextTick()
+    await Promise.resolve()
+
+    edgeState.listener({ scope: "graph-a", tab: "root", kind: "completed" })
+    edgeState.listener({ scope: "graph-a", tab: "root", kind: "waiting-input" })
+    await Promise.resolve()
+
+    expect(show).toHaveBeenCalledTimes(1)
+    expect(show).toHaveBeenCalledWith(
+      "attention.notify.waitingTitle",
+      "attention.notify.waitingBody: target=graph-a/root",
+    )
+    expect(Notification).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it("stays silent on the desktop when the shell has no notifications or the user opted out", async () => {
+    const show = vi.fn().mockResolvedValue(true)
+    window.pywebview = {
+      api: {
+        get_desktop_capabilities: vi
+          .fn()
+          .mockResolvedValue({ surface: "desktop", protocol: 1, notifications: false }),
+        show_notification: show,
+      },
+    }
+    const wrapper = mountEffects()
+    await nextTick()
+    await Promise.resolve()
+
+    edgeState.listener({ scope: "graph-a", tab: "root", kind: "waiting-input" })
+    prefs.systemNotifications = false
+    window.pywebview.api.get_desktop_capabilities.mockResolvedValue({
+      surface: "desktop",
+      protocol: 1,
+      notifications: true,
+    })
+    edgeState.listener({ scope: "graph-a", tab: "root", kind: "waiting-input" })
+    await Promise.resolve()
+
+    expect(show).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it("unlocks audio when sound becomes enabled on the same user gesture", async () => {
     const oscillators = []
     class FakeAudioContext {

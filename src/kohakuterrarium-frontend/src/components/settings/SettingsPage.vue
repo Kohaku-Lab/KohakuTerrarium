@@ -323,10 +323,10 @@
                     </div>
                     <span class="text-[11px] shrink-0" :class="notificationPermissionClass">{{ t(`settings.prefs.notificationPermission.${notificationPermission}`) }}</span>
                   </div>
-                  <div v-if="desktopSurface" class="attention-permission-row">
+                  <div v-if="desktopSurface && !hostNotifications" class="attention-permission-row">
                     <div class="text-xs text-warm-500 dark:text-warm-400">{{ t("settings.prefs.notificationPermissionHint.desktop") }}</div>
                   </div>
-                  <div v-else-if="notificationPermission !== 'granted'" class="attention-permission-row">
+                  <div v-else-if="!desktopSurface && notificationPermission !== 'granted'" class="attention-permission-row">
                     <div class="text-xs text-warm-500 dark:text-warm-400">{{ t(`settings.prefs.notificationPermissionHint.${notificationPermission}`) }}</div>
                     <el-button v-if="notificationPermission === 'default'" data-notification-permission-action size="small" type="primary" :loading="requestingNotificationPermission" @click="grantNotificationPermission">
                       {{ t("settings.prefs.allowNotifications") }}
@@ -379,6 +379,7 @@
                   </div>
                 </div>
               </div>
+              <DesktopAppSettings />
             </div>
           </div>
         </el-tab-pane>
@@ -399,6 +400,7 @@ import AboutPanel from "@/components/settings/AboutPanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
+import DesktopAppSettings from "@/components/settings/DesktopAppSettings.vue"
 import DriveSettingsPanel from "@/components/settings/DriveSettingsPanel.vue"
 import OAuthProviderRow from "@/components/settings/OAuthProviderRow.vue"
 import PackageProviderRow from "@/components/settings/PackageProviderRow.vue"
@@ -419,7 +421,7 @@ import { useClusterStore } from "@/stores/cluster"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
 import { registerBuiltinSettingsSections, visibleSettingsSections } from "@/stores/settingsSectionRegistry"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, READING_SIZES, useThemeStore } from "@/stores/theme"
-import { hasDesktopHost, onHostReady } from "@/utils/hostBridge"
+import { desktopCapabilities, hasDesktopHost, onHostReady } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const cluster = useClusterStore()
@@ -441,6 +443,7 @@ function sectionLabel(section) {
 }
 const requestingNotificationPermission = ref(false)
 const desktopSurface = ref(hasDesktopHost())
+const hostNotifications = ref(false)
 const notificationPermission = ref(getNotificationPermission())
 
 const localeOptions = computed(() =>
@@ -469,7 +472,11 @@ function getNotificationPermission() {
 
 const inAppIndicatorsEnabled = computed(() => inAppAttentionSettings.some((item) => attentionPrefs.state[item.key]))
 
-const notificationsAvailable = computed(() => !desktopSurface.value && notificationPermission.value === "granted" && attentionPrefs.state.systemNotifications)
+const notificationsAvailable = computed(
+  () =>
+    attentionPrefs.state.systemNotifications &&
+    (desktopSurface.value ? hostNotifications.value : notificationPermission.value === "granted"),
+)
 
 const notificationPermissionClass = computed(() => ({
   "text-iolite": notificationPermission.value === "granted",
@@ -1032,10 +1039,11 @@ async function removeMCPServer(name) {
 
 // ───────── Lifecycle ─────────
 
-function detectDesktopSurface() {
+async function detectDesktopSurface() {
   if (!hasDesktopHost()) return
   desktopSurface.value = true
   notificationPermission.value = "desktop"
+  hostNotifications.value = (await desktopCapabilities())?.notifications === true
 }
 
 let stopHostReady = () => {}
