@@ -1,8 +1,8 @@
-"""Unit tests for :mod:`kohakuterrarium.session.store_counters`."""
+"""Unit tests for :mod:`kohakuterrarium.session.store.events.counters`."""
 
 from kohakuvault import KVault
 
-from kohakuterrarium.session.store_counters import (
+from kohakuterrarium.session.store.events.counters import (
     EXACT_EVENT_ID_KEY,
     MAX_EVENT_ID_KEY,
     EventIdCounters,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import kohakuterrarium.session.store_tables as store_tables_mod
+import kohakuterrarium.session.store.lifecycle.tables as store_tables_mod
 from kohakuterrarium.errors import SessionLockedError
 from kohakuterrarium.session.store import SessionStore
 
@@ -151,7 +151,7 @@ class TestEventIdWatermark:
     def test_reserved_per_block_and_exact_after_clean_close(
         self, tmp_path, monkeypatch
     ):
-        from kohakuterrarium.session import store as store_module
+        from kohakuterrarium.session.store.events import append as store_module
 
         path = tmp_path / "w.kohakutr"
         block = SessionStore.EVENT_ID_BLOCK
@@ -239,7 +239,7 @@ class TestEventIdWatermark:
         assert _counters(path) == [1 + SessionStore.EVENT_ID_BLOCK, 0]
 
     def test_read_only_store_scans_only_when_asked(self, tmp_path, monkeypatch):
-        from kohakuterrarium.session import store as store_module
+        from kohakuterrarium.session.store.events import append as store_module
 
         path = tmp_path / "live.kohakutr"
         store = SessionStore(str(path))

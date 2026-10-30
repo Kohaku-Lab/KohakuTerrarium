@@ -6,7 +6,7 @@ import threading
 import pytest
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_open import open_owned_store
+from kohakuterrarium.session.store.lifecycle.open import open_owned_store
 
 
 async def test_successful_open_transfers_live_store_off_loop(tmp_path):

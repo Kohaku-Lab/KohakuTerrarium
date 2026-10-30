@@ -1,6 +1,6 @@
 """Event-key namespace discovery: which agents and attached agents a session has."""
 
-from kohakuterrarium.session.store_discovery import (
+from kohakuterrarium.session.store.events.discovery import (
     discover_agents,
     discover_attached_agents,
 )

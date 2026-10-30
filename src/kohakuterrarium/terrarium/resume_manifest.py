@@ -15,7 +15,7 @@ from kohakuterrarium.errors import (
 from kohakuterrarium.session.resume import _open_store_with_migration
 from kohakuterrarium.session.resume_async import inject_saved_state_async
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_open import open_owned_store
+from kohakuterrarium.session.store.lifecycle.open import open_owned_store
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
     apply_creature_name,

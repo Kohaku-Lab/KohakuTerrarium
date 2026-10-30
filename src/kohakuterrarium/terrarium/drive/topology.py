@@ -23,7 +23,7 @@ into the destination graph(s).
   ``split_policy`` (largest_component / anchor / orphan / clone). Clone mints new
   ids with ``parent_drive_id`` lineage; a now-cross-graph dependency blocks.
 - Fork (§6.8): a conversation fork carries no Drives by default (see
-  :func:`fork_carries_no_drives` / :mod:`session.store_fork`); explicit Drive
+  :func:`fork_carries_no_drives` / :mod:`session.store.fork`); explicit Drive
   cloning is unsupported in v1.
 """
 

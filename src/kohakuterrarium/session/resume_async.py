@@ -24,7 +24,10 @@ from kohakuterrarium.session.resume_open import (
     preflight_legacy_workspace,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_open import _finish_cleanup, open_owned_store
+from kohakuterrarium.session.store.lifecycle.open import (
+    _finish_cleanup,
+    open_owned_store,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

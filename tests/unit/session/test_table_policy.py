@@ -6,7 +6,7 @@ from contextlib import closing
 import pytest
 from kohakuvault import KVault
 
-from kohakuterrarium.session.store_tables import TABLE_NAMES
+from kohakuterrarium.session.store.lifecycle.tables import TABLE_NAMES
 from kohakuterrarium.session.table_policy import (
     BULK_TABLE,
     DEFAULT_TABLE_POLICY,

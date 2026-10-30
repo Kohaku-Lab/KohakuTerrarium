@@ -515,10 +515,9 @@ src/kohakuterrarium/
 ├── commands/                 # Framework commands (##info##, ##read##)
 │
 ├── session/                  # Session persistence (KohakuVault-backed)
-│   ├── store.py              # SessionStore: meta/state/events/channels/subagents/jobs/conversation/fts
-│   │                         #   (+ store_counters.py, store_protocol.py, token_views.py,
-│   │                         #      version.py, errors.py, migrations/)
-│   ├── store_fork.py         # Fork / branch primitive for SessionStore
+│   ├── store/                # SessionStore pseudo-class package (see store/README.md):
+│   │                         #   lifecycle/ events/ records/ + meta, derived, fork
+│   │                         #   (+ token_views.py, version.py, errors.py, migrations/)
 │   ├── reader.py             # SessionReader: read a finished .kohakutr without spelunking
 │   ├── output.py             # SessionOutput: captures events via OutputModule
 │   ├── resume.py             # Resume agent/terrarium from .kohakutr file
@@ -806,7 +805,7 @@ Sessions store everything in a `.kohakutr` file (SQLite via KohakuVault):
 
 Resume rebuilds the agent from config and injects the saved conversation.
 
-Key files: `session/store.py`, `session/output.py`, `session/resume.py`, `session/history.py`.
+Key files: `session/store/`, `session/output.py`, `session/resume.py`, `session/history.py`.
 
 ## CI Matrix
 

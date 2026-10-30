@@ -1,12 +1,15 @@
-"""Unit tests for :mod:`kohakuterrarium.session.store_tables`."""
+"""Unit tests for :mod:`kohakuterrarium.session.store.lifecycle.tables`."""
 
 from types import SimpleNamespace
 
 import pytest
 from kohakuvault import KVault, TextVault
 
-import kohakuterrarium.session.store_tables as store_tables_mod
-from kohakuterrarium.session.store_tables import TABLE_NAMES, open_store_tables
+import kohakuterrarium.session.store.lifecycle.tables as store_tables_mod
+from kohakuterrarium.session.store.lifecycle.tables import (
+    TABLE_NAMES,
+    open_store_tables,
+)
 from kohakuterrarium.session.table_policy import TablePolicy, resolve_table_policy
 from kohakuterrarium.session.vault_handles import dispose
 from kohakuterrarium.session.vault_read import AbsentTable

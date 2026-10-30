@@ -33,7 +33,7 @@ from kohakuterrarium.session.resume_async import (
     resume_agent_async,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_open import open_owned_store
+from kohakuterrarium.session.store.lifecycle.open import open_owned_store
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.creature_host import (
     Creature,

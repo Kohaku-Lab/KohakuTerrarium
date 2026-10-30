@@ -5,11 +5,14 @@ import threading
 import pytest
 
 import kohakuterrarium.session.memory as memory_module
-import kohakuterrarium.session.store as store_module
+import kohakuterrarium.session.store.lifecycle.handle as handle_module
 from kohakuterrarium.session.memory import SessionMemory
 from kohakuterrarium.session.resource_gate import try_fast
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_lock import TABLE_ATTRS, discard_partial_open
+from kohakuterrarium.session.store.lifecycle.lock import (
+    TABLE_ATTRS,
+    discard_partial_open,
+)
 from kohakuterrarium.session.vault_handles import dispose
 
 
@@ -99,7 +102,7 @@ def test_primary_error_survives_secondary_store_close_failure(tmp_path, monkeypa
         original_close()
         raise secondary
 
-    monkeypatch.setattr(store_module, "persist_event_counter", persist)
+    monkeypatch.setattr(handle_module, "persist_event_counter", persist)
     monkeypatch.setattr(store, "_close_enrolled_resources", cleanup)
     with pytest.raises(Interrupted) as caught:
         store.close(update_status=False)

@@ -19,11 +19,11 @@ from kohakuterrarium.session.history import (
 )
 from kohakuterrarium.session.identity import new_conversation_id
 from kohakuterrarium.session.resource_gate import acquire_legacy
-from kohakuterrarium.session.store_counters import (
+from kohakuterrarium.session.store.events.counters import (
     EXACT_EVENT_ID_KEY,
     MAX_EVENT_ID_KEY,
 )
-from kohakuterrarium.session.store_protocol import SessionStoreLike
+from kohakuterrarium.session.store.protocol import SessionStoreLike
 from kohakuterrarium.session.vault_io import (
     copy_rows,
     read_prefix,

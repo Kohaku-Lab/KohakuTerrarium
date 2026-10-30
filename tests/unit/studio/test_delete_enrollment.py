@@ -20,7 +20,10 @@ from kohakuterrarium.session.resource_gate import (
     acquire_legacy,
     try_fast,
 )
-from kohakuterrarium.session.store_lock import acquire_writer_lock, release_writer_lock
+from kohakuterrarium.session.store.lifecycle.lock import (
+    acquire_writer_lock,
+    release_writer_lock,
+)
 from kohakuterrarium.studio.persistence import store as store_mod
 from kohakuterrarium.studio.persistence.delete_family import detach_file_family
 from kohakuterrarium.terrarium.drive import store_migration as migration

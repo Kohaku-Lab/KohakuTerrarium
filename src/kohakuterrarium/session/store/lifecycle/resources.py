@@ -10,7 +10,7 @@ from kohakuterrarium.session.open_registry import (
     unregister_open_store,
 )
 from kohakuterrarium.session.resource_gate import ResourceLease, acquire_legacy
-from kohakuterrarium.session.store_lock import (
+from kohakuterrarium.session.store.lifecycle.lock import (
     TABLE_ATTRS,
     acquire_writer_lock,
     close_tables,

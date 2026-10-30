@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from kohakuterrarium.session import store_affinity as store_affinity_mod
+from kohakuterrarium.session.store.lifecycle import affinity as store_affinity_mod
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.trigger_manager import TriggerManager
 from kohakuterrarium.session.attachment_service import _emit_lineage

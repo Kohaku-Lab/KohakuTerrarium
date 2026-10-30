@@ -7,7 +7,7 @@ from pathlib import Path
 from kohakuterrarium.session import metadata_candidate as candidate
 from kohakuterrarium.session import readonly as readonly_module
 from kohakuterrarium.session import resume_async
-from kohakuterrarium.session import store_tables as store_tables_module
+from kohakuterrarium.session.store.lifecycle import tables as store_tables_module
 from kohakuterrarium.session.resource_gate import GATE
 from kohakuterrarium.terrarium import resume, resume_manifest
 

@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.session.store_flush`."""
+"""Unit tests for :mod:`kohakuterrarium.session.store.events.flush`."""
 
 import threading
 from contextlib import closing
@@ -6,8 +6,11 @@ from contextlib import closing
 import pytest
 from kohakuvault import KVault, TextVault
 
-import kohakuterrarium.session.store_flush as flush_mod
-from kohakuterrarium.session.store_flush import EventFlushPipeline, insert_fts_rows
+import kohakuterrarium.session.store.events.flush as flush_mod
+from kohakuterrarium.session.store.events.flush import (
+    EventFlushPipeline,
+    insert_fts_rows,
+)
 from kohakuterrarium.session.vault_handles import dispose
 
 

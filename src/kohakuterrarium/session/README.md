@@ -13,9 +13,8 @@ state; engine-level terrarium resume lives in `terrarium/resume.py`.
 | File                    | Description                                                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `__init__.py`           | Re-exports `SessionStore`                                                                                                                  |
-| `store.py`              | `SessionStore`: persistent storage with 8 table groups (meta, state, events, channels, subagents, jobs, conversation, fts) via KohakuVault |
-| `store_fork.py`         | Fork / branch primitive for `SessionStore`                                                                                                 |
-| `store_counters.py`, `store_protocol.py`, `token_views.py`, `version.py` | Store helpers: counter restore, helper protocols, read-side token-usage views, format versioning |
+| `store/`                | `SessionStore`: persistent storage with 8 table groups (meta, state, events, channels, subagents, jobs, conversation, fts) via KohakuVault, assembled from parts; see `store/README.md` |
+| `token_views.py`, `version.py` | Read-side token-usage views; format versioning                                                                                      |
 | `reader.py`             | `SessionReader`: read a finished `.kohakutr` without spelunking                                                                            |
 | `output.py`             | `SessionOutput`: output module that records text chunks, tool activity, and processing state to the store                                  |
 | `resume.py`             | `resume_agent` / `detect_session_type`: rebuild from a `.kohakutr` file, inject saved conversation and scratchpad (engine-level terrarium resume lives in `terrarium/resume.py`) |

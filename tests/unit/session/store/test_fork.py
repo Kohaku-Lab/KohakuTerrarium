@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.session.store_fork`."""
+"""Unit tests for :mod:`kohakuterrarium.session.store.fork`."""
 
 import pytest
 
@@ -9,7 +9,7 @@ from kohakuterrarium.session.history import (
     resolve_branch_view_strict,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_fork import (
+from kohakuterrarium.session.store.fork import (
     _build_lineage,
     _call_id_for,
     _child_session_id,
@@ -343,7 +343,7 @@ class TestForkDriveTablePurge:
     def test_purge_drops_drive_tables_keeps_others(self, tmp_path):
         import sqlite3
 
-        from kohakuterrarium.session.store_fork import _purge_drive_tables
+        from kohakuterrarium.session.store.fork import _purge_drive_tables
 
         path = str(tmp_path / "x.sqlite")
         conn = sqlite3.connect(path)

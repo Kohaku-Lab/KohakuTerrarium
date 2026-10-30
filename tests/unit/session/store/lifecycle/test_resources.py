@@ -7,9 +7,9 @@ import time
 
 import pytest
 
-import kohakuterrarium.session.store_lock as store_lock_mod
-import kohakuterrarium.session.store_resources as store_resources_mod
-import kohakuterrarium.session.store_tables as store_tables_mod
+import kohakuterrarium.session.store.lifecycle.lock as store_lock_mod
+import kohakuterrarium.session.store.lifecycle.resources as store_resources_mod
+import kohakuterrarium.session.store.lifecycle.tables as store_tables_mod
 from kohakuterrarium.errors import SessionLockedError
 from kohakuterrarium.session.open_registry import live_store_for
 from kohakuterrarium.session.resource_gate import (
@@ -21,7 +21,10 @@ from kohakuterrarium.session.resource_gate import (
     try_fast,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_lock import close_tables, discard_partial_open
+from kohakuterrarium.session.store.lifecycle.lock import (
+    close_tables,
+    discard_partial_open,
+)
 from kohakuterrarium.session.vault_handles import dispose, is_disposed
 
 

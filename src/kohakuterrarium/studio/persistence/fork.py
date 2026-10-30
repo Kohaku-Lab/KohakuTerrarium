@@ -20,7 +20,7 @@ from kohakuterrarium.errors import (
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_open import open_owned_store
+from kohakuterrarium.session.store.lifecycle.open import open_owned_store
 from kohakuterrarium.session.version import FORMAT_VERSION
 
 

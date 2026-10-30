@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-import kohakuterrarium.session.store_fork as store_fork
+import kohakuterrarium.session.store.fork as store_fork
 from kohakuterrarium.session.resource_gate import (
     GATE,
     REASON_LEGACY_ENROLLED,
@@ -23,7 +23,7 @@ from kohakuterrarium.session.resource_gate import (
     acquire_legacy,
     try_fast,
 )
-from kohakuterrarium.session.store_fork import _purge_drive_tables
+from kohakuterrarium.session.store.fork import _purge_drive_tables
 
 _REAL_CONNECT = sqlite3.connect
 
