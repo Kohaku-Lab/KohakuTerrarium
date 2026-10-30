@@ -39,6 +39,15 @@
     }
   },
   "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhGNDdEOUQyQjc4RkE4RjEKUldUeHFJKzMwdGxIajM4dzE1d2IxUHlzTkdWUjZ2bGwvUEpXeEd4dFUzc1Y5d2ZvbVpiT0N0SVMK",
+      "endpoints": [
+        "https://github.com/Kohaku-Lab/KohakuTerrarium/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    },
     "deep-link": {
       "desktop": {
         "schemes": ["kt"]

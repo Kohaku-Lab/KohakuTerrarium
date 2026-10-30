@@ -16,6 +16,8 @@
     "allow-set-autostart",
     "allow-set-desktop-theme",
     "allow-take-deep-link",
-    "allow-smoke-ack"
+    "allow-smoke-ack",
+    "allow-check-shell-update",
+    "allow-install-shell-update"
   ]
 }

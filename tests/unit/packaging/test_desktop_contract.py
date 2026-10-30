@@ -68,8 +68,8 @@ def test_resource_directories_match_the_layout_and_the_config(backend_rs):
 
 def test_every_command_is_declared_allowed_and_registered():
     commands_rs = _text(TAURI / "src" / "commands.rs")
-    declared = set(re.findall(r"pub fn ([a-z_]+)\(", commands_rs)) & set(
-        re.findall(r"#\[tauri::command\]\s*pub fn ([a-z_]+)\(", commands_rs)
+    declared = set(
+        re.findall(r"#\[tauri::command\]\s*pub (?:async )?fn ([a-z_]+)\(", commands_rs)
     )
     manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
     registered = set(
@@ -115,5 +115,9 @@ def test_commands_the_frontend_calls_exist_in_the_shell():
         ROOT / "src" / "kohakuterrarium-frontend" / "src" / "utils" / "hostBridge.js"
     )
     called = set(re.findall(r'(?:hostSupports|call)\("([a-z_]+)"', bridge))
-    shell = set(re.findall(r"pub fn ([a-z_]+)\(", _text(TAURI / "src" / "commands.rs")))
+    shell = set(
+        re.findall(
+            r"pub (?:async )?fn ([a-z_]+)\(", _text(TAURI / "src" / "commands.rs")
+        )
+    )
     assert called and called <= shell

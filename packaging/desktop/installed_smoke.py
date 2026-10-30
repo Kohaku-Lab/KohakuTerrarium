@@ -136,7 +136,9 @@ def check_shims(python: Path, env: dict[str, str], site: Path, home: Path) -> No
         "PYTHONPATH": os.pathsep.join([str(site), env["PYTHONPATH"]]),
     }
     run_python(python, ["-m", "kohakuterrarium.cli", "shims", "install"], shim_env)
-    status = run_python(python, ["-m", "kohakuterrarium.cli", "shims", "status"], shim_env)
+    status = run_python(
+        python, ["-m", "kohakuterrarium.cli", "shims", "status"], shim_env
+    )
     wrapper = next(
         (
             line.split("(", 1)[1].rstrip(")")

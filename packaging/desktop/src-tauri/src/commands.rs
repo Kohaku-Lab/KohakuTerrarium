@@ -6,10 +6,11 @@
 use std::sync::Mutex;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, State, Theme, UserAttentionType, WebviewWindow};
+use tauri::{AppHandle, Manager, State, Theme, UserAttentionType, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::backend::Backend;
 use crate::navigation::is_openable;
@@ -103,6 +104,40 @@ pub fn set_desktop_theme(window: WebviewWindow, args: Args) -> bool {
     };
     let theme = if dark { Theme::Dark } else { Theme::Light };
     window.set_theme(Some(theme)).is_ok()
+}
+
+/// Whether a newer shell build is published for this platform.
+#[tauri::command]
+pub async fn check_shell_update(app: AppHandle) -> Value {
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(error) => return json!({ "available": false, "error": error.to_string() }),
+    };
+    match updater.check().await {
+        Ok(Some(update)) => json!({
+            "available": true,
+            "version": update.version,
+            "current": update.current_version,
+        }),
+        Ok(None) => json!({ "available": false }),
+        Err(error) => json!({ "available": false, "error": error.to_string() }),
+    }
+}
+
+/// Download and install the newer shell build, then restart into it.
+#[tauri::command]
+pub async fn install_shell_update(app: AppHandle) -> bool {
+    let Ok(updater) = app.updater() else {
+        return false;
+    };
+    let Ok(Some(update)) = updater.check().await else {
+        return false;
+    };
+    if update.download_and_install(|_, _| {}, || {}).await.is_err() {
+        return false;
+    }
+    app.state::<Backend>().stop();
+    app.restart()
 }
 
 /// Lets the headless self-check confirm the app page can call native commands.

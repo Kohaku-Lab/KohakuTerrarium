@@ -8,6 +8,8 @@ const COMMANDS: &[&str] = &[
     "set_desktop_theme",
     "take_deep_link",
     "smoke_ack",
+    "check_shell_update",
+    "install_shell_update",
 ];
 
 fn main() {
