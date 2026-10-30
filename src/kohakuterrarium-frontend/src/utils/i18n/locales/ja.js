@@ -324,7 +324,8 @@ export default {
   "settings.prefs.desktopAttentionHint": "非アクティブなkt appウィンドウを点滅または強調します。",
   "settings.desktop.title": "デスクトップアプリ",
   "settings.desktop.terminalTitle": "ターミナルコマンド",
-  "settings.desktop.terminalHint": "このアプリのランタイムで kt、kt-cli、kt-tui を任意のターミナルから実行します。",
+  "settings.desktop.terminalHint":
+    "このアプリのランタイムで kt、kt-cli、kt-tui を任意のターミナルから実行します。",
   "settings.desktop.terminalLocation": "{dir} にインストール済み",
   "settings.desktop.terminalReopen": "変更を反映するには新しいターミナルを開いてください。",
   "settings.desktop.terminalFailed": "ターミナルコマンドを変更できませんでした。",

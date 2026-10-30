@@ -336,7 +336,8 @@ export default {
   "settings.prefs.desktopAttentionHint": "kt app 視窗不活躍時閃爍或標記視窗。",
   "settings.desktop.title": "桌面應用程式",
   "settings.desktop.terminalTitle": "終端機指令",
-  "settings.desktop.terminalHint": "在任何終端機中使用此應用程式的執行環境執行 kt、kt-cli 與 kt-tui。",
+  "settings.desktop.terminalHint":
+    "在任何終端機中使用此應用程式的執行環境執行 kt、kt-cli 與 kt-tui。",
   "settings.desktop.terminalLocation": "已安裝於 {dir}",
   "settings.desktop.terminalReopen": "請開啟新的終端機使變更生效。",
   "settings.desktop.terminalFailed": "無法變更終端機指令。",

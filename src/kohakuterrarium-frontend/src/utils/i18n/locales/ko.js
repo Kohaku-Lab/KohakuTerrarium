@@ -321,7 +321,8 @@ export default {
   "settings.prefs.desktopAttentionHint": "비활성 kt app 창을 깜박이거나 강조합니다.",
   "settings.desktop.title": "데스크톱 앱",
   "settings.desktop.terminalTitle": "터미널 명령",
-  "settings.desktop.terminalHint": "이 앱의 런타임으로 어떤 터미널에서든 kt, kt-cli, kt-tui를 실행합니다.",
+  "settings.desktop.terminalHint":
+    "이 앱의 런타임으로 어떤 터미널에서든 kt, kt-cli, kt-tui를 실행합니다.",
   "settings.desktop.terminalLocation": "{dir}에 설치됨",
   "settings.desktop.terminalReopen": "변경 사항을 적용하려면 새 터미널을 여세요.",
   "settings.desktop.terminalFailed": "터미널 명령을 변경할 수 없습니다.",

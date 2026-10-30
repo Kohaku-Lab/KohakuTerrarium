@@ -472,11 +472,7 @@ function getNotificationPermission() {
 
 const inAppIndicatorsEnabled = computed(() => inAppAttentionSettings.some((item) => attentionPrefs.state[item.key]))
 
-const notificationsAvailable = computed(
-  () =>
-    attentionPrefs.state.systemNotifications &&
-    (desktopSurface.value ? hostNotifications.value : notificationPermission.value === "granted"),
-)
+const notificationsAvailable = computed(() => attentionPrefs.state.systemNotifications && (desktopSurface.value ? hostNotifications.value : notificationPermission.value === "granted"))
 
 const notificationPermissionClass = computed(() => ({
   "text-iolite": notificationPermission.value === "granted",

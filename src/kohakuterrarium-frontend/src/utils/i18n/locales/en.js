@@ -420,7 +420,8 @@ export default {
   "settings.prefs.desktopAttentionHint": "Flash or mark the kt app window when it is inactive.",
   "settings.desktop.title": "Desktop app",
   "settings.desktop.terminalTitle": "Terminal command",
-  "settings.desktop.terminalHint": "Run kt, kt-cli and kt-tui from any terminal using this app's runtime.",
+  "settings.desktop.terminalHint":
+    "Run kt, kt-cli and kt-tui from any terminal using this app's runtime.",
   "settings.desktop.terminalLocation": "Installed in {dir}",
   "settings.desktop.terminalReopen": "Open a new terminal for the change to take effect.",
   "settings.desktop.terminalFailed": "Could not change the terminal command.",

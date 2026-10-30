@@ -336,7 +336,8 @@ export default {
   "settings.prefs.desktopAttentionHint": "Markiert das inaktive kt-app-Fenster.",
   "settings.desktop.title": "Desktop-App",
   "settings.desktop.terminalTitle": "Terminalbefehl",
-  "settings.desktop.terminalHint": "Führt kt, kt-cli und kt-tui in jedem Terminal mit der Laufzeit dieser App aus.",
+  "settings.desktop.terminalHint":
+    "Führt kt, kt-cli und kt-tui in jedem Terminal mit der Laufzeit dieser App aus.",
   "settings.desktop.terminalLocation": "Installiert in {dir}",
   "settings.desktop.terminalReopen": "Öffne ein neues Terminal, damit die Änderung wirksam wird.",
   "settings.desktop.terminalFailed": "Der Terminalbefehl konnte nicht geändert werden.",
