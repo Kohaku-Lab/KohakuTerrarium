@@ -198,8 +198,11 @@ def test_desktop_blocking_passes_window_icon_on_windows(monkeypatch, tmp_path):
 @pytest.mark.xdist_group("ports")
 class TestFindFreePort:
     def test_returns_a_port(self):
-        port = find_free_port(start=49152, max_tries=10)
-        assert 49152 <= port <= 49152 + 9
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            start = probe.getsockname()[1]
+        port = find_free_port(start=start, max_tries=10)
+        assert start <= port <= start + 9
         # Verify it's actually free (we can re-bind it).
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", port))

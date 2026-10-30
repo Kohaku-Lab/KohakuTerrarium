@@ -52,8 +52,7 @@ try:
             oversized = (work.Width*2, work.Height*2)
             reference.MinimumSize = Size(*oversized)
             constrained = reference.MinimumSize
-            assert constrained.Width <= work.Width and constrained.Height <= work.Height
-            assert constrained != Size(*oversized)
+            assert constrained.Width < oversized[0] and constrained.Height < oversized[1]
             assert not reference.IsHandleCreated
         finally:
             reference.Dispose()

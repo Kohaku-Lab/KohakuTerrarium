@@ -7,6 +7,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+try:
+    import _winapi
+except ImportError:
+    _winapi = None
+
 from kohakuterrarium.packages import locations
 from kohakuterrarium.packages.slots import ui as ui_slot
 from kohakuterrarium.packages.install import install_package, uninstall_package
@@ -19,6 +24,16 @@ from kohakuterrarium.packages.slots.ui import (
     parse_ui_slot,
     resolve_ui_asset,
 )
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    """Make ``link`` an escaping directory link: a symlink, else a Windows junction."""
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        if _winapi is None:
+            pytest.skip("no directory link can be created here")
+        _winapi.CreateJunction(str(target), str(link))
 
 
 def _record(root: Path, ui, name: str = "pkg", **slots) -> dict:
@@ -183,10 +198,14 @@ class TestAssets:
         assert resolve_ui_asset(slot, "") is None
 
     def test_symlink_out_of_root_is_refused(self, tmp_path):
-        root = _pkg(tmp_path, files=("ui/index.js", "secret.py"))
-        (root / "ui" / "link.py").symlink_to(root / "secret.py")
+        root = _pkg(tmp_path, files=("ui/index.js",))
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.py").write_text("secret")
+        _link_dir(root / "ui" / "escape", outside)
         slot = parse_ui_slot(_record(root, {"entry": "ui/index.js"}))
-        assert resolve_ui_asset(slot, "link.py") is None
+        assert (root / "ui" / "escape" / "secret.py").is_file()
+        assert resolve_ui_asset(slot, "escape/secret.py") is None
 
     def test_invalid_slot_serves_nothing(self, tmp_path):
         root = _pkg(tmp_path)
@@ -285,7 +304,7 @@ class TestSafety:
         (outside / "passwd").write_text("root:x")
         root = tmp_path / "pkg"
         root.mkdir()
-        (root / "ui").symlink_to(outside, target_is_directory=True)
+        _link_dir(root / "ui", outside)
         slot = parse_ui_slot(_record(root, {"entry": "ui/index.js"}))
         assert "outside the package" in slot.error
         assert resolve_ui_asset(slot, "index.js") is None
