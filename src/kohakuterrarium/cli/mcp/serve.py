@@ -11,6 +11,7 @@ from kohakuterrarium.mcp_server.migration import migrate
 from kohakuterrarium.utils.logging import enable_file_logging
 from kohakuterrarium.mcp_server.service import (
     connection_url,
+    restart,
     rotate,
     start,
     status,
@@ -26,6 +27,7 @@ def add_mcp_serve_subparser(subparsers):
     for command in (
         "setup",
         "start",
+        "restart",
         "stop",
         "status",
         "url",
@@ -75,7 +77,7 @@ def add_mcp_serve_subparser(subparsers):
                 action="store_true",
                 help="Print status JSON without credentials",
             )
-        if command == "start":
+        if command in {"start", "restart"}:
             child.add_argument(
                 "--wait",
                 type=float,
@@ -124,6 +126,8 @@ def mcp_serve_cli(args) -> int:
                 store,
                 wait=args.wait,
             )
+        elif command == "restart":
+            result = restart(store, wait=args.wait)
         elif command == "stop":
             result = stop(store)
         elif command == "rotate":
@@ -163,11 +167,11 @@ def mcp_serve_cli(args) -> int:
                     print(f"  {key}: {change['running']!r} -> {change['configured']!r}")
             if result.get("error"):
                 print(result["error"])
-            if command == "start" and result.get("public_ready"):
+            if command in {"start", "restart"} and result.get("public_ready"):
                 print("Connection URL (keep private): " + connection_url(store))
         return (
             0
-            if command != "start"
+            if command not in {"start", "restart"}
             or (result.get("public_ready") and result.get("state") == "ready")
             else 1
         )

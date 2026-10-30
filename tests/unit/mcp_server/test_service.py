@@ -12,7 +12,7 @@ from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.mcp_server.service import connection_url, start, status, stop
 from kohakuterrarium.mcp_server.setup import SetupSession
-from kohakuterrarium.utils.file.lock import FileLock
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
 
 def test_existing_instance_and_stale_records(tmp_path):
@@ -36,6 +36,55 @@ def test_existing_instance_and_stale_records(tmp_path):
         assert store.load().port == record.port
     assert stop(store)["state"] == "stopped"
     assert store.load().secret == record.secret
+
+
+def test_restart_prevalidates_and_serializes_stop_and_start(tmp_path, monkeypatch):
+    store = EndpointStore(tmp_path / "home")
+    store.configure(public_origin="https://example.com", tunnel="external")
+    calls = []
+
+    def stopped(store, *, wait, locked):
+        assert locked
+        with pytest.raises(FileLockBusy):
+            FileLock(store.command_lock.path).acquire()
+        calls.append("stop")
+
+    def started(store, *, wait, locked):
+        assert locked and wait == 40
+        calls.append("start")
+        return {"state": "ready"}
+
+    monkeypatch.setattr(service, "_stop", stopped)
+    monkeypatch.setattr(service, "_start", started)
+    assert service.restart(store, wait=40)["state"] == "ready"
+    assert calls == ["stop", "start"]
+    calls.clear()
+    with pytest.raises(ValueError):
+        service.restart(store, wait=0)
+    assert not calls
+    monkeypatch.setattr(
+        store, "validate", lambda record: (_ for _ in ()).throw(ValueError("invalid"))
+    )
+    with pytest.raises(ValueError, match="invalid"):
+        service.restart(store)
+    assert not calls
+
+
+def test_restart_does_not_start_after_failed_stop(tmp_path, monkeypatch):
+    store = EndpointStore(tmp_path / "home")
+    store.configure(public_origin="https://example.com", tunnel="external")
+    monkeypatch.setattr(
+        service,
+        "_stop",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("stop failed")),
+    )
+    monkeypatch.setattr(
+        service,
+        "_start",
+        lambda *args, **kwargs: pytest.fail("started after failed stop"),
+    )
+    with pytest.raises(RuntimeError, match="stop failed"):
+        service.restart(store)
 
 
 def test_corrupt_runtime_with_live_lock_reports_unknown_health(tmp_path):

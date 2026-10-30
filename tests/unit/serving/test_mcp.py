@@ -3,6 +3,7 @@
 import json
 import asyncio
 import socket
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -10,6 +11,7 @@ import pytest
 from kohakuterrarium.mcp_server.endpoint import Endpoint, EndpointStore
 from kohakuterrarium.mcp_server.management import manage
 from kohakuterrarium.mcp_server.records import write_json
+from kohakuterrarium.serving import mcp as serving_mcp
 from kohakuterrarium.serving.mcp import probe_public, serve
 
 
@@ -44,6 +46,32 @@ async def test_public_probe_does_not_contact_environment_proxy(monkeypatch):
         assert contacted == []
 
 
+async def test_public_probe_explicit_proxy_uses_connect_without_sending_secret():
+    contacted = []
+
+    async def proxy(reader, writer):
+        contacted.append(await reader.readline())
+        writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(proxy, "127.0.0.1", 0)
+    try:
+        record = Endpoint(
+            home_dir="home",
+            public_origin="https://example.com",
+            secret="a" * 43,
+            probe_proxy=f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}",
+        )
+        ok, error = await probe_public(record, "expected")
+        assert not ok and record.secret not in error
+        assert contacted == [b"CONNECT example.com:443 HTTP/1.1\r\n"]
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
 async def test_public_probe_is_bounded_and_matches_instance(monkeypatch):
     record = Endpoint(
         home_dir="home", public_origin="https://example.com", secret="a" * 43
@@ -71,6 +99,76 @@ async def test_public_probe_is_bounded_and_matches_instance(monkeypatch):
     ok, error = await probe_public(record, "different")
     assert not ok and "this instance" in error
     assert seen == ["initialize", "initialize"]
+
+
+async def test_exited_tunnel_discards_inflight_probe(monkeypatch):
+    record = Endpoint(
+        home_dir="home",
+        public_origin="https://example.com",
+        secret="a" * 43,
+        tunnel="cloudflare",
+    )
+
+    class Pipe:
+        def close(self):
+            pass
+
+    class Child:
+        def __init__(self, pid):
+            self.pid, self.returncode, self.stdin = pid, None, Pipe()
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout):
+            pass
+
+    children = []
+    probes = []
+    observations = []
+    serving = asyncio.get_running_loop().create_future()
+
+    async def probe(*args):
+        event = asyncio.Event()
+        probes.append(event)
+        await event.wait()
+        return True, None
+
+    def start(*args):
+        child = Child(len(children) + 1)
+        children.append(child)
+        return child
+
+    async def publish(store, snapshot):
+        observations.append(dict(snapshot))
+        if len(children) == 1 and probes:
+            children[0].returncode = 1
+        if len(children) == 2:
+            probes[0].set()
+            if len(probes) >= 2:
+                serving.set_result(None)
+
+    monkeypatch.setattr(serving_mcp, "_start_tunnel", start)
+    monkeypatch.setattr(serving_mcp, "probe_public", probe)
+    monkeypatch.setattr(serving_mcp, "_publish", publish)
+    monkeypatch.setattr(serving_mcp, "stop_requested", lambda *args: False)
+    monkeypatch.setattr(
+        serving_mcp, "management_snapshot", lambda *args: {"state": "ready"}
+    )
+    await asyncio.wait_for(
+        serving_mcp._monitor(
+            None,
+            record,
+            SimpleNamespace(started=True),
+            serving,
+            {"run_id": "x", "instance_id": "x", "public_ready": False},
+            None,
+            None,
+        ),
+        5,
+    )
+    assert len(probes) >= 2
+    assert not any(s.get("public_ready") for s in observations)
 
 
 @pytest.mark.xdist_group("ports")

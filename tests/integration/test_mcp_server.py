@@ -1,6 +1,7 @@
 """Complete authenticated tool workflows through the real MCP HTTP SDK."""
 
 import asyncio
+import base64
 import hashlib
 import json
 import os
@@ -35,6 +36,8 @@ class TestMCPServer:
         env = {
             **os.environ,
             "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
+            "TUNNEL_TOKEN": "unrelated-token",
+            "TUNNEL_CRED_CONTENTS": "unrelated-credentials",
         }
 
         def cli(command, *extra, root=home):
@@ -48,7 +51,7 @@ class TestMCPServer:
                     "--home-dir",
                     str(root),
                     *([] if command == "url" else ["--json"]),
-                    *(["--wait", "8"] if command == "start" else []),
+                    *(["--wait", "8"] if command in {"start", "restart"} else []),
                     *map(str, extra),
                 ],
                 capture_output=True,
@@ -444,11 +447,72 @@ class TestMCPServer:
                 assert (
                     active.public_origin in args and "https://next.invalid" not in args
                 )
-            assert cli("stop")[1]["state"] == "stopped"
-            cli("start")
-            reapplied = settled(lambda s: s["local_ready"])
+            cli("restart")
+            reapplied = settled(
+                lambda s: s["local_ready"]
+                and s.get("instance_id") != pending["instance_id"]
+            )
             assert reapplied["public_origin"] == "https://next.invalid"
+            assert reapplied["instance_id"] != pending["instance_id"]
             assert reapplied["local_ready"] and not reapplied["restart_required"]
+
+            tunnel_id = "f28d5968-1e07-4a79-8055-0c7e58f38341"
+            credentials = tmp_path / "cloudflare-credentials.json"
+            cloudflare_secret = base64.b64encode(b"x" * 32).decode()
+            credentials.write_text(
+                json.dumps(
+                    {
+                        "TunnelID": tunnel_id,
+                        "TunnelSecret": cloudflare_secret,
+                        "AccountTag": "account",
+                    }
+                )
+            )
+            (home / "tunnel").write_text(
+                "import json,os,sys,time\nfrom pathlib import Path\n"
+                "p = Path(sys.argv[sys.argv.index('--config') + 1])\n"
+                "assert 'TUNNEL_TOKEN' not in os.environ\n"
+                "assert 'TUNNEL_CRED_CONTENTS' not in os.environ\n"
+                "Path('cloudflare-observed.json').write_text(p.read_text())\n"
+                "time.sleep(60)\n"
+            )
+            new_port = port()
+            code, configured = cli(
+                "setup",
+                "--non-interactive",
+                "--mode",
+                "cloudflare",
+                "--port",
+                new_port,
+                "--cloudflared-bin",
+                sys.executable,
+                "--cloudflare-tunnel-id",
+                tunnel_id,
+                "--cloudflare-credentials",
+                credentials,
+                "--probe-proxy",
+                "http://127.0.0.1:1",
+            )
+            assert code == 0 and configured["restart_required"]
+            assert configured["pending_changes"]["probe_proxy"]["running"] is None
+            cli("restart")
+            cloudflare = settled(
+                lambda s: s["local_ready"] and s["tunnel"] == "cloudflare"
+            )
+            assert cloudflare["local_ready"] and cloudflare["tunnel"] == "cloudflare"
+            assert cloudflare["active"]["probe_proxy"] == "http://127.0.0.1:1"
+            assert not cloudflare["public_ready"]
+            observed_cf = home / "cloudflare-observed.json"
+            for _ in range(100):
+                if observed_cf.exists():
+                    break
+                await asyncio.sleep(0.1)
+            generated = json.loads(observed_cf.read_text())
+            assert generated["ingress"][0] == {
+                "hostname": "next.invalid",
+                "service": f"http://127.0.0.1:{new_port}",
+            }
+            assert cloudflare_secret not in str(cloudflare) + str(generated)
         finally:
             for root, owner in ((home, store), (other_home, other)):
                 if owner.record_path.exists():
