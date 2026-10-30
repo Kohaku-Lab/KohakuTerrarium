@@ -13,9 +13,12 @@ from typing import Any
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.adapters.file_scopes import resolve_in_scope
 from kohakuterrarium.laboratory.protocols import LabRegistrar
-from kohakuterrarium.session.file_family import acquire_family
-from kohakuterrarium.session.file_mutation import await_mutation, run_admitted_mutation
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.occupancy.family import acquire_family
+from kohakuterrarium.session.occupancy.mutation import (
+    await_mutation,
+    run_admitted_mutation,
+)
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest

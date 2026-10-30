@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from kohakuterrarium.session.resource_gate import GATE, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.terrarium.drive import store_migration as migration
 from kohakuterrarium.terrarium.drive.store_migration_resources import (
     MigrationSqlResources,
 )
-from kohakuterrarium.session.resource_gate import acquire_legacy
+from kohakuterrarium.session.occupancy.gate import acquire_legacy
 from tests.unit.terrarium.drive.store_migration_resource_fixtures import (
     _REAL_CONNECT,
     assert_idle,

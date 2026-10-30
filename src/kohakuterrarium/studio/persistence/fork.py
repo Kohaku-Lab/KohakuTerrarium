@@ -21,7 +21,7 @@ from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.open import open_owned_store
-from kohakuterrarium.session.version import FORMAT_VERSION
+from kohakuterrarium.session.store.lifecycle.version import FORMAT_VERSION
 
 
 def fork_target_path(parent: Path, fork_name: str) -> Path:

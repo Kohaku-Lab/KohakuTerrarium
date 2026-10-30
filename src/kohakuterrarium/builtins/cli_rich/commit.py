@@ -21,7 +21,7 @@ from kohakuterrarium.builtins.cli_rich.runtime import spawn
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_USER, ICON_USER
 from kohakuterrarium.builtins.outputs.stdout import _write_safe
 from kohakuterrarium.llm.message import content_display_text
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
     select_live_event_ids,
 )

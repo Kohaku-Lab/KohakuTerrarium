@@ -11,8 +11,8 @@ import pytest
 from kohakuterrarium.session.store.lifecycle import affinity as store_affinity_mod
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.trigger_manager import TriggerManager
-from kohakuterrarium.session.attachment_service import _emit_lineage
-from kohakuterrarium.session.output import SessionOutput
+from kohakuterrarium.session.attach.service import _emit_lineage
+from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from tests.helpers.loop_witness import LoopWitness, loop_ran_meanwhile

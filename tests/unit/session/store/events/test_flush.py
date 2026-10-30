@@ -11,7 +11,7 @@ from kohakuterrarium.session.store.events.flush import (
     EventFlushPipeline,
     insert_fts_rows,
 )
-from kohakuterrarium.session.vault_handles import dispose
+from kohakuterrarium.session.vault.handles import dispose
 
 
 class _Timers:

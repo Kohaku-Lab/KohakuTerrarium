@@ -9,7 +9,7 @@ from __future__ import annotations
 import sqlite3
 import time
 
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_OK,
     REASON_LEGACY_ENROLLED,

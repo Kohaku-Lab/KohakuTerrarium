@@ -19,8 +19,8 @@ from typing import Any
 from kohakuvault import KVault, TextVault
 
 from kohakuterrarium.session import run_state
-from kohakuterrarium.session.vault_handles import dispose
-from kohakuterrarium.session.vault_io import read_prefix, read_values, scan_keys
+from kohakuterrarium.session.vault.handles import dispose
+from kohakuterrarium.session.vault.io import read_prefix, read_values, scan_keys
 from kohakuterrarium.studio.persistence.session_index.entry import (
     SCHEMA_VERSION,
     SessionIndexEntry,

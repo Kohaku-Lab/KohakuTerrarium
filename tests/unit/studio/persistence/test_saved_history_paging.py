@@ -13,7 +13,7 @@ import pytest
 from kohakuvault import KVault
 
 from kohakuterrarium.errors import NotFoundError
-from kohakuterrarium.session.history_paging import HistoryPagingError
+from kohakuterrarium.session.history.paging import HistoryPagingError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.history import (
     history_index_from_store,

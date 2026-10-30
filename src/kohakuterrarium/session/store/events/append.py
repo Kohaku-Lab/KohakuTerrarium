@@ -4,8 +4,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from kohakuterrarium.session.branch_index import BranchIndex
-from kohakuterrarium.session.event_key_index import EventKeyIndex
+from kohakuterrarium.session.store.events.branch_index import BranchIndex
+from kohakuterrarium.session.store.events.key_index import EventKeyIndex
 from kohakuterrarium.session.store.events.counters import (
     reserve_event_ids,
     restore_event_counters,

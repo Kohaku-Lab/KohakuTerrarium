@@ -3,12 +3,15 @@
 import json
 from typing import Any
 
-from kohakuterrarium.session.rollup import (
+from kohakuterrarium.session.store.records.rollup import (
     get_turn_rollup,
     list_turn_rollups,
     save_turn_rollup,
 )
-from kohakuterrarium.session.snapshot import load_branch_snapshot, save_branch_snapshot
+from kohakuterrarium.session.store.records.snapshot import (
+    load_branch_snapshot,
+    save_branch_snapshot,
+)
 
 
 class ConversationRecordsMixin:

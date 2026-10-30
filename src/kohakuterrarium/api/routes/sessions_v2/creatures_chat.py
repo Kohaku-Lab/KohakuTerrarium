@@ -16,11 +16,11 @@ from kohakuterrarium.api.schemas import (
     RegenerateRequest,
 )
 from kohakuterrarium.errors import ConflictError, NotFoundError
-from kohakuterrarium.session.history_paging import (
+from kohakuterrarium.session.history.paging import (
     HistoryPagingError,
     require_bounded_history_page,
 )
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()

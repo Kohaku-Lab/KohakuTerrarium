@@ -398,7 +398,7 @@ async with kt.Terrarium(session_dir="runs/") as engine:
 
 ### `SessionReader`：只读检视
 
-模块：`kohakuterrarium.session.reader`（重导出为
+模块：`kohakuterrarium.session.readonly.reader`（重导出为
 `kohakuterrarium.SessionReader`）。`.kohakutr` 文件的一站式只读接口。
 经 `SessionStore.open_readonly` 打开，读取绝不会更新 `last_active`
 或改写 `status`。支持上下文管理器。

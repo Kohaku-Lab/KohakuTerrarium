@@ -15,7 +15,7 @@ from kohakuterrarium.core.conversation.conversation import (
     ConversationConfig,
 )
 from kohakuterrarium.core.conversation.locator import user_message_indices_for_turn
-from kohakuterrarium.session.raw_history import (
+from kohakuterrarium.session.history.raw import (
     UserMessageSelector,
     select_raw_history_prefix,
 )

@@ -20,7 +20,7 @@ import json
 import sys
 
 from kohakuterrarium.compose import factory
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 
 SPECIALIST_PROMPTS = {
     "planner": (

@@ -2,7 +2,7 @@
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.core.token_ledger import reset_context_tokens
-from kohakuterrarium.session.snapshot import save_agent_snapshot
+from kohakuterrarium.session.store.records.snapshot import save_agent_snapshot
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,

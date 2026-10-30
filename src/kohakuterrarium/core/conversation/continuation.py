@@ -11,7 +11,7 @@ from kohakuterrarium.core.agent.history.message_history import (
     apply_prepared_branch_view,
 )
 from kohakuterrarium.errors import AgentNotRunningError, ConflictError
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     InvalidBranchViewError,
     resolve_branch_view_strict,
 )

@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from kohakuterrarium.session.resource_gate import ResourceLease
+from kohakuterrarium.session.occupancy.gate import ResourceLease
 
 
 def new_cursors() -> list[sqlite3.Cursor]:

@@ -48,16 +48,16 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import get_service_legacy, set_service
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.readonly import read_session_meta
-from kohakuterrarium.session.metadata_candidate import read_metadata_candidate
-from kohakuterrarium.session.resource_gate import GATE, acquire_legacy, try_fast
+from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.readonly.candidate import read_metadata_candidate
+from kohakuterrarium.session.occupancy.gate import GATE, acquire_legacy, try_fast
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.api.routes.catalog import _deps as _catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent import model as _agent_model
 from kohakuterrarium.packages.resolve import resolve_package_path
-from kohakuterrarium.session.embedding import NullEmbedder
+from kohakuterrarium.session.memory.embedding import NullEmbedder
 from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions import memory_build as _memory_build

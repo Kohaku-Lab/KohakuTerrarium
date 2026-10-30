@@ -7,7 +7,7 @@ sessions.
 from collections.abc import Iterable
 from typing import Any
 
-from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
+from kohakuterrarium.session.history.replay import dedupe_adjacent_duplicate_events
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.agents import (
     viewer_agent_names as _agents_for_summary,

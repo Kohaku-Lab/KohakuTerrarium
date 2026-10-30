@@ -88,7 +88,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.modules.user_command.base import (

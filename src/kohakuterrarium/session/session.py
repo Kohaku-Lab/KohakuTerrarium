@@ -6,13 +6,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.session.attachment_service import attach_agent_to_session
-from kohakuterrarium.session.attachment_service import detach_agent_from_session
-from kohakuterrarium.session.attachment_service import get_attach_state
+from kohakuterrarium.session.attach.service import attach_agent_to_session
+from kohakuterrarium.session.attach.service import detach_agent_from_session
+from kohakuterrarium.session.attach.service import get_attach_state
 from kohakuterrarium.session.errors import NotAttachedError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.version import FORMAT_VERSION
+from kohakuterrarium.session.store.lifecycle.version import FORMAT_VERSION
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

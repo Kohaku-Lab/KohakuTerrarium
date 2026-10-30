@@ -12,9 +12,12 @@ from kohakuterrarium.core.conversation.continuation import (
     require_no_running_jobs,
 )
 from kohakuterrarium.llm.media.reference import file_reference_path
-from kohakuterrarium.session.history import select_live_event_ids
-from kohakuterrarium.session.resume_build import build_conversation
-from kohakuterrarium.session.snapshot import save_agent_snapshot, snapshot_tag
+from kohakuterrarium.session.history.replay import select_live_event_ids
+from kohakuterrarium.session.resume.build import build_conversation
+from kohakuterrarium.session.store.records.snapshot import (
+    save_agent_snapshot,
+    snapshot_tag,
+)
 
 
 @dataclass(frozen=True)

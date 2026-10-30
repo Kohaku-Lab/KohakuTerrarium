@@ -7,7 +7,7 @@ from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     UserCommandResult,
 )
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     collect_branch_metadata,
     collect_user_groups,
     dedupe_adjacent_duplicate_events,

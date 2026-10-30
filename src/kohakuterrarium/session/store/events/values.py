@@ -3,7 +3,7 @@
 from collections.abc import Iterator, Sequence
 from typing import Any
 
-from kohakuterrarium.session.vault_io import read_values
+from kohakuterrarium.session.vault.io import read_values
 
 
 def _iter_event_values(

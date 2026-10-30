@@ -18,8 +18,8 @@ from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.errors import AgentNotRunningError, ConflictError
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
-from kohakuterrarium.session.raw_history import append_user_event_pair
-from kohakuterrarium.session.resume import resume_agent
+from kohakuterrarium.session.history.raw import append_user_event_pair
+from kohakuterrarium.session.resume.resume import resume_agent
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 

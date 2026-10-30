@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from kohakuterrarium.session.file_family import acquire_family
-from kohakuterrarium.session.file_mutation import run_mutation_worker
+from kohakuterrarium.session.occupancy.family import acquire_family
+from kohakuterrarium.session.occupancy.mutation import run_mutation_worker
 
 
 def write_bytes_enrolled(path: str | Path, data: bytes) -> None:

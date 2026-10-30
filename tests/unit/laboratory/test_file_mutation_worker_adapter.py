@@ -16,8 +16,8 @@ from kohakuterrarium.laboratory.adapters.terrarium_file_mutations import (
     run_mutation_worker,
     write_bytes_enrolled,
 )
-from kohakuterrarium.session import file_family as family
-from kohakuterrarium.session.resource_gate import GATE
+from kohakuterrarium.session.occupancy import family
+from kohakuterrarium.session.occupancy.gate import GATE
 from tests.unit.laboratory.file_mutation_enrollment_helpers import (
     assert_idle,
     b64,

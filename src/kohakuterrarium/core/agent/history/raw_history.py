@@ -21,12 +21,12 @@ from kohakuterrarium.core.conversation.snapshot import (
     replayed_compact_state,
 )
 from kohakuterrarium.llm.message import dicts_to_messages
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
     normalize_tool_call_events,
     replay_conversation,
 )
-from kohakuterrarium.session.raw_history import (
+from kohakuterrarium.session.history.raw import (
     RawHistoryPrefix,
     UserMessageSelector,
     select_raw_history_prefix,

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.errors import SessionLockedError
-from kohakuterrarium.session.resource_gate import GATE, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.studio.persistence import store as persistence
 from kohakuterrarium.utils.file_lock import FileLock
 

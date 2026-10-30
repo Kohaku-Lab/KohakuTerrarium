@@ -29,7 +29,7 @@ import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
 from kohakuterrarium.terrarium.session_event_copy import copy_events_into
 from kohakuterrarium.terrarium.session_successor import stage_successor
 from kohakuterrarium.errors import SessionNotResumableError
-from kohakuterrarium.session.identity import new_conversation_id
+from kohakuterrarium.session.store.identity import new_conversation_id
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 

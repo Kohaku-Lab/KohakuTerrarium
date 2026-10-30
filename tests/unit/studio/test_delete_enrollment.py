@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.errors import SessionLockedError
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_LEGACY_ENROLLED,
     REASON_LEGACY_PENDING,

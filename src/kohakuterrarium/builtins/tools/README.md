@@ -46,7 +46,7 @@ names a builtin tool. Imports:
 - `kohakuterrarium.builtins.tool_catalog` (`register_builtin`)
 - `kohakuterrarium.modules.tool.base` (`BaseTool`, `ToolResult`, `ToolContext`, `ExecutionMode`)
 - `kohakuterrarium.core.channel` / `core.session` (channel + scratchpad tools)
-- `kohakuterrarium.session.memory` / `session.store` (`search_memory`)
+- `kohakuterrarium.session.memory.index` / `session.store` (`search_memory`)
 - `kohakuterrarium.utils.logging`
 
 No tool imports another tool's implementation except `multi_edit` and

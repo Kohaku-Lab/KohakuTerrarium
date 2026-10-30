@@ -11,8 +11,11 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import kohakuterrarium.terrarium.wiring as wiring
-from kohakuterrarium.session.file_family import acquire_family
-from kohakuterrarium.session.file_mutation import await_mutation, run_admitted_mutation
+from kohakuterrarium.session.occupancy.family import acquire_family
+from kohakuterrarium.session.occupancy.mutation import (
+    await_mutation,
+    run_admitted_mutation,
+)
 from kohakuterrarium.terrarium import graph_checkpoint
 from kohakuterrarium.terrarium.channels import remove_channel_trigger
 from kohakuterrarium.utils.fs_path import coerce_fs_path

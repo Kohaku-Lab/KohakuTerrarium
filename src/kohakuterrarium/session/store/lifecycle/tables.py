@@ -5,8 +5,8 @@ from typing import Any
 
 from kohakuvault import KVault, TextVault
 
-from kohakuterrarium.session.table_policy import TablePolicy
-from kohakuterrarium.session.vault_read import open_read_table_or_absent
+from kohakuterrarium.session.store.lifecycle.table_policy import TablePolicy
+from kohakuterrarium.session.vault.read import open_read_table_or_absent
 
 # Open order; each table is assigned as soon as it opens so a failed open
 # can release the ones before it.

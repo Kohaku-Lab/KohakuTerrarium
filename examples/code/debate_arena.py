@@ -24,7 +24,7 @@ import asyncio
 import sys
 
 from kohakuterrarium.compose import agent
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 
 
 def make_debater_config(name: str, stance: str, topic: str):

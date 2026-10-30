@@ -457,7 +457,7 @@ Lifecycle / introspection:
 
 ### `SessionReader`: read-only inspection
 
-Module: `kohakuterrarium.session.reader` (re-exported as
+Module: `kohakuterrarium.session.readonly.reader` (re-exported as
 `kohakuterrarium.SessionReader`). The one-stop read-only surface over a
 `.kohakutr` file. Opens via `SessionStore.open_readonly`, so reading never
 bumps `last_active` or flips `status`. Context-manager friendly.

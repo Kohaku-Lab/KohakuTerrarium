@@ -9,7 +9,7 @@ import json
 from typing import Any
 
 from kohakuterrarium.errors import InvalidRequestError, NotFoundError
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 
 SUPPORTED_FORMATS = ("md", "html", "jsonl")

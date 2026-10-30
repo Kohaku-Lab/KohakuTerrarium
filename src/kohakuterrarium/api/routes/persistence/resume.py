@@ -53,7 +53,7 @@ from kohakuterrarium.api.routes.persistence.resume_request import (
 from kohakuterrarium.api.routes.persistence.resume_response import (
     build_single_remote_response as _build_single_remote_response,
 )
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest

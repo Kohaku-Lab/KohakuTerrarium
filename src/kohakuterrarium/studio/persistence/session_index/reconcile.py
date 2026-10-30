@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.session.errors import SessionNotReadyError
-from kohakuterrarium.session.readonly_view import SessionReadView
+from kohakuterrarium.session.readonly.view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.vault_io import read_prefix
+from kohakuterrarium.session.vault.io import read_prefix
 from kohakuterrarium.studio.persistence.session_index.entry import (
     SessionIndexEntry,
     _max_mtime_with_wal,

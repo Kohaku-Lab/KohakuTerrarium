@@ -4,9 +4,12 @@ import platform
 from datetime import datetime, timezone
 from typing import Any
 
-from kohakuterrarium.session.identity import legacy_conversation_id, new_conversation_id
-from kohakuterrarium.session.vault_io import key_text, read_prefix
-from kohakuterrarium.session.version import FORMAT_VERSION
+from kohakuterrarium.session.store.identity import (
+    legacy_conversation_id,
+    new_conversation_id,
+)
+from kohakuterrarium.session.vault.io import key_text, read_prefix
+from kohakuterrarium.session.store.lifecycle.version import FORMAT_VERSION
 
 
 class StoreMetaMixin:

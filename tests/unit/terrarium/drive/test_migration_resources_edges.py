@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import kohakuterrarium.terrarium.drive.store_migration as migration
-from kohakuterrarium.session.resource_gate import GATE, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.terrarium.drive.errors import DriveSchemaVersionError
 from kohakuterrarium.terrarium.drive.store_migration import DRIVE_SCHEMA_VERSION
 from kohakuterrarium.terrarium.drive.store_migration_resources import (

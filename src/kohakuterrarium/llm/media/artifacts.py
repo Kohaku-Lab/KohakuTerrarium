@@ -14,7 +14,7 @@ from kohakuterrarium.llm.media.reference import (
 from kohakuterrarium.llm.media.reference import (
     file_reference_path as file_reference_path,
 )
-from kohakuterrarium.session.artifacts import resolve_artifact_file
+from kohakuterrarium.session.store.records.artifacts import resolve_artifact_file
 from kohakuterrarium.studio.persistence.artifacts import resolve_artifacts_dir
 from kohakuterrarium.studio.persistence.store import _session_dir
 

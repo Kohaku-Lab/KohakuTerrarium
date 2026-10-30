@@ -13,7 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.session.resource_gate import acquire_legacy
+from kohakuterrarium.session.occupancy.gate import acquire_legacy
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.lock import (
     acquire_writer_lock,

@@ -14,7 +14,7 @@ from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.event_inbox import EventInbox
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
-from kohakuterrarium.session.output import SessionOutput
+from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.parsing.events import (
     CommandResultEvent,

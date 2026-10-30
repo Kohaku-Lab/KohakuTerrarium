@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.session.history_paging import HistoryPagingError
+from kohakuterrarium.session.history.paging import HistoryPagingError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.terrarium import history_service

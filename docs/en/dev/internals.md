@@ -239,7 +239,7 @@ Sessions live in a single `.kohakutr` file backed by KohakuVault
 (append-only), `channels` (message history), `subagents` (snapshots
 before destruction), `jobs`, `conversation` (latest snapshot per
 agent), `fts` (full-text index). Binary artifacts live beside the DB in
-`<session>.artifacts/` and are managed by `session/artifacts.py`.
+`<session>.artifacts/` and are managed by `session/store/records/artifacts.py`.
 
 Writes happen on:
 
@@ -249,13 +249,13 @@ Writes happen on:
 - scratchpad write,
 - channel send.
 
-Resume (`session/resume.py`): load `meta`, load the conversation
+Resume (`session/resume/resume.py`): load `meta`, load the conversation
 snapshot per agent, restore scratchpad/state, restore triggers, replay
 events to the output module (for scrollback), reattach sub-agent
 conversations. Non-resumable state (open files, LLM connections, TUI,
 asyncio tasks) is rebuilt from config.
 
-`session/memory.py` + `session/embedding.py` provide FTS5 and vector
+`session/memory/index.py` + `session/memory/embedding.py` provide FTS5 and vector
 search over the event log. Embedding providers: `model2vec`,
 `sentence-transformer`, `api`. Vectors are stored alongside event blocks
 for hybrid search.

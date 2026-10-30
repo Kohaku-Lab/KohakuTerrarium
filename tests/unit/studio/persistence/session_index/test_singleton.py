@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.vault_handles import dispose
+from kohakuterrarium.session.vault.handles import dispose
 from kohakuterrarium.studio.persistence import session_index as pkg
 from kohakuterrarium.studio.persistence.session_index import reconcile as reconcile_mod
 from kohakuterrarium.studio.sessions import index_hooks

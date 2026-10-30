@@ -13,8 +13,8 @@ import sys
 from typing import Literal
 
 from kohakuterrarium.cli.run import _resolve_session
-from kohakuterrarium.session.readonly import read_session_meta
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity.drive_settings import resolve_drive_kwargs
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed

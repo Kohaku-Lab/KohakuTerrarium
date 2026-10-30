@@ -8,7 +8,7 @@ far too heavy, so this module projects events down to timing fields only.
 from typing import Any
 
 from kohakuterrarium.errors import NotFoundError
-from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
+from kohakuterrarium.session.history.replay import dedupe_adjacent_duplicate_events
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.rollups import (
     _event_failed,

@@ -5,7 +5,7 @@ from typing import Any
 
 from kohakuterrarium.session.store.events.flush import insert_fts_rows
 from kohakuterrarium.session.store.events.counters import restore_suffix_counters
-from kohakuterrarium.session.vault_io import read_prefix
+from kohakuterrarium.session.vault.io import read_prefix
 
 
 class ChannelRecordsMixin:

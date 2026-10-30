@@ -15,8 +15,8 @@ from kohakuterrarium.session.migrations import (
     discover_versions,
     path_for_version,
 )
-from kohakuterrarium.session.resume import _open_store_with_migration
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.resume.resume import _open_store_with_migration
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions import live as _live

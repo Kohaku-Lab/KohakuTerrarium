@@ -12,7 +12,7 @@ v1→v2 migration) is the production collaborator.
 The workflows mirror how the codebase actually drives session:
 ``studio/sessions/lifecycle.py`` builds a ``SessionStore``, calls
 ``init_meta``, then ``agent.attach_session_store(store)``; the agent's
-``SessionOutput`` sink records every turn; ``session/resume.py`` rebuilds
+``SessionOutput`` sink records every turn; ``session/resume/resume.py`` rebuilds
 the agent from the ``config_path`` in meta and re-injects state;
 ``studio/sessions/memory_search.py`` indexes events and searches.
 """
@@ -43,32 +43,32 @@ from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
 from kohakuterrarium.modules.output.widgets import WidgetMessage
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
-from kohakuterrarium.session import history as _history_mod
-from kohakuterrarium.session import resume as _resume_mod
-from kohakuterrarium.session import resume_branch as _resume_branch_mod
-from kohakuterrarium.session.attachment_service import get_attach_state
-from kohakuterrarium.session.output import SessionOutput
-from kohakuterrarium.session.embedding import BaseEmbedder
+from kohakuterrarium.session.history import replay as _history_mod
+from kohakuterrarium.session.resume import resume as _resume_mod
+from kohakuterrarium.session.resume import branch as _resume_branch_mod
+from kohakuterrarium.session.attach.service import get_attach_state
+from kohakuterrarium.session.output.output import SessionOutput
+from kohakuterrarium.session.memory.embedding import BaseEmbedder
 from kohakuterrarium.session.errors import (
     AlreadyAttachedError,
     ForkNotStableError,
     NotAttachedError,
 )
 from kohakuterrarium.session.session import Session
-from kohakuterrarium.session.history_records import (
+from kohakuterrarium.session.history.records import (
     history_detail,
     history_page,
 )
 
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     collect_branch_metadata,
     collect_user_groups,
     normalize_resumable_events,
     replay_conversation,
 )
-from kohakuterrarium.session.memory import SessionMemory
-from kohakuterrarium.session.memory_async import live_memory_for_store
-from kohakuterrarium.session.metadata_candidate import read_metadata_candidate
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.async_search import live_memory_for_store
+from kohakuterrarium.session.readonly.candidate import read_metadata_candidate
 from kohakuterrarium.session.migrations import (
     discover_versions,
     ensure_latest_version,
@@ -76,14 +76,17 @@ from kohakuterrarium.session.migrations import (
     migration_marker,
     path_for_version,
 )
-from kohakuterrarium.session.readonly import read_session_meta
-from kohakuterrarium.session.readonly_view import SessionReadView
-from kohakuterrarium.session.resource_gate import try_fast
-from kohakuterrarium.session.raw_history import UserMessageSelector
-from kohakuterrarium.session.resume import detect_session_type, resume_agent
-from kohakuterrarium.session.resume_async import resume_agent_async
+from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.readonly.view import SessionReadView
+from kohakuterrarium.session.occupancy.gate import try_fast
+from kohakuterrarium.session.history.raw import UserMessageSelector
+from kohakuterrarium.session.resume.resume import detect_session_type, resume_agent
+from kohakuterrarium.session.resume.async_flow import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
+from kohakuterrarium.session.store.lifecycle.version import (
+    FORMAT_VERSION,
+    detect_format_version,
+)
 from kohakuterrarium.studio.attach._event_stream import StreamOutput
 from kohakuterrarium.studio.attach.widget_frames import handle_widget_frame
 from kohakuterrarium.testing.llm import ScriptedLLM

@@ -5,7 +5,7 @@ from contextlib import closing
 import pytest
 from kohakuvault import KVault
 
-import kohakuterrarium.session.vault_io as vault_io
+import kohakuterrarium.session.vault.io as vault_io
 from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.events import (
@@ -165,7 +165,7 @@ class TestBuildEventsPayload:
             assert reads == [f"alice:e{index:06d}" for index in range(3)]
             assert "Failed to read event" in caplog.text
             assert {record.name for record in caplog.records} == {
-                "kohakuterrarium.session.vault_io"
+                "kohakuterrarium.session.vault.io"
             }
             assert "bad:alice:e000000" in caplog.text
             assert "bad:alice:e000003" not in caplog.text

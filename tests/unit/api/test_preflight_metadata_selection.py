@@ -13,8 +13,8 @@ import kohakuterrarium.api.routes.persistence.preflight_metadata as preflight_me
 import kohakuterrarium.api.routes.persistence.resume as route
 import kohakuterrarium.api.routes.persistence.resume_cluster as cluster
 import kohakuterrarium.session.migrations as migrations
-import kohakuterrarium.session.readonly as readonly_mod
-import kohakuterrarium.session.version as version
+import kohakuterrarium.session.readonly.metadata as readonly_mod
+import kohakuterrarium.session.store.lifecycle.version as version
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import get_service_factory
 from kohakuterrarium.api.routes.persistence.preflight_metadata import (
@@ -22,15 +22,15 @@ from kohakuterrarium.api.routes.persistence.preflight_metadata import (
 )
 from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.core.config.serde import pack_agent_config
-from kohakuterrarium.session.metadata_candidate import (
+from kohakuterrarium.session.readonly.candidate import (
     MetadataReadError,
     read_metadata_candidate,
 )
-from kohakuterrarium.session.memory import SessionMemory
-from kohakuterrarium.session.readonly import read_session_meta
-from kohakuterrarium.session.resource_gate import GATE, ResourceReleaseError, try_fast
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.occupancy.gate import GATE, ResourceReleaseError, try_fast
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.vault_handles import dispose
+from kohakuterrarium.session.vault.handles import dispose
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 
 

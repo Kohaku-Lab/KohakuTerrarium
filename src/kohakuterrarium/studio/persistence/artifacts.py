@@ -7,7 +7,7 @@ response handling outside the persistence layer.
 from pathlib import Path
 
 from kohakuterrarium.errors import NotFoundError
-from kohakuterrarium.session.artifacts import (
+from kohakuterrarium.session.store.records.artifacts import (
     resolve_artifact_file as resolve_artifact_file,
 )
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default

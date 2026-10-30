@@ -4,12 +4,18 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.session.artifacts import artifacts_dir_for, write_artifact_bytes
+from kohakuterrarium.session.store.records.artifacts import (
+    artifacts_dir_for,
+    write_artifact_bytes,
+)
 from kohakuterrarium.session.store.events.counters import persist_event_counter
 from kohakuterrarium.session.store.events.flush import EventFlushPipeline
 from kohakuterrarium.session.store.lifecycle.tables import open_store_tables
-from kohakuterrarium.session.table_policy import TablePolicy, resolve_table_policy
-from kohakuterrarium.session.version import require_writable_format
+from kohakuterrarium.session.store.lifecycle.table_policy import (
+    TablePolicy,
+    resolve_table_policy,
+)
+from kohakuterrarium.session.store.lifecycle.version import require_writable_format
 from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 

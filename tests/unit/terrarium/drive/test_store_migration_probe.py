@@ -8,7 +8,7 @@ import threading
 import pytest
 
 import kohakuterrarium.terrarium.drive.store_migration as store_migration
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_LEGACY_ENROLLED,
     REASON_LEGACY_PENDING,

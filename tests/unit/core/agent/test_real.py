@@ -1451,7 +1451,7 @@ class TestStopFinalizesInflightJobs:
         # the pair survives provider-safe serialization + snapshot +
         # resume rebuild.
         from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobType
-        from kohakuterrarium.session.resume import _build_conversation
+        from kohakuterrarium.session.resume.resume import _build_conversation
 
         agent = make_agent()
         await agent.start()
@@ -1514,7 +1514,7 @@ class TestStopFinalizesInflightJobs:
         # closed → a fresh agent resumes via the actual entry point
         # (inject_saved_state) and sees the announcement + interrupted
         # result pair.
-        from kohakuterrarium.session.resume import inject_saved_state
+        from kohakuterrarium.session.resume.resume import inject_saved_state
         from kohakuterrarium.session.store import SessionStore
 
         store = SessionStore(str(tmp_path / "native.kohakutr.v2"))
@@ -4569,7 +4569,7 @@ class TestOpportunisticInputInjection:
         self, make_agent, tmp_path
     ):
         from kohakuterrarium.core.events import TriggerEvent
-        from kohakuterrarium.session.history import replay_conversation
+        from kohakuterrarium.session.history.replay import replay_conversation
         from kohakuterrarium.session.store import SessionStore
 
         agent = make_agent()

@@ -5,11 +5,11 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from kohakuterrarium.core.compact.branch import compact_source_path_from_event
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
     select_live_event_ids,
 )
-from kohakuterrarium.session.snapshot import load_records
+from kohakuterrarium.session.store.records.snapshot import load_records
 
 
 def replayed_compact_state(messages: list[dict]) -> dict:

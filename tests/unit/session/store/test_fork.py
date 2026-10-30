@@ -4,7 +4,7 @@ import pytest
 
 from kohakuterrarium.core.conversation.continuation import load_persisted_branch_view
 from kohakuterrarium.session.errors import ForkNotStableError
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     replay_conversation,
     resolve_branch_view_strict,
 )
@@ -603,7 +603,7 @@ class TestCopyArtifacts:
     def test_pre_existing_target_artifact_is_not_overwritten(self, tmp_path):
         # If the child already has an artifact with the same name, the
         # copy skips it — the existing child file wins.
-        from kohakuterrarium.session.artifacts import artifacts_dir_for
+        from kohakuterrarium.session.store.records.artifacts import artifacts_dir_for
 
         source = tmp_path / "src.kohakutr"
         source.write_bytes(b"")

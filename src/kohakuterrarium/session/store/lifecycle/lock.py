@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from kohakuterrarium.errors import SessionLockedError
-from kohakuterrarium.session.vault_handles import dispose
+from kohakuterrarium.session.vault.handles import dispose
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 

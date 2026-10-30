@@ -17,7 +17,7 @@ from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.metrics_hook import metrics
 from kohakuterrarium.core.pending_input import pending_id_of
 from kohakuterrarium.core.trigger_manager import TriggerManager
-from kohakuterrarium.session.raw_history import append_user_event_pair
+from kohakuterrarium.session.history.raw import append_user_event_pair
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.skills.hints import inject_skill_path_hint

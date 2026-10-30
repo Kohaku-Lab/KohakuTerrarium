@@ -335,7 +335,7 @@ worker's `_ensure_store_meta`
 (`src/kohakuterrarium/laboratory/adapters/_worker_session.py`)
 captures the full `AgentConfig` via `pack_agent_config` and stores it
 under `meta["config_snapshot"]`. The resume path
-(`session/resume.py::_rebuild_agent`) prefers `config_path` when the
+(`session/resume/resume.py::_rebuild_agent`) prefers `config_path` when the
 folder exists, and falls back to `unpack_agent_config(snapshot)`
 otherwise.
 

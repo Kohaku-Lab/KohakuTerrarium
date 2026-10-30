@@ -12,7 +12,7 @@ User clarification:
 
 Mechanism (see ``temp/bugs/B8.md`` Stage 3):
     * The worker writes ``tool_call`` and ``tool_result`` events
-      (`session/output.py:_handle_tool_start`/`_handle_tool_done`),
+      (`session/output/output.py:_handle_tool_start`/`_handle_tool_done`),
       both keyed by ``call_id == metadata["job_id"]``. Within the
       events table these pair correctly.
     * The runtime does NOT emit a corresponding ``assistant_tool_calls``
@@ -21,7 +21,7 @@ Mechanism (see ``temp/bugs/B8.md`` Stage 3):
       because ``SessionEventTee`` only subscribes to ``append_event``).
     * The host mirror therefore has a ``tool_result`` with a
       ``call_id`` that no preceding ``assistant_tool_calls`` event
-      announced. When ``session/history.py:replay_conversation``
+      announced. When ``session/history/replay.py:replay_conversation``
       rebuilds the message list from that mirror, every ``role=tool``
       message lacks an announcing assistant; then
       ``Conversation.sanitize_orphan_tool_pairs`` drops it as orphan
@@ -49,7 +49,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.core.conversation.conversation import Conversation
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     normalize_resumable_events,
     replay_conversation,
 )

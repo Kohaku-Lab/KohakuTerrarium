@@ -8,9 +8,9 @@ from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     persist_branch_view,
 )
-from kohakuterrarium.session.identity import new_conversation_id
-from kohakuterrarium.session.resume_target import SUCCESSOR_KEY
-from kohakuterrarium.session.snapshot import compact_state, snapshot_tag
+from kohakuterrarium.session.store.identity import new_conversation_id
+from kohakuterrarium.session.resume.target import SUCCESSOR_KEY
+from kohakuterrarium.session.store.records.snapshot import compact_state, snapshot_tag
 from kohakuterrarium.session.store import SessionStore
 
 

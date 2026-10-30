@@ -49,7 +49,7 @@ moves above the app area before stdout writes, then the app redraws below.
 ## Dependency direction
 
 Imported by: `cli/run.py` (default run mode), `cli/resume.py` (resume mode),
-`session/resume.py` (io module wiring).
+`session/resume/resume.py` (io module wiring).
 
 Imports: `prompt_toolkit` (`Application`, `Layout`, `TextArea`, key bindings,
 completion), `rich` (`Console`, `Markdown`, `Panel`, `Syntax`, `Text`);

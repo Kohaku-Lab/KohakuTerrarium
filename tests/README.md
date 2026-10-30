@@ -171,7 +171,7 @@ Each mirrors how the **real consumer** drives that folder.
 |---|---|---|---|
 | `test_core.py` | `core/` | build an `Agent` → inject input → controller loop → direct + background tool dispatch → sub-agent dispatch → output routing → compaction → termination → interrupt → history ops | `terrarium/creature_host.py`, `bootstrap/agent_init.py` |
 | `test_bootstrap.py` | `bootstrap/` | `Agent.from_path` on a real on-disk config → every factory fires → run a turn proving the wiring is live | `terrarium/factory.py`, `core/agent.py.__init__` |
-| `test_session.py` | `session/` | init store → creature writes events → record turns → read back → close → resume → verify → memory search → fork → migration | `terrarium/persistence.py`, `studio/sessions/lifecycle.py`, `session/resume.py` |
+| `test_session.py` | `session/` | init store → creature writes events → record turns → read back → close → resume → verify → memory search → fork → migration | `terrarium/persistence.py`, `studio/sessions/lifecycle.py`, `session/resume/resume.py` |
 | `test_terrarium.py` | `terrarium/` | build graph → add creatures → wire channels → broadcast → privileged node mutates → auto-merge/split → session lineage → hot-plug → recipe apply: driven through `LocalTerrariumService` | `studio/sessions/lifecycle.py` |
 | `test_laboratory.py` | `laboratory/` | real host+client over `InProcTransport`, wired as `cli/serve.py` does → `MultiNodeTerrariumService` → spawn-on-worker → remote chat → remote ops → deploy → session sync | `cli/serve.py` boot dispatch, `api/deps.py` |
 | `test_studio.py` | `studio/` | `Studio` façade → catalog → editors create workspace creature → sessions start+chat → persistence save/resume/fork → identity → attach | `api/routes/*`, `cli/*` |
@@ -244,7 +244,7 @@ testing otherwise.
 | `terrarium/engine_cli.py`, `terrarium/engine_rich_cli.py`, `terrarium/cli_output.py` | CLI / TTY UI |
 | `studio/attach/pty_posix.py`, `studio/attach/pty_windows.py`, `studio/attach/pty_router.py` | Platform-specific PTY backends, gated at import |
 | `studio/identity/codex_oauth.py` | 3rd-party OAuth flow |
-| `session/embedding.py` (non-deterministic embedders) | 3rd-party model dependency |
+| `session/memory/embedding.py` (non-deterministic embedders) | 3rd-party model dependency |
 | `laboratory/_internal/transport_ws.py` | `websockets` library: `InProcTransport` is the test transport |
 | `builtins/inputs/cli*.py`, `builtins/inputs/tui*.py`, `builtins/outputs/*` (terminal/audio) | CLI / TUI / audio UI |
 | `serving/web.py` (the pywebview / uvicorn boot path) | Desktop bundling, manual test only |

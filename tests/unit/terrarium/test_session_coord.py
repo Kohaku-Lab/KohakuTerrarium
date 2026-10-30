@@ -9,7 +9,7 @@ import pytest
 from kohakuterrarium.core.config.types import AgentConfig
 
 
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import session_coord as sc
 from kohakuterrarium.terrarium.autosession import close_attached_stores

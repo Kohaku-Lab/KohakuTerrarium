@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.errors import SessionNotResumableError
 
 T = TypeVar("T")

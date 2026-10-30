@@ -12,7 +12,7 @@ from httpx import ASGITransport, AsyncClient
 from kohakuvault import KVault
 from fastapi.testclient import TestClient
 
-import kohakuterrarium.session.vault_io as vault_io
+import kohakuterrarium.session.vault.io as vault_io
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.api.routes.persistence import subagents as subagents_mod
 from kohakuterrarium.api.routes.persistence import viewer as viewer_mod

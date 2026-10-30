@@ -7,13 +7,13 @@ from contextlib import closing
 import httpx
 import pytest
 
-import kohakuterrarium.session.metadata_candidate as candidate
-import kohakuterrarium.session.readonly as readonly_mod
+import kohakuterrarium.session.readonly.candidate as candidate
+import kohakuterrarium.session.readonly.metadata as readonly_mod
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.routes.persistence.preflight_metadata import (
     local_metadata_reader,
 )
-from kohakuterrarium.session.resource_gate import GATE
+from kohakuterrarium.session.occupancy.gate import GATE
 from kohakuterrarium.session.store import SessionStore
 
 

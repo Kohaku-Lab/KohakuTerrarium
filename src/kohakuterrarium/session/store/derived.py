@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.session.store.fork import perform_fork
-from kohakuterrarium.session.token_views import (
+from kohakuterrarium.session.store.token_views import (
     token_usage as _token_usage_impl,
     token_usage_all_loops as _token_usage_all_loops_impl,
 )
-from kohakuterrarium.session.vault_handles import dispose
-from kohakuterrarium.session.vault_read import open_read_text
+from kohakuterrarium.session.vault.handles import dispose
+from kohakuterrarium.session.vault.read import open_read_text
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:

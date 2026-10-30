@@ -8,7 +8,7 @@ import pytest
 from kohakuterrarium.laboratory.adapters.terrarium_session import (
     TerrariumSessionAdapter,
 )
-from kohakuterrarium.session.resource_gate import GATE, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 
 
 async def test_attach_while_delete_waits_does_not_delete(tmp_path, monkeypatch):

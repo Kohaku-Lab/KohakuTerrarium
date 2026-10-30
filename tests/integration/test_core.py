@@ -71,15 +71,15 @@ from kohakuterrarium.llm.media.artifacts import resolve_artifact_url
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.codex.format import to_responses_input
 from kohakuterrarium.llm.recovery.errors import drop_last_tool_round
-from kohakuterrarium.session import resume as resume_history
-from kohakuterrarium.session import resume_branch
-from kohakuterrarium.session.history import replay_conversation
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.resume import resume as resume_history
+from kohakuterrarium.session.resume import branch as resume_branch
+from kohakuterrarium.session.history.replay import replay_conversation
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.modules.user_command.base import UserCommandContext
-from kohakuterrarium.session.resume import resume_agent
-from kohakuterrarium.session.resume_build import build_conversation
+from kohakuterrarium.session.resume.resume import resume_agent
+from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.reader import SessionReader
+from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError

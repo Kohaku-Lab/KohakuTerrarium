@@ -18,11 +18,11 @@ from kohakuterrarium.core.conversation.pinned import (
     sync_with_store as sync_pinned_with_store,
 )
 from kohakuterrarium.core.token_ledger import context_window
-from kohakuterrarium.session.agent_attach import attach_to_session as _attach_to_session
-from kohakuterrarium.session.agent_attach import (
+from kohakuterrarium.session.attach.agent import attach_to_session as _attach_to_session
+from kohakuterrarium.session.attach.agent import (
     detach_from_session as _detach_from_session,
 )
-from kohakuterrarium.session.output import SessionOutput
+from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

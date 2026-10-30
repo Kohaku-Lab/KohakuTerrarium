@@ -13,7 +13,7 @@ import time
 import pytest
 
 import kohakuterrarium.session.store.fork as store_fork
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_LEGACY_ENROLLED,
     REASON_LEGACY_PENDING,

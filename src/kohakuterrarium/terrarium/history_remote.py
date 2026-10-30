@@ -1,6 +1,6 @@
 """Remote and multi-node history paging delegation."""
 
-from kohakuterrarium.session.history_records import history_detail
+from kohakuterrarium.session.history.records import history_detail
 from kohakuterrarium.terrarium.history_service import channel_list_page
 
 

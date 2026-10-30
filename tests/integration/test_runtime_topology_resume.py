@@ -37,7 +37,7 @@ from kohakuterrarium.terrarium.drive.requests import (
 )
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.service import LocalTerrariumService

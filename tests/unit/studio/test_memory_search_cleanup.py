@@ -16,11 +16,11 @@ from typing import Any
 import pytest
 
 from kohakuterrarium.errors import SessionError
-from kohakuterrarium.session.embedding import NullEmbedder
-from kohakuterrarium.session.memory import SessionMemory
-from kohakuterrarium.session.open_registry import live_store_for
+from kohakuterrarium.session.memory.embedding import NullEmbedder
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.occupancy.registry import live_store_for
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.vault_handles import is_disposed
+from kohakuterrarium.session.vault.handles import is_disposed
 from kohakuterrarium.studio.sessions import memory_search as mem_mod
 
 _ORIGINAL_MEMORY_CLOSE = SessionMemory.close

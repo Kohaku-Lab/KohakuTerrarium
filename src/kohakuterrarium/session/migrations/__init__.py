@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from kohakuterrarium.session.migrations import v1_to_v2
-from kohakuterrarium.session.readonly import read_session_meta
-from kohakuterrarium.session.resource_gate import acquire_legacy
-from kohakuterrarium.session.version import (
+from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.occupancy.gate import acquire_legacy
+from kohakuterrarium.session.store.lifecycle.version import (
     FORMAT_VERSION,
     archive_family,
     detect_format_version,

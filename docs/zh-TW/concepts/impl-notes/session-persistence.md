@@ -148,11 +148,11 @@ Sidecar 是可以直接刪除的；下次呼叫 `get_session_index_default` 就�
 ## 程式碼中的位置
 
 - `src/kohakuterrarium/session/store.py`：`SessionStore` API。
-- `src/kohakuterrarium/session/output.py`：`SessionOutput` 透過
+- `src/kohakuterrarium/session/output/output.py`：`SessionOutput` 透過
   `OutputModule` 協定記錄事件，因此控制器層不需要特別處理。
-- `src/kohakuterrarium/session/resume.py`：重建路徑。
-- `src/kohakuterrarium/session/memory.py`：FTS 與向量查詢。
-- `src/kohakuterrarium/session/embedding.py`：embedding providers。
+- `src/kohakuterrarium/session/resume/resume.py`：重建路徑。
+- `src/kohakuterrarium/session/memory/index.py`：FTS 與向量查詢。
+- `src/kohakuterrarium/session/memory/embedding.py`：embedding providers。
 - `src/kohakuterrarium/studio/persistence/session_index/`：列表用
   sidecar：`entry.py`（列結構）、`store.py`（KVault + TextVault 包裝）、
   `reconcile.py`（指紋差異 + 並行重讀）、`hooks.py`（來自執行中

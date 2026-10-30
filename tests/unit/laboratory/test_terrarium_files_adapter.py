@@ -21,7 +21,7 @@ from kohakuterrarium.laboratory.adapters.terrarium_files import (
     _unpack_bundle_entry,
 )
 from kohakuterrarium.laboratory.adapters.file_scopes import ScopeError, resolve_in_scope
-from kohakuterrarium.session import file_family as family
+from kohakuterrarium.session.occupancy import family
 from tests.unit.laboratory.file_mutation_enrollment_helpers import assert_idle
 
 

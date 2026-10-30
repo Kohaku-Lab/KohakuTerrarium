@@ -315,7 +315,7 @@ Resume 跑的還是同一個 `engine.adopt_session(path)`，只是在
 （[`_worker_session.py`](_worker_session.py-line)）透過
 `pack_agent_config` 擷取完整的 `AgentConfig` 並存在
 `meta["config_snapshot"]` 下。Resume 路徑
-（`session/resume.py::_rebuild_agent`）有 folder 存在時優先用
+（`session/resume/resume.py::_rebuild_agent`）有 folder 存在時優先用
 `config_path`，否則回退到 `unpack_agent_config(snapshot)`。
 
 ### 單生物 resume（CF-6 基準）

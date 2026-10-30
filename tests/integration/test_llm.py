@@ -53,7 +53,7 @@ from kohakuterrarium.core.controller.controller import Controller, ControllerCon
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.llm.antigravity import auth as agy_auth
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     replay_conversation,
     normalize_resumable_events,
 )

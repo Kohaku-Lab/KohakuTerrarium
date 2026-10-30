@@ -15,8 +15,8 @@ from kohakuterrarium.laboratory.adapters.terrarium_file_mutations import (
     replace_enrolled,
     run_mutation_worker,
 )
-from kohakuterrarium.session import file_mutation as worker
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy import mutation as worker
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     ResourceReleaseError,
     try_fast,

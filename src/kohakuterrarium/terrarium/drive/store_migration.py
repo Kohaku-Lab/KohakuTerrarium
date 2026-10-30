@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from kohakuterrarium.session.resource_gate import acquire_legacy
+from kohakuterrarium.session.occupancy.gate import acquire_legacy
 from kohakuterrarium.terrarium.drive.errors import DriveSchemaVersionError
 from kohakuterrarium.terrarium.drive.store_migration_resources import (
     MigrationSqlResources,

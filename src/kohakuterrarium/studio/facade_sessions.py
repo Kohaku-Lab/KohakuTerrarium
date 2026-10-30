@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from kohakuterrarium.errors import SessionNotFoundError
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence import store as _persistence_store
 from kohakuterrarium.studio.sessions import (

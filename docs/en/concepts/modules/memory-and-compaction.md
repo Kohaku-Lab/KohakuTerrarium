@@ -81,10 +81,10 @@ the compact manager kicks off a background task.
 ## How we implement it
 
 - `session/store.py`: KohakuVault-backed persistent store.
-- `session/output.py`: the output consumer that writes events.
-- `session/resume.py`: replay into a freshly built agent.
-- `session/memory.py`: FTS5 queries and vector search.
-- `session/embedding.py`: model2vec / sentence-transformer / API
+- `session/output/output.py`: the output consumer that writes events.
+- `session/resume/resume.py`: replay into a freshly built agent.
+- `session/memory/index.py`: FTS5 queries and vector search.
+- `session/memory/embedding.py`: model2vec / sentence-transformer / API
   providers for embeddings.
 - `core/compact/manager.py`: `CompactManager` with the atomic-splice trick.
   See [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md).

@@ -12,7 +12,7 @@ interrupted sub-agents visible in trace and cost totals.
 from collections.abc import Iterable
 from typing import Any
 
-from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
+from kohakuterrarium.session.history.replay import dedupe_adjacent_duplicate_events
 from kohakuterrarium.session.store import SessionStore
 
 # Summary and rollup views must classify the same event types as errors.

@@ -22,7 +22,7 @@ from kohakuterrarium.core.conversation.snapshot import (
     replayed_compact_state,
 )
 from kohakuterrarium.core.tools.output import render_content_text
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
     index_parent_paths,
     normalize_resumable_events,

@@ -37,7 +37,7 @@ from kohakuterrarium.laboratory._internal.client import (
     RequestTimeoutError,
 )
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.drive.remote_ops import RemoteDriveServiceMixin
 from kohakuterrarium.terrarium.drive.service_protocol import (

@@ -17,9 +17,9 @@ from kohakuterrarium.llm.media.reference import (
     file_reference_path,
     resolve_session_image_urls,
 )
-from kohakuterrarium.session.resume import inject_saved_state
-from kohakuterrarium.session.resume_build import build_conversation
-from kohakuterrarium.session.snapshot import save_agent_snapshot
+from kohakuterrarium.session.resume.resume import inject_saved_state
+from kohakuterrarium.session.resume.build import build_conversation
+from kohakuterrarium.session.store.records.snapshot import save_agent_snapshot
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
 

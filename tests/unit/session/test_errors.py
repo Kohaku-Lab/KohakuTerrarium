@@ -29,8 +29,8 @@ def test_distinct_error_types():
 def test_attach_module_reexports():
     """:mod:`session.attach` is a thin re-export shim — confirm the
     aliases resolve to the real ``attachment_service`` symbols."""
-    from kohakuterrarium.session import attach as attach_mod
-    from kohakuterrarium.session import attachment_service
+    from kohakuterrarium.session.attach import compat as attach_mod
+    from kohakuterrarium.session.attach import service as attachment_service
 
     assert attach_mod.attach_agent_to_session is (
         attachment_service.attach_agent_to_session
@@ -50,8 +50,8 @@ def test_attach_module_reexports():
 def test_agent_attach_helpers_delegate():
     """``session.agent_attach`` provides bound-style wrappers that
     delegate to ``attachment_service``."""
-    from kohakuterrarium.session import agent_attach as aa
-    from kohakuterrarium.session import attachment_service
+    from kohakuterrarium.session.attach import agent as aa
+    from kohakuterrarium.session.attach import service as attachment_service
 
     # Module re-exports the low-level imports.
     assert aa.attach_agent_to_session is (attachment_service.attach_agent_to_session)
@@ -68,7 +68,7 @@ def test_agent_attach_helpers_delegate():
     def fake_detach(self):
         captured.append(("detach", self))
 
-    import kohakuterrarium.session.agent_attach as aa_mod
+    import kohakuterrarium.session.attach.agent as aa_mod
 
     aa_mod.attach_agent_to_session = fake_attach
     aa_mod.detach_agent_from_session = fake_detach

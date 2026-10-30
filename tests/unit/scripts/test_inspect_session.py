@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from kohakuvault import KVault
 
-from kohakuterrarium.session.resource_gate import GATE, ResourceReleaseError, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, ResourceReleaseError, try_fast
 from kohakuterrarium.session.store import SessionStore
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

@@ -16,8 +16,8 @@ from kohakuterrarium.core.agent.history.messages import AgentMessagesMixin
 from kohakuterrarium.core.compact.splice import splice_conversation
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.errors import ConflictError
-from kohakuterrarium.session.history import InvalidBranchViewError
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.history.replay import InvalidBranchViewError
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.session.store import SessionStore
 
 # ── fake agent harness (mirrors production surface) ──────────────

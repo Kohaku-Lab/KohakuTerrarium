@@ -54,7 +54,7 @@ from kohakuterrarium.llm.profiles.api_keys import (
 from kohakuterrarium.studio.nodes import NodeMap
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.studio.sessions import lifecycle as session_lifecycle
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 from kohakuterrarium.studio.attach.io import attach_io
 from kohakuterrarium.studio.catalog.packages import install_package_op

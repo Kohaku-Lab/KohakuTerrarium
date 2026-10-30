@@ -6,8 +6,8 @@ from kohakuterrarium.core.conversation.continuation import (
     encode_branch_view,
     selected_branch_view,
 )
-from kohakuterrarium.session.history_paging import page_channels
-from kohakuterrarium.session.history_records import history_detail, history_page
+from kohakuterrarium.session.history.paging import page_channels
+from kohakuterrarium.session.history.records import history_detail, history_page
 from kohakuterrarium.terrarium.creature_ops import agent_live_job_ids
 
 

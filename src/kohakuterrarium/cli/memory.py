@@ -7,8 +7,8 @@ module is strictly the rich-CLI presentation layer.
 """
 
 from kohakuterrarium.cli.run import _resolve_session
-from kohakuterrarium.session.embedding import create_embedder
-from kohakuterrarium.session.memory import SessionMemory
+from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory_build import build_index
 from kohakuterrarium.utils.logging import get_logger

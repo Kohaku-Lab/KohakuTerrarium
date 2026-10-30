@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from kohakuterrarium.session.store.events.counters import restore_subagent_counters
-from kohakuterrarium.session.vault_io import key_text, read_values, scan_keys
+from kohakuterrarium.session.vault.io import key_text, read_values, scan_keys
 
 
 class SubagentRecordsMixin:

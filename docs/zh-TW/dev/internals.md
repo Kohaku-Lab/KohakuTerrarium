@@ -134,9 +134,9 @@ Resume 時，觸發器的狀態會從 session store 的 `events[agent]:*` 列重
 - 草稿區寫入，
 - 頻道 send。
 
-Resume (`session/resume.py`)：載入 `meta`、每個代理的 conversation 快照、還原 scratchpad/state、還原觸發器、把事件重播給輸出模組 (拿來當 scrollback)、把子代理的對話再接回來。不可 resume 的狀態 (開著的檔案、LLM 連線、TUI、asyncio task) 從 config 重建。
+Resume (`session/resume/resume.py`)：載入 `meta`、每個代理的 conversation 快照、還原 scratchpad/state、還原觸發器、把事件重播給輸出模組 (拿來當 scrollback)、把子代理的對話再接回來。不可 resume 的狀態 (開著的檔案、LLM 連線、TUI、asyncio task) 從 config 重建。
 
-`session/memory.py` + `session/embedding.py` 在事件日誌上提供 FTS5 與向量搜尋。Embedding 提供者：`model2vec`、`sentence-transformer`、`api`。向量跟事件區塊並排存，以便做混合搜尋。
+`session/memory/index.py` + `session/memory/embedding.py` 在事件日誌上提供 FTS5 與向量搜尋。Embedding 提供者：`model2vec`、`sentence-transformer`、`api`。向量跟事件區塊並排存，以便做混合搜尋。
 
 細節參考 [impl-notes/session-persistence.md](../concepts/impl-notes/session-persistence.md)。
 

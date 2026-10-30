@@ -43,7 +43,7 @@ import numpy as np
 import pytest
 from kohakuvault import KVault
 
-import kohakuterrarium.session.vault_io as vault_io
+import kohakuterrarium.session.vault.io as vault_io
 from kohakuterrarium.errors import (
     InvalidRequestError,
     NotFoundError,
@@ -55,9 +55,9 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.packages.locations import ensure_local_project
 from kohakuterrarium.studio.catalog.packages_scan import scan_creatures_in_dirs
-from kohakuterrarium.session.embedding import BaseEmbedder
+from kohakuterrarium.session.memory.embedding import BaseEmbedder
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.resource_gate import GATE, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.studio.identity import grok_subscription
 from kohakuterrarium.studio.persistence import store as _persistence_store_mod
 from kohakuterrarium.studio.persistence.session_index import close_session_index

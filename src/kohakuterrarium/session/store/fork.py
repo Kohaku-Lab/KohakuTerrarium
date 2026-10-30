@@ -10,21 +10,21 @@ from typing import Any
 
 from kohakuvault import KVault
 
-from kohakuterrarium.session.artifacts import artifacts_dir_for
+from kohakuterrarium.session.store.records.artifacts import artifacts_dir_for
 from kohakuterrarium.session.errors import ForkNotStableError
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     InvalidBranchViewError,
     _coerce_branch_view,
     resolve_branch_view_strict,
 )
-from kohakuterrarium.session.identity import new_conversation_id
-from kohakuterrarium.session.resource_gate import acquire_legacy
+from kohakuterrarium.session.store.identity import new_conversation_id
+from kohakuterrarium.session.occupancy.gate import acquire_legacy
 from kohakuterrarium.session.store.events.counters import (
     EXACT_EVENT_ID_KEY,
     MAX_EVENT_ID_KEY,
 )
 from kohakuterrarium.session.store.protocol import SessionStoreLike
-from kohakuterrarium.session.vault_io import (
+from kohakuterrarium.session.vault.io import (
     copy_rows,
     read_prefix,
     scan_keys,

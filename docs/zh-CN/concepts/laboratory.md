@@ -320,7 +320,7 @@ Resume 跑的还是它一直跑的那段 `engine.adopt_session(path)`，
 `_ensure_store_meta`（[`_worker_session.py`](_worker_session.py-line)）
 会通过 `pack_agent_config` 捕获完整的 `AgentConfig` 并把它存
 在 `meta["config_snapshot"]` 下。Resume 路径
-（`session/resume.py::_rebuild_agent`）在文件夹存在时优先用
+（`session/resume/resume.py::_rebuild_agent`）在文件夹存在时优先用
 `config_path`，否则 fallback 到 `unpack_agent_config(snapshot)`。
 
 ### 单生物 resume（CF-6 基线）

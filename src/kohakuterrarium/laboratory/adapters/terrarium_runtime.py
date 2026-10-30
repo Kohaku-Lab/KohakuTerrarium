@@ -16,7 +16,7 @@ from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.llm.profiles.backends import set_remote_backend
 from kohakuterrarium.llm.presets.store import preset_from_data, set_remote_preset
 from kohakuterrarium.llm.profiles.types import LLMBackend
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.terrarium.creature_ops import (
     agent_command_inventory,
     agent_env,

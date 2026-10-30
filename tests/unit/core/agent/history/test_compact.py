@@ -12,8 +12,8 @@ from kohakuterrarium.core.agent.history.message_history import replay_with_settl
 from kohakuterrarium.core.conversation.continuation import persist_branch_view
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.conversation.conversation import Conversation
-from kohakuterrarium.session.resume import inject_saved_state
-from kohakuterrarium.session.resume_build import build_conversation
+from kohakuterrarium.session.resume.resume import inject_saved_state
+from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
 

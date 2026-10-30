@@ -13,7 +13,7 @@ _EXPORTS = {
     "EventFilter": "kohakuterrarium.terrarium",
     "EventKind": "kohakuterrarium.terrarium",
     "FunctionTool": "kohakuterrarium.modules.tool.function",
-    "SessionReader": "kohakuterrarium.session.reader",
+    "SessionReader": "kohakuterrarium.session.readonly.reader",
     "SessionStore": "kohakuterrarium.session.store",
     "Studio": "kohakuterrarium.studio",
     "Terrarium": "kohakuterrarium.terrarium",

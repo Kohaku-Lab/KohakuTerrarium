@@ -11,7 +11,7 @@ import time
 from itertools import islice
 from pathlib import Path
 
-from kohakuterrarium.session.readonly_view import SessionReadView
+from kohakuterrarium.session.readonly.view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
 
 READS = 200

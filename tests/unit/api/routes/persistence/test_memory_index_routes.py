@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.persistence import memory_index as memory_index_mod
 from kohakuterrarium.api.ws import memory_build as ws_memory_build
-from kohakuterrarium.session.embedding import BaseEmbedder
+from kohakuterrarium.session.memory.embedding import BaseEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import store as store_mod
 from kohakuterrarium.studio.sessions import memory_build as memory_build_service

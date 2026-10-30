@@ -293,7 +293,7 @@ Mirror `src/` layout under `tests/unit/`:
 | `modules/trigger/`      | `tests/unit/test_phase7.py`        |
 | `core/environment.py`   | `tests/unit/test_environment.py`   |
 | `session/store.py`      | `tests/unit/test_session_store.py` |
-| `session/resume.py`     | `tests/unit/test_session_resume.py`|
+| `session/resume/resume.py`     | `tests/unit/test_session_resume.py`|
 | `bootstrap/`            | `tests/unit/test_bootstrap.py`     |
 | `terrarium/`            | `tests/unit/test_terrarium_modules.py` |
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from kohakuvault import KVault
 
-from kohakuterrarium.session.vault_io import read_prefix, scan_keys
+from kohakuterrarium.session.vault.io import read_prefix, scan_keys
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

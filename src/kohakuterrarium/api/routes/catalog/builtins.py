@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.routes.catalog._deps import get_workspace_optional
 from kohakuterrarium.llm.profiles.resolve import list_all as list_all_models
-from kohakuterrarium.session.embedding import (
+from kohakuterrarium.session.memory.embedding import (
     list_embedding_presets as _list_embedding_presets,
 )
 from kohakuterrarium.studio.catalog.builtins import (

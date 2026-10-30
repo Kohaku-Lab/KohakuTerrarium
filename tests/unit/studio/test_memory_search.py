@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.session.embedding import NullEmbedder
+from kohakuterrarium.session.memory.embedding import NullEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import memory_build as build_mod
 from kohakuterrarium.studio.sessions import memory_search as mem_mod
@@ -203,7 +203,7 @@ class TestSearchSessionMemory:
         monkeypatch.setattr(mem_mod, "create_embedder", lambda cfg: _FakeEmbedder())
 
         # Build a memory stub that returns fake SearchResult-shaped items.
-        from kohakuterrarium.session.memory import SearchResult
+        from kohakuterrarium.session.memory.index import SearchResult
 
         class _FakeMemory:
             def __init__(self, *a, **kw):
@@ -360,7 +360,7 @@ class TestSearchSessionMemory:
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, live_store)
         )
-        from kohakuterrarium.session.memory import SearchResult
+        from kohakuterrarium.session.memory.index import SearchResult
 
         class _FakeMemory:
             def __init__(self, *a, **kw):

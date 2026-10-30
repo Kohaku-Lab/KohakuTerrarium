@@ -10,16 +10,16 @@
 
 ## Task 1: Cache immutable path compatibility
 
-**Files:** `src/kohakuterrarium/session/history_selection.py`, `tests/unit/session/test_history_selection.py`.
+**Files:** `src/kohakuterrarium/session/history/selection.py`, `tests/unit/session/history/test_selection.py`.
 
 1. Add deterministic operation budgets for repeated immutable paths, including varying event turns, with compatible and incompatible ancestry. Preserve the existing differential tests for legacy, malformed, custom integer, and custom tuple inputs.
-2. Run `.venv/bin/python -m pytest -n0 tests/unit/session/test_history_selection.py -q`; confirm the new budget fails on repeated validation.
+2. Run `.venv/bin/python -m pytest -n0 tests/unit/session/history/test_selection.py -q`; confirm the new budget fails on repeated validation.
 3. Cache each exact built-in tuple by identity, retain its reference, and calculate the first conflicting parent turn once. Cache selected-branch comparisons for shared parent pairs. Answer compatibility as `conflict is None or conflict >= turn`. Keep noncanonical fallback evaluation unchanged.
 4. Rerun the focused test file and audit cache lifetime, identity reuse, boolean aliases, and mutation handling.
 
 ## Task 2: Share parent indexes within replay
 
-**Files:** `src/kohakuterrarium/session/branch_paths.py`, `src/kohakuterrarium/session/history.py`, `tests/unit/session/test_branch_paths.py`, `tests/unit/session/test_history.py`, `tests/unit/session/test_history_selection.py`.
+**Files:** `src/kohakuterrarium/session/history/branch_paths.py`, `src/kohakuterrarium/session/history/replay.py`, `tests/unit/session/history/test_branch_paths.py`, `tests/unit/session/history/test_replay.py`, `tests/unit/session/history/test_selection.py`.
 
 Also share the raw projection's index in `src/kohakuterrarium/core/agent/history/message_history.py` (`replay_with_settled_tools` and `snapshot_needs_settled_tool_replay`), covered by `tests/unit/core/agent/history/test_message_history.py`. Normalization still creates a separate replay projection and therefore requires its own index.
 

@@ -9,7 +9,7 @@ import time
 import pytest
 
 import kohakuterrarium.session.run_state as rs
-from kohakuterrarium.session.output import SessionOutput
+from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
 
 

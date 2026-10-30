@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.session.artifacts import artifacts_dir_for
+from kohakuterrarium.session.store.records.artifacts import artifacts_dir_for
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.vault_io import copy_rows, key_text, read_prefix
+from kohakuterrarium.session.vault.io import copy_rows, key_text, read_prefix
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

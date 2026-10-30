@@ -29,7 +29,7 @@ import discord
 from discord import app_commands
 
 from kohakuterrarium import Terrarium
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.terrarium.creature_host import Creature
 
 # One engine hosts every NPC creature for the whole bot process.

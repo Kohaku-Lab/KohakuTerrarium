@@ -10,7 +10,7 @@ from kohakuterrarium.laboratory.adapters.terrarium_file_mutations import (
     unlink_enrolled,
     write_bytes_enrolled,
 )
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_LEGACY_RELEASE_UNCERTAIN,
     try_fast,

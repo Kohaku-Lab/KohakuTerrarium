@@ -5,7 +5,7 @@ from typing import TextIO
 
 from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.modules.output.base import BaseOutputModule
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
     select_live_event_ids,
 )

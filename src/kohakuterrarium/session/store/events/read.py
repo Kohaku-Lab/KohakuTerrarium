@@ -3,8 +3,8 @@
 from collections.abc import Iterator
 from typing import Any
 
-from kohakuterrarium.session.event_key_index import EventKeyIndex
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.store.events.key_index import EventKeyIndex
+from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
     normalize_resumable_events,
 )
@@ -13,7 +13,7 @@ from kohakuterrarium.session.store.events.discovery import (
     discover_attached_agents,
 )
 from kohakuterrarium.session.store.events.values import _iter_event_values
-from kohakuterrarium.session.vault_io import key_text, read_prefix, scan_keys
+from kohakuterrarium.session.vault.io import key_text, read_prefix, scan_keys
 
 
 class EventReadMixin:

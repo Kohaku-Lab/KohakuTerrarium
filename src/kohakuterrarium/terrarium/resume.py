@@ -18,17 +18,17 @@ from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.config.serde import pack_agent_config
-from kohakuterrarium.session.readonly import read_session_meta
-from kohakuterrarium.session.resume_target import (
+from kohakuterrarium.session.readonly.metadata import read_session_meta
+from kohakuterrarium.session.resume.target import (
     active_resume_graph,
     resolve_resume_path,
 )
-from kohakuterrarium.session.resume import (
+from kohakuterrarium.session.resume.resume import (
     _open_store_with_migration,
     detect_session_type,
     preflight_legacy_workspace,
 )
-from kohakuterrarium.session.resume_async import (
+from kohakuterrarium.session.resume.async_flow import (
     inject_saved_state_async,
     resume_agent_async,
 )

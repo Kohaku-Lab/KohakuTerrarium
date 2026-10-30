@@ -164,14 +164,14 @@ themselves) does not already hold.
 ## Where it lives in the code
 
 - `src/kohakuterrarium/session/store.py`: `SessionStore` API.
-- `src/kohakuterrarium/session/output.py`: `SessionOutput` records
+- `src/kohakuterrarium/session/output/output.py`: `SessionOutput` records
   events via the `OutputModule` protocol, so nothing special is
   needed at the controller layer.
-- `src/kohakuterrarium/session/artifacts.py`: artifact path resolution
+- `src/kohakuterrarium/session/store/records/artifacts.py`: artifact path resolution
   and safe binary writes.
-- `src/kohakuterrarium/session/resume.py`: the rebuild path.
-- `src/kohakuterrarium/session/memory.py`: FTS and vector queries.
-- `src/kohakuterrarium/session/embedding.py`: embedding providers.
+- `src/kohakuterrarium/session/resume/resume.py`: the rebuild path.
+- `src/kohakuterrarium/session/memory/index.py`: FTS and vector queries.
+- `src/kohakuterrarium/session/memory/embedding.py`: embedding providers.
 - `src/kohakuterrarium/studio/persistence/session_index/`: listing
   sidecar: `entry.py` (row schema), `store.py` (KVault + TextVault
   wrapper), `reconcile.py` (fingerprint diff + parallel re-read),

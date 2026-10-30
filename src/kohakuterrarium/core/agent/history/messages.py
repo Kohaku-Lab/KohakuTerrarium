@@ -37,9 +37,9 @@ from kohakuterrarium.core.conversation.source import (
 from kohakuterrarium.core.conversation.settled_refresh import prepare_mutation_prefix
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.llm.message import content_parts_to_dicts, normalize_content_parts
-from kohakuterrarium.session.history import replay_conversation
-from kohakuterrarium.session.snapshot import save_agent_snapshot
-from kohakuterrarium.session.raw_history import (
+from kohakuterrarium.session.history.replay import replay_conversation
+from kohakuterrarium.session.store.records.snapshot import save_agent_snapshot
+from kohakuterrarium.session.history.raw import (
     UserMessageSelector,
     append_user_event_pair,
 )
@@ -515,7 +515,7 @@ class AgentMessagesMixin:
         turns inflate positions and make ``_user_position_for_turn_index``
         resolve to the wrong message).
 
-        Defers to ``select_live_event_ids`` from ``session/history.py``
+        Defers to ``select_live_event_ids`` from ``session/history/replay.py``
         so this stays in lock-step with the replay logic.
         """
         return _live_user_turns(self, branch_view=branch_view)

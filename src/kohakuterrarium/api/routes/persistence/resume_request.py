@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, Request
 from kohakuterrarium.errors import SessionNotResumableError
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.resume.target import resolve_resume_path
 
 
 def canonical_resume_path(path: Path, session_dir: Path) -> Path:

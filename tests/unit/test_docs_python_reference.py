@@ -151,8 +151,8 @@ DOCUMENTED_SYMBOLS: list[tuple[str, str]] = [
     ("kohakuterrarium", "Creature.get_log_entries"),
     ("kohakuterrarium", "Creature.get_log_text"),
     # -- sessions -----------------------------------------------------------
-    ("kohakuterrarium.session.reader", "SessionReader"),
-    ("kohakuterrarium.session.reader", "TurnView"),
+    ("kohakuterrarium.session.readonly.reader", "SessionReader"),
+    ("kohakuterrarium.session.readonly.reader", "TurnView"),
     ("kohakuterrarium", "SessionReader.events"),
     ("kohakuterrarium", "SessionReader.conversation"),
     ("kohakuterrarium", "SessionReader.channel_messages"),
@@ -387,7 +387,7 @@ DOCUMENTED_FIELDS: list[tuple[str, str, list[str]]] = [
     ),
     ("kohakuterrarium", "DisconnectionResult", ["channels", "delta_kind"]),
     (
-        "kohakuterrarium.session.reader",
+        "kohakuterrarium.session.readonly.reader",
         "TurnView",
         ["index", "user_text", "assistant_text", "tool_calls", "source", "ts"],
     ),

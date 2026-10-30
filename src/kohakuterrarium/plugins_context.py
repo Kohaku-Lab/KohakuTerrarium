@@ -9,7 +9,7 @@ imports this module before defining ``Agent``.
 import sys
 from typing import Any
 
-from kohakuterrarium.session.attachment_service import attach_agent_to_session
+from kohakuterrarium.session.attach.service import attach_agent_to_session
 from kohakuterrarium.session.session import Session as AsyncSession
 
 

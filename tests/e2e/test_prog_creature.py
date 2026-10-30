@@ -42,10 +42,10 @@ from kohakuterrarium.llm.profiles.types import LLMProfile
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.modules.trigger.base import BaseTrigger
-from kohakuterrarium.session import resume_branch as _resume_branch_mod
-from kohakuterrarium.session.embedding import BaseEmbedder
-from kohakuterrarium.session.memory import SessionMemory
-from kohakuterrarium.session.resume import resume_agent
+from kohakuterrarium.session.resume import branch as _resume_branch_mod
+from kohakuterrarium.session.memory.embedding import BaseEmbedder
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.resume.resume import resume_agent
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.terrarium.creature_host import Creature

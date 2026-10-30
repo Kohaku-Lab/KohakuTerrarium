@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import kohakuterrarium.session.run_state as run_state
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence.resume import resume_session
 from kohakuterrarium.studio.sessions.live.registry import live_sessions, path_key

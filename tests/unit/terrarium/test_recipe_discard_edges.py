@@ -4,7 +4,7 @@ from contextlib import closing
 
 import pytest
 
-from kohakuterrarium.session.resource_gate import GATE
+from kohakuterrarium.session.occupancy.gate import GATE
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.recipe_discard import _close_store, discard_recipe_graph
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder

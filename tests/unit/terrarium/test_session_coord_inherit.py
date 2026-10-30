@@ -11,7 +11,7 @@ config_path or config_snapshot in metadata".
 from kohakuterrarium.session.store import SessionStore
 import pytest
 from kohakuterrarium.errors import SessionNotResumableError
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.core.config.load import build_agent_config
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.resume import (

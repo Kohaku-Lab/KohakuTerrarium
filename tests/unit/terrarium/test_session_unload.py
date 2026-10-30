@@ -7,7 +7,7 @@ import warnings
 import pytest
 
 from kohakuterrarium.bootstrap import agent_init, llm
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.terrarium import graph_checkpoint
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY

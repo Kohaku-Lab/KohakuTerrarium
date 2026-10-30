@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from kohakuterrarium.session.open_registry import (
+from kohakuterrarium.session.occupancy.registry import (
     register_open_store,
     unregister_open_store,
 )
-from kohakuterrarium.session.resource_gate import ResourceLease, acquire_legacy
+from kohakuterrarium.session.occupancy.gate import ResourceLease, acquire_legacy
 from kohakuterrarium.session.store.lifecycle.lock import (
     TABLE_ATTRS,
     acquire_writer_lock,

@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.session_index import (
     SessionIndexEntry,

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import NotFoundError
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
 
 

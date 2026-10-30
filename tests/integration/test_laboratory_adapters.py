@@ -32,7 +32,7 @@ import os
 import pytest
 
 from kohakuterrarium.core.config.load import AgentConfig
-from kohakuterrarium.session.resource_gate import GATE, try_fast
+from kohakuterrarium.session.occupancy.gate import GATE, try_fast
 from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod

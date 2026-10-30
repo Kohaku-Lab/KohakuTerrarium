@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from kohakuterrarium.core.compact.splice import is_real_user_message
-from kohakuterrarium.session.snapshot import snapshot_tag
+from kohakuterrarium.session.store.records.snapshot import snapshot_tag
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -464,7 +464,7 @@ def persist_compact_state(
 def tag_snapshot_branch(store: Any, agent: Any, agent_name: str) -> None:
     """Tag the saved snapshot with the branch it was created on.
 
-    Mirrors ``session/output.py:on_processing_end`` so resume can match the
+    Mirrors ``session/output/output.py:on_processing_end`` so resume can match the
     target branch before trusting the snapshot. No-op when the agent has not
     started a turn or the store is read-only.
     """
@@ -476,7 +476,7 @@ def tag_snapshot_branch(store: Any, agent: Any, agent_name: str) -> None:
         # persist_compacted rewrote the snapshot above; the agent's branch
         # state is missing/invalid, so clear any stale tag from a prior run
         # rather than leave it pointing at a branch that no longer matches
-        # this snapshot (mirrors session/output.py:on_processing_end).
+        # this snapshot (mirrors session/output/output.py:on_processing_end).
         try:
             store.state.pop(f"{agent_name}:snapshot_branch", None)
         except Exception:  # pragma: no cover - defensive

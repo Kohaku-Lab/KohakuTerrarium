@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from kohakuterrarium.errors import KTError
-from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.readonly.metadata import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest
 from kohakuterrarium.terrarium.drive.models import ActorRef

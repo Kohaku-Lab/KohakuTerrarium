@@ -27,7 +27,7 @@ from kohakuterrarium.llm.profiles.resolve import (
     profile_to_identifier,
     resolve_controller_llm,
 )
-from kohakuterrarium.session.snapshot import load_branch_snapshot
+from kohakuterrarium.session.store.records.snapshot import load_branch_snapshot
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)

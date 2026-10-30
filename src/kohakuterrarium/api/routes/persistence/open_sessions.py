@@ -16,7 +16,7 @@ from kohakuterrarium.api.routes.persistence.resume_coordinator import (
     resume_coordinator,
     session_coordination_key,
 )
-from kohakuterrarium.session.readonly_view import SessionReadView
+from kohakuterrarium.session.readonly.view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence.session_index import get_session_index_default

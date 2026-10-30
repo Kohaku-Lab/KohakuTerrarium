@@ -14,8 +14,8 @@ from kohakuterrarium.laboratory.adapters.terrarium_file_mutations import (
     unlink_enrolled,
     write_bytes_enrolled,
 )
-from kohakuterrarium.session import file_family as family
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy import family
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_LEGACY_ENROLLED,
     REASON_LEGACY_PENDING,

@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
-from kohakuterrarium.session.embedding import create_embedder
-from kohakuterrarium.session.memory import SessionMemory
-from kohakuterrarium.session.memory_async import live_memory_for_store
+from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory_build import (
     build_index as _build_index,

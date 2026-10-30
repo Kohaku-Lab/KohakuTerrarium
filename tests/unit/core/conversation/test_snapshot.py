@@ -11,7 +11,7 @@ from kohakuterrarium.core.agent.history.message_history import (
     snapshot_needs_settled_tool_replay,
 )
 from kohakuterrarium.core.conversation.snapshot import prepare_snapshot
-from kohakuterrarium.session.snapshot import load_records
+from kohakuterrarium.session.store.records.snapshot import load_records
 from kohakuterrarium.session.store import SessionStore
 
 _EVENTS = [

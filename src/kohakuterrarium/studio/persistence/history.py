@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import NotFoundError, SessionError, SessionNotFoundError
-from kohakuterrarium.session.history_paging import physical_refs
-from kohakuterrarium.session.history_records import history_page
+from kohakuterrarium.session.history.paging import physical_refs
+from kohakuterrarium.session.history.records import history_page
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.store import (
     session_history_payload,

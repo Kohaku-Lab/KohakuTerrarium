@@ -44,7 +44,7 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
-from kohakuterrarium.session.reader import SessionReader
+from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM

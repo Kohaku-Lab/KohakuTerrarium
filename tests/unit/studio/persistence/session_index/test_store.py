@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError
 import pytest
 
 from kohakuterrarium.session import run_state
-from kohakuterrarium.session.vault_handles import dispose, is_disposed
+from kohakuterrarium.session.vault.handles import dispose, is_disposed
 from kohakuterrarium.studio.persistence.session_index.entry import (
     SCHEMA_VERSION,
     SessionIndexEntry,

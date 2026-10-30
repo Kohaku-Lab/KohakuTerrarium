@@ -8,9 +8,11 @@ import pytest
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.modules.plugin.base import BasePlugin
-from kohakuterrarium.session.resume import _load_conversation_with_replay_fallback
-from kohakuterrarium.session.readonly_view import SessionReadView
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.resume.resume import (
+    _load_conversation_with_replay_fallback,
+)
+from kohakuterrarium.session.readonly.view import SessionReadView
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM

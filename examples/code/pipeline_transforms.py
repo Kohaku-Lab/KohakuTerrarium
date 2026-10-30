@@ -21,7 +21,7 @@ import asyncio
 import json
 
 from kohakuterrarium.compose import factory
-from kohakuterrarium.core.config import load_agent_config
+from kohakuterrarium.core.config.load import load_agent_config
 
 
 def make_extractor_config():

@@ -12,8 +12,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
-from kohakuterrarium.session.readonly import read_session_meta as read_meta_strict
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.readonly.metadata import (
+    read_session_meta as read_meta_strict,
+)
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.graph_manifest import (
     GraphManifest,

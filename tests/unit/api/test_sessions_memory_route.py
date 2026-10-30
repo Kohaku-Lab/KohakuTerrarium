@@ -10,7 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.laboratory.config import HostConfig
-from kohakuterrarium.session.embedding import NullEmbedder
+from kohakuterrarium.session.memory.embedding import NullEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import memory_search as search_mod
 from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService

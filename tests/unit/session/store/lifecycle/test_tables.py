@@ -10,9 +10,12 @@ from kohakuterrarium.session.store.lifecycle.tables import (
     TABLE_NAMES,
     open_store_tables,
 )
-from kohakuterrarium.session.table_policy import TablePolicy, resolve_table_policy
-from kohakuterrarium.session.vault_handles import dispose
-from kohakuterrarium.session.vault_read import AbsentTable
+from kohakuterrarium.session.store.lifecycle.table_policy import (
+    TablePolicy,
+    resolve_table_policy,
+)
+from kohakuterrarium.session.vault.handles import dispose
+from kohakuterrarium.session.vault.read import AbsentTable
 
 
 def _release(store):

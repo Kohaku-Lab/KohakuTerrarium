@@ -74,7 +74,7 @@ from kohakuterrarium.terrarium.multi_node_routing import (
     runtime_graph_snapshot_fanout,
     stream_subscribe,
 )
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.terrarium.remote_service import RemoteTerrariumService
 from kohakuterrarium.terrarium.service import (
     CreatureInfo,

@@ -130,9 +130,9 @@ Session 都保存在单个 `.kohakutr` 文件中，底层是 KohakuVault（SQLit
 - scratchpad 写入时
 - channel 发送时
 
-恢复逻辑位于 `session/resume.py`：先加载 `meta`，再加载每个 agent 的 conversation snapshot，恢复 scratchpad/state，恢复 trigger，将 event 重放给 output module（用于 scrollback），再把 sub-agent 对话挂回去。无法恢复的状态，例如打开的文件、LLM 连接、TUI、asyncio task，都会按配置重新创建。
+恢复逻辑位于 `session/resume/resume.py`：先加载 `meta`，再加载每个 agent 的 conversation snapshot，恢复 scratchpad/state，恢复 trigger，将 event 重放给 output module（用于 scrollback），再把 sub-agent 对话挂回去。无法恢复的状态，例如打开的文件、LLM 连接、TUI、asyncio task，都会按配置重新创建。
 
-`session/memory.py` 和 `session/embedding.py` 提供基于 event log 的 FTS5 和向量搜索。embedding provider 支持 `model2vec`、`sentence-transformer`、`api`。向量会和 event block 一起存储，用于混合搜索。
+`session/memory/index.py` 和 `session/memory/embedding.py` 提供基于 event log 的 FTS5 和向量搜索。embedding provider 支持 `model2vec`、`sentence-transformer`、`api`。向量会和 event block 一起存储，用于混合搜索。
 
 相关文档见 [impl-notes/session-persistence.md](../concepts/impl-notes/session-persistence.md)。
 

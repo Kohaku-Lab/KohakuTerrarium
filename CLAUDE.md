@@ -508,20 +508,20 @@ src/kohakuterrarium/
 │
 ├── session/                  # Session persistence (KohakuVault-backed)
 │   ├── store/                # SessionStore pseudo-class package (see store/README.md):
-│   │                         #   lifecycle/ events/ records/ + meta, derived, fork
-│   │                         #   (+ token_views.py, version.py, errors.py, migrations/)
-│   ├── reader.py             # SessionReader: read a finished .kohakutr without spelunking
-│   ├── output.py             # SessionOutput: captures events via OutputModule
-│   ├── resume.py             # Resume agent/terrarium from .kohakutr file
-│   ├── attach.py             # Attach/detach a store to a live agent
-│   │                         #   (+ agent_attach.py, attachment_service.py)
-│   ├── artifacts.py          # Session-local artifact helpers
+│   │                         #   assembly.py + lifecycle/ events/ records/ + meta, derived, fork,
+│   │                         #   identity, token_views (key/branch index, artifacts, rollup, snapshot)
+│   ├── vault/                # Native KohakuVault access: handles, io, read
+│   ├── occupancy/            # Session-file admission: gate, registry, family, mutation
+│   ├── readonly/             # metadata, view, reader (SessionReader), candidate
+│   ├── history/              # replay, paging, records, selection, raw, assistant, branch_paths
+│   ├── resume/               # Resume agent/terrarium from .kohakutr: resume, async_flow, build, ...
+│   ├── memory/               # SessionMemory FTS5 + vector search (index), embedding providers
+│   ├── output/               # SessionOutput: captures events via OutputModule (+ activity, widgets)
+│   ├── attach/               # Attach/detach a store to a live agent (agent, service, compat)
 │   ├── session.py            # Async wrapper around a running agent + SessionStore
-│   ├── rollup.py             # Per-turn rollup helpers
 │   ├── sync.py               # Event mirroring across the Laboratory layer
-│   ├── memory.py             # SessionMemory: FTS5 + vector search over events
-│   ├── embedding.py          # Embedding providers (model2vec, sentence-transformer, API)
-│   └── history.py            # Event-history normalization
+│   ├── run_state.py          # Crash-tolerant run records per process boot
+│   └── errors.py             # Session-level exceptions (+ migrations/)
 │
 ├── serving/                  # Web/desktop launch glue (no service manager: Studio/Terrarium
 │   │                         #   own lifecycle; AgentSession / KohakuManager are gone)
@@ -629,7 +629,7 @@ src/kohakuterrarium/
 1. **Agent runtime** (`core/`): Turn-based LLM controller, async non-blocking tool execution, unified TriggerEvent queue, sub-agent dispatch.
 2. **Multi-agent orchestration** (`terrarium/`): The `Terrarium` runtime engine. Channels between creatures, hot-plug with auto merge/split, optional privileged node carrying the `group_*` management tools.
 3. **Session persistence** (`session/`): `.kohakutr` files via KohakuVault (SQLite). Append-only event log + conversation snapshots + sub-agent capture + channel history + scratchpad. Resume via `kt resume`. Listing + search are backed by a sidecar SQLite cache at `<session_dir>/.kt-index.kvault` (`studio/persistence/session_index/`): one file open + FTS5 BM25 query for the whole list endpoint regardless of session count; incremental reconcile via `(mtime,size)` fingerprint diff so unchanged files skip the per-session SQLite open.
-4. **Memory** (`session/memory.py` + `session/embedding.py`): FTS5 + vector search over recorded events. Embedding via model2vec / sentence-transformer / API providers.
+4. **Memory** (`session/memory/index.py` + `session/memory/embedding.py`): FTS5 + vector search over recorded events. Embedding via model2vec / sentence-transformer / API providers.
 5. **HTTP API + Web dashboard** (`api/` + `src/kohakuterrarium-frontend/`): FastAPI REST + WebSocket. Vue 3 frontend served from `web_dist/`. Multi-tab chat, tool accordion, session resume.
 6. **Plugin system** (`modules/plugin/`): Pre/post hooks around tool execution, LLM calls, sub-agent runs, plus fire-and-forget callbacks. `PluginBlockError` in a `pre_tool_execute` becomes the tool result. All plugins run linearly by priority.
 7. **MCP integration** (`mcp/`): Stdio + HTTP transport. Tools indirected through four meta-tools instead of mirrored, which keeps the agent's prompt small.
@@ -797,7 +797,7 @@ Sessions store everything in a `.kohakutr` file (SQLite via KohakuVault):
 
 Resume rebuilds the agent from config and injects the saved conversation.
 
-Key files: `session/store/`, `session/output.py`, `session/resume.py`, `session/history.py`.
+Key files: `session/store/`, `session/output/output.py`, `session/resume/resume.py`, `session/history/replay.py`.
 
 ## CI Matrix
 

@@ -19,8 +19,8 @@ from kohakuterrarium.laboratory.adapters import terrarium_session as sess_mod
 from kohakuterrarium.laboratory.adapters.terrarium_session import (
     TerrariumSessionAdapter,
 )
-from kohakuterrarium.session.file_family import acquire_family
-from kohakuterrarium.session.resource_gate import (
+from kohakuterrarium.session.occupancy.family import acquire_family
+from kohakuterrarium.session.occupancy.gate import (
     GATE,
     REASON_LEGACY_ENROLLED,
     REASON_LEGACY_PENDING,

@@ -25,11 +25,11 @@ from kohakuterrarium.errors import (
     SessionError,
     SessionNotFoundError,
 )
-from kohakuterrarium.session.history_paging import (
+from kohakuterrarium.session.history.paging import (
     HistoryPagingError,
     require_bounded_history_page,
 )
-from kohakuterrarium.session.history_records import history_detail
+from kohakuterrarium.session.history.records import history_detail
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence.history import (

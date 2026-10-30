@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from kohakuterrarium.session.output import SessionOutput
+from kohakuterrarium.session.output.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.identity.session_summary import SummarySettings
 from kohakuterrarium.studio.sessions.summary import hook as hook_mod

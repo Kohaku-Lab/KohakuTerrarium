@@ -39,15 +39,15 @@ from kohakuterrarium.core.config.types import (
     OutputConfig,
 )
 from kohakuterrarium.modules.tool.base import ToolContext
-from kohakuterrarium.session.history import (
+from kohakuterrarium.session.history.replay import (
     normalize_resumable_events,
     replay_conversation,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.resource_gate import try_fast
+from kohakuterrarium.session.occupancy.gate import try_fast
 from kohakuterrarium.terrarium.drive.store_migration import _migrate_same_file_drives
 from kohakuterrarium.terrarium.drive.wire import pack_drive_record
-from kohakuterrarium.session.resume_target import resolve_resume_path
+from kohakuterrarium.session.resume.target import resolve_resume_path
 from kohakuterrarium.studio.persistence.viewer.exchanges import build_exchanges_payload
 import kohakuterrarium.terrarium.session_coord as _session_coord
 from kohakuterrarium.terrarium.drive.store import (

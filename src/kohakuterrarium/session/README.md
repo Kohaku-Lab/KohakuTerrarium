@@ -4,29 +4,30 @@ Session persistence backed by KohakuVault. Stores everything needed to
 resume an agent or terrarium in a single `.kohakutr` file (SQLite): conversation
 snapshots, append-only event logs, channel message history, sub-agent
 conversations, scratchpad state, token usage, and full-text search indexes.
-`SessionOutput` is an output module that captures all agent events without
-modifying the processing loop. `resume.py` rebuilds agents from saved
-state; engine-level terrarium resume lives in `terrarium/resume.py`.
+`SessionOutput` (in `output/`) is an output module that captures all agent
+events without modifying the processing loop. `resume/` rebuilds agents from
+saved state; engine-level terrarium resume lives in `terrarium/resume.py`.
 
-## Files
+## Layout
 
-| File                    | Description                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `__init__.py`           | Re-exports `SessionStore`                                                                                                                  |
-| `store/`                | `SessionStore`: persistent storage with 8 table groups (meta, state, events, channels, subagents, jobs, conversation, fts) via KohakuVault, assembled from parts; see `store/README.md` |
-| `token_views.py`, `version.py` | Read-side token-usage views; format versioning                                                                                      |
-| `reader.py`             | `SessionReader`: read a finished `.kohakutr` without spelunking                                                                            |
-| `output.py`             | `SessionOutput`: output module that records text chunks, tool activity, and processing state to the store                                  |
-| `resume.py`             | `resume_agent` / `detect_session_type`: rebuild from a `.kohakutr` file, inject saved conversation and scratchpad (engine-level terrarium resume lives in `terrarium/resume.py`) |
-| `resume_target.py`      | Resume-only successor resolution, format companions, identity checks, and already-running target lookup; historical reads retain the requested file |
-| `attach.py`, `agent_attach.py`, `attachment_service.py` | Attach/detach a store to a live agent (compat re-exports + service)                                       |
-| `session.py`            | Async wrapper around a running agent + `SessionStore`                                                                                      |
-| `artifacts.py`          | Session-local artifact helpers                                                                                                             |
-| `rollup.py`             | Per-turn rollup helpers                                                                                                                    |
-| `sync.py`               | Session event mirroring across the Laboratory layer                                                                                       |
-| `memory.py`, `embedding.py` | `SessionMemory` FTS5 + vector search; embedding providers                                                                              |
-| `history.py`            | Event-history normalization                                                                                                                |
-| `errors.py`, `migrations/` | Session-level exceptions; format migrations                                                                                             |
+| Path                | Description                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`       | Lazy facade: `SessionStore`                                                                                                  |
+| `store/`            | `SessionStore` (8 table groups via KohakuVault), assembled from parts, plus its internals: key index, branch index, table policy, format version, artifacts, rollups, snapshots, identity, token views; see `store/README.md` |
+| `vault/`            | `handles` (release native table handles), `io` (batched reads/copies), `read` (read-only table opens)                        |
+| `occupancy/`        | Process-local admission and occupancy: `gate` (resource gate), `registry` (open stores), `family` (sidecar identities), `mutation` (cancellation-safe mutation workers) |
+| `readonly/`         | `metadata` (strict metadata reads), `view` (selective queries), `reader` (`SessionReader`), `candidate` (admission-controlled reads) |
+| `history/`          | `replay` (normalize, branch-select, replay events), `paging`, `records`, `selection`, `raw`, `assistant`, `branch_paths`      |
+| `resume/`           | `resume` (`resume_agent` / `detect_session_type`), `async_flow`, `branch`, `build`, `open`, `target` (retired-file resolution) |
+| `memory/`           | `index` (`SessionMemory`: FTS5 + vector search), `embedding`, `async_search`, `blocks`, `resources`, `legacy`                  |
+| `output/`           | `output` (`SessionOutput`), `activity`, `assistant`, `widgets`, `text_buffer`                                                 |
+| `attach/`           | `agent` (methods bound onto `Agent`), `service` (host-scoped attach/detach), `compat` (legacy re-exports)                      |
+| `session.py`        | Async wrapper around a running agent + `SessionStore`                                                                        |
+| `sync.py`           | Session event mirroring across the Laboratory layer                                                                          |
+| `run_state.py`      | Crash-tolerant run records per process boot                                                                                  |
+| `job_reaper.py`     | Finds jobs a server restart killed                                                                                           |
+| `errors.py`         | Session-level exceptions                                                                                                     |
+| `migrations/`       | Format migrations                                                                                                            |
 
 ## Dependencies
 

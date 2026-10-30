@@ -1,7 +1,7 @@
 """Inspect and build saved-session memory indexes.
 
 Search operations live in :mod:`studio.sessions.memory_search`; this module
-creates indexes through :class:`kohakuterrarium.session.memory.SessionMemory`.
+creates indexes through :class:`kohakuterrarium.session.memory.index.SessionMemory`.
 Builds are suitable for a background thread and report synchronous progress for
 HTTP and WebSocket adapters to forward.
 """
@@ -9,8 +9,8 @@ HTTP and WebSocket adapters to forward.
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.session.embedding import create_embedder
-from kohakuterrarium.session.memory import SessionMemory
+from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 

@@ -5,7 +5,7 @@ import copy
 import pytest
 
 from kohakuterrarium.core.agent.history import message_history as history
-from kohakuterrarium.session import history as session_history
+from kohakuterrarium.session.history import replay as session_history
 
 
 def _event(event_id, kind, identity, turn, **extra):

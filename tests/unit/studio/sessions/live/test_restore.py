@@ -1,7 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.studio.sessions.live.restore`."""
 
 import kohakuterrarium.session.run_state as rs
-from kohakuterrarium.session.resume_target import SUCCESSOR_KEY
+from kohakuterrarium.session.resume.target import SUCCESSOR_KEY
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.live import live_sessions
 from kohakuterrarium.studio.sessions.live.restore import (

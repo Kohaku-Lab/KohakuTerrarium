@@ -76,10 +76,10 @@ compact manager 就会启动一个背景 task。
 ## 我们怎么实现它
 
 - `session/store.py`：以 KohakuVault 为后端的持久化储存。
-- `session/output.py`：负责写入事件的 output consumer。
-- `session/resume.py`：把数据重播进新建好的 Agent。
-- `session/memory.py`：FTS5 查询与向量搜寻。
-- `session/embedding.py`：model2vec / sentence-transformer / API
+- `session/output/output.py`：负责写入事件的 output consumer。
+- `session/resume/resume.py`：把数据重播进新建好的 Agent。
+- `session/memory/index.py`：FTS5 查询与向量搜寻。
+- `session/memory/embedding.py`：model2vec / sentence-transformer / API
   provider 的 embeddings。
 - `core/compact/manager.py`：使用 atomic-splice 技巧的 `CompactManager`。
   见 [impl-notes/non-blocking-compaction](../impl-notes/non-blocking-compaction.md)。

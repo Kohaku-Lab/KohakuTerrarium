@@ -20,7 +20,7 @@ from typing import Any
 
 from kohakuvault import KVault
 
-from kohakuterrarium.session.vault_io import read_prefix
+from kohakuterrarium.session.vault.io import read_prefix
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 

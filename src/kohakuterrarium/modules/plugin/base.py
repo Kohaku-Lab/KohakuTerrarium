@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from kohakuterrarium.core.scratchpad import Scratchpad
     from kohakuterrarium.modules.subagent.manager import SubAgentManager
     from kohakuterrarium.modules.tool.base import BaseTool
-    from kohakuterrarium.session.memory import SessionMemory
+    from kohakuterrarium.session.memory.index import SessionMemory
     from kohakuterrarium.session.store import SessionStore
 
 
