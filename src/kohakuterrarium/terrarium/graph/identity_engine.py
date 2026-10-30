@@ -9,8 +9,8 @@ from kohakuterrarium.terrarium.graph.identity import (
 )
 
 if TYPE_CHECKING:
-    from kohakuterrarium.terrarium.creature.host import Creature, CreatureRef
-    from kohakuterrarium.terrarium.engine.engine import Terrarium
+    from kohakuterrarium.terrarium.creature.host import Creature
+    from kohakuterrarium.terrarium.engine.engine import CreatureRef, Terrarium
 
 
 def bind_runtime_creature_id(creature: "Creature") -> None:

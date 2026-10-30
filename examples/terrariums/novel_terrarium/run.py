@@ -1,38 +1,36 @@
-"""Run the novel writer terrarium."""
+"""Run the novel writer terrarium on the engine and seed it with a story prompt."""
 
 import asyncio
-import os
 import sys
+from pathlib import Path
 
-# Resolve imports and environment relative to the repository checkout.
-project_root = os.path.join(os.path.dirname(__file__), "..", "..")
-sys.path.insert(0, os.path.join(project_root, "src"))
+from kohakuterrarium import Terrarium
+from kohakuterrarium.core.channel import ChannelMessage
 
-from dotenv import load_dotenv
-
-load_dotenv(os.path.join(project_root, ".env"))
-
-from kohakuterrarium.terrarium import TerrariumRuntime, load_terrarium_config
+DEFAULT_SEED = "A story about a lighthouse keeper"
+RUN_SECONDS = 600
 
 
 async def main() -> None:
-    """Load the novel recipe and run it from a dedicated output directory."""
-    # Isolate generated novel files from the recipe and source tree.
-    output_dir = os.path.join(project_root, "example_output", "novel_terrarium")
-    os.makedirs(output_dir, exist_ok=True)
-    os.chdir(output_dir)
+    """Load the recipe, send the seed on its channel, and let the creatures work."""
+    seed = " ".join(sys.argv[1:]) or DEFAULT_SEED
+    output_dir = Path.cwd() / "example_output" / "novel_terrarium"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    config_path = os.path.dirname(__file__)
-    config = load_terrarium_config(config_path)
-
-    print(f"=== Terrarium: {config.name} ===")
-    print(f"Creatures: {[c.name for c in config.creatures]}")
-    print(f"Channels: {[c.name for c in config.channels]}")
-    print(f"Output dir: {output_dir}")
-    print()
-
-    runtime = TerrariumRuntime(config)
-    await runtime.run()
+    engine = await Terrarium.from_recipe(
+        str(Path(__file__).parent), pwd=str(output_dir)
+    )
+    try:
+        graph_id = next(iter(engine.list_graphs())).graph_id
+        print(f"Creatures: {[c.name for c in engine.list_creatures()]}")
+        print(f"Output dir: {output_dir}")
+        await engine.channel(graph_id, "seed").send(
+            ChannelMessage(sender="user", content=seed)
+        )
+        print(f"Seeded: {seed!r}")
+        await asyncio.sleep(RUN_SECONDS)
+    finally:
+        await engine.shutdown()
 
 
 if __name__ == "__main__":
