@@ -19,6 +19,8 @@ const COMMANDS: &[&str] = &[
     "get_close_to_tray",
     "set_close_to_tray",
     "set_attention_count",
+    "get_summon_shortcut",
+    "set_summon_shortcut",
 ];
 
 fn main() {

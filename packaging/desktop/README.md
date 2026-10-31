@@ -53,7 +53,8 @@ With `KT_DESKTOP_SMOKE_OVERLAY` also set, the shell opens a native overlay windo
 (`overlay.rs`) and the report's `overlayWindow` says whether that window loaded the
 app page and called a native command from it. `KT_DESKTOP_SMOKE_TRAY` creates the
 tray icon and reports whether its attention badge can be shown and cleared
-(`tray`). The installer tests always set both.
+(`tray`). `KT_DESKTOP_SMOKE_SUMMON` registers and releases a system-wide shortcut
+(`summonShortcut`). The installer tests always set all three.
 
 With `KT_DESKTOP_SMOKE_UPDATE` also set, the self-check fetches the update feed and
 downloads the advertised build, which verifies its signature; the report's

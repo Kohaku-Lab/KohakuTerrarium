@@ -5,7 +5,9 @@ mod commands;
 mod files;
 mod navigation;
 mod overlay;
+mod settings;
 mod smoke;
+mod summon;
 mod tray;
 mod window;
 
@@ -15,7 +17,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 use crate::backend::Backend;
 use crate::commands::DeepLinks;
-use crate::tray::ShellSettings;
+use crate::settings::ShellSettings;
 
 fn deliver_deep_link(app: &tauri::AppHandle, url: String) {
     *app.state::<DeepLinks>().0.lock().unwrap() = Some(url.clone());
@@ -37,6 +39,17 @@ pub fn run() {
                 window::focus(app);
             }))
             .plugin(tauri_plugin_window_state::Builder::default().build());
+    }
+    if !headless || smoke::summon_probe_requested() {
+        builder = builder.plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        summon::summon(app);
+                    }
+                })
+                .build(),
+        );
     }
     let app = builder
         .plugin(tauri_plugin_deep_link::init())
@@ -72,6 +85,8 @@ pub fn run() {
             tray::get_close_to_tray,
             tray::set_close_to_tray,
             tray::set_attention_count,
+            summon::get_summon_shortcut,
+            summon::set_summon_shortcut,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -102,6 +117,7 @@ pub fn run() {
                 app.state::<ShellSettings>().load(directory);
             }
             if !headless {
+                summon::restore(app.handle());
                 tray::install(app)?;
             } else if smoke::tray_probe_requested() {
                 let _ = tray::install(app);

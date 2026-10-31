@@ -1,19 +1,15 @@
 //! Tray icon, close-to-tray and the attention badge.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, State};
 
 use crate::commands::{number_arg, Args};
+use crate::settings::ShellSettings;
 use crate::window;
 
-const SETTINGS_FILE: &str = "shell-settings.json";
 const TRAY_ID: &str = "main";
 const PENDING_COLOR: [u8; 3] = [0xdc, 0x26, 0x26];
 const DONE_COLOR: [u8; 3] = [0x25, 0x63, 0xeb];
@@ -21,56 +17,6 @@ const DONE_COLOR: [u8; 3] = [0x25, 0x63, 0xeb];
 /// Page event that asks the app to open whatever needs the user first.
 const FOCUS_ATTENTION_SCRIPT: &str =
     "window.dispatchEvent(new CustomEvent('kt:desktop-focus-attention'))";
-
-/// Shell preferences that outlive a run, stored next to the window state.
-#[derive(Default)]
-pub struct ShellSettings {
-    close_to_tray: AtomicBool,
-    quitting: AtomicBool,
-    path: Mutex<Option<PathBuf>>,
-}
-
-impl ShellSettings {
-    pub fn load(&self, directory: PathBuf) {
-        let path = directory.join(SETTINGS_FILE);
-        let enabled = std::fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|value| value["closeToTray"].as_bool())
-            .unwrap_or(false);
-        self.close_to_tray.store(enabled, Ordering::SeqCst);
-        *self.path.lock().unwrap() = Some(path);
-    }
-
-    pub fn close_to_tray(&self) -> bool {
-        self.close_to_tray.load(Ordering::SeqCst)
-    }
-
-    pub fn quitting(&self) -> bool {
-        self.quitting.load(Ordering::SeqCst)
-    }
-
-    pub fn begin_quit(&self) {
-        self.quitting.store(true, Ordering::SeqCst);
-    }
-
-    /// Whether closing the main window should hide it instead of quitting.
-    pub fn hides_on_close(&self) -> bool {
-        self.close_to_tray() && !self.quitting()
-    }
-
-    fn set_close_to_tray(&self, enabled: bool) -> bool {
-        self.close_to_tray.store(enabled, Ordering::SeqCst);
-        let guard = self.path.lock().unwrap();
-        let Some(path) = guard.as_ref() else {
-            return false;
-        };
-        let text = json!({ "closeToTray": enabled }).to_string();
-        path.parent()
-            .is_none_or(|parent| std::fs::create_dir_all(parent).is_ok())
-            && std::fs::write(path, text).is_ok()
-    }
-}
 
 /// Dot colour for the attention counts: waiting for input wins over finished work.
 pub fn badge_color(pending: u32, completed: u32) -> Option<[u8; 3]> {
@@ -248,40 +194,5 @@ mod tests {
         assert!(tooltip(0, 4).contains("4 finished"));
         let both = tooltip(1, 2);
         assert!(both.contains("1 waiting") && both.contains("2 finished"));
-    }
-
-    #[test]
-    fn close_to_tray_defaults_off_and_persists() {
-        let dir = std::env::temp_dir().join(format!("kt-tray-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let settings = ShellSettings::default();
-        settings.load(dir.clone());
-        assert!(!settings.close_to_tray() && !settings.hides_on_close());
-
-        assert!(settings.set_close_to_tray(true));
-        assert!(settings.hides_on_close());
-        let reloaded = ShellSettings::default();
-        reloaded.load(dir.clone());
-        assert!(reloaded.close_to_tray());
-
-        settings.begin_quit();
-        assert!(!settings.hides_on_close());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_corrupt_settings_file_means_the_default() {
-        let dir = std::env::temp_dir().join(format!("kt-tray-bad-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(SETTINGS_FILE), "{not json").unwrap();
-        let settings = ShellSettings::default();
-        settings.load(dir.clone());
-        assert!(!settings.close_to_tray());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn settings_cannot_be_saved_before_the_directory_is_known() {
-        assert!(!ShellSettings::default().set_close_to_tray(true));
     }
 }

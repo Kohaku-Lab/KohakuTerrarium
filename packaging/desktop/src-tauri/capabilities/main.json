@@ -23,6 +23,8 @@
     "allow-close-overlay-window",
     "allow-get-close-to-tray",
     "allow-set-close-to-tray",
-    "allow-set-attention-count"
+    "allow-set-attention-count",
+    "allow-get-summon-shortcut",
+    "allow-set-summon-shortcut"
   ]
 }

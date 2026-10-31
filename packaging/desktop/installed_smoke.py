@@ -67,6 +67,7 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
         "KT_DESKTOP_SMOKE_OUT": str(report),
         "KT_DESKTOP_SMOKE_OVERLAY": "1",
         "KT_DESKTOP_SMOKE_TRAY": "1",
+        "KT_DESKTOP_SMOKE_SUMMON": "1",
     }
     if os.environ.get("KT_DESKTOP_RESOURCES") is None and resources != exe.parent:
         env["KT_DESKTOP_RESOURCES"] = str(resources)
@@ -99,6 +100,9 @@ def check_report(data: dict) -> list[str]:
         problems.append("the shell did not create a tray icon")
     elif tray.get("badgeShown") is not True or tray.get("badgeCleared") is not True:
         problems.append(f"the tray icon badge could not be updated: {tray}")
+    summon = data.get("summonShortcut") or {}
+    if summon.get("registered") is not True or summon.get("released") is not True:
+        problems.append(f"a system-wide shortcut could not be registered: {summon}")
     if data.get("unauthenticatedStatus") != 401:
         problems.append(
             f"a request without the launch cookie got {data.get('unauthenticatedStatus')}, expected 401"

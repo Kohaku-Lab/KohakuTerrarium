@@ -16,7 +16,7 @@ from kohakuterrarium.utils.interpreter import PYTHON_ENV
 ROOT = Path(__file__).resolve().parents[3]
 TAURI = ROOT / "packaging" / "desktop" / "src-tauri"
 SRC = ROOT / "src" / "kohakuterrarium"
-COMMAND_MODULES = ("commands.rs", "overlay.rs", "tray.rs")
+COMMAND_MODULES = ("commands.rs", "overlay.rs", "tray.rs", "summon.rs")
 
 
 def _text(path: Path) -> str:
@@ -88,7 +88,8 @@ def test_every_command_is_declared_allowed_and_registered():
     manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
     registered = set(
         re.findall(
-            r"(?:commands|overlay|tray)::([a-z_]+),", _text(TAURI / "src" / "lib.rs")
+            r"(?:commands|overlay|tray|summon)::([a-z_]+),",
+            _text(TAURI / "src" / "lib.rs"),
         )
     )
     assert declared == manifest == registered

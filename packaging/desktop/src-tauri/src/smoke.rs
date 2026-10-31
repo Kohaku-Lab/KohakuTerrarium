@@ -133,6 +133,10 @@ pub fn overlay_probe_requested() -> bool {
     std::env::var_os("KT_DESKTOP_SMOKE_OVERLAY").is_some()
 }
 
+pub fn summon_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_SUMMON").is_some()
+}
+
 pub fn tray_probe_requested() -> bool {
     std::env::var_os("KT_DESKTOP_SMOKE_TRAY").is_some()
 }
@@ -151,6 +155,7 @@ pub struct Probes {
     pub update: Option<Value>,
     pub overlay: Option<Value>,
     pub tray: Option<Value>,
+    pub summon: Option<Value>,
 }
 
 pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Probes) -> Value {
@@ -166,11 +171,16 @@ pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Pr
         .tray
         .as_ref()
         .is_none_or(|probe| probe["badgeShown"] == true && probe["badgeCleared"] == true);
+    let summon_ok = probes
+        .summon
+        .as_ref()
+        .is_none_or(|probe| probe["registered"] == true && probe["released"] == true);
     json!({
-        "ok": page_loaded && ipc && update_ok && overlay_ok && tray_ok,
+        "ok": page_loaded && ipc && update_ok && overlay_ok && tray_ok && summon_ok,
         "shellUpdate": probes.update,
         "overlayWindow": probes.overlay,
         "tray": probes.tray,
+        "summonShortcut": probes.summon,
         "port": port,
         "pageLoaded": page_loaded,
         "ipcFromAppPage": ipc,
@@ -207,6 +217,7 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
         let mut probes = Probes {
             overlay: overlay_probe_requested().then(|| overlay_probe(&app)),
             tray: tray_probe_requested().then(|| tray_probe(&app)),
+            summon: summon_probe_requested().then(|| crate::summon::probe(&app)),
             update: None,
         };
         probes.update = update_probe_requested().map(|probe| {
@@ -310,6 +321,17 @@ mod tests {
         ] {
             let probes = Probes {
                 update: Some(probe),
+                ..Probes::default()
+            };
+            assert_eq!(ok(true, true, probes), expected);
+        }
+        for (probe, expected) in [
+            (json!({ "registered": false, "released": false }), false),
+            (json!({ "registered": true, "released": false }), false),
+            (json!({ "registered": true, "released": true }), true),
+        ] {
+            let probes = Probes {
+                summon: Some(probe),
                 ..Probes::default()
             };
             assert_eq!(ok(true, true, probes), expected);

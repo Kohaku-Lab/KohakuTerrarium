@@ -50,6 +50,7 @@ pub fn capabilities() -> Value {
         "closeToTray": true,
         "trayBadge": true,
         "fileDrop": true,
+        "summonShortcut": true,
     })
 }
 

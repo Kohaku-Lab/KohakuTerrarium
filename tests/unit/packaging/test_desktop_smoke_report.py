@@ -27,6 +27,7 @@ def _report(**overrides) -> dict:
         "healthStatus": 200,
         "overlayWindow": {"opened": True, "pageLoaded": True, "ipc": True},
         "tray": {"installed": True, "badgeShown": True, "badgeCleared": True},
+        "summonShortcut": {"registered": True, "released": True},
     }
     report.update(overrides)
     return report
@@ -54,6 +55,11 @@ def test_a_healthy_report_has_no_problems(smoke):
         (
             {"tray": {"installed": True, "badgeShown": True, "badgeCleared": False}},
             "badge could not be updated",
+        ),
+        ({"summonShortcut": None}, "could not be registered"),
+        (
+            {"summonShortcut": {"registered": True, "released": False}},
+            "could not be registered",
         ),
         ({"unauthenticatedStatus": 200}, "expected 401"),
         ({"ipcFromAppPage": False}, "could not call a native command"),
