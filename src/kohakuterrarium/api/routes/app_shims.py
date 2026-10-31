@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from kohakuterrarium.api.auth.dependencies import verify_admin_token
+from kohakuterrarium.api.routes._local import is_local, local_only
 from kohakuterrarium.cli.shims import (
     MODE_DEFER_PIPX,
     SHIM_SUBCOMMANDS,
@@ -27,8 +28,6 @@ from kohakuterrarium.utils.user_path import (
 
 router = APIRouter()
 
-_LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
-
 
 class InstallRequest(BaseModel):
     add_to_path: bool = True
@@ -38,20 +37,15 @@ class UninstallRequest(BaseModel):
     remove_from_path: bool = True
 
 
-def _is_local(request: Request) -> bool:
-    return (request.client.host if request.client else "") in _LOOPBACK
-
-
 def _local_only(request: Request) -> None:
-    if not _is_local(request):
-        raise HTTPException(403, "terminal commands can only be managed locally")
+    local_only(request, "terminal commands can only be managed locally")
 
 
 def _status(request: Request) -> dict[str, Any]:
     plan = build_plan()
     installed = [name for name in SHIM_SUBCOMMANDS if is_ours(shim_path(plan, name))]
     return {
-        "local": _is_local(request),
+        "local": is_local(request),
         "supported": plan.mode != MODE_DEFER_PIPX,
         "mode": plan.mode,
         "note": plan.note,
