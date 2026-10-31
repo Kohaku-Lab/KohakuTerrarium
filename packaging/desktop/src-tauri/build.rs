@@ -28,6 +28,7 @@ const COMMANDS: &[&str] = &[
     "popout_ack",
     "popout_return",
     "set_window_chrome",
+    "show_context_menu",
     "set_keep_awake",
     "add_recent_session",
     "get_explorer_verbs",

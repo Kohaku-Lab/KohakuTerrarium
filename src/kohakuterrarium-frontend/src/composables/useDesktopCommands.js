@@ -13,6 +13,7 @@ export const DESKTOP_COMMAND_IDS = {
   restart: "desktop:restart-backend",
   diagnostics: "desktop:export-diagnostics",
   logs: "desktop:open-logs",
+  print: "desktop:print",
 }
 
 /** Offer the desktop shell's own actions in the command palette; nothing outside the Tauri shell. */
@@ -29,6 +30,12 @@ export function useDesktopCommands() {
       () => exportDiagnostics(),
     ],
     [DESKTOP_COMMAND_IDS.logs, "Desktop: open backend log", "i-carbon-catalog", openLogs],
+    [
+      DESKTOP_COMMAND_IDS.print,
+      "Desktop: print this conversation",
+      "i-carbon-printer",
+      () => window.print(),
+    ],
   ]
   for (const [id, label, icon, run] of entries) {
     palette.register({ id, label, icon, keywords: "desktop shell", handler: () => void run() })

@@ -48,5 +48,8 @@ Each section names the milestone that added it and the surface to look at.
 ## Window frame (M10)
 - Windows 11: the title bar and window border take the colour at the top of the page (warm beige in light mode, dark brown in dark mode) and change when the theme is switched; the title text stays readable. On Windows 10 the frame stays the system one.
 
+- Right-click a tab: the operating system's own menu opens (refresh, move to new window, the close commands, then extension actions); Close left/right/others are greyed when nothing applies; Escape closes it without doing anything. In a browser the in-page menu still appears.
+- Ctrl+P (or "Desktop: print this conversation" in the palette): the print preview shows the conversation without the tab strip, rail, status bar and message box, and long chats continue onto further pages.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

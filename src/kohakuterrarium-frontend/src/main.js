@@ -36,6 +36,7 @@ import "element-plus/es/components/tab-pane/style/css"
 import "element-plus/es/components/tabs/style/css"
 import "uno.css"
 import "./style.css"
+import "./print.css"
 import "./components/session-v2/surfaces.css"
 
 const router = createRouter({

@@ -14,6 +14,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import TabContextMenu from "@/components/shell/TabContextMenu.vue"
+import { tabMenuItems } from "@/components/shell/tabMenu"
+import { runActionMenuId } from "@/ext/actions"
+import { nativeMenuSupported, showNativeMenu } from "@/utils/nativeMenu"
 import { dragOutPosition, endedOutsideWindow, moveTabToWindow } from "@/composables/useDesktopPopout"
 import { useSplitDrag } from "@/composables/useSplitDrag"
 import { extensionTabMeta } from "@/ext/registry"
@@ -78,7 +81,39 @@ function onDragEnd(ev) {
   void moveTabToWindow(props.tab, dragOutPosition(ev))
 }
 
-function onContextMenu(ev) {
+function runMenuChoice(id) {
+  const context = { id: props.tab.id, kind: props.tab.kind || "", label: props.tab.label || "" }
+  switch (id) {
+    case "refresh":
+      return onRefresh()
+    case "move":
+      return void moveTabToWindow(props.tab)
+    case "close":
+      return emit("close")
+    case "close-left":
+      return closeLeft()
+    case "close-right":
+      return closeRight()
+    case "close-others":
+      return closeOthers()
+    case "close-all":
+      return closeAll()
+    default:
+      return void runActionMenuId(id, context)
+  }
+}
+
+async function onContextMenu(ev) {
+  if (nativeMenuSupported()) {
+    const items = tabMenuItems({
+      tab: props.tab,
+      index: tabIndex.value,
+      total: totalTabs.value,
+      canPopOut: props.tab.kind === "attach" && popoutWindowsSupported(),
+      t,
+    })
+    if (await showNativeMenu(items, runMenuChoice)) return
+  }
   menuPos.value = { x: ev.clientX, y: ev.clientY }
   menuOpen.value = true
 }

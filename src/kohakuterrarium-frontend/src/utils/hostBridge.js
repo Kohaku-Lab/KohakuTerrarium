@@ -224,6 +224,11 @@ export function openLogs() {
   return callBoolean("open_logs")
 }
 
+/** Show a native context menu at the pointer. Resolves ``false`` where the shell cannot or there are no rows. */
+export function showContextMenu(items) {
+  return callBoolean("show_context_menu", { items })
+}
+
 /** Colour the native caption and border to `[r, g, b]`. Resolves ``false`` where the system cannot. */
 export function setWindowChrome(background) {
   return callBoolean("set_window_chrome", { background })

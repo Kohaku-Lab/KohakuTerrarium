@@ -1,0 +1,40 @@
+/* Printing the page prints the conversation: chrome is dropped and scroll containers grow. */
+@media print {
+  nav,
+  aside,
+  .status-bar,
+  .kt-overlay-layer,
+  [data-print="hide"],
+  textarea,
+  button {
+    display: none !important;
+  }
+
+  html,
+  body,
+  #app,
+  #app > div {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  [class*="overflow-y-auto"],
+  [class*="overflow-auto"],
+  [class*="overflow-hidden"] {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  pre,
+  code {
+    white-space: pre-wrap !important;
+    word-break: break-word;
+  }
+
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+}

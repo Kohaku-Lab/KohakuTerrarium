@@ -60,6 +60,7 @@ pub fn capabilities() -> Value {
         "runtimeRepair": true,
         "diagnostics": true,
         "keepAwake": true,
+        "contextMenus": true,
         "windowChrome": cfg!(windows),
         "recentSessions": cfg!(windows),
         "explorerVerbs": cfg!(windows),

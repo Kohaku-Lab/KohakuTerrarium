@@ -4,6 +4,7 @@ mod attention;
 mod backend;
 mod chrome;
 mod commands;
+mod context_menu;
 mod dialogs;
 mod files;
 mod menu;
@@ -110,6 +111,7 @@ pub fn run() {
             popout::popout_ack,
             popout::popout_return,
             chrome::set_window_chrome,
+            context_menu::show_context_menu,
             os::keep_awake::set_keep_awake,
             os::recent::add_recent_session,
             os::explorer::get_explorer_verbs,
@@ -125,7 +127,12 @@ pub fn run() {
             settings::get_shell_settings,
             settings::patch_shell_settings,
         ])
-        .on_menu_event(|app, event| menu::on_event(app, &event))
+        .on_menu_event(
+            |app, event| match context_menu::choice_of(event.id().as_ref()) {
+                Some(id) => context_menu::deliver(app, id),
+                None => menu::on_event(app, &event),
+            },
+        )
         .on_window_event(|window, event| {
             if popout::is_popout_label(window.label()) {
                 if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
