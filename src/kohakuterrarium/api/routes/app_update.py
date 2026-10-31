@@ -34,6 +34,7 @@ from kohakuterrarium.launcher.update_runner import (
     rollback,
     run_update,
 )
+from kohakuterrarium.launcher.versions import is_newer
 
 router = APIRouter()
 # The WebSocket uses a separate router to preserve its root-level canonical
@@ -141,8 +142,22 @@ async def post_feeds_probe(request: Request) -> dict[str, Any]:
         "platform": plat,
         "py_abi": abi,
         "latest_version": latest,
+        "update_available": _update_available(cfg, latest),
         "releases": releases,
     }
+
+
+def _update_available(cfg, latest: str | None) -> bool:
+    """Whether an update would install: the target differs, and is newer unless pinned."""
+    target = cfg.pinned_version or latest
+    if not target:
+        return False
+    active = read_active_pointer()
+    if active is None:
+        return True
+    if target == active.version:
+        return False
+    return bool(cfg.pinned_version) or is_newer(target, active.version)
 
 
 @router.post("/update")

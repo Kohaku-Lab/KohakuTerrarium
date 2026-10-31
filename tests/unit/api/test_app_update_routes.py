@@ -3,6 +3,7 @@
 import asyncio
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -69,6 +70,35 @@ class TestSettingsRoundTrip:
         body = resp.json()
         assert body["channel"] == "stable"
         assert body["update"]["mode"] == "notify-on-launch"
+
+
+class TestUpdateAvailable:
+    @pytest.fixture
+    def active(self, monkeypatch):
+        def _set(version):
+            pointer = None if version is None else SimpleNamespace(version=version)
+            monkeypatch.setattr(_r, "read_active_pointer", lambda: pointer)
+
+        return _set
+
+    @pytest.mark.parametrize(
+        ("active_version", "pinned", "latest", "expected"),
+        [
+            ("2.2.1.dev1", None, "2.2.0", False),
+            ("2.2.1.dev1", None, "2.2.1.dev1", False),
+            ("2.2.0", None, "2.2.1.dev1", True),
+            ("2.2.1.dev1", "2.2.0", "2.3.0", True),
+            ("2.2.0", "2.2.0", "2.3.0", False),
+            (None, None, "2.2.0", True),
+            ("2.2.0", None, None, False),
+        ],
+    )
+    def test_only_a_newer_or_pinned_target_counts(
+        self, active, active_version, pinned, latest, expected
+    ):
+        active(active_version)
+        cfg = SimpleNamespace(pinned_version=pinned)
+        assert _r._update_available(cfg, latest) is expected
 
 
 class TestRuntime:
