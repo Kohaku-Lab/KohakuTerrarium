@@ -10,10 +10,13 @@ export const MAX_UI_ZOOM = 2
 export const DEFAULT_DESKTOP_ZOOM = 1
 export const DEFAULT_MOBILE_ZOOM = 1
 export const DEFAULT_READING_SIZE = "default"
-export const READING_SIZES = [DEFAULT_READING_SIZE, "large", "larger"]
+export const READING_SIZES = ["smaller", DEFAULT_READING_SIZE, "larger"]
+// Stored values of an earlier scale, whose "large" is today's default.
+const LEGACY_READING_SIZES = { large: DEFAULT_READING_SIZE }
 
 function normalizeReadingSize(value) {
-  return READING_SIZES.includes(value) ? value : DEFAULT_READING_SIZE
+  const size = LEGACY_READING_SIZES[value] ?? value
+  return READING_SIZES.includes(size) ? size : DEFAULT_READING_SIZE
 }
 
 function clampZoom(value, fallback) {

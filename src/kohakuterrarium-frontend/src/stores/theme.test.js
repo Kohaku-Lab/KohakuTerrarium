@@ -112,16 +112,26 @@ describe("theme reading size", () => {
 
     const theme = useThemeStore()
     theme.init()
-    theme.setReadingSize("large")
+    theme.setReadingSize("smaller")
     resolvePrefs({ values: { [READING_SIZE_KEY]: "larger" } })
     await vi.runAllTimersAsync()
 
-    expect(theme.readingSize).toBe("large")
-    expect(document.documentElement.dataset.readingSize).toBe("large")
-    expect(localStorage.getItem(READING_SIZE_KEY)).toBe("large")
+    expect(theme.readingSize).toBe("smaller")
+    expect(document.documentElement.dataset.readingSize).toBe("smaller")
+    expect(localStorage.getItem(READING_SIZE_KEY)).toBe("smaller")
     expect(settingsAPI.updateUIPrefs).toHaveBeenCalledWith(
-      expect.objectContaining({ [READING_SIZE_KEY]: "large" }),
+      expect.objectContaining({ [READING_SIZE_KEY]: "smaller" }),
     )
+  })
+
+  it("reads the earlier scale's \"large\" as today's default size", () => {
+    localStorage.setItem(READING_SIZE_KEY, "large")
+
+    const theme = useThemeStore()
+    theme.init()
+
+    expect(theme.readingSize).toBe("default")
+    expect(document.documentElement.dataset.readingSize).toBe("default")
   })
 
   it("normalizes an unsupported backend reading size that arrives late", async () => {

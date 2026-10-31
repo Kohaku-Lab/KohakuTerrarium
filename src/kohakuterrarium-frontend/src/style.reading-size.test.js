@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
-import settingsPageSource from "@/components/settings/SettingsPage.vue?raw"
+import settingsRowSource from "@/components/settings/ui/SettingsRow.vue?raw"
 
 const styleSource = readFileSync("src/style.css", "utf8")
 
@@ -15,12 +15,19 @@ describe("reading-size CSS contracts", () => {
     expect(coarsePointerRule).not.toContain("font-size: 16px !important;")
   })
 
-  it("scales the reading-size hint with the root reading size", () => {
-    const readingSizeBlock = settingsPageSource.match(
-      /<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">[\s\S]*?settings\.prefs\.readingSizeHint[\s\S]*?<\/div>/,
-    )?.[0]
+  it("scales a setting's title and hint with the root reading size", () => {
+    expect(settingsRowSource).toContain("kt-text-body")
+    expect(settingsRowSource).toContain("kt-text-caption")
+    expect(settingsRowSource).not.toMatch(/text-\[\d+px\]/)
+  })
 
-    expect(readingSizeBlock).toContain('class="kt-text-caption text-warm-400 mt-1"')
-    expect(readingSizeBlock).not.toContain('class="text-[11px] text-warm-400 mt-1"')
+  it("makes 16px the default root size, with 14px as the smaller scale", () => {
+    expect(styleSource).toContain("font-size: var(--kt-reading-root-size, 16px);")
+    expect(styleSource).toMatch(
+      /html\[data-reading-size="smaller"\] \{\s*--kt-reading-root-size: 14px;/,
+    )
+    expect(styleSource).toMatch(
+      /html:not\(\[data-reading-size="smaller"\]\):not\(\[data-reading-size="larger"\]\) \{\s*--kt-reading-root-size: 16px;/,
+    )
   })
 })

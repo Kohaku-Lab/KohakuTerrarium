@@ -84,7 +84,12 @@
   }
 }
 
-html[data-reading-size="large"] {
+/* "smaller" is the compact 14px scale with Element Plus's own pixel sizes; the default is 16px. */
+html[data-reading-size="smaller"] {
+  --kt-reading-root-size: 14px;
+}
+
+html:not([data-reading-size="smaller"]):not([data-reading-size="larger"]) {
   --kt-reading-root-size: 16px;
   --el-font-size-extra-small: 0.857rem;
   --el-font-size-small: 0.929rem;
@@ -138,7 +143,7 @@ button {
 
 html {
   font-family: var(--font-sans);
-  font-size: var(--kt-reading-root-size, 14px);
+  font-size: var(--kt-reading-root-size, 16px);
   line-height: 1.6;
   color: var(--color-text);
   background: var(--color-bg);
