@@ -40,6 +40,7 @@ def prepare_saved_snapshot(store, namespace: str, events: list[dict]) -> dict | 
         parent_paths=parent_paths,
         replay=replay_with_settled_tools,
         needs_replay=snapshot_needs_settled_tool_replay,
+        keep_delivered_pending=True,
     )
 
 
