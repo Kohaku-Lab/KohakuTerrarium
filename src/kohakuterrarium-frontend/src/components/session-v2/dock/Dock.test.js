@@ -39,7 +39,13 @@ beforeEach(() => {
 
 describe("Dock extension panels", () => {
   it("lists a docked panel, opens it as the widget and clears it with the extensions", async () => {
-    registerDockPanel({ key: "ext:alpha/board", label: "Board", icon: "i-x", order: 1, component: { template: "<div />" } })
+    registerDockPanel({
+      key: "ext:alpha/board",
+      label: "Board",
+      icon: "i-x",
+      order: 1,
+      component: { template: "<div />" },
+    })
     const { wrapper, ctx } = mountDock()
     const button = wrapper.find("[data-test='v2-dock-ext:alpha/board']")
     expect(button.exists()).toBe(true)

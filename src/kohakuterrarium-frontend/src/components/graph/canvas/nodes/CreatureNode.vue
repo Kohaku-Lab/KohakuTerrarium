@@ -14,6 +14,7 @@
         <span class="text-[13px] font-semibold text-warm-800 dark:text-warm-100 truncate">{{ c.name }}</span>
         <span v-if="c.privileged" class="i-carbon-security text-xs text-iolite shrink-0" :title="t('graph.node.privileged')" />
         <span class="flex-1" />
+        <GraphSlots variant="badge" kind="creature" :item="c" />
         <SiteChip v-if="data.showHost" :node-id="c.hostId" />
         <button class="nodrag kt-graph-more" :title="t('graph.menu.more')" @click.stop="openMenu($event, id)"><span class="i-carbon-overflow-menu-horizontal" /></button>
       </div>
@@ -36,6 +37,7 @@ import { Handle, Position, useVueFlow } from "@vue-flow/core"
 
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { lodForZoom, statusStyle } from "@/components/graph/graphTheme"
+import GraphSlots from "@/ext/GraphSlots.vue"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({

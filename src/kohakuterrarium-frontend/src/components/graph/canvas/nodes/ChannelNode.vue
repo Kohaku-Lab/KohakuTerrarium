@@ -5,6 +5,7 @@
     <span class="i-carbon-flow-stream shrink-0" :class="lod === 'far' ? 'text-lg' : 'text-sm'" />
     <span class="font-mono font-semibold truncate" :class="lod === 'far' ? 'text-xl' : 'text-xs'">{{ ch.name }}</span>
     <span class="flex-1" />
+    <GraphSlots v-if="lod !== 'far'" variant="badge" kind="channel" :item="ch" />
     <span v-if="lod !== 'far' && ch.messageCount" class="text-[10px] font-mono opacity-80 shrink-0">{{ ch.messageCount }}</span>
     <button v-if="lod !== 'far'" class="nodrag kt-graph-more kt-graph-more--on-fill" :title="t('graph.menu.more')" @click.stop="openMenu($event, id)"><span class="i-carbon-overflow-menu-horizontal" /></button>
   </div>
@@ -15,6 +16,7 @@ import { computed, inject, onBeforeUnmount, ref, watch } from "vue"
 import { Handle, Position, useVueFlow } from "@vue-flow/core"
 
 import { lodForZoom } from "@/components/graph/graphTheme"
+import GraphSlots from "@/ext/GraphSlots.vue"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({

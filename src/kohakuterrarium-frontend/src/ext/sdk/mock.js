@@ -82,6 +82,9 @@ export function createMockHost(options = {}) {
     action: new Map(),
     "message-renderer": new Map(),
     "message-decorator": new Map(),
+    "file-view": new Map(),
+    "graph-badge": new Map(),
+    "graph-panel": new Map(),
   }
   const overlayVisible = reactive({})
   const storageData = new Map()
@@ -125,6 +128,9 @@ export function createMockHost(options = {}) {
     registerAction: provide("action"),
     registerMessageRenderer: provide("message-renderer"),
     registerMessageDecorator: provide("message-decorator"),
+    registerFileView: provide("file-view"),
+    registerGraphBadge: provide("graph-badge"),
+    registerGraphPanel: provide("graph-panel"),
     storage: {
       get: (key, fallback = null) => (storageData.has(key) ? storageData.get(key) : fallback),
       set: (key, value) => storageData.set(key, value),
@@ -200,6 +206,8 @@ export function createMockHost(options = {}) {
     widget: options.widget || null,
     block: options.block || null,
     message: options.message || null,
+    file: options.file || null,
+    node: options.node || null,
     said: [],
     overlayId: options.overlayId || "overlay",
     overlayVisible,
@@ -237,6 +245,21 @@ export function useWidget() {
   const widget = current().widget
   if (!widget) throw new Error("useWidget() used outside a widget renderer")
   return widget
+}
+
+/** In tests, the file given as ``createMockHost({ file: { path, content } })``, as a read-only ref. */
+export function useFileView() {
+  const host = current()
+  if (!host.file) throw new Error("useFileView() used outside a file view")
+  const path = host.file.path || "file.txt"
+  return ref({ name: path.split(/[\\/]/).pop(), content: "", language: "", ...host.file, path })
+}
+
+/** In tests, the node given as ``createMockHost({ node: { kind, id, name } })``, as a read-only ref. */
+export function useGraphNode() {
+  const host = current()
+  if (!host.node) throw new Error("useGraphNode() used outside a graph badge or panel")
+  return ref({ kind: "creature", id: "", name: "", sessionId: null, ...host.node })
 }
 
 /** In tests, the message given as ``createMockHost({ message: { id, role, text } })``, as a read-only ref. */

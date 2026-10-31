@@ -10,6 +10,7 @@
         <span class="i-carbon-bot text-xs shrink-0" />{{ g.creatureIds.length }}
         <span v-if="g.busy" class="inline-flex items-center gap-0.5 text-aquamarine"><span class="w-1.5 h-1.5 rounded-full bg-aquamarine" />{{ g.busy }}</span>
       </span>
+      <GraphSlots variant="badge" kind="group" :item="g" />
       <button class="nodrag text-warm-500 hover:text-iolite p-0.5 rounded shrink-0" :title="t('graph.group.collapse')" @click.stop="data.onToggleCollapse(g.id)">
         <span class="i-carbon-collapse-categories text-sm" />
       </button>
@@ -24,6 +25,7 @@ import { Handle, Position } from "@vue-flow/core"
 
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { groupIcon, groupTitle } from "@/components/graph/graphTheme"
+import GraphSlots from "@/ext/GraphSlots.vue"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({

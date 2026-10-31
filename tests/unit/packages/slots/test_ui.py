@@ -260,6 +260,112 @@ class TestParse:
         slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
         assert message in slot.error
 
+    def test_file_view_patterns(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {
+                        "kind": "file-view",
+                        "id": "csv",
+                        "patterns": ["*.csv", "*.tar.gz"],
+                    },
+                    {
+                        "kind": "file-view",
+                        "id": "mk",
+                        "patterns": ["Makefile"],
+                        "defaultView": True,
+                    },
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c["fileView"] for c in slot.to_dict()["contributes"]}
+        assert by_id["csv"] == {"patterns": ["*.csv", "*.tar.gz"], "defaultView": False}
+        assert by_id["mk"] == {"patterns": ["Makefile"], "defaultView": True}
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "file-view", "id": "v"}, "patterns must be"),
+            ({"kind": "file-view", "id": "v", "patterns": []}, "patterns must be"),
+            ({"kind": "file-view", "id": "v", "patterns": "*.csv"}, "patterns must be"),
+            ({"kind": "file-view", "id": "v", "patterns": ["*"]}, "patterns must be"),
+            (
+                {"kind": "file-view", "id": "v", "patterns": ["a/b.csv"]},
+                "patterns must",
+            ),
+            (
+                {"kind": "file-view", "id": "v", "patterns": ["**/*.csv"]},
+                "patterns must",
+            ),
+            ({"kind": "file-view", "id": "v", "patterns": ["*.c", "*.c"]}, "distinct"),
+            (
+                {"kind": "file-view", "id": "v", "patterns": ["*.c"], "defaultView": 1},
+                "defaultView must",
+            ),
+            (
+                {
+                    "kind": "file-view",
+                    "id": "v",
+                    "patterns": ["*.c"],
+                    "owner": "plugin:x",
+                },
+                "owned by",
+            ),
+            (
+                {"kind": "tab", "id": "t", "patterns": ["*.c"]},
+                "only valid on a file-view",
+            ),
+            (
+                {"kind": "tab", "id": "t", "defaultView": True},
+                "only valid on a file-view",
+            ),
+        ],
+    )
+    def test_bad_file_view_invalidates_the_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
+    def test_graph_badge_and_panel_node_kinds(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "graph-badge", "id": "all"},
+                    {"kind": "graph-badge", "id": "c", "nodes": ["creature"]},
+                    {"kind": "graph-panel", "id": "p", "nodes": ["channel", "group"]},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c["graph"] for c in slot.to_dict()["contributes"]}
+        assert by_id["all"] == {"nodes": ["creature", "channel", "group"]}
+        assert by_id["c"] == {"nodes": ["creature"]}
+        assert by_id["p"] == {"nodes": ["channel", "group"]}
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "graph-badge", "id": "g", "nodes": ["edge"]}, "nodes must"),
+            ({"kind": "graph-badge", "id": "g", "nodes": []}, "nodes must"),
+            ({"kind": "graph-panel", "id": "g", "owner": "plugin:x"}, "owned by"),
+            (
+                {"kind": "tab", "id": "t", "nodes": ["creature"]},
+                "only valid on a graph",
+            ),
+        ],
+    )
+    def test_bad_graph_contribution_invalidates_the_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
     def test_panel_dock_flag(self, tmp_path):
         slot = _slot(
             tmp_path,

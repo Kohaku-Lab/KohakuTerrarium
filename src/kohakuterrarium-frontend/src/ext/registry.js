@@ -13,6 +13,13 @@ import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { clearActions, registerAction } from "@/ext/actions"
 import { clearDecorators, registerDecorator } from "@/ext/decorators"
 import { clearDockPanels, registerDockPanel } from "@/ext/dockPanels"
+import { clearFileViews, registerFileView } from "@/ext/fileViews"
+import {
+  GRAPH_NODE_KINDS,
+  clearGraphSlots,
+  registerGraphBadge,
+  registerGraphPanel,
+} from "@/ext/graphSlots"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
@@ -60,6 +67,22 @@ export const MOUNT_OWNER_KINDS = {
   action: "package",
   "message-renderer": "any",
   "message-decorator": "package",
+  "file-view": "package",
+  "graph-badge": "package",
+  "graph-panel": "package",
+}
+
+function fileViewOptions(source) {
+  const out = {}
+  if (Array.isArray(source?.patterns)) out.patterns = [...source.patterns]
+  if (source?.defaultView !== undefined) out.defaultView = source.defaultView
+  return out
+}
+
+function graphOptions(source) {
+  const nodes =
+    Array.isArray(source?.nodes) && source.nodes.length ? source.nodes : GRAPH_NODE_KINDS
+  return { nodes: [...nodes] }
 }
 
 function decoratorOptions(source) {
@@ -219,6 +242,32 @@ export function registerContribution(pkg, contribution) {
         options: statusOptions(contribution.status),
       })
       break
+    case "file-view":
+      registerFileView({
+        key,
+        pkg,
+        id: contribution.id,
+        label: contribution.label,
+        icon: contribution.icon,
+        order: contribution.order,
+        component: host,
+        options: fileViewOptions(contribution.fileView),
+      })
+      break
+    case "graph-badge":
+    case "graph-panel": {
+      const register = contribution.kind === "graph-badge" ? registerGraphBadge : registerGraphPanel
+      register({
+        key,
+        pkg,
+        id: contribution.id,
+        label: contribution.label,
+        order: contribution.order,
+        component: host,
+        options: graphOptions(contribution.graph),
+      })
+      break
+    }
     case "message-decorator":
       registerDecorator({
         key,
@@ -274,6 +323,8 @@ export function unregisterAllContributions() {
   clearMessageRenderers()
   clearDecorators()
   clearDockPanels()
+  clearFileViews()
+  clearGraphSlots()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -293,6 +344,9 @@ export function provideContributionComponent(pkg, kind, id, component, options =
   if (!component) throw new Error(`${pkg}: register${kind} ${id} needs a component`)
   if ((kind === "command" || kind === "action") && typeof component !== "function") {
     throw new Error(`${pkg}: ${kind} ${id} needs a handler function`)
+  }
+  if (kind === "file-view" && !findContribution(pkg, id) && !options.patterns?.length) {
+    throw new Error(`${pkg}: an undeclared file-view ${id} needs options.patterns`)
   }
   if (kind === "action" && !findContribution(pkg, id) && !options.targets?.length) {
     throw new Error(`${pkg}: an undeclared action ${id} needs options.targets`)
@@ -335,6 +389,8 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       ...(kind === "action" ? { action: actionOptions(options) } : {}),
       ...(kind === "message-decorator" ? { decorator: decoratorOptions(options) } : {}),
       ...(kind === "panel" ? { dock: options.dock === true } : {}),
+      ...(kind === "file-view" ? { fileView: fileViewOptions(options) } : {}),
+      ...(kind === "graph-badge" || kind === "graph-panel" ? { graph: graphOptions(options) } : {}),
       ...(kind === "command"
         ? { shortcut: options.shortcut || "", keywords: options.keywords || "" }
         : {}),

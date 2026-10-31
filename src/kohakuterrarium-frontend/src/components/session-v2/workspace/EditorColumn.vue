@@ -13,6 +13,7 @@
       </button>
       <span class="flex-1" />
       <template v-if="!activeDiff && editor.activeFile">
+        <button v-for="view in availableViews" :key="view.key" class="h-6 px-2 rounded text-[11px] flex items-center gap-1 shrink-0" :class="activeView?.key === view.key ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" :title="view.label" :data-test="`ext-file-view-${view.id}`" @click="toggleView(view)"><span :class="view.icon" />{{ view.label }}</button>
         <button v-if="isMarkdown" class="h-6 px-2 rounded text-[11px] flex items-center gap-1 shrink-0" :class="richMarkdown ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-800 dark:hover:text-warm-200'" @click="toggleRich"><span :class="richMarkdown ? 'i-carbon-document' : 'i-carbon-code'" />{{ richMarkdown ? t("ws.rich") : t("ws.code") }}</button>
         <button class="h-6 px-2 rounded text-[11px] text-warm-500 hover:text-warm-800 dark:hover:text-warm-200 disabled:opacity-40 shrink-0" :disabled="!editor.activeFile.dirty" @click="editor.revertFile(editor.activeFilePath)">{{ t("ws.revert") }}</button>
         <button class="h-6 px-2.5 rounded text-[11px] bg-iolite text-white disabled:opacity-40 shrink-0" :disabled="!editor.activeFile.dirty" @click="editor.saveFile(editor.activeFilePath)">{{ t("ws.save") }}</button>
@@ -32,7 +33,8 @@
     <div class="flex-1 min-h-0">
       <DiffView v-if="currentDiff" :original="currentDiff.old" :modified="currentDiff.new" :language="languageOf(currentDiff.path)" />
       <template v-else-if="editor.activeFile">
-        <VditorEditor v-if="isMarkdown && richMarkdown" :buffer="editor.activeFile" :file-path="editor.activeFilePath" :content="editor.activeFile.content" @edit="onEdit" @change="onChange" @save="onSave" />
+        <FileViewHost v-if="activeView" :key="activeView.key" :view="activeView" :path="editor.activeFilePath" :content="editor.activeFile.content" :language="editor.activeFile.language || languageOf(editor.activeFilePath)" />
+        <VditorEditor v-else-if="isMarkdown && richMarkdown" :buffer="editor.activeFile" :file-path="editor.activeFilePath" :content="editor.activeFile.content" @edit="onEdit" @change="onChange" @save="onSave" />
         <MonacoEditor v-else :buffer="editor.activeFile" :file-path="editor.activeFilePath" :content="editor.activeFile.content" :language="editor.activeFile.language || languageOf(editor.activeFilePath)" @edit="onEdit" @change="onChange" @save="onSave" />
       </template>
       <div v-else class="h-full flex flex-col items-center justify-center gap-2 text-warm-400 text-sm">
@@ -52,6 +54,8 @@ import VditorEditor from "@/components/editor/VditorEditor.vue"
 import { baseName, languageOf } from "@/components/session-v2/model/workspace/languageOf"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import DiffView from "@/components/session-v2/workspace/DiffView.vue"
+import FileViewHost from "@/ext/FileViewHost.vue"
+import { defaultFileView, fileViewsFor } from "@/ext/fileViews"
 import { useEditorStore } from "@/stores/editor"
 
 /**
@@ -109,6 +113,22 @@ function showDiff({ path, old, new: next }) {
 function closeDiff(id) {
   diffs.value = diffs.value.filter((d) => d.id !== id)
   if (activeDiff.value === id) activeDiff.value = diffs.value.at(-1)?.id || null
+}
+
+const viewChoice = ref({})
+const availableViews = computed(() => fileViewsFor(editor.activeFilePath))
+const activeView = computed(() => {
+  const path = editor.activeFilePath
+  const chosen = viewChoice.value[path]
+  if (chosen === "code") return null
+  if (chosen) return availableViews.value.find((view) => view.key === chosen) || null
+  return defaultFileView(path)
+})
+
+// Picking the shown view again returns to the code editor.
+function toggleView(view) {
+  const path = editor.activeFilePath
+  viewChoice.value = { ...viewChoice.value, [path]: activeView.value?.key === view.key ? "code" : view.key }
 }
 
 function toggleRich() {

@@ -32,6 +32,9 @@ This guide covers:
 | `status-item` | a segment in the status bar at the bottom of a session | `package` | host-wide |
 | `message-renderer` | replaces a closed code fence named after its `renderer` id inside an assistant reply | any | wherever replies are drawn |
 | `message-decorator` | extra display above or below a message, outside its text | `package` | host-wide |
+| `file-view` | a read-only view of a workspace file, chosen by file name pattern, beside the code editor | `package` | host-wide |
+| `graph-badge` | a small component on a graph node (creature, channel or group) | `package` | host-wide |
+| `graph-panel` | a section in the graph dock's details for the selected node | `package` | host-wide |
 | `action` | a button or menu entry on a message, the composer, a tab, a rail item, a file or a graph node or edge | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
@@ -67,7 +70,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer | message-decorator
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer | message-decorator | file-view | graph-badge | graph-panel
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -139,6 +142,8 @@ export default defineExtension((kt) => {
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
 | `kt.registerMessageRenderer(id, component, options?)` | provide the component of a [message renderer](#message-renderers); an undeclared one needs `options.renderer` |
+| `kt.registerFileView(id, component, options?)` | provide a [file view](#file-views); an undeclared one needs `options.patterns` |
+| `kt.registerGraphBadge(id, component, options?)`, `kt.registerGraphPanel(id, component, options?)` | provide a [graph badge or panel](#graph-badges-and-panels) |
 | `kt.registerMessageDecorator(id, component, options?)` | provide a [message decorator](#message-decorators) |
 | `kt.registerAction(id, handler, options?)` | provide the handler of an [action](#actions); an undeclared action needs `options.targets` |
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
@@ -146,7 +151,7 @@ export default defineExtension((kt) => {
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
-`useOwner`, `useOverlay`, `useMessageBlock`, `useMessage`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
+`useOwner`, `useOverlay`, `useMessageBlock`, `useMessage`, `useFileView`, `useGraphNode`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
 `hostInfo`, `useHost`, `useSession`, `useCreature`,
 `useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
@@ -401,6 +406,69 @@ kt.registerMessageDecorator("cost", {
 ```
 
 The host shows at most three decorators per package on one message.
+
+### File views
+
+A `file-view` shows a workspace file in your component instead of the code
+editor. It is a read-only presentation of the open buffer: editing, saving and
+the stored file stay with the code editor.
+
+```yaml
+- kind: file-view
+  id: table
+  label: Table
+  icon: i-carbon-table
+  patterns: ["*.csv", "*.tsv"]   # "*.ext" matches the end of the base name; others match exactly; case-insensitive
+  defaultView: false             # true opens matching files in this view first
+```
+
+```js
+import { useFileView } from "@kohakuterrarium/ui-sdk"
+
+kt.registerFileView("table", {
+  setup() {
+    const file = useFileView() // read-only ref: { path, name, content, language }
+    return { file }
+  },
+  template: `<pre>{{ file.content }}</pre>`,
+})
+```
+
+A button per matching view appears in the editor toolbar; clicking the shown
+view again returns to the code editor. The content follows the buffer, so an
+agent edit or the user's typing updates the view.
+
+### Graph badges and panels
+
+A `graph-badge` is a small component on graph nodes; a `graph-panel` is a
+section in the graph dock's details for the selected node. Both read the node
+through `useGraphNode()` and name the node kinds they apply to.
+
+```yaml
+- kind: graph-badge
+  id: health
+  nodes: [creature]            # creature | channel | group (default: all three)
+- kind: graph-panel
+  id: history
+  label: History
+  nodes: [creature, channel]
+```
+
+```js
+import { useGraphNode, useOwner } from "@kohakuterrarium/ui-sdk"
+
+kt.registerGraphBadge("health", {
+  setup() {
+    const node = useGraphNode() // read-only ref: { kind, id, name, sessionId }
+    const owner = useOwner()
+    return { node, owner }
+  },
+  template: `<span>{{ owner.state.value?.health?.[node.id] ?? "" }}</span>`,
+})
+```
+
+Badges are not drawn when the canvas is zoomed far out. Graph actions
+(`graph-node`, `graph-edge`) receive the same `{ kind, id, name, sessionId }`.
 
 ### Host services
 

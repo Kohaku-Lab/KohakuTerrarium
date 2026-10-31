@@ -13,6 +13,7 @@
       <EdgeDetails v-else-if="sel?.kind === 'edge'" :view="view" :actions="actions" :edge="sel.item" />
       <GroupDetails v-else-if="sel?.kind === 'group'" :view="view" :actions="actions" :group="sel.item" @confirm="pending = $event" />
       <SessionSummary v-else :view="view" :actions="actions" @quick-add="$emit('quick-add', $event)" @confirm="pending = $event" @new-session="$emit('new-session')" />
+      <GraphSlots v-if="sel && ['creature', 'channel', 'group'].includes(sel.kind)" :key="`${sel.kind}:${sel.item.id ?? sel.item.key ?? sel.item.name}`" variant="panel" :kind="sel.kind" :item="sel.item" />
     </div>
 
     <div v-if="chatMounted" v-show="activeTab === 'chat'" class="flex-1 min-h-0">
@@ -34,6 +35,7 @@ import GroupDetails from "@/components/graph/dock/details/GroupDetails.vue"
 import SessionSummary from "@/components/graph/dock/details/SessionSummary.vue"
 import GraphChatScope from "@/components/graph/dock/chat/GraphChatScope.vue"
 import { deleteRequestForSelection } from "@/components/graph/dock/details/deleteRequests"
+import GraphSlots from "@/ext/GraphSlots.vue"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({

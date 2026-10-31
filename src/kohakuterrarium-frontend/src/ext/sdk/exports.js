@@ -15,6 +15,8 @@ export const SDK_EXPORT_NAMES = [
   "useOverlay",
   "useMessageBlock",
   "useMessage",
+  "useFileView",
+  "useGraphNode",
   "OwnerCallError",
   "useHost",
   "useSession",

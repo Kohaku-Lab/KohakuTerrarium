@@ -48,6 +48,7 @@ import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue
 import { useGraphActions } from "@/composables/graph/useGraphActions"
 import { useDensity } from "@/composables/useDensity"
 import { actionMenuItems, isActionMenuId, runActionMenuId } from "@/ext/actions"
+import { graphNodeInfo } from "@/ext/graphSlots"
 import { useGraphLiveStore } from "@/stores/graph/live"
 import { useGraphViewStore } from "@/stores/graph/view"
 import { useI18n } from "@/utils/i18n"
@@ -152,10 +153,7 @@ function actionTarget(target) {
 }
 
 // Read-only description of the clicked node or edge handed to extension actions.
-function actionContext(target) {
-  const item = target.item || {}
-  return { kind: target.kind, id: item.id ?? item.key ?? "", name: item.name ?? item.label ?? "", sessionId: item.sessionId ?? null }
-}
+const actionContext = (target) => graphNodeInfo(target.kind, target.item)
 
 function openMenu({ x, y, target }) {
   const own = menuItemsFor(target, view, t)

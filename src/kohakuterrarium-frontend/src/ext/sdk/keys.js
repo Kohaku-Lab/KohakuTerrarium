@@ -7,6 +7,12 @@ export const OVERLAY_INJECT_KEY = "kt:overlay"
 /** Inject key carrying where an overlay is drawn: ``"app"`` or ``"window"``. */
 export const OVERLAY_MODE_INJECT_KEY = "kt:overlay-mode"
 
+/** Inject key carrying the read-only file a file view is showing. */
+export const FILE_VIEW_INJECT_KEY = "kt:file-view"
+
+/** Inject key carrying the read-only graph node a badge or panel belongs to. */
+export const GRAPH_NODE_INJECT_KEY = "kt:graph-node"
+
 /** Inject key carrying the read-only message a decorator is drawn beside. */
 export const MESSAGE_CONTEXT_INJECT_KEY = "kt:message-context"
 

@@ -26,6 +26,8 @@ import { windowLabel } from "@/ext/overlayWindows"
 import { openExtensionTab } from "@/ext/registry"
 import {
   EXTENSION_INJECT_KEY,
+  FILE_VIEW_INJECT_KEY,
+  GRAPH_NODE_INJECT_KEY,
   MESSAGE_BLOCK_INJECT_KEY,
   MESSAGE_CONTEXT_INJECT_KEY,
   OVERLAY_INJECT_KEY,
@@ -154,6 +156,20 @@ export function useMessage() {
   const message = inject(MESSAGE_CONTEXT_INJECT_KEY, null)
   if (!message) throw new Error("useMessage() must be called inside a message decorator")
   return message
+}
+
+/** The file a file view shows, as a read-only ref: `{ path, name, content, language }`. */
+export function useFileView() {
+  const file = inject(FILE_VIEW_INJECT_KEY, null)
+  if (!file) throw new Error("useFileView() must be called inside a file view")
+  return file
+}
+
+/** The node a graph badge or panel belongs to, as a read-only ref: `{ kind, id, name, sessionId }`. */
+export function useGraphNode() {
+  const node = inject(GRAPH_NODE_INJECT_KEY, null)
+  if (!node) throw new Error("useGraphNode() must be called inside a graph badge or panel")
+  return node
 }
 
 /** The backend host this dashboard is talking to. */

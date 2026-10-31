@@ -38,7 +38,15 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "status-item": ("package",),
     "action": ("package",),
     "message-decorator": ("package",),
+    "file-view": ("package",),
+    "graph-badge": ("package",),
+    "graph-panel": ("package",),
 }
+GRAPH_NODE_KINDS: tuple[str, ...] = ("creature", "channel", "group")
+FILE_PATTERN_MAX = 16
+_FILE_PATTERN_RE = re.compile(
+    r"^(\*\.[A-Za-z0-9_+-]+(\.[A-Za-z0-9_+-]+)*|[A-Za-z0-9_][A-Za-z0-9_.+-]{0,63})$"
+)
 DECORATOR_POSITIONS: tuple[str, ...] = ("header", "footer")
 DECORATOR_MIN_HEIGHT = 16
 DECORATOR_MAX_HEIGHT = 400
@@ -127,6 +135,8 @@ class UIContribution:
     action: dict = field(default_factory=dict)
     decorator: dict = field(default_factory=dict)
     dock: bool = False
+    file_view: dict = field(default_factory=dict)
+    graph: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -150,6 +160,11 @@ class UIContribution:
                 for k, v in self.decorator.items()
             },
             "dock": self.dock,
+            "fileView": {
+                k: list(v) if isinstance(v, list) else v
+                for k, v in self.file_view.items()
+            },
+            "graph": {k: list(v) for k, v in self.graph.items()},
         }
 
 
@@ -301,7 +316,47 @@ def _parse_contribution(
         action=_parse_action(raw, kind, where),
         decorator=_parse_decorator(raw, kind, where),
         dock=_parse_dock(raw, kind, where),
+        file_view=_parse_file_view(raw, kind, where),
+        graph=_parse_graph(raw, kind, where),
     )
+
+
+def _parse_file_view(raw: dict, kind: str, where: str) -> dict:
+    """File name patterns of a ``file-view``; empty for other kinds."""
+    own = ("patterns", "defaultView")
+    if kind != "file-view":
+        stray = [k for k in own if k in raw]
+        if stray:
+            raise _SlotError(f"{where}.{stray[0]} is only valid on a file-view")
+        return {}
+    patterns = raw.get("patterns")
+    if (
+        not isinstance(patterns, list)
+        or not 0 < len(patterns) <= FILE_PATTERN_MAX
+        or len(set(patterns)) != len(patterns)
+        or not all(isinstance(p, str) and _FILE_PATTERN_RE.match(p) for p in patterns)
+    ):
+        raise _SlotError(
+            f"{where}.patterns must be 1..{FILE_PATTERN_MAX} distinct names such as "
+            f"'*.csv' or 'Makefile' (got {patterns!r})"
+        )
+    default = raw.get("defaultView", False)
+    if not isinstance(default, bool):
+        raise _SlotError(f"{where}.defaultView must be true or false")
+    return {"patterns": list(patterns), "defaultView": default}
+
+
+def _parse_graph(raw: dict, kind: str, where: str) -> dict:
+    """Node kinds a ``graph-badge`` or ``graph-panel`` applies to; empty otherwise."""
+    if kind not in ("graph-badge", "graph-panel"):
+        if "nodes" in raw:
+            raise _SlotError(
+                f"{where}.nodes is only valid on a graph-badge or graph-panel"
+            )
+        return {}
+    if "nodes" not in raw:
+        return {"nodes": list(GRAPH_NODE_KINDS)}
+    return {"nodes": _choice_list(raw, "nodes", GRAPH_NODE_KINDS, where)}
 
 
 def _parse_dock(raw: dict, kind: str, where: str) -> bool:
