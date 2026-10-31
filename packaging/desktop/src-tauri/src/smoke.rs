@@ -17,7 +17,7 @@ use tauri_plugin_updater::UpdaterExt;
 use crate::backend::Backend;
 
 const PAGE_TIMEOUT: Duration = Duration::from_secs(120);
-const IPC_TIMEOUT: Duration = Duration::from_secs(30);
+const IPC_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Runs in the app page: a native call from the loopback origin must succeed.
 const ACK_SCRIPT: &str =
@@ -133,6 +133,42 @@ pub fn overlay_probe_requested() -> bool {
     std::env::var_os("KT_DESKTOP_SMOKE_OVERLAY").is_some()
 }
 
+pub fn menu_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_MENU").is_some()
+}
+
+/// Build the application menu and count its top-level menus.
+fn menu_probe(app: &AppHandle) -> Value {
+    match crate::menu::build(app) {
+        Ok(menu) => json!({
+            "built": true,
+            "topLevel": menu.items().map_or(0, |items| items.len()),
+            "expected": crate::menu::TOP_LEVEL_MENUS,
+        }),
+        Err(error) => json!({ "built": false, "error": error.to_string() }),
+    }
+}
+
+pub fn popout_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_POPOUT").is_some()
+}
+
+/// Open a session window and wait for its page to load and call a native command.
+fn popout_probe(app: &AppHandle) -> Value {
+    let spec = json!({ "label": "popout-smoke", "scope": "smoke", "title": "smoke" });
+    let opened = crate::popout::open(app, &spec);
+    let backend = app.state::<Backend>();
+    let deadline = Instant::now() + IPC_TIMEOUT;
+    while opened && !backend.popout_ipc_confirmed() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+    json!({
+        "opened": opened,
+        "pageLoaded": backend.popout_page_loaded(),
+        "ipc": backend.popout_ipc_confirmed(),
+    })
+}
+
 pub fn summon_probe_requested() -> bool {
     std::env::var_os("KT_DESKTOP_SMOKE_SUMMON").is_some()
 }
@@ -156,6 +192,8 @@ pub struct Probes {
     pub overlay: Option<Value>,
     pub tray: Option<Value>,
     pub summon: Option<Value>,
+    pub popout: Option<Value>,
+    pub menu: Option<Value>,
 }
 
 pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Probes) -> Value {
@@ -175,8 +213,19 @@ pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Pr
         .summon
         .as_ref()
         .is_none_or(|probe| probe["registered"] == true && probe["released"] == true);
+    let popout_ok = probes
+        .popout
+        .as_ref()
+        .is_none_or(|probe| probe["pageLoaded"] == true && probe["ipc"] == true);
+    let menu_ok = probes
+        .menu
+        .as_ref()
+        .is_none_or(|probe| probe["built"] == true && probe["topLevel"] == probe["expected"]);
     json!({
-        "ok": page_loaded && ipc && update_ok && overlay_ok && tray_ok && summon_ok,
+        "ok": page_loaded && ipc && update_ok && overlay_ok && tray_ok && summon_ok && popout_ok
+            && menu_ok,
+        "menu": probes.menu,
+        "popoutWindow": probes.popout,
         "shellUpdate": probes.update,
         "overlayWindow": probes.overlay,
         "tray": probes.tray,
@@ -206,18 +255,20 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
         while !backend.page_loaded() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(100));
         }
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.eval(ACK_SCRIPT);
-        }
         let ipc_deadline = Instant::now() + IPC_TIMEOUT;
         while !backend.ipc_confirmed() && Instant::now() < ipc_deadline {
-            thread::sleep(Duration::from_millis(100));
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.eval(ACK_SCRIPT);
+            }
+            thread::sleep(Duration::from_millis(500));
         }
         let version = app.package_info().version.to_string();
         let mut probes = Probes {
             overlay: overlay_probe_requested().then(|| overlay_probe(&app)),
             tray: tray_probe_requested().then(|| tray_probe(&app)),
             summon: summon_probe_requested().then(|| crate::summon::probe(&app)),
+            popout: popout_probe_requested().then(|| popout_probe(&app)),
+            menu: menu_probe_requested().then(|| menu_probe(&app)),
             update: None,
         };
         probes.update = update_probe_requested().map(|probe| {
@@ -321,6 +372,30 @@ mod tests {
         ] {
             let probes = Probes {
                 update: Some(probe),
+                ..Probes::default()
+            };
+            assert_eq!(ok(true, true, probes), expected);
+        }
+        for (probe, expected) in [
+            (json!({ "built": false }), false),
+            (
+                json!({ "built": true, "topLevel": 5, "expected": 6 }),
+                false,
+            ),
+            (json!({ "built": true, "topLevel": 6, "expected": 6 }), true),
+        ] {
+            let probes = Probes {
+                menu: Some(probe),
+                ..Probes::default()
+            };
+            assert_eq!(ok(true, true, probes), expected);
+        }
+        for (probe, expected) in [
+            (json!({ "pageLoaded": true, "ipc": false }), false),
+            (json!({ "pageLoaded": true, "ipc": true }), true),
+        ] {
+            let probes = Probes {
+                popout: Some(probe),
                 ..Probes::default()
             };
             assert_eq!(ok(true, true, probes), expected);

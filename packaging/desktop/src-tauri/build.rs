@@ -22,6 +22,8 @@ const COMMANDS: &[&str] = &[
     "get_summon_shortcut",
     "set_summon_shortcut",
     "take_pending_opens",
+    "open_popout_window",
+    "popout_ack",
 ];
 
 fn main() {

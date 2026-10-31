@@ -26,6 +26,7 @@
     "allow-set-attention-count",
     "allow-get-summon-shortcut",
     "allow-set-summon-shortcut",
-    "allow-take-pending-opens"
+    "allow-take-pending-opens",
+    "allow-open-popout-window"
   ]
 }

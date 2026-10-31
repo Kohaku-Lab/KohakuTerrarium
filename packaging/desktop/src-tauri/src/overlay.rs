@@ -40,7 +40,12 @@ pub struct Rect {
 }
 
 pub fn is_overlay_label(label: &str) -> bool {
-    label.strip_prefix(LABEL_PREFIX).is_some_and(|rest| {
+    is_label(LABEL_PREFIX, label)
+}
+
+/// Whether `label` is `prefix` followed by 1-48 lowercase letters, digits or hyphens.
+pub fn is_label(prefix: &str, label: &str) -> bool {
+    label.strip_prefix(prefix).is_some_and(|rest| {
         (1..=48).contains(&rest.len())
             && rest
                 .bytes()

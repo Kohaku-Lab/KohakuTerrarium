@@ -3,9 +3,11 @@
 mod backend;
 mod commands;
 mod files;
+mod menu;
 mod navigation;
 mod opens;
 mod overlay;
+mod popout;
 mod settings;
 mod smoke;
 mod summon;
@@ -93,7 +95,10 @@ pub fn run() {
             summon::get_summon_shortcut,
             summon::set_summon_shortcut,
             opens::take_pending_opens,
+            popout::open_popout_window,
+            popout::popout_ack,
         ])
+        .on_menu_event(|app, event| menu::on_event(app, &event))
         .on_window_event(|window, event| {
             if window.label() != "main" {
                 return;
@@ -119,6 +124,7 @@ pub fn run() {
         })
         .setup(move |app| {
             window::create(app)?;
+            menu::install(app.handle())?;
             if !headless {
                 app.state::<opens::PendingOpens>()
                     .extend(opens::from_launch());

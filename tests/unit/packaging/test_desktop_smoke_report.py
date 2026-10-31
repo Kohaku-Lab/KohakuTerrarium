@@ -26,6 +26,8 @@ def _report(**overrides) -> dict:
         "unauthenticatedStatus": 401,
         "healthStatus": 200,
         "overlayWindow": {"opened": True, "pageLoaded": True, "ipc": True},
+        "menu": {"built": True, "topLevel": 6, "expected": 6},
+        "popoutWindow": {"opened": True, "pageLoaded": True, "ipc": True},
         "tray": {"installed": True, "badgeShown": True, "badgeCleared": True},
         "summonShortcut": {"registered": True, "released": True},
     }
@@ -49,6 +51,13 @@ def test_a_healthy_report_has_no_problems(smoke):
         (
             {"overlayWindow": {"opened": True, "pageLoaded": False, "ipc": True}},
             "did not run the app page",
+        ),
+        ({"menu": None}, "menu could not be built"),
+        ({"menu": {"built": True, "topLevel": 3, "expected": 6}}, "menu could not"),
+        ({"popoutWindow": None}, "could not open a session window"),
+        (
+            {"popoutWindow": {"opened": True, "pageLoaded": True, "ipc": False}},
+            "session window did not run",
         ),
         ({"tray": None}, "did not create a tray icon"),
         ({"tray": {"installed": False}}, "did not create a tray icon"),

@@ -52,6 +52,7 @@ pub fn capabilities() -> Value {
         "fileDrop": true,
         "summonShortcut": true,
         "openFiles": true,
+        "popoutWindows": true,
     })
 }
 

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popout",
+  "description": "Native calls a session window may make: the page's theme sync and external links.",
+  "windows": ["popout-*"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:event:default",
+    "allow-get-desktop-capabilities",
+    "allow-open-external",
+    "allow-set-desktop-theme",
+    "allow-popout-ack"
+  ]
+}

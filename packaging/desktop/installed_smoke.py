@@ -68,6 +68,8 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
         "KT_DESKTOP_SMOKE_OVERLAY": "1",
         "KT_DESKTOP_SMOKE_TRAY": "1",
         "KT_DESKTOP_SMOKE_SUMMON": "1",
+        "KT_DESKTOP_SMOKE_POPOUT": "1",
+        "KT_DESKTOP_SMOKE_MENU": "1",
     }
     if os.environ.get("KT_DESKTOP_RESOURCES") is None and resources != exe.parent:
         env["KT_DESKTOP_RESOURCES"] = str(resources)
@@ -95,6 +97,14 @@ def check_report(data: dict) -> list[str]:
         problems.append("the shell could not open an overlay window")
     elif overlay.get("pageLoaded") is not True or overlay.get("ipc") is not True:
         problems.append(f"the overlay window did not run the app page: {overlay}")
+    menu = data.get("menu") or {}
+    if menu.get("built") is not True or menu.get("topLevel") != menu.get("expected"):
+        problems.append(f"the application menu could not be built: {menu}")
+    popout = data.get("popoutWindow") or {}
+    if popout.get("opened") is not True:
+        problems.append("the shell could not open a session window")
+    elif popout.get("pageLoaded") is not True or popout.get("ipc") is not True:
+        problems.append(f"the session window did not run the app page: {popout}")
     tray = data.get("tray") or {}
     if tray.get("installed") is not True:
         problems.append("the shell did not create a tray icon")

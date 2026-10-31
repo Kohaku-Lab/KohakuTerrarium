@@ -9,7 +9,7 @@ use crate::navigation::{is_internal, is_openable};
 use crate::smoke;
 
 /// Keeps the native caption in step with the page's light or dark mode.
-const THEME_SYNC: &str = r#"(() => {
+pub const THEME_SYNC: &str = r#"(() => {
   if (window.top !== window || location.hostname !== "127.0.0.1") return;
   const invoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
   if (!invoke) return;

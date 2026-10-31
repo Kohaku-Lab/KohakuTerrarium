@@ -16,7 +16,15 @@ from kohakuterrarium.utils.interpreter import PYTHON_ENV
 ROOT = Path(__file__).resolve().parents[3]
 TAURI = ROOT / "packaging" / "desktop" / "src-tauri"
 SRC = ROOT / "src" / "kohakuterrarium"
-COMMAND_MODULES = ("commands.rs", "overlay.rs", "tray.rs", "summon.rs", "opens.rs")
+COMMAND_MODULES = (
+    "commands.rs",
+    "overlay.rs",
+    "tray.rs",
+    "summon.rs",
+    "opens.rs",
+    "popout.rs",
+)
+CAPABILITY_FILES = ("main.json", "overlay.json", "popout.json")
 
 
 def _text(path: Path) -> str:
@@ -88,24 +96,44 @@ def test_every_command_is_declared_allowed_and_registered():
     manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
     registered = set(
         re.findall(
-            r"(?:commands|overlay|tray|summon|opens)::([a-z_]+),",
+            r"(?:commands|overlay|tray|summon|opens|popout)::([a-z_]+),",
             _text(TAURI / "src" / "lib.rs"),
         )
     )
     assert declared == manifest == registered
-    assert declared == _allowed("main.json") | _allowed("overlay.json")
+    allowed = set()
+    for name in CAPABILITY_FILES:
+        allowed |= _allowed(name)
+    assert declared == allowed
 
 
-def test_overlay_windows_may_only_call_commands_that_act_on_themselves():
-    main_only = {"open_overlay_window"}
+def test_secondary_windows_may_only_call_commands_that_act_on_themselves():
+    powerful = {
+        "open_overlay_window",
+        "open_popout_window",
+        "close_overlay_window",
+        "install_shell_update",
+        "set_autostart",
+        "show_notification",
+        "set_summon_shortcut",
+        "set_close_to_tray",
+        "take_pending_opens",
+    }
     overlay = _allowed("overlay.json")
-    assert not overlay & main_only
     assert {"overlay_start_drag", "overlay_set_bounds", "overlay_ack"} <= overlay
-    assert not overlay & {"install_shell_update", "set_autostart", "show_notification"}
+    assert not overlay & (powerful - {"close_overlay_window"})
+    popout = _allowed("popout.json")
+    assert "popout_ack" in popout
+    assert not popout & powerful
 
 
 def test_app_page_origin_is_the_only_remote_capability():
-    for name, windows in (("main.json", ["main"]), ("overlay.json", ["overlay-*"])):
+    windows_by_file = {
+        "main.json": ["main"],
+        "overlay.json": ["overlay-*"],
+        "popout.json": ["popout-*"],
+    }
+    for name, windows in windows_by_file.items():
         capability = json.loads(_text(TAURI / "capabilities" / name))
         assert capability["remote"]["urls"] == ["http://127.0.0.1:*"]
         assert capability["windows"] == windows
@@ -169,6 +197,36 @@ def test_file_drop_event_name_matches_the_frontend():
         assert f'"phase": "{phase}"' in files_rs
     for phase in ("drop", "leave"):
         assert f'phase === "{phase}"' in composable
+
+
+def test_menu_actions_are_all_handled_by_the_page():
+    menu_rs = _text(TAURI / "src" / "menu.rs")
+    event = _rust_const(menu_rs, "MENU_EVENT")
+    composable = _text(
+        ROOT
+        / "src"
+        / "kohakuterrarium-frontend"
+        / "src"
+        / "composables"
+        / "useDesktopMenu.js"
+    )
+    assert f'MENU_EVENT = "{event}"' in composable
+    declared = re.findall(r'^\s*\("([a-z-]+)", "[^"]+", ', menu_rs, re.MULTILINE)
+    assert declared
+    for action in declared:
+        assert re.search(rf'(?:^|\s)"?{re.escape(action)}"?:', composable), action
+
+
+def test_popout_page_parameter_and_window_prefix_match_the_frontend():
+    popout_rs = _text(TAURI / "src" / "popout.rs")
+    popout_js = _text(
+        ROOT / "src" / "kohakuterrarium-frontend" / "src" / "utils" / "popout.js"
+    )
+    param = _rust_const(popout_rs, "POPOUT_PARAM")
+    prefix = _rust_const(popout_rs, "LABEL_PREFIX")
+    assert f'POPOUT_PARAM = "{param}"' in popout_js
+    assert f'POPOUT_LABEL_PREFIX = "{prefix}"' in popout_js
+    assert prefix != _rust_const(_text(TAURI / "src" / "overlay.rs"), "LABEL_PREFIX")
 
 
 def test_overlay_page_parameter_and_window_prefix_match_the_frontend():
