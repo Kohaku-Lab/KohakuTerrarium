@@ -637,8 +637,9 @@ jobs:
           find all-artifacts/release-tree-* -type f -exec cp {} release/ \;
           # Desktop installers
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
-          # The desktop shell's updater reads this from the latest stable release.
-          if [ "${{ needs.meta.outputs.channel }}" = "stable" ] && compgen -G "release/*.sig" > /dev/null; then
+          # The shell's updater reads this from the latest stable release; a
+          # nightly carries one too so the signed path can be tried against it.
+          if compgen -G "release/*.sig" > /dev/null; then
             python packaging/desktop/updater_manifest.py \
               --assets release \
               --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ needs.meta.outputs.tag }}" \
