@@ -8,11 +8,22 @@ to subprocess-capable tools.
 import asyncio
 import os
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
+from kohakuterrarium.builtins.plugins.sandbox.seatbelt import (
+    DEFAULT_WRITE_ALLOW,
+    build_write_profile,
+    confine_argv,
+    seatbelt_available,
+)
+from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
+    terminate_process_tree,
+    windows_process_kwargs,
+)
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
@@ -123,6 +134,22 @@ class SandboxPlugin(BasePlugin):
                 "default": [],
                 "doc": "Allowed hosts when network is enabled. Empty = unrestricted.",
             },
+            "os_enforce": {
+                "type": "enum",
+                "values": ["auto", "require", "off"],
+                "default": "auto",
+                "doc": (
+                    "Kernel write confinement for subprocesses (macOS sandbox-exec). "
+                    "auto = confine where supported, require = refuse to spawn "
+                    "elsewhere, off = policy checks only."
+                ),
+            },
+            "fs_write_allow": {
+                "type": "list",
+                "item_type": "string",
+                "default": list(DEFAULT_WRITE_ALLOW),
+                "doc": "Paths subprocesses may always write, even inside fs_deny.",
+            },
             "blocked_tools": {
                 "type": "list",
                 "item_type": "string",
@@ -161,6 +188,11 @@ class SandboxPlugin(BasePlugin):
         self._network_allowlist = {
             str(host).lower() for host in self.options.get("network_allowlist") or []
         }
+        self._os_enforce = str(self.options.get("os_enforce") or "auto").lower()
+        allow = self.options.get("fs_write_allow")
+        self._write_allow = tuple(
+            str(p) for p in (DEFAULT_WRITE_ALLOW if allow is None else allow)
+        )
 
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
         """Gate known file/network/tool operations before execution."""
@@ -222,12 +254,34 @@ class SandboxPlugin(BasePlugin):
         if self._profile.network == "deny" and _argv_may_use_network(argv):
             self._violate("network", " ".join(argv), "network command denied")
         return await _run_plain_subprocess(
-            argv,
+            self._confine(argv, cwd),
             cwd=cwd,
             env=env,
             timeout=timeout,
             input_data=input_data,
             max_output_bytes=max_output_bytes,
+        )
+
+    def _confine(self, argv: list[str], cwd: str | Path | None) -> list[str]:
+        """Wrap ``argv`` so the kernel enforces the write policy, when it can."""
+        if self._audit or self._os_enforce == "off":
+            return argv
+        if not seatbelt_available():
+            if self._os_enforce == "require":
+                self._violate(
+                    "syscall", "spawn", "kernel sandbox is unavailable on this host"
+                )
+            return argv
+        workspace = (
+            Path(cwd).resolve()
+            if cwd is not None
+            else _context_cwd(None, self._context)
+        )
+        return confine_argv(
+            argv,
+            build_write_profile(
+                self._profile, workspace, write_allow=self._write_allow
+            ),
         )
 
     def _check_glob(self, args: dict[str, Any], context: Any, cwd: Path) -> None:
@@ -430,6 +484,11 @@ async def _run_plain_subprocess(
     max_output_bytes: int | None,
 ) -> dict[str, Any]:
     """Run a subprocess and return bounded byte streams and timeout state."""
+    spawn_kwargs: dict[str, Any] = (
+        windows_process_kwargs()
+        if sys.platform == "win32"
+        else {"start_new_session": True}
+    )
     process = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd is not None else None,
@@ -437,14 +496,17 @@ async def _run_plain_subprocess(
         stdin=asyncio.subprocess.PIPE if input_data is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **spawn_kwargs,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(input_data), timeout=timeout if timeout else None
         )
+    except asyncio.CancelledError:
+        await terminate_process_tree(process)
+        raise
     except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+        await terminate_process_tree(process)
         return {
             "returncode": 124,
             "stdout": b"",

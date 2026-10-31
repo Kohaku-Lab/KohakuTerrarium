@@ -69,6 +69,8 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
 | `tmp` | enum | `default` / `private` / `shared` | from profile | Temp directory isolation. |
 | `fs_deny` | list[str] | paths | `[]` | Additional path deny-list (env-var expansion supported). |
 | `network_allowlist` | list[str] | hostnames | `[]` | Allowed hosts when `network=allow`. Empty list = allow all when network is allowed. |
+| `os_enforce` | enum | `auto` / `require` / `off` | `auto` | Kernel write confinement for subprocesses. `auto` = confine where the OS supports it, `require` = refuse to spawn where it does not, `off` = policy checks only. |
+| `fs_write_allow` | list[str] | paths | `["~/.cache", "~/Library/Caches", "~/.npm"]` | Paths subprocesses may always write, even inside `fs_deny` (not under `fs_write=deny`). |
 | `blocked_tools` | list[str] | tool names | `[]` | Tools the agent cannot call regardless of args. |
 
 ### Profile presets
@@ -97,6 +99,19 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   (`pure` blocks all spawns, `fs` blocks network calls, `shell`
   allows everything) and the network allowlist before delegating to
   `asyncio.create_subprocess_exec`.
+- **Kernel write confinement** (macOS): the runner launches each command
+  under `sandbox-exec` with a profile built from `fs_write`, so the command
+  and every process it starts are confined, whatever they do. A script that
+  calls `shutil.rmtree(os.environ["HOME"])` fails with `Operation not
+  permitted`. `workspace` allows writes under the working directory, the
+  system temp directories and `/dev`; `deny` allows only `/dev`; `broad`
+  allows everything. `fs_deny` paths are then unwritable, and
+  `fs_write_allow` entries are writable again, so a narrow exception such as
+  `~/.ssh/sockets` (ssh connection sharing) or `~/.config/gcloud` survives a
+  denied parent. Reads and network are not confined by the kernel. Commands run in
+  their own process group, and a timeout or cancellation kills the whole
+  tree. Other platforms run unconfined under `auto`; use `require` to refuse
+  instead.
 - **`backend=audit`**: violations are logged via the agent logger
   rather than raised. Useful for first-pass discovery on a new
   workload.

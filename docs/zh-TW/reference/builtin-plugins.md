@@ -44,6 +44,8 @@ KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特�
 | `tmp` | enum | `default` / `private` / `shared` | 來自 profile | 暫存目錄隔離。 |
 | `fs_deny` | list[str] | 路徑 | `[]` | 額外的路徑黑名單（支援環境變數展開）。 |
 | `network_allowlist` | list[str] | 主機名 | `[]` | `network=allow` 時的允許清單。空清單 = 網路允許時全允許。 |
+| `os_enforce` | enum | `auto` / `require` / `off` | `auto` | 子行程的核心寫入限制（macOS `sandbox-exec`）。`auto`＝支援時啟用，`require`＝不支援時拒絕啟動，`off`＝只做規則檢查。 |
+| `fs_write_allow` | list[str] | 路徑 | `["~/.cache", "~/Library/Caches", "~/.npm"]` | 子行程一律可寫的路徑，即使在 `fs_deny` 之內（`fs_write=deny` 時除外）。 |
 | `blocked_tools` | list[str] | 工具名 | `[]` | 不論參數都不允許呼叫的工具。 |
 
 ### Profile 預設

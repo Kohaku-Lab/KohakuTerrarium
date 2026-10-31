@@ -44,6 +44,8 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
 | `tmp` | enum | `default` / `private` / `shared` | 来自 profile | 临时目录隔离。 |
 | `fs_deny` | list[str] | 路径 | `[]` | 额外的路径黑名单（支持环境变数展开）。 |
 | `network_allowlist` | list[str] | 主机名 | `[]` | `network=allow` 时的允许清单。空清单 = 网络允许时全允许。 |
+| `os_enforce` | enum | `auto` / `require` / `off` | `auto` | 子进程的内核写入限制（macOS `sandbox-exec`）。`auto`＝支持时启用，`require`＝不支持时拒绝启动，`off`＝只做规则检查。 |
+| `fs_write_allow` | list[str] | 路径 | `["~/.cache", "~/Library/Caches", "~/.npm"]` | 子进程一律可写的路径，即使在 `fs_deny` 之内（`fs_write=deny` 时除外）。 |
 | `blocked_tools` | list[str] | 工具名 | `[]` | 不论参数都不允许呼叫的工具。 |
 
 ### Profile 预设
