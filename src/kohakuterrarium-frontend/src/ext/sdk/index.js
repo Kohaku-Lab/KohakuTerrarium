@@ -27,6 +27,7 @@ import { openExtensionTab } from "@/ext/registry"
 import {
   EXTENSION_INJECT_KEY,
   MESSAGE_BLOCK_INJECT_KEY,
+  MESSAGE_CONTEXT_INJECT_KEY,
   OVERLAY_INJECT_KEY,
   OVERLAY_MODE_INJECT_KEY,
   OWNER_INJECT_KEY,
@@ -143,6 +144,16 @@ export function useMessageBlock() {
   const block = inject(MESSAGE_BLOCK_INJECT_KEY, null)
   if (!block) throw new Error("useMessageBlock() must be called inside a message renderer")
   return block
+}
+
+/**
+ * The message a decorator is drawn beside, as a read-only ref:
+ * `{ id, role, text, turn, tab }`.
+ */
+export function useMessage() {
+  const message = inject(MESSAGE_CONTEXT_INJECT_KEY, null)
+  if (!message) throw new Error("useMessage() must be called inside a message decorator")
+  return message
 }
 
 /** The backend host this dashboard is talking to. */

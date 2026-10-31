@@ -165,6 +165,7 @@ function createHandle(record) {
     registerStatusItem: provide("status-item"),
     registerAction: provide("action"),
     registerMessageRenderer: provide("message-renderer"),
+    registerMessageDecorator: provide("message-decorator"),
     storage: createPackageStorage(pkg),
     showOverlay: (id) => showOverlay(contributionKey(pkg, id)),
     hideOverlay: (id) => hideOverlay(contributionKey(pkg, id)),

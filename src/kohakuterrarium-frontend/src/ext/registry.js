@@ -11,6 +11,7 @@ import { defineComponent, h, markRaw } from "vue"
 
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { clearActions, registerAction } from "@/ext/actions"
+import { clearDecorators, registerDecorator } from "@/ext/decorators"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
@@ -57,6 +58,15 @@ export const MOUNT_OWNER_KINDS = {
   "status-item": "package",
   action: "package",
   "message-renderer": "any",
+  "message-decorator": "package",
+}
+
+function decoratorOptions(source) {
+  const out = {}
+  if (source?.position !== undefined) out.position = source.position
+  if (source?.maxHeight !== undefined) out.maxHeight = source.maxHeight
+  if (Array.isArray(source?.roles)) out.roles = [...source.roles]
+  return out
 }
 
 function actionOptions(source) {
@@ -199,6 +209,17 @@ export function registerContribution(pkg, contribution) {
         options: statusOptions(contribution.status),
       })
       break
+    case "message-decorator":
+      registerDecorator({
+        key,
+        pkg,
+        id: contribution.id,
+        label: contribution.label,
+        order: contribution.order,
+        component: host,
+        options: decoratorOptions(contribution.decorator),
+      })
+      break
     case "message-renderer":
       if (!isPackageRendererId(contribution.renderer)) return null
       if (!registerMessageRenderer(contribution.renderer, host, { key })) return null
@@ -241,6 +262,7 @@ export function unregisterAllContributions() {
   clearStatusItems()
   clearActions()
   clearMessageRenderers()
+  clearDecorators()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -300,6 +322,7 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       ...(kind === "overlay" ? { overlay: overlayOptions(options) } : {}),
       ...(kind === "status-item" ? { status: statusOptions(options) } : {}),
       ...(kind === "action" ? { action: actionOptions(options) } : {}),
+      ...(kind === "message-decorator" ? { decorator: decoratorOptions(options) } : {}),
       ...(kind === "command"
         ? { shortcut: options.shortcut || "", keywords: options.keywords || "" }
         : {}),

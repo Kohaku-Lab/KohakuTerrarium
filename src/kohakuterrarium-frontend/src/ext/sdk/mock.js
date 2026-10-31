@@ -81,6 +81,7 @@ export function createMockHost(options = {}) {
     "status-item": new Map(),
     action: new Map(),
     "message-renderer": new Map(),
+    "message-decorator": new Map(),
   }
   const overlayVisible = reactive({})
   const storageData = new Map()
@@ -123,6 +124,7 @@ export function createMockHost(options = {}) {
     registerStatusItem: provide("status-item"),
     registerAction: provide("action"),
     registerMessageRenderer: provide("message-renderer"),
+    registerMessageDecorator: provide("message-decorator"),
     storage: {
       get: (key, fallback = null) => (storageData.has(key) ? storageData.get(key) : fallback),
       set: (key, value) => storageData.set(key, value),
@@ -197,6 +199,7 @@ export function createMockHost(options = {}) {
     ownerCalls,
     widget: options.widget || null,
     block: options.block || null,
+    message: options.message || null,
     said: [],
     overlayId: options.overlayId || "overlay",
     overlayVisible,
@@ -234,6 +237,13 @@ export function useWidget() {
   const widget = current().widget
   if (!widget) throw new Error("useWidget() used outside a widget renderer")
   return widget
+}
+
+/** In tests, the message given as ``createMockHost({ message: { id, role, text } })``, as a read-only ref. */
+export function useMessage() {
+  const host = current()
+  if (!host.message) throw new Error("useMessage() used outside a message decorator")
+  return ref({ id: null, role: "assistant", text: "", turn: null, tab: "", ...host.message })
 }
 
 /** In tests, the fenced block given as ``createMockHost({ block: { id, source } })``; `say` calls land in `host.said`. */

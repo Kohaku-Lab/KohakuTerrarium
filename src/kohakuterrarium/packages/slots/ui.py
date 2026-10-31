@@ -37,7 +37,11 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "command": ("package",),
     "status-item": ("package",),
     "action": ("package",),
+    "message-decorator": ("package",),
 }
+DECORATOR_POSITIONS: tuple[str, ...] = ("header", "footer")
+DECORATOR_MIN_HEIGHT = 16
+DECORATOR_MAX_HEIGHT = 400
 RENDERER_KINDS: tuple[str, ...] = ("widget", "message-renderer")
 ACTION_TARGETS: tuple[str, ...] = (
     "message",
@@ -121,6 +125,7 @@ class UIContribution:
     keywords: str = ""
     status: dict = field(default_factory=dict)
     action: dict = field(default_factory=dict)
+    decorator: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -139,6 +144,10 @@ class UIContribution:
             "keywords": self.keywords,
             "status": dict(self.status),
             "action": {k: list(v) for k, v in self.action.items()},
+            "decorator": {
+                k: list(v) if isinstance(v, list) else v
+                for k, v in self.decorator.items()
+            },
         }
 
 
@@ -288,7 +297,36 @@ def _parse_contribution(
         keywords=_parse_keywords(raw, kind, where),
         status=_parse_status(raw, kind, where),
         action=_parse_action(raw, kind, where),
+        decorator=_parse_decorator(raw, kind, where),
     )
+
+
+def _parse_decorator(raw: dict, kind: str, where: str) -> dict:
+    """Placement of a ``message-decorator``; empty for other kinds."""
+    if kind != "message-decorator":
+        stray = [k for k in ("position", "maxHeight") if k in raw]
+        if stray:
+            raise _SlotError(f"{where}.{stray[0]} is only valid on a message-decorator")
+        return {}
+    position = raw.get("position", "footer")
+    if position not in DECORATOR_POSITIONS:
+        raise _SlotError(f"{where}.position must be one of {list(DECORATOR_POSITIONS)}")
+    height = raw.get("maxHeight", 120)
+    if (
+        not isinstance(height, int)
+        or isinstance(height, bool)
+        or not DECORATOR_MIN_HEIGHT <= height <= DECORATOR_MAX_HEIGHT
+    ):
+        raise _SlotError(
+            f"{where}.maxHeight must be an integer in "
+            f"{DECORATOR_MIN_HEIGHT}..{DECORATOR_MAX_HEIGHT}"
+        )
+    roles = (
+        _choice_list(raw, "roles", ACTION_ROLES, where)
+        if "roles" in raw
+        else ["assistant"]
+    )
+    return {"position": position, "maxHeight": height, "roles": roles}
 
 
 def _choice_list(raw: dict, key: str, allowed: tuple[str, ...], where: str) -> list:
@@ -307,7 +345,8 @@ def _choice_list(raw: dict, key: str, allowed: tuple[str, ...], where: str) -> l
 def _parse_action(raw: dict, kind: str, where: str) -> dict:
     """Targets (and message roles) of an ``action``; empty for other kinds."""
     if kind != "action":
-        stray = [k for k in ("targets", "roles") if k in raw]
+        own = ("targets",) if kind == "message-decorator" else ("targets", "roles")
+        stray = [k for k in own if k in raw]
         if stray:
             raise _SlotError(f"{where}.{stray[0]} is only valid on an action")
         return {}

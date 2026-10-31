@@ -71,6 +71,7 @@
 
   <!-- User message -->
   <div v-else-if="message.role === 'user'" class="ml-auto group relative" :class="editing ? 'w-[min(760px,92%)] max-w-[92%]' : 'max-w-[80%]'">
+    <MessageDecorators position="header" :message="messageInfo" />
     <div class="kt-conversation-user-bubble chat-cv" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
       <div class="text-xs text-warm-400 mb-1 flex items-center gap-1.5">
         <span>You</span>
@@ -116,6 +117,7 @@
       <ConversationMessage v-else :message="message" :render-text="renderSharedText" :render-content-part="renderSharedContentPart" bare />
       <p v-if="editError || branchOperationError" class="mt-1 text-sm text-coral-shadow dark:text-coral-light" role="alert">{{ editError || branchOperationError }}</p>
     </div>
+    <MessageDecorators position="footer" :message="messageInfo" />
     <!-- Hover actions for user messages -->
     <div v-if="!editing && !message.queued && !message.injectedMidTurn && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
       <!-- Branch navigator on user message: shown only when this turn
@@ -147,9 +149,11 @@
        keyed on the first tool's id so streaming new tools into an
        in-progress batch doesn't reshuffle ``expandedTools`` state. -->
   <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
+    <MessageDecorators position="header" :message="messageInfo" />
     <div class="chat-cv">
       <ConversationMessage :message="message" :render-text="renderSharedText" :render-content-part="renderSharedAssistantPart" bare />
     </div>
+    <MessageDecorators position="footer" :message="messageInfo" />
     <!-- Hover actions -->
     <div class="absolute -bottom-5 left-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--left">
       <!-- Branch navigator on the assistant bubble: shown only when
@@ -236,6 +240,7 @@ import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { useMessageActions } from "../../../public/chat/messageActions.js"
 import { contentToText, useMessageRowActions } from "../../../public/chat/useMessageRowActions.js"
 import ActionButtons from "@/ext/ActionButtons.vue"
+import MessageDecorators from "@/ext/MessageDecorators.vue"
 import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 import { GEM } from "@/utils/colors"
@@ -389,8 +394,8 @@ const showSenderHeader = computed(() => {
   return props.prevMessage.sender !== props.message.sender
 })
 
-// Read-only description of this message handed to extension actions.
-function actionContext() {
+// Read-only description of this message handed to extension actions and decorators.
+const messageInfo = computed(() => {
   const message = props.message
   const text = message.parts
     ? message.parts
@@ -399,7 +404,8 @@ function actionContext() {
         .join("")
     : contentToText(message.contentParts || message.content)
   return { id: message.id ?? null, role: message.role, text, turn: message.turnIndex ?? null, tab: messageTab.value }
-}
+})
+const actionContext = () => messageInfo.value
 
 const senderGemColor = computed(() => _gemForSender(props.message.sender))
 

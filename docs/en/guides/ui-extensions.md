@@ -31,6 +31,7 @@ This guide covers:
 | `overlay` | a floating window above the whole app, on every page and in the browser as well as the desktop app | `package` | host-wide |
 | `status-item` | a segment in the status bar at the bottom of a session | `package` | host-wide |
 | `message-renderer` | replaces a closed code fence named after its `renderer` id inside an assistant reply | any | wherever replies are drawn |
+| `message-decorator` | extra display above or below a message, outside its text | `package` | host-wide |
 | `action` | a button or menu entry on a message, the composer, a tab, a rail item, a file or a graph node or edge | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
@@ -66,7 +67,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer | message-decorator
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -138,13 +139,14 @@ export default defineExtension((kt) => {
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
 | `kt.registerMessageRenderer(id, component, options?)` | provide the component of a [message renderer](#message-renderers); an undeclared one needs `options.renderer` |
+| `kt.registerMessageDecorator(id, component, options?)` | provide a [message decorator](#message-decorators) |
 | `kt.registerAction(id, handler, options?)` | provide the handler of an [action](#actions); an undeclared action needs `options.targets` |
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
-`useOwner`, `useOverlay`, `useMessageBlock`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
+`useOwner`, `useOverlay`, `useMessageBlock`, `useMessage`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
 `hostInfo`, `useHost`, `useSession`, `useCreature`,
 `useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
@@ -353,6 +355,36 @@ Rules the host applies:
   `prompt_renderers` and returns its prompt part from `presentation_contribution`
   only while the id is attached, so the model is told about the format only when it
   can be drawn. `examples/ui-extensions/poll-block` is a complete package.
+
+### Message decorators
+
+A `message-decorator` adds display above (`header`) or below (`footer`) a
+message: a cost line, a badge, a translate toggle. It sits beside the message,
+never inside its text, and cannot change the message or what is stored. State
+that must persist is kept by the owner (package backend) or a plugin hook.
+
+```yaml
+- kind: message-decorator
+  id: cost
+  position: footer      # header | footer (default footer)
+  roles: [assistant]    # assistant | user | tool | system (default assistant)
+  maxHeight: 60         # 16..400 px (default 120); taller content scrolls
+```
+
+```js
+import { useMessage, useOwner } from "@kohakuterrarium/ui-sdk"
+
+kt.registerMessageDecorator("cost", {
+  setup() {
+    const message = useMessage() // read-only ref: { id, role, text, turn, tab }
+    const owner = useOwner()
+    return { message, owner }
+  },
+  template: `<small>{{ owner.state.value?.costs?.[message.id] ?? "" }}</small>`,
+})
+```
+
+The host shows at most three decorators per package on one message.
 
 ### Host services
 

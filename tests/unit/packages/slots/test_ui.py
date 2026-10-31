@@ -260,6 +260,64 @@ class TestParse:
         slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
         assert message in slot.error
 
+    def test_message_decorator_options(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "message-decorator", "id": "plain"},
+                    {
+                        "kind": "message-decorator",
+                        "id": "cost",
+                        "position": "header",
+                        "maxHeight": 40,
+                        "roles": ["assistant", "tool"],
+                    },
+                    {"kind": "tab", "id": "t"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c["decorator"] for c in slot.to_dict()["contributes"]}
+        assert by_id["plain"] == {
+            "position": "footer",
+            "maxHeight": 120,
+            "roles": ["assistant"],
+        }
+        assert by_id["cost"] == {
+            "position": "header",
+            "maxHeight": 40,
+            "roles": ["assistant", "tool"],
+        }
+        assert by_id["t"] == {}
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "message-decorator", "id": "d", "owner": "plugin:x"}, "owned by"),
+            ({"kind": "message-decorator", "id": "d", "position": "side"}, "position"),
+            ({"kind": "message-decorator", "id": "d", "maxHeight": 4}, "maxHeight"),
+            ({"kind": "message-decorator", "id": "d", "maxHeight": 9000}, "maxHeight"),
+            (
+                {"kind": "message-decorator", "id": "d", "roles": ["robot"]},
+                "roles must",
+            ),
+            ({"kind": "message-decorator", "id": "d", "roles": []}, "roles must"),
+            (
+                {"kind": "message-decorator", "id": "d", "targets": ["tab"]},
+                "only valid",
+            ),
+            ({"kind": "tab", "id": "t", "position": "header"}, "only valid on a"),
+            ({"kind": "tab", "id": "t", "roles": ["user"]}, "only valid on an action"),
+        ],
+    )
+    def test_bad_message_decorator_invalidates_the_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
     def test_action_targets_and_roles(self, tmp_path):
         slot = _slot(
             tmp_path,
