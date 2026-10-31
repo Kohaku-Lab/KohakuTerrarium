@@ -268,6 +268,36 @@ def inject_channel_trigger(
     return trigger_id
 
 
+def restore_listen_triggers(creature: Any) -> list[str]:
+    """Re-install listen triggers missing from a creature's agent.
+
+    Stopping an agent clears every trigger, so a creature started again keeps
+    its listen edges but hears nothing until this runs. Returns the channels
+    restored; channels absent from the creature's environment are skipped.
+    """
+    agent = creature.agent
+    registry = getattr(getattr(agent, "environment", None), "shared_channels", None)
+    manager = getattr(agent, "trigger_manager", None)
+    if registry is None or manager is None:
+        return []
+    restored = []
+    for channel_name in creature.listen_channels:
+        if f"channel_{creature.name}_{channel_name}" in manager._triggers:
+            continue
+        if registry.get(channel_name) is None:
+            continue
+        inject_channel_trigger(
+            agent,
+            subscriber_id=creature.name,
+            channel_name=channel_name,
+            registry=registry,
+            ignore_sender=creature.name,
+            ignore_sender_id=creature.creature_id,
+        )
+        restored.append(channel_name)
+    return restored
+
+
 def remove_channel_trigger(
     agent: Any,
     *,

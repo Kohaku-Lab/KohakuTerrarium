@@ -327,6 +327,25 @@ class TestTerrariumIntegration:
         assert channel_msgs[0].payload["content"] == "status: green"
         assert channel_msgs[0].payload["sender"] == "alice"
 
+        # --- a stopped-then-started listener still hears the channel ------
+        # Stopping clears the agent's triggers; start must re-install bob's
+        # listen trigger from the graph, or bob is silently deaf on ``ops``.
+        await service.stop_creature("bob")
+        assert "bob_ops" not in ops._subscribers
+        await service.start_creature("bob")
+        await _settle()
+        assert set(ops._subscribers) == {"bob_ops"}
+        assert [t["trigger_id"] for t in await service.list_triggers("bob")] == [
+            "channel_bob_ops"
+        ]
+        await ops.send(ChannelMessage(sender="alice", content="after restart"))
+        await asyncio.sleep(0.05)
+        bob_hist = await service.chat_history("bob")
+        delivered = [
+            m for m in bob_hist["messages"] if "after restart" in str(m.get("content"))
+        ]
+        assert len(delivered) == 1
+
         # --- the Protocol's topology / status read surface ---------------
         # ``list_channels`` reflects the declared channel; the per-graph
         # ``get_graph`` exposes the live wiring edges.
