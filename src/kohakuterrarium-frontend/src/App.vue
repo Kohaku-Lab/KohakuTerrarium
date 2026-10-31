@@ -13,6 +13,8 @@
     <OverlayLayer />
     <DesktopOpenHost />
     <DesktopFirstRun />
+    <DesktopBackendBanner />
+    <DeepLinkInstallDialog />
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
     <WorkspaceResumeDialog />
@@ -28,10 +30,12 @@ import AdminTokenModal from "@/components/auth/AdminTokenModal.vue"
 import AuthGate from "@/components/auth/AuthGate.vue"
 import LoginPromptModal from "@/components/auth/LoginPromptModal.vue"
 import CommandPalette from "@/components/chrome/CommandPalette.vue"
+import DesktopBackendBanner from "@/components/chrome/DesktopBackendBanner.vue"
 import DesktopFirstRun from "@/components/chrome/DesktopFirstRun.vue"
 import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
+import DeepLinkInstallDialog from "@/components/shell/DeepLinkInstallDialog.vue"
 import DesktopOpenHost from "@/components/shell/DesktopOpenHost.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
 import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
@@ -41,6 +45,7 @@ import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
 import { useConnectIntent } from "@/composables/useConnectIntent"
 import { useDensity } from "@/composables/useDensity"
+import { useDesktopCommands } from "@/composables/useDesktopCommands"
 import { useDesktopMenu } from "@/composables/useDesktopMenu"
 import { useDesktopTrayItems } from "@/composables/useDesktopTrayItems"
 import { useDesktopTrayMenu } from "@/composables/useDesktopTrayMenu"
@@ -95,6 +100,7 @@ instances.fetchAll()
 useKeyboardShortcuts()
 useDesktopSummon()
 useDesktopPopout()
+useDesktopCommands()
 useDesktopMenu()
 useDesktopTrayItems()
 useDesktopTrayMenu()

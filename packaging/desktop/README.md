@@ -16,8 +16,14 @@ Tauri shell ── spawns ──> python/python(.exe) -m kohakuterrarium.launche
 
 | Path | Purpose |
 |---|---|
-| `src-tauri/src/backend.rs` | start, watch and stop the Python backend; progress and state-file protocol |
-| `src-tauri/src/window.rs` | main window, navigation policy, tray |
+| `src-tauri/src/backend.rs` | start, watch, restart, repair and stop the Python backend; progress and state-file protocol |
+| `src-tauri/src/runtime/` | backend status and memory (`stats.rs`), diagnostics bundle (`diagnostics.rs`) with credential removal (`redact.rs`), runtime repair (`repair.rs`) |
+| `src-tauri/src/attention.rs` | one attention state drives the tray dot, tooltip and taskbar progress |
+| `src-tauri/src/tray.rs` | tray icon and menu (waiting sessions, sessions, new session, backend, diagnostics) |
+| `src-tauri/src/dialogs/` | the operating system's file and folder dialogs |
+| `src-tauri/src/settings.rs` | declared shell preferences, read and patched by the page |
+| `src-tauri/src/popout.rs` | session windows and their reopening at the next launch |
+| `src-tauri/src/window.rs` | main window and navigation policy |
 | `src-tauri/src/commands.rs` | native operations the app page may call (mirrors the pywebview shell) |
 | `src-tauri/src/navigation.rs` | which URLs may load in the window |
 | `src-tauri/src/smoke.rs` | headless self-check for installer tests |
@@ -57,7 +63,17 @@ tray icon and reports whether its attention badge can be shown and cleared
 (`summonShortcut`). `KT_DESKTOP_SMOKE_POPOUT` opens a session window and reports
 whether it loaded the app page and called a native command (`popoutWindow`). The
 installer tests always set all four plus `KT_DESKTOP_SMOKE_MENU`, which builds the
-application menu and counts its top-level menus (`menu`).
+application menu and counts its top-level menus (`menu`). They also set
+`KT_DESKTOP_SMOKE_BACKEND`, which restarts the backend and checks that the new
+process answers with the same launch token (`backendRestart`);
+`KT_DESKTOP_SMOKE_DIAGNOSTICS`, which plants credentials in the log, builds the
+diagnostics bundle and checks that none of them survived (`diagnostics`); and
+`KT_DESKTOP_SMOKE_REPAIR`, which reinstalls the shipped release and checks that the
+backend returns on a rewritten pointer (`runtimeRepair`). The tray probe also
+rebuilds the tray menu.
+
+`tests/unit/packaging/test_desktop_contract.py` finds command modules by scanning
+`src-tauri/src`; `MANUAL-CHECKS.md` lists what only a person at a desktop can check.
 
 With `KT_DESKTOP_SMOKE_UPDATE` also set, the self-check fetches the update feed and
 downloads the advertised build, which verifies its signature; the report's

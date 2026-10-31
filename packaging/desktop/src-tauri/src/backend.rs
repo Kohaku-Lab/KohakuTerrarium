@@ -9,7 +9,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,6 +18,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, Url};
 
+use crate::overlay;
+use crate::popout::{self, PopoutRegistry};
 use crate::smoke;
 
 /// Must equal `utils/desktop_launch.py`; a Python test compares the two.
@@ -29,10 +31,51 @@ const READY_TIMEOUT: Duration = Duration::from_secs(1800);
 const STALL_TIMEOUT: Duration = Duration::from_secs(180);
 const POLL: Duration = Duration::from_millis(100);
 
+const RECOVER_WINDOW: Duration = Duration::from_secs(120);
+const RECOVER_LIMIT: usize = 3;
+
+/// Where the backend is in its life, as the page and the tray show it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Phase {
+    #[default]
+    Starting,
+    Running,
+    Restarting,
+    Failed,
+}
+
+impl Phase {
+    pub fn name(self) -> &'static str {
+        match self {
+            Phase::Starting => "starting",
+            Phase::Running => "running",
+            Phase::Restarting => "restarting",
+            Phase::Failed => "failed",
+        }
+    }
+}
+
+/// Whether another automatic restart is allowed; records it when it is.
+pub fn may_recover(crashes: &mut Vec<Instant>, now: Instant) -> bool {
+    crashes.retain(|at| now.duration_since(*at) < RECOVER_WINDOW);
+    if crashes.len() >= RECOVER_LIMIT {
+        return false;
+    }
+    crashes.push(now);
+    true
+}
+
 #[derive(Default)]
 pub struct Backend {
     child: Mutex<Option<Child>>,
     state_path: Mutex<Option<PathBuf>>,
+    token: Mutex<Option<String>>,
+    phase: Mutex<Phase>,
+    started_at: Mutex<Option<Instant>>,
+    crashes: Mutex<Vec<Instant>>,
+    restarts: AtomicU32,
+    main_loads: AtomicU32,
+    relaunching: AtomicBool,
     port: AtomicU16,
     shell_loaded: AtomicBool,
     page_loaded: AtomicBool,
@@ -46,6 +89,62 @@ pub struct Backend {
 }
 
 impl Backend {
+    pub fn phase(&self) -> Phase {
+        *self.phase.lock().unwrap()
+    }
+
+    fn set_phase(&self, phase: Phase) {
+        *self.phase.lock().unwrap() = phase;
+    }
+
+    pub fn restarts(&self) -> u32 {
+        self.restarts.load(Ordering::SeqCst)
+    }
+
+    pub fn is_relaunching(&self) -> bool {
+        self.relaunching.load(Ordering::SeqCst)
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
+    }
+
+    /// Seconds since the current backend process became ready.
+    pub fn uptime_secs(&self) -> Option<u64> {
+        self.started_at
+            .lock()
+            .unwrap()
+            .map(|at| at.elapsed().as_secs())
+    }
+
+    /// The operating-system id of the running backend process.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.lock().unwrap().as_ref().map(Child::id)
+    }
+
+    pub fn token(&self) -> Option<String> {
+        self.token.lock().unwrap().clone()
+    }
+
+    /// Ask the backend to exit, then force it if it does not; the app keeps running.
+    fn stop_child(&self) {
+        let Some(mut child) = self.child.lock().unwrap().take() else {
+            return;
+        };
+        if let Some(path) = self.state_path.lock().unwrap().as_ref() {
+            let _ = std::fs::write(path, r#"{"status":"shutdown"}"#);
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            thread::sleep(POLL);
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
     /// Whether the caller is the first to ask to reopen the last run's session windows.
     pub fn claim_popout_restore(&self) -> bool {
         !self.popouts_restored.swap(true, Ordering::SeqCst)
@@ -93,6 +192,12 @@ impl Backend {
 
     pub fn mark_page_loaded(&self) {
         self.page_loaded.store(true, Ordering::SeqCst);
+        self.main_loads.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// How many times the main window has finished loading the app page.
+    pub fn main_loads(&self) -> u32 {
+        self.main_loads.load(Ordering::SeqCst)
     }
 
     pub fn page_loaded(&self) -> bool {
@@ -120,21 +225,7 @@ impl Backend {
     /// Ask the backend to exit, then force it if it does not.
     pub fn stop(&self) {
         self.stopping.store(true, Ordering::SeqCst);
-        let Some(mut child) = self.child.lock().unwrap().take() else {
-            return;
-        };
-        if let Some(path) = self.state_path.lock().unwrap().as_ref() {
-            let _ = std::fs::write(path, r#"{"status":"shutdown"}"#);
-        }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                return;
-            }
-            thread::sleep(POLL);
-        }
-        let _ = child.kill();
-        let _ = child.wait();
+        self.stop_child();
     }
 }
 
@@ -226,7 +317,7 @@ pub fn parse_progress(line: &str) -> Option<Value> {
     (object.contains_key("phase") || object.contains_key("percent")).then_some(value)
 }
 
-fn config_dir(app: &AppHandle) -> PathBuf {
+pub fn config_dir(app: &AppHandle) -> PathBuf {
     match std::env::var_os("KT_CONFIG_DIR") {
         Some(dir) => PathBuf::from(dir),
         None => app
@@ -235,6 +326,28 @@ fn config_dir(app: &AppHandle) -> PathBuf {
             .unwrap_or_else(|_| PathBuf::from("."))
             .join(".kohakuterrarium"),
     }
+}
+
+/// A command that runs the bundled interpreter with the launcher on its path.
+pub fn python_command(app: &AppHandle, args: &[&str]) -> Result<Command, String> {
+    let layout = Layout::from_root(&resource_root(app)?);
+    if !layout.python.is_file() {
+        return Err(format!(
+            "bundled Python not found at {}",
+            layout.python.display()
+        ));
+    }
+    let mut command = Command::new(&layout.python);
+    command
+        .args(args)
+        .envs(environment(&layout, ""))
+        .stdin(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    Ok(command)
 }
 
 fn resource_root(app: &AppHandle) -> Result<PathBuf, String> {
@@ -251,6 +364,7 @@ fn spawn(
     layout: &Layout,
     state_path: &Path,
     token: &str,
+    port: u16,
 ) -> Result<Child, String> {
     if !layout.python.is_file() {
         return Err(format!(
@@ -268,7 +382,7 @@ fn spawn(
 
     let mut command = Command::new(&layout.python);
     command
-        .args(arguments(REQUESTED_PORT, state_path, std::process::id()))
+        .args(arguments(port, state_path, std::process::id()))
         .envs(environment(layout, token))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -334,11 +448,25 @@ fn wait_ready(
     }
 }
 
+/// Tell the shell page and every app page which phase the backend is in.
+fn announce(app: &AppHandle, phase: Phase, message: &str) {
+    let detail = serde_json::json!({ "state": phase.name(), "message": message });
+    let _ = app.emit("kt-backend-state", &detail);
+    let script = format!(
+        "window.dispatchEvent(new CustomEvent('kt:desktop-backend-state', {{ detail: {detail} }}))"
+    );
+    for window in app.webview_windows().values() {
+        let _ = window.eval(&script);
+    }
+    crate::runtime::refresh_tray_line(app);
+}
+
 fn fail(app: &AppHandle, message: &str) {
     if let Some(out) = smoke::output_path() {
         smoke::fail(app, &out, message);
         return;
     }
+    app.state::<Backend>().set_phase(Phase::Failed);
     let _ = app.emit("kt-error", message);
     if let Some(window) = app.get_webview_window("main") {
         let encoded = serde_json::to_string(message).unwrap_or_else(|_| "\"error\"".into());
@@ -346,14 +474,18 @@ fn fail(app: &AppHandle, message: &str) {
             "window.__ktShowError && window.__ktShowError({encoded})"
         ));
     }
+    announce(app, Phase::Failed, message);
 }
 
-fn launch(app: &AppHandle) -> Result<(), String> {
+/// Start the backend process on `port` (or the next free one) and wait until it serves.
+fn start_child(app: &AppHandle, token: &str, port: u16) -> Result<u16, String> {
     let backend = app.state::<Backend>();
     let layout = Layout::from_root(&resource_root(app)?);
-    let token = new_token();
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
     let state_path = std::env::temp_dir().join(format!(
-        "kt-desktop-{}-{}.json",
+        "kt-desktop-{}-{}-{unique}.json",
         std::process::id(),
         &token[..8]
     ));
@@ -362,12 +494,22 @@ fn launch(app: &AppHandle) -> Result<(), String> {
 
     let clock = Instant::now();
     let activity = Arc::new(AtomicU64::new(0));
-    let mut child = spawn(app, &layout, &state_path, &token)?;
+    let mut child = spawn(app, &layout, &state_path, token, port)?;
     forward_progress(app.clone(), &mut child, activity.clone(), clock);
     *backend.child.lock().unwrap() = Some(child);
 
-    let port = wait_ready(&backend, &state_path, &activity, clock)?;
-    backend.port.store(port, Ordering::SeqCst);
+    let ready = wait_ready(&backend, &state_path, &activity, clock)?;
+    backend.port.store(ready, Ordering::SeqCst);
+    *backend.started_at.lock().unwrap() = Some(Instant::now());
+    backend.set_phase(Phase::Running);
+    Ok(ready)
+}
+
+fn launch(app: &AppHandle) -> Result<(), String> {
+    let backend = app.state::<Backend>();
+    let token = new_token();
+    *backend.token.lock().unwrap() = Some(token.clone());
+    let port = start_child(app, &token, REQUESTED_PORT)?;
 
     let window = app
         .get_webview_window("main")
@@ -381,6 +523,96 @@ fn launch(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Send every window to the restarted backend: the main window reloads first because only it
+/// carries the launch token; session windows follow once it has the new session cookie.
+fn reload_windows(app: &AppHandle, token: &str, port: u16) {
+    let backend = app.state::<Backend>();
+    let loads_before = backend.main_loads();
+    if let (Some(main), Ok(url)) = (
+        app.get_webview_window("main"),
+        Url::parse(&launch_url(port, token)),
+    ) {
+        let _ = main.navigate(url);
+    }
+    let mut sessions = Vec::new();
+    let registry = app.state::<PopoutRegistry>();
+    for (label, window) in app.webview_windows() {
+        if popout::is_popout_label(&label) {
+            match registry
+                .scope_of(&label)
+                .and_then(|scope| popout::popout_url(port, &scope))
+            {
+                Some(url) => sessions.push((window, url)),
+                None => {
+                    let _ = window.close();
+                }
+            }
+        } else if overlay::is_overlay_label(&label) {
+            let _ = window.close();
+        }
+    }
+    if sessions.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let backend = app.state::<Backend>();
+        while backend.main_loads() == loads_before && Instant::now() < deadline {
+            thread::sleep(POLL);
+        }
+        for (window, url) in sessions {
+            let _ = window.navigate(url);
+        }
+    });
+}
+
+/// Stop the backend, run `between` while it is stopped, start it again and reload every window.
+fn relaunch(
+    app: &AppHandle,
+    between: impl FnOnce(&AppHandle) -> Result<(), String>,
+) -> Result<(), String> {
+    let backend = app.state::<Backend>();
+    backend.stop_child();
+    between(app)?;
+    let token = backend.token().ok_or("the backend was never started")?;
+    let port = start_child(app, &token, backend.port().unwrap_or(REQUESTED_PORT))?;
+    reload_windows(app, &token, port);
+    Ok(())
+}
+
+/// Stop the backend and start it again with the same token, then reload every window.
+pub fn restart(app: &AppHandle) -> Result<(), String> {
+    cycle(app, |_| Ok(()))
+}
+
+/// Reinstall the release shipped with the shell while the backend is stopped, then start it again.
+pub fn repair(app: &AppHandle) -> Result<(), String> {
+    cycle(app, crate::runtime::repair::run)
+}
+
+fn cycle(
+    app: &AppHandle,
+    between: impl FnOnce(&AppHandle) -> Result<(), String>,
+) -> Result<(), String> {
+    let backend = app.state::<Backend>();
+    if backend.relaunching.swap(true, Ordering::SeqCst) {
+        return Err("the backend is already restarting".into());
+    }
+    backend.set_phase(Phase::Restarting);
+    announce(app, Phase::Restarting, "");
+    let result = relaunch(app, between);
+    backend.relaunching.store(false, Ordering::SeqCst);
+    match &result {
+        Ok(()) => {
+            backend.restarts.fetch_add(1, Ordering::SeqCst);
+            announce(app, Phase::Running, "");
+        }
+        Err(message) => fail(app, message),
+    }
+    result
+}
+
 fn watch(app: AppHandle) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(1));
@@ -388,17 +620,23 @@ fn watch(app: AppHandle) {
         if backend.stopping.load(Ordering::SeqCst) {
             return;
         }
+        if backend.is_relaunching() {
+            continue;
+        }
         let exited = match backend.child.lock().unwrap().as_mut() {
             Some(child) => child.try_wait().ok().flatten(),
-            None => return,
+            None => continue,
         };
-        if let Some(status) = exited {
-            fail(
-                &app,
-                &format!("The backend stopped unexpectedly ({status}). Restart the app; details are in app.log."),
-            );
-            return;
+        let Some(status) = exited else { continue };
+        let allowed = may_recover(&mut backend.crashes.lock().unwrap(), Instant::now());
+        if allowed && restart(&app).is_ok() {
+            continue;
         }
+        fail(
+            &app,
+            &format!("The backend stopped unexpectedly ({status}). Restart it from the tray or the settings; details are in app.log."),
+        );
+        return;
     });
 }
 
@@ -416,6 +654,40 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_restarts_stop_after_three_crashes_in_two_minutes() {
+        let start = Instant::now();
+        let mut crashes = Vec::new();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        assert!(may_recover(&mut crashes, at(0)));
+        assert!(may_recover(&mut crashes, at(10)));
+        assert!(may_recover(&mut crashes, at(20)));
+        assert!(!may_recover(&mut crashes, at(30)));
+        assert_eq!(crashes.len(), 3);
+        assert!(may_recover(&mut crashes, at(125)));
+        assert!(may_recover(&mut crashes, at(135)));
+        assert!(!may_recover(&mut crashes, at(139)));
+        assert!(may_recover(&mut crashes, at(140)));
+    }
+
+    #[test]
+    fn phases_have_distinct_names_and_a_new_backend_is_starting() {
+        let names: Vec<_> = [
+            Phase::Starting,
+            Phase::Running,
+            Phase::Restarting,
+            Phase::Failed,
+        ]
+        .map(Phase::name)
+        .to_vec();
+        assert_eq!(names, ["starting", "running", "restarting", "failed"]);
+        let backend = Backend::default();
+        assert_eq!(backend.phase(), Phase::Starting);
+        assert_eq!(backend.restarts(), 0);
+        assert!(backend.pid().is_none() && backend.token().is_none());
+        assert!(!backend.is_relaunching());
+    }
 
     #[test]
     fn layout_points_at_the_interpreter_for_the_platform() {

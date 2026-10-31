@@ -10,6 +10,7 @@ mod navigation;
 mod opens;
 mod overlay;
 mod popout;
+mod runtime;
 mod settings;
 mod smoke;
 mod summon;
@@ -105,6 +106,11 @@ pub fn run() {
             popout::open_popout_window,
             popout::popout_ack,
             popout::popout_return,
+            runtime::get_backend_status,
+            runtime::restart_backend,
+            runtime::open_logs,
+            runtime::repair::repair_runtime,
+            runtime::diagnostics::export_diagnostics,
             dialogs::pick_folder,
             dialogs::pick_files,
             dialogs::save_file,
@@ -157,6 +163,7 @@ pub fn run() {
             if !headless {
                 summon::restore(app.handle());
                 tray::install(app)?;
+                runtime::watch_tray_line(app.handle().clone());
             } else if smoke::tray_probe_requested() {
                 let _ = tray::install(app);
             }

@@ -9,8 +9,13 @@ import {
   popoutWindowsSupported,
   closeOverlayWindow,
   getCloseToTray,
+  exportDiagnostics,
+  getBackendStatus,
   getShellSettings,
   nativeDialogsSupported,
+  openLogs,
+  repairRuntime,
+  restartBackend,
   patchShellSettings,
   pickFilesNative,
   pickFolderNative,
@@ -313,6 +318,39 @@ describe("hostBridge", () => {
     expect(await pickFolderNative()).toBeUndefined()
     expect(await pickFilesNative()).toBeUndefined()
     expect(await saveFileNative()).toBeUndefined()
+  })
+
+  it("controls the backend, repairs the runtime and exports diagnostics through Tauri only", async () => {
+    expect(await getBackendStatus()).toBeNull()
+    expect(await restartBackend()).toBe(false)
+    expect(await openLogs()).toBe(false)
+    expect(await repairRuntime()).toBe(false)
+    expect(await exportDiagnostics()).toEqual({ ok: false, error: "unsupported" })
+
+    const answers = {
+      get_backend_status: { state: "running", port: 8001 },
+      export_diagnostics: { ok: true, path: "C:/out.zip", files: 6 },
+    }
+    const invoke = vi.fn(async (name) => (name in answers ? answers[name] : true))
+    window.__TAURI_INTERNALS__ = { invoke }
+    expect(await getBackendStatus()).toEqual({ state: "running", port: 8001 })
+    expect(await restartBackend()).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("restart_backend", {})
+    expect(await repairRuntime()).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("repair_runtime", {})
+    expect(await exportDiagnostics()).toMatchObject({ ok: true, files: 6 })
+    expect(invoke).toHaveBeenLastCalledWith("export_diagnostics", {})
+    await exportDiagnostics("C:/chosen.zip")
+    expect(invoke).toHaveBeenLastCalledWith("export_diagnostics", { args: ["C:/chosen.zip"] })
+
+    window.__TAURI_INTERNALS__ = {
+      invoke: async () => {
+        throw new Error("denied")
+      },
+    }
+    expect(await getBackendStatus()).toBeNull()
+    expect(await restartBackend()).toBe(false)
+    expect(await exportDiagnostics()).toEqual({ ok: false, error: "denied" })
   })
 
   it("reads and patches shell settings through Tauri only", async () => {

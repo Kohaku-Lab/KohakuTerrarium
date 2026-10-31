@@ -70,6 +70,9 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
         "KT_DESKTOP_SMOKE_SUMMON": "1",
         "KT_DESKTOP_SMOKE_POPOUT": "1",
         "KT_DESKTOP_SMOKE_MENU": "1",
+        "KT_DESKTOP_SMOKE_BACKEND": "1",
+        "KT_DESKTOP_SMOKE_DIAGNOSTICS": "1",
+        "KT_DESKTOP_SMOKE_REPAIR": "1",
     }
     if os.environ.get("KT_DESKTOP_RESOURCES") is None and resources != exe.parent:
         env["KT_DESKTOP_RESOURCES"] = str(resources)
@@ -110,6 +113,37 @@ def check_report(data: dict) -> list[str]:
         problems.append("the shell did not create a tray icon")
     elif tray.get("badgeShown") is not True or tray.get("badgeCleared") is not True:
         problems.append(f"the tray icon badge could not be updated: {tray}")
+    elif tray.get("menuShown") is not True or tray.get("menuCleared") is not True:
+        problems.append(f"the tray menu could not be rebuilt: {tray}")
+    diagnostics = data.get("diagnostics") or {}
+    if diagnostics.get("planted") is not True or diagnostics.get("written") is not True:
+        problems.append(f"the diagnostics bundle could not be built: {diagnostics}")
+    elif (
+        diagnostics.get("leaked") is not False or diagnostics.get("hasLog") is not True
+    ):
+        problems.append(
+            f"the diagnostics bundle kept a credential or lost the log: {diagnostics}"
+        )
+    repair = data.get("runtimeRepair") or {}
+    if repair.get("repaired") is not True:
+        problems.append(f"the runtime could not be repaired: {repair}")
+    elif not (
+        repair.get("pointerRewritten") is True
+        and repair.get("sameVersion") is True
+        and repair.get("pidChanged") is True
+        and repair.get("healthStatus") == 200
+    ):
+        problems.append(f"the repaired runtime is not healthy: {repair}")
+    restart = data.get("backendRestart") or {}
+    if restart.get("restarted") is not True:
+        problems.append(f"the backend could not be restarted: {restart}")
+    elif not (
+        restart.get("pidChanged") is True
+        and restart.get("sameToken") is True
+        and restart.get("healthStatus") == 200
+        and restart.get("memoryMeasured") is True
+    ):
+        problems.append(f"the restarted backend is not healthy: {restart}")
     summon = data.get("summonShortcut") or {}
     if summon.get("registered") is not True or summon.get("released") is not True:
         problems.append(f"a system-wide shortcut could not be registered: {summon}")

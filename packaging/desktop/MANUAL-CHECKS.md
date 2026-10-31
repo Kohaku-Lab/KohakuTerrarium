@@ -29,5 +29,14 @@ Each section names the milestone that added it and the surface to look at.
 - Inside a session, the status bar shows a "Desktop" chip with a dot until the card was dismissed; hovering lists the current values; clicking opens the desktop section.
 - Settings -> Desktop app is grouped under Window, Startup, Shortcuts, Updates and Integration, and "Reopen session windows" is there.
 
+## Backend control, repair and diagnostics (M5, M6)
+- Settings -> Desktop app -> Backend shows running, memory, uptime and restarts; "Restart backend" shows a banner, then the window reloads on a fresh backend.
+- End the backend's python process in Task Manager: a "Restarting the backend" banner appears and the window reloads by itself. Do it four times within two minutes: the fourth time a "backend stopped" banner with Restart backend and Open logs stays.
+- Tray menu shows "Backend: running - N MB"; "Restart backend" and "Export diagnostics..." work from there.
+- Settings -> Runtime shows the active and the shipped release; "Repair runtime" asks for a second click, then the window restarts on the shipped release. With a stale runtime (active older than shipped) the warning line is shown.
+- Settings -> Diagnostics -> Export: a save dialog opens; the zip holds info.json, app.log, runtime/, shell-settings.json and doctor.txt, and a search for your API key in them finds nothing.
+- Break the runtime (rename `~/.kohakuterrarium/runtime/versions/<active>` while the app is closed) and start: the loading page shows the error with Restart backend, Repair runtime, Export diagnostics and Open logs; Repair runtime brings the app up.
+- Command palette: "Desktop: settings / restart backend / export diagnostics / open backend log".
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

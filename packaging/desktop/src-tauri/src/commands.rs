@@ -56,6 +56,9 @@ pub fn capabilities() -> Value {
         "nativeDialogs": true,
         "taskbarProgress": true,
         "trayMenu": true,
+        "backendControl": true,
+        "runtimeRepair": true,
+        "diagnostics": true,
     })
 }
 

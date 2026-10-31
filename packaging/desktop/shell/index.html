@@ -80,6 +80,22 @@
         text-align: left;
         white-space: pre-wrap;
       }
+      .actions {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 14px;
+      }
+      .actions button {
+        padding: 6px 14px;
+        border: 1px solid var(--track);
+        border-radius: 6px;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -107,6 +123,17 @@
           detail.textContent = payload.message || ""
         }
 
+        var core = window.__TAURI__ && window.__TAURI__.core
+
+        function actionButton(label, command) {
+          var button = document.createElement("button")
+          button.textContent = label
+          button.onclick = function () {
+            core.invoke(command).catch(function () {})
+          }
+          return button
+        }
+
         window.__ktShowError = function (message) {
           shell.className = "shell failed"
           title.innerHTML = "<h2>Startup failed</h2>"
@@ -114,10 +141,26 @@
           var pre = document.createElement("pre")
           pre.textContent = String(message)
           detail.appendChild(pre)
+          if (core) {
+            var actions = document.createElement("div")
+            actions.className = "actions"
+            actions.appendChild(actionButton("Restart backend", "restart_backend"))
+            actions.appendChild(actionButton("Repair runtime", "repair_runtime"))
+            actions.appendChild(actionButton("Export diagnostics", "export_diagnostics"))
+            actions.appendChild(actionButton("Open logs", "open_logs"))
+            detail.appendChild(actions)
+          }
         }
 
         var events = window.__TAURI__ && window.__TAURI__.event
         if (events) {
+          events.listen("kt-backend-state", function (event) {
+            if (event.payload && event.payload.state === "restarting") {
+              shell.className = "shell"
+              title.textContent = "Restarting KohakuTerrarium…"
+              detail.textContent = ""
+            }
+          })
           events.listen("kt-progress", function (event) {
             progress(event.payload)
           })

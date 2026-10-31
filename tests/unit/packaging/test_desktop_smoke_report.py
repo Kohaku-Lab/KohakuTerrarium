@@ -28,7 +28,34 @@ def _report(**overrides) -> dict:
         "overlayWindow": {"opened": True, "pageLoaded": True, "ipc": True},
         "menu": {"built": True, "topLevel": 6, "expected": 6},
         "popoutWindow": {"opened": True, "pageLoaded": True, "ipc": True},
-        "tray": {"installed": True, "badgeShown": True, "badgeCleared": True},
+        "tray": {
+            "installed": True,
+            "badgeShown": True,
+            "badgeCleared": True,
+            "menuShown": True,
+            "menuCleared": True,
+        },
+        "backendRestart": {
+            "restarted": True,
+            "pidChanged": True,
+            "sameToken": True,
+            "healthStatus": 200,
+            "memoryMeasured": True,
+        },
+        "diagnostics": {
+            "planted": True,
+            "written": True,
+            "hasInfo": True,
+            "hasLog": True,
+            "leaked": False,
+        },
+        "runtimeRepair": {
+            "repaired": True,
+            "pointerRewritten": True,
+            "sameVersion": True,
+            "pidChanged": True,
+            "healthStatus": 200,
+        },
         "summonShortcut": {"registered": True, "released": True},
     }
     report.update(overrides)
@@ -64,6 +91,85 @@ def test_a_healthy_report_has_no_problems(smoke):
         (
             {"tray": {"installed": True, "badgeShown": True, "badgeCleared": False}},
             "badge could not be updated",
+        ),
+        (
+            {
+                "tray": {
+                    "installed": True,
+                    "badgeShown": True,
+                    "badgeCleared": True,
+                    "menuShown": True,
+                    "menuCleared": False,
+                }
+            },
+            "tray menu could not be rebuilt",
+        ),
+        ({"runtimeRepair": None}, "runtime could not be repaired"),
+        (
+            {
+                "runtimeRepair": {
+                    "repaired": True,
+                    "pointerRewritten": False,
+                    "sameVersion": True,
+                    "pidChanged": True,
+                    "healthStatus": 200,
+                }
+            },
+            "repaired runtime is not healthy",
+        ),
+        ({"diagnostics": None}, "diagnostics bundle could not be built"),
+        (
+            {
+                "diagnostics": {
+                    "planted": True,
+                    "written": True,
+                    "hasInfo": True,
+                    "hasLog": True,
+                    "leaked": True,
+                }
+            },
+            "kept a credential",
+        ),
+        (
+            {
+                "diagnostics": {
+                    "planted": True,
+                    "written": True,
+                    "hasInfo": True,
+                    "hasLog": False,
+                    "leaked": False,
+                }
+            },
+            "kept a credential or lost the log",
+        ),
+        ({"backendRestart": None}, "backend could not be restarted"),
+        (
+            {"backendRestart": {"restarted": False}},
+            "backend could not be restarted",
+        ),
+        (
+            {
+                "backendRestart": {
+                    "restarted": True,
+                    "pidChanged": False,
+                    "sameToken": True,
+                    "healthStatus": 200,
+                    "memoryMeasured": True,
+                }
+            },
+            "restarted backend is not healthy",
+        ),
+        (
+            {
+                "backendRestart": {
+                    "restarted": True,
+                    "pidChanged": True,
+                    "sameToken": False,
+                    "healthStatus": 200,
+                    "memoryMeasured": True,
+                }
+            },
+            "restarted backend is not healthy",
         ),
         ({"summonShortcut": None}, "could not be registered"),
         (

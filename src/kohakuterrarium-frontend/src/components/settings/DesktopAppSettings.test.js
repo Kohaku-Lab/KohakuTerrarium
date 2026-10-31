@@ -1,13 +1,15 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { shimsApi, secretsApi } = vi.hoisted(() => ({
+const { shimsApi, secretsApi, runtimeApi } = vi.hoisted(() => ({
   shimsApi: { status: vi.fn(), install: vi.fn(), uninstall: vi.fn() },
   secretsApi: { status: vi.fn(), setMode: vi.fn() },
+  runtimeApi: { getRuntime: vi.fn() },
 }))
 
 vi.mock("@/utils/appShimsApi", () => ({ appShimsAPI: shimsApi }))
 vi.mock("@/utils/appSecretsApi", () => ({ appSecretsAPI: secretsApi }))
+vi.mock("@/utils/appUpdateApi", () => ({ appUpdateAPI: { getRuntime: runtimeApi.getRuntime } }))
 vi.mock("@/utils/i18n", () => ({
   useI18n: () => ({
     t: (key, params = {}) =>
@@ -55,6 +57,8 @@ function mountSettings() {
 beforeEach(() => {
   Object.values(shimsApi).forEach((fn) => fn.mockReset())
   Object.values(secretsApi).forEach((fn) => fn.mockReset())
+  runtimeApi.getRuntime.mockReset()
+  runtimeApi.getRuntime.mockRejectedValue(new Error("404"))
   secretsApi.status.mockRejectedValue(new Error("404"))
   delete window.pywebview
 })
@@ -339,5 +343,100 @@ describe("DesktopAppSettings", () => {
     const wrapper = mountSettings()
     await flushPromises()
     expect(wrapper.find("[data-setting='autostart']").exists()).toBe(false)
+    expect(wrapper.find("[data-setting='backend']").exists()).toBe(false)
+  })
+
+  it("shows the backend the Tauri shell manages and restarts it on request", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const invoke = vi.fn(async (name) => {
+      if (name === "get_backend_status") {
+        return {
+          state: "running",
+          uptimeSec: 7500,
+          restarts: 2,
+          memoryBytes: 612 * 1024 * 1024,
+        }
+      }
+      return name === "get_shell_settings" ? { restorePopouts: true } : true
+    })
+    window.__TAURI_INTERNALS__ = { invoke }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    const summary = wrapper.find("[data-backend-summary]").text()
+    expect(summary).toContain("settings.desktop.backendState.running")
+    expect(summary).toContain("612 MB")
+    expect(summary).toContain("2h 5m")
+    expect(summary).toContain('"count":2')
+
+    await wrapper.find("[data-backend-restart]").trigger("click")
+    expect(invoke).toHaveBeenCalledWith("restart_backend", {})
+    await wrapper.find("[data-backend-logs]").trigger("click")
+    expect(invoke).toHaveBeenCalledWith("open_logs", {})
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it("names the runtime, warns when the shipped one is newer, and asks twice before repairing", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    runtimeApi.getRuntime.mockResolvedValue({
+      active: { version: "2.0.0.dev5" },
+      bundled: "2.2.1.dev11",
+      bundled_newer: true,
+    })
+    const invoke = vi.fn(async (name) =>
+      name === "get_backend_status"
+        ? { state: "running" }
+        : name === "get_shell_settings"
+          ? {}
+          : true,
+    )
+    window.__TAURI_INTERNALS__ = { invoke }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    const summary = wrapper.find("[data-runtime-summary]").text()
+    expect(summary).toContain("2.0.0.dev5")
+    expect(summary).toContain("2.2.1.dev11")
+    expect(wrapper.find("[data-runtime-newer]").exists()).toBe(true)
+
+    await wrapper.find("[data-runtime-repair]").trigger("click")
+    expect(invoke).not.toHaveBeenCalledWith("repair_runtime", expect.anything())
+    expect(wrapper.find("[data-runtime-repair]").text()).toBe(
+      "settings.desktop.runtimeRepairConfirm",
+    )
+    await wrapper.find("[data-runtime-repair]").trigger("click")
+    expect(invoke).toHaveBeenCalledWith("repair_runtime", {})
+    expect(wrapper.find("[data-runtime-repair]").text()).toBe("settings.desktop.runtimeRepair")
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it("exports diagnostics and says where the file went, or that it failed, and stays quiet on cancel", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    let answer = { ok: true, path: "C:/out/diag.zip", files: 6 }
+    const invoke = vi.fn(async (name) => {
+      if (name === "get_backend_status") return { state: "running" }
+      if (name === "get_shell_settings") return {}
+      return name === "export_diagnostics" ? answer : true
+    })
+    window.__TAURI_INTERNALS__ = { invoke }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.find("[data-diagnostics-export]").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-diagnostics-result]").text()).toContain("C:/out/diag.zip")
+
+    answer = { ok: false, error: "disk full" }
+    await wrapper.find("[data-diagnostics-export]").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-diagnostics-result]").text()).toBe(
+      "settings.desktop.diagnosticsFailed",
+    )
+
+    answer = { ok: false, cancelled: true }
+    await wrapper.find("[data-diagnostics-export]").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-diagnostics-result]").exists()).toBe(false)
+    delete window.__TAURI_INTERNALS__
   })
 })

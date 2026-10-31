@@ -60,6 +60,11 @@ export const appUpdateAPI = {
     const { data } = await api.get("/state")
     return data
   },
+  /** The active release, every installed one and the one shipped with the shell. */
+  async getRuntime() {
+    const { data } = await api.get("/runtime")
+    return data
+  },
   /** Force-fetch the channel manifest; returns releases filtered for this machine. */
   async probeFeed() {
     const { data } = await api.post("/feeds/probe")

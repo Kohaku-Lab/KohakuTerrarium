@@ -201,6 +201,53 @@ export async function patchShellSettings(patch) {
   }
 }
 
+/**
+ * How the backend process is doing: `{ state, port, pid, uptimeSec, restarts, memoryBytes, processes }`,
+ * or ``null`` when the shell does not manage a backend.
+ */
+export async function getBackendStatus() {
+  if (hostKind() !== KIND_TAURI || !hostSupports("get_backend_status")) return null
+  try {
+    return (await call("get_backend_status")) || null
+  } catch {
+    return null
+  }
+}
+
+/** Restart the backend process and reload the app windows. Resolves ``false`` if a restart is already running. */
+export function restartBackend() {
+  return callBoolean("restart_backend")
+}
+
+/** Show the backend log in the file manager. */
+export function openLogs() {
+  return callBoolean("open_logs")
+}
+
+/** Reinstall the release shipped with the shell while the backend is stopped. Resolves ``false`` if a restart is already running. */
+export function repairRuntime() {
+  return callBoolean("repair_runtime")
+}
+
+/**
+ * Save a diagnostics bundle (versions, logs, settings; credentials removed). Without
+ * ``path`` the shell asks where. Resolves `{ ok, path?, files?, cancelled?, error? }`.
+ */
+export async function exportDiagnostics(path) {
+  if (hostKind() !== KIND_TAURI || !hostSupports("export_diagnostics")) {
+    return { ok: false, error: "unsupported" }
+  }
+  try {
+    return (
+      (path ? await call("export_diagnostics", path) : await call("export_diagnostics")) || {
+        ok: false,
+      }
+    )
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error) }
+  }
+}
+
 /** Whether the shell can show the operating system's own file and folder dialogs. */
 export function nativeDialogsSupported() {
   return hostKind() === KIND_TAURI && hostSupports("pick_folder")

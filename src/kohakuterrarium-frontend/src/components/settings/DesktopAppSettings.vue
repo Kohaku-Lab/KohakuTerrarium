@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate" id="desktop-app-settings" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
+  <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate || backend.status.value" id="desktop-app-settings" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
     <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
 
     <div v-if="showTray || showRestore" class="desktop-section-title" data-section="window">{{ t("settings.desktop.sectionWindow") }}</div>
@@ -58,6 +58,38 @@
       <el-button v-else size="small" data-update-check :loading="updateBusy" @click="checkUpdate">{{ t("settings.desktop.updateCheck") }}</el-button>
     </div>
 
+    <div v-if="backend.status.value" class="desktop-section-title" data-section="backend">{{ t("settings.desktop.sectionBackend") }}</div>
+
+    <div v-if="backend.status.value" class="flex items-start justify-between gap-4" data-setting="backend">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.backendTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1" data-backend-summary>{{ backendSummary }}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <el-button size="small" data-backend-logs @click="openLogs">{{ t("settings.desktop.backendLogs") }}</el-button>
+        <el-button size="small" data-backend-restart :loading="backend.status.value.state === 'restarting'" @click="backend.restart">{{ t("settings.desktop.backendRestart") }}</el-button>
+      </div>
+    </div>
+
+    <div v-if="backend.status.value" class="flex items-start justify-between gap-4" data-setting="runtime">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.runtimeTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1" data-runtime-summary>{{ runtimeSummary }}</div>
+        <div v-if="runtime?.bundled_newer" class="text-[11px] text-amber mt-1" data-runtime-newer>{{ t("settings.desktop.runtimeNewer", { version: runtime.bundled }) }}</div>
+      </div>
+      <el-button size="small" :type="repairArmed ? 'danger' : 'default'" data-runtime-repair @click="repair">{{ repairArmed ? t("settings.desktop.runtimeRepairConfirm") : t("settings.desktop.runtimeRepair") }}</el-button>
+    </div>
+
+    <div v-if="backend.status.value" class="flex items-start justify-between gap-4" data-setting="diagnostics">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.diagnosticsTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.diagnosticsHint") }}</div>
+        <div v-if="diagnosticsResult?.ok" class="text-[11px] text-iolite mt-1" data-diagnostics-result>{{ t("settings.desktop.diagnosticsSaved", { path: diagnosticsResult.path }) }}</div>
+        <div v-else-if="diagnosticsResult" class="text-[11px] text-coral mt-1" data-diagnostics-result>{{ t("settings.desktop.diagnosticsFailed") }}</div>
+      </div>
+      <el-button size="small" :loading="diagnosticsBusy" data-diagnostics-export @click="exportBundle">{{ t("settings.desktop.diagnosticsExport") }}</el-button>
+    </div>
+
     <div v-if="showTerminal || showKeychain" class="desktop-section-title" data-section="integration">{{ t("settings.desktop.sectionIntegration") }}</div>
 
     <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
@@ -85,11 +117,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
+import { formatMemory, formatUptime, useBackendStatus } from "@/composables/useBackendStatus"
 import { useShellSettings } from "@/composables/useShellSettings"
 import { acceleratorFromEvent, displayAccelerator } from "@/utils/accelerator"
+import { appUpdateAPI } from "@/utils/appUpdateApi"
 import { appSecretsAPI } from "@/utils/appSecretsApi"
 import { appShimsAPI } from "@/utils/appShimsApi"
-import { checkShellUpdate, getAutostart, getCloseToTray, getSummonShortcut, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
+import { checkShellUpdate, getAutostart, getCloseToTray, getSummonShortcut, exportDiagnostics, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, openLogs, repairRuntime, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -106,6 +140,51 @@ const terminalEnabled = computed(() => shims.value.commands.length > 0 && shims.
 const showTerminal = computed(() => available.value && shims.value.supported && shims.value.local)
 const showAutostart = computed(() => hostReady.value && hostSupports("get_autostart"))
 const shell = useShellSettings()
+const backend = useBackendStatus()
+const runtime = ref(null)
+const repairArmed = ref(false)
+const diagnosticsBusy = ref(false)
+const diagnosticsResult = ref(null)
+let repairTimer = null
+const runtimeSummary = computed(() => (runtime.value ? t("settings.desktop.runtimeSummary", { active: runtime.value.active?.version || "-", shipped: runtime.value.bundled || "-" }) : ""))
+
+async function loadRuntime() {
+  try {
+    runtime.value = await appUpdateAPI.getRuntime()
+  } catch {
+    runtime.value = null
+  }
+}
+
+function repair() {
+  if (!repairArmed.value) {
+    repairArmed.value = true
+    repairTimer = setTimeout(() => (repairArmed.value = false), 5000)
+    return
+  }
+  clearTimeout(repairTimer)
+  repairArmed.value = false
+  void repairRuntime()
+}
+
+async function exportBundle() {
+  diagnosticsBusy.value = true
+  try {
+    const result = await exportDiagnostics()
+    diagnosticsResult.value = result.cancelled ? null : result
+  } finally {
+    diagnosticsBusy.value = false
+  }
+}
+const backendSummary = computed(() => {
+  const status = backend.status.value
+  if (!status) return ""
+  const parts = [t(`settings.desktop.backendState.${status.state}`)]
+  if (status.memoryBytes != null) parts.push(formatMemory(status.memoryBytes))
+  if (status.uptimeSec != null) parts.push(t("settings.desktop.backendUptime", { time: formatUptime(status.uptimeSec) }))
+  if (status.restarts > 0) parts.push(t("settings.desktop.backendRestarts", { count: status.restarts }))
+  return parts.join(" · ")
+})
 const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tray"))
 const showRestore = computed(() => hostReady.value && shell.settings.value !== null)
 const secrets = ref({ local: false, mode: "file", available: false, backend: "" })
@@ -250,12 +329,14 @@ let stopHostReady = () => {}
 onMounted(() => {
   void loadShims()
   void loadSecrets()
+  if (hasDesktopHost()) void loadRuntime()
   stopHostReady = onHostReady(() => void loadAutostart())
 })
 
 onBeforeUnmount(() => {
   stopHostReady()
   stopRecording()
+  clearTimeout(repairTimer)
 })
 </script>
 

@@ -8,6 +8,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, State};
 
+use crate::backend;
 use crate::commands::Args;
 use crate::settings::ShellSettings;
 use crate::window;
@@ -152,6 +153,7 @@ pub fn layout(
     waiting: &[(String, String)],
     sessions: &[(String, String)],
     extensions: &[(String, String)],
+    backend: &str,
 ) -> Vec<Entry> {
     let mut entries = vec![item("show", "Show KohakuTerrarium"), Entry::Separator];
     let others: Vec<&(String, String)> = sessions
@@ -182,6 +184,12 @@ pub fn layout(
         }
         entries.push(Entry::Separator);
     }
+    if !backend.is_empty() {
+        entries.push(Entry::Header(backend.to_string()));
+    }
+    entries.push(item("restart-backend", "Restart backend"));
+    entries.push(item("diagnostics", "Export diagnostics..."));
+    entries.push(Entry::Separator);
     entries.push(item("quit", "Quit"));
     entries
 }
@@ -192,6 +200,7 @@ pub struct TrayState {
     waiting: Mutex<Vec<(String, String)>>,
     sessions: Mutex<Vec<(String, String)>>,
     extensions: Mutex<Vec<(String, String)>>,
+    backend: Mutex<String>,
     shown: Mutex<Option<Vec<Entry>>>,
 }
 
@@ -201,8 +210,15 @@ impl TrayState {
             &self.waiting.lock().unwrap(),
             &self.sessions.lock().unwrap(),
             &self.extensions.lock().unwrap(),
+            &self.backend.lock().unwrap(),
         )
     }
+}
+
+/// Show `line` as the backend summary in the tray menu.
+pub fn set_backend_line(app: &AppHandle, state: &TrayState, line: String) -> bool {
+    *state.backend.lock().unwrap() = line;
+    rebuild(app, state)
 }
 
 fn build_menu<M: Manager<tauri::Wry>>(
@@ -257,6 +273,19 @@ pub fn install(app: &App) -> tauri::Result<()> {
             let id = event.id.as_ref();
             match id {
                 "show" => window::focus(app),
+                "restart-backend" => {
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        let _ = backend::restart(&app);
+                    });
+                }
+                "diagnostics" => {
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        let main = app.get_webview_window("main");
+                        crate::runtime::diagnostics::export_interactive(&app, main.as_ref(), None);
+                    });
+                }
                 "quit" => {
                     app.state::<ShellSettings>().begin_quit();
                     app.exit(0);
@@ -450,16 +479,40 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_tray_still_offers_show_new_open_and_quit() {
-        let entries = layout(&[], &[], &[]);
-        assert_eq!(ids(&entries), ["show", "-", "new", "folder", "-", "quit"]);
+    fn an_empty_tray_still_offers_show_new_open_restart_and_quit() {
+        let entries = layout(&[], &[], &[], "");
+        assert_eq!(
+            ids(&entries),
+            [
+                "show",
+                "-",
+                "new",
+                "folder",
+                "-",
+                "restart-backend",
+                "diagnostics",
+                "-",
+                "quit"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_backend_summary_sits_above_its_restart_entry() {
+        let entries = layout(&[], &[], &[], "Backend: running - 612 MB");
+        let ids = ids(&entries);
+        let at = ids
+            .iter()
+            .position(|id| id == "# Backend: running - 612 MB")
+            .unwrap();
+        assert_eq!(ids[at + 1], "restart-backend");
     }
 
     #[test]
     fn sessions_waiting_for_the_user_come_first_and_are_not_listed_twice() {
         let waiting = pairs(&[("a", "Alpha")]);
         let sessions = pairs(&[("a", "Alpha"), ("b", "Beta")]);
-        let entries = layout(&waiting, &sessions, &pairs(&[("pkg/x", "Pause")]));
+        let entries = layout(&waiting, &sessions, &pairs(&[("pkg/x", "Pause")]), "");
         assert_eq!(
             ids(&entries),
             [
@@ -475,6 +528,9 @@ mod tests {
                 "-",
                 "ext:pkg/x",
                 "-",
+                "restart-backend",
+                "diagnostics",
+                "-",
                 "quit"
             ]
         );
@@ -483,7 +539,7 @@ mod tests {
     #[test]
     fn a_sessions_section_with_only_waiting_ones_has_no_empty_header() {
         let waiting = pairs(&[("a", "Alpha")]);
-        let entries = layout(&waiting, &waiting, &[]);
+        let entries = layout(&waiting, &waiting, &[], "");
         assert!(!ids(&entries).contains(&"# Sessions".to_string()));
     }
 }

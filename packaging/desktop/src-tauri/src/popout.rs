@@ -64,6 +64,15 @@ impl PopoutRegistry {
         self.remove(label);
     }
 
+    /// The session the window `label` shows.
+    pub fn scope_of(&self, label: &str) -> Option<String> {
+        let windows = self.0.lock().unwrap();
+        windows
+            .iter()
+            .find(|known| known.label == label)
+            .map(|known| known.scope.clone())
+    }
+
     /// The open windows as the settings store keeps them.
     pub fn snapshot(&self) -> Value {
         let windows = self.0.lock().unwrap();
