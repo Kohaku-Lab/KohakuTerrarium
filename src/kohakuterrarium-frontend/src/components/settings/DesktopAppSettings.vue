@@ -1,17 +1,26 @@
 <template>
-  <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
+  <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate" id="desktop-app-settings" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
     <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
 
-    <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
+    <div v-if="showTray || showRestore" class="desktop-section-title" data-section="window">{{ t("settings.desktop.sectionWindow") }}</div>
+
+    <div v-if="showTray" class="flex items-start justify-between gap-4" data-setting="close-to-tray">
       <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.terminalTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.terminalHint") }}</div>
-        <div v-if="shims.installed.length" class="text-[11px] text-warm-400 mt-1" data-terminal-location>{{ t("settings.desktop.terminalLocation", { dir: shims.target_dir }) }}</div>
-        <div v-if="justChanged && terminalEnabled" class="text-[11px] text-iolite mt-1" data-terminal-reopen>{{ t("settings.desktop.terminalReopen") }}</div>
-        <div v-if="error" class="text-[11px] text-coral mt-1" data-terminal-error>{{ error }}</div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.trayTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.trayHint") }}</div>
       </div>
-      <el-switch :model-value="terminalEnabled" :loading="busy" @change="setTerminal" />
+      <el-switch :model-value="closeToTray" @change="setTray" />
     </div>
+
+    <div v-if="showRestore" class="flex items-start justify-between gap-4" data-setting="restore-windows">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.restoreTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.restoreHint") }}</div>
+      </div>
+      <el-switch :model-value="shell.settings.value?.restorePopouts !== false" @change="(value) => shell.patch({ restorePopouts: value })" />
+    </div>
+
+    <div v-if="showAutostart" class="desktop-section-title" data-section="startup">{{ t("settings.desktop.sectionStartup") }}</div>
 
     <div v-if="showAutostart" class="flex items-start justify-between gap-4" data-setting="autostart">
       <div>
@@ -21,22 +30,7 @@
       <el-switch :model-value="autostart" @change="setLogin" />
     </div>
 
-    <div v-if="showKeychain" class="flex items-start justify-between gap-4" data-setting="keychain">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.keychainTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.keychainHint", { backend: secrets.backend }) }}</div>
-        <div v-if="keychainError" class="text-[11px] text-coral mt-1" data-keychain-error>{{ keychainError }}</div>
-      </div>
-      <el-switch :model-value="secrets.mode === 'keychain'" :loading="keychainBusy" @change="setKeychain" />
-    </div>
-
-    <div v-if="showTray" class="flex items-start justify-between gap-4" data-setting="close-to-tray">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.trayTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.trayHint") }}</div>
-      </div>
-      <el-switch :model-value="closeToTray" @change="setTray" />
-    </div>
+    <div v-if="showSummon" class="desktop-section-title" data-section="shortcuts">{{ t("settings.desktop.sectionShortcuts") }}</div>
 
     <div v-if="showSummon" class="flex items-start justify-between gap-4" data-setting="summon-shortcut">
       <div>
@@ -50,6 +44,8 @@
       </div>
     </div>
 
+    <div v-if="showUpdate" class="desktop-section-title" data-section="updates">{{ t("settings.desktop.sectionUpdates") }}</div>
+
     <div v-if="showUpdate" class="flex items-start justify-between gap-4" data-setting="shell-update">
       <div>
         <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.updateTitle") }}</div>
@@ -61,12 +57,35 @@
       <el-button v-if="updateStatus === 'available'" size="small" type="primary" data-update-install :loading="updateBusy" @click="installUpdate">{{ t("settings.desktop.updateInstall") }}</el-button>
       <el-button v-else size="small" data-update-check :loading="updateBusy" @click="checkUpdate">{{ t("settings.desktop.updateCheck") }}</el-button>
     </div>
+
+    <div v-if="showTerminal || showKeychain" class="desktop-section-title" data-section="integration">{{ t("settings.desktop.sectionIntegration") }}</div>
+
+    <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.terminalTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.terminalHint") }}</div>
+        <div v-if="shims.installed.length" class="text-[11px] text-warm-400 mt-1" data-terminal-location>{{ t("settings.desktop.terminalLocation", { dir: shims.target_dir }) }}</div>
+        <div v-if="justChanged && terminalEnabled" class="text-[11px] text-iolite mt-1" data-terminal-reopen>{{ t("settings.desktop.terminalReopen") }}</div>
+        <div v-if="error" class="text-[11px] text-coral mt-1" data-terminal-error>{{ error }}</div>
+      </div>
+      <el-switch :model-value="terminalEnabled" :loading="busy" @change="setTerminal" />
+    </div>
+
+    <div v-if="showKeychain" class="flex items-start justify-between gap-4" data-setting="keychain">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.keychainTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.keychainHint", { backend: secrets.backend }) }}</div>
+        <div v-if="keychainError" class="text-[11px] text-coral mt-1" data-keychain-error>{{ keychainError }}</div>
+      </div>
+      <el-switch :model-value="secrets.mode === 'keychain'" :loading="keychainBusy" @change="setKeychain" />
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
+import { useShellSettings } from "@/composables/useShellSettings"
 import { acceleratorFromEvent, displayAccelerator } from "@/utils/accelerator"
 import { appSecretsAPI } from "@/utils/appSecretsApi"
 import { appShimsAPI } from "@/utils/appShimsApi"
@@ -86,7 +105,9 @@ const hostReady = ref(hasDesktopHost())
 const terminalEnabled = computed(() => shims.value.commands.length > 0 && shims.value.installed.length === shims.value.commands.length)
 const showTerminal = computed(() => available.value && shims.value.supported && shims.value.local)
 const showAutostart = computed(() => hostReady.value && hostSupports("get_autostart"))
+const shell = useShellSettings()
 const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tray"))
+const showRestore = computed(() => hostReady.value && shell.settings.value !== null)
 const secrets = ref({ local: false, mode: "file", available: false, backend: "" })
 const showKeychain = computed(() => secrets.value.local && secrets.value.available)
 const keychainBusy = ref(false)
@@ -237,3 +258,13 @@ onBeforeUnmount(() => {
   stopRecording()
 })
 </script>
+
+<style scoped>
+.desktop-section-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  margin-top: 0.25rem;
+}
+</style>

@@ -26,6 +26,8 @@
 
     <StatusItems side="right" />
 
+    <DesktopStatusChip />
+
     <!-- Running jobs count -->
     <div class="status-seg flex items-center gap-1 shrink-0" :class="jobCount ? 'text-amber' : ''">
       <span class="i-carbon-pulse text-[11px]" />
@@ -45,6 +47,7 @@
 <script setup>
 import { computed, ref } from "vue"
 
+import DesktopStatusChip from "@/components/chrome/DesktopStatusChip.vue"
 import { useInstanceContext } from "@/components/chrome/instanceContext"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import StatusDot from "@/components/common/StatusDot.vue"

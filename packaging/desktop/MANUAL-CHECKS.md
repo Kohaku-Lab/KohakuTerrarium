@@ -24,5 +24,10 @@ Each section names the milestone that added it and the surface to look at.
 - In a session window, "Return to main window" closes it and the session shows in the main window.
 - Quit with a session window open, start again: the window comes back; close it first and it does not.
 
+## Finding the desktop settings (M4)
+- First start of a fresh install: a card "Set up the desktop app" appears bottom right with close-to-tray and start-at-login switches; "Done" removes it for good, "All desktop settings" opens Settings scrolled to the desktop section.
+- Inside a session, the status bar shows a "Desktop" chip with a dot until the card was dismissed; hovering lists the current values; clicking opens the desktop section.
+- Settings -> Desktop app is grouped under Window, Startup, Shortcuts, Updates and Integration, and "Reopen session windows" is there.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

@@ -12,6 +12,7 @@
     <ShortcutHelp />
     <OverlayLayer />
     <DesktopOpenHost />
+    <DesktopFirstRun />
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
     <WorkspaceResumeDialog />
@@ -27,6 +28,7 @@ import AdminTokenModal from "@/components/auth/AdminTokenModal.vue"
 import AuthGate from "@/components/auth/AuthGate.vue"
 import LoginPromptModal from "@/components/auth/LoginPromptModal.vue"
 import CommandPalette from "@/components/chrome/CommandPalette.vue"
+import DesktopFirstRun from "@/components/chrome/DesktopFirstRun.vue"
 import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
