@@ -427,6 +427,14 @@ export default {
   "settings.desktop.terminalFailed": "Could not change the terminal command.",
   "settings.desktop.autostartTitle": "Start at login",
   "settings.desktop.autostartHint": "Open KohakuTerrarium automatically when you sign in.",
+  "settings.desktop.summonTitle": "Summon shortcut",
+  "settings.desktop.summonHint":
+    "A system-wide shortcut that brings KohakuTerrarium to the front from any app and puts the cursor in the message box.",
+  "settings.desktop.summonSet": "Set shortcut",
+  "settings.desktop.summonRecording": "Press a shortcut…",
+  "settings.desktop.summonClear": "Clear",
+  "settings.desktop.summonUnavailable":
+    "That shortcut could not be used. Another app may already own it.",
   "settings.desktop.trayTitle": "Keep running in the tray",
   "settings.desktop.trayHint":
     "Closing the window hides it instead of quitting, so agents keep working. The tray icon shows what is waiting for you; use its menu to quit.",

@@ -6,7 +6,9 @@ import {
   checkShellUpdate,
   closeOverlayWindow,
   getCloseToTray,
+  getSummonShortcut,
   openOverlayWindow,
+  setSummonShortcut,
   setAttentionCount,
   setCloseToTray,
   overlayWindowsSupported,
@@ -191,6 +193,24 @@ describe("hostBridge", () => {
     expect(await getCloseToTray()).toBeNull()
     expect(await setCloseToTray(true)).toBeNull()
     expect(await setAttentionCount(1, 1)).toBe(false)
+  })
+
+  it("reads, sets and clears the summon shortcut", async () => {
+    const api = {
+      get_summon_shortcut: vi.fn(async () => ({ shortcut: "Alt+K" })),
+      set_summon_shortcut: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+    expect(await getSummonShortcut()).toBe("Alt+K")
+    expect(await setSummonShortcut("Alt+J")).toBe(true)
+    expect(api.set_summon_shortcut).toHaveBeenLastCalledWith("Alt+J")
+    expect(await setSummonShortcut(null)).toBe(true)
+    expect(api.set_summon_shortcut).toHaveBeenLastCalledWith(null)
+    api.get_summon_shortcut.mockResolvedValue({ shortcut: null })
+    expect(await getSummonShortcut()).toBeNull()
+    window.pywebview = { api: {} }
+    expect(await getSummonShortcut()).toBeNull()
+    expect(await setSummonShortcut("Alt+J")).toBe(false)
   })
 
   it("drives native overlay windows through Tauri only", async () => {

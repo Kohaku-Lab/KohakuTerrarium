@@ -137,6 +137,21 @@ export async function setCloseToTray(enabled) {
   }
 }
 
+/** The system-wide shortcut that raises the app, or ``null`` when none is set or the shell has none. */
+export async function getSummonShortcut() {
+  if (!hostSupports("get_summon_shortcut")) return null
+  try {
+    return (await call("get_summon_shortcut"))?.shortcut || null
+  } catch {
+    return null
+  }
+}
+
+/** Set (an accelerator string) or clear (``null``) the system-wide summon shortcut. Resolves ``false`` if it cannot be used. */
+export function setSummonShortcut(shortcut) {
+  return callBoolean("set_summon_shortcut", shortcut ?? null)
+}
+
 /** Show the `pending` and `completed` attention counts on the tray icon and taskbar entry. */
 export function setAttentionCount(pending, completed) {
   return callBoolean("set_attention_count", Math.max(0, pending | 0), Math.max(0, completed | 0))

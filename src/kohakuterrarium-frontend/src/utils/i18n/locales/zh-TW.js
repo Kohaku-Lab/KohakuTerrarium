@@ -343,6 +343,13 @@ export default {
   "settings.desktop.terminalFailed": "無法變更終端機指令。",
   "settings.desktop.autostartTitle": "登入時啟動",
   "settings.desktop.autostartHint": "登入系統時自動開啟 KohakuTerrarium。",
+  "settings.desktop.summonTitle": "喚出快速鍵",
+  "settings.desktop.summonHint":
+    "系統層級快速鍵：在任何應用程式中把 KohakuTerrarium 帶到最前面，並將游標放進訊息輸入框。",
+  "settings.desktop.summonSet": "設定快速鍵",
+  "settings.desktop.summonRecording": "請按下快速鍵…",
+  "settings.desktop.summonClear": "清除",
+  "settings.desktop.summonUnavailable": "無法使用該快速鍵，可能已被其他應用程式佔用。",
   "settings.desktop.trayTitle": "在系統匣中持續執行",
   "settings.desktop.trayHint":
     "關閉視窗時只會隱藏而不結束，代理會繼續工作。系統匣圖示會顯示等待你處理的項目；請從系統匣選單結束。",

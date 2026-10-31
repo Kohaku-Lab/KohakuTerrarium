@@ -331,6 +331,14 @@ export default {
   "settings.desktop.terminalFailed": "ターミナルコマンドを変更できませんでした。",
   "settings.desktop.autostartTitle": "ログイン時に起動",
   "settings.desktop.autostartHint": "サインイン時に KohakuTerrarium を自動的に開きます。",
+  "settings.desktop.summonTitle": "呼び出しショートカット",
+  "settings.desktop.summonHint":
+    "どのアプリからでも KohakuTerrarium を最前面に出し、メッセージ欄にカーソルを置くシステム全体のショートカットです。",
+  "settings.desktop.summonSet": "ショートカットを設定",
+  "settings.desktop.summonRecording": "ショートカットを押してください…",
+  "settings.desktop.summonClear": "クリア",
+  "settings.desktop.summonUnavailable":
+    "このショートカットは使用できません。他のアプリが使用している可能性があります。",
   "settings.desktop.trayTitle": "トレイで実行を続ける",
   "settings.desktop.trayHint":
     "ウィンドウを閉じても終了せず非表示になるので、エージェントは動き続けます。トレイアイコンに待機中の項目が表示されます。終了はトレイのメニューから行います。",

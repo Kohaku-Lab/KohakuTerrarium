@@ -328,6 +328,14 @@ export default {
   "settings.desktop.terminalFailed": "터미널 명령을 변경할 수 없습니다.",
   "settings.desktop.autostartTitle": "로그인 시 시작",
   "settings.desktop.autostartHint": "로그인할 때 KohakuTerrarium을 자동으로 엽니다.",
+  "settings.desktop.summonTitle": "불러오기 단축키",
+  "settings.desktop.summonHint":
+    "어떤 앱에서든 KohakuTerrarium을 맨 앞으로 가져오고 메시지 입력란에 커서를 두는 시스템 전체 단축키입니다.",
+  "settings.desktop.summonSet": "단축키 설정",
+  "settings.desktop.summonRecording": "단축키를 누르세요…",
+  "settings.desktop.summonClear": "지우기",
+  "settings.desktop.summonUnavailable":
+    "이 단축키를 사용할 수 없습니다. 다른 앱이 이미 사용 중일 수 있습니다.",
   "settings.desktop.trayTitle": "트레이에서 계속 실행",
   "settings.desktop.trayHint":
     "창을 닫아도 종료하지 않고 숨겨지므로 에이전트가 계속 동작합니다. 트레이 아이콘에 대기 중인 항목이 표시되며, 종료는 트레이 메뉴에서 합니다.",

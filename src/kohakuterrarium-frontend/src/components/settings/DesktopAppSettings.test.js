@@ -38,6 +38,7 @@ const ElSwitch = {
 
 const ElButton = {
   props: ["loading"],
+  emits: ["click"],
   template: '<button class="btn" @click="$emit(\'click\')"><slot /></button>',
 }
 
@@ -166,6 +167,48 @@ describe("DesktopAppSettings", () => {
     expect(wrapper.find("[data-setting='close-to-tray'] .switch").attributes("data-on")).toBe(
       "true",
     )
+  })
+
+  it("records a summon shortcut from a key press, reports a refusal, and clears it", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const api = {
+      get_summon_shortcut: vi.fn(async () => ({ shortcut: null })),
+      set_summon_shortcut: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    const press = (init) =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { cancelable: true, ...init }))
+    await wrapper.find("[data-summon-record]").trigger("click")
+    expect(wrapper.find("[data-summon-record]").text()).toBe("settings.desktop.summonRecording")
+    press({ code: "KeyK" })
+    expect(api.set_summon_shortcut).not.toHaveBeenCalled()
+    press({ code: "Space", ctrlKey: true, shiftKey: true })
+    await flushPromises()
+    expect(api.set_summon_shortcut).toHaveBeenCalledWith("CommandOrControl+Shift+Space")
+    expect(wrapper.find("[data-summon-record]").text()).toContain("Shift+Space")
+    expect(wrapper.find("[data-summon-clear]").exists()).toBe(true)
+
+    api.set_summon_shortcut.mockResolvedValue(false)
+    await wrapper.find("[data-summon-record]").trigger("click")
+    press({ code: "KeyJ", altKey: true })
+    await flushPromises()
+    expect(wrapper.find("[data-summon-error]").exists()).toBe(true)
+    expect(wrapper.find("[data-summon-record]").text()).toContain("Shift+Space")
+
+    api.set_summon_shortcut.mockResolvedValue(true)
+    await wrapper.find("[data-summon-clear]").trigger("click")
+    await flushPromises()
+    expect(api.set_summon_shortcut).toHaveBeenLastCalledWith(null)
+    expect(wrapper.find("[data-summon-clear]").exists()).toBe(false)
+
+    await wrapper.find("[data-summon-record]").trigger("click")
+    press({ code: "Escape" })
+    await flushPromises()
+    expect(wrapper.find("[data-summon-record]").text()).toBe("settings.desktop.summonSet")
+    wrapper.unmount()
   })
 
   it("does not offer the tray option to a shell without one", async () => {

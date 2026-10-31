@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showTerminal || showAutostart || showTray || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
+  <div v-if="showTerminal || showAutostart || showTray || showSummon || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
     <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
 
     <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
@@ -29,6 +29,18 @@
       <el-switch :model-value="closeToTray" @change="setTray" />
     </div>
 
+    <div v-if="showSummon" class="flex items-start justify-between gap-4" data-setting="summon-shortcut">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.summonTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.summonHint") }}</div>
+        <div v-if="summonError" class="text-[11px] text-coral mt-1" data-summon-error>{{ t("settings.desktop.summonUnavailable") }}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <el-button size="small" data-summon-record @click="recordSummon">{{ summonRecording ? t("settings.desktop.summonRecording") : summonShortcut ? displayAccelerator(summonShortcut) : t("settings.desktop.summonSet") }}</el-button>
+        <el-button v-if="summonShortcut && !summonRecording" size="small" data-summon-clear @click="clearSummon">{{ t("settings.desktop.summonClear") }}</el-button>
+      </div>
+    </div>
+
     <div v-if="showUpdate" class="flex items-start justify-between gap-4" data-setting="shell-update">
       <div>
         <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.updateTitle") }}</div>
@@ -46,8 +58,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
+import { acceleratorFromEvent, displayAccelerator } from "@/utils/accelerator"
 import { appShimsAPI } from "@/utils/appShimsApi"
-import { checkShellUpdate, getAutostart, getCloseToTray, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart, setCloseToTray } from "@/utils/hostBridge"
+import { checkShellUpdate, getAutostart, getCloseToTray, getSummonShortcut, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -65,6 +78,10 @@ const showTerminal = computed(() => available.value && shims.value.supported && 
 const showAutostart = computed(() => hostReady.value && hostSupports("get_autostart"))
 const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tray"))
 const closeToTray = ref(false)
+const showSummon = computed(() => hostReady.value && hostSupports("get_summon_shortcut"))
+const summonShortcut = ref(null)
+const summonRecording = ref(false)
+const summonError = ref(false)
 const showUpdate = computed(() => hostReady.value && hostSupports("check_shell_update"))
 const updateStatus = ref("idle")
 const updateVersion = ref("")
@@ -109,6 +126,45 @@ async function loadAutostart() {
   if (current !== null) autostart.value = current
   const tray = await getCloseToTray()
   if (tray !== null) closeToTray.value = tray
+  summonShortcut.value = await getSummonShortcut()
+}
+
+function stopRecording() {
+  summonRecording.value = false
+  window.removeEventListener("keydown", onRecordKey, true)
+}
+
+async function onRecordKey(event) {
+  if (event.code === "Escape") {
+    event.preventDefault()
+    stopRecording()
+    return
+  }
+  const accelerator = acceleratorFromEvent(event)
+  if (!accelerator) return
+  event.preventDefault()
+  event.stopPropagation()
+  stopRecording()
+  if (await setSummonShortcut(accelerator)) {
+    summonShortcut.value = accelerator
+    summonError.value = false
+  } else {
+    summonError.value = true
+  }
+}
+
+function recordSummon() {
+  if (summonRecording.value) {
+    stopRecording()
+    return
+  }
+  summonError.value = false
+  summonRecording.value = true
+  window.addEventListener("keydown", onRecordKey, true)
+}
+
+async function clearSummon() {
+  if (await setSummonShortcut(null)) summonShortcut.value = null
 }
 
 async function setTray(enabled) {
@@ -141,5 +197,8 @@ onMounted(() => {
   stopHostReady = onHostReady(() => void loadAutostart())
 })
 
-onBeforeUnmount(() => stopHostReady())
+onBeforeUnmount(() => {
+  stopHostReady()
+  stopRecording()
+})
 </script>

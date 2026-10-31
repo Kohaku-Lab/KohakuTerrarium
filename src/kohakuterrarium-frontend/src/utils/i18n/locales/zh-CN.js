@@ -417,6 +417,13 @@ export default {
   "settings.desktop.terminalFailed": "无法更改终端命令。",
   "settings.desktop.autostartTitle": "登录时启动",
   "settings.desktop.autostartHint": "登录系统时自动打开 KohakuTerrarium。",
+  "settings.desktop.summonTitle": "唤出快捷键",
+  "settings.desktop.summonHint":
+    "系统级快捷键：在任意应用中把 KohakuTerrarium 调到最前，并把光标放进消息输入框。",
+  "settings.desktop.summonSet": "设置快捷键",
+  "settings.desktop.summonRecording": "请按下快捷键…",
+  "settings.desktop.summonClear": "清除",
+  "settings.desktop.summonUnavailable": "无法使用该快捷键，可能已被其他应用占用。",
   "settings.desktop.trayTitle": "在托盘中继续运行",
   "settings.desktop.trayHint":
     "关闭窗口时只隐藏而不退出，智能体会继续工作。托盘图标会显示等待你处理的内容；请从托盘菜单退出。",
