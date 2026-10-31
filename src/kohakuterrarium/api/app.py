@@ -51,6 +51,7 @@ logger = get_logger(__name__)
 # Route modules are grouped by Studio concern so this factory only owns
 # application-wide mounting, middleware, and lifecycle coordination.
 from kohakuterrarium.api.routes import app_open as app_open_route
+from kohakuterrarium.api.routes import app_secrets as app_secrets_route
 from kohakuterrarium.api.routes import app_shims as app_shims_route
 from kohakuterrarium.api.routes import app_update as app_update_route
 from kohakuterrarium.api.routes import health as health_route
@@ -678,6 +679,9 @@ def create_app(
     # /api/app/shims — opt-in terminal command (``kt``) for desktop installs.
     app.include_router(app_shims_route.router, prefix="/api/app", tags=["app-shims"])
     app.include_router(app_open_route.router, prefix="/api/app", tags=["app-open"])
+    app.include_router(
+        app_secrets_route.router, prefix="/api/app", tags=["app-secrets"]
+    )
     # /ws/app/update — progress stream for the update flow (no prefix).
     app.include_router(app_update_route.ws_router, tags=["app-update"])
 
