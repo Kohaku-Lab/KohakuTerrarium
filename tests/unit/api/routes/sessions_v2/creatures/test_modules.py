@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2.creatures import modules as mods_mod
+from kohakuterrarium.modules.plugin.base import PluginLockedError
 from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
@@ -120,6 +121,16 @@ class TestSetOptions:
             json={"values": {}},
         )
         assert resp.status_code == 404
+
+    def test_locked_plugin_returns_409(self):
+        svc = _FakeService(
+            raise_on={"set_module_options": PluginLockedError("sandbox is locked")}
+        )
+        resp = _client(svc).put(
+            "/sess/creatures/alice/modules/plugin/sandbox/options",
+            json={"values": {"backend": "off"}},
+        )
+        assert resp.status_code == 409
 
     def test_value_error(self):
         svc = _FakeService(raise_on={"set_module_options": ValueError("bad")})

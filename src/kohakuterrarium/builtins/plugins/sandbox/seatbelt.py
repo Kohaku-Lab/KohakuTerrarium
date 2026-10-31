@@ -26,6 +26,14 @@ _ALWAYS_WRITABLE: tuple[str, ...] = ("/dev",)
 # Programs and services that start work outside the caller's sandbox
 # (LaunchServices, Apple Events, launchd jobs).
 _LAUNCHERS: tuple[str, ...] = ("/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl")
+# Control sockets of daemons and multiplexers that run commands unconfined.
+_CONTROL_SOCKETS: tuple[str, ...] = (
+    "/var/run/docker.sock",
+    "~/.docker/run",
+    "~/.screen",
+    "~/Library/Application Support/iTerm2",
+)
+
 _LAUNCH_SERVICES: tuple[str, ...] = (
     '(global-name "com.apple.coreservices.launchservicesd")',
     '(global-name-prefix "com.apple.lsd.")',
@@ -116,6 +124,8 @@ def build_write_profile(
     launchers = " ".join(f"(literal {_quote(p)})" for p in _LAUNCHERS)
     lines.append(f"(deny process-exec {launchers})")
     lines.append(f"(deny mach-lookup {' '.join(_LAUNCH_SERVICES)})")
+    sockets = [*_CONTROL_SOCKETS, f"/private/tmp/tmux-{os.getuid()}"]
+    lines.append(f"(deny network-outbound {' '.join(_subpaths(sockets, workspace))})")
     return "\n".join(lines) + "\n"
 
 

@@ -2,8 +2,10 @@
 
 import asyncio
 import os
+import socket
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -51,7 +53,7 @@ class TestBuildWriteProfile:
         )
         lines = text.splitlines()
         assert lines[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
-        allow, deny, exceptions, execs, lookups = lines[3:]
+        allow, deny, exceptions, execs, lookups, sockets = lines[3:]
         assert allow.startswith("(allow file-write*")
         assert f'(subpath "{os.path.realpath(tmp_path)}")' in allow
         assert '(subpath "/dev")' in allow
@@ -68,6 +70,8 @@ class TestBuildWriteProfile:
         assert execs.startswith("(deny process-exec")
         assert '(literal "/usr/bin/osascript")' in execs
         assert lookups.startswith("(deny mach-lookup")
+        assert sockets.startswith("(deny network-outbound")
+        assert f'(subpath "{Path("~/.docker/run").expanduser()}")' in sockets
 
     def test_broad_level_keeps_only_the_deny_list(self, tmp_path):
         text = seatbelt.build_write_profile(
@@ -83,9 +87,9 @@ class TestBuildWriteProfile:
             tmp_path,
             write_allow=["~/.cache"],
         )
-        assert '(allow file-write* (subpath "/dev"))' in text
+        allows = [line for line in text.splitlines() if line.startswith("(allow ")]
+        assert allows == ["(allow default)", '(allow file-write* (subpath "/dev"))']
         assert str(tmp_path) not in text
-        assert ".cache" not in text
 
     def test_paths_are_quoted_for_the_profile_language(self, tmp_path):
         odd = tmp_path / 'we"ird'
@@ -178,6 +182,33 @@ class TestKernelEnforcement:
         result = await SandboxPlugin().run_subprocess_exec(
             argv, cwd=workspace, timeout=30
         )
+        assert result["returncode"] != 0
+        assert b"Operation not permitted" in result["stderr"]
+
+    async def test_control_sockets_cannot_be_reached(self, dirs, monkeypatch):
+        workspace, _ = dirs
+        # AF_UNIX paths are short; keep the socket near the filesystem root.
+        sock_dir = Path(tempfile.mkdtemp(prefix="kts", dir="/tmp"))
+        sock_path = sock_dir / "d.sock"
+        monkeypatch.setattr(seatbelt, "_CONTROL_SOCKETS", (str(sock_dir),))
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(sock_path))
+        server.listen(1)
+        try:
+            probe = (
+                "import socket, sys\n"
+                "s = socket.socket(socket.AF_UNIX)\n"
+                "s.connect(sys.argv[1])\n"
+            )
+            result = await SandboxPlugin().run_subprocess_exec(
+                [sys.executable, "-c", probe, str(sock_path)],
+                cwd=workspace,
+                timeout=30,
+            )
+        finally:
+            server.close()
+            sock_path.unlink()
+            sock_dir.rmdir()
         assert result["returncode"] != 0
         assert b"Operation not permitted" in result["stderr"]
 

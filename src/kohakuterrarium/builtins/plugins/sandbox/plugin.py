@@ -29,6 +29,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    PluginLockedError,
 )
 from kohakuterrarium.modules.sandbox.parse import parse_profile
 from kohakuterrarium.modules.sandbox.presets import WORKSPACE
@@ -57,6 +58,8 @@ NETWORK_URL_ARGS = {
 }
 
 NETWORK_TOOLS = {"web_search"}
+
+UNLOCK_ENV = "KT_SANDBOX_ALLOW_UNLOCK"
 
 
 class SandboxPlugin(BasePlugin):
@@ -151,6 +154,14 @@ class SandboxPlugin(BasePlugin):
                 "default": [],
                 "doc": "Paths writable even inside fs_deny (exceptions you name).",
             },
+            "locked": {
+                "type": "bool",
+                "default": False,
+                "doc": (
+                    "Refuse runtime disable and option changes. Unlock by "
+                    "restarting the server with KT_SANDBOX_ALLOW_UNLOCK=1."
+                ),
+            },
             "blocked_tools": {
                 "type": "list",
                 "item_type": "string",
@@ -178,6 +189,23 @@ class SandboxPlugin(BasePlugin):
 
     async def on_unload(self) -> None:
         self._context = None
+
+    def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Apply option overrides unless the plugin is locked against them."""
+        changes = {k: v for k, v in (values or {}).items() if self.options.get(k) != v}
+        if changes and self._locked():
+            raise PluginLockedError(
+                "sandbox is locked; restart the server with "
+                f"{UNLOCK_ENV}=1 to change {sorted(changes)}"
+            )
+        return super().set_options(values)
+
+    def refuses_disable(self) -> bool:
+        """A locked sandbox cannot be switched off at runtime."""
+        return self._locked()
+
+    def _locked(self) -> bool:
+        return bool(self.options.get("locked")) and os.environ.get(UNLOCK_ENV) != "1"
 
     def refresh_options(self) -> None:
         """Rebuild policy from runtime-editable plugin options."""

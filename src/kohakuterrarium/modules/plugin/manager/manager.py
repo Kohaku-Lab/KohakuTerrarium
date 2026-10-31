@@ -13,6 +13,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    PluginLockedError,
 )
 from kohakuterrarium.modules.plugin.dispatch import (
     call_method as _call_method,
@@ -141,6 +142,8 @@ class PluginManager(
     def disable(self, name: str) -> bool:
         for p in self._plugins:
             if getattr(p, "name", "") == name:
+                if p.refuses_disable():
+                    raise PluginLockedError(f"plugin {name!r} is locked")
                 changed = name not in self._disabled
                 self._disabled.add(name)
                 try:

@@ -17,7 +17,11 @@ from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.builtins.tools.files.tree import TreeTool
 from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.modules.plugin.base import PluginBlockError, PluginContext
+from kohakuterrarium.modules.plugin.base import (
+    PluginBlockError,
+    PluginContext,
+    PluginLockedError,
+)
 from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
 
 
@@ -346,3 +350,34 @@ class TestFileToolWritesMatchTheKernelProfile:
                 tool=ReadTool(),
                 context=context,
             )
+
+
+class TestLock:
+    def test_locked_sandbox_refuses_runtime_changes(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        sandbox = SandboxPlugin(locked=True)
+        with pytest.raises(PluginLockedError, match="KT_SANDBOX_ALLOW_UNLOCK"):
+            sandbox.set_options({"backend": "off"})
+        with pytest.raises(PluginLockedError):
+            sandbox.set_options({"locked": False})
+        assert sandbox.refuses_disable() is True
+        assert sandbox.options["backend"] == "auto"
+
+    def test_reapplying_current_values_is_not_a_change(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        sandbox = SandboxPlugin(locked=True, fs_write="workspace")
+        # Resume re-applies the persisted options onto an already-locked plugin.
+        sandbox.set_options({"locked": True, "fs_write": "workspace"})
+
+    def test_server_started_with_the_unlock_flag_may_change_it(self, monkeypatch):
+        monkeypatch.setenv(plugin_mod.UNLOCK_ENV, "1")
+        sandbox = SandboxPlugin(locked=True)
+        assert sandbox.refuses_disable() is False
+        assert sandbox.set_options({"locked": False})["locked"] is False
+
+    def test_unlocked_sandbox_can_be_locked_at_runtime(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        sandbox = SandboxPlugin()
+        assert sandbox.refuses_disable() is False
+        sandbox.set_options({"locked": True})
+        assert sandbox.refuses_disable() is True
