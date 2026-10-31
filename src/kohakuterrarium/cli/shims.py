@@ -313,6 +313,33 @@ def shims_status() -> int:
     return 0
 
 
+def refresh_installed_shims() -> list[str]:
+    """Rewrite installed wrapper shims whose contents differ from what this install
+    would write, so a reinstall or a move does not leave them pointing at nothing.
+
+    Only shims we own are touched, and none are created.
+    """
+    plan = build_plan()
+    if plan.mode == MODE_DEFER_PIPX:
+        return []
+    stale = []
+    for item in plan.items:
+        if item.action != "wrapper" or item.content is None:
+            continue
+        if not (item.dest.is_file() and is_ours(item.dest)):
+            continue
+        try:
+            current = item.dest.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if current != item.content:
+            stale.append(item)
+    if not stale:
+        return []
+    plan.items = stale
+    return apply_plan(plan)
+
+
 def shims_uninstall() -> int:
     """Remove only shims recognized as owned by KohakuTerrarium."""
     plan = build_plan()

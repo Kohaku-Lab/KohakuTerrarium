@@ -108,6 +108,17 @@ def start_desktop_server(port: int, log_level: str):
     )
 
 
+def _refresh_shims() -> None:
+    """Point installed terminal commands at this install; failures only reach the log."""
+    try:
+        from kohakuterrarium.cli.shims import refresh_installed_shims
+
+        for line in refresh_installed_shims():
+            logger.info("shims: %s", line)
+    except Exception as exc:
+        logger.warning("shims: refresh failed: %s", exc)
+
+
 def run_server_child(
     port: int, log_level: str, state_path: Path, parent_pid: int = 0
 ) -> int:
@@ -115,6 +126,7 @@ def run_server_child(
     try:
         server, actual_port = start_desktop_server(port, log_level)
         _publish_state(state_path, status="ready", port=actual_port)
+        _refresh_shims()
         mark_startup("desktop_server_ready", surface="desktop", port=actual_port)
         while not server.should_exit:
             if parent_pid and not _pid_alive(parent_pid):

@@ -146,7 +146,8 @@ def _install_from_feed(
     """Resolve and install a feed release unless an update is current.
 
     First installation always proceeds. Update mode returns a successful
-    ``up-to-date`` result when the resolved version is already active.
+    ``up-to-date`` result when the resolved version is already active, or is not
+    newer than it unless the user pinned a version.
     """
     _safe_progress(progress, "resolve", 5.0, "Checking for updates")
     try:
@@ -156,7 +157,13 @@ def _install_from_feed(
 
     if is_update:
         current = read_active_pointer()
-        if current is not None and current.version == target.version:
+        stale = current is not None and (
+            current.version == target.version
+            or (
+                not cfg.pinned_version and not is_newer(target.version, current.version)
+            )
+        )
+        if stale:
             _safe_progress(progress, "done", 100.0, f"Already on {target.version}")
             return UpdateResult(
                 ok=True,

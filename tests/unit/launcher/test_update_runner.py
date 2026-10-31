@@ -75,6 +75,59 @@ def test_first_install_falls_through_when_bundled_corrupt(monkeypatch, cfg_home)
     assert not result.ok
 
 
+# ── _install_from_feed never goes backwards ─────────────────────────
+
+
+class _Target:
+    def __init__(self, version):
+        self.version = version
+
+
+def _feed_install(monkeypatch, cfg_home, *, active, feed, pinned=None):
+    _t.write_active_pointer(active, build_id="b")
+    monkeypatch.setattr(_r, "resolve_feed", lambda cfg: _Target(feed))
+    downloaded = []
+    monkeypatch.setattr(
+        _r,
+        "_download_smoke_swap",
+        lambda target, progress: downloaded.append(target.version)
+        or _r.UpdateResult(ok=True, version=target.version),
+    )
+    cfg = _s.AppSettings()
+    cfg.pinned_version = pinned
+    result = _r._install_from_feed(cfg, lambda *a: None, is_update=True)
+    return result, downloaded
+
+
+def test_an_update_never_replaces_the_active_release_with_an_older_one(
+    monkeypatch, cfg_home
+):
+    result, downloaded = _feed_install(
+        monkeypatch, cfg_home, active="2.2.1.dev20261031", feed="2.2.0"
+    )
+    assert result.ok and result.skipped_reason == "up-to-date"
+    assert downloaded == []
+
+
+def test_an_update_installs_a_newer_release(monkeypatch, cfg_home):
+    result, downloaded = _feed_install(
+        monkeypatch, cfg_home, active="2.2.1.dev11", feed="2.2.1.dev20261031"
+    )
+    assert result.skipped_reason is None
+    assert downloaded == ["2.2.1.dev20261031"]
+
+
+def test_a_pinned_version_may_be_older_than_the_active_release(monkeypatch, cfg_home):
+    result, downloaded = _feed_install(
+        monkeypatch,
+        cfg_home,
+        active="2.2.1.dev20261031",
+        feed="2.2.0",
+        pinned="2.2.0",
+    )
+    assert downloaded == ["2.2.0"]
+
+
 # ── adopt_newer_bundle ──────────────────────────────────────────────
 
 
