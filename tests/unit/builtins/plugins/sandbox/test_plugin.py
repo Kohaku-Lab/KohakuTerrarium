@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium.builtins.plugins.sandbox import plugin as plugin_mod
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.tools.files.edit import EditTool
 from kohakuterrarium.builtins.tools.files.glob import GlobTool
@@ -282,3 +283,66 @@ class TestDeclaredPathArguments:
 )
 def test_builtin_file_tools_declare_their_path_argument(tool_cls):
     assert "path" in tool_cls.path_arguments
+
+
+class TestFileToolWritesMatchTheKernelProfile:
+    """``fs_write=workspace`` admits the same roots for file tools as for commands."""
+
+    async def _write(self, sandbox, target, context):
+        return await sandbox.pre_tool_execute(
+            {"path": str(target), "content": "x"},
+            tool_name="write",
+            tool=WriteTool(),
+            context=context,
+        )
+
+    async def test_write_outside_every_allowed_root_is_blocked(
+        self, paths, monkeypatch
+    ):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [])
+        with pytest.raises(PluginBlockError, match="outside working directory"):
+            await self._write(
+                SandboxPlugin(fs_write_allow=[]), outside / "new.txt", context
+            )
+
+    async def test_write_under_a_temp_root_is_allowed(self, paths, monkeypatch):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [str(outside)])
+        assert (
+            await self._write(
+                SandboxPlugin(fs_write_allow=[]), outside / "n.txt", context
+            )
+            is None
+        )
+
+    async def test_explicit_allow_is_an_exception_to_the_deny_list(
+        self, paths, monkeypatch
+    ):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [])
+        sockets = outside / "sockets"
+        sandbox = SandboxPlugin(fs_deny=[str(outside)], fs_write_allow=[str(sockets)])
+        assert await self._write(sandbox, sockets / "mux", context) is None
+        with pytest.raises(PluginBlockError, match="path is denied"):
+            await self._write(sandbox, outside / "outside.txt", context)
+
+    async def test_deny_list_overrides_the_cache_roots(self, paths, monkeypatch):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [])
+        monkeypatch.setattr(plugin_mod, "CACHE_ROOTS", (str(outside),))
+        sandbox = SandboxPlugin(fs_deny=[str(outside / "secret")])
+        assert await self._write(sandbox, outside / "pip" / "wheel", context) is None
+        with pytest.raises(PluginBlockError, match="path is denied"):
+            await self._write(sandbox, outside / "secret" / "token", context)
+
+    async def test_reads_do_not_gain_the_temp_roots(self, paths, monkeypatch):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [str(outside)])
+        with pytest.raises(PluginBlockError, match="outside working directory"):
+            await SandboxPlugin(fs_read="workspace").pre_tool_execute(
+                {"path": str(outside / "outside.txt")},
+                tool_name="read",
+                tool=ReadTool(),
+                context=context,
+            )

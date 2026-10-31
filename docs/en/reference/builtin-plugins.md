@@ -70,7 +70,7 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
 | `fs_deny` | list[str] | paths | `[]` | Additional path deny-list (env-var expansion supported). |
 | `network_allowlist` | list[str] | hostnames | `[]` | Allowed hosts when `network=allow`. Empty list = allow all when network is allowed. |
 | `os_enforce` | enum | `auto` / `require` / `off` | `auto` | Kernel write confinement for subprocesses. `auto` = confine where the OS supports it, `require` = refuse to spawn where it does not, `off` = policy checks only. |
-| `fs_write_allow` | list[str] | paths | `["~/.cache", "~/Library/Caches", "~/.npm"]` | Paths subprocesses may always write, even inside `fs_deny` (not under `fs_write=deny`). |
+| `fs_write_allow` | list[str] | paths | `[]` | Exceptions you name: writable even inside `fs_deny` (not under `fs_write=deny`). |
 | `blocked_tools` | list[str] | tool names | `[]` | Tools the agent cannot call regardless of args. |
 
 ### Profile presets
@@ -104,11 +104,17 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   and every process it starts are confined, whatever they do. A script that
   calls `shutil.rmtree(os.environ["HOME"])` fails with `Operation not
   permitted`. `workspace` allows writes under the working directory, the
-  system temp directories and `/dev`; `deny` allows only `/dev`; `broad`
-  allows everything. `fs_deny` paths are then unwritable, and
-  `fs_write_allow` entries are writable again, so a narrow exception such as
-  `~/.ssh/sockets` (ssh connection sharing) or `~/.config/gcloud` survives a
-  denied parent. Reads and network are not confined by the kernel. Commands run in
+  system temp directories, the user caches (`~/.cache`, `~/Library/Caches`,
+  `~/.npm`) and `/dev`; `deny` allows only `/dev`; `broad` allows
+  everything. `fs_deny` paths are then unwritable, and so are the directory
+  entries above them, so a denied path cannot be moved away by renaming a
+  parent. `fs_write_allow` entries are writable again, so a narrow exception
+  such as `~/.ssh/sockets` (ssh connection sharing) or `~/.config/gcloud`
+  survives a denied parent. Launchers that would run work outside the
+  sandbox (`open`, `osascript`, `launchctl` and the LaunchServices / Apple
+  Events services) are refused. Reads and network are not confined by the
+  kernel; another login path such as `ssh localhost` is out of scope.
+  `write` / `edit` checks under `fs_write=workspace` admit the same roots. Commands run in
   their own process group, and a timeout or cancellation kills the whole
   tree. Other platforms run unconfined under `auto`; use `require` to refuse
   instead.

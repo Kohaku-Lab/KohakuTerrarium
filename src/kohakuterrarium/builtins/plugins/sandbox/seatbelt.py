@@ -15,13 +15,22 @@ from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 
-DEFAULT_WRITE_ALLOW: tuple[str, ...] = (
+CACHE_ROOTS: tuple[str, ...] = (
     "~/.cache",
     "~/Library/Caches",
     "~/.npm",
 )
 
 _ALWAYS_WRITABLE: tuple[str, ...] = ("/dev",)
+
+# Programs and services that start work outside the caller's sandbox
+# (LaunchServices, Apple Events, launchd jobs).
+_LAUNCHERS: tuple[str, ...] = ("/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl")
+_LAUNCH_SERVICES: tuple[str, ...] = (
+    '(global-name "com.apple.coreservices.launchservicesd")',
+    '(global-name-prefix "com.apple.lsd.")',
+    '(global-name "com.apple.coreservices.appleevents")',
+)
 
 
 def seatbelt_available() -> bool:
@@ -61,34 +70,52 @@ def _subpaths(paths: list[str], cwd: Path) -> list[str]:
     return [f"(subpath {_quote(p)})" for p in seen]
 
 
+def _ancestors(paths: list[str], cwd: Path) -> list[str]:
+    """Every parent directory of ``paths`` below the filesystem root."""
+    seen: list[str] = []
+    for path in paths:
+        for form in _real_paths(path, cwd):
+            for parent in Path(form).parents:
+                text = str(parent)
+                if text != parent.anchor and text not in seen:
+                    seen.append(text)
+    return [f"(literal {_quote(p)})" for p in seen]
+
+
 def build_write_profile(
     profile: SandboxProfile,
     workspace: Path,
     *,
-    write_allow: tuple[str, ...] | list[str] = DEFAULT_WRITE_ALLOW,
+    write_allow: tuple[str, ...] | list[str] = (),
 ) -> str:
     """Seatbelt profile text enforcing ``profile``'s write axis.
 
-    ``fs_write=workspace`` allows the working directory and temporary roots;
-    ``fs_deny`` paths are carved out of those, and ``write_allow`` entries are
-    carved back in, so a narrow exception such as ``~/.ssh/sockets`` survives a
-    denied ``~/.ssh``. ``fs_write=deny`` allows only devices. Seatbelt applies
-    the last matching rule. Reads, network and process rules are left open.
+    ``fs_write=workspace`` allows the working directory, temporary roots and
+    user caches; ``fs_deny`` paths, and the directory entries above them, are
+    carved out of that, and ``write_allow`` entries are carved back in, so an
+    exception such as ``~/.ssh/sockets`` survives a denied ``~/.ssh``.
+    ``fs_write=deny`` allows only devices. Seatbelt applies the last matching
+    rule. Launchers that would run work outside the sandbox are refused; reads
+    and network are left open.
     """
     lines = ["(version 1)", "(allow default)"]
     if profile.fs_write != "broad":
         lines.append("(deny file-write*)")
         allowed = list(_ALWAYS_WRITABLE)
         if profile.fs_write == "workspace":
-            allowed += [str(workspace), *temp_roots()]
+            allowed += [str(workspace), *temp_roots(), *CACHE_ROOTS]
         lines.append(f"(allow file-write* {' '.join(_subpaths(allowed, workspace))})")
     denied = [p for p in profile.fs_deny if not p.startswith("%")]
     if denied:
-        lines.append(f"(deny file-write* {' '.join(_subpaths(denied, workspace))})")
+        rules = _subpaths(denied, workspace) + _ancestors(denied, workspace)
+        lines.append(f"(deny file-write* {' '.join(rules)})")
     if write_allow and profile.fs_write != "deny":
         lines.append(
             f"(allow file-write* {' '.join(_subpaths(list(write_allow), workspace))})"
         )
+    launchers = " ".join(f"(literal {_quote(p)})" for p in _LAUNCHERS)
+    lines.append(f"(deny process-exec {launchers})")
+    lines.append(f"(deny mach-lookup {' '.join(_LAUNCH_SERVICES)})")
     return "\n".join(lines) + "\n"
 
 

@@ -15,10 +15,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from kohakuterrarium.builtins.plugins.sandbox.seatbelt import (
-    DEFAULT_WRITE_ALLOW,
+    CACHE_ROOTS,
     build_write_profile,
     confine_argv,
     seatbelt_available,
+    temp_roots,
 )
 from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
     terminate_process_tree,
@@ -147,8 +148,8 @@ class SandboxPlugin(BasePlugin):
             "fs_write_allow": {
                 "type": "list",
                 "item_type": "string",
-                "default": list(DEFAULT_WRITE_ALLOW),
-                "doc": "Paths subprocesses may always write, even inside fs_deny.",
+                "default": [],
+                "doc": "Paths writable even inside fs_deny (exceptions you name).",
             },
             "blocked_tools": {
                 "type": "list",
@@ -189,9 +190,8 @@ class SandboxPlugin(BasePlugin):
             str(host).lower() for host in self.options.get("network_allowlist") or []
         }
         self._os_enforce = str(self.options.get("os_enforce") or "auto").lower()
-        allow = self.options.get("fs_write_allow")
         self._write_allow = tuple(
-            str(p) for p in (DEFAULT_WRITE_ALLOW if allow is None else allow)
+            str(p) for p in self.options.get("fs_write_allow") or []
         )
 
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
@@ -322,18 +322,31 @@ class SandboxPlugin(BasePlugin):
         resolved = (
             path if literal else Path(os.path.expandvars(str(path))).expanduser()
         ).resolve()
+        writing = axis == "fs_write"
+        if (
+            writing
+            and level != "deny"
+            and self._under(resolved, self._write_allow, cwd)
+        ):
+            return
         for denied in self._profile.fs_deny:
             denied_path = _resolve(denied, cwd).resolve()
             if _is_relative_to(resolved, denied_path):
                 self._violate(axis, str(path), f"{tool_name}: path is denied")
         if level == "deny":
             self._violate(axis, str(path), f"{tool_name}: {axis}=deny")
-        if level == "workspace" and not _is_relative_to(resolved, cwd):
+        roots = [str(cwd), *temp_roots(), *CACHE_ROOTS] if writing else [str(cwd)]
+        if level == "workspace" and not self._under(resolved, roots, cwd):
             self._violate(
                 axis,
                 str(path),
                 f"{tool_name}: path is outside working directory ({cwd})",
             )
+
+    @staticmethod
+    def _under(resolved: Path, roots: tuple[str, ...] | list[str], cwd: Path) -> bool:
+        """Whether ``resolved`` lies under any of ``roots``."""
+        return any(_is_relative_to(resolved, _resolve(r, cwd).resolve()) for r in roots)
 
     def _check_network_tool(self, tool_name: str, args: dict[str, Any]) -> None:
         if tool_name in NETWORK_TOOLS:

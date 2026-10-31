@@ -51,16 +51,23 @@ class TestBuildWriteProfile:
         )
         lines = text.splitlines()
         assert lines[:3] == ["(version 1)", "(allow default)", "(deny file-write*)"]
-        allow, deny, exceptions = lines[3:]
+        allow, deny, exceptions, execs, lookups = lines[3:]
         assert allow.startswith("(allow file-write*")
         assert f'(subpath "{os.path.realpath(tmp_path)}")' in allow
         assert '(subpath "/dev")' in allow
-        # The deny list overrides the workspace, then explicit allows override it.
+        # User caches are ordinary allows, so the deny list still overrides them.
+        assert f'(subpath "{Path("~/Library/Caches").expanduser()}")' in allow
         assert deny.startswith("(deny file-write*")
         assert f'(subpath "{Path("~/.ssh").expanduser()}")' in deny
+        # The directory entry above a denied path cannot be renamed away.
+        assert f'(literal "{Path("~").expanduser()}")' in deny
+        # Only the explicitly named exceptions come after the deny list.
         assert exceptions == (
             f'(allow file-write* (subpath "{Path("~/.cache").expanduser()}"))'
         )
+        assert execs.startswith("(deny process-exec")
+        assert '(literal "/usr/bin/osascript")' in execs
+        assert lookups.startswith("(deny mach-lookup")
 
     def test_broad_level_keeps_only_the_deny_list(self, tmp_path):
         text = seatbelt.build_write_profile(
@@ -72,7 +79,9 @@ class TestBuildWriteProfile:
 
     def test_deny_level_allows_devices_only(self, tmp_path):
         text = seatbelt.build_write_profile(
-            WORKSPACE.with_overrides(fs_write="deny"), tmp_path
+            WORKSPACE.with_overrides(fs_write="deny"),
+            tmp_path,
+            write_allow=["~/.cache"],
         )
         assert '(allow file-write* (subpath "/dev"))' in text
         assert str(tmp_path) not in text
@@ -140,6 +149,37 @@ class TestKernelEnforcement:
         assert (sockets / "mux").exists()
         assert result["returncode"] != 0
         assert (outside / ".zshrc").exists()
+
+    async def test_renaming_a_parent_of_a_denied_path_is_refused(self, dirs):
+        workspace, outside = dirs
+        protected = outside / "config" / "git"
+        protected.mkdir(parents=True)
+        sandbox = SandboxPlugin(fs_write="broad", fs_deny=[str(protected)])
+        result = await sandbox.run_subprocess_exec(
+            ["/bin/mv", str(outside / "config"), str(outside / "moved")],
+            cwd=workspace,
+            timeout=30,
+        )
+        assert result["returncode"] != 0
+        assert protected.is_dir()
+        beside = await sandbox.run_subprocess_exec(
+            ["/usr/bin/touch", str(outside / "config" / "other")],
+            cwd=workspace,
+            timeout=30,
+        )
+        assert beside["returncode"] == 0
+
+    @pytest.mark.parametrize(
+        "argv",
+        [["/usr/bin/osascript", "-e", "return 1"], ["/bin/launchctl", "list"]],
+    )
+    async def test_launchers_that_escape_the_sandbox_are_refused(self, dirs, argv):
+        workspace, _ = dirs
+        result = await SandboxPlugin().run_subprocess_exec(
+            argv, cwd=workspace, timeout=30
+        )
+        assert result["returncode"] != 0
+        assert b"Operation not permitted" in result["stderr"]
 
     async def test_audit_backend_does_not_confine(self, dirs):
         workspace, outside = dirs
