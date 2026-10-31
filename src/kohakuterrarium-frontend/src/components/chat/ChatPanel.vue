@@ -129,6 +129,7 @@ import { useDensity } from "@/composables/useDensity"
 import { useSlashCommandCompletion } from "@/composables/useSlashCommandCompletion"
 import { _parseSlashCommand, useChatStore } from "@/stores/chat"
 import { useChatTabDrag } from "@/composables/useChatTabDrag"
+import { appendDroppedPaths, useDesktopFileDrop } from "@/composables/useDesktopFileDrop"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
 import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
@@ -158,6 +159,14 @@ const submitInFlight = ref(false)
 const messagesEl = ref(null)
 const composerEl = ref(null)
 const bubbleEl = ref(null)
+useDesktopFileDrop(bubbleEl, {
+  enabled: () => !props.readOnly,
+  onHover: (value) => (dragOver.value = value),
+  onPaths: (paths) => {
+    inputText.value = appendDroppedPaths(inputText.value, paths)
+    nextTick(() => composerEl.value?.focus?.())
+  },
+})
 const attachments = ref([])
 const queueExpanded = ref(false)
 const dragOver = ref(false)
