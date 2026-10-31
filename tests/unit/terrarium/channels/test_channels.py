@@ -218,6 +218,53 @@ class TestInjectChannelTrigger:
         assert out is True
 
 
+# ── restore_listen_triggers ───────────────────────────────────
+
+
+def _listening_creature(env, *listen):
+    agent = _FakeAgent()
+    agent.environment = env
+    return SimpleNamespace(
+        agent=agent, name="bob", creature_id="bob_1", listen_channels=list(listen)
+    )
+
+
+class TestRestoreListenTriggers:
+    def test_reinstalls_only_missing_triggers(self):
+        env = Environment(env_id="e")
+        for name in ("ops", "chat"):
+            channels_mod.register_channel_in_environment(
+                env.shared_channels, ChannelInfo(name=name)
+            )
+        creature = _listening_creature(env, "ops", "chat")
+        channels_mod.inject_channel_trigger(
+            creature.agent,
+            subscriber_id="bob",
+            channel_name="chat",
+            registry=env.shared_channels,
+        )
+        live = creature.agent.trigger_manager._triggers["channel_bob_chat"]
+
+        assert channels_mod.restore_listen_triggers(creature) == ["ops"]
+        triggers = creature.agent.trigger_manager._triggers
+        assert set(triggers) == {"channel_bob_ops", "channel_bob_chat"}
+        # A live trigger is kept, not torn down and re-subscribed.
+        assert triggers["channel_bob_chat"] is live
+        assert triggers["channel_bob_ops"].ignore_sender_id == "bob_1"
+
+    def test_skips_channels_missing_from_the_environment(self):
+        env = Environment(env_id="e")
+        creature = _listening_creature(env, "gone")
+        assert channels_mod.restore_listen_triggers(creature) == []
+        assert creature.agent.trigger_manager._triggers == {}
+
+    def test_agent_without_environment_is_left_alone(self):
+        creature = SimpleNamespace(
+            agent=_FakeAgent(), name="bob", creature_id="bob_1", listen_channels=["x"]
+        )
+        assert channels_mod.restore_listen_triggers(creature) == []
+
+
 # ── _teardown_existing_trigger ────────────────────────────────
 
 

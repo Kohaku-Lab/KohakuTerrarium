@@ -34,6 +34,7 @@ from kohakuterrarium.core.turn import AgentEventStream, TurnResult
 from kohakuterrarium.llm.profiles.resolve import _login_provider_for
 from kohakuterrarium.packages.walk import package_snapshot
 from kohakuterrarium.terrarium.config import CreatureConfig
+from kohakuterrarium.terrarium.channels.channels import restore_listen_triggers
 from kohakuterrarium.terrarium.creature.ids import _safe_creature_id
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
 from kohakuterrarium.utils.logging import get_logger
@@ -164,6 +165,7 @@ class Creature:
             self._ensure_chat_pipe()
             self._restoration_state = RESTORATION_RESTORING
             try:
+                restore_listen_triggers(self)
                 await self.agent.start()
             except BaseException:
                 self._restoration_state = RESTORATION_ADDED
