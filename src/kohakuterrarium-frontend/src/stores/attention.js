@@ -20,7 +20,7 @@ export function createAttentionState() {
 }
 
 function attentionEventId(event) {
-  return event?.ui_event_id ?? event?.event_id ?? event?.widget_id ?? event?.payload?.event_id
+  return event?.ui_event_id ?? event?.widget_id ?? event?.payload?.event_id ?? event?.event_id
 }
 
 /** Whether ``event`` raises a prompt that waits for the user. */

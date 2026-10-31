@@ -1,7 +1,12 @@
+import { mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
+import { defineComponent, h, nextTick } from "vue"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatStore } from "./chat"
 import { indexOfSemanticKey, semanticKey } from "@/components/chat/chatRenderWindow"
+import TabItem from "@/components/shell/TabItem.vue"
+import { useAttentionEffects } from "@/composables/useAttentionEffects"
+import { clearAttentionRegistry } from "@/stores/attention"
 import api, { sessionAPI, terrariumAPI } from "@/utils/api"
 
 function event(id, type = "user_message", extra = {}) {
@@ -43,6 +48,7 @@ const content = (chat) =>
   )
 let chat
 beforeEach(() => {
+  clearAttentionRegistry()
   setActivePinia(createPinia())
   chat = useChatStore()
   chat._instanceId = "instance"
@@ -192,6 +198,69 @@ describe("paged history consumers", () => {
     await chat.initHistoryPage("root")
     expect(chat.attentionByTab.root.pending).toEqual(new Set(["prompt"]))
     expect(chat._appliedMaxEventIdByTab.root).toBe(70)
+
+    chat._onMessage({ type: "ui_supersede", source: "root", event_id: "prompt" })
+    const favicon = document.createElement("link")
+    favicon.rel = "icon"
+    favicon.href = "/favicon.ico"
+    document.head.append(favicon)
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          useAttentionEffects()
+          return () =>
+            h(TabItem, { tab: { id: "attach:default", kind: "attach", target: "default" } })
+        },
+      }),
+    )
+    try {
+      const prompts = ["ask-replied", "ask-expired"].map((widgetId, index) =>
+        event(71 + index, "widget", {
+          widget_id: widgetId,
+          renderer: "kt.ask_text",
+          interactive: true,
+          spec: { prompt: widgetId },
+        }),
+      )
+      vi.mocked(terrariumAPI.getHistoryPage).mockResolvedValueOnce(page(prompts, { older: false }))
+      await chat.initHistoryPage("root")
+      await nextTick()
+      expect(wrapper.find('[title="pending attention"]').text()).toBe("!")
+      expect(decodeURIComponent(favicon.href)).toContain("#dc2626")
+
+      chat._ws = { readyState: WebSocket.OPEN, send: vi.fn() }
+      expect(chat.submitUIReply("root", "ask-replied", "submit", { text: "answer" })).toBe(true)
+      const closes = []
+      for (const [index, reason] of ["replied", "timeout"].entries()) {
+        const widgetId = prompts[index].widget_id
+        chat._onMessage({
+          type: "widget_close",
+          source: "root",
+          event_id: widgetId,
+          payload: { reason },
+        })
+        closes.push(event(73 + index, "widget_close", { widget_id: widgetId, reason }))
+        expect(chat.attentionSummary("root").pending).toBe(1 - index)
+        await nextTick()
+        expect(wrapper.find('[title="pending attention"]').exists()).toBe(index === 0)
+        if (index === 0) expect(decodeURIComponent(favicon.href)).toContain("#dc2626")
+      }
+      expect(chat.messagesByTab.root[0].replied).toBe(true)
+      expect(chat.messagesByTab.root[1].timedOut).toBe(true)
+      expect(favicon.getAttribute("href")).toBe("/favicon.ico")
+
+      vi.mocked(terrariumAPI.getHistoryPage).mockResolvedValueOnce(
+        page([...prompts, ...closes], { older: false }),
+      )
+      await chat.initHistoryPage("root")
+      await nextTick()
+      expect(chat.attentionSummary("root").pending).toBe(0)
+      expect(wrapper.find('[title="pending attention"]').exists()).toBe(false)
+      expect(favicon.getAttribute("href")).toBe("/favicon.ico")
+    } finally {
+      wrapper.unmount()
+      favicon.remove()
+    }
   })
 
   it("reuses the saved source for older reads, maps channel messages, and never starts saved jobs", async () => {
