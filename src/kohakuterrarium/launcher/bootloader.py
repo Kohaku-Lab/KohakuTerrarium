@@ -30,6 +30,7 @@ from kohakuterrarium.launcher.tree_ops import read_active_pointer
 from kohakuterrarium.launcher.update_runner import (
     ProgressCallback,
     UpdateResult,
+    adopt_newer_bundle,
     first_install,
     maybe_update,
     reset as runner_reset,
@@ -157,6 +158,12 @@ def prepare(
             log.error("launcher: first_install reported ok but pointer absent")
             return PrepareResult(exit_code=7, error="post-install pointer absent")
     else:
+        adopted = adopt_newer_bundle(progress)
+        if adopted.ok and adopted.skipped_reason is None:
+            log.info("launcher: adopted bundled release %s", adopted.version)
+            pointer = read_active_pointer() or pointer
+        elif not adopted.ok:
+            log.warning("launcher: bundled release not adopted (%s)", adopted.error)
         update_result = maybe_update(progress)
         if not update_result.ok:
             log.warning(

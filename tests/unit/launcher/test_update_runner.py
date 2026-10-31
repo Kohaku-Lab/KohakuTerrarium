@@ -75,6 +75,67 @@ def test_first_install_falls_through_when_bundled_corrupt(monkeypatch, cfg_home)
     assert not result.ok
 
 
+# ── adopt_newer_bundle ──────────────────────────────────────────────
+
+
+def _bundle(monkeypatch, cfg_home, version):
+    bundled = cfg_home / "bundled-release"
+    bundled.mkdir(exist_ok=True)
+    _make_smoke_passing_tarball(
+        bundled / f"kohakuterrarium-{version}-linux-x64-py3.13.tar.gz", version=version
+    )
+    monkeypatch.setattr(_p, "_candidate_bundled_release_dirs", lambda: [bundled])
+    monkeypatch.setattr(_r, "smoke_test_tree", lambda d: version)
+
+
+def test_adopt_newer_bundle_replaces_an_older_active_release(monkeypatch, cfg_home):
+    _t.write_active_pointer("2.0.0.dev20260520092822+45856af", build_id="bundled")
+    _bundle(monkeypatch, cfg_home, "2.2.1.dev20261031")
+
+    result = _r.adopt_newer_bundle()
+
+    assert result.ok and result.skipped_reason is None
+    assert _t.read_active_pointer().version == "2.2.1.dev20261031"
+    assert _p.version_dir("2.2.1.dev20261031").is_dir()
+    assert _s.load().runtime.active_version == "2.2.1.dev20261031"
+
+
+@pytest.mark.parametrize("active", ["2.2.1.dev20261031", "3.0.0"])
+def test_adopt_newer_bundle_keeps_an_active_release_that_is_not_older(
+    monkeypatch, cfg_home, active
+):
+    _t.write_active_pointer(active, build_id="feed")
+    _bundle(monkeypatch, cfg_home, "2.2.1.dev20261031")
+
+    result = _r.adopt_newer_bundle()
+
+    assert result.ok and result.skipped_reason == "active-is-current"
+    assert _t.read_active_pointer().version == active
+    assert not _p.version_dir("2.2.1.dev20261031").exists()
+
+
+def test_adopt_newer_bundle_without_a_bundle_or_pointer_does_nothing(
+    monkeypatch, cfg_home
+):
+    monkeypatch.setattr(_p, "_candidate_bundled_release_dirs", lambda: [])
+    assert _r.adopt_newer_bundle().skipped_reason == "nothing-to-adopt"
+    _bundle(monkeypatch, cfg_home, "2.2.1")
+    assert _r.adopt_newer_bundle().skipped_reason == "nothing-to-adopt"
+
+
+def test_adopt_newer_bundle_failure_leaves_the_active_release(monkeypatch, cfg_home):
+    _t.write_active_pointer("2.0.0", build_id="bundled")
+    bundled = cfg_home / "bundled-release"
+    bundled.mkdir()
+    (bundled / "kohakuterrarium-2.2.1-linux-x64-py3.13.tar.gz").write_bytes(b"")
+    monkeypatch.setattr(_p, "_candidate_bundled_release_dirs", lambda: [bundled])
+
+    result = _r.adopt_newer_bundle()
+
+    assert not result.ok
+    assert _t.read_active_pointer().version == "2.0.0"
+
+
 # ── _install_from_feed via run_update ──────────────────────────────
 
 

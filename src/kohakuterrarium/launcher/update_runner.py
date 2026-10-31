@@ -39,6 +39,7 @@ from kohakuterrarium.launcher.tree_ops import (
     sweep_stale_partials,
     write_active_pointer,
 )
+from kohakuterrarium.launcher.versions import is_newer
 
 
 @dataclass
@@ -243,6 +244,33 @@ def _first_install_locked(progress: ProgressCallback) -> UpdateResult:
         cfg.runtime.last_check_error = result.error
     _settings.save(cfg)
     return result
+
+
+def adopt_newer_bundle(progress: ProgressCallback | None = None) -> UpdateResult:
+    """Activate the bundled release when it is newer than the active one.
+
+    An installed shell carries a release; a runtime left by an earlier install
+    must not hold the app on an older one.
+    """
+    progress = progress or _noop_progress
+    tarball = _pick_bundled_tarball()
+    active = read_active_pointer()
+    if tarball is None or active is None:
+        return UpdateResult(ok=True, skipped_reason="nothing-to-adopt")
+    version = _bundled_version_from_filename(tarball)
+    if not is_newer(version, active.version):
+        return UpdateResult(ok=True, skipped_reason="active-is-current")
+    try:
+        with UpdateLock(lock_path()):
+            result = _install_from_bundled(progress)
+            if result.ok:
+                cfg = _settings.load()
+                cfg.runtime.active_version = result.version
+                cfg.runtime.active_build_id = result.build_id
+                _settings.save(cfg)
+            return result
+    except LockBusy as e:
+        return UpdateResult(ok=False, error=f"another update is in progress: {e}")
 
 
 def first_install(progress: ProgressCallback | None = None) -> UpdateResult:
