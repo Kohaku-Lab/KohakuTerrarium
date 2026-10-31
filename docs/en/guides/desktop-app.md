@@ -56,6 +56,31 @@ back and opens the tab that needs you first.
 window hide it instead of quitting, so agents keep working. Quit from the tray menu.
 The setting is stored in `shell-settings.json` in the app's config folder.
 
+## API keys in the system keychain
+
+When the machine has a keychain (Windows Credential Manager, macOS Keychain, or a Linux
+Secret Service), **Settings → Desktop → Keep API keys in the system keychain** moves your
+provider keys out of `api_keys.yaml` into it. Each key is written and read back before the
+file is emptied, so a failure leaves everything as it was; turning the switch off moves
+the keys back. The installed app ships with the needed library; with pip, install
+`kohakuterrarium[keychain]`. If the keychain later becomes unavailable the app falls back
+to the key file and your environment variables instead of failing.
+
+## Session windows
+
+With a session open, run **Session: pop out into its own window** from the command
+palette (Ctrl+K). The session opens alone in a second window, handy for a second
+monitor; each session gets one window, and running the command again raises it. The
+window shows the same live session as the tab it came from.
+
+## Application menu (macOS)
+
+On macOS the menu bar has the standard application, File, Edit, View, Window and Help
+menus. Edit carries cut, copy, paste and select all (the page needs them for the keyboard
+shortcuts to work), and the app-specific items — Settings (⌘,), New Session (⌘N), Command
+Palette (⌘K) and Pop Out Session — do what their names say. Windows has no menu bar; the
+command palette covers the same actions.
+
 ## Opening files and folders
 
 The installers register `.kohakutr` session files with the app. Opening one (double-click,
