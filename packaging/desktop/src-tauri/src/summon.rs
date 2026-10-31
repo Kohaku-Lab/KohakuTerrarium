@@ -42,9 +42,11 @@ fn apply(app: &AppHandle, previous: Option<&str>, next: Option<&str>) -> bool {
     }
 }
 
-/// Register and release a rarely used shortcut, leaving saved settings alone.
+/// Rarely used, and a key all three desktop platforms map (macOS stops at F20).
+const PROBE: &str = "Control+Alt+Shift+F19";
+
+/// Register and release the probe shortcut, leaving saved settings alone.
 pub fn probe(app: &AppHandle) -> Value {
-    const PROBE: &str = "Control+Alt+Shift+F23";
     let registered = apply(app, None, Some(PROBE));
     let released = registered && apply(app, Some(PROBE), None);
     json!({ "registered": registered, "released": released })
@@ -93,6 +95,13 @@ mod tests {
         ] {
             assert!(parse(text).is_some(), "{text}");
         }
+    }
+
+    #[test]
+    fn the_probe_shortcut_parses_and_uses_a_key_macos_can_bind() {
+        assert!(parse(PROBE).is_some());
+        let key: u32 = PROBE.rsplit('F').next().unwrap().parse().unwrap();
+        assert!((13..=20).contains(&key));
     }
 
     #[test]
