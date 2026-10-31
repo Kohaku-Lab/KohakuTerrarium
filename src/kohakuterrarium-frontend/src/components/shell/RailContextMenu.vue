@@ -21,20 +21,31 @@
         <span class="i-carbon-stop-filled" />
         {{ t("shell.rail.endConversation") }}
       </button>
+      <template v-if="hasActions">
+        <div class="border-t border-warm-200 dark:border-warm-700 my-1" />
+        <ActionButtons target="rail-item" variant="menu" :context="actionContext" @ran="emit('close')" />
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed } from "vue"
+
+import ActionButtons from "@/ext/ActionButtons.vue"
+import { actionsFor } from "@/ext/actions"
 import { useI18n } from "@/utils/i18n"
 
-defineProps({
+const props = defineProps({
   instance: { type: Object, required: true },
   chatOpen: { type: Boolean, default: false },
   inspectorOpen: { type: Boolean, default: false },
 })
 const emit = defineEmits(["close", "toggle-chat", "toggle-inspector", "detach", "end"])
 const { t } = useI18n()
+
+const hasActions = computed(() => actionsFor("rail-item").length > 0)
+const actionContext = () => ({ id: props.instance.id ?? "", name: props.instance.config_name || "" })
 
 function emitAndClose(name) {
   emit(name)

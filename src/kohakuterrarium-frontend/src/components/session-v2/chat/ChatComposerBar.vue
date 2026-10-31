@@ -30,6 +30,7 @@
       <template #toolbar>
         <PhoneModelChip v-if="isCompact" />
         <ComposerModelPicker v-else />
+        <ActionButtons target="composer" :context="composerActionContext" button-class="w-7 h-7 flex items-center justify-center rounded-md shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10" icon-class="text-sm" />
         <span class="flex-1" />
         <ComposerContextMeter />
       </template>
@@ -56,6 +57,7 @@ import ComposerModelPicker from "@/components/session-v2/chat/ComposerModelPicke
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import PhoneModelChip from "@/components/session-v2/phone/PhoneModelChip.vue"
 import { useDensity } from "@/composables/useDensity"
+import ActionButtons from "@/ext/ActionButtons.vue"
 import { ChatComposer, handleSlashKeydown, shouldSendOnEnter } from "@kohakuterrarium/chat-ui"
 import { MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 import { useI18n } from "@/utils/i18n"
@@ -94,6 +96,21 @@ const pending = computed(() => {
 })
 // Shown only while there is a draft that would not answer them.
 const pendingCount = computed(() => (inputText.value ? pending.value.length : 0))
+
+// The draft box as an extension action sees it: it can read and fill the draft
+// for the user, and nothing is sent until the user sends it.
+function composerActionContext() {
+  return {
+    tab: props.tabKey,
+    draft: inputText.value,
+    setDraft: (text) => {
+      inputText.value = String(text ?? "")
+    },
+    insertText: (text) => {
+      inputText.value += String(text ?? "")
+    },
+  }
+}
 
 function startEdit(qm) {
   editingId.value = qm.eventId

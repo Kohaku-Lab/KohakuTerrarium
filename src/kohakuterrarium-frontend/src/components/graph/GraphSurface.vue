@@ -47,6 +47,7 @@ import GraphToolbar from "@/components/graph/toolbar/GraphToolbar.vue"
 import NewSessionDialog from "@/components/shell/newSession/NewSessionDialog.vue"
 import { useGraphActions } from "@/composables/graph/useGraphActions"
 import { useDensity } from "@/composables/useDensity"
+import { actionMenuItems, isActionMenuId, runActionMenuId } from "@/ext/actions"
 import { useGraphLiveStore } from "@/stores/graph/live"
 import { useGraphViewStore } from "@/stores/graph/view"
 import { useI18n } from "@/utils/i18n"
@@ -145,8 +146,21 @@ function menuTitle(target) {
   return ""
 }
 
+function actionTarget(target) {
+  if (target.kind === "edge") return "graph-edge"
+  return ["creature", "channel", "group"].includes(target.kind) ? "graph-node" : ""
+}
+
+// Read-only description of the clicked node or edge handed to extension actions.
+function actionContext(target) {
+  const item = target.item || {}
+  return { kind: target.kind, id: item.id ?? item.key ?? "", name: item.name ?? item.label ?? "", sessionId: item.sessionId ?? null }
+}
+
 function openMenu({ x, y, target }) {
-  const items = menuItemsFor(target, view, t)
+  const own = menuItemsFor(target, view, t)
+  const extra = actionTarget(target) ? actionMenuItems(actionTarget(target)) : []
+  const items = extra.length && own.length ? [...own, { id: "ext-divider", divider: true }, ...extra] : [...own, ...extra]
   if (items.length) menu.value = { x, y, target, items, title: menuTitle(target) }
 }
 
@@ -170,6 +184,7 @@ function onMenuPick(id) {
   const target = menu.value?.target
   menu.value = null
   if (!target) return
+  if (isActionMenuId(id)) return runActionMenuId(id, { target: actionTarget(target), ...actionContext(target) })
   const item = target.item
   switch (id) {
     case "chat":

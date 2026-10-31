@@ -10,6 +10,7 @@
 import { defineComponent, h, markRaw } from "vue"
 
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
+import { clearActions, registerAction } from "@/ext/actions"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
@@ -49,6 +50,14 @@ export const MOUNT_OWNER_KINDS = {
   overlay: "package",
   command: "package",
   "status-item": "package",
+  action: "package",
+}
+
+function actionOptions(source) {
+  const out = {}
+  if (Array.isArray(source?.targets)) out.targets = [...source.targets]
+  if (Array.isArray(source?.roles)) out.roles = [...source.roles]
+  return out
 }
 
 const STATUS_OPTION_NAMES = ["side", "maxWidth"]
@@ -184,6 +193,17 @@ export function registerContribution(pkg, contribution) {
         options: statusOptions(contribution.status),
       })
       break
+    case "action":
+      registerAction({
+        key,
+        pkg,
+        id: contribution.id,
+        label: contribution.label,
+        icon: contribution.icon,
+        order: contribution.order,
+        options: actionOptions(contribution.action),
+      })
+      break
     default:
       return null
   }
@@ -209,6 +229,7 @@ export function unregisterAllContributions() {
   }
   clearOverlays()
   clearStatusItems()
+  clearActions()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -226,8 +247,11 @@ export function registeredContributionKeys() {
  */
 export function provideContributionComponent(pkg, kind, id, component, options = {}) {
   if (!component) throw new Error(`${pkg}: register${kind} ${id} needs a component`)
-  if (kind === "command" && typeof component !== "function") {
-    throw new Error(`${pkg}: command ${id} needs a handler function`)
+  if ((kind === "command" || kind === "action") && typeof component !== "function") {
+    throw new Error(`${pkg}: ${kind} ${id} needs a handler function`)
+  }
+  if (kind === "action" && !findContribution(pkg, id) && !options.targets?.length) {
+    throw new Error(`${pkg}: an undeclared action ${id} needs options.targets`)
   }
   const declared = findContribution(pkg, id)
   if (declared && declared.kind !== kind) {
@@ -261,6 +285,7 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       ...(kind === "widget" ? { renderer: options.renderer } : {}),
       ...(kind === "overlay" ? { overlay: overlayOptions(options) } : {}),
       ...(kind === "status-item" ? { status: statusOptions(options) } : {}),
+      ...(kind === "action" ? { action: actionOptions(options) } : {}),
       ...(kind === "command"
         ? { shortcut: options.shortcut || "", keywords: options.keywords || "" }
         : {}),

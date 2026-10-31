@@ -136,6 +136,7 @@
       <button class="msg-action-btn" title="Edit & rerun" aria-label="Edit and rerun message" :disabled="branchOperationBusy" :aria-busy="branchOperationBusy" @click="startEdit">
         <span class="i-carbon-edit text-xs" />
       </button>
+      <ActionButtons target="message" role="user" :context="actionContext" button-class="msg-action-btn" />
     </div>
   </div>
 
@@ -174,6 +175,7 @@
       <button class="msg-action-btn" title="Regenerate" aria-label="Regenerate response" :disabled="branchOperationBusy" :aria-busy="branchOperationBusy" @click="regenerate">
         <span class="i-carbon-renew text-xs" />
       </button>
+      <ActionButtons target="message" role="assistant" :context="actionContext" button-class="msg-action-btn" />
     </div>
   </div>
 
@@ -233,6 +235,7 @@ import MarkdownRenderer from "../../../public/chat/MarkdownRenderer.vue"
 import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { useMessageActions } from "../../../public/chat/messageActions.js"
 import { contentToText, useMessageRowActions } from "../../../public/chat/useMessageRowActions.js"
+import ActionButtons from "@/ext/ActionButtons.vue"
 import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 import { GEM } from "@/utils/colors"
@@ -386,6 +389,18 @@ const showSenderHeader = computed(() => {
   return props.prevMessage.sender !== props.message.sender
 })
 
+// Read-only description of this message handed to extension actions.
+function actionContext() {
+  const message = props.message
+  const text = message.parts
+    ? message.parts
+        .filter((part) => part.type === "text" && part.content)
+        .map((part) => part.content)
+        .join("")
+    : contentToText(message.contentParts || message.content)
+  return { id: message.id ?? null, role: message.role, text, turn: message.turnIndex ?? null, tab: messageTab.value }
+}
+
 const senderGemColor = computed(() => _gemForSender(props.message.sender))
 
 const senderHomeNode = computed(() => resolveHomeNode(props.message))
@@ -457,7 +472,8 @@ const { editing, editText, editAttachments, editTextRestricted, editTextareaEl, 
   }
 }
 
-.msg-action-btn {
+.msg-action-btn,
+:deep(.msg-action-btn) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -473,7 +489,8 @@ const { editing, editText, editAttachments, editTextRestricted, editTextareaEl, 
     color 0.15s,
     border-color 0.15s;
 }
-.msg-action-btn:hover {
+.msg-action-btn:hover,
+:deep(.msg-action-btn:hover) {
   background: var(--color-card-hover);
   color: var(--color-text);
   border-color: var(--color-border-hover);

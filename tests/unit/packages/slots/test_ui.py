@@ -210,6 +210,63 @@ class TestParse:
         assert by_id["git"]["order"] == 5
         assert by_id["t"]["status"] == {}
 
+    def test_action_targets_and_roles(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "action", "id": "a", "targets": ["message", "tab"]},
+                    {
+                        "kind": "action",
+                        "id": "b",
+                        "targets": ["message"],
+                        "roles": ["user", "tool"],
+                    },
+                    {"kind": "action", "id": "c", "targets": ["composer", "file"]},
+                    {"kind": "tab", "id": "t"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c["action"] for c in slot.to_dict()["contributes"]}
+        assert by_id["a"] == {"targets": ["message", "tab"], "roles": ["assistant"]}
+        assert by_id["b"] == {"targets": ["message"], "roles": ["user", "tool"]}
+        assert by_id["c"] == {"targets": ["composer", "file"]}
+        assert by_id["t"] == {}
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "action", "id": "a"}, "targets must be a non-empty list"),
+            ({"kind": "action", "id": "a", "targets": []}, "targets must be"),
+            ({"kind": "action", "id": "a", "targets": "tab"}, "targets must be"),
+            ({"kind": "action", "id": "a", "targets": ["sky"]}, "distinct values"),
+            ({"kind": "action", "id": "a", "targets": ["tab", "tab"]}, "distinct"),
+            (
+                {"kind": "action", "id": "a", "targets": ["tab"], "roles": ["user"]},
+                "needs the message target",
+            ),
+            (
+                {
+                    "kind": "action",
+                    "id": "a",
+                    "targets": ["message"],
+                    "roles": ["robot"],
+                },
+                "roles must hold",
+            ),
+            (
+                {"kind": "action", "id": "a", "targets": ["tab"], "owner": "plugin:x"},
+                "owned by",
+            ),
+            ({"kind": "tab", "id": "t", "targets": ["tab"]}, "only valid on an action"),
+        ],
+    )
+    def test_bad_action_invalidates_the_package(self, tmp_path, contribution, message):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
     @pytest.mark.parametrize(
         "contribution, message",
         [

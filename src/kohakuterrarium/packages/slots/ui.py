@@ -35,7 +35,18 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "overlay": ("package",),
     "command": ("package",),
     "status-item": ("package",),
+    "action": ("package",),
 }
+ACTION_TARGETS: tuple[str, ...] = (
+    "message",
+    "composer",
+    "tab",
+    "rail-item",
+    "file",
+    "graph-node",
+    "graph-edge",
+)
+ACTION_ROLES: tuple[str, ...] = ("assistant", "user", "tool", "system")
 STATUS_SIDES: tuple[str, ...] = ("left", "right")
 STATUS_MIN_WIDTH = 24
 STATUS_MAX_WIDTH = 320
@@ -107,6 +118,7 @@ class UIContribution:
     shortcut: str = ""
     keywords: str = ""
     status: dict = field(default_factory=dict)
+    action: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -124,6 +136,7 @@ class UIContribution:
             "shortcut": self.shortcut,
             "keywords": self.keywords,
             "status": dict(self.status),
+            "action": {k: list(v) for k, v in self.action.items()},
         }
 
 
@@ -272,7 +285,41 @@ def _parse_contribution(
         shortcut=_parse_shortcut(raw, kind, where),
         keywords=_parse_keywords(raw, kind, where),
         status=_parse_status(raw, kind, where),
+        action=_parse_action(raw, kind, where),
     )
+
+
+def _choice_list(raw: dict, key: str, allowed: tuple[str, ...], where: str) -> list:
+    value = raw.get(key)
+    if not isinstance(value, list) or not value:
+        raise _SlotError(f"{where}.{key} must be a non-empty list of {list(allowed)}")
+    bad = [v for v in value if v not in allowed]
+    if bad or len(set(value)) != len(value):
+        raise _SlotError(
+            f"{where}.{key} must hold distinct values from {list(allowed)} "
+            f"(got {value!r})"
+        )
+    return list(value)
+
+
+def _parse_action(raw: dict, kind: str, where: str) -> dict:
+    """Targets (and message roles) of an ``action``; empty for other kinds."""
+    if kind != "action":
+        stray = [k for k in ("targets", "roles") if k in raw]
+        if stray:
+            raise _SlotError(f"{where}.{stray[0]} is only valid on an action")
+        return {}
+    targets = _choice_list(raw, "targets", ACTION_TARGETS, where)
+    if "roles" in raw and "message" not in targets:
+        raise _SlotError(f"{where}.roles needs the message target")
+    out = {"targets": targets}
+    if "message" in targets:
+        out["roles"] = (
+            _choice_list(raw, "roles", ACTION_ROLES, where)
+            if "roles" in raw
+            else ["assistant"]
+        )
+    return out
 
 
 def _parse_status(raw: dict, kind: str, where: str) -> dict:

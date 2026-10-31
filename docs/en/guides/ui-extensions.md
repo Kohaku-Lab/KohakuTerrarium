@@ -30,6 +30,7 @@ This guide covers:
 | `command` | a command palette entry with an optional key combination | `package` | host-wide |
 | `overlay` | a floating window above the whole app, on every page and in the browser as well as the desktop app | `package` | host-wide |
 | `status-item` | a segment in the status bar at the bottom of a session | `package` | host-wide |
+| `action` | a button or menu entry on a message, the composer, a tab, a rail item, a file or a graph node or edge | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
 loaded and enabled**; otherwise it renders nothing. Renderers render past
@@ -64,7 +65,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -135,6 +136,7 @@ export default defineExtension((kt) => {
 | `kt.openTab(id)` | open one of the package's tabs |
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
+| `kt.registerAction(id, handler, options?)` | provide the handler of an [action](#actions); an undeclared action needs `options.targets` |
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
@@ -268,6 +270,40 @@ kt.registerStatusItem("branch", {
 
 A status item shows state that its owner (package backend) keeps; it does not
 read or change session content.
+
+### Actions
+
+An `action` adds a button or a menu entry to the surfaces it names. The host
+calls the handler with a read-only description of the thing acted on. An
+action never changes stored content: the owner (package backend) does the work.
+
+```yaml
+- kind: action
+  id: translate
+  label: Translate
+  icon: i-carbon-translate
+  targets: [message, tab]   # message | composer | tab | rail-item | file | graph-node | graph-edge
+  roles: [assistant]        # message only: assistant | user | tool | system (default assistant)
+```
+
+```js
+kt.registerAction("translate", async (ctx) => {
+  if (ctx.target === "message") await kt.api.post("translate", { text: ctx.text })
+})
+```
+
+| Target | Shown as | Context passed to the handler |
+|---|---|---|
+| `message` | a button in the hover bar of a message with a matching role | `id`, `role`, `text`, `turn`, `tab` |
+| `composer` | a button in the message box toolbar | `tab`, `draft`, `setDraft(text)`, `insertText(text)` |
+| `tab` | a row in the tab's right-click menu | `id`, `kind`, `label` |
+| `rail-item` | a row in the rail item's right-click menu | `id`, `name` |
+| `file` | a row in the workspace file tree's right-click menu | `path`, `name`, `isDirectory` |
+| `graph-node` / `graph-edge` | a row in the graph's right-click menu | `kind`, `id`, `name`, `sessionId` |
+
+The composer context only fills the draft the user is typing; nothing is sent
+until the user sends it. Content that must reach the agent or the stored
+session goes through a backend plugin hook instead.
 
 ### Host services
 
