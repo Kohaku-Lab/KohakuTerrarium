@@ -33,6 +33,7 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "trigger-renderer": ("trigger",),
     "widget": ("package", "plugin", "tool", "trigger"),
     "overlay": ("package",),
+    "command": ("package",),
 }
 OVERLAY_ANCHORS: tuple[str, ...] = (
     "top-left",
@@ -50,6 +51,9 @@ OVERLAY_FLAGS: tuple[str, ...] = (
     "alwaysOnTop",
 )
 OVERLAY_MAX_SIZE = 4096
+_SHORTCUT_RE = re.compile(
+    r"^((Ctrl|Alt|Shift|Meta)\+){1,3}([A-Za-z0-9]|F([1-9]|1[0-2]))$"
+)
 UI_KINDS: tuple[str, ...] = tuple(MOUNT_OWNER_KINDS)
 OWNER_KINDS: tuple[str, ...] = ("package", "plugin", "tool", "trigger")
 OWNER_MANIFEST_SLOTS: dict[str, str] = {
@@ -96,6 +100,8 @@ class UIContribution:
     isolation: str = "inline"
     renderer: str = ""
     overlay: dict = field(default_factory=dict)
+    shortcut: str = ""
+    keywords: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -110,6 +116,8 @@ class UIContribution:
             "isolation": self.isolation,
             "renderer": self.renderer,
             "overlay": dict(self.overlay),
+            "shortcut": self.shortcut,
+            "keywords": self.keywords,
         }
 
 
@@ -255,7 +263,44 @@ def _parse_contribution(
         isolation=isolation,
         renderer=renderer,
         overlay=_parse_overlay(raw, kind, where),
+        shortcut=_parse_shortcut(raw, kind, where),
+        keywords=_parse_keywords(raw, kind, where),
     )
+
+
+def _parse_shortcut(raw: dict, kind: str, where: str) -> str:
+    """The in-app key combination of a command; empty for other kinds."""
+    value = raw.get("shortcut")
+    if kind != "command":
+        if value is not None:
+            raise _SlotError(f"{where}.shortcut is only valid on a command")
+        return ""
+    if value is None:
+        return ""
+    modifiers = str(value).split("+")[:-1]
+    if (
+        not isinstance(value, str)
+        or not _SHORTCUT_RE.match(value)
+        or not set(modifiers) & {"Ctrl", "Alt", "Meta"}
+        or len(set(modifiers)) != len(modifiers)
+    ):
+        raise _SlotError(
+            f"{where}.shortcut must look like 'Ctrl+Shift+P' (a Ctrl, Alt or Meta "
+            f"modifier plus one key), got {value!r}"
+        )
+    return value
+
+
+def _parse_keywords(raw: dict, kind: str, where: str) -> str:
+    """Extra search words of a command; empty for other kinds."""
+    value = raw.get("keywords")
+    if kind != "command":
+        if value is not None:
+            raise _SlotError(f"{where}.keywords is only valid on a command")
+        return ""
+    if value is not None and not isinstance(value, str):
+        raise _SlotError(f"{where}.keywords must be a string")
+    return value or ""
 
 
 def _parse_overlay(raw: dict, kind: str, where: str) -> dict:

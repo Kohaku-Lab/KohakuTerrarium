@@ -159,6 +159,32 @@ class TestParse:
         }
         assert by_id["t"] == {}
 
+    def test_command_options(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {
+                        "kind": "command",
+                        "id": "pet-toggle",
+                        "label": "Toggle pet",
+                        "shortcut": "Ctrl+Alt+P",
+                        "keywords": "cat desk",
+                    },
+                    {"kind": "command", "id": "plain"},
+                    {"kind": "tab", "id": "t"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c for c in slot.to_dict()["contributes"]}
+        assert by_id["pet-toggle"]["shortcut"] == "Ctrl+Alt+P"
+        assert by_id["pet-toggle"]["keywords"] == "cat desk"
+        assert by_id["pet-toggle"]["owner"] == "package:pkg"
+        assert by_id["plain"]["shortcut"] == "" and by_id["plain"]["keywords"] == ""
+        assert by_id["t"]["shortcut"] == ""
+
     @pytest.mark.parametrize(
         "contribution, message",
         [
@@ -180,6 +206,27 @@ class TestParse:
             ({"kind": "tab", "id": "t", "renderer": "pkg.x"}, "only valid on a widget"),
             ({"kind": "overlay", "id": "o", "owner": "plugin:x"}, "owned by"),
             ({"kind": "overlay", "id": "o", "anchor": "middle"}, "anchor"),
+            ({"kind": "command", "id": "c", "owner": "plugin:x"}, "owned by"),
+            (
+                {"kind": "command", "id": "c", "shortcut": "P"},
+                "shortcut must look like",
+            ),
+            (
+                {"kind": "command", "id": "c", "shortcut": "Shift+P"},
+                "Ctrl, Alt or Meta",
+            ),
+            (
+                {"kind": "command", "id": "c", "shortcut": "Ctrl+Ctrl+P"},
+                "shortcut must",
+            ),
+            ({"kind": "command", "id": "c", "shortcut": "Ctrl+Enter"}, "shortcut must"),
+            ({"kind": "command", "id": "c", "shortcut": 5}, "shortcut must"),
+            ({"kind": "command", "id": "c", "keywords": ["a"]}, "keywords must"),
+            (
+                {"kind": "tab", "id": "t", "shortcut": "Ctrl+P"},
+                "only valid on a command",
+            ),
+            ({"kind": "tab", "id": "t", "keywords": "x"}, "only valid on a command"),
             ({"kind": "overlay", "id": "o", "surface": "tab"}, "surface"),
             ({"kind": "overlay", "id": "o", "alwaysOnTop": 1}, "alwaysOnTop"),
             ({"kind": "overlay", "id": "o", "width": 0}, "width"),
