@@ -31,6 +31,10 @@ describe("DesktopOpenHost", () => {
 
     await wrapper.find("button").trigger("click")
     expect(wrapper.find('[data-test="dialog"]').exists()).toBe(false)
+
+    window.dispatchEvent(new CustomEvent(OPEN_WORKSPACE_EVENT, { detail: { path: "" } }))
+    await flushPromises()
+    expect(wrapper.find('[data-test="dialog"]').attributes("data-pwd")).toBe("")
     wrapper.unmount()
   })
 })

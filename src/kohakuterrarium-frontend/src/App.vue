@@ -39,6 +39,8 @@ import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
 import { useConnectIntent } from "@/composables/useConnectIntent"
 import { useDensity } from "@/composables/useDensity"
+import { useDesktopMenu } from "@/composables/useDesktopMenu"
+import { useDesktopPopout } from "@/composables/useDesktopPopout"
 import { useDesktopSummon } from "@/composables/useDesktopSummon"
 import { useDocumentAttention } from "@/composables/useDocumentAttention"
 import { useAttentionEffects } from "@/composables/useAttentionEffects"
@@ -88,6 +90,8 @@ instances.fetchAll()
 
 useKeyboardShortcuts()
 useDesktopSummon()
+useDesktopPopout()
+useDesktopMenu()
 useDocumentAttention()
 useAttentionEffects()
 useBuiltinCommands()

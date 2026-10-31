@@ -12,7 +12,9 @@ import { initializeAttentionPrefs } from "@/stores/attentionPrefs"
 import { registerBuiltinPanels } from "@/stores/layoutPanels"
 import { useLocaleStore } from "@/stores/locale"
 import { useThemeStore } from "@/stores/theme"
+import PopoutApp from "@/components/shell/PopoutApp.vue"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
+import { popoutScopeFromSearch } from "@/utils/popout"
 import { ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
 import "element-plus/es/components/message/style/css"
@@ -72,7 +74,13 @@ async function bootstrap() {
 
   const pinia = createPinia()
   const overlayKey = overlayKeyFromSearch(location.search)
-  const app = overlayKey ? createApp(OverlayWindowApp, { overlayKey }) : createApp(App)
+  const popoutScope = popoutScopeFromSearch(location.search)
+  const secondary = Boolean(overlayKey || popoutScope)
+  const app = overlayKey
+    ? createApp(OverlayWindowApp, { overlayKey })
+    : popoutScope
+      ? createApp(PopoutApp, { scope: popoutScope })
+      : createApp(App)
 
   app.use(pinia)
   app.use(router)
@@ -80,14 +88,14 @@ async function bootstrap() {
   registerBuiltinPanels()
   installSharedModules()
 
-  if (overlayKey) {
+  if (secondary) {
     useThemeStore().init()
     useLocaleStore().init()
     installExternalLinkGuard()
   }
   app.mount("#app")
   startUiExtensions()
-  if (!overlayKey) startOverlayWindows()
+  if (!secondary) startOverlayWindows()
 }
 
 bootstrap()

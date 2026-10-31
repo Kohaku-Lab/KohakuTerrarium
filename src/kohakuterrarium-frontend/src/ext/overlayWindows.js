@@ -16,32 +16,19 @@ import {
   reloadPlacements,
 } from "@/ext/overlays"
 import { closeOverlayWindow, openOverlayWindow, overlayWindowsSupported } from "@/utils/hostBridge"
+import { makeWindowLabel } from "@/utils/windowLabel"
 
 export const OVERLAY_PARAM = "kt_overlay"
 export const WINDOW_LABEL_PREFIX = "overlay-"
-const LABEL_BODY_MAX = 48
-const HASH_LENGTH = 8
 
 /** The overlay key an overlay window was opened for, or ``null`` in the normal app. */
 export function overlayKeyFromSearch(search) {
   return new URLSearchParams(search || "").get(OVERLAY_PARAM) || null
 }
 
-function hash(text) {
-  let h = 2166136261
-  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
-  return (h >>> 0).toString(36).padStart(HASH_LENGTH, "0").slice(0, HASH_LENGTH)
-}
-
 /** Window label for an overlay key: readable, unique per key, accepted by the shell. */
 export function windowLabel(key) {
-  const tag = hash(key)
-  const slug = String(key)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, LABEL_BODY_MAX - tag.length - 1)
-  return `${WINDOW_LABEL_PREFIX}${slug ? `${slug}-` : ""}${tag}`
+  return makeWindowLabel(WINDOW_LABEL_PREFIX, key)
 }
 
 export function wantsWindow(overlay) {

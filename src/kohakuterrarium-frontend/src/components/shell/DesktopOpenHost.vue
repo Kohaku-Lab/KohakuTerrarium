@@ -1,5 +1,5 @@
 <template>
-  <NewSessionDialog v-if="workspace" :key="workspace" :initial-pwd="workspace" @close="workspace = ''" />
+  <NewSessionDialog v-if="open" :key="dialogKey" :initial-pwd="workspace" @close="open = false" />
 </template>
 
 <script setup>
@@ -12,10 +12,13 @@ import { useI18n } from "@/utils/i18n"
 
 /**
  * Receives the files and folders the desktop shell is asked to open and shows
- * the one thing that needs a view of its own: the new-session dialog in a folder.
+ * the one thing that needs a view of its own: the new-session dialog, in the
+ * given folder or (an empty path, from the menu) in the default one.
  */
 const { t } = useI18n()
+const open = ref(false)
 const workspace = ref("")
+const dialogKey = ref(0)
 
 useDesktopOpen({
   onError: (error, path) => {
@@ -26,6 +29,8 @@ useDesktopOpen({
 
 function onWorkspace(event) {
   workspace.value = event.detail?.path || ""
+  dialogKey.value += 1
+  open.value = true
 }
 
 onMounted(() => window.addEventListener(OPEN_WORKSPACE_EVENT, onWorkspace))

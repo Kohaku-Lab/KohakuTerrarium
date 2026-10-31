@@ -196,6 +196,21 @@ export function openOverlayWindow(spec) {
   return callBoolean("open_overlay_window", spec)
 }
 
+/** Whether the shell can show a session in a window of its own. */
+export function popoutWindowsSupported() {
+  return hostKind() === KIND_TAURI && hostSupports("open_popout_window")
+}
+
+/** Open (or raise) a native window for one session: `{ label, scope, title }`. */
+export function openPopoutWindow(spec) {
+  return callBoolean("open_popout_window", spec)
+}
+
+/** Tell the shell the session window's page is running and could call a native command. */
+export function ackPopoutWindow() {
+  return callBoolean("popout_ack")
+}
+
 /** Close the native overlay window with `label`. */
 export function closeOverlayWindow(label) {
   return callBoolean("close_overlay_window", String(label))

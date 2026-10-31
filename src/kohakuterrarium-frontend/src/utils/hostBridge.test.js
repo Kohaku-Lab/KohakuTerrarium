@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   DESKTOP_PROTOCOL,
   ackOverlayWindow,
+  ackPopoutWindow,
   checkShellUpdate,
+  openPopoutWindow,
+  popoutWindowsSupported,
   closeOverlayWindow,
   getCloseToTray,
   getSummonShortcut,
@@ -193,6 +196,23 @@ describe("hostBridge", () => {
     expect(await getCloseToTray()).toBeNull()
     expect(await setCloseToTray(true)).toBeNull()
     expect(await setAttentionCount(1, 1)).toBe(false)
+  })
+
+  it("opens session windows through Tauri only", async () => {
+    expect(popoutWindowsSupported()).toBe(false)
+    expect(await openPopoutWindow({ label: "popout-a", scope: "s" })).toBe(false)
+    const invoke = vi.fn(async () => true)
+    window.__TAURI_INTERNALS__ = { invoke }
+    expect(popoutWindowsSupported()).toBe(true)
+    expect(await openPopoutWindow({ label: "popout-a", scope: "s" })).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("open_popout_window", {
+      args: [{ label: "popout-a", scope: "s" }],
+    })
+    expect(await ackPopoutWindow()).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("popout_ack", {})
+    delete window.__TAURI_INTERNALS__
+    window.pywebview = { api: { open_popout_window: async () => true } }
+    expect(popoutWindowsSupported()).toBe(false)
   })
 
   it("reads, sets and clears the summon shortcut", async () => {
