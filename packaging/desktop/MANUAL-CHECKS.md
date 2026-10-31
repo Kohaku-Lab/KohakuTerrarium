@@ -45,5 +45,8 @@ Each section names the milestone that added it and the surface to look at.
 - In a terminal with the `kt` command installed: `kt open <folder>` raises the running app on that folder; `kt open file.txt` refuses.
 - Open `kt://new?path=<folder>` and `kt://live/<scope>` from the Run dialog; `kt://install/<name>` shows a confirmation naming the package and installs nothing until "Install" is pressed; `kt://install/https%3A%2F%2Fx` does nothing.
 
+## Window frame (M10)
+- Windows 11: the title bar and window border take the colour at the top of the page (warm beige in light mode, dark brown in dark mode) and change when the theme is switched; the title text stays readable. On Windows 10 the frame stays the system one.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.
