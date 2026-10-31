@@ -166,6 +166,8 @@ function createHandle(record) {
     registerAction: provide("action"),
     registerMessageRenderer: provide("message-renderer"),
     registerMessageDecorator: provide("message-decorator"),
+    registerTrayItem: provide("tray-item"),
+    registerNotificationChannel: provide("notification-channel"),
     registerFileView: provide("file-view"),
     registerGraphBadge: provide("graph-badge"),
     registerGraphPanel: provide("graph-panel"),

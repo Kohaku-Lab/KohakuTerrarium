@@ -217,6 +217,20 @@ def test_menu_actions_are_all_handled_by_the_page():
         assert re.search(rf'(?:^|\s)"?{re.escape(action)}"?:', composable), action
 
 
+def test_tray_item_event_name_matches_the_frontend():
+    tray_rs = _text(TAURI / "src" / "tray.rs")
+    event = _rust_const(tray_rs, "TRAY_ITEM_EVENT")
+    tray_items = _text(
+        ROOT / "src" / "kohakuterrarium-frontend" / "src" / "ext" / "trayItems.js"
+    )
+    assert f'TRAY_ITEM_EVENT = "{event}"' in tray_items
+    bridge = _text(
+        ROOT / "src" / "kohakuterrarium-frontend" / "src" / "utils" / "hostBridge.js"
+    )
+    assert '"set_tray_items"' in bridge
+    assert "set_tray_items" in _allowed("main.json")
+
+
 def test_popout_page_parameter_and_window_prefix_match_the_frontend():
     popout_rs = _text(TAURI / "src" / "popout.rs")
     popout_js = _text(

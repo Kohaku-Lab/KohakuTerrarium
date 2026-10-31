@@ -35,6 +35,8 @@ This guide covers:
 | `file-view` | a read-only view of a workspace file, chosen by file name pattern, beside the code editor | `package` | host-wide |
 | `graph-badge` | a small component on a graph node (creature, channel or group) | `package` | host-wide |
 | `graph-panel` | a section in the graph dock's details for the selected node | `package` | host-wide |
+| `tray-item` | an entry in the desktop app's tray menu | `package` | host-wide |
+| `notification-channel` | a handler told whenever something needs the user | `package` | host-wide |
 | `action` | a button or menu entry on a message, the composer, a tab, a rail item, a file or a graph node or edge | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
@@ -70,7 +72,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer | message-decorator | file-view | graph-badge | graph-panel
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer | message-decorator | file-view | graph-badge | graph-panel | tray-item | notification-channel
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -142,6 +144,7 @@ export default defineExtension((kt) => {
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
 | `kt.registerMessageRenderer(id, component, options?)` | provide the component of a [message renderer](#message-renderers); an undeclared one needs `options.renderer` |
+| `kt.registerTrayItem(id, handler)`, `kt.registerNotificationChannel(id, handler)` | provide a [tray item](#tray-items) or [notification channel](#notification-channels) handler |
 | `kt.registerFileView(id, component, options?)` | provide a [file view](#file-views); an undeclared one needs `options.patterns` |
 | `kt.registerGraphBadge(id, component, options?)`, `kt.registerGraphPanel(id, component, options?)` | provide a [graph badge or panel](#graph-badges-and-panels) |
 | `kt.registerMessageDecorator(id, component, options?)` | provide a [message decorator](#message-decorators) |
@@ -469,6 +472,49 @@ kt.registerGraphBadge("health", {
 
 Badges are not drawn when the canvas is zoomed far out. Graph actions
 (`graph-node`, `graph-edge`) receive the same `{ kind, id, name, sessionId }`.
+
+### Tray items
+
+A `tray-item` adds an entry to the desktop app's tray icon menu, between Show
+and Quit. Choosing it runs the handler. It works only in the desktop app;
+elsewhere it is ignored. The shell shows at most 12 items with labels of up to
+60 characters, and the page must be open (the window can be hidden in the tray)
+because the handler runs in it.
+
+```yaml
+- kind: tray-item
+  id: pause
+  label: Pause the bot
+```
+
+```js
+kt.registerTrayItem("pause", async () => {
+  await kt.api.post("pause", {})
+})
+```
+
+### Notification channels
+
+A `notification-channel` handler is called whenever the dashboard raises an
+attention event: a creature waiting for the user, or a turn that finished. Use
+it to forward the event to a chat app or webhook. It follows the user's
+"notify when waiting / when finished" settings and runs in the open dashboard
+page, so it sees events only while the page is open. Delivery that must not
+depend on a browser belongs in a backend plugin (`on_event`).
+
+```yaml
+- kind: notification-channel
+  id: webhook
+```
+
+```js
+kt.registerNotificationChannel("webhook", async (event) => {
+  // event: { kind: "waiting-input" | "completed", title, body, target }
+  await kt.api.post("notify", event)
+})
+```
+
+A failing handler is logged once and never affects other channels.
 
 ### Host services
 

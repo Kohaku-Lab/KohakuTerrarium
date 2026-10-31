@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted, watch } from "vue"
 
+import { dispatchToChannels } from "@/ext/notificationChannels"
 import {
   firstAttentionTarget,
   subscribeAttention,
@@ -163,7 +164,17 @@ export function useAttentionEffects() {
     void requestHostAttention()
   }
 
+  function forwardToChannels(event) {
+    const enabled =
+      (event.kind === "waiting-input" && prefs.state.notifyWaiting) ||
+      (event.kind === "completed" && prefs.state.notifyCompletion)
+    if (!enabled) return
+    const { title, body } = notificationContent(event)
+    void dispatchToChannels({ kind: event.kind, title, body, target: attentionTargetLabel(event) })
+  }
+
   function onEdge(event) {
+    forwardToChannels(event)
     const inactive = document.hidden || !document.hasFocus()
     if (inactive) {
       requestDesktopAttention()

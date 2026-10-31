@@ -14,6 +14,8 @@ import { clearActions, registerAction } from "@/ext/actions"
 import { clearDecorators, registerDecorator } from "@/ext/decorators"
 import { clearDockPanels, registerDockPanel } from "@/ext/dockPanels"
 import { clearFileViews, registerFileView } from "@/ext/fileViews"
+import { clearNotificationChannels, registerNotificationChannel } from "@/ext/notificationChannels"
+import { clearTrayItems, registerTrayItem } from "@/ext/trayItems"
 import {
   GRAPH_NODE_KINDS,
   clearGraphSlots,
@@ -70,7 +72,11 @@ export const MOUNT_OWNER_KINDS = {
   "file-view": "package",
   "graph-badge": "package",
   "graph-panel": "package",
+  "tray-item": "package",
+  "notification-channel": "package",
 }
+
+const HANDLER_KINDS = ["command", "action", "tray-item", "notification-channel"]
 
 function fileViewOptions(source) {
   const out = {}
@@ -242,6 +248,12 @@ export function registerContribution(pkg, contribution) {
         options: statusOptions(contribution.status),
       })
       break
+    case "tray-item":
+      registerTrayItem({ key, pkg, label: contribution.label, order: contribution.order })
+      break
+    case "notification-channel":
+      registerNotificationChannel({ key, pkg, label: contribution.label })
+      break
     case "file-view":
       registerFileView({
         key,
@@ -325,6 +337,8 @@ export function unregisterAllContributions() {
   clearDockPanels()
   clearFileViews()
   clearGraphSlots()
+  clearTrayItems()
+  clearNotificationChannels()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -342,7 +356,7 @@ export function registeredContributionKeys() {
  */
 export function provideContributionComponent(pkg, kind, id, component, options = {}) {
   if (!component) throw new Error(`${pkg}: register${kind} ${id} needs a component`)
-  if ((kind === "command" || kind === "action") && typeof component !== "function") {
+  if (HANDLER_KINDS.includes(kind) && typeof component !== "function") {
     throw new Error(`${pkg}: ${kind} ${id} needs a handler function`)
   }
   if (kind === "file-view" && !findContribution(pkg, id) && !options.patterns?.length) {

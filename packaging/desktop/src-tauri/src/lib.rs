@@ -92,6 +92,7 @@ pub fn run() {
             tray::get_close_to_tray,
             tray::set_close_to_tray,
             tray::set_attention_count,
+            tray::set_tray_items,
             summon::get_summon_shortcut,
             summon::set_summon_shortcut,
             opens::take_pending_opens,

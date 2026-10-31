@@ -157,6 +157,14 @@ export function setAttentionCount(pending, completed) {
   return callBoolean("set_attention_count", Math.max(0, pending | 0), Math.max(0, completed | 0))
 }
 
+/** Replace the extension items in the tray menu with `[{ id, label }]`. Resolves ``false`` if the shell has no tray menu. */
+export function setTrayItems(items) {
+  return callBoolean(
+    "set_tray_items",
+    (items || []).map(({ id, label }) => ({ id: String(id), label: String(label) })),
+  )
+}
+
 /** Whether a newer shell build is published: `{ available, version? }`, or ``null`` if the shell cannot check. */
 export async function checkShellUpdate() {
   if (!hostSupports("check_shell_update")) return null

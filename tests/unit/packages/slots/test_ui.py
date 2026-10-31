@@ -260,6 +260,46 @@ class TestParse:
         slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
         assert message in slot.error
 
+    def test_tray_item_and_notification_channel_are_package_owned(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "tray-item", "id": "pause", "label": "Pause bot"},
+                    {"kind": "notification-channel", "id": "hook"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        kinds = {
+            c["id"]: (c["kind"], c["owner"]) for c in slot.to_dict()["contributes"]
+        }
+        assert kinds == {
+            "pause": ("tray-item", "package:pkg"),
+            "hook": ("notification-channel", "package:pkg"),
+        }
+
+    @pytest.mark.parametrize("kind", ["tray-item", "notification-channel"])
+    def test_these_kinds_refuse_a_runtime_owner_and_stray_options(self, tmp_path, kind):
+        owned = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [{"kind": kind, "id": "x", "owner": "plugin:qq_feed"}],
+            },
+        )
+        assert "owned by" in owned.error
+        stray = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [{"kind": kind, "id": "x", "patterns": ["*.c"]}],
+            },
+            name="other",
+        )
+        assert "only valid on a file-view" in stray.error
+
     def test_file_view_patterns(self, tmp_path):
         slot = _slot(
             tmp_path,

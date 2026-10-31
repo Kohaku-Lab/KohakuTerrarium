@@ -41,6 +41,8 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "file-view": ("package",),
     "graph-badge": ("package",),
     "graph-panel": ("package",),
+    "tray-item": ("package",),
+    "notification-channel": ("package",),
 }
 GRAPH_NODE_KINDS: tuple[str, ...] = ("creature", "channel", "group")
 FILE_PATTERN_MAX = 16
