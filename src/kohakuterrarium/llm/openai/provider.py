@@ -134,13 +134,7 @@ class OpenAIProvider(BaseLLMProvider):
                 "Set OPENROUTER_API_KEY or OPENAI_API_KEY environment variable."
             )
 
-        self._client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout,
-            max_retries=self._max_retries,
-            default_headers=extra_headers or {},
-        )
+        self._client = self._new_client()
 
         # Report caching once at construction rather than on every request.
         anthropic = is_anthropic_endpoint(self.base_url, None)
@@ -158,6 +152,24 @@ class OpenAIProvider(BaseLLMProvider):
             model=model,
             base_url=base_url,
         )
+
+    def _new_client(self) -> AsyncOpenAI:
+        """Build an SDK client for the current key and endpoint."""
+        return AsyncOpenAI(
+            api_key=self._api_key,
+            base_url=self._base_url_input,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
+            default_headers=self._extra_headers,
+        )
+
+    def _open_client(self) -> AsyncOpenAI:
+        """The SDK client, rebuilt if a previous ``close`` shut it."""
+        is_closed = getattr(self._client, "is_closed", None)
+        if callable(is_closed) and is_closed():
+            self._client = self._new_client()
+            self._borrowed_client = False
+        return self._client
 
     async def close(self) -> None:
         """Close the WebSocket session and the HTTP client unless a fork borrows it."""
@@ -229,13 +241,7 @@ class OpenAIProvider(BaseLLMProvider):
         old_session = self._ws_session
         self._ws_session = None
         self._api_key = new_key
-        self._client = AsyncOpenAI(
-            api_key=new_key,
-            base_url=self._base_url_input,
-            timeout=self._timeout,
-            max_retries=self._max_retries,
-            default_headers=self._extra_headers,
-        )
+        self._client = self._new_client()
         borrowed, self._borrowed_client = self._borrowed_client, False
         try:
             loop = asyncio.get_running_loop()
@@ -258,7 +264,7 @@ class OpenAIProvider(BaseLLMProvider):
 
             def _factory() -> Any:
                 # Late-bound so credential reloads pick up the rebuilt client.
-                return self._client.responses.connect(
+                return self._open_client().responses.connect(
                     max_retries=0,
                     websocket_connection_options=dict(self._ws_connection_options),
                 )
@@ -465,7 +471,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         if recovery is not None:
             recovery.record_submission()
-        stream = await self._client.chat.completions.create(**create_kwargs)
+        stream = await self._open_client().chat.completions.create(**create_kwargs)
 
         async for chunk in stream:
             if recovery is not None:
@@ -644,7 +650,7 @@ class OpenAIProvider(BaseLLMProvider):
             create_kwargs["messages"],
         )
 
-        response = await self._client.chat.completions.create(**create_kwargs)
+        response = await self._open_client().chat.completions.create(**create_kwargs)
 
         choice = response.choices[0]
         message = choice.message
