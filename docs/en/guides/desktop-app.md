@@ -56,6 +56,14 @@ back and opens the tab that needs you first.
 window hide it instead of quitting, so agents keep working. Quit from the tray menu.
 The setting is stored in `shell-settings.json` in the app's config folder.
 
+## Opening files and folders
+
+The installers register `.kohakutr` session files with the app. Opening one (double-click,
+or `KohakuTerrarium <file>`) copies it into your saved sessions under a free name and
+shows its history; if the app is already running, that window handles it. Passing a
+folder (`KohakuTerrarium <folder>`) opens the new-session dialog with that folder as the
+working directory. A file that is not a session is refused with a message.
+
 ## Summon shortcut
 
 **Settings → Desktop → Summon shortcut** registers a system-wide key combination (off
