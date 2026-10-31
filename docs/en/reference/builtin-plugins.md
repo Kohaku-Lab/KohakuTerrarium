@@ -71,7 +71,7 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
 | `network_allowlist` | list[str] | hostnames | `[]` | Allowed hosts when `network=allow`. Empty list = allow all when network is allowed. |
 | `os_enforce` | enum | `auto` / `require` / `off` | `auto` | Kernel write confinement for subprocesses. `auto` = confine where the OS supports it, `require` = refuse to spawn where it does not, `off` = policy checks only. |
 | `fs_write_allow` | list[str] | paths | `[]` | Exceptions you name: writable even inside `fs_deny` (not under `fs_write=deny`). |
-| `locked` | bool | true / false | false | Refuse runtime disable and option changes (409 from the HTTP API). Can be turned on at runtime, not off; unlock by restarting the server with `KT_SANDBOX_ALLOW_UNLOCK=1`. |
+| `locked` | bool | true / false | false | Refuse runtime disable, option changes and working-directory switches (409 from the HTTP API). Can be turned on at runtime, not off; unlock by restarting the server with `KT_SANDBOX_ALLOW_UNLOCK=1`. |
 | `blocked_tools` | list[str] | tool names | `[]` | Tools the agent cannot call regardless of args. |
 
 ### Profile presets
@@ -114,8 +114,10 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   survives a denied parent. Launchers that would run work outside the
   sandbox (`open`, `osascript`, `launchctl` and the LaunchServices / Apple
   Events services) are refused, and so are connections to the control
-  sockets of Docker, GNU screen, tmux and iTerm2, which would run commands
-  unconfined. Reads and network are not confined by the kernel: secrets
+  sockets of Docker (Desktop, Colima, OrbStack), Podman, GNU screen, tmux
+  (including `TMUX_TMPDIR`) and iTerm2, which would run commands unconfined.
+  This is a denylist: other local unix sockets stay reachable, because a
+  default-deny would also cut DNS (`mDNSResponder`) and `ssh-agent`. Reads and network are not confined by the kernel: secrets
   stay readable, so pair the sandbox with `env=filtered` where API keys
   should not be inherited. `write` / `edit` checks under `fs_write=workspace` admit the same
   roots. The confinement targets accidental damage (a misdirected `rmtree`,

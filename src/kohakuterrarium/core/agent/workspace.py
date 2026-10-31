@@ -34,6 +34,7 @@ Constraints:
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kohakuterrarium.modules.plugin.base import PluginLockedError
 from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import default_workdir
@@ -76,6 +77,12 @@ class WorkspaceController:
             raise ValueError(f"Working directory is not a directory: {resolved}")
 
         agent = self._agent
+        plugins = getattr(agent, "plugins", None)
+        pinned_by = plugins.working_dir_pinned_by() if plugins is not None else None
+        if pinned_by:
+            raise PluginLockedError(
+                f"working directory is pinned by the locked {pinned_by!r} plugin"
+            )
         if getattr(agent, "_processing_task", None) is not None:
             raise RuntimeError(
                 "Cannot switch working directory while the agent is processing. "

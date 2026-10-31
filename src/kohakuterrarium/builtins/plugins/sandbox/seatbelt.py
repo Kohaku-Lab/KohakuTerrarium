@@ -30,6 +30,10 @@ _LAUNCHERS: tuple[str, ...] = ("/usr/bin/open", "/usr/bin/osascript", "/bin/laun
 _CONTROL_SOCKETS: tuple[str, ...] = (
     "/var/run/docker.sock",
     "~/.docker/run",
+    "~/Library/Containers/com.docker.docker/Data",
+    "~/.colima",
+    "~/.orbstack/run",
+    "~/.local/share/containers/podman",
     "~/.screen",
     "~/Library/Application Support/iTerm2",
 )
@@ -78,6 +82,16 @@ def _subpaths(paths: list[str], cwd: Path) -> list[str]:
     return [f"(subpath {_quote(p)})" for p in seen]
 
 
+def _tmux_socket_dirs() -> list[str]:
+    """Where tmux may keep this user's server sockets."""
+    bases = {
+        "/tmp",
+        os.environ.get("TMUX_TMPDIR") or "",
+        os.environ.get("TMPDIR") or "",
+    }
+    return [f"{base.rstrip('/')}/tmux-{os.getuid()}" for base in sorted(bases) if base]
+
+
 def _ancestors(paths: list[str], cwd: Path) -> list[str]:
     """Every parent directory of ``paths`` below the filesystem root."""
     seen: list[str] = []
@@ -124,7 +138,7 @@ def build_write_profile(
     launchers = " ".join(f"(literal {_quote(p)})" for p in _LAUNCHERS)
     lines.append(f"(deny process-exec {launchers})")
     lines.append(f"(deny mach-lookup {' '.join(_LAUNCH_SERVICES)})")
-    sockets = [*_CONTROL_SOCKETS, f"/private/tmp/tmux-{os.getuid()}"]
+    sockets = [*_CONTROL_SOCKETS, *_tmux_socket_dirs()]
     lines.append(f"(deny network-outbound {' '.join(_subpaths(sockets, workspace))})")
     return "\n".join(lines) + "\n"
 

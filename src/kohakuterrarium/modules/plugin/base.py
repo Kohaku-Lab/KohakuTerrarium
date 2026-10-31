@@ -331,6 +331,10 @@ class BasePlugin(UIOwnerMixin):
         """Whether a runtime request to disable this plugin must be refused."""
         return False
 
+    def pins_working_dir(self) -> bool:
+        """Whether a runtime working-directory switch must be refused."""
+        return False
+
     def refresh_options(self) -> None:
         """Re-derive internal state after validated option changes."""
         return None

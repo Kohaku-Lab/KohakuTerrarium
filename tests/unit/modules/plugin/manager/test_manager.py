@@ -136,6 +136,16 @@ class TestEnableDisable:
     def test_disable_unknown_returns_false(self):
         assert PluginManager().disable("ghost") is False
 
+    def test_working_dir_pinned_only_by_an_active_plugin(self):
+        pinning = _CallbackPlugin("guard")
+        pinning.pins_working_dir = lambda: True
+        mgr = PluginManager()
+        mgr.register(_CallbackPlugin("other"))
+        mgr.register(pinning)
+        assert mgr.working_dir_pinned_by() == "guard"
+        mgr.disable("guard")
+        assert mgr.working_dir_pinned_by() is None
+
     def test_plugin_that_refuses_disable_stays_enabled(self):
         plugin = _CallbackPlugin("guard")
         plugin.refuses_disable = lambda: True

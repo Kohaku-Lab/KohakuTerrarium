@@ -73,6 +73,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext as RuntimePluginContext,
+    PluginLockedError,
     ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
@@ -838,6 +839,14 @@ class TestModulesIntegration:
                 )
                 assert (await agent.executor.wait_for(write_job)).exit_code == 0
                 assert (work / "made.txt").read_text(encoding="utf-8") == "made\n"
+            # Once locked, neither a disable nor a workspace move can widen it.
+            mgr.set_plugin_options("sandbox", {"locked": True})
+            with pytest.raises(PluginLockedError):
+                agent.workspace.set(outside)
+            with pytest.raises(PluginLockedError):
+                mgr.disable("sandbox")
+            assert agent.executor._working_dir == work
+            assert mgr.is_enabled("sandbox")
             # should_proceed with no veto hooks → True (nothing vetoes).
             assert (
                 await mgr.should_proceed("on_compact_start", context_length=10) is True

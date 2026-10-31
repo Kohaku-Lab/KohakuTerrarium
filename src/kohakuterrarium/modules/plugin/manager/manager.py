@@ -158,6 +158,13 @@ class PluginManager(
                 return True
         return False
 
+    def working_dir_pinned_by(self) -> str | None:
+        """Name of an active plugin that forbids switching the working directory."""
+        for plugin in self._active_plugins():
+            if plugin.pins_working_dir():
+                return getattr(plugin, "name", "?")
+        return None
+
     def is_enabled(self, name: str) -> bool:
         return name not in self._disabled and any(
             getattr(p, "name", "") == name for p in self._plugins

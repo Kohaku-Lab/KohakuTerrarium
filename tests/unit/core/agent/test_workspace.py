@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.core.agent.workspace import WorkspaceController
+from kohakuterrarium.modules.plugin.base import PluginLockedError
 from kohakuterrarium.utils.file.guard import FileReadState, PathBoundaryGuard
 
 
@@ -87,6 +88,16 @@ class TestSet:
         WorkspaceController(a).set(new_dir)
 
         assert a._path_guard.check(str(attachment)) is None
+
+    def test_locked_plugin_pins_the_working_dir(self, tmp_path):
+        new_dir = tmp_path / "subdir"
+        new_dir.mkdir()
+        a = _fake_agent(tmp_path)
+        a.plugins = types.SimpleNamespace(working_dir_pinned_by=lambda: "sandbox")
+        with pytest.raises(PluginLockedError, match="'sandbox'"):
+            WorkspaceController(a).set(new_dir)
+        assert a.executor._working_dir == tmp_path
+        assert a.session_store.touched == 0
 
     def test_empty_path_rejected(self, tmp_path):
         a = _fake_agent(tmp_path)

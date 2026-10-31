@@ -72,6 +72,13 @@ class TestBuildWriteProfile:
         assert lookups.startswith("(deny mach-lookup")
         assert sockets.startswith("(deny network-outbound")
         assert f'(subpath "{Path("~/.docker/run").expanduser()}")' in sockets
+        assert f'(subpath "{Path("~/.orbstack/run").expanduser()}")' in sockets
+
+    def test_tmux_sockets_follow_tmux_tmpdir(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TMUX_TMPDIR", "/var/tmux-sockets")
+        text = seatbelt.build_write_profile(WORKSPACE, tmp_path)
+        assert f'(subpath "/var/tmux-sockets/tmux-{os.getuid()}")' in text
+        assert f'(subpath "/tmp/tmux-{os.getuid()}")' in text
 
     def test_broad_level_keeps_only_the_deny_list(self, tmp_path):
         text = seatbelt.build_write_profile(

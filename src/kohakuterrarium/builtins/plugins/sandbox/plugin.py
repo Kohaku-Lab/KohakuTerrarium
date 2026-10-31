@@ -204,6 +204,10 @@ class SandboxPlugin(BasePlugin):
         """A locked sandbox cannot be switched off at runtime."""
         return self._locked()
 
+    def pins_working_dir(self) -> bool:
+        """A locked sandbox keeps its workspace root: the working directory."""
+        return self._enabled and self._locked()
+
     def _locked(self) -> bool:
         return bool(self.options.get("locked")) and os.environ.get(UNLOCK_ENV) != "1"
 

@@ -375,6 +375,12 @@ class TestLock:
         assert sandbox.refuses_disable() is False
         assert sandbox.set_options({"locked": False})["locked"] is False
 
+    def test_locked_sandbox_pins_the_working_dir(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        assert SandboxPlugin(locked=True).pins_working_dir() is True
+        assert SandboxPlugin().pins_working_dir() is False
+        assert SandboxPlugin(locked=True, backend="off").pins_working_dir() is False
+
     def test_unlocked_sandbox_can_be_locked_at_runtime(self, monkeypatch):
         monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
         sandbox = SandboxPlugin()
