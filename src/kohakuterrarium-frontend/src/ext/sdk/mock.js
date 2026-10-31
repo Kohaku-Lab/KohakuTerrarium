@@ -76,7 +76,9 @@ export function createMockHost(options = {}) {
     "tool-renderer": new Map(),
     "trigger-renderer": new Map(),
     widget: new Map(),
+    overlay: new Map(),
   }
+  const overlayVisible = reactive({})
   const requests = []
   const notifications = []
   const openedTabs = []
@@ -111,6 +113,10 @@ export function createMockHost(options = {}) {
     registerToolRenderer: provide("tool-renderer"),
     registerTriggerRenderer: provide("trigger-renderer"),
     registerWidgetRenderer: provide("widget"),
+    registerOverlay: provide("overlay"),
+    showOverlay: (id) => (overlayVisible[id] = true),
+    hideOverlay: (id) => (overlayVisible[id] = false),
+    toggleOverlay: (id) => (overlayVisible[id] = !(overlayVisible[id] ?? true)),
     api: {
       request: (config = {}) =>
         call((config.method || "GET").toUpperCase(), config.url, config.data, config),
@@ -175,6 +181,8 @@ export function createMockHost(options = {}) {
     owner,
     ownerCalls,
     widget: options.widget || null,
+    overlayId: options.overlayId || "overlay",
+    overlayVisible,
     /** Push an owner event, as the backend's ``ui_emit`` would. */
     emit(event, data) {
       if (event === "state") ownerState.value = data
@@ -209,6 +217,23 @@ export function useWidget() {
   const widget = current().widget
   if (!widget) throw new Error("useWidget() used outside a widget renderer")
   return widget
+}
+
+/** In tests, controls the overlay named by ``createMockHost({ overlayId })``. */
+export function useOverlay() {
+  const host = current()
+  const id = host.overlayId
+  const bounds = ref({ left: 0, top: 0, width: 320, height: 240 })
+  return {
+    visible: computed(() => host.overlayVisible[id] ?? true),
+    bounds: computed(() => bounds.value),
+    show: () => host.kt.showOverlay(id),
+    hide: () => host.kt.hideOverlay(id),
+    toggle: () => host.kt.toggleOverlay(id),
+    move: (left, top) => (bounds.value = { ...bounds.value, left, top }),
+    resize: (width, height) => (bounds.value = { ...bounds.value, width, height }),
+    startDrag: () => {},
+  }
 }
 
 export function useHost() {

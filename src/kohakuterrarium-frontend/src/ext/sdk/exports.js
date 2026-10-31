@@ -12,6 +12,7 @@ export const SDK_EXPORT_NAMES = [
   "useExtension",
   "useOwner",
   "useWidget",
+  "useOverlay",
   "OwnerCallError",
   "useHost",
   "useSession",

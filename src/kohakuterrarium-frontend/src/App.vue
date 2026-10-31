@@ -10,6 +10,7 @@
     </AuthGate>
     <CommandPalette />
     <ShortcutHelp />
+    <OverlayLayer />
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
     <WorkspaceResumeDialog />
@@ -30,6 +31,7 @@ import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
 import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
+import OverlayLayer from "@/ext/OverlayLayer.vue"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"

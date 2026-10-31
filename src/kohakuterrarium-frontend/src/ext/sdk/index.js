@@ -12,8 +12,18 @@
 import { computed, getCurrentInstance, inject, onUnmounted } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
+import {
+  beginDrag,
+  hideOverlay,
+  isOverlayVisible,
+  moveOverlay,
+  overlayBounds,
+  resizeOverlay,
+  showOverlay,
+  toggleOverlay,
+} from "@/ext/overlays"
 import { openExtensionTab } from "@/ext/registry"
-import { EXTENSION_INJECT_KEY, OWNER_INJECT_KEY } from "@/ext/sdk/keys"
+import { EXTENSION_INJECT_KEY, OVERLAY_INJECT_KEY, OWNER_INJECT_KEY } from "@/ext/sdk/keys"
 import { THEME_TOKENS } from "@/ext/sdk/theme"
 import { injectScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
@@ -70,6 +80,26 @@ export function useOwner() {
       if (hasInstance) onUnmounted(off)
       return off
     },
+  }
+}
+
+/**
+ * Control the overlay the calling component is drawn in: ``visible`` and
+ * ``bounds`` are refs; ``startDrag(event)`` moves a click-through overlay
+ * from a ``pointerdown`` on any element of its own.
+ */
+export function useOverlay() {
+  const key = inject(OVERLAY_INJECT_KEY, null)
+  if (!key) throw new Error("useOverlay() must be called inside an overlay contribution")
+  return {
+    visible: computed(() => isOverlayVisible(key)),
+    bounds: computed(() => overlayBounds(key)),
+    show: () => showOverlay(key),
+    hide: () => hideOverlay(key),
+    toggle: () => toggleOverlay(key),
+    move: (left, top) => moveOverlay(key, left, top),
+    resize: (width, height) => resizeOverlay(key, width, height),
+    startDrag: (event) => beginDrag(key, event, "move"),
   }
 }
 

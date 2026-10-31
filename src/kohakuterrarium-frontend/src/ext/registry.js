@@ -10,6 +10,7 @@
 import { defineComponent, h, markRaw } from "vue"
 
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
+import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
 import {
   registerWidgetRenderer,
@@ -43,6 +44,24 @@ export const MOUNT_OWNER_KINDS = {
   "tool-renderer": "tool",
   "trigger-renderer": "trigger",
   widget: "any",
+  overlay: "package",
+}
+
+const OVERLAY_OPTION_NAMES = [
+  "anchor",
+  "width",
+  "height",
+  "draggable",
+  "resizable",
+  "clickThrough",
+  "defaultVisible",
+]
+
+function overlayOptions(source) {
+  const out = {}
+  for (const name of OVERLAY_OPTION_NAMES)
+    if (source?.[name] !== undefined) out[name] = source[name]
+  return out
 }
 
 const OWNER_KINDS = ["package", "plugin", "tool", "trigger"]
@@ -127,6 +146,16 @@ export function registerContribution(pkg, contribution) {
       if (!registerWidgetRenderer(contribution.renderer, host, { key, trust: "package" }))
         return null
       break
+    case "overlay":
+      registerOverlay({
+        key,
+        pkg,
+        id: contribution.id,
+        label: contribution.label,
+        component: host,
+        options: overlayOptions(contribution.overlay),
+      })
+      break
     default:
       return null
   }
@@ -150,6 +179,7 @@ export function unregisterAllContributions() {
     else if (kind === "rail") railGroups.delete(key)
     else if (kind === "settings") unregisterSettingsSection(key)
   }
+  clearOverlays()
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
   contributionComponents.clear()
@@ -196,12 +226,17 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       minDensity: options.minDensity || "compact",
       isolation: "inline",
       ...(kind === "widget" ? { renderer: options.renderer } : {}),
+      ...(kind === "overlay" ? { overlay: overlayOptions(options) } : {}),
     }
     if (record) record.contributes = [...(record.contributes || []), contribution]
     registerContribution(pkg, contribution)
   }
   contributionComponents.set(contributionKey(pkg, id), markRaw(component))
   if (kind === "widget") updateWidgetEntry(contributionKey(pkg, id), options)
+  if (kind === "overlay") {
+    const entry = overlays.get(contributionKey(pkg, id))
+    if (entry) entry.options = { ...entry.options, ...overlayOptions(options) }
+  }
 }
 
 /** Apply a package's ``version`` / ``surfaces`` / chrome options to its registered renderer. */

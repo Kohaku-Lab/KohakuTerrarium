@@ -19,7 +19,9 @@ import { BUILTIN_UI_PACKAGES } from "@/ext/builtin/index"
 import { closeOwnerSocket } from "@/ext/ownerSocket"
 import { enableRuntimeCompiler } from "@/ext/runtimeCompiler"
 import { SDK_VERSION, satisfiesRange } from "@/ext/sdk/version"
-import { extState, findPackage, runtime } from "@/ext/state"
+import { hideOverlay, loadPlacements, showOverlay, toggleOverlay } from "@/ext/overlays"
+import { registerOverlaySettings } from "@/ext/overlaySettings"
+import { contributionKey, extState, findPackage, runtime } from "@/ext/state"
 import { useHostsStore } from "@/stores/hosts"
 import { useLocaleStore } from "@/stores/locale"
 import api from "@/utils/api"
@@ -156,6 +158,10 @@ function createHandle(record) {
     registerToolRenderer: provide("tool-renderer"),
     registerTriggerRenderer: provide("trigger-renderer"),
     registerWidgetRenderer: provide("widget"),
+    registerOverlay: provide("overlay"),
+    showOverlay: (id) => showOverlay(contributionKey(pkg, id)),
+    hideOverlay: (id) => hideOverlay(contributionKey(pkg, id)),
+    toggleOverlay: (id) => toggleOverlay(contributionKey(pkg, id)),
     api: {
       request: (config = {}) => api.request({ ...config, url: join(config.url) }),
       get: (path, config) => api.get(join(path), config),
@@ -251,6 +257,7 @@ export async function reloadUiExtensions() {
   const hostKey = currentHostKey()
   unloadUiExtensions()
   extState.hostKey = hostKey
+  loadPlacements(hostKey)
   extState.loading = true
   extState.error = ""
   let listed = []
@@ -291,6 +298,7 @@ let _started = false
 export function startUiExtensions() {
   if (_started) return
   _started = true
+  registerOverlaySettings()
   runtime.ensureLoaded = ensurePackageLoaded
   watch(currentHostKey, () => reloadUiExtensions(), { immediate: true })
   watch(

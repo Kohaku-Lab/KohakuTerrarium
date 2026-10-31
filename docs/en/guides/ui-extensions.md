@@ -27,6 +27,7 @@ This guide covers:
 | `tool-renderer` | replaces the body of that tool's call/result block in chat | `tool` | one creature |
 | `trigger-renderer` | replaces the body of that trigger's event block in chat | `trigger` | one creature |
 | `widget` | draws every chat widget whose renderer id is the contribution's `renderer` | any | wherever the widget opens |
+| `overlay` | a floating window above the whole app, on every page and in the browser as well as the desktop app | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
 loaded and enabled**; otherwise it renders nothing. Renderers render past
@@ -61,7 +62,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -130,14 +131,54 @@ export default defineExtension((kt) => {
 | `kt.api.get/post/put/patch/delete/request` | raw-route fallback, `/api/ext/<pkg>/<path>` on the active host |
 | `kt.ws(path)` | WebSocket to `/api/ext/<pkg>/<path>` (raw fallback) |
 | `kt.openTab(id)` | open one of the package's tabs |
+| `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
-`useOwner`, `OwnerCallError`, `useHost`, `useSession`, `useCreature`,
+`useOwner`, `useOverlay`, `OwnerCallError`, `useHost`, `useSession`, `useCreature`,
 `useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
 `FrameIsolationUnsupportedError`, `createFrameBridge`.
+
+### Overlays
+
+An `overlay` is drawn in a layer above the whole app and stays while the
+user moves between pages and tabs. Declare it in the manifest:
+
+```yaml
+contributes:
+  - kind: overlay
+    id: pet
+    label: "Desk pet"
+    anchor: bottom-right     # top-left | top-right | bottom-left | bottom-right | center
+    width: 160               # pixels, default 320
+    height: 160              # default 240
+    draggable: true          # default true
+    resizable: false         # default false
+    clickThrough: false      # default false
+    defaultVisible: true     # default true
+```
+
+```js
+kt.registerOverlay("pet", Pet, { anchor: "top-left" })   // options override the manifest
+kt.showOverlay("pet"); kt.hideOverlay("pet"); kt.toggleOverlay("pet")
+```
+
+Inside the component, `useOverlay()` returns `visible` and `bounds` (refs),
+`show()`, `hide()`, `toggle()`, `move(left, top)`, `resize(width, height)` and
+`startDrag(event)`.
+
+- By default the host draws a title bar with a hide button and, when
+  `resizable`, a resize grip. With `clickThrough: true` the host draws no
+  chrome and the overlay does not catch the mouse; only elements with the
+  class `kt-overlay-hit` do. Call `startDrag(event)` from a `pointerdown`
+  handler on such an element to let the user move it.
+- The overlay loads the first time it is shown. Position, size and visibility
+  are remembered per host in the browser; Settings → Overlays lists every
+  overlay with a switch and "Reset position".
+- Overlays run inline in the dashboard origin, with the same trust as other
+  contributions.
 
 `useOwner()` returns:
 
