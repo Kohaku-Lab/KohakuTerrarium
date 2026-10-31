@@ -2,6 +2,7 @@
 
 mod backend;
 mod commands;
+mod dialogs;
 mod files;
 mod menu;
 mod navigation;
@@ -59,6 +60,7 @@ pub fn run() {
     }
     let app = builder
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
@@ -98,6 +100,9 @@ pub fn run() {
             opens::take_pending_opens,
             popout::open_popout_window,
             popout::popout_ack,
+            dialogs::pick_folder,
+            dialogs::pick_files,
+            dialogs::save_file,
             settings::get_shell_settings,
             settings::patch_shell_settings,
         ])

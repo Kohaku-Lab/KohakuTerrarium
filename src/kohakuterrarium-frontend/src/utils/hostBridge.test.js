@@ -10,7 +10,11 @@ import {
   closeOverlayWindow,
   getCloseToTray,
   getShellSettings,
+  nativeDialogsSupported,
   patchShellSettings,
+  pickFilesNative,
+  pickFolderNative,
+  saveFileNative,
   getSummonShortcut,
   openOverlayWindow,
   setSummonShortcut,
@@ -264,6 +268,38 @@ describe("hostBridge", () => {
     expect(await openOverlayWindow(spec)).toBe(false)
     delete window.__TAURI_INTERNALS__
     expect(await openOverlayWindow(spec)).toBe(false)
+  })
+
+  it("shows native dialogs through Tauri only and tells cancel from unsupported", async () => {
+    expect(nativeDialogsSupported()).toBe(false)
+    expect(await pickFolderNative({ title: "x" })).toBeUndefined()
+    expect(await pickFilesNative()).toBeUndefined()
+    expect(await saveFileNative()).toBeUndefined()
+    window.pywebview = { api: { pick_folder: async () => "/p" } }
+    expect(nativeDialogsSupported()).toBe(false)
+    delete window.pywebview
+
+    const answers = { pick_folder: "C:\\a", pick_files: ["C:\\b", "C:\\c"], save_file: null }
+    const invoke = vi.fn(async (name) => answers[name])
+    window.__TAURI_INTERNALS__ = { invoke }
+    expect(nativeDialogsSupported()).toBe(true)
+    expect(await pickFolderNative({ title: "Pick" })).toBe("C:\\a")
+    expect(invoke).toHaveBeenLastCalledWith("pick_folder", { args: [{ title: "Pick" }] })
+    expect(await pickFilesNative({ filters: [] })).toEqual(["C:\\b", "C:\\c"])
+    expect(await saveFileNative({ fileName: "x.json" })).toBeNull()
+    answers.pick_folder = null
+    answers.pick_files = null
+    expect(await pickFolderNative()).toBeNull()
+    expect(await pickFilesNative()).toEqual([])
+
+    window.__TAURI_INTERNALS__ = {
+      invoke: async () => {
+        throw new Error("denied")
+      },
+    }
+    expect(await pickFolderNative()).toBeUndefined()
+    expect(await pickFilesNative()).toBeUndefined()
+    expect(await saveFileNative()).toBeUndefined()
   })
 
   it("reads and patches shell settings through Tauri only", async () => {

@@ -29,6 +29,9 @@
     "allow-set-summon-shortcut",
     "allow-take-pending-opens",
     "allow-open-popout-window",
+    "allow-pick-folder",
+    "allow-pick-files",
+    "allow-save-file",
     "allow-get-shell-settings",
     "allow-patch-shell-settings"
   ]

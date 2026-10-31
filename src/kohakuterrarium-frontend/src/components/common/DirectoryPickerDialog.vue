@@ -82,7 +82,9 @@ import { computed, ref, watch } from "vue"
 import { ElDialog } from "element-plus"
 
 import KButton from "@/components/common/PickerButton.vue"
+import { useHostsStore } from "@/stores/hosts"
 import { filesAPI } from "@/utils/api"
+import { pickFolderNative } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
@@ -96,6 +98,7 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue", "pick"])
 
 const { t } = useI18n()
+const hosts = useHostsStore()
 const remote = computed(() => Boolean(props.onNode && props.onNode !== "_host"))
 
 const localOpen = ref(props.modelValue)
@@ -110,12 +113,26 @@ const selectedPath = ref("")
 watch(
   () => props.modelValue,
   async (v) => {
+    if (v && (await openNative())) return
     localOpen.value = v
     if (v) {
       await open()
     }
   },
 )
+
+/** Use the OS folder dialog when this machine's own filesystem is being browsed; ``false`` means show the web picker. */
+async function openNative() {
+  if (remote.value || hosts.activeHost) return false
+  const picked = await pickFolderNative({
+    title: t("studio.picker.title"),
+    defaultPath: (props.initialPath || "").trim(),
+  })
+  if (picked === undefined) return false
+  if (picked) emit("pick", picked)
+  emit("update:modelValue", false)
+  return true
+}
 
 watch(localOpen, (v) => {
   if (v !== props.modelValue) emit("update:modelValue", v)

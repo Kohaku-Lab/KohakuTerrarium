@@ -25,6 +25,9 @@ const COMMANDS: &[&str] = &[
     "take_pending_opens",
     "open_popout_window",
     "popout_ack",
+    "pick_folder",
+    "pick_files",
+    "save_file",
     "get_shell_settings",
     "patch_shell_settings",
 ];

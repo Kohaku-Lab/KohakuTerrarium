@@ -53,6 +53,7 @@ pub fn capabilities() -> Value {
         "summonShortcut": true,
         "openFiles": true,
         "popoutWindows": true,
+        "nativeDialogs": true,
     })
 }
 

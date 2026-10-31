@@ -186,6 +186,45 @@ export async function patchShellSettings(patch) {
   }
 }
 
+/** Whether the shell can show the operating system's own file and folder dialogs. */
+export function nativeDialogsSupported() {
+  return hostKind() === KIND_TAURI && hostSupports("pick_folder")
+}
+
+/**
+ * Ask for a folder in the OS dialog: `{ title, defaultPath }`. Resolves the path,
+ * ``null`` when the user cancelled, or ``undefined`` when the shell has no dialog.
+ */
+export async function pickFolderNative(options = {}) {
+  if (!nativeDialogsSupported()) return undefined
+  try {
+    return (await call("pick_folder", options)) || null
+  } catch {
+    return undefined
+  }
+}
+
+/** Ask for files: `{ title, defaultPath, filters }`. Resolves paths (empty on cancel) or ``undefined`` without a dialog. */
+export async function pickFilesNative(options = {}) {
+  if (!nativeDialogsSupported()) return undefined
+  try {
+    const paths = await call("pick_files", options)
+    return Array.isArray(paths) ? paths : []
+  } catch {
+    return undefined
+  }
+}
+
+/** Ask where to save: `{ title, defaultPath, fileName, filters }`. Resolves a path, ``null`` on cancel, ``undefined`` without a dialog. */
+export async function saveFileNative(options = {}) {
+  if (!nativeDialogsSupported()) return undefined
+  try {
+    return (await call("save_file", options)) || null
+  } catch {
+    return undefined
+  }
+}
+
 /** Whether a newer shell build is published: `{ available, version? }`, or ``null`` if the shell cannot check. */
 export async function checkShellUpdate() {
   if (!hostSupports("check_shell_update")) return null
