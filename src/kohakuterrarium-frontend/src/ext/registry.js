@@ -13,6 +13,7 @@ import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
+import { clearStatusItems, registerStatusItem } from "@/ext/statusItems"
 import {
   registerWidgetRenderer,
   unregisterWidgetRenderersByKey,
@@ -47,6 +48,15 @@ export const MOUNT_OWNER_KINDS = {
   widget: "any",
   overlay: "package",
   command: "package",
+  "status-item": "package",
+}
+
+const STATUS_OPTION_NAMES = ["side", "maxWidth"]
+
+function statusOptions(source) {
+  const out = {}
+  for (const name of STATUS_OPTION_NAMES) if (source?.[name] !== undefined) out[name] = source[name]
+  return out
 }
 
 const OVERLAY_OPTION_NAMES = [
@@ -163,6 +173,17 @@ export function registerContribution(pkg, contribution) {
     case "command":
       registerCommand(pkg, contribution, key)
       break
+    case "status-item":
+      registerStatusItem({
+        key,
+        pkg,
+        id: contribution.id,
+        label: contribution.label,
+        order: contribution.order,
+        component: host,
+        options: statusOptions(contribution.status),
+      })
+      break
     default:
       return null
   }
@@ -187,6 +208,7 @@ export function unregisterAllContributions() {
     else if (kind === "settings") unregisterSettingsSection(key)
   }
   clearOverlays()
+  clearStatusItems()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -238,6 +260,7 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       isolation: "inline",
       ...(kind === "widget" ? { renderer: options.renderer } : {}),
       ...(kind === "overlay" ? { overlay: overlayOptions(options) } : {}),
+      ...(kind === "status-item" ? { status: statusOptions(options) } : {}),
       ...(kind === "command"
         ? { shortcut: options.shortcut || "", keywords: options.keywords || "" }
         : {}),

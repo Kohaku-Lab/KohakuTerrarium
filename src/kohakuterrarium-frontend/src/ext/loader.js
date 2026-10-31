@@ -162,6 +162,7 @@ function createHandle(record) {
     registerWidgetRenderer: provide("widget"),
     registerOverlay: provide("overlay"),
     registerCommand: provide("command"),
+    registerStatusItem: provide("status-item"),
     storage: createPackageStorage(pkg),
     showOverlay: (id) => showOverlay(contributionKey(pkg, id)),
     hideOverlay: (id) => hideOverlay(contributionKey(pkg, id)),

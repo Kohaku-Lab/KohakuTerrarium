@@ -185,6 +185,48 @@ class TestParse:
         assert by_id["plain"]["shortcut"] == "" and by_id["plain"]["keywords"] == ""
         assert by_id["t"]["shortcut"] == ""
 
+    def test_status_item_options(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "status-item", "id": "plain"},
+                    {
+                        "kind": "status-item",
+                        "id": "git",
+                        "side": "left",
+                        "maxWidth": 80,
+                        "order": 5,
+                    },
+                    {"kind": "tab", "id": "t"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c for c in slot.to_dict()["contributes"]}
+        assert by_id["plain"]["status"] == {"side": "right", "maxWidth": 160}
+        assert by_id["git"]["status"] == {"side": "left", "maxWidth": 80}
+        assert by_id["git"]["order"] == 5
+        assert by_id["t"]["status"] == {}
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "status-item", "id": "s", "owner": "plugin:x"}, "owned by"),
+            ({"kind": "status-item", "id": "s", "side": "middle"}, "side"),
+            ({"kind": "status-item", "id": "s", "maxWidth": 8}, "maxWidth"),
+            ({"kind": "status-item", "id": "s", "maxWidth": 4000}, "maxWidth"),
+            ({"kind": "status-item", "id": "s", "maxWidth": True}, "maxWidth"),
+            ({"kind": "tab", "id": "t", "side": "left"}, "only valid on a status-item"),
+        ],
+    )
+    def test_bad_status_item_invalidates_the_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
     @pytest.mark.parametrize(
         "contribution, message",
         [

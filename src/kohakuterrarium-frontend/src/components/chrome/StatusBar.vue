@@ -19,8 +19,12 @@
       <span class="truncate max-w-28">{{ sessionIdShort }}</span>
     </button>
 
+    <StatusItems side="left" />
+
     <!-- Spacer -->
     <div class="flex-1 min-w-0" />
+
+    <StatusItems side="right" />
 
     <!-- Running jobs count -->
     <div class="status-seg flex items-center gap-1 shrink-0" :class="jobCount ? 'text-amber' : ''">
@@ -44,6 +48,7 @@ import { computed, ref } from "vue"
 import { useInstanceContext } from "@/components/chrome/instanceContext"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import StatusDot from "@/components/common/StatusDot.vue"
+import StatusItems from "@/ext/StatusItems.vue"
 import { useVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"

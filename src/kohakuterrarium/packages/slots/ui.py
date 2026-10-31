@@ -34,7 +34,11 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "widget": ("package", "plugin", "tool", "trigger"),
     "overlay": ("package",),
     "command": ("package",),
+    "status-item": ("package",),
 }
+STATUS_SIDES: tuple[str, ...] = ("left", "right")
+STATUS_MIN_WIDTH = 24
+STATUS_MAX_WIDTH = 320
 OVERLAY_ANCHORS: tuple[str, ...] = (
     "top-left",
     "top-right",
@@ -102,6 +106,7 @@ class UIContribution:
     overlay: dict = field(default_factory=dict)
     shortcut: str = ""
     keywords: str = ""
+    status: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -118,6 +123,7 @@ class UIContribution:
             "overlay": dict(self.overlay),
             "shortcut": self.shortcut,
             "keywords": self.keywords,
+            "status": dict(self.status),
         }
 
 
@@ -265,7 +271,32 @@ def _parse_contribution(
         overlay=_parse_overlay(raw, kind, where),
         shortcut=_parse_shortcut(raw, kind, where),
         keywords=_parse_keywords(raw, kind, where),
+        status=_parse_status(raw, kind, where),
     )
+
+
+def _parse_status(raw: dict, kind: str, where: str) -> dict:
+    """Placement options of a ``status-item``; empty for other kinds."""
+    keys = ("side", "maxWidth")
+    if kind != "status-item":
+        stray = [k for k in keys if k in raw]
+        if stray:
+            raise _SlotError(f"{where}.{stray[0]} is only valid on a status-item")
+        return {}
+    side = raw.get("side", "right")
+    if side not in STATUS_SIDES:
+        raise _SlotError(f"{where}.side must be one of {list(STATUS_SIDES)}")
+    width = raw.get("maxWidth", 160)
+    if (
+        not isinstance(width, int)
+        or isinstance(width, bool)
+        or not STATUS_MIN_WIDTH <= width <= STATUS_MAX_WIDTH
+    ):
+        raise _SlotError(
+            f"{where}.maxWidth must be an integer in "
+            f"{STATUS_MIN_WIDTH}..{STATUS_MAX_WIDTH}"
+        )
+    return {"side": side, "maxWidth": width}
 
 
 def _parse_shortcut(raw: dict, kind: str, where: str) -> str:

@@ -78,6 +78,7 @@ export function createMockHost(options = {}) {
     widget: new Map(),
     overlay: new Map(),
     command: new Map(),
+    "status-item": new Map(),
   }
   const overlayVisible = reactive({})
   const storageData = new Map()
@@ -117,6 +118,7 @@ export function createMockHost(options = {}) {
     registerWidgetRenderer: provide("widget"),
     registerOverlay: provide("overlay"),
     registerCommand: provide("command"),
+    registerStatusItem: provide("status-item"),
     storage: {
       get: (key, fallback = null) => (storageData.has(key) ? storageData.get(key) : fallback),
       set: (key, value) => storageData.set(key, value),

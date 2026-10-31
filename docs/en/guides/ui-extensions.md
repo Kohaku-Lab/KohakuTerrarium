@@ -29,6 +29,7 @@ This guide covers:
 | `widget` | draws every chat widget whose renderer id is the contribution's `renderer` | any | wherever the widget opens |
 | `command` | a command palette entry with an optional key combination | `package` | host-wide |
 | `overlay` | a floating window above the whole app, on every page and in the browser as well as the desktop app | `package` | host-wide |
+| `status-item` | a segment in the status bar at the bottom of a session | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
 loaded and enabled**; otherwise it renders nothing. Renderers render past
@@ -63,7 +64,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -133,6 +134,7 @@ export default defineExtension((kt) => {
 | `kt.ws(path)` | WebSocket to `/api/ext/<pkg>/<path>` (raw fallback) |
 | `kt.openTab(id)` | open one of the package's tabs |
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
+| `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
@@ -238,6 +240,34 @@ that the app (`Ctrl+K`, `Ctrl+Shift+L`, `Ctrl+Shift+0`, `Ctrl+1`…`Ctrl+6`)
 or an earlier command already owns is ignored with a console warning. These
 shortcuts work while the app window has focus; system-wide shortcuts are a
 desktop-shell feature.
+
+### Status items
+
+A `status-item` is a small segment in the status bar. The host places it,
+orders it and caps its width; the component draws the content and handles its
+own clicks (use `el-popover` for a popup).
+
+```yaml
+- kind: status-item
+  id: branch
+  label: Git branch
+  side: left          # left | right (default right)
+  maxWidth: 120       # 24..320 px (default 160); overflow is clipped
+  order: 10           # lower first within a side
+```
+
+```js
+kt.registerStatusItem("branch", {
+  setup() {
+    const owner = useOwner()
+    return { owner }
+  },
+  template: `<span>{{ owner.state.value?.branch ?? "—" }}</span>`,
+})
+```
+
+A status item shows state that its owner (package backend) keeps; it does not
+read or change session content.
 
 ### Host services
 
