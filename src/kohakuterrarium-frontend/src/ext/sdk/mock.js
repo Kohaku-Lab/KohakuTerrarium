@@ -77,8 +77,10 @@ export function createMockHost(options = {}) {
     "trigger-renderer": new Map(),
     widget: new Map(),
     overlay: new Map(),
+    command: new Map(),
   }
   const overlayVisible = reactive({})
+  const storageData = new Map()
   const requests = []
   const notifications = []
   const openedTabs = []
@@ -114,6 +116,12 @@ export function createMockHost(options = {}) {
     registerTriggerRenderer: provide("trigger-renderer"),
     registerWidgetRenderer: provide("widget"),
     registerOverlay: provide("overlay"),
+    registerCommand: provide("command"),
+    storage: {
+      get: (key, fallback = null) => (storageData.has(key) ? storageData.get(key) : fallback),
+      set: (key, value) => storageData.set(key, value),
+      remove: (key) => storageData.delete(key),
+    },
     showOverlay: (id) => (overlayVisible[id] = true),
     hideOverlay: (id) => (overlayVisible[id] = false),
     toggleOverlay: (id) => (overlayVisible[id] = !(overlayVisible[id] ?? true)),
@@ -178,6 +186,7 @@ export function createMockHost(options = {}) {
     requests,
     notifications,
     openedTabs,
+    openedExternal: [],
     owner,
     ownerCalls,
     widget: options.widget || null,
@@ -268,6 +277,21 @@ export function useTheme() {
 
 export function notify(message, type = "info") {
   current().notifications.push({ message: String(message), type })
+}
+
+/** In tests, records the notification and reports the in-app fallback. */
+export async function notifyDesktop(title, body = "") {
+  current().notifications.push({ message: String(title), body: String(body), type: "desktop" })
+  return "toast"
+}
+
+export async function openExternal(url) {
+  current().openedExternal.push(String(url))
+  return true
+}
+
+export function hostInfo() {
+  return { kind: "browser" }
 }
 
 export async function confirm(message) {

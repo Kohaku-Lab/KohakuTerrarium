@@ -27,6 +27,7 @@ This guide covers:
 | `tool-renderer` | replaces the body of that tool's call/result block in chat | `tool` | one creature |
 | `trigger-renderer` | replaces the body of that trigger's event block in chat | `trigger` | one creature |
 | `widget` | draws every chat widget whose renderer id is the contribution's `renderer` | any | wherever the widget opens |
+| `command` | a command palette entry with an optional key combination | `package` | host-wide |
 | `overlay` | a floating window above the whole app, on every page and in the browser as well as the desktop app | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
@@ -131,12 +132,14 @@ export default defineExtension((kt) => {
 | `kt.api.get/post/put/patch/delete/request` | raw-route fallback, `/api/ext/<pkg>/<path>` on the active host |
 | `kt.ws(path)` | WebSocket to `/api/ext/<pkg>/<path>` (raw fallback) |
 | `kt.openTab(id)` | open one of the package's tabs |
+| `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
-`useOwner`, `useOverlay`, `OwnerCallError`, `useHost`, `useSession`, `useCreature`,
+`useOwner`, `useOverlay`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
+`hostInfo`, `useHost`, `useSession`, `useCreature`,
 `useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
 `FrameIsolationUnsupportedError`, `createFrameBridge`.
@@ -208,6 +211,45 @@ host.
   window. The shell only lets an overlay window move, resize and close
   itself; it cannot open other windows or use the app's other native
   commands.
+
+### Commands and shortcuts
+
+A `command` contribution adds an entry to the command palette (Ctrl+K) and,
+optionally, an in-app key combination:
+
+```yaml
+contributes:
+  - kind: command
+    id: toggle-pet
+    label: "Toggle desk pet"
+    icon: i-carbon-paw
+    keywords: "cat overlay"          # extra search words
+    shortcut: "Ctrl+Alt+P"           # needs Ctrl, Alt or Meta; one key (A-Z, 0-9, F1-F12)
+```
+
+```js
+kt.registerCommand("toggle-pet", () => kt.toggleOverlay("pet"))
+```
+
+The palette entry exists before the package loads; running the command (or
+pressing its shortcut) loads the package, then calls the handler. A failing
+handler shows an error toast. `Ctrl` also matches `Cmd` on macOS. A shortcut
+that the app (`Ctrl+K`, `Ctrl+Shift+L`, `Ctrl+Shift+0`, `Ctrl+1`…`Ctrl+6`)
+or an earlier command already owns is ignored with a console warning. These
+shortcuts work while the app window has focus; system-wide shortcuts are a
+desktop-shell feature.
+
+### Host services
+
+Calls that use the desktop shell when there is one and a sensible browser
+fallback otherwise:
+
+| Call | Behaviour |
+|---|---|
+| `notifyDesktop(title, body?)` | system notification in the desktop app; an in-app toast elsewhere. Resolves `"native"` or `"toast"`. |
+| `openExternal(url)` | opens `http(s):` and `mailto:` links outside the app. Resolves `false` for any other scheme. |
+| `hostInfo()` | `{ kind: "tauri" \| "pywebview" \| "browser" }` |
+| `kt.storage.get(key, fallback?)`, `.set(key, value)`, `.remove(key)` | JSON values in this browser/profile, separate for each package; kept in memory when storage is blocked. |
 
 `useOwner()` returns:
 

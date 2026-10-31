@@ -195,6 +195,8 @@ export function useTheme() {
   return { dark: computed(() => theme.dark), tokens: THEME_TOKENS }
 }
 
+export { hostInfo, notifyDesktop, openExternal } from "@/ext/hostServices"
+
 /** Show a toast. ``type`` is ``info`` | ``success`` | ``warning`` | ``error``. */
 export function notify(message, type = "info") {
   ElMessage({ message: String(message), type })

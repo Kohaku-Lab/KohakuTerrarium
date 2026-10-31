@@ -19,6 +19,8 @@ import { BUILTIN_UI_PACKAGES } from "@/ext/builtin/index"
 import { closeOwnerSocket } from "@/ext/ownerSocket"
 import { enableRuntimeCompiler } from "@/ext/runtimeCompiler"
 import { SDK_VERSION, satisfiesRange } from "@/ext/sdk/version"
+import { installCommandShortcuts } from "@/ext/commands"
+import { createPackageStorage } from "@/ext/hostServices"
 import { hideOverlay, loadPlacements, showOverlay, toggleOverlay } from "@/ext/overlays"
 import { registerOverlaySettings } from "@/ext/overlaySettings"
 import { contributionKey, extState, findPackage, runtime } from "@/ext/state"
@@ -159,6 +161,8 @@ function createHandle(record) {
     registerTriggerRenderer: provide("trigger-renderer"),
     registerWidgetRenderer: provide("widget"),
     registerOverlay: provide("overlay"),
+    registerCommand: provide("command"),
+    storage: createPackageStorage(pkg),
     showOverlay: (id) => showOverlay(contributionKey(pkg, id)),
     hideOverlay: (id) => hideOverlay(contributionKey(pkg, id)),
     toggleOverlay: (id) => toggleOverlay(contributionKey(pkg, id)),
@@ -299,6 +303,7 @@ export function startUiExtensions() {
   if (_started) return
   _started = true
   registerOverlaySettings()
+  installCommandShortcuts()
   runtime.ensureLoaded = ensurePackageLoaded
   watch(currentHostKey, () => reloadUiExtensions(), { immediate: true })
   watch(

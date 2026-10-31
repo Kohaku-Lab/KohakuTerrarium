@@ -10,6 +10,7 @@
 import { defineComponent, h, markRaw } from "vue"
 
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
+import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
 import {
@@ -45,6 +46,7 @@ export const MOUNT_OWNER_KINDS = {
   "trigger-renderer": "trigger",
   widget: "any",
   overlay: "package",
+  command: "package",
 }
 
 const OVERLAY_OPTION_NAMES = [
@@ -158,6 +160,9 @@ export function registerContribution(pkg, contribution) {
         options: overlayOptions(contribution.overlay),
       })
       break
+    case "command":
+      registerCommand(pkg, contribution, key)
+      break
     default:
       return null
   }
@@ -182,6 +187,7 @@ export function unregisterAllContributions() {
     else if (kind === "settings") unregisterSettingsSection(key)
   }
   clearOverlays()
+  unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
   contributionComponents.clear()
@@ -198,6 +204,9 @@ export function registeredContributionKeys() {
  */
 export function provideContributionComponent(pkg, kind, id, component, options = {}) {
   if (!component) throw new Error(`${pkg}: register${kind} ${id} needs a component`)
+  if (kind === "command" && typeof component !== "function") {
+    throw new Error(`${pkg}: command ${id} needs a handler function`)
+  }
   const declared = findContribution(pkg, id)
   if (declared && declared.kind !== kind) {
     throw new Error(`${pkg}: ${id} is declared as a ${declared.kind}, not a ${kind}`)
@@ -229,6 +238,9 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       isolation: "inline",
       ...(kind === "widget" ? { renderer: options.renderer } : {}),
       ...(kind === "overlay" ? { overlay: overlayOptions(options) } : {}),
+      ...(kind === "command"
+        ? { shortcut: options.shortcut || "", keywords: options.keywords || "" }
+        : {}),
     }
     if (record) record.contributes = [...(record.contributes || []), contribution]
     registerContribution(pkg, contribution)
