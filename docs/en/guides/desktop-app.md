@@ -56,6 +56,14 @@ back and opens the tab that needs you first.
 window hide it instead of quitting, so agents keep working. Quit from the tray menu.
 The setting is stored in `shell-settings.json` in the app's config folder.
 
+## Summon shortcut
+
+**Settings → Desktop → Summon shortcut** registers a system-wide key combination (off
+until you set one). Pressing it from any app raises the window, even when it is hidden
+in the tray, and puts the cursor in the message box (or opens the command palette when
+no chat is showing). The shortcut needs at least one modifier key. If another app
+already owns the combination, the setting says so and keeps the previous one.
+
 ## Dropping files
 
 Drag files from your desktop onto a chat and their full paths are added to the message
