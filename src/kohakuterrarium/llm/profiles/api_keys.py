@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from kohakuterrarium.llm.profiles import secret_store
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
@@ -52,14 +53,57 @@ def clear_api_key_resolver() -> None:
 
 
 def save_api_key(provider: str, key: str) -> None:
-    """Save an API key for a provider."""
-    path = _keys_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    keys = _load_api_keys()
+    """Save an API key for a provider; an empty key removes it.
+
+    With the keychain active the key goes there and never into the key file.
+    """
+    if secret_store.active():
+        if key:
+            secret_store.put(provider, key)
+        else:
+            secret_store.drop(provider)
+        file_keys = _load_file_keys()
+        if provider in file_keys:
+            del file_keys[provider]
+            _write_file_keys(file_keys)
+        logger.info(
+            "API key saved", provider=provider, store=secret_store.MODE_KEYCHAIN
+        )
+        return
+    keys = _load_file_keys()
     keys[provider] = key
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(keys, f, default_flow_style=False)
+    _write_file_keys(keys)
     logger.info("API key saved", provider=provider)
+
+
+def switch_secret_store(mode: str) -> int:
+    """Move every stored key to ``mode`` (``file`` or ``keychain``); returns how many moved.
+
+    Keys are written and read back at the destination before the source is
+    emptied, so a failure part-way leaves every key where it was readable.
+    """
+    if mode == secret_store.MODE_KEYCHAIN:
+        if not secret_store.keychain_available():
+            raise secret_store.SecretStoreError("no system keychain is available")
+        file_keys = _load_file_keys()
+        moving = {name: key for name, key in file_keys.items() if key}
+        for name, key in moving.items():
+            secret_store.put(name, key)
+            if secret_store.get(name) != key:
+                raise secret_store.SecretStoreError(
+                    f"the {name} key did not store correctly"
+                )
+        secret_store.set_configured_mode(mode)
+        _write_file_keys({name: key for name, key in file_keys.items() if not key})
+        return len(moving)
+    if mode != secret_store.MODE_FILE:
+        raise secret_store.SecretStoreError(f"unknown secret store {mode!r}")
+    stored = secret_store.all_keys() if secret_store.keychain_available() else {}
+    _write_file_keys({**_load_file_keys(), **stored})
+    secret_store.set_configured_mode(mode)
+    for name in stored:
+        secret_store.drop(name)
+    return len(stored)
 
 
 def get_api_key(provider_or_env: str) -> str:
@@ -134,6 +178,21 @@ def list_api_keys() -> dict[str, str]:
 
 
 def _load_api_keys() -> dict[str, str]:
+    """Every stored key: the key file's, plus the keychain's when it is active."""
+    keys = _load_file_keys()
+    if secret_store.active():
+        keys.update(secret_store.all_keys())
+    return keys
+
+
+def _write_file_keys(keys: dict[str, str]) -> None:
+    path = _keys_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(keys, f, default_flow_style=False)
+
+
+def _load_file_keys() -> dict[str, str]:
     """Load API keys from file."""
     path = _keys_path()
     if not path.exists():

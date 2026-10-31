@@ -258,6 +258,7 @@ jobs:
             --platform "${{ matrix.plat }}" \
             --py-abi "${{ matrix.abi }}" \
             --channel "${{ needs.meta.outputs.channel }}" \
+            --extras keychain \
             --out dist/release-trees/
 
       - uses: actions/upload-artifact@v4
