@@ -230,7 +230,9 @@ for (const staleOutcome of ['resolve', 'reject']) {
     await Promise.all([replacement, shared])
     const connectionId = posted.find((message) => message.type === 'ready.result' && message.data.available)?.data.connectionId
     assert.equal(typeof connectionId, 'string')
-    assert.doesNotMatch(connectionId, /127\.0\.0\.1|8001|http/)
+    // A random UUID, so it cannot carry the endpoint it was minted for.
+    assert.match(connectionId, /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
+    assert.equal(connectionId.includes('127.0.0.1'), false)
     const counts = { clientCount, topologyStarts, topologyCloses, listCount }
     const retained = runtimes.at(-1)
     const refreshed = receiveMessage({ type: 'ready', requestId: 4 })
