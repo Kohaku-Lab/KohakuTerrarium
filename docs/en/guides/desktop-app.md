@@ -47,14 +47,41 @@ default; see [Terminal commands](terminal-commands.md#installed-as-the-desktop-a
 ## Tray and attention
 
 The installed app puts an icon in the system tray (menu bar on macOS). The icon
-shows a red dot while something is waiting for your input and a blue dot when
-work has finished; its tooltip says how many, and the taskbar entry (Windows) or
-Dock icon (macOS) carries the same indicator. Clicking the icon brings the window
-back and opens the tab that needs you first.
+shows a red dot while something is waiting for your input, an amber dot when a turn
+failed and a blue dot when work has finished; its tooltip says how many, and the
+taskbar entry (Windows) or Dock icon (macOS) carries the same indicator plus a
+progress bar: moving while agents work, yellow when one waits for you, red after a
+failure. Clicking the icon brings the window back and opens the tab that needs you
+first.
+
+The tray menu lists the sessions waiting for you, then your other sessions (choose one
+to open its tab), **New session**, **Open folder as session...** (the system folder
+dialog), the backend's state and memory, **Restart backend** and **Export
+diagnostics...**.
 
 **Settings → Desktop → Keep running in the tray** (off by default) makes closing the
 window hide it instead of quitting, so agents keep working. Quit from the tray menu.
-The setting is stored in `shell-settings.json` in the app's config folder.
+**Start in the tray** (with start at login on) opens no window when the system starts
+the app at login. **Keep the computer awake** stops sleep while agents work (never,
+while agents work, or only on mains power). Settings are stored in
+`shell-settings.json` in the app's config folder. A **Desktop** chip in a session's
+status bar lists the current values and opens this section; a card on the first start
+offers the most useful switches.
+
+## The backend and the runtime
+
+**Settings → Desktop → Backend** shows whether the backend process is running, its
+memory, uptime and restarts, and restarts it or opens its log. If it crashes the app
+restarts it (up to three times in two minutes, keeping your windows); after that a
+banner offers **Restart backend** and **Open logs**. The same actions are in the tray
+and the command palette.
+
+**Runtime** names the active release and the one shipped with the app. **Repair
+runtime** stops the backend, reinstalls the shipped release and starts it again; it is
+also offered on the loading page when the app cannot start. **Export diagnostics**
+saves one zip with versions, the log tail, the runtime pointer, settings and `kt
+doctor` output for a bug report. Every file passes through a redaction that removes API
+keys, tokens, cookies, passwords and credential-shaped strings before it is written.
 
 ## API keys in the system keychain
 
@@ -68,10 +95,14 @@ to the key file and your environment variables instead of failing.
 
 ## Session windows
 
-With a session open, run **Session: pop out into its own window** from the command
-palette (Ctrl+K). The session opens alone in a second window, handy for a second
-monitor; each session gets one window, and running the command again raises it. The
-window shows the same live session as the tab it came from.
+Right-click a session tab and choose **Move to new window**, drag the tab out of the
+window, right-click a session in the left rail and choose **Open in new window**, or run
+**Session: pop out into its own window** from the command palette (Ctrl+K). The session
+opens alone in a second window, handy for a second monitor; each session gets one
+window, and doing it again raises it. The window shows the same live session as the
+tab it came from and has a **Return to main window** button. Session windows that are
+open when you quit come back at the next start (**Reopen session windows**, on by
+default).
 
 ## Application menu (macOS)
 
@@ -88,6 +119,15 @@ or `KohakuTerrarium <file>`) copies it into your saved sessions under a free nam
 shows its history; if the app is already running, that window handles it. Passing a
 folder (`KohakuTerrarium <folder>`) opens the new-session dialog with that folder as the
 working directory. A file that is not a session is refused with a message.
+
+From a terminal, `kt open <folder-or-session-file>` does the same. On Windows,
+**Settings → Desktop → Open folders from Explorer** adds "Open with KohakuTerrarium" to
+the right-click menu of folders (the NSIS uninstaller removes it), and sessions you open
+appear under Recent in the taskbar jump list.
+
+Folder pickers in the app use the operating system's dialog when you work on this
+computer; with a remote host or a remote worker node they keep the in-page picker, since
+the system dialog cannot show another machine's disks.
 
 ## Summon shortcut
 
@@ -106,7 +146,13 @@ over it; split views drop into whichever chat is under the pointer.
 ## Links
 
 Links to other sites open in your default browser, never inside the app window.
-`kt://session/<name>` links open that saved session's history in the app.
+`kt://session/<name>` links open that saved session's history in the app,
+`kt://live/<id>` shows a running session, `kt://new[?path=<folder>]` opens the
+new-session dialog, and `kt://install/<name>` asks for confirmation (naming the
+package) before installing that marketplace package. Anything else in a `kt://` link is
+ignored.
+
+On Windows 11 the title bar and window border take the page's colours.
 
 ## How the local server is protected
 
