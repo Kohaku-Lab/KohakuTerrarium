@@ -109,6 +109,50 @@ class TestParse:
         assert record["has_api"] is True and record["has_handler"] is True
         assert record["contributes"][1]["owner"] == "plugin:qq_feed"
 
+    def test_overlay_options_default_and_override(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "overlay", "id": "pet"},
+                    {
+                        "kind": "overlay",
+                        "id": "hud",
+                        "anchor": "top-left",
+                        "width": 100,
+                        "height": 50,
+                        "draggable": False,
+                        "resizable": True,
+                        "clickThrough": True,
+                        "defaultVisible": False,
+                    },
+                    {"kind": "tab", "id": "t"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c["overlay"] for c in slot.to_dict()["contributes"]}
+        assert by_id["pet"] == {
+            "anchor": "bottom-right",
+            "width": 320,
+            "height": 240,
+            "draggable": True,
+            "resizable": False,
+            "clickThrough": False,
+            "defaultVisible": True,
+        }
+        assert by_id["hud"] == {
+            "anchor": "top-left",
+            "width": 100,
+            "height": 50,
+            "draggable": False,
+            "resizable": True,
+            "clickThrough": True,
+            "defaultVisible": False,
+        }
+        assert by_id["t"] == {}
+
     @pytest.mark.parametrize(
         "contribution, message",
         [
@@ -128,6 +172,15 @@ class TestParse:
             ({"kind": "widget", "id": "w", "renderer": "kt.app"}, "reserved prefix"),
             ({"kind": "widget", "id": "w", "renderer": "mcp.app"}, "reserved prefix"),
             ({"kind": "tab", "id": "t", "renderer": "pkg.x"}, "only valid on a widget"),
+            ({"kind": "overlay", "id": "o", "owner": "plugin:x"}, "owned by"),
+            ({"kind": "overlay", "id": "o", "anchor": "middle"}, "anchor"),
+            ({"kind": "overlay", "id": "o", "width": 0}, "width"),
+            ({"kind": "overlay", "id": "o", "height": True}, "height"),
+            ({"kind": "overlay", "id": "o", "draggable": "yes"}, "draggable"),
+            (
+                {"kind": "tab", "id": "t", "anchor": "center"},
+                "only valid on an overlay",
+            ),
         ],
     )
     def test_bad_contribution_invalidates_only_this_package(

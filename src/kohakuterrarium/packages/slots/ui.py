@@ -32,7 +32,22 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "tool-renderer": ("tool",),
     "trigger-renderer": ("trigger",),
     "widget": ("package", "plugin", "tool", "trigger"),
+    "overlay": ("package",),
 }
+OVERLAY_ANCHORS: tuple[str, ...] = (
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+    "center",
+)
+OVERLAY_FLAGS: tuple[str, ...] = (
+    "draggable",
+    "resizable",
+    "clickThrough",
+    "defaultVisible",
+)
+OVERLAY_MAX_SIZE = 4096
 UI_KINDS: tuple[str, ...] = tuple(MOUNT_OWNER_KINDS)
 OWNER_KINDS: tuple[str, ...] = ("package", "plugin", "tool", "trigger")
 OWNER_MANIFEST_SLOTS: dict[str, str] = {
@@ -78,6 +93,7 @@ class UIContribution:
     min_density: str = "compact"
     isolation: str = "inline"
     renderer: str = ""
+    overlay: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -91,6 +107,7 @@ class UIContribution:
             "minDensity": self.min_density,
             "isolation": self.isolation,
             "renderer": self.renderer,
+            "overlay": dict(self.overlay),
         }
 
 
@@ -235,7 +252,40 @@ def _parse_contribution(
         min_density=density,
         isolation=isolation,
         renderer=renderer,
+        overlay=_parse_overlay(raw, kind, where),
     )
+
+
+def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
+    """Placement options of an ``overlay`` contribution; empty for other kinds."""
+    keys = ("anchor", "width", "height", *OVERLAY_FLAGS)
+    if kind != "overlay":
+        stray = [k for k in keys if k in raw]
+        if stray:
+            raise _SlotError(f"{where}.{stray[0]} is only valid on an overlay")
+        return {}
+    anchor = raw.get("anchor", "bottom-right")
+    if anchor not in OVERLAY_ANCHORS:
+        raise _SlotError(f"{where}.anchor must be one of {list(OVERLAY_ANCHORS)}")
+    out: dict = {"anchor": anchor}
+    for name in ("width", "height"):
+        value = raw.get(name, 320 if name == "width" else 240)
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or not 1 <= value <= OVERLAY_MAX_SIZE
+        ):
+            raise _SlotError(
+                f"{where}.{name} must be an integer in 1..{OVERLAY_MAX_SIZE}"
+            )
+        out[name] = value
+    defaults = {"draggable": True, "resizable": False, "clickThrough": False}
+    for flag in OVERLAY_FLAGS:
+        value = raw.get(flag, defaults.get(flag, True))
+        if not isinstance(value, bool):
+            raise _SlotError(f"{where}.{flag} must be true or false")
+        out[flag] = value
+    return out
 
 
 def _parse_renderer(raw: object, kind: str, where: str) -> str:
