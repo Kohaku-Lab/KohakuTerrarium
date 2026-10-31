@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from kohakuterrarium.core.compact.branch import compact_source_path_from_event
+from kohakuterrarium.core.conversation.settled_identity import delivered_jobs
 from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
     select_live_event_ids,
@@ -47,6 +48,18 @@ def _fresh(store: Any, namespace: str, events: list[dict], watermark: int) -> bo
     )
 
 
+def _continued_by(
+    path: list, selected: dict[int, int], before_turn: int | None
+) -> bool:
+    """Whether the view extends the checkpoint path with only later turns."""
+    if before_turn is not None or not path:
+        return False
+    recorded = {tuple(pair) for pair in path}
+    chosen = set(selected.items())
+    last = path[-1][0]
+    return recorded < chosen and all(turn > last for turn, _ in chosen - recorded)
+
+
 def _prefix(
     record: dict,
     selected: dict[int, int],
@@ -60,6 +73,8 @@ def _prefix(
         if before_turn is None or turn < before_turn
     }
     exact = before_turn is None and dict(record["path"]) == selected
+    # Later turns appended after the checkpoint keep its lineage intact.
+    lineage = exact or _continued_by(record["path"], selected, before_turn)
     kept, last_turn = [], 0
     open_turn = None
     for message in record["messages"]:
@@ -77,7 +92,7 @@ def _prefix(
             inputs = compact_source_path_from_event(metadata)
             if (
                 inputs is None
-                and not exact
+                and not lineage
                 or inputs is not None
                 and not inputs.issubset(pairs)
             ):
@@ -89,14 +104,14 @@ def _prefix(
         if role == "user" and metadata.get("kind") != "tool_results":
             turn, branch = metadata.get("turn_index"), metadata.get("branch_id")
             if type(turn) is not int or type(branch) is not int:
-                if not exact:
+                if not lineage:
                     return None
             elif (turn, branch) not in pairs:
                 break
             else:
                 open_turn = (turn, branch)
                 last_turn = max(last_turn, turn)
-        elif not exact and open_turn is None:
+        elif not lineage and open_turn is None:
             return None
         kept.append(message)
     if (
@@ -108,7 +123,7 @@ def _prefix(
         )
     ):
         return None
-    return deepcopy(kept), record["path"][-1][0] if exact else last_turn
+    return deepcopy(kept), record["path"][-1][0] if lineage else last_turn
 
 
 def _boundary_turn(
@@ -199,8 +214,14 @@ def prepare_snapshot(
     before_turn: int | None = None,
     records: list[dict] | None = None,
     parent_paths: dict[int, tuple[tuple[int, int], ...]] | None = None,
+    keep_delivered_pending: bool = False,
 ) -> dict | None:
-    """Restore a checkpoint prefix; supplied paths match unchanged raw events and order."""
+    """Restore a checkpoint prefix; supplied paths match unchanged raw events and order.
+
+    ``keep_delivered_pending`` accepts a background placeholder whose completion
+    the checkpoint already delivers; only a whole-conversation restore may, since
+    truncating callers would cut the delivery and keep the placeholder.
+    """
     if records is None:
         records = load_records(store, namespace)
     if not records:
@@ -218,8 +239,22 @@ def prepare_snapshot(
     covered = compact_covered_event_ids(events, selected, parent_paths=parent_paths)
     # Checkpoint paths record only real turns; pre-turn events sit at (0, 0).
     path_view = {t: b for t, b in selected.items() if t > 0 and b > 0}
+    user_pairs = {
+        (event.get("turn_index"), event.get("branch_id"))
+        for event in events
+        if event.get("type") == "user_message"
+    }
     candidates, repairs = [], []
     for record in records:
+        # A turn the view leaves unselected that has no user message (or was
+        # never recorded) cannot diverge from the view, so it does not count.
+        path = [
+            pair
+            for pair in record["path"]
+            if pair[0] in path_view or tuple(pair) in user_pairs
+        ]
+        if len(path) != len(record["path"]):
+            record = {**record, "path": path}
         if not set(map(tuple, record["path"])).issubset(raw_pairs) or not _fresh(
             store, namespace, events, record["watermark"]
         ):
@@ -299,6 +334,8 @@ def prepare_snapshot(
             for message in messages
             if message.get("metadata", {}).get("tool_result_phase") == "pending"
         }
+        if keep_delivered_pending:
+            pending -= delivered_jobs(messages)
         if any(
             event.get("type") == "tool_result"
             and event.get("event_id") not in covered

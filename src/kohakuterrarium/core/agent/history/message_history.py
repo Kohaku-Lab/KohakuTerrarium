@@ -1,14 +1,11 @@
 """Branch-aware history lookup helpers for agent message mutations."""
 
-import re
 from collections.abc import Callable
 from typing import Any
 
 from kohakuterrarium.core.conversation.branch import build_branch_conversation
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.conversation.elide import (
-    ELISION_MARKER,
-    TOOL_FEEDBACK_KIND,
     elide_stale_tool_results,
     estimate_tokens,
 )
@@ -16,12 +13,15 @@ from kohakuterrarium.core.conversation.locator import (
     user_message_indices_for_content,
     user_message_indices_for_turn,
 )
-from kohakuterrarium.core.conversation.settled_identity import pending_snapshot_jobs
+from kohakuterrarium.core.conversation.settled_identity import (
+    pending_snapshot_jobs,
+    result_identities,
+    result_is_final,
+)
 from kohakuterrarium.core.conversation.snapshot import (
     prepare_snapshot,
     replayed_compact_state,
 )
-from kohakuterrarium.core.tools.output import render_content_text
 from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
     index_parent_paths,
@@ -381,71 +381,16 @@ def snapshot_needs_settled_tool_replay(
         return True
     present: set[str] = set()
     for message in snapshot:
-        identities = _snapshot_result_identities(message)
+        identities = result_identities(message)
         if not identities:
             continue
-        if not _snapshot_result_is_final(message):
+        if not result_is_final(message):
             continue
         for identity in identities:
             owners = alias_owners.get(identity, set())
             if len(owners) == 1:
                 present.update(owners & needed.keys())
     return any(job_id not in present for job_id in needed)
-
-
-def _snapshot_result_identities(message: dict) -> set[str]:
-    role = message.get("role")
-    metadata = (
-        message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    )
-    names: set[str] = set()
-    if role != "tool" and not (
-        role == "user" and metadata.get("kind") == TOOL_FEEDBACK_KIND
-    ):
-        return names
-    for key in ("job_id", "call_id"):
-        if metadata.get(key):
-            names.add(str(metadata[key]))
-    job_ids = metadata.get("job_ids")
-    if isinstance(job_ids, list):
-        names.update(str(value) for value in job_ids if value)
-    if names:
-        return names
-    if role == "tool":
-        identity = str(message.get("tool_call_id") or "")
-        return {identity} if identity else set()
-    content = render_content_text(message.get("content") or "")
-    names.update(
-        re.findall(
-            r"(?:\A|\n\n)\[Tool ([^\]\n]+?) "
-            r"(?:completed|failed(?:, exit [^\]\n]+)?|cancelled)\](?=\n|\Z)",
-            content,
-        )
-    )
-    return names
-
-
-def _snapshot_result_is_final(message: dict) -> bool:
-    metadata = (
-        message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    )
-    phase = metadata.get("tool_result_phase")
-    if phase == "pending":
-        return False
-    if phase == "final":
-        return True
-    content = render_content_text(message.get("content") or "")
-    if re.match(
-        r"^(?:\[[^\]\n]+\] )?(?:Running in background — task delegated\.|"
-        r"Promoted to background\. Result arrives in a later turn\.)",
-        content,
-    ):
-        return False
-    if metadata.get("tool_results_elided") or ELISION_MARKER in content:
-        return True
-    if message.get("role") == "user" and metadata.get("kind") == TOOL_FEEDBACK_KIND:
-        return bool(_snapshot_result_identities(message))
-    return True
 
 
 def reload_conversation_under_branch_view(
