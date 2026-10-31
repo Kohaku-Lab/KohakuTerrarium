@@ -141,6 +141,41 @@ describe("DesktopAppSettings", () => {
     expect(wrapper.find("[data-setting='autostart'] .switch").attributes("data-on")).toBe("true")
   })
 
+  it("offers keep-running-in-the-tray only when the shell has a tray, and applies its answer", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const api = {
+      get_close_to_tray: vi.fn(async () => false),
+      set_close_to_tray: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    const toggle = wrapper.find("[data-setting='close-to-tray'] .switch")
+    expect(toggle.attributes("data-on")).toBe("false")
+    await toggle.trigger("click")
+    await flushPromises()
+    expect(api.set_close_to_tray).toHaveBeenCalledWith(true)
+    expect(wrapper.find("[data-setting='close-to-tray'] .switch").attributes("data-on")).toBe(
+      "true",
+    )
+
+    api.set_close_to_tray.mockResolvedValue(false)
+    await wrapper.find("[data-setting='close-to-tray'] .switch").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-setting='close-to-tray'] .switch").attributes("data-on")).toBe(
+      "true",
+    )
+  })
+
+  it("does not offer the tray option to a shell without one", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    window.pywebview = { api: { get_autostart: vi.fn(async () => false) } }
+    const wrapper = mountSettings()
+    await flushPromises()
+    expect(wrapper.find("[data-setting='close-to-tray']").exists()).toBe(false)
+  })
+
   it("checks for a shell update, offers it, and installs it", async () => {
     shimsApi.status.mockResolvedValue(status({ supported: false }))
     const api = {

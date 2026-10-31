@@ -116,6 +116,32 @@ export async function setAutostart(enabled) {
   }
 }
 
+/** Whether closing the window keeps the app running in the tray, or ``null`` when the shell has no tray. */
+export async function getCloseToTray() {
+  if (!hostSupports("get_close_to_tray")) return null
+  try {
+    return (await call("get_close_to_tray")) === true
+  } catch {
+    return null
+  }
+}
+
+/** Keep the app running in the tray when its window is closed. Resolves the state afterwards. */
+export async function setCloseToTray(enabled) {
+  if (!hostSupports("set_close_to_tray")) return null
+  try {
+    const applied = await call("set_close_to_tray", Boolean(enabled))
+    return applied === true ? Boolean(enabled) : !enabled
+  } catch {
+    return null
+  }
+}
+
+/** Show the `pending` and `completed` attention counts on the tray icon and taskbar entry. */
+export function setAttentionCount(pending, completed) {
+  return callBoolean("set_attention_count", Math.max(0, pending | 0), Math.max(0, completed | 0))
+}
+
 /** Whether a newer shell build is published: `{ available, version? }`, or ``null`` if the shell cannot check. */
 export async function checkShellUpdate() {
   if (!hostSupports("check_shell_update")) return null

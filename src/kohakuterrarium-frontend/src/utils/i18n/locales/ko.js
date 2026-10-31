@@ -328,6 +328,9 @@ export default {
   "settings.desktop.terminalFailed": "터미널 명령을 변경할 수 없습니다.",
   "settings.desktop.autostartTitle": "로그인 시 시작",
   "settings.desktop.autostartHint": "로그인할 때 KohakuTerrarium을 자동으로 엽니다.",
+  "settings.desktop.trayTitle": "트레이에서 계속 실행",
+  "settings.desktop.trayHint":
+    "창을 닫아도 종료하지 않고 숨겨지므로 에이전트가 계속 동작합니다. 트레이 아이콘에 대기 중인 항목이 표시되며, 종료는 트레이 메뉴에서 합니다.",
   "settings.desktop.updateTitle": "앱 업데이트",
   "settings.desktop.updateHint":
     "새 데스크톱 셸이 있는지 확인합니다. Python 런타임은 별도로 업데이트됩니다.",

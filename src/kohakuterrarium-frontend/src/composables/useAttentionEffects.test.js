@@ -43,6 +43,8 @@ vi.mock("@/utils/attentionNavigation", () => ({
 }))
 vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: i18n.t }) }))
 
+import { clearAttentionRegistry, createAttentionState, publishAttention } from "@/stores/attention"
+
 import { useAttentionEffects } from "./useAttentionEffects"
 
 function mountEffects() {
@@ -234,6 +236,68 @@ describe("useAttentionEffects", () => {
     )
     expect(Notification).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it("shows the attention counts on the shell's tray and opens the first waiting tab on request", async () => {
+    const setCount = vi.fn().mockResolvedValue(true)
+    window.pywebview = {
+      api: {
+        get_desktop_capabilities: vi
+          .fn()
+          .mockResolvedValue({ surface: "desktop", protocol: 1, trayBadge: true }),
+        set_attention_count: setCount,
+      },
+    }
+    clearAttentionRegistry()
+    const wrapper = mountEffects()
+    await nextTick()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(setCount).toHaveBeenLastCalledWith(0, 0)
+
+    publishAttention("graph-a", "root", { ...createAttentionState(), completed: 2 })
+    publishAttention("graph-b", "helper", {
+      ...createAttentionState(),
+      pending: new Set(["ask-1"]),
+    })
+    await Promise.resolve()
+    expect(setCount).toHaveBeenLastCalledWith(1, 2)
+    const calls = setCount.mock.calls.length
+    publishAttention("graph-b", "helper", {
+      ...createAttentionState(),
+      pending: new Set(["ask-1"]),
+    })
+    expect(setCount.mock.calls.length).toBe(calls)
+
+    window.dispatchEvent(new Event("kt:desktop-focus-attention"))
+    expect(navigation).toHaveBeenLastCalledWith({ scope: "graph-b", tab: "helper" })
+
+    clearAttentionRegistry()
+    window.dispatchEvent(new Event("kt:desktop-focus-attention"))
+    expect(navigation).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    window.dispatchEvent(new Event("kt:desktop-focus-attention"))
+    expect(navigation).toHaveBeenCalledTimes(1)
+    clearAttentionRegistry()
+  })
+
+  it("does not touch the tray when the shell does not offer a badge", async () => {
+    const setCount = vi.fn().mockResolvedValue(true)
+    window.pywebview = {
+      api: {
+        get_desktop_capabilities: vi.fn().mockResolvedValue({ surface: "desktop", protocol: 1 }),
+        set_attention_count: setCount,
+      },
+    }
+    clearAttentionRegistry()
+    const wrapper = mountEffects()
+    await nextTick()
+    await Promise.resolve()
+    publishAttention("graph-a", "root", { ...createAttentionState(), completed: 1 })
+    await Promise.resolve()
+    expect(setCount).not.toHaveBeenCalled()
+    wrapper.unmount()
+    clearAttentionRegistry()
   })
 
   it("stays silent on the desktop when the shell has no notifications or the user opted out", async () => {

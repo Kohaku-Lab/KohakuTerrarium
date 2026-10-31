@@ -427,6 +427,9 @@ export default {
   "settings.desktop.terminalFailed": "Could not change the terminal command.",
   "settings.desktop.autostartTitle": "Start at login",
   "settings.desktop.autostartHint": "Open KohakuTerrarium automatically when you sign in.",
+  "settings.desktop.trayTitle": "Keep running in the tray",
+  "settings.desktop.trayHint":
+    "Closing the window hides it instead of quitting, so agents keep working. The tray icon shows what is waiting for you; use its menu to quit.",
   "settings.desktop.updateTitle": "App updates",
   "settings.desktop.updateHint":
     "Check for a newer desktop shell. The Python runtime updates separately.",

@@ -203,6 +203,16 @@ export function totalAttention() {
   return { pending, completed }
 }
 
+/** The first tab that needs the user: one waiting for input, else one with finished work. */
+export function firstAttentionTarget() {
+  let finished = null
+  for (const { scope, tab, state } of snapshots.values()) {
+    if (state?.pending?.size > 0) return { scope, tab }
+    if (!finished && state?.completed > 0) finished = { scope, tab }
+  }
+  return finished
+}
+
 export function subscribeAttention(listener) {
   listeners.add(listener)
   return () => listeners.delete(listener)

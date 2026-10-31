@@ -1,6 +1,11 @@
 import { onBeforeUnmount, onMounted, watch } from "vue"
 
-import { subscribeAttention, subscribeAttentionEdges, totalAttention } from "@/stores/attention"
+import {
+  firstAttentionTarget,
+  subscribeAttention,
+  subscribeAttentionEdges,
+  totalAttention,
+} from "@/stores/attention"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { attentionTargetLabel, navigateToAttention } from "@/utils/attentionNavigation"
 import {
@@ -9,11 +14,13 @@ import {
   hostSupports,
   onHostReady,
   requestDesktopAttention as requestHostAttention,
+  setAttentionCount,
   showDesktopNotification,
 } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const AUDIO_UNLOCK_EVENT = "kt:attention-audio-unlock"
+const FOCUS_ATTENTION_EVENT = "kt:desktop-focus-attention"
 
 export function requestAttentionAudioUnlock() {
   document.dispatchEvent(new Event(AUDIO_UNLOCK_EVENT))
@@ -40,6 +47,7 @@ export function useAttentionEffects() {
   let favicons = []
   let originalFavicons = []
   let pendingDesktopAttention = false
+  let lastBadge = { pending: -1, completed: -1 }
 
   async function detectDesktopSurface() {
     if (!hasDesktopHost()) return
@@ -49,6 +57,7 @@ export function useAttentionEffects() {
       pendingDesktopAttention = false
       requestDesktopAttention()
     }
+    publishTrayBadge()
   }
 
   function unlockAudio() {
@@ -164,7 +173,21 @@ export function useAttentionEffects() {
     playSound(event.kind)
   }
 
+  function publishTrayBadge() {
+    if (!desktopSurface || hostCapabilities?.trayBadge !== true) return
+    const { pending, completed } = totalAttention()
+    if (pending === lastBadge.pending && completed === lastBadge.completed) return
+    lastBadge = { pending, completed }
+    void setAttentionCount(pending, completed)
+  }
+
+  function openFirstAttention() {
+    const target = firstAttentionTarget()
+    if (target) navigateToAttention(target)
+  }
+
   function updateFavicon() {
+    publishTrayBadge()
     if (favicons.length === 0) return
     const summary = totalAttention()
     const showBadge = prefs.state.faviconBadge && (summary.pending > 0 || summary.completed > 0)
@@ -187,6 +210,7 @@ export function useAttentionEffects() {
     document.addEventListener("keydown", unlockAudio)
     document.addEventListener(AUDIO_UNLOCK_EVENT, unlockAudio)
     stopHostReady = onHostReady(detectDesktopSurface)
+    window.addEventListener(FOCUS_ATTENTION_EVENT, openFirstAttention)
     updateFavicon()
   })
 
@@ -197,6 +221,7 @@ export function useAttentionEffects() {
     document.removeEventListener("keydown", unlockAudio)
     document.removeEventListener(AUDIO_UNLOCK_EVENT, unlockAudio)
     stopHostReady()
+    window.removeEventListener(FOCUS_ATTENTION_EVENT, openFirstAttention)
     favicons.forEach((favicon, index) => {
       const original = originalFavicons[index]
       if (original !== null) favicon.href = original

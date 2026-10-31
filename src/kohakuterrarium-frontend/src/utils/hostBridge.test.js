@@ -5,7 +5,10 @@ import {
   ackOverlayWindow,
   checkShellUpdate,
   closeOverlayWindow,
+  getCloseToTray,
   openOverlayWindow,
+  setAttentionCount,
+  setCloseToTray,
   overlayWindowsSupported,
   setOverlayBounds,
   setOverlayHitRegions,
@@ -167,6 +170,27 @@ describe("hostBridge", () => {
     expect(await getAutostart()).toBeNull()
     expect(await setAutostart(true)).toBeNull()
     expect(await takeDeepLink()).toBeNull()
+  })
+
+  it("reads and changes close-to-tray and sends attention counts", async () => {
+    const api = {
+      get_close_to_tray: vi.fn(async () => true),
+      set_close_to_tray: vi.fn(async () => true),
+      set_attention_count: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+    expect(await getCloseToTray()).toBe(true)
+    expect(await setCloseToTray(false)).toBe(false)
+    expect(api.set_close_to_tray).toHaveBeenCalledWith(false)
+    expect(await setAttentionCount(2.9, -4)).toBe(true)
+    expect(api.set_attention_count).toHaveBeenCalledWith(2, 0)
+
+    api.set_close_to_tray.mockResolvedValue(false)
+    expect(await setCloseToTray(true)).toBe(false)
+    window.pywebview = { api: {} }
+    expect(await getCloseToTray()).toBeNull()
+    expect(await setCloseToTray(true)).toBeNull()
+    expect(await setAttentionCount(1, 1)).toBe(false)
   })
 
   it("drives native overlay windows through Tauri only", async () => {

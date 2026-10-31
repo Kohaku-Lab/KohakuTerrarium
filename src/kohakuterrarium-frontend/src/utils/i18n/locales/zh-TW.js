@@ -343,6 +343,9 @@ export default {
   "settings.desktop.terminalFailed": "無法變更終端機指令。",
   "settings.desktop.autostartTitle": "登入時啟動",
   "settings.desktop.autostartHint": "登入系統時自動開啟 KohakuTerrarium。",
+  "settings.desktop.trayTitle": "在系統匣中持續執行",
+  "settings.desktop.trayHint":
+    "關閉視窗時只會隱藏而不結束，代理會繼續工作。系統匣圖示會顯示等待你處理的項目；請從系統匣選單結束。",
   "settings.desktop.updateTitle": "應用程式更新",
   "settings.desktop.updateHint": "檢查是否有較新的桌面外殼。Python 執行環境另行更新。",
   "settings.desktop.updateCheck": "檢查更新",

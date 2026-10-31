@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showTerminal || showAutostart || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
+  <div v-if="showTerminal || showAutostart || showTray || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
     <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
 
     <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
@@ -21,6 +21,14 @@
       <el-switch :model-value="autostart" @change="setLogin" />
     </div>
 
+    <div v-if="showTray" class="flex items-start justify-between gap-4" data-setting="close-to-tray">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.trayTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.trayHint") }}</div>
+      </div>
+      <el-switch :model-value="closeToTray" @change="setTray" />
+    </div>
+
     <div v-if="showUpdate" class="flex items-start justify-between gap-4" data-setting="shell-update">
       <div>
         <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.updateTitle") }}</div>
@@ -39,7 +47,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import { appShimsAPI } from "@/utils/appShimsApi"
-import { checkShellUpdate, getAutostart, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart } from "@/utils/hostBridge"
+import { checkShellUpdate, getAutostart, getCloseToTray, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart, setCloseToTray } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -55,6 +63,8 @@ const hostReady = ref(hasDesktopHost())
 const terminalEnabled = computed(() => shims.value.commands.length > 0 && shims.value.installed.length === shims.value.commands.length)
 const showTerminal = computed(() => available.value && shims.value.supported && shims.value.local)
 const showAutostart = computed(() => hostReady.value && hostSupports("get_autostart"))
+const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tray"))
+const closeToTray = ref(false)
 const showUpdate = computed(() => hostReady.value && hostSupports("check_shell_update"))
 const updateStatus = ref("idle")
 const updateVersion = ref("")
@@ -97,6 +107,13 @@ async function loadAutostart() {
   hostReady.value = hasDesktopHost()
   const current = await getAutostart()
   if (current !== null) autostart.value = current
+  const tray = await getCloseToTray()
+  if (tray !== null) closeToTray.value = tray
+}
+
+async function setTray(enabled) {
+  const applied = await setCloseToTray(enabled)
+  if (applied !== null) closeToTray.value = applied
 }
 
 async function setTerminal(enabled) {

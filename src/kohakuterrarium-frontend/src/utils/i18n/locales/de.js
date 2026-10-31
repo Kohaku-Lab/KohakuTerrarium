@@ -343,6 +343,9 @@ export default {
   "settings.desktop.terminalFailed": "Der Terminalbefehl konnte nicht geändert werden.",
   "settings.desktop.autostartTitle": "Beim Anmelden starten",
   "settings.desktop.autostartHint": "KohakuTerrarium beim Anmelden automatisch öffnen.",
+  "settings.desktop.trayTitle": "Im Infobereich weiterlaufen",
+  "settings.desktop.trayHint":
+    "Beim Schließen wird das Fenster nur ausgeblendet, damit die Agenten weiterarbeiten. Das Symbol zeigt, was auf dich wartet; beende die App über sein Menü.",
   "settings.desktop.updateTitle": "App-Updates",
   "settings.desktop.updateHint":
     "Sucht nach einer neueren Desktop-Shell. Die Python-Laufzeit wird separat aktualisiert.",

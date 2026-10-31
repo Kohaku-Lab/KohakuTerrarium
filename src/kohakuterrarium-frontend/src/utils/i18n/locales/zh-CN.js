@@ -417,6 +417,9 @@ export default {
   "settings.desktop.terminalFailed": "无法更改终端命令。",
   "settings.desktop.autostartTitle": "登录时启动",
   "settings.desktop.autostartHint": "登录系统时自动打开 KohakuTerrarium。",
+  "settings.desktop.trayTitle": "在托盘中继续运行",
+  "settings.desktop.trayHint":
+    "关闭窗口时只隐藏而不退出，智能体会继续工作。托盘图标会显示等待你处理的内容；请从托盘菜单退出。",
   "settings.desktop.updateTitle": "应用更新",
   "settings.desktop.updateHint": "检查是否有更新的桌面外壳。Python 运行时单独更新。",
   "settings.desktop.updateCheck": "检查更新",
