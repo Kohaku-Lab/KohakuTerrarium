@@ -21,6 +21,7 @@ const COMMANDS: &[&str] = &[
     "set_attention_count",
     "get_summon_shortcut",
     "set_summon_shortcut",
+    "take_pending_opens",
 ];
 
 fn main() {

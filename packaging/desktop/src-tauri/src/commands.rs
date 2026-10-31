@@ -51,6 +51,7 @@ pub fn capabilities() -> Value {
         "trayBadge": true,
         "fileDrop": true,
         "summonShortcut": true,
+        "openFiles": true,
     })
 }
 

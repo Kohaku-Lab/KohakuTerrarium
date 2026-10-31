@@ -29,6 +29,15 @@
       "../stage/bootstrap": "bootstrap",
       "../stage/bundled-release": "bundled-release"
     },
+    "fileAssociations": [
+      {
+        "ext": ["kohakutr"],
+        "name": "KohakuTerrarium session",
+        "description": "KohakuTerrarium session file",
+        "mimeType": "application/vnd.kohakuterrarium.session",
+        "role": "Viewer"
+      }
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser"

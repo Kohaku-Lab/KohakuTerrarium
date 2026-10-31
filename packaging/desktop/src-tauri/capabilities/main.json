@@ -25,6 +25,7 @@
     "allow-set-close-to-tray",
     "allow-set-attention-count",
     "allow-get-summon-shortcut",
-    "allow-set-summon-shortcut"
+    "allow-set-summon-shortcut",
+    "allow-take-pending-opens"
   ]
 }

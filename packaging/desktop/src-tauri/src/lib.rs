@@ -4,6 +4,7 @@ mod backend;
 mod commands;
 mod files;
 mod navigation;
+mod opens;
 mod overlay;
 mod settings;
 mod smoke;
@@ -35,8 +36,11 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
     if !headless {
         builder = builder
-            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
                 window::focus(app);
+                let directory = std::path::PathBuf::from(cwd);
+                let targets = opens::from_arguments(args.get(1..).unwrap_or_default(), &directory);
+                opens::deliver(app, targets);
             }))
             .plugin(tauri_plugin_window_state::Builder::default().build());
     }
@@ -63,6 +67,7 @@ pub fn run() {
         .manage(Backend::default())
         .manage(DeepLinks::default())
         .manage(overlay::HitRegions::default())
+        .manage(opens::PendingOpens::default())
         .manage(ShellSettings::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_capabilities,
@@ -87,6 +92,7 @@ pub fn run() {
             tray::set_attention_count,
             summon::get_summon_shortcut,
             summon::set_summon_shortcut,
+            opens::take_pending_opens,
         ])
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -113,6 +119,10 @@ pub fn run() {
         })
         .setup(move |app| {
             window::create(app)?;
+            if !headless {
+                app.state::<opens::PendingOpens>()
+                    .extend(opens::from_launch());
+            }
             if let Ok(directory) = app.path().app_config_dir() {
                 app.state::<ShellSettings>().load(directory);
             }
@@ -134,9 +144,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("failed to build the KohakuTerrarium desktop app");
 
-    app.run(|app, event| {
-        if let RunEvent::Exit = event {
-            app.state::<Backend>().stop();
-        }
+    app.run(|app, event| match event {
+        RunEvent::Exit => app.state::<Backend>().stop(),
+        #[cfg(target_os = "macos")]
+        RunEvent::Opened { urls } => opens::deliver(app, opens::from_file_urls(&urls)),
+        _ => {}
     });
 }

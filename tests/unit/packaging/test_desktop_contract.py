@@ -16,7 +16,7 @@ from kohakuterrarium.utils.interpreter import PYTHON_ENV
 ROOT = Path(__file__).resolve().parents[3]
 TAURI = ROOT / "packaging" / "desktop" / "src-tauri"
 SRC = ROOT / "src" / "kohakuterrarium"
-COMMAND_MODULES = ("commands.rs", "overlay.rs", "tray.rs", "summon.rs")
+COMMAND_MODULES = ("commands.rs", "overlay.rs", "tray.rs", "summon.rs", "opens.rs")
 
 
 def _text(path: Path) -> str:
@@ -88,7 +88,7 @@ def test_every_command_is_declared_allowed_and_registered():
     manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
     registered = set(
         re.findall(
-            r"(?:commands|overlay|tray|summon)::([a-z_]+),",
+            r"(?:commands|overlay|tray|summon|opens)::([a-z_]+),",
             _text(TAURI / "src" / "lib.rs"),
         )
     )
@@ -123,6 +123,34 @@ def test_tray_capabilities_the_page_checks_are_declared_by_the_shell():
     )
     for flag in re.findall(r"hostCapabilities\?\.([A-Za-z]+) !== true", effects):
         assert f'"{flag}": true' in commands_rs, flag
+
+
+def test_session_file_association_and_open_event_match_the_app():
+    conf = json.loads(_text(TAURI / "tauri.conf.json"))
+    extensions = {
+        ext for item in conf["bundle"]["fileAssociations"] for ext in item["ext"]
+    }
+    assert extensions == {"kohakutr"}
+    opens_rs = _text(TAURI / "src" / "opens.rs")
+    assert _rust_const(opens_rs, "SESSION_EXTENSION") in extensions
+    event = _rust_const(opens_rs, "OPEN_EVENT")
+    composable = _text(
+        ROOT
+        / "src"
+        / "kohakuterrarium-frontend"
+        / "src"
+        / "composables"
+        / "useDesktopOpen.js"
+    )
+    assert f'OPEN_EVENT = "{event}"' in composable
+    for kind in ("session", "workspace"):
+        assert f'"{kind}"' in opens_rs
+        assert f'"{kind}"' in composable
+    route = _text(SRC / "api" / "routes" / "app_open.py")
+    assert '"/open-session"' in route
+    assert "/app/open-session" in _text(
+        ROOT / "src" / "kohakuterrarium-frontend" / "src" / "utils" / "appOpenApi.js"
+    )
 
 
 def test_file_drop_event_name_matches_the_frontend():
