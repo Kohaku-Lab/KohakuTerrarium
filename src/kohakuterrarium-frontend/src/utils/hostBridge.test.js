@@ -9,6 +9,8 @@ import {
   popoutWindowsSupported,
   closeOverlayWindow,
   getCloseToTray,
+  getShellSettings,
+  patchShellSettings,
   getSummonShortcut,
   openOverlayWindow,
   setSummonShortcut,
@@ -262,6 +264,35 @@ describe("hostBridge", () => {
     expect(await openOverlayWindow(spec)).toBe(false)
     delete window.__TAURI_INTERNALS__
     expect(await openOverlayWindow(spec)).toBe(false)
+  })
+
+  it("reads and patches shell settings through Tauri only", async () => {
+    expect(await getShellSettings()).toBeNull()
+    expect(await patchShellSettings({ keepAwake: "never" })).toBeNull()
+    window.pywebview = { api: { get_shell_settings: async () => ({ keepAwake: "never" }) } }
+    expect(await getShellSettings()).toBeNull()
+    delete window.pywebview
+
+    const invoke = vi.fn(async (name, payload) => {
+      if (name === "get_shell_settings") return { keepAwake: "running" }
+      return payload.args[0].keepAwake === "bad"
+        ? { ok: false, error: "invalid keepAwake" }
+        : { ok: true, settings: { keepAwake: payload.args[0].keepAwake } }
+    })
+    window.__TAURI_INTERNALS__ = { invoke }
+    expect(await getShellSettings()).toEqual({ keepAwake: "running" })
+    expect(await patchShellSettings({ keepAwake: "never" })).toEqual({ keepAwake: "never" })
+    expect(invoke).toHaveBeenLastCalledWith("patch_shell_settings", {
+      args: [{ keepAwake: "never" }],
+    })
+    expect(await patchShellSettings({ keepAwake: "bad" })).toBeNull()
+    window.__TAURI_INTERNALS__ = {
+      invoke: async () => {
+        throw new Error("denied")
+      },
+    }
+    expect(await getShellSettings()).toBeNull()
+    expect(await patchShellSettings({ keepAwake: "never" })).toBeNull()
   })
 
   it("onHostReady fires immediately when hosted and again on pywebviewready", () => {

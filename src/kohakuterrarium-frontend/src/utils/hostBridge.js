@@ -165,6 +165,27 @@ export function setTrayItems(items) {
   )
 }
 
+/** Every shell setting with its current value, or ``null`` when the shell keeps none. */
+export async function getShellSettings() {
+  if (hostKind() !== KIND_TAURI || !hostSupports("get_shell_settings")) return null
+  try {
+    return (await call("get_shell_settings")) || null
+  } catch {
+    return null
+  }
+}
+
+/** Apply a `{ key: value }` patch all-or-nothing. Resolves the full settings, or ``null`` when the shell refuses it. */
+export async function patchShellSettings(patch) {
+  if (hostKind() !== KIND_TAURI || !hostSupports("patch_shell_settings")) return null
+  try {
+    const result = await call("patch_shell_settings", patch)
+    return result?.ok === true ? result.settings : null
+  } catch {
+    return null
+  }
+}
+
 /** Whether a newer shell build is published: `{ available, version? }`, or ``null`` if the shell cannot check. */
 export async function checkShellUpdate() {
   if (!hostSupports("check_shell_update")) return null

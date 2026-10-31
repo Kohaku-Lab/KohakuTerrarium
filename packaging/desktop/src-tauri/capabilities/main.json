@@ -28,6 +28,8 @@
     "allow-get-summon-shortcut",
     "allow-set-summon-shortcut",
     "allow-take-pending-opens",
-    "allow-open-popout-window"
+    "allow-open-popout-window",
+    "allow-get-shell-settings",
+    "allow-patch-shell-settings"
   ]
 }

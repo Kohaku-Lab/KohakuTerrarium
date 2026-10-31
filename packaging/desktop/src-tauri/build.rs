@@ -25,6 +25,8 @@ const COMMANDS: &[&str] = &[
     "take_pending_opens",
     "open_popout_window",
     "popout_ack",
+    "get_shell_settings",
+    "patch_shell_settings",
 ];
 
 fn main() {

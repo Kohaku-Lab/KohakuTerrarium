@@ -16,14 +16,6 @@ from kohakuterrarium.utils.interpreter import PYTHON_ENV
 ROOT = Path(__file__).resolve().parents[3]
 TAURI = ROOT / "packaging" / "desktop" / "src-tauri"
 SRC = ROOT / "src" / "kohakuterrarium"
-COMMAND_MODULES = (
-    "commands.rs",
-    "overlay.rs",
-    "tray.rs",
-    "summon.rs",
-    "opens.rs",
-    "popout.rs",
-)
 CAPABILITY_FILES = ("main.json", "overlay.json", "popout.json")
 
 
@@ -86,19 +78,17 @@ def _allowed(capability_file: str) -> set[str]:
 
 def test_every_command_is_declared_allowed_and_registered():
     declared = set()
-    for module in COMMAND_MODULES:
+    for module in (TAURI / "src").rglob("*.rs"):
         declared |= set(
             re.findall(
                 r"#\[tauri::command\]\s*pub (?:async )?fn ([a-z_]+)\(",
-                _text(TAURI / "src" / module),
+                _text(module),
             )
         )
     manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
+    handler = _text(TAURI / "src" / "lib.rs").split("generate_handler![")[1]
     registered = set(
-        re.findall(
-            r"(?:commands|overlay|tray|summon|opens|popout)::([a-z_]+),",
-            _text(TAURI / "src" / "lib.rs"),
-        )
+        re.findall(r"[a-z_]+::([a-z_]+),", handler.split("])", 1)[0]),
     )
     assert declared == manifest == registered
     allowed = set()
@@ -280,8 +270,6 @@ def test_commands_the_frontend_calls_exist_in_the_shell():
     )
     called = set(re.findall(r'(?:hostSupports|call)\("([a-z_]+)"', bridge))
     shell = set()
-    for module in COMMAND_MODULES:
-        shell |= set(
-            re.findall(r"pub (?:async )?fn ([a-z_]+)\(", _text(TAURI / "src" / module))
-        )
+    for module in (TAURI / "src").rglob("*.rs"):
+        shell |= set(re.findall(r"pub (?:async )?fn ([a-z_]+)\(", _text(module)))
     assert called and called <= shell

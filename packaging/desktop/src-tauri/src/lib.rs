@@ -98,6 +98,8 @@ pub fn run() {
             opens::take_pending_opens,
             popout::open_popout_window,
             popout::popout_ack,
+            settings::get_shell_settings,
+            settings::patch_shell_settings,
         ])
         .on_menu_event(|app, event| menu::on_event(app, &event))
         .on_window_event(|window, event| {
