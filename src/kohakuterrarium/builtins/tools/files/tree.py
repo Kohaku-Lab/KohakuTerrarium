@@ -197,6 +197,10 @@ class TreeTool(BaseTool):
                     "type": "integer",
                     "description": "Max output lines (default 100, 0 = unlimited)",
                 },
+                "hidden": {
+                    "type": "boolean",
+                    "description": "Include dot-prefixed entries (default false)",
+                },
                 "gitignore": {
                     "type": "boolean",
                     "description": "Follow .gitignore rules (default true)",

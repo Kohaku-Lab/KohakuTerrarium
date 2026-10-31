@@ -93,6 +93,41 @@ async def test_embedding_instructions_schema_and_execution_agree(tmp_path, regis
             result = await rpc("tools/call", {"name": "read", "arguments": args})
             assert not result["isError"]
             assert "bound directory" in result["structuredContent"]["output"]
+            for name, options in (
+                ("glob", {"pattern": "*.txt", "limit": 1}),
+                (
+                    "grep",
+                    {"pattern": "BOUND", "limit": 1, "ignore_case": True},
+                ),
+            ):
+                if registered:
+                    options["workspace_id"] = "project"
+                result = await rpc("tools/call", {"name": name, "arguments": options})
+                assert not result["isError"], result
+                assert "note.txt" in result["structuredContent"]["output"]
+                invalid_limit = {**options, "limit": "invalid"}
+                result = await rpc(
+                    "tools/call", {"name": name, "arguments": invalid_limit}
+                )
+                assert result["isError"]
+            (workspace / ".hidden.txt").write_text("hidden entry", encoding="utf-8")
+            tree_args = {"path": ".", "hidden": False}
+            if registered:
+                tree_args["workspace_id"] = "project"
+            result = await rpc("tools/call", {"name": "tree", "arguments": tree_args})
+            assert not result["isError"]
+            assert ".hidden.txt" not in result["structuredContent"]["output"]
+            result = await rpc(
+                "tools/call",
+                {"name": "tree", "arguments": {**tree_args, "hidden": True}},
+            )
+            assert not result["isError"], result
+            assert ".hidden.txt" in result["structuredContent"]["output"]
+            result = await rpc(
+                "tools/call",
+                {"name": "tree", "arguments": {**tree_args, "_body": "."}},
+            )
+            assert result["isError"]
             invalid = {"path": "note.txt"}
             if not registered:
                 invalid["workspace_id"] = "project"

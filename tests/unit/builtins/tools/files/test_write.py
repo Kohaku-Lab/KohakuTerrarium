@@ -28,6 +28,31 @@ def _context(tmp_path: Path, existing: Path | None = None) -> ToolContext:
 
 
 class TestWriteToolAtomicReplace:
+    @pytest.mark.parametrize(
+        "content", ["中文🙂", "中文🙂\nnext\n", "中文🙂\r\nnext\r\n", ""]
+    )
+    @pytest.mark.parametrize("existing", [False, True])
+    async def test_default_text_write_reports_disk_size_and_utf8_preview(
+        self, tmp_path, content, existing
+    ):
+        path = tmp_path / "target.txt"
+        reference = tmp_path / "reference.txt"
+        reference.write_text(content, encoding="utf-8")
+        if existing:
+            path.write_bytes(b"original")
+        result = await WriteTool().execute(
+            {"path": str(path), "content": content},
+            context=_context(tmp_path, path if existing else None),
+        )
+        expected = reference.read_bytes()
+        assert result.error is None
+        assert f", {len(expected)} bytes)" in result.output
+        assert result.metadata["canvas_preview"]["bytes"] == len(
+            content.encode("utf-8")
+        )
+        assert result.metadata["canvas_preview"]["content"] == content
+        assert path.read_bytes() == expected
+
     async def test_success_replaces_content_and_removes_temp_file(self, tmp_path):
         path = tmp_path / "target.txt"
         reference = tmp_path / "reference.txt"

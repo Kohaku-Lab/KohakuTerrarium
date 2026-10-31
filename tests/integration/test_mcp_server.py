@@ -799,6 +799,106 @@ class TestMCPServer:
                             )
                         )[0].isError
                         assert (tmp_path / "note.txt").read_text() == "after"
+                        for index in range(2):
+                            text = f"中文🙂{index}\nsecond\n"
+                            path = f"contract-{index}.txt"
+                            created, written = await call(
+                                "write", {"path": path, "content": text}
+                            )
+                            assert not created.isError
+                            assert (tmp_path / path).read_text(encoding="utf-8") == text
+                            assert (
+                                f", {(tmp_path / path).stat().st_size} bytes)"
+                                in written["output"]
+                            )
+                            assert written["metadata"]["canvas_preview"][
+                                "bytes"
+                            ] == len(text.encode("utf-8"))
+                            assert not (await call("read", {"path": path}))[0].isError
+                            edited, _ = await call(
+                                "edit",
+                                {
+                                    "path": path,
+                                    "old": "second",
+                                    "new": "third",
+                                },
+                            )
+                            assert not edited.isError
+                            assert (tmp_path / path).read_text(
+                                encoding="utf-8"
+                            ) == text.replace("second", "third")
+                            expected = (tmp_path / path).read_bytes()
+                            rolled_back, _ = await call(
+                                "multi_edit",
+                                {
+                                    "path": path,
+                                    "edits": [
+                                        {"old": "third", "new": "fourth"},
+                                        {"old": "missing", "new": "bad"},
+                                    ],
+                                },
+                            )
+                            assert rolled_back.isError
+                            assert (tmp_path / path).read_bytes() == expected
+                            edited, _ = await call(
+                                "multi_edit",
+                                {
+                                    "path": path,
+                                    "edits": [
+                                        {"old": "third", "new": "fourth"},
+                                        {"old": "fourth", "new": "FIFTH"},
+                                    ],
+                                },
+                            )
+                            assert not edited.isError
+                            assert (tmp_path / path).read_text(
+                                encoding="utf-8"
+                            ) == text.replace("second", "FIFTH")
+                        found, paths = await call(
+                            "glob", {"pattern": "contract-*.txt", "limit": 1}
+                        )
+                        assert not found.isError
+                        assert (
+                            len(
+                                [
+                                    line
+                                    for line in paths["output"].splitlines()
+                                    if line.startswith("contract-")
+                                ]
+                            )
+                            == 1
+                        )
+                        found, matches = await call(
+                            "grep",
+                            {
+                                "pattern": "fifth",
+                                "glob": "contract-*.txt",
+                                "limit": 1,
+                                "ignore_case": True,
+                            },
+                        )
+                        assert not found.isError
+                        assert (
+                            len(
+                                [
+                                    line
+                                    for line in matches["output"].splitlines()
+                                    if ":2: FIFTH" in line
+                                ]
+                            )
+                            == 1
+                        )
+                        (tmp_path / ".contract-hidden.txt").write_text(
+                            "hidden", encoding="utf-8"
+                        )
+                        for include_hidden in (False, True):
+                            found, listing = await call(
+                                "tree", {"hidden": include_hidden}
+                            )
+                            assert not found.isError
+                            assert (
+                                ".contract-hidden.txt" in listing["output"]
+                            ) == include_hidden
                         shell, shell_data = await call(
                             "bash", {"command": "echo MCP-SHELL"}
                         )
