@@ -210,6 +210,56 @@ class TestParse:
         assert by_id["git"]["order"] == 5
         assert by_id["t"]["status"] == {}
 
+    def test_message_renderer_declares_its_fence_id(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {
+                        "kind": "message-renderer",
+                        "id": "poll",
+                        "renderer": "pkg.poll",
+                    },
+                    {
+                        "kind": "message-renderer",
+                        "id": "tool-poll",
+                        "renderer": "pkg.tool-poll",
+                        "owner": "plugin:qq_feed",
+                    },
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c for c in slot.to_dict()["contributes"]}
+        assert by_id["poll"]["renderer"] == "pkg.poll"
+        assert by_id["poll"]["owner"] == "package:pkg"
+        assert by_id["tool-poll"]["owner"] == "plugin:qq_feed"
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            ({"kind": "message-renderer", "id": "p"}, "renderer must be a dotted id"),
+            (
+                {"kind": "message-renderer", "id": "p", "renderer": "json"},
+                "dotted id",
+            ),
+            (
+                {"kind": "message-renderer", "id": "p", "renderer": "kt.poll"},
+                "reserved prefix",
+            ),
+            (
+                {"kind": "message-renderer", "id": "p", "renderer": "mcp.poll"},
+                "reserved prefix",
+            ),
+        ],
+    )
+    def test_bad_message_renderer_invalidates_the_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
     def test_action_targets_and_roles(self, tmp_path):
         slot = _slot(
             tmp_path,

@@ -32,11 +32,13 @@ MOUNT_OWNER_KINDS: dict[str, tuple[str, ...]] = {
     "tool-renderer": ("tool",),
     "trigger-renderer": ("trigger",),
     "widget": ("package", "plugin", "tool", "trigger"),
+    "message-renderer": ("package", "plugin", "tool", "trigger"),
     "overlay": ("package",),
     "command": ("package",),
     "status-item": ("package",),
     "action": ("package",),
 }
+RENDERER_KINDS: tuple[str, ...] = ("widget", "message-renderer")
 ACTION_TARGETS: tuple[str, ...] = (
     "message",
     "composer",
@@ -417,10 +419,12 @@ def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
 
 
 def _parse_renderer(raw: object, kind: str, where: str) -> str:
-    """The widget renderer id a ``widget`` contribution provides; empty otherwise."""
-    if kind != "widget":
+    """The renderer id a widget or message-renderer provides; empty otherwise."""
+    if kind not in RENDERER_KINDS:
         if raw is not None:
-            raise _SlotError(f"{where}.renderer is only valid on a widget")
+            raise _SlotError(
+                f"{where}.renderer is only valid on a widget or message-renderer"
+            )
         return ""
     if not isinstance(raw, str) or not _RENDERER_RE.match(raw):
         raise _SlotError(

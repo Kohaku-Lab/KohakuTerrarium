@@ -30,6 +30,7 @@ This guide covers:
 | `command` | a command palette entry with an optional key combination | `package` | host-wide |
 | `overlay` | a floating window above the whole app, on every page and in the browser as well as the desktop app | `package` | host-wide |
 | `status-item` | a segment in the status bar at the bottom of a session | `package` | host-wide |
+| `message-renderer` | replaces a closed code fence named after its `renderer` id inside an assistant reply | any | wherever replies are drawn |
 | `action` | a button or menu entry on a message, the composer, a tab, a rail item, a file or a graph node or edge | `package` | host-wide |
 
 A `panel` is shown only while the **focused creature has that plugin
@@ -65,7 +66,7 @@ ui:
   handler: my_pkg.ui:PackageUI  # optional package owner class
   api: my_pkg.api:router        # optional raw-route fallback (APIRouter / FastAPI)
   contributes:
-    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action
+    - kind: settings            # settings | tab | rail | panel | tool-renderer | trigger-renderer | widget | overlay | command | status-item | action | message-renderer
       id: login                 # [a-z0-9][a-z0-9._-]*, unique in the package
       label: "QQ Bot"
       owner: package            # default for settings / tab / rail
@@ -136,13 +137,14 @@ export default defineExtension((kt) => {
 | `kt.openTab(id)` | open one of the package's tabs |
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
+| `kt.registerMessageRenderer(id, component, options?)` | provide the component of a [message renderer](#message-renderers); an undeclared one needs `options.renderer` |
 | `kt.registerAction(id, handler, options?)` | provide the handler of an [action](#actions); an undeclared action needs `options.targets` |
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
-`useOwner`, `useOverlay`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
+`useOwner`, `useOverlay`, `useMessageBlock`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
 `hostInfo`, `useHost`, `useSession`, `useCreature`,
 `useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
@@ -304,6 +306,53 @@ kt.registerAction("translate", async (ctx) => {
 The composer context only fills the draft the user is typing; nothing is sent
 until the user sends it. Content that must reach the agent or the stored
 session goes through a backend plugin hook instead.
+
+### Message renderers
+
+A `message-renderer` draws a code fence in an assistant reply as a component.
+It is the display half of a new answer format: a backend plugin teaches the
+model the format, the model writes it as ordinary text, and the renderer draws
+it. The stored reply keeps the fence as written, so the CLI and the session
+store show the raw text.
+
+```yaml
+- kind: message-renderer
+  id: poll
+  renderer: demo.poll   # dotted id; the fence info string is exactly this
+```
+
+````
+```demo.poll
+{"question": "Which database?", "options": ["SQLite", "Postgres"]}
+```
+````
+
+```js
+import { defineExtension, useMessageBlock } from "@kohakuterrarium/ui-sdk"
+
+kt.registerMessageRenderer("poll", {
+  setup() {
+    const block = useMessageBlock() // { id, source: Ref<string>, say(text) }
+    return { block }
+  },
+  template: `<button @click="block.say('SQLite')">{{ block.source.value }}</button>`,
+})
+```
+
+Rules the host applies:
+
+- **Closed fences only.** A fence still streaming stays raw text until its closing
+  line arrives, so the component never sees half a payload.
+- **Fallback.** If the renderer is not registered the fence shows as an ordinary
+  code block. A component that cannot parse its `source` should draw the raw text.
+- **Untrusted payload.** `source` is text the model wrote. Parse it as data; never
+  insert it as HTML. Anything that needs the backend goes through `useOwner()`.
+- **Replies back.** `say(text)` sends `text` as a normal user message, so the agent
+  and the stored session see it. A text beginning with `/` is refused.
+- **Pairing.** The renderer id is announced in `client_hello`. A plugin lists it in
+  `prompt_renderers` and returns its prompt part from `presentation_contribution`
+  only while the id is attached, so the model is told about the format only when it
+  can be drawn. `examples/ui-extensions/poll-block` is a complete package.
 
 ### Host services
 

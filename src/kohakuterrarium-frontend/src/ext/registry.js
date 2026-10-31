@@ -14,6 +14,11 @@ import { clearActions, registerAction } from "@/ext/actions"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
+import {
+  clearMessageRenderers,
+  messageRenderers,
+  registerMessageRenderer,
+} from "@/ext/messageRenderers"
 import { clearStatusItems, registerStatusItem } from "@/ext/statusItems"
 import {
   registerWidgetRenderer,
@@ -51,6 +56,7 @@ export const MOUNT_OWNER_KINDS = {
   command: "package",
   "status-item": "package",
   action: "package",
+  "message-renderer": "any",
 }
 
 function actionOptions(source) {
@@ -193,6 +199,10 @@ export function registerContribution(pkg, contribution) {
         options: statusOptions(contribution.status),
       })
       break
+    case "message-renderer":
+      if (!isPackageRendererId(contribution.renderer)) return null
+      if (!registerMessageRenderer(contribution.renderer, host, { key })) return null
+      break
     case "action":
       registerAction({
         key,
@@ -230,6 +240,7 @@ export function unregisterAllContributions() {
   clearOverlays()
   clearStatusItems()
   clearActions()
+  clearMessageRenderers()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -267,9 +278,12 @@ export function provideContributionComponent(pkg, kind, id, component, options =
         `${pkg}: an undeclared ${kind} ${id} needs options.owner "${ownerKind}:<name>"`,
       )
     }
-    if (kind === "widget" && !isPackageRendererId(options.renderer)) {
+    if (
+      (kind === "widget" || kind === "message-renderer") &&
+      !isPackageRendererId(options.renderer)
+    ) {
       throw new Error(
-        `${pkg}: widget ${id} needs options.renderer, a dotted id outside kt./mcp. (got ${options.renderer})`,
+        `${pkg}: ${kind} ${id} needs options.renderer, a dotted id outside kt./mcp. (got ${options.renderer})`,
       )
     }
     const contribution = {
@@ -282,7 +296,7 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       order: options.order ?? 100,
       minDensity: options.minDensity || "compact",
       isolation: "inline",
-      ...(kind === "widget" ? { renderer: options.renderer } : {}),
+      ...(kind === "widget" || kind === "message-renderer" ? { renderer: options.renderer } : {}),
       ...(kind === "overlay" ? { overlay: overlayOptions(options) } : {}),
       ...(kind === "status-item" ? { status: statusOptions(options) } : {}),
       ...(kind === "action" ? { action: actionOptions(options) } : {}),
@@ -295,9 +309,19 @@ export function provideContributionComponent(pkg, kind, id, component, options =
   }
   contributionComponents.set(contributionKey(pkg, id), markRaw(component))
   if (kind === "widget") updateWidgetEntry(contributionKey(pkg, id), options)
+  if (kind === "message-renderer") updateMessageRendererEntry(contributionKey(pkg, id), options)
   if (kind === "overlay") {
     const entry = overlays.get(contributionKey(pkg, id))
     if (entry) entry.options = { ...entry.options, ...overlayOptions(options) }
+  }
+}
+
+/** Apply a package's ``version`` option to its registered message renderer. */
+function updateMessageRendererEntry(key, options) {
+  for (const entry of messageRenderers.values()) {
+    if (entry.key === key && Number.isInteger(options.version) && options.version >= 1) {
+      entry.version = options.version
+    }
   }
 }
 

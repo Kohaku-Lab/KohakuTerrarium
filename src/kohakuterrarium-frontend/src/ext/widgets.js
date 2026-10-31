@@ -11,6 +11,8 @@
 
 import { markRaw, reactive, watch } from "vue"
 
+import { messageRendererVersions } from "@/ext/messageRenderers"
+
 export const LEGACY_RENDERER_IDS = Object.freeze([
   "kt.card",
   "kt.ask_text",
@@ -78,9 +80,9 @@ export function findWidgetRenderer(id) {
   return widgetRenderers.get(id) || null
 }
 
-/** ``{id: version}`` for ``client_hello``: every announced renderer except the legacy kinds. */
+/** ``{id: version}`` for ``client_hello``: every announced widget and message renderer except the legacy kinds. */
 export function helloRenderers() {
-  const out = {}
+  const out = { ...messageRendererVersions() }
   for (const [id, entry] of widgetRenderers)
     if (!LEGACY.has(id) && entry.announce) out[id] = entry.version
   return out

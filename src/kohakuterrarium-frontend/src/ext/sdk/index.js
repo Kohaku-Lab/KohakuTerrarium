@@ -26,6 +26,7 @@ import { windowLabel } from "@/ext/overlayWindows"
 import { openExtensionTab } from "@/ext/registry"
 import {
   EXTENSION_INJECT_KEY,
+  MESSAGE_BLOCK_INJECT_KEY,
   OVERLAY_INJECT_KEY,
   OVERLAY_MODE_INJECT_KEY,
   OWNER_INJECT_KEY,
@@ -132,6 +133,16 @@ export function useOverlay() {
     resize: (width, height) => resizeOverlay(key, width, height),
     startDrag: (event) => beginDrag(key, event, "move"),
   }
+}
+
+/**
+ * The fenced block a message renderer is drawing: ``source`` is a ref to the
+ * text between the fence lines, ``say(text)`` sends ``text`` as a user message.
+ */
+export function useMessageBlock() {
+  const block = inject(MESSAGE_BLOCK_INJECT_KEY, null)
+  if (!block) throw new Error("useMessageBlock() must be called inside a message renderer")
+  return block
 }
 
 /** The backend host this dashboard is talking to. */

@@ -80,6 +80,7 @@ export function createMockHost(options = {}) {
     command: new Map(),
     "status-item": new Map(),
     action: new Map(),
+    "message-renderer": new Map(),
   }
   const overlayVisible = reactive({})
   const storageData = new Map()
@@ -121,6 +122,7 @@ export function createMockHost(options = {}) {
     registerCommand: provide("command"),
     registerStatusItem: provide("status-item"),
     registerAction: provide("action"),
+    registerMessageRenderer: provide("message-renderer"),
     storage: {
       get: (key, fallback = null) => (storageData.has(key) ? storageData.get(key) : fallback),
       set: (key, value) => storageData.set(key, value),
@@ -194,6 +196,8 @@ export function createMockHost(options = {}) {
     owner,
     ownerCalls,
     widget: options.widget || null,
+    block: options.block || null,
+    said: [],
     overlayId: options.overlayId || "overlay",
     overlayVisible,
     /** Push an owner event, as the backend's ``ui_emit`` would. */
@@ -230,6 +234,17 @@ export function useWidget() {
   const widget = current().widget
   if (!widget) throw new Error("useWidget() used outside a widget renderer")
   return widget
+}
+
+/** In tests, the fenced block given as ``createMockHost({ block: { id, source } })``; `say` calls land in `host.said`. */
+export function useMessageBlock() {
+  const host = current()
+  if (!host.block) throw new Error("useMessageBlock() used outside a message renderer")
+  return {
+    id: host.block.id || "test.block",
+    source: ref(host.block.source || ""),
+    say: (text) => host.said.push(text),
+  }
 }
 
 /** In tests, controls the overlay named by ``createMockHost({ overlayId })``. */

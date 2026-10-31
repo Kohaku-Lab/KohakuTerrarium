@@ -4,6 +4,7 @@
   <div v-else class="kt-assistant-text" data-test="assistant-text">
     <template v-for="(segment, i) in segments" :key="`${i}:${segment.kind}`">
       <MarkdownRenderer v-if="segment.kind === 'markdown'" :content="segment.text" :breaks="breaks" :origin="origin" />
+      <ExtensionFenceBlock v-else-if="segment.kind === 'fence'" :id="segment.id" :source="segment.source" @say="(text) => emit('say', text)" />
       <InlineUiBlock v-else :source="segment.source" :closed="segment.closed" :streaming="streaming" :can-open-canvas="canOpenCanvas" :binding="bindingFor(blockIds[i])" :say-blocked="sayBlocked" @say="(text) => emit('say', text)" @open-canvas="(payload) => emit('open-canvas', payload)" />
     </template>
   </div>
@@ -12,6 +13,9 @@
 <script setup>
 import { computed } from "vue"
 
+import ExtensionFenceBlock from "@/ext/ExtensionFenceBlock.vue"
+import { splitFences } from "@/ext/fenceSplit"
+import { renderersIn } from "@/ext/messageRenderers"
 import { blockIdsFor } from "../widgets/ktui/blockId.js"
 import InlineUiBlock from "../widgets/ktui/InlineUiBlock.vue"
 import { mayHaveMarkup, splitMarkup } from "../widgets/ktui/markup.js"
@@ -32,10 +36,13 @@ const props = defineProps({
 
 const emit = defineEmits(["say", "open-canvas"])
 
-// Null keeps the plain single-renderer path for text without any <ui> block.
+// Null keeps the plain single-renderer path for text without any <ui> block or extension fence.
 const segments = computed(() => {
-  if (!mayHaveMarkup(props.content)) return null
-  const parts = splitMarkup(props.content, { holdPartial: props.streaming })
+  const fenceIds = renderersIn(props.content)
+  const hasMarkup = mayHaveMarkup(props.content)
+  if (!hasMarkup && !fenceIds.length) return null
+  let parts = hasMarkup ? splitMarkup(props.content, { holdPartial: props.streaming }) : [{ kind: "markdown", text: props.content }]
+  if (fenceIds.length) parts = parts.flatMap((part) => (part.kind === "markdown" ? splitFences(part.text, fenceIds) : [part]))
   if (parts.length === 1 && parts[0].kind === "markdown" && parts[0].text === props.content) return null
   return parts
 })

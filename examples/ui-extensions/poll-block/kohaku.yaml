@@ -1,0 +1,17 @@
+name: poll-block
+version: 0.1.0
+description: Lets the model ask a multiple-choice question as a clickable poll.
+
+plugins:
+  - name: poll_block
+    module: poll_block.plugin
+    class: PollBlockPlugin
+
+ui:
+  sdk: ">=1,<2"
+  entry: ui/index.js
+  contributes:
+    - kind: message-renderer
+      id: poll
+      label: Poll
+      renderer: demo.poll

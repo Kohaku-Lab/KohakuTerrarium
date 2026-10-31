@@ -46,7 +46,8 @@ const component = computed(() => contributionComponents.get(key.value) || null)
 const renderError = ref("")
 const loadError = ref("")
 const failure = computed(() => renderError.value || loadError.value)
-const inline = computed(() => props.contribution.kind === "tool-renderer" || props.contribution.kind === "trigger-renderer")
+const INLINE_KINDS = ["tool-renderer", "trigger-renderer", "message-renderer"]
+const inline = computed(() => INLINE_KINDS.includes(props.contribution.kind))
 
 const owner = createOwnerClient(props.contribution.owner || `package:${props.pkg}`, useOwnerScope())
 provide(OWNER_INJECT_KEY, owner)
