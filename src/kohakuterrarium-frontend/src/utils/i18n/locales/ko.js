@@ -328,6 +328,10 @@ export default {
   "settings.desktop.terminalFailed": "터미널 명령을 변경할 수 없습니다.",
   "settings.desktop.autostartTitle": "로그인 시 시작",
   "settings.desktop.autostartHint": "로그인할 때 KohakuTerrarium을 자동으로 엽니다.",
+  "settings.desktop.keychainTitle": "API 키를 시스템 키체인에 보관",
+  "settings.desktop.keychainHint":
+    "제공자 키를 키 파일에서 {backend}(으)로 옮깁니다. 끄면 다시 돌아옵니다.",
+  "settings.desktop.keychainFailed": "키를 옮기지 못했습니다. 아무것도 변경되지 않았습니다.",
   "desktop.openFailed": "{path}을(를) 열 수 없습니다: {reason}",
   "settings.desktop.summonTitle": "불러오기 단축키",
   "settings.desktop.summonHint":

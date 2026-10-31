@@ -427,6 +427,10 @@ export default {
   "settings.desktop.terminalFailed": "Could not change the terminal command.",
   "settings.desktop.autostartTitle": "Start at login",
   "settings.desktop.autostartHint": "Open KohakuTerrarium automatically when you sign in.",
+  "settings.desktop.keychainTitle": "Keep API keys in the system keychain",
+  "settings.desktop.keychainHint":
+    "Provider keys move out of the key file into {backend}. Turning this off moves them back.",
+  "settings.desktop.keychainFailed": "The keys could not be moved. Nothing was changed.",
   "desktop.openFailed": "Could not open {path}: {reason}",
   "settings.desktop.summonTitle": "Summon shortcut",
   "settings.desktop.summonHint":

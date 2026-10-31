@@ -343,6 +343,9 @@ export default {
   "settings.desktop.terminalFailed": "無法變更終端機指令。",
   "settings.desktop.autostartTitle": "登入時啟動",
   "settings.desktop.autostartHint": "登入系統時自動開啟 KohakuTerrarium。",
+  "settings.desktop.keychainTitle": "將 API 金鑰保存在系統鑰匙圈中",
+  "settings.desktop.keychainHint": "供應商金鑰會從金鑰檔移到 {backend}；關閉後會移回。",
+  "settings.desktop.keychainFailed": "無法移動金鑰，未做任何變更。",
   "desktop.openFailed": "無法開啟 {path}：{reason}",
   "settings.desktop.summonTitle": "喚出快速鍵",
   "settings.desktop.summonHint":

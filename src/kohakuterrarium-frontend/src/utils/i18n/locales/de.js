@@ -343,6 +343,11 @@ export default {
   "settings.desktop.terminalFailed": "Der Terminalbefehl konnte nicht geändert werden.",
   "settings.desktop.autostartTitle": "Beim Anmelden starten",
   "settings.desktop.autostartHint": "KohakuTerrarium beim Anmelden automatisch öffnen.",
+  "settings.desktop.keychainTitle": "API-Schlüssel im System-Schlüsselbund speichern",
+  "settings.desktop.keychainHint":
+    "Die Schlüssel der Anbieter wandern aus der Schlüsseldatei nach {backend}. Beim Ausschalten kommen sie zurück.",
+  "settings.desktop.keychainFailed":
+    "Die Schlüssel konnten nicht verschoben werden. Es wurde nichts geändert.",
   "desktop.openFailed": "{path} konnte nicht geöffnet werden: {reason}",
   "settings.desktop.summonTitle": "Tastenkürzel zum Herholen",
   "settings.desktop.summonHint":

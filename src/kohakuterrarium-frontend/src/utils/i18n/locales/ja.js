@@ -331,6 +331,10 @@ export default {
   "settings.desktop.terminalFailed": "ターミナルコマンドを変更できませんでした。",
   "settings.desktop.autostartTitle": "ログイン時に起動",
   "settings.desktop.autostartHint": "サインイン時に KohakuTerrarium を自動的に開きます。",
+  "settings.desktop.keychainTitle": "API キーをシステムのキーチェーンに保存",
+  "settings.desktop.keychainHint":
+    "プロバイダーのキーをキーファイルから {backend} に移します。オフにすると元に戻ります。",
+  "settings.desktop.keychainFailed": "キーを移動できませんでした。何も変更されていません。",
   "desktop.openFailed": "{path} を開けませんでした: {reason}",
   "settings.desktop.summonTitle": "呼び出しショートカット",
   "settings.desktop.summonHint":

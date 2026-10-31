@@ -1,11 +1,13 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const { shimsApi } = vi.hoisted(() => ({
+const { shimsApi, secretsApi } = vi.hoisted(() => ({
   shimsApi: { status: vi.fn(), install: vi.fn(), uninstall: vi.fn() },
+  secretsApi: { status: vi.fn(), setMode: vi.fn() },
 }))
 
 vi.mock("@/utils/appShimsApi", () => ({ appShimsAPI: shimsApi }))
+vi.mock("@/utils/appSecretsApi", () => ({ appSecretsAPI: secretsApi }))
 vi.mock("@/utils/i18n", () => ({
   useI18n: () => ({
     t: (key, params = {}) =>
@@ -52,6 +54,8 @@ function mountSettings() {
 
 beforeEach(() => {
   Object.values(shimsApi).forEach((fn) => fn.mockReset())
+  Object.values(secretsApi).forEach((fn) => fn.mockReset())
+  secretsApi.status.mockRejectedValue(new Error("404"))
   delete window.pywebview
 })
 
@@ -140,6 +144,77 @@ describe("DesktopAppSettings", () => {
 
     expect(api.set_autostart).toHaveBeenCalledWith(true)
     expect(wrapper.find("[data-setting='autostart'] .switch").attributes("data-on")).toBe("true")
+  })
+
+  it("offers the system keychain only where one is reachable, and moves the keys both ways", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    secretsApi.status.mockResolvedValue({
+      local: true,
+      mode: "file",
+      active: false,
+      available: true,
+      backend: "WinVaultKeyring",
+    })
+    secretsApi.setMode.mockResolvedValue({
+      local: true,
+      mode: "keychain",
+      available: true,
+      backend: "WinVaultKeyring",
+    })
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    const toggle = () => wrapper.find("[data-setting='keychain'] .switch")
+    expect(toggle().attributes("data-on")).toBe("false")
+    expect(wrapper.text()).toContain("WinVaultKeyring")
+    await toggle().trigger("click")
+    await flushPromises()
+    expect(secretsApi.setMode).toHaveBeenCalledWith("keychain")
+    expect(toggle().attributes("data-on")).toBe("true")
+
+    secretsApi.setMode.mockResolvedValue({
+      local: true,
+      mode: "file",
+      available: true,
+      backend: "WinVaultKeyring",
+    })
+    await toggle().trigger("click")
+    await flushPromises()
+    expect(secretsApi.setMode).toHaveBeenLastCalledWith("file")
+    expect(toggle().attributes("data-on")).toBe("false")
+  })
+
+  it("keeps the switch where it was and says why when the keys cannot be moved", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    secretsApi.status.mockResolvedValue({
+      local: true,
+      mode: "file",
+      available: true,
+      backend: "Vault",
+    })
+    secretsApi.setMode.mockRejectedValue({ response: { data: { detail: "locked keychain" } } })
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    await wrapper.find("[data-setting='keychain'] .switch").trigger("click")
+    await flushPromises()
+
+    expect(wrapper.find("[data-keychain-error]").text()).toBe("locked keychain")
+    expect(wrapper.find("[data-setting='keychain'] .switch").attributes("data-on")).toBe("false")
+  })
+
+  it("hides the keychain option when none is available or the server is another machine", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    for (const reply of [
+      { local: true, mode: "file", available: false, backend: "" },
+      { local: false, mode: "file", available: true, backend: "Vault" },
+    ]) {
+      secretsApi.status.mockResolvedValue(reply)
+      const wrapper = mountSettings()
+      await flushPromises()
+      expect(wrapper.find("[data-setting='keychain']").exists()).toBe(false)
+      wrapper.unmount()
+    }
   })
 
   it("offers keep-running-in-the-tray only when the shell has a tray, and applies its answer", async () => {

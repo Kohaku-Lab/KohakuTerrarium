@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showTerminal || showAutostart || showTray || showSummon || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
+  <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
     <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
 
     <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
@@ -19,6 +19,15 @@
         <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.autostartHint") }}</div>
       </div>
       <el-switch :model-value="autostart" @change="setLogin" />
+    </div>
+
+    <div v-if="showKeychain" class="flex items-start justify-between gap-4" data-setting="keychain">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.keychainTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.keychainHint", { backend: secrets.backend }) }}</div>
+        <div v-if="keychainError" class="text-[11px] text-coral mt-1" data-keychain-error>{{ keychainError }}</div>
+      </div>
+      <el-switch :model-value="secrets.mode === 'keychain'" :loading="keychainBusy" @change="setKeychain" />
     </div>
 
     <div v-if="showTray" class="flex items-start justify-between gap-4" data-setting="close-to-tray">
@@ -59,6 +68,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import { acceleratorFromEvent, displayAccelerator } from "@/utils/accelerator"
+import { appSecretsAPI } from "@/utils/appSecretsApi"
 import { appShimsAPI } from "@/utils/appShimsApi"
 import { checkShellUpdate, getAutostart, getCloseToTray, getSummonShortcut, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
@@ -77,6 +87,10 @@ const terminalEnabled = computed(() => shims.value.commands.length > 0 && shims.
 const showTerminal = computed(() => available.value && shims.value.supported && shims.value.local)
 const showAutostart = computed(() => hostReady.value && hostSupports("get_autostart"))
 const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tray"))
+const secrets = ref({ local: false, mode: "file", available: false, backend: "" })
+const showKeychain = computed(() => secrets.value.local && secrets.value.available)
+const keychainBusy = ref(false)
+const keychainError = ref("")
 const closeToTray = ref(false)
 const showSummon = computed(() => hostReady.value && hostSupports("get_summon_shortcut"))
 const summonShortcut = ref(null)
@@ -108,6 +122,26 @@ async function installUpdate() {
     if (!(await installShellUpdate())) updateStatus.value = "failed"
   } finally {
     updateBusy.value = false
+  }
+}
+
+async function loadSecrets() {
+  try {
+    secrets.value = await appSecretsAPI.status()
+  } catch {
+    secrets.value = { local: false, mode: "file", available: false, backend: "" }
+  }
+}
+
+async function setKeychain(enabled) {
+  keychainBusy.value = true
+  keychainError.value = ""
+  try {
+    secrets.value = await appSecretsAPI.setMode(enabled ? "keychain" : "file")
+  } catch (err) {
+    keychainError.value = err.response?.data?.detail || t("settings.desktop.keychainFailed")
+  } finally {
+    keychainBusy.value = false
   }
 }
 
@@ -194,6 +228,7 @@ let stopHostReady = () => {}
 
 onMounted(() => {
   void loadShims()
+  void loadSecrets()
   stopHostReady = onHostReady(() => void loadAutostart())
 })
 
