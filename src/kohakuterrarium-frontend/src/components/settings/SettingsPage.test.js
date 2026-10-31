@@ -39,9 +39,11 @@ import {
   registerSettingsSection,
   unregisterSettingsSection,
 } from "@/stores/settingsSectionRegistry"
+import { selectSection } from "@/stores/settingsNav"
 import { configAPI, settingsAPI } from "@/utils/api"
 
-function mountSettingsPage() {
+function mountSettingsPage(section = "") {
+  if (section) selectSection(section)
   return shallowMount(SettingsPage, {
     global: {
       plugins: [ElementPlus],
@@ -53,8 +55,8 @@ function mountSettingsPage() {
         ElButton: false,
         ElInput: false,
         ElTag: false,
-        ElTabs: { template: "<div><slot /></div>" },
-        ElTabPane: { template: "<section><slot /></section>" },
+        SettingsLayout: { template: "<div><slot /></div>" },
+        SectionShell: { template: "<section><slot name='aside' /><slot /></section>" },
       },
     },
   })
@@ -63,6 +65,7 @@ function mountSettingsPage() {
 describe("SettingsPage model presets", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    selectSection("providers")
     vi.stubGlobal("localStorage", {
       getItem: vi.fn(() => null),
       setItem: vi.fn(),
@@ -187,92 +190,6 @@ describe("SettingsPage model presets", () => {
     expect(keys.find("input").exists()).toBe(false)
   })
 
-  it("groups attention preferences by channel instead of rendering one flat list", async () => {
-    configAPI.getModels.mockResolvedValue([])
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-
-    expect(wrapper.find('[data-attention-group="in-app"]').exists()).toBe(true)
-    expect(wrapper.find('[data-attention-group="notifications"]').exists()).toBe(true)
-    expect(wrapper.find('[data-attention-group="sound"]').exists()).toBe(true)
-    expect(wrapper.find('[data-attention-group="desktop"]').exists()).toBe(true)
-    expect(wrapper.findAll("[data-attention-setting]")).toHaveLength(11)
-    expect(wrapper.find("[data-in-app-toggle]").exists()).toBe(true)
-  })
-
-  it("uses a permission action instead of the system-notification preference switch", async () => {
-    configAPI.getModels.mockResolvedValue([])
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-
-    const permissionButton = wrapper.find("[data-notification-permission-action]")
-    expect(permissionButton.exists()).toBe(true)
-    expect(wrapper.find('[data-attention-setting="systemNotifications"]').exists()).toBe(false)
-    expect(
-      wrapper.find('[data-attention-setting="notifyWaiting"]').attributes("disabled"),
-    ).toBeDefined()
-
-    await permissionButton.trigger("click")
-    await flushPromises()
-
-    expect(requestNotificationPermission).toHaveBeenCalledOnce()
-    expect(wrapper.vm.attentionPrefs.state.systemNotifications).toBe(true)
-    expect(wrapper.vm.notificationPermission).toBe("granted")
-  })
-
-  it("unlocks audio immediately when attention sound is enabled", async () => {
-    configAPI.getModels.mockResolvedValue([])
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-
-    wrapper.vm.setAttentionPreference("attentionSound", true)
-
-    expect(wrapper.vm.attentionPrefs.state.attentionSound).toBe(true)
-    expect(requestAttentionAudioUnlock).toHaveBeenCalledOnce()
-  })
-
-  it("does not offer browser notification authorization inside the desktop shell", async () => {
-    window.pywebview = { api: {} }
-    vi.stubGlobal("Notification", { permission: "denied" })
-    configAPI.getModels.mockResolvedValue([])
-
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-
-    expect(wrapper.vm.desktopSurface).toBe(true)
-    expect(wrapper.vm.notificationPermission).toBe("desktop")
-    expect(wrapper.find("[data-notification-permission-action]").exists()).toBe(false)
-    expect(
-      wrapper.find('[data-attention-group="notifications"]').attributes("data-desktop-surface"),
-    ).toBe("true")
-  })
-
-  it("updates notification capability when pywebview is injected after mount", async () => {
-    configAPI.getModels.mockResolvedValue([])
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-    expect(wrapper.vm.notificationPermission).toBe("default")
-
-    window.pywebview = { api: {} }
-    window.dispatchEvent(new Event("pywebviewready"))
-    await nextTick()
-
-    expect(wrapper.vm.desktopSurface).toBe(true)
-    expect(wrapper.vm.notificationPermission).toBe("desktop")
-    expect(wrapper.find("[data-notification-permission-action]").exists()).toBe(false)
-  })
-
-  it("keeps the desktop attention card content left aligned", async () => {
-    configAPI.getModels.mockResolvedValue([])
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-
-    const desktop = wrapper.find('[data-attention-group="desktop"]')
-    expect(desktop.classes()).toContain("attention-group")
-    expect(desktop.classes()).not.toContain("attention-setting-row")
-    expect(desktop.find(".attention-setting-row").exists()).toBe(true)
-  })
-
   it("refreshes the selected preset without reporting a successful default change as failed", async () => {
     const preset = { name: "fast", provider: "openai", source: "user", is_default: false }
     const refreshed = { ...preset, is_default: true }
@@ -324,14 +241,15 @@ describe("SettingsPage model presets", () => {
     expect(wrapper.vm.editorPreset).toEqual(refreshed)
   })
 
-  it("renders registered sections in order between the built-in ones", async () => {
+  it("lists registered sections last, in the Extensions group, and renders the open one", async () => {
     const DemoSection = { name: "DemoSection", template: "<p>demo body</p>" }
     registerSettingsSection({ id: "ext:demo/s", label: "Demo", order: 15, component: DemoSection })
     try {
-      const wrapper = mountSettingsPage()
+      const wrapper = mountSettingsPage("ext:demo/s")
       await flushPromises()
       const ids = wrapper.vm.sections.map((s) => s.id)
-      expect(ids.slice(0, 3)).toEqual(["providers", "ext:demo/s", "models"])
+      expect(ids.at(-1)).toBe("ext:demo/s")
+      expect(wrapper.vm.groups.at(-1).id).toBe("extensions")
       expect(ids).not.toContain("sites")
       expect(wrapper.findComponent(DemoSection).exists()).toBe(true)
       unregisterSettingsSection("ext:demo/s")

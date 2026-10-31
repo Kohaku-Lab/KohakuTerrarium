@@ -1,152 +1,107 @@
 <template>
-  <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate || backend.status.value" id="desktop-app-settings" class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3" data-desktop-app-settings>
-    <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.title") }}</div>
+  <SectionShell :title="t('settings.section.desktop')" :hint="t('settings.desc.desktop')" bare>
+    <div v-if="showTerminal || showAutostart || showKeychain || showTray || showSummon || showUpdate || backend.status.value" id="desktop-app-settings" class="flex flex-col gap-6" data-desktop-app-settings>
+      <SettingsGroup v-if="showTray || showRestore || showKeepAwake" :title="t('settings.desktop.sectionWindow')" data-section="window">
+        <SettingsRow v-if="showTray" data-setting="close-to-tray" :title="t('settings.desktop.trayTitle')" :hint="t('settings.desktop.trayHint')" inline>
+          <el-switch :model-value="closeToTray" @change="setTray" />
+        </SettingsRow>
+        <SettingsRow v-if="showRestore" data-setting="restore-windows" :title="t('settings.desktop.restoreTitle')" :hint="t('settings.desktop.restoreHint')" inline>
+          <el-switch :model-value="shell.settings.value?.restorePopouts !== false" @change="(value) => shell.patch({ restorePopouts: value })" />
+        </SettingsRow>
+        <SettingsRow v-if="showKeepAwake" data-setting="keep-awake" :title="t('settings.desktop.keepAwakeTitle')" :hint="t('settings.desktop.keepAwakeHint')">
+          <select class="kt-v2-edge kt-v2-panel h-8 px-2 rounded-lg border text-sm text-warm-700 dark:text-warm-200" data-keep-awake @change="(event) => shell.patch({ keepAwake: event.target.value })">
+            <option value="never" :selected="shell.settings.value?.keepAwake === 'never'">{{ t("settings.desktop.keepAwakeNever") }}</option>
+            <option value="running" :selected="shell.settings.value?.keepAwake === 'running'">{{ t("settings.desktop.keepAwakeRunning") }}</option>
+            <option value="running-on-ac" :selected="shell.settings.value?.keepAwake === 'running-on-ac'">{{ t("settings.desktop.keepAwakeAc") }}</option>
+          </select>
+        </SettingsRow>
+      </SettingsGroup>
 
-    <div v-if="showTray || showRestore" class="desktop-section-title" data-section="window">{{ t("settings.desktop.sectionWindow") }}</div>
+      <SettingsGroup v-if="showAutostart" :title="t('settings.desktop.sectionStartup')" data-section="startup">
+        <SettingsRow data-setting="autostart" :title="t('settings.desktop.autostartTitle')" :hint="t('settings.desktop.autostartHint')" inline>
+          <el-switch :model-value="autostart" @change="setLogin" />
+        </SettingsRow>
+        <SettingsRow v-if="showRestore" data-setting="start-hidden" :title="t('settings.desktop.startHiddenTitle')" :hint="t('settings.desktop.startHiddenHint')" inline>
+          <el-switch :model-value="shell.settings.value?.startHidden === true" :disabled="!autostart" @change="(value) => shell.patch({ startHidden: value })" />
+        </SettingsRow>
+      </SettingsGroup>
 
-    <div v-if="showTray" class="flex items-start justify-between gap-4" data-setting="close-to-tray">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.trayTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.trayHint") }}</div>
-      </div>
-      <el-switch :model-value="closeToTray" @change="setTray" />
+      <SettingsGroup v-if="showSummon" :title="t('settings.desktop.sectionShortcuts')" data-section="shortcuts">
+        <SettingsRow data-setting="summon-shortcut" :title="t('settings.desktop.summonTitle')" :hint="t('settings.desktop.summonHint')">
+          <template #detail>
+            <div v-if="summonError" class="mt-1 text-[12px] text-coral" data-summon-error>{{ t("settings.desktop.summonUnavailable") }}</div>
+          </template>
+          <KButton size="sm" data-summon-record @click="recordSummon">{{ summonRecording ? t("settings.desktop.summonRecording") : summonShortcut ? displayAccelerator(summonShortcut) : t("settings.desktop.summonSet") }}</KButton>
+          <KButton v-if="summonShortcut && !summonRecording" size="sm" variant="ghost" data-summon-clear @click="clearSummon">{{ t("settings.desktop.summonClear") }}</KButton>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup v-if="showUpdate" :title="t('settings.desktop.sectionUpdates')" data-section="updates">
+        <SettingsRow data-setting="shell-update" :title="t('settings.desktop.updateTitle')" :hint="t('settings.desktop.updateHint')">
+          <template #detail>
+            <div v-if="updateStatus === 'current'" class="mt-1 text-[12px] text-warm-500" data-update-status>{{ t("settings.desktop.updateCurrent") }}</div>
+            <div v-else-if="updateStatus === 'available'" class="mt-1 text-[12px] text-iolite dark:text-iolite-light" data-update-status>{{ t("settings.desktop.updateAvailable", { version: updateVersion }) }}</div>
+            <div v-else-if="updateStatus === 'failed'" class="mt-1 text-[12px] text-coral" data-update-status>{{ t("settings.desktop.updateFailed") }}</div>
+          </template>
+          <KButton v-if="updateStatus === 'available'" variant="primary" size="sm" data-update-install :disabled="updateBusy" @click="installUpdate">{{ t("settings.desktop.updateInstall") }}</KButton>
+          <KButton v-else size="sm" data-update-check :disabled="updateBusy" @click="checkUpdate">{{ t("settings.desktop.updateCheck") }}</KButton>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup v-if="backend.status.value" :title="t('settings.desktop.sectionBackend')" data-section="backend">
+        <SettingsRow data-setting="backend" :title="t('settings.desktop.backendTitle')">
+          <template #detail>
+            <div class="mt-0.5 text-[12px] text-warm-500" data-backend-summary>{{ backendSummary }}</div>
+          </template>
+          <KButton size="sm" data-backend-logs @click="openLogs">{{ t("settings.desktop.backendLogs") }}</KButton>
+          <KButton size="sm" data-backend-restart :disabled="backend.status.value.state === 'restarting'" @click="backend.restart">{{ t("settings.desktop.backendRestart") }}</KButton>
+        </SettingsRow>
+        <SettingsRow data-setting="runtime" :title="t('settings.desktop.runtimeTitle')">
+          <template #detail>
+            <div class="mt-0.5 text-[12px] text-warm-500" data-runtime-summary>{{ runtimeSummary }}</div>
+            <div v-if="runtime?.bundled_newer" class="mt-1 text-[12px] text-amber-shadow dark:text-amber-light" data-runtime-newer>{{ t("settings.desktop.runtimeNewer", { version: runtime.bundled }) }}</div>
+          </template>
+          <KButton size="sm" :variant="repairArmed ? 'danger' : 'secondary'" data-runtime-repair @click="repair">{{ repairArmed ? t("settings.desktop.runtimeRepairConfirm") : t("settings.desktop.runtimeRepair") }}</KButton>
+        </SettingsRow>
+        <SettingsRow data-setting="diagnostics" :title="t('settings.desktop.diagnosticsTitle')" :hint="t('settings.desktop.diagnosticsHint')">
+          <template #detail>
+            <div v-if="diagnosticsResult?.ok" class="mt-1 text-[12px] text-aquamarine-shadow dark:text-aquamarine-light" data-diagnostics-result>{{ t("settings.desktop.diagnosticsSaved", { path: diagnosticsResult.path }) }}</div>
+            <div v-else-if="diagnosticsResult" class="mt-1 text-[12px] text-coral" data-diagnostics-result>{{ t("settings.desktop.diagnosticsFailed") }}</div>
+          </template>
+          <KButton size="sm" :disabled="diagnosticsBusy" data-diagnostics-export @click="exportBundle">{{ t("settings.desktop.diagnosticsExport") }}</KButton>
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup v-if="explorerVerbs !== null || showTerminal || showKeychain" :title="t('settings.desktop.sectionIntegration')" data-section="integration">
+        <SettingsRow v-if="explorerVerbs !== null" data-setting="explorer-verbs" :title="t('settings.desktop.explorerTitle')" :hint="t('settings.desktop.explorerHint')" inline>
+          <el-switch :model-value="explorerVerbs" @change="setExplorer" />
+        </SettingsRow>
+        <SettingsRow v-if="showTerminal" data-setting="terminal-command" :title="t('settings.desktop.terminalTitle')" :hint="t('settings.desktop.terminalHint')" inline>
+          <template #detail>
+            <div v-if="shims.installed.length" class="mt-1 text-[12px] text-warm-500 font-mono break-all" data-terminal-location>{{ t("settings.desktop.terminalLocation", { dir: shims.target_dir }) }}</div>
+            <div v-if="justChanged && terminalEnabled" class="mt-1 text-[12px] text-iolite dark:text-iolite-light" data-terminal-reopen>{{ t("settings.desktop.terminalReopen") }}</div>
+            <div v-if="error" class="mt-1 text-[12px] text-coral" data-terminal-error>{{ error }}</div>
+          </template>
+          <el-switch :model-value="terminalEnabled" :loading="busy" @change="setTerminal" />
+        </SettingsRow>
+        <SettingsRow v-if="showKeychain" data-setting="keychain" :title="t('settings.desktop.keychainTitle')" :hint="t('settings.desktop.keychainHint', { backend: secrets.backend })" inline>
+          <template #detail>
+            <div v-if="keychainError" class="mt-1 text-[12px] text-coral" data-keychain-error>{{ keychainError }}</div>
+          </template>
+          <el-switch :model-value="secrets.mode === 'keychain'" :loading="keychainBusy" @change="setKeychain" />
+        </SettingsRow>
+      </SettingsGroup>
     </div>
-
-    <div v-if="showRestore" class="flex items-start justify-between gap-4" data-setting="restore-windows">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.restoreTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.restoreHint") }}</div>
-      </div>
-      <el-switch :model-value="shell.settings.value?.restorePopouts !== false" @change="(value) => shell.patch({ restorePopouts: value })" />
-    </div>
-
-    <div v-if="showKeepAwake" class="flex items-start justify-between gap-4" data-setting="keep-awake">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.keepAwakeTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.keepAwakeHint") }}</div>
-      </div>
-      <select class="text-xs rounded border border-warm-300 dark:border-warm-600 bg-transparent px-2 py-1" data-keep-awake @change="(event) => shell.patch({ keepAwake: event.target.value })">
-        <option value="never" :selected="shell.settings.value?.keepAwake === 'never'">{{ t("settings.desktop.keepAwakeNever") }}</option>
-        <option value="running" :selected="shell.settings.value?.keepAwake === 'running'">{{ t("settings.desktop.keepAwakeRunning") }}</option>
-        <option value="running-on-ac" :selected="shell.settings.value?.keepAwake === 'running-on-ac'">{{ t("settings.desktop.keepAwakeAc") }}</option>
-      </select>
-    </div>
-
-    <div v-if="showAutostart" class="desktop-section-title" data-section="startup">{{ t("settings.desktop.sectionStartup") }}</div>
-
-    <div v-if="showAutostart" class="flex items-start justify-between gap-4" data-setting="autostart">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.autostartTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.autostartHint") }}</div>
-      </div>
-      <el-switch :model-value="autostart" @change="setLogin" />
-    </div>
-
-    <div v-if="showAutostart && showRestore" class="flex items-start justify-between gap-4" data-setting="start-hidden">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.startHiddenTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.startHiddenHint") }}</div>
-      </div>
-      <el-switch :model-value="shell.settings.value?.startHidden === true" :disabled="!autostart" @change="(value) => shell.patch({ startHidden: value })" />
-    </div>
-
-    <div v-if="showSummon" class="desktop-section-title" data-section="shortcuts">{{ t("settings.desktop.sectionShortcuts") }}</div>
-
-    <div v-if="showSummon" class="flex items-start justify-between gap-4" data-setting="summon-shortcut">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.summonTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.summonHint") }}</div>
-        <div v-if="summonError" class="text-[11px] text-coral mt-1" data-summon-error>{{ t("settings.desktop.summonUnavailable") }}</div>
-      </div>
-      <div class="flex items-center gap-2">
-        <el-button size="small" data-summon-record @click="recordSummon">{{ summonRecording ? t("settings.desktop.summonRecording") : summonShortcut ? displayAccelerator(summonShortcut) : t("settings.desktop.summonSet") }}</el-button>
-        <el-button v-if="summonShortcut && !summonRecording" size="small" data-summon-clear @click="clearSummon">{{ t("settings.desktop.summonClear") }}</el-button>
-      </div>
-    </div>
-
-    <div v-if="showUpdate" class="desktop-section-title" data-section="updates">{{ t("settings.desktop.sectionUpdates") }}</div>
-
-    <div v-if="showUpdate" class="flex items-start justify-between gap-4" data-setting="shell-update">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.updateTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.updateHint") }}</div>
-        <div v-if="updateStatus === 'current'" class="text-[11px] text-warm-400 mt-1" data-update-status>{{ t("settings.desktop.updateCurrent") }}</div>
-        <div v-else-if="updateStatus === 'available'" class="text-[11px] text-iolite mt-1" data-update-status>{{ t("settings.desktop.updateAvailable", { version: updateVersion }) }}</div>
-        <div v-else-if="updateStatus === 'failed'" class="text-[11px] text-coral mt-1" data-update-status>{{ t("settings.desktop.updateFailed") }}</div>
-      </div>
-      <el-button v-if="updateStatus === 'available'" size="small" type="primary" data-update-install :loading="updateBusy" @click="installUpdate">{{ t("settings.desktop.updateInstall") }}</el-button>
-      <el-button v-else size="small" data-update-check :loading="updateBusy" @click="checkUpdate">{{ t("settings.desktop.updateCheck") }}</el-button>
-    </div>
-
-    <div v-if="backend.status.value" class="desktop-section-title" data-section="backend">{{ t("settings.desktop.sectionBackend") }}</div>
-
-    <div v-if="backend.status.value" class="flex items-start justify-between gap-4" data-setting="backend">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.backendTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1" data-backend-summary>{{ backendSummary }}</div>
-      </div>
-      <div class="flex items-center gap-2">
-        <el-button size="small" data-backend-logs @click="openLogs">{{ t("settings.desktop.backendLogs") }}</el-button>
-        <el-button size="small" data-backend-restart :loading="backend.status.value.state === 'restarting'" @click="backend.restart">{{ t("settings.desktop.backendRestart") }}</el-button>
-      </div>
-    </div>
-
-    <div v-if="backend.status.value" class="flex items-start justify-between gap-4" data-setting="runtime">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.runtimeTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1" data-runtime-summary>{{ runtimeSummary }}</div>
-        <div v-if="runtime?.bundled_newer" class="text-[11px] text-amber mt-1" data-runtime-newer>{{ t("settings.desktop.runtimeNewer", { version: runtime.bundled }) }}</div>
-      </div>
-      <el-button size="small" :type="repairArmed ? 'danger' : 'default'" data-runtime-repair @click="repair">{{ repairArmed ? t("settings.desktop.runtimeRepairConfirm") : t("settings.desktop.runtimeRepair") }}</el-button>
-    </div>
-
-    <div v-if="backend.status.value" class="flex items-start justify-between gap-4" data-setting="diagnostics">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.diagnosticsTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.diagnosticsHint") }}</div>
-        <div v-if="diagnosticsResult?.ok" class="text-[11px] text-iolite mt-1" data-diagnostics-result>{{ t("settings.desktop.diagnosticsSaved", { path: diagnosticsResult.path }) }}</div>
-        <div v-else-if="diagnosticsResult" class="text-[11px] text-coral mt-1" data-diagnostics-result>{{ t("settings.desktop.diagnosticsFailed") }}</div>
-      </div>
-      <el-button size="small" :loading="diagnosticsBusy" data-diagnostics-export @click="exportBundle">{{ t("settings.desktop.diagnosticsExport") }}</el-button>
-    </div>
-
-    <div v-if="explorerVerbs !== null" class="desktop-section-title" data-section="explorer">{{ t("settings.desktop.sectionExplorer") }}</div>
-
-    <div v-if="explorerVerbs !== null" class="flex items-start justify-between gap-4" data-setting="explorer-verbs">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.explorerTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.explorerHint") }}</div>
-      </div>
-      <el-switch :model-value="explorerVerbs" @change="setExplorer" />
-    </div>
-
-    <div v-if="showTerminal || showKeychain" class="desktop-section-title" data-section="integration">{{ t("settings.desktop.sectionIntegration") }}</div>
-
-    <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.terminalTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.terminalHint") }}</div>
-        <div v-if="shims.installed.length" class="text-[11px] text-warm-400 mt-1" data-terminal-location>{{ t("settings.desktop.terminalLocation", { dir: shims.target_dir }) }}</div>
-        <div v-if="justChanged && terminalEnabled" class="text-[11px] text-iolite mt-1" data-terminal-reopen>{{ t("settings.desktop.terminalReopen") }}</div>
-        <div v-if="error" class="text-[11px] text-coral mt-1" data-terminal-error>{{ error }}</div>
-      </div>
-      <el-switch :model-value="terminalEnabled" :loading="busy" @change="setTerminal" />
-    </div>
-
-    <div v-if="showKeychain" class="flex items-start justify-between gap-4" data-setting="keychain">
-      <div>
-        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.keychainTitle") }}</div>
-        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.keychainHint", { backend: secrets.backend }) }}</div>
-        <div v-if="keychainError" class="text-[11px] text-coral mt-1" data-keychain-error>{{ keychainError }}</div>
-      </div>
-      <el-switch :model-value="secrets.mode === 'keychain'" :loading="keychainBusy" @change="setKeychain" />
-    </div>
-  </div>
+  </SectionShell>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
+import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
+import SettingsGroup from "@/components/settings/ui/SettingsGroup.vue"
+import SettingsRow from "@/components/settings/ui/SettingsRow.vue"
+import KButton from "@/components/common/ActionButton.vue"
 import { formatMemory, formatUptime, useBackendStatus } from "@/composables/useBackendStatus"
 import { useShellSettings } from "@/composables/useShellSettings"
 import { acceleratorFromEvent, displayAccelerator } from "@/utils/accelerator"
@@ -377,13 +332,3 @@ onBeforeUnmount(() => {
   clearTimeout(repairTimer)
 })
 </script>
-
-<style scoped>
-.desktop-section-title {
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.55;
-  margin-top: 0.25rem;
-}
-</style>

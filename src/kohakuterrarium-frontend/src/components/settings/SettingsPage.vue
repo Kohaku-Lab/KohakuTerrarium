@@ -1,26 +1,16 @@
 <template>
-  <div class="settings-page">
-    <div class="settings-header">
-      <h1 class="text-xl font-semibold text-warm-800 dark:text-warm-200">{{ t("common.settings") }}</h1>
-    </div>
-
-    <el-tabs v-model="activeTab" class="settings-tabs">
-      <template v-for="section in sections" :key="section.id">
+  <div class="kt-v2 settings-page">
+    <SettingsLayout :groups="groups" :model-value="activeTab" @update:model-value="selectSection">
+      <template v-for="section in activeSections" :key="section.id">
         <!-- ════════════════════════ Registered (non-inline) sections ════════════════════════ -->
-        <el-tab-pane v-if="!section.inline" :label="sectionLabel(section)" :name="section.id">
-          <component :is="section.component" :active="activeTab === section.id" />
-        </el-tab-pane>
+        <SectionShell v-if="!section.inline" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
+          <component :is="section.component" :active="true" />
+        </SectionShell>
 
         <!-- ════════════════════════ Providers (custom backends) ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'providers'" :label="sectionLabel(section)" name="providers">
-          <div class="settings-pane flex flex-col gap-3 max-w-2xl">
-            <p class="text-xs text-warm-400 mb-1">{{ t("settings.providers.description") }}</p>
-            <!-- Multi-node target picker. Hidden in standalone mode by SitePicker itself. -->
-            <div class="flex items-center gap-2">
-              <SitePicker v-model="providerNode" :label="t('settings.providers.targetNode')" />
-              <span v-if="providerNode && providerNode !== '_host'" class="text-[11px] text-amber-shadow dark:text-amber-light">{{ t("settings.providers.targetNodeHint") }}</span>
-            </div>
-
+        <SectionShell v-if="section.id === 'providers'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
+          <template #aside><NodeScope v-model="providerNode" /></template>
+          <div class="flex flex-col gap-4">
             <section v-if="oauthBackends.length" class="card p-4 provider-section" data-provider-section="oauth">
               <h3 class="provider-section-title">{{ t("settings.providers.oauthTitle") }}</h3>
               <p class="provider-section-hint">{{ t("settings.providers.oauthHint") }}</p>
@@ -63,68 +53,72 @@
               </div>
             </section>
           </div>
-        </el-tab-pane>
+        </SectionShell>
 
         <!-- ════════════════════════ Models (master-detail, scrollable list + fixed editor) ════════════════════════
            On compact density the side-by-side master-detail collapses
            into a back/forward pattern: the list takes the full pane
            until a preset is picked, then the editor takes the full
            pane with a "← Back" button. -->
-        <el-tab-pane v-if="section.id === 'models'" :label="sectionLabel(section)" name="models" class="models-pane">
-          <div class="model-workspace" :class="{ 'is-compact': isCompact }">
-            <aside v-if="!isCompact || !showEditor" class="model-list-pane">
-              <div class="model-list-head">
-                <el-input v-model="presetSearch" size="small" placeholder="Search name/model…" clearable />
-                <div class="flex items-center justify-between text-[11px] text-warm-400 mt-2">
-                  <span>{{ filteredPresets.length }} preset{{ filteredPresets.length === 1 ? "" : "s" }}</span>
-                  <el-button size="small" type="primary" plain @click="startNewPreset"> + New </el-button>
-                </div>
-              </div>
-              <div class="model-list-scroll">
-                <template v-for="(group, idx) in presetGroups" :key="group.provider">
-                  <div v-if="idx > 0" class="h-px bg-warm-100 dark:bg-warm-800 mx-3 my-1" />
-                  <div class="text-[10px] uppercase tracking-wide text-warm-400 px-3 py-1">
-                    {{ group.provider }}
-                    <span class="normal-case text-warm-400">({{ group.presets.length }})</span>
+        <div v-if="section.id === 'models'" class="flex-1 min-h-0 flex flex-col">
+          <header class="px-8 pt-6 pb-3 max-md:hidden">
+            <h2 class="text-lg font-semibold text-warm-800 dark:text-warm-100">{{ sectionTitle(section) }}</h2>
+            <p class="mt-1 text-sm text-warm-500">{{ sectionHint(section) }}</p>
+          </header>
+          <div class="models-pane flex-1 min-h-0 px-8 pb-6 max-md:px-3 max-md:pb-3">
+            <div class="model-workspace" :class="{ 'is-compact': isCompact }">
+              <aside v-if="!isCompact || !showEditor" class="model-list-pane">
+                <div class="model-list-head">
+                  <el-input v-model="presetSearch" size="small" placeholder="Search name/model…" clearable />
+                  <div class="flex items-center justify-between text-[11px] text-warm-400 mt-2">
+                    <span>{{ filteredPresets.length }} preset{{ filteredPresets.length === 1 ? "" : "s" }}</span>
+                    <el-button size="small" type="primary" plain @click="startNewPreset"> + New </el-button>
                   </div>
-                  <button v-for="preset in group.presets" :key="`${preset.provider}/${preset.name}`" type="button" class="preset-row" :class="{ 'is-active': selectedPresetKey === `${preset.provider}/${preset.name}` }" @click="selectPreset(preset)">
-                    <div class="flex items-center gap-1.5 w-full min-w-0">
-                      <span class="font-medium text-[12px] truncate">{{ preset.name }}</span>
-                      <span v-if="preset.source === 'user'" class="text-[9px] px-1 rounded bg-iolite/15 text-iolite uppercase shrink-0"> user </span>
-                      <span v-if="preset.is_default" class="text-[9px] px-1 rounded bg-aquamarine/20 text-aquamarine uppercase shrink-0"> default </span>
-                      <span v-if="Object.keys(preset.variation_groups || {}).length" class="text-[9px] text-warm-400 shrink-0"> {{ Object.keys(preset.variation_groups).length }} var </span>
+                </div>
+                <div class="model-list-scroll">
+                  <template v-for="(group, idx) in presetGroups" :key="group.provider">
+                    <div v-if="idx > 0" class="h-px bg-warm-100 dark:bg-warm-800 mx-3 my-1" />
+                    <div class="text-[10px] uppercase tracking-wide text-warm-400 px-3 py-1">
+                      {{ group.provider }}
+                      <span class="normal-case text-warm-400">({{ group.presets.length }})</span>
                     </div>
-                    <div class="text-[10px] text-warm-400 font-mono truncate w-full">
-                      {{ preset.model }}
-                    </div>
-                  </button>
-                </template>
-                <div v-if="filteredPresets.length === 0" class="text-warm-400 text-[11px] italic p-4 text-center">No matching presets.</div>
-              </div>
-            </aside>
+                    <button v-for="preset in group.presets" :key="`${preset.provider}/${preset.name}`" type="button" class="preset-row" :class="{ 'is-active': selectedPresetKey === `${preset.provider}/${preset.name}` }" @click="selectPreset(preset)">
+                      <div class="flex items-center gap-1.5 w-full min-w-0">
+                        <span class="font-medium text-[12px] truncate">{{ preset.name }}</span>
+                        <span v-if="preset.source === 'user'" class="text-[9px] px-1 rounded bg-iolite/15 text-iolite uppercase shrink-0"> user </span>
+                        <span v-if="preset.is_default" class="text-[9px] px-1 rounded bg-aquamarine/20 text-aquamarine uppercase shrink-0"> default </span>
+                        <span v-if="Object.keys(preset.variation_groups || {}).length" class="text-[9px] text-warm-400 shrink-0"> {{ Object.keys(preset.variation_groups).length }} var </span>
+                      </div>
+                      <div class="text-[10px] text-warm-400 font-mono truncate w-full">
+                        {{ preset.model }}
+                      </div>
+                    </button>
+                  </template>
+                  <div v-if="filteredPresets.length === 0" class="text-warm-400 text-[11px] italic p-4 text-center">No matching presets.</div>
+                </div>
+              </aside>
 
-            <section v-if="!isCompact || showEditor" class="model-editor-pane">
-              <button v-if="isCompact && showEditor" type="button" class="model-back-button" @click="compactBackToList">
-                <span class="i-carbon-arrow-left" />
-                <span>{{ t("settings.models.backToList") }}</span>
-              </button>
-              <PresetEditor v-if="showEditor" :preset="editorPreset" :backends="backends" :mode="editorMode" @save="handleSavePreset" @cancel="cancelEdit" @clone="clonePreset" @delete="confirmDeletePreset" @set-default="handleSetDefault" />
-              <div v-else class="model-editor-empty">
-                <p class="text-sm">Select a preset on the left, or click "+ New" to create one.</p>
-                <p class="text-[11px] mt-2">
-                  Presets live in
-                  <code class="font-mono">~/.kohakuterrarium/llm_profiles.yaml</code>
-                </p>
-              </div>
-            </section>
+              <section v-if="!isCompact || showEditor" class="model-editor-pane">
+                <button v-if="isCompact && showEditor" type="button" class="model-back-button" @click="compactBackToList">
+                  <span class="i-carbon-arrow-left" />
+                  <span>{{ t("settings.models.backToList") }}</span>
+                </button>
+                <PresetEditor v-if="showEditor" :preset="editorPreset" :backends="backends" :mode="editorMode" @save="handleSavePreset" @cancel="cancelEdit" @clone="clonePreset" @delete="confirmDeletePreset" @set-default="handleSetDefault" />
+                <div v-else class="model-editor-empty">
+                  <p class="text-sm">Select a preset on the left, or click "+ New" to create one.</p>
+                  <p class="text-[11px] mt-2">
+                    Presets live in
+                    <code class="font-mono">~/.kohakuterrarium/llm_profiles.yaml</code>
+                  </p>
+                </div>
+              </section>
+            </div>
           </div>
-        </el-tab-pane>
+        </div>
 
         <!-- ════════════════════════ MCP Servers ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'mcp'" :label="sectionLabel(section)" name="mcp">
-          <div class="settings-pane flex flex-col gap-3 max-w-2xl">
-            <p class="text-xs text-warm-400 mb-2">{{ t("settings.mcp.description") }}</p>
-
+        <SectionShell v-if="section.id === 'mcp'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
+          <div class="flex flex-col gap-3">
             <div v-for="server in mcpServers" :key="server.name" class="card p-4">
               <div class="flex items-center gap-2 mb-2">
                 <span class="font-medium text-warm-700 dark:text-warm-300">{{ server.name }}</span>
@@ -182,221 +176,61 @@
               </div>
             </div>
           </div>
-        </el-tab-pane>
+        </SectionShell>
 
         <!-- ════════════════════════ Account ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'account'" :label="sectionLabel(section)" name="account">
-          <div class="settings-pane flex flex-col gap-4 max-w-xl">
+        <SectionShell v-if="section.id === 'account'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
+          <template #aside><NodeScope v-model="providerNode" /></template>
+          <div class="flex flex-col gap-4">
             <!-- KohakuTerrarium account (L4) — only when logged into a
                multi-user host. Provider usage follows below. -->
             <AccountSection v-if="auth.currentUser" />
-            <div class="flex items-center gap-2">
-              <SitePicker v-model="providerNode" :label="t('settings.providers.targetNode')" />
-              <span v-if="providerNode && providerNode !== '_host'" class="text-[11px] text-amber-shadow dark:text-amber-light">{{ t("settings.providers.targetNodeHint") }}</span>
-            </div>
-            <AccountUsagePanel :node="providerNode" :active="activeTab === 'account'" />
+            <AccountUsagePanel :node="providerNode" :active="true" />
           </div>
-        </el-tab-pane>
+        </SectionShell>
 
         <!-- ════════════════════════ Sites (lab cluster) ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'sites'" :label="sectionLabel(section)" name="sites">
+        <SectionShell v-if="section.id === 'sites'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
           <SitesPane />
-        </el-tab-pane>
+        </SectionShell>
 
-        <!-- ════════════════════════ Drives ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'drives'" :label="sectionLabel(section)" name="drives">
-          <div class="settings-pane">
-            <DriveSettingsPanel @open-drives="onOpenDrives" />
-          </div>
-        </el-tab-pane>
-
-        <!-- ════════════════════════ Sessions ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'sessions'" :label="sectionLabel(section)" name="sessions">
-          <div class="settings-pane max-w-2xl">
-            <SessionSummaryPanel />
-          </div>
-        </el-tab-pane>
-
-        <!-- ════════════════════════ Updates ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'updates'" :label="sectionLabel(section)" name="updates">
-          <div class="settings-pane max-w-2xl">
-            <UpdatesPanel />
-          </div>
-        </el-tab-pane>
-
-        <!-- ════════════════════════ Advanced ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'advanced'" :label="sectionLabel(section)" name="advanced">
-          <AdvancedPanel />
-        </el-tab-pane>
-
-        <!-- ════════════════════════ About ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'about'" :label="sectionLabel(section)" name="about">
-          <AboutPanel />
-        </el-tab-pane>
-
-        <!-- ════════════════════════ Preferences ════════════════════════ -->
-        <el-tab-pane v-if="section.id === 'prefs'" :label="sectionLabel(section)" name="prefs">
-          <div class="settings-pane flex flex-col gap-4 max-w-xl">
-            <div class="card p-4">
-              <div class="font-medium text-warm-700 dark:text-warm-300 mb-3">{{ t("settings.prefs.appearance") }}</div>
-              <div class="flex items-center justify-between mb-3">
-                <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("common.theme") }}</span>
-                <el-switch :model-value="theme.dark" :active-text="t('common.dark')" :inactive-text="t('common.light')" @change="theme.toggle()" />
-              </div>
-              <div class="flex items-start justify-between mb-3 gap-4">
-                <div>
-                  <div class="text-sm text-warm-600 dark:text-warm-400">{{ t("common.language") }}</div>
-                  <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.languageHint") }}</div>
-                </div>
-                <el-select :model-value="localeStore.locale" size="small" class="!w-40 shrink-0" @change="localeStore.setLocale">
-                  <el-option v-for="option in localeOptions" :key="option.value" :label="option.label" :value="option.value" />
-                </el-select>
-              </div>
-              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3" data-test="settings-ui-version">
-                <div>
-                  <div class="text-sm text-warm-600 dark:text-warm-400">{{ v2t("settings.interface") }}</div>
-                  <div class="kt-text-caption text-warm-400 mt-1">{{ v2t("settings.interfaceHint") }}</div>
-                </div>
-                <el-segmented :model-value="uiVersion" :options="uiVersionOptions" size="small" @change="setUiVersion" />
-              </div>
-              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                <div>
-                  <div class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.readingSize") }}</div>
-                  <div class="kt-text-caption text-warm-400 mt-1">{{ t("settings.prefs.readingSizeHint") }}</div>
-                </div>
-                <el-segmented :model-value="theme.readingSize" :options="readingSizeOptions" size="small" @change="theme.setReadingSize" />
-              </div>
-              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
-                <div>
-                  <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.desktopZoom") }}</span>
-                  <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.desktopZoom * 100) }}%</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button class="w-10 h-10 sm:w-7 sm:h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-base sm:text-sm" @click="theme.setDesktopZoom(theme.desktopZoom - 0.05)">-</button>
-                  <input type="range" :value="theme.desktopZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setDesktopZoom(parseFloat($event.target.value))" />
-                  <button class="w-10 h-10 sm:w-7 sm:h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-base sm:text-sm" @click="theme.setDesktopZoom(theme.desktopZoom + 0.05)">+</button>
-                  <button class="text-xs sm:text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(DEFAULT_DESKTOP_ZOOM)">{{ t("common.reset") }}</button>
-                </div>
-              </div>
-              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                <div>
-                  <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.mobileZoom") }}</span>
-                  <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.mobileZoom * 100) }}%</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button class="w-10 h-10 sm:w-7 sm:h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-base sm:text-sm" @click="theme.setMobileZoom(theme.mobileZoom - 0.05)">-</button>
-                  <input type="range" :value="theme.mobileZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setMobileZoom(parseFloat($event.target.value))" />
-                  <button class="w-10 h-10 sm:w-7 sm:h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-base sm:text-sm" @click="theme.setMobileZoom(theme.mobileZoom + 0.05)">+</button>
-                  <button class="text-xs sm:text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(DEFAULT_MOBILE_ZOOM)">{{ t("common.reset") }}</button>
-                </div>
-              </div>
-              <div class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3">
-                <div>
-                  <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.attention") }}</div>
-                  <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.attentionHint") }}</div>
-                </div>
-
-                <div data-attention-group="in-app" class="attention-group">
-                  <div class="attention-setting-row">
-                    <div>
-                      <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.inAppIndicators") }}</div>
-                      <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.inAppIndicatorsHint") }}</div>
-                    </div>
-                    <el-switch data-in-app-toggle :model-value="inAppIndicatorsEnabled" @change="setInAppIndicators" />
-                  </div>
-                  <div class="attention-group-children" :class="{ 'opacity-45': !inAppIndicatorsEnabled }">
-                    <div v-for="item in inAppAttentionSettings" :key="item.key" class="attention-setting-row" :data-attention-setting="item.key">
-                      <div>
-                        <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
-                        <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
-                      </div>
-                      <el-switch :model-value="attentionPrefs.state[item.key]" :disabled="!inAppIndicatorsEnabled" @change="setAttentionPreference(item.key, $event)" />
-                    </div>
-                  </div>
-                </div>
-
-                <div data-attention-group="notifications" class="attention-group" :data-desktop-surface="desktopSurface">
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.systemNotifications") }}</div>
-                      <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.systemNotificationsHint") }}</div>
-                    </div>
-                    <span class="text-[11px] shrink-0" :class="notificationPermissionClass">{{ t(`settings.prefs.notificationPermission.${notificationPermission}`) }}</span>
-                  </div>
-                  <div v-if="desktopSurface && !hostNotifications" class="attention-permission-row">
-                    <div class="text-xs text-warm-500 dark:text-warm-400">{{ t("settings.prefs.notificationPermissionHint.desktop") }}</div>
-                  </div>
-                  <div v-else-if="!desktopSurface && notificationPermission !== 'granted'" class="attention-permission-row">
-                    <div class="text-xs text-warm-500 dark:text-warm-400">{{ t(`settings.prefs.notificationPermissionHint.${notificationPermission}`) }}</div>
-                    <el-button v-if="notificationPermission === 'default'" data-notification-permission-action size="small" type="primary" :loading="requestingNotificationPermission" @click="grantNotificationPermission">
-                      {{ t("settings.prefs.allowNotifications") }}
-                    </el-button>
-                  </div>
-                  <div v-else class="attention-permission-row">
-                    <div class="text-xs text-warm-500 dark:text-warm-400">{{ t("settings.prefs.notificationEnabledHint") }}</div>
-                    <el-switch :model-value="attentionPrefs.state.systemNotifications" @change="setAttentionPreference('systemNotifications', $event)" />
-                  </div>
-                  <div class="attention-group-children" :class="{ 'opacity-45': !notificationsAvailable }">
-                    <div v-for="item in notificationAttentionSettings" :key="item.key" class="attention-setting-row" :data-attention-setting="item.key" :disabled="!notificationsAvailable || undefined">
-                      <div>
-                        <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
-                        <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
-                      </div>
-                      <el-switch :model-value="attentionPrefs.state[item.key]" :disabled="!notificationsAvailable" @change="setAttentionPreference(item.key, $event)" />
-                    </div>
-                  </div>
-                </div>
-
-                <div data-attention-group="sound" class="attention-group">
-                  <div class="attention-setting-row" data-attention-setting="attentionSound">
-                    <div>
-                      <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.attentionSound") }}</div>
-                      <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.attentionSoundHint") }}</div>
-                    </div>
-                    <el-switch :model-value="attentionPrefs.state.attentionSound" @change="setAttentionPreference('attentionSound', $event)" />
-                  </div>
-                  <div class="attention-group-children" :class="{ 'opacity-45': !attentionPrefs.state.attentionSound }">
-                    <div v-for="item in soundAttentionSettings" :key="item.key" class="attention-setting-row" :data-attention-setting="item.key">
-                      <div>
-                        <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
-                        <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
-                      </div>
-                      <el-switch :model-value="attentionPrefs.state[item.key]" :disabled="!attentionPrefs.state.attentionSound" @change="setAttentionPreference(item.key, $event)" />
-                    </div>
-                  </div>
-                </div>
-
-                <div data-attention-group="desktop" class="attention-group" data-attention-setting="desktopAttention">
-                  <div class="attention-setting-row">
-                    <div>
-                      <div class="flex items-center gap-2">
-                        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.desktopAttention") }}</div>
-                        <span class="attention-platform-badge">{{ t("settings.prefs.desktopOnly") }}</span>
-                      </div>
-                      <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.desktopAttentionHint") }}</div>
-                    </div>
-                    <el-switch :model-value="attentionPrefs.state.desktopAttention" @change="setAttentionPreference('desktopAttention', $event)" />
-                  </div>
-                </div>
-              </div>
-              <DesktopAppSettings />
+        <!-- ════════════════════════ Agent runtime: sessions + drives ════════════════════════ -->
+        <SectionShell v-if="section.id === 'runtime'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
+          <div class="flex flex-col gap-4">
+            <div class="kt-v2-card p-5 max-md:p-3">
+              <SessionSummaryPanel />
+            </div>
+            <div class="kt-v2-card p-5 max-md:p-3">
+              <DriveSettingsPanel @open-drives="onOpenDrives" />
             </div>
           </div>
-        </el-tab-pane>
+        </SectionShell>
+
+        <!-- ════════════════════════ Software: version, updates, install details ════════════════════════ -->
+        <SoftwareSection v-if="section.id === 'software'" />
+
+        <!-- ════════════════════════ Storage: config files ════════════════════════ -->
+        <SectionShell v-if="section.id === 'storage'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
+          <AdvancedPanel />
+        </SectionShell>
+
+        <!-- ════════════════════════ Appearance ════════════════════════ -->
+        <AppearanceSection v-if="section.id === 'appearance'" />
+        <NotificationsSection v-if="section.id === 'notifications'" />
+        <DesktopAppSettings v-if="section.id === 'desktop'" />
       </template>
-    </el-tabs>
+    </SettingsLayout>
     <MCPServerEditModal v-model="mcpEditOpen" :server="mcpEditTarget" @saved="onMCPEditSaved" />
     <CodexLoginModal :open="codexModalOpen" :node="codexModalNode" @close="codexModalOpen = false" @done="onCodexLoginDone" />
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, ref, onBeforeUnmount, onMounted, watch } from "vue"
+import { computed, reactive, ref, onMounted } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import AccountSection from "@/components/account/AccountSection.vue"
 import AccountUsagePanel from "@/components/settings/account/AccountUsagePanel.vue"
-import AboutPanel from "@/components/settings/AboutPanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
@@ -407,153 +241,35 @@ import PackageProviderRow from "@/components/settings/PackageProviderRow.vue"
 import ProviderKeyRow from "@/components/settings/ProviderKeyRow.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
+import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
+import AppearanceSection from "@/components/settings/sections/AppearanceSection.vue"
+import NotificationsSection from "@/components/settings/sections/NotificationsSection.vue"
+import SettingsLayout from "@/components/settings/layout/SettingsLayout.vue"
+import NodeScope from "@/components/settings/ui/NodeScope.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
 import SessionSummaryPanel from "@/components/settings/SessionSummaryPanel.vue"
-import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
-import SitePicker from "@/components/cluster/SitePicker.vue"
-import { requestAttentionAudioUnlock, requestNotificationPermission } from "@/composables/useAttentionEffects"
+import SoftwareSection from "@/components/settings/software/SoftwareSection.vue"
 import { useDensity } from "@/composables/useDensity"
-import { UI_VERSIONS, useUiVersion } from "@/components/session-v2/model/useUiVersion"
-import { useV2T } from "@/components/session-v2/model/v2Strings"
-import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { useAuthStore } from "@/stores/auth"
-import { useClusterStore } from "@/stores/cluster"
-import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
-import { registerBuiltinSettingsSections, visibleSettingsSections } from "@/stores/settingsSectionRegistry"
-import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, READING_SIZES, useThemeStore } from "@/stores/theme"
-import { desktopCapabilities, hasDesktopHost, onHostReady } from "@/utils/hostBridge"
+import { activeSection, selectSection } from "@/stores/settingsNav"
+import { registerBuiltinSettingsSections, visibleSettingsGroups } from "@/stores/settingsSectionRegistry"
 import { useI18n } from "@/utils/i18n"
 
-const cluster = useClusterStore()
 const auth = useAuthStore()
 import { configAPI, settingsAPI } from "@/utils/api"
 
-const theme = useThemeStore()
-const localeStore = useLocaleStore()
-const attentionPrefs = useAttentionPrefs()
 const { t } = useI18n()
 const { isCompact } = useDensity()
-const activeTab = ref("providers")
 
 registerBuiltinSettingsSections()
-const sections = computed(() => visibleSettingsSections())
+const groups = computed(() => visibleSettingsGroups())
+const sections = computed(() => groups.value.flatMap((group) => group.sections))
+const currentSection = computed(() => sections.value.find((section) => section.id === activeSection.value) || sections.value[0] || null)
+const activeTab = computed(() => currentSection.value?.id || "")
+const activeSections = computed(() => (currentSection.value ? [currentSection.value] : []))
 
-function sectionLabel(section) {
-  return section.labelKey ? t(section.labelKey) : section.label
-}
-const requestingNotificationPermission = ref(false)
-const desktopSurface = ref(hasDesktopHost())
-const hostNotifications = ref(false)
-const notificationPermission = ref(getNotificationPermission())
-
-const localeOptions = computed(() =>
-  SUPPORTED_LOCALES.map((value) => ({
-    value,
-    label: LOCALE_DISPLAY_NAMES[value] || value,
-  })),
-)
-
-const v2t = useV2T()
-const { uiVersion, setUiVersion } = useUiVersion()
-const uiVersionOptions = computed(() => UI_VERSIONS.map((value) => ({ value, label: v2t(`settings.interface.${value}`) })))
-const readingSizeOptions = computed(() =>
-  READING_SIZES.map((value) => ({
-    value,
-    label: t(`settings.prefs.readingSize.${value}`),
-  })),
-)
-
-function getNotificationPermission() {
-  if (hasDesktopHost()) return "desktop"
-  if (typeof Notification === "undefined") return "unsupported"
-  if (window.isSecureContext === false) return "unsupported"
-  return Notification.permission || "default"
-}
-
-const inAppIndicatorsEnabled = computed(() => inAppAttentionSettings.some((item) => attentionPrefs.state[item.key]))
-
-const notificationsAvailable = computed(() => attentionPrefs.state.systemNotifications && (desktopSurface.value ? hostNotifications.value : notificationPermission.value === "granted"))
-
-const notificationPermissionClass = computed(() => ({
-  "text-iolite": notificationPermission.value === "granted",
-  "text-amber-shadow dark:text-amber-light": notificationPermission.value === "default",
-  "text-coral": ["denied", "unsupported"].includes(notificationPermission.value),
-  "text-warm-400": notificationPermission.value === "desktop",
-}))
-
-async function grantNotificationPermission() {
-  if (desktopSurface.value) return
-  requestingNotificationPermission.value = true
-  try {
-    notificationPermission.value = await requestNotificationPermission()
-    attentionPrefs.set("systemNotifications", notificationPermission.value === "granted")
-  } finally {
-    requestingNotificationPermission.value = false
-  }
-}
-
-function setAttentionPreference(key, value) {
-  attentionPrefs.set(key, value)
-  if (key === "attentionSound" && value) requestAttentionAudioUnlock()
-}
-
-function setInAppIndicators(value) {
-  for (const item of inAppAttentionSettings) attentionPrefs.set(item.key, value)
-}
-
-const inAppAttentionSettings = [
-  {
-    key: "dynamicTitle",
-    label: "settings.prefs.dynamicTitle",
-    hint: "settings.prefs.dynamicTitleHint",
-  },
-  {
-    key: "completionBadge",
-    label: "settings.prefs.completionBadge",
-    hint: "settings.prefs.completionBadgeHint",
-  },
-  {
-    key: "inputRequiredBadge",
-    label: "settings.prefs.inputRequiredBadge",
-    hint: "settings.prefs.inputRequiredBadgeHint",
-  },
-  {
-    key: "faviconBadge",
-    label: "settings.prefs.faviconBadge",
-    hint: "settings.prefs.faviconBadgeHint",
-  },
-]
-
-const notificationAttentionSettings = [
-  {
-    key: "notifyWaiting",
-    label: "settings.prefs.notifyWaiting",
-    hint: "settings.prefs.notifyWaitingHint",
-  },
-  {
-    key: "notifyCompletion",
-    label: "settings.prefs.notifyCompletion",
-    hint: "settings.prefs.notifyCompletionHint",
-  },
-  {
-    key: "notificationPreview",
-    label: "settings.prefs.notificationPreview",
-    hint: "settings.prefs.notificationPreviewHint",
-  },
-]
-
-const soundAttentionSettings = [
-  {
-    key: "soundWaiting",
-    label: "settings.prefs.soundWaiting",
-    hint: "settings.prefs.soundWaitingHint",
-  },
-  {
-    key: "soundCompletion",
-    label: "settings.prefs.soundCompletion",
-    hint: "settings.prefs.soundCompletionHint",
-  },
-]
+const sectionTitle = (section) => (section.labelKey ? t(section.labelKey) : section.label)
+const sectionHint = (section) => (section.descriptionKey ? t(section.descriptionKey) : section.description)
 
 // ───────── Provider auth state ─────────
 
@@ -1035,26 +751,12 @@ async function removeMCPServer(name) {
 
 // ───────── Lifecycle ─────────
 
-async function detectDesktopSurface() {
-  if (!hasDesktopHost()) return
-  desktopSurface.value = true
-  notificationPermission.value = "desktop"
-  hostNotifications.value = (await desktopCapabilities())?.notifications === true
-}
-
-let stopHostReady = () => {}
-
 onMounted(async () => {
-  stopHostReady = onHostReady(detectDesktopSurface)
   await loadKeys()
   await loadBackends()
   await loadNativeTools()
   await loadPresets()
   await loadMCP()
-})
-
-onBeforeUnmount(() => {
-  stopHostReady()
 })
 
 // The Drives *record* panel lives in a workspace, not in global Settings.
@@ -1086,56 +788,19 @@ function onOpenDrives() {
    The Models tab in particular fills exactly the remaining space — no
    outer page scroll, only scrolling inside the preset list / editor. */
 .settings-page {
-  display: flex;
-  flex-direction: column;
   height: 100%;
-  min-height: 0;
-  max-width: 72rem;
-  margin: 0 auto;
-  padding: 1.5rem 1.5rem 0;
-  overflow: hidden;
-}
-
-/* Reclaim horizontal room on compact viewports — the default 1.5rem
-   gutter leaves form fields cramped on a 375px screen. */
-@media (max-width: 767px) {
-  .settings-page {
-    padding: 0.75rem 0.75rem 0;
-  }
-}
-
-.settings-header {
-  flex-shrink: 0;
-  margin-bottom: 0.75rem;
-}
-
-.settings-tabs {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.settings-tabs :deep(.el-tabs__content) {
-  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
 }
 
-.settings-tabs :deep(.el-tab-pane) {
-  height: 100%;
-}
-
-/* Simple tabs that just need their content to scroll naturally. */
+/* The layout's content column scrolls; a pane only needs its natural height. */
 .settings-pane {
-  height: 100%;
-  overflow-y: auto;
-  padding-bottom: 1.5rem;
+  padding-bottom: 1rem;
 }
 
-/* Models tab — pane holds the workspace, workspace fills exactly. */
+/* Models section — the workspace fills the content column and scrolls inside. */
 .models-pane {
-  padding-bottom: 1.5rem;
+  height: 100%;
 }
 
 .model-workspace {

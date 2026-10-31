@@ -4,7 +4,7 @@ import { LOCALES, V2_STRINGS, translate } from "./v2Strings"
 
 const SOURCES = Object.entries({
   ...import.meta.glob("../**/*.{vue,js}", { query: "?raw", import: "default", eager: true }),
-  ...import.meta.glob("../../settings/SettingsPage.vue", {
+  ...import.meta.glob("../../settings/sections/AppearanceSection.vue", {
     query: "?raw",
     import: "default",
     eager: true,

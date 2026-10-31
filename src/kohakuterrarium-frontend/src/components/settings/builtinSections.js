@@ -1,0 +1,123 @@
+import { useClusterStore } from "@/stores/cluster"
+import { hasDesktopHost } from "@/utils/hostBridge"
+
+export const EXTENSIONS_GROUP = "extensions"
+
+/** Groups the built-in sections are filed under, in nav order. */
+export const BUILTIN_GROUPS = [
+  { id: "general", labelKey: "settings.group.general", order: 10 },
+  { id: "ai", labelKey: "settings.group.ai", order: 20 },
+  { id: "agents", labelKey: "settings.group.agents", order: 30 },
+  { id: "account", labelKey: "settings.group.account", order: 40 },
+  { id: "system", labelKey: "settings.group.system", order: 50 },
+  { id: EXTENSIONS_GROUP, labelKey: "settings.group.extensions", order: 90 },
+]
+
+/** Built-in sections; SettingsPage renders each by id. Icon classes live here so the icon scan sees them. */
+export const BUILTIN_SECTIONS = [
+  {
+    id: "appearance",
+    labelKey: "settings.section.appearance",
+    descriptionKey: "settings.desc.appearance",
+    icon: "i-carbon-color-palette",
+    group: "general",
+    order: 10,
+    keywords: ["theme", "dark", "language", "zoom", "font"],
+  },
+  {
+    id: "notifications",
+    labelKey: "settings.section.notifications",
+    descriptionKey: "settings.desc.notifications",
+    icon: "i-carbon-notification",
+    group: "general",
+    order: 20,
+    keywords: ["sound", "badge", "alert", "attention"],
+  },
+  {
+    id: "desktop",
+    labelKey: "settings.section.desktop",
+    descriptionKey: "settings.desc.desktop",
+    icon: "i-carbon-screen",
+    group: "general",
+    order: 30,
+    keywords: ["tray", "startup", "shortcut", "terminal", "keychain"],
+    visible: () => hasDesktopHost(),
+  },
+  {
+    id: "providers",
+    labelKey: "settings.tabs.providers",
+    descriptionKey: "settings.desc.providers",
+    icon: "i-carbon-cloud-service-management",
+    group: "ai",
+    order: 10,
+    keywords: ["api key", "oauth", "login", "backend"],
+    scope: "node",
+  },
+  {
+    id: "models",
+    labelKey: "settings.tabs.models",
+    descriptionKey: "settings.desc.models",
+    icon: "i-carbon-model-alt",
+    group: "ai",
+    order: 20,
+    keywords: ["preset", "profile", "default model"],
+    width: "fill",
+  },
+  {
+    id: "mcp",
+    labelKey: "settings.tabs.mcp",
+    descriptionKey: "settings.desc.mcp",
+    icon: "i-carbon-connect",
+    group: "ai",
+    order: 30,
+    keywords: ["server", "tools"],
+  },
+  {
+    id: "runtime",
+    labelKey: "settings.section.runtime",
+    descriptionKey: "settings.desc.runtime",
+    icon: "i-carbon-bot",
+    group: "agents",
+    order: 10,
+    keywords: ["session", "summary", "drive"],
+  },
+  {
+    id: "account",
+    labelKey: "settings.tabs.account",
+    descriptionKey: "settings.desc.account",
+    icon: "i-carbon-user",
+    group: "account",
+    order: 10,
+    keywords: ["login", "usage", "quota"],
+    scope: "node",
+  },
+  {
+    id: "sites",
+    labelKey: "cluster.settings.title",
+    descriptionKey: "settings.desc.sites",
+    icon: "i-carbon-network-3",
+    group: "account",
+    order: 20,
+    keywords: ["cluster", "node", "lab"],
+    visible: () => useClusterStore().isCluster,
+  },
+  {
+    id: "software",
+    labelKey: "settings.section.software",
+    descriptionKey: "settings.desc.software",
+    icon: "i-carbon-update-now",
+    group: "system",
+    order: 10,
+    keywords: ["update", "version", "about", "channel", "diagnostics"],
+  },
+  {
+    id: "storage",
+    labelKey: "settings.section.storage",
+    descriptionKey: "settings.desc.storage",
+    icon: "i-carbon-folder",
+    group: "system",
+    order: 20,
+    keywords: ["config", "files", "paths", "yaml"],
+    width: "wide",
+  },
+]
