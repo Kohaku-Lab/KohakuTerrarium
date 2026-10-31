@@ -245,3 +245,18 @@ class TestMidStreamFailure:
             async for _ in provider._stream_chat(MESSAGES):
                 pass
         assert len(attempts) == 3
+
+
+class TestRequestAfterClose:
+    async def test_closed_client_is_rebuilt_for_the_next_request(self):
+        provider = anthropic_provider("claude-sonnet-4-6")
+        closed = provider._client
+        await provider.close()
+        assert closed.is_closed()
+        provider._new_client = lambda: anthropic_provider("claude-sonnet-4-6")._client
+
+        # A stopped agent that starts again reuses its provider after close().
+        assert (await provider.chat_complete(MESSAGES)).content == ANSWER
+        assert "".join([chunk async for chunk in provider.chat(MESSAGES)]) == ANSWER
+        assert provider._client is not closed
+        await provider.close()

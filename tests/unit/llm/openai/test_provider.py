@@ -581,3 +581,25 @@ class TestMidStreamFailure:
             await _attach_transport(provider, respond)
             assert await _turn(provider, True) == "ok"
         assert len(requests) == 2
+
+
+class TestRequestAfterClose:
+    @pytest.mark.parametrize("streaming", [True, False])
+    async def test_closed_client_is_rebuilt_for_the_next_request(self, streaming):
+        provider = OpenAIProvider(
+            api_key="test", model="test", retry_policy=RetryPolicy(max_retries=0)
+        )
+        await _attach_transport(provider, lambda request: _success(streaming))
+        closed = provider._client
+        await provider.close()
+        assert closed.is_closed()
+        provider._new_client = lambda: closed.with_options(
+            http_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda request: _success(streaming))
+            )
+        )
+
+        # A stopped agent that starts again reuses its provider after close().
+        assert await _turn(provider, streaming) == "ok"
+        assert provider._client is not closed
+        await provider.close()

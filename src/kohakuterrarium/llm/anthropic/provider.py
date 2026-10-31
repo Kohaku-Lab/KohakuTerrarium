@@ -126,23 +126,35 @@ class AnthropicProvider(BaseLLMProvider):
         if auth_as_bearer is None and looks_like_bearer_endpoint(self.base_url):
             self.auth_as_bearer = True
 
-        default_headers = dict(self._extra_headers)
-        if self.auth_as_bearer:
-            default_headers.setdefault("X-Api-Key", Omit())
-        self._client = AsyncAnthropic(
-            api_key=None if self.auth_as_bearer else api_key,
-            auth_token=api_key if self.auth_as_bearer else None,
-            base_url=self.base_url,
-            timeout=timeout,
-            max_retries=max_retries,
-            default_headers=default_headers,
-        )
+        self._client = self._new_client()
         logger.debug(
             "AnthropicProvider initialized",
             model=model,
             base_url=self.base_url,
             auth_as_bearer=self.auth_as_bearer,
         )
+
+    def _new_client(self) -> AsyncAnthropic:
+        """Build an SDK client for the current key and auth shape."""
+        default_headers = dict(self._extra_headers)
+        if self.auth_as_bearer:
+            default_headers.setdefault("X-Api-Key", Omit())
+        return AsyncAnthropic(
+            api_key=None if self.auth_as_bearer else self._api_key,
+            auth_token=self._api_key if self.auth_as_bearer else None,
+            base_url=self.base_url,
+            timeout=self._timeout,
+            max_retries=self._max_retries,
+            default_headers=default_headers,
+        )
+
+    def _open_client(self) -> AsyncAnthropic:
+        """The SDK client, rebuilt if a previous ``close`` shut it."""
+        is_closed = getattr(self._client, "is_closed", None)
+        if callable(is_closed) and is_closed():
+            self._client = self._new_client()
+            self._borrowed_client = False
+        return self._client
 
     async def close(self) -> None:
         if not self._borrowed_client:
@@ -200,17 +212,7 @@ class AnthropicProvider(BaseLLMProvider):
             return False
         old = self._client
         self._api_key = new_key
-        default_headers = dict(self._extra_headers)
-        if self.auth_as_bearer:
-            default_headers.setdefault("X-Api-Key", Omit())
-        self._client = AsyncAnthropic(
-            api_key=None if self.auth_as_bearer else new_key,
-            auth_token=new_key if self.auth_as_bearer else None,
-            base_url=self.base_url,
-            timeout=self._timeout,
-            max_retries=self._max_retries,
-            default_headers=default_headers,
-        )
+        self._client = self._new_client()
         borrowed, self._borrowed_client = self._borrowed_client, False
         try:
             loop = asyncio.get_running_loop()
@@ -298,7 +300,7 @@ class AnthropicProvider(BaseLLMProvider):
             create_kwargs["messages"],
         )
 
-        stream = await self._client.messages.create(**create_kwargs)
+        stream = await self._open_client().messages.create(**create_kwargs)
         blocks: dict[int, dict[str, Any]] = {}
         stop_reason = ""
         progress = ToolCallProgress()
@@ -406,7 +408,7 @@ class AnthropicProvider(BaseLLMProvider):
             create_kwargs["model"],
             create_kwargs["messages"],
         )
-        response = await self._client.messages.create(**create_kwargs)
+        response = await self._open_client().messages.create(**create_kwargs)
         content_blocks = [
             block_to_dict(block) for block in getattr(response, "content", [])
         ]
