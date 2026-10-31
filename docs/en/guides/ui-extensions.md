@@ -66,6 +66,7 @@ ui:
   sdk: ">=1,<2"                 # required SDK range (default ">=1,<2")
   root: ui                      # folder that is served (default "ui")
   entry: ui/index.js            # ESM module; default export register(kt)
+  frame: ui/frame.html          # page of `isolation: frame` contributions
   styles: [ui/style.css]        # optional stylesheets
   i18n:                         # optional message bundles (JSON)
     en: ui/i18n/en.json
@@ -80,7 +81,7 @@ ui:
       description: ""           # optional
       order: 100                # optional sort order
       minDensity: compact       # compact | regular (tabs)
-      isolation: inline         # inline | frame (frame is reserved, see below)
+      isolation: inline         # inline | frame (see "Frame isolation")
     - kind: panel
       id: chats
       label: "QQ chats"
@@ -92,7 +93,8 @@ Rules (checked without importing package code):
 - `root` must resolve (after symlinks) inside the package; `entry`,
   `styles` and `i18n` paths must be inside `root`. Served files are
   checked against both.
-- `entry` is required when any contribution is `inline`.
+- `entry` is required when any contribution is `inline`; `frame` is required
+  when any contribution is `isolation: frame` (and must be inside `root`).
 - A `plugin:` / `tool:` / `trigger:` owner must be a module this package's
   own manifest declares in its `plugins:` / `tools:` / `triggers:` slot.
   (Built-in contributions shipped with the dashboard are exempt.)
@@ -100,11 +102,8 @@ Rules (checked without importing package code):
 - An invalid block marks only that package as broken; the error is shown
   in the Catalog and the package's UI does not load.
 
-`isolation: frame` is accepted and reserved for a future sandboxed-iframe
-mode. In SDK v1 the dashboard shows a "not supported yet" placeholder for
-it and loads nothing. The SDK already exports the reserved names
-(`FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED = false`,
-`createFrameBridge()` which throws).
+`isolation: frame` runs the contribution as a page in a sandboxed iframe; see
+[Frame isolation](#frame-isolation).
 
 ## Writing the frontend part
 
@@ -158,7 +157,8 @@ export default defineExtension((kt) => {
 `hostInfo`, `useHost`, `useSession`, `useCreature`,
 `useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
-`FrameIsolationUnsupportedError`, `createFrameBridge`.
+`FrameIsolationUnsupportedError`, `createFrameBridge` (the dashboard side of
+the frame protocol; frame pages use `window.kt` instead).
 
 ### Overlays
 
@@ -515,6 +515,66 @@ kt.registerNotificationChannel("webhook", async (event) => {
 ```
 
 A failing handler is logged once and never affects other channels.
+
+### Frame isolation
+
+A contribution with `isolation: frame` is a web page (`frame:` in the `ui:` block)
+that runs in an iframe with `sandbox="allow-scripts"`. The page has an opaque
+origin: it cannot read the dashboard's DOM, cookies, local storage or tokens,
+cannot navigate or open windows, and cannot make network requests of its own. It
+talks to the dashboard only through `window.kt`, which the host injects before the
+page's own scripts. Use it for code you do not fully trust, such as a package from
+a marketplace.
+
+```yaml
+ui:
+  frame: ui/frame.html
+  contributes:
+    - kind: tab
+      id: board
+      label: Board
+      isolation: frame
+```
+
+```html
+<!-- ui/frame.html -->
+<link rel="stylesheet" href="style.css">
+<div id="app"></div>
+<script src="app.js"></script>
+```
+
+```js
+// ui/app.js (a classic script)
+const ctx = await kt.ready // { package, id, locale, dark, tokens, subject }
+const data = await kt.api.get("items")       // /api/ext/<package>/items
+const result = await kt.owner.call("reset", {}) // the contribution's owner
+kt.owner.onState((state) => draw(state))
+kt.notify("saved", "success")
+```
+
+| `window.kt` | Purpose |
+|---|---|
+| `ready`, `context`, `onContext(fn)` | package, locale, `dark`, theme `tokens`, and `subject`: the message block, message, file or graph node the contribution is drawn for |
+| `api.get/post/put/patch/delete(path, data?)`, `api.request({method, path, data})` | the package's own API only; any path outside it is refused |
+| `owner.call(action, args)`, `owner.state`, `owner.onState(fn)`, `owner.on(event, fn)` | the owner RPC and pushes |
+| `notify(message, kind?)`, `openTab(id)`, `say(text)`, `resize(height)` | toast, open one of the package's own tabs, send a user message (message renderers), size an inline frame |
+
+What the host enforces:
+
+- **Content security policy.** Scripts, styles, images and fonts load only from
+  the package's asset folder (relative URLs resolve against it); `connect-src`,
+  `frame-src` and `object-src` are `'none'`, and `eval` is blocked. The page's own
+  `<base>` and CSP tags are dropped.
+- **Classic scripts only.** ES module scripts need cross-origin access the opaque
+  origin does not have; bundle the page into classic scripts or inline scripts.
+- **One message protocol** (`kt-ui-frame/1`) with checked shapes: sizes, paths and
+  message lengths are bounded, only messages from this iframe's window are read,
+  and at most 32 requests may be in flight.
+- **Window overlays** are frames too, so a framed overlay never shares the page's
+  origin; it still needs the user's consent to open its own native window.
+
+A frame contribution is not loaded through `entry`; a package may mix inline
+contributions (from `entry`) and frame contributions (from `frame`).
 
 ### Host services
 

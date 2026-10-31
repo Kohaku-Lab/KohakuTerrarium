@@ -185,6 +185,7 @@ class UISlot:
     ui_root: str = DEFAULT_UI_ROOT
     sdk: str = DEFAULT_SDK_RANGE
     entry: str = ""
+    frame: str = ""
     styles: tuple[str, ...] = ()
     api: str = ""
     handler: str = ""
@@ -204,6 +205,7 @@ class UISlot:
             "version": self.version,
             "sdk": self.sdk,
             "entry": self.entry,
+            "frame": self.frame,
             "styles": list(self.styles),
             "has_api": bool(self.api),
             "has_handler": bool(self.handler),
@@ -595,6 +597,14 @@ def _parse_block(
     if not entry and any(c.isolation == "inline" for c in contributions):
         raise _SlotError("entry is required when any contribution is inline")
 
+    frame = ""
+    if raw.get("frame") is not None:
+        frame = _relative_inside(raw.get("frame"), root, "frame")
+    if not frame and any(c.isolation == "frame" for c in contributions):
+        raise _SlotError(
+            "frame is required when any contribution uses isolation: frame"
+        )
+
     styles_raw = raw.get("styles") or []
     if not isinstance(styles_raw, list):
         raise _SlotError("styles must be a list of paths")
@@ -611,6 +621,7 @@ def _parse_block(
         "ui_root": root,
         "sdk": sdk,
         "entry": entry,
+        "frame": frame,
         "styles": styles,
         "api": _parse_ref(raw, "api"),
         "handler": _parse_ref(raw, "handler"),

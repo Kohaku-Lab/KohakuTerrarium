@@ -18,6 +18,7 @@ import {
 import { BUILTIN_UI_PACKAGES } from "@/ext/builtin/index"
 import { closeOwnerSocket } from "@/ext/ownerSocket"
 import { enableRuntimeCompiler } from "@/ext/runtimeCompiler"
+import { buildFrameDocument } from "@/ext/frameDocument"
 import { SDK_VERSION, satisfiesRange } from "@/ext/sdk/version"
 import { installCommandShortcuts } from "@/ext/commands"
 import { createPackageStorage } from "@/ext/hostServices"
@@ -41,6 +42,11 @@ const defaultDeps = {
     const resp = await fetch(url, { credentials: "omit" })
     if (!resp.ok) throw new Error(`${resp.status} fetching ${url}`)
     return resp.json()
+  },
+  fetchText: async (url) => {
+    const resp = await fetch(url, { credentials: "omit" })
+    if (!resp.ok) throw new Error(`${resp.status} fetching ${url}`)
+    return resp.text()
   },
   now: () => Date.now() / 1000,
 }
@@ -77,6 +83,23 @@ function encodePath(path) {
 /** URL of a file under a package's UI root, carrying an asset token. */
 export function assetUrlFor(pkg, path, token) {
   return `${hostBase()}/api/ext/${encodeURIComponent(pkg)}/ui/${token}/${encodePath(path)}`
+}
+
+/** The ``srcdoc`` of a package's frame page, fetched with a fresh asset token. */
+export async function loadFrameDocument(pkg) {
+  const record = findPackage(pkg)
+  if (!record?.frame) throw new Error(`${pkg}: the manifest declares no frame page`)
+  const urlFor = (token) => assetUrlFor(pkg, record.frame, token)
+  let token = await assetToken(pkg)
+  let html
+  try {
+    html = await deps.fetchText(urlFor(token))
+  } catch (_first) {
+    token = await assetToken(pkg, { force: true })
+    html = await deps.fetchText(urlFor(token))
+  }
+  const full = new URL(urlFor(token), globalThis.location?.href || "http://localhost/")
+  return buildFrameDocument(html, { base: new URL(".", full).href, origin: full.origin })
 }
 
 /** The package's asset token, minted again when near expiry or ``force``d. */
@@ -314,6 +337,7 @@ export function startUiExtensions() {
   registerOverlaySettings()
   installCommandShortcuts()
   runtime.ensureLoaded = ensurePackageLoaded
+  runtime.loadFrameDocument = loadFrameDocument
   watch(currentHostKey, () => reloadUiExtensions(), { immediate: true })
   watch(
     () => useLocaleStore().locale,

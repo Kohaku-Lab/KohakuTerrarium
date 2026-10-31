@@ -70,10 +70,12 @@ describe("UI SDK surface", () => {
     expect(satisfiesRange("1.0.0", "latest")).toBe(false)
   })
 
-  it("reserves the frame bridge without implementing it", () => {
-    expect(Sdk.FRAME_SUPPORTED).toBe(false)
+  it("supports the frame bridge and refuses one built without a target", () => {
+    expect(Sdk.FRAME_SUPPORTED).toBe(true)
+    expect(Mock.FRAME_SUPPORTED).toBe(true)
     expect(FRAME_PROTOCOL).toBe("kt-ui-frame/1")
     expect(() => createFrameBridge()).toThrow(FrameIsolationUnsupportedError)
+    expect(() => createFrameBridge({ handlers: {} })).toThrow(FrameIsolationUnsupportedError)
   })
 
   it("generates shared-module proxies and the import map", () => {

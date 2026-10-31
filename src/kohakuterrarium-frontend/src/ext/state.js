@@ -22,6 +22,9 @@ export const runtime = {
   ensureLoaded: async (_pkg) => {
     throw new Error("UI extension loader is not started")
   },
+  loadFrameDocument: async (_pkg) => {
+    throw new Error("UI extension loader is not started")
+  },
 }
 
 /** Global key of a contribution: ``ext:<package>/<id>``. */

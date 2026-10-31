@@ -71,9 +71,10 @@ describe("ExtensionContribution", () => {
     expect(wrapper.find(".real").text()).toBe("turns 4")
   })
 
-  it("renders the reserved frame placeholder without loading anything", async () => {
+  it("draws a frame contribution in a sandboxed iframe without loading the entry", async () => {
     const ensure = vi.fn()
     runtime.ensureLoaded = ensure
+    runtime.loadFrameDocument = vi.fn(async () => "<!doctype html><html><body>hi</body></html>")
     const wrapper = mountIn({
       kind: "tab",
       id: "f",
@@ -82,7 +83,10 @@ describe("ExtensionContribution", () => {
       isolation: "frame",
     })
     await flushPromises()
-    expect(wrapper.find("[data-test=ext-frame-unsupported]").text()).toContain("not supported yet")
+    const frame = wrapper.find("[data-test=ext-frame]")
+    expect(frame.attributes("sandbox")).toBe("allow-scripts")
+    expect(frame.attributes("srcdoc")).toContain("hi")
+    expect(runtime.loadFrameDocument).toHaveBeenCalledWith("alpha")
     expect(ensure).not.toHaveBeenCalled()
   })
 

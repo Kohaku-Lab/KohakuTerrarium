@@ -1,13 +1,7 @@
 <template>
   <div v-if="hidden" class="hidden" data-test="ext-owner-absent" :data-ext="key" />
   <div v-else class="kt-ext-contribution" :class="inline ? 'min-w-0' : 'h-full w-full overflow-auto'" :data-ext="key">
-    <div v-if="contribution.isolation === 'frame'" class="kt-ext-notice" data-test="ext-frame-unsupported">
-      <span class="i-carbon-shield" />
-      <div>
-        <div class="font-medium">{{ contribution.label }}</div>
-        <div class="text-[11px]">Isolated (frame) extensions are not supported yet. This contribution is reserved and shows no content.</div>
-      </div>
-    </div>
+    <FrameHost v-if="contribution.isolation === 'frame'" :pkg="pkg" :contribution="contribution" :owner="owner" :inline="inline" />
     <div v-else-if="failure" class="kt-ext-notice !text-coral" data-test="ext-error">
       <span class="i-carbon-warning-alt" />
       <div class="min-w-0">
@@ -29,6 +23,7 @@
 <script setup>
 import { computed, onErrorCaptured, onUnmounted, provide, ref, watch } from "vue"
 
+import FrameHost from "@/ext/FrameHost.vue"
 import { createOwnerClient } from "@/ext/ownerClient"
 import { useOwnerScope } from "@/ext/ownerScope"
 import { EXTENSION_INJECT_KEY, OWNER_INJECT_KEY } from "@/ext/sdk/keys"

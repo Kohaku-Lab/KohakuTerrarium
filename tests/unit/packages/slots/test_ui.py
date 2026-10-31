@@ -663,13 +663,44 @@ class TestParse:
     def test_block_errors(self, tmp_path, ui, message):
         assert message in _slot(tmp_path, ui).error
 
-    def test_frame_only_package_needs_no_entry(self, tmp_path):
+    def test_frame_only_package_needs_a_frame_page_and_no_entry(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "frame": "ui/frame.html",
+                "contributes": [{"kind": "tab", "id": "t", "isolation": "frame"}],
+            },
+        )
+        assert slot.error == ""
+        assert slot.contributions[0].isolation == "frame"
+        assert slot.frame == "frame.html"
+        assert slot.to_dict()["frame"] == "frame.html"
+        assert slot.entry == ""
+
+    def test_frame_contribution_without_a_frame_page_is_refused(self, tmp_path):
         slot = _slot(
             tmp_path,
             {"contributes": [{"kind": "tab", "id": "t", "isolation": "frame"}]},
         )
-        assert slot.error == ""
-        assert slot.contributions[0].isolation == "frame"
+        assert "frame is required" in slot.error
+
+    @pytest.mark.parametrize("path", ["../x.html", "/abs.html", "other/frame.html", 5])
+    def test_frame_page_must_live_under_the_ui_root(self, tmp_path, path):
+        slot = _slot(
+            tmp_path,
+            {
+                "frame": path,
+                "contributes": [{"kind": "tab", "id": "t", "isolation": "frame"}],
+            },
+        )
+        assert "frame" in slot.error
+
+    def test_a_frame_page_is_optional_without_frame_contributions(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {"entry": "ui/index.js", "contributes": [{"kind": "tab", "id": "t"}]},
+        )
+        assert slot.error == "" and slot.frame == ""
 
     def test_absent_and_non_mapping_blocks(self, tmp_path):
         root = _pkg(tmp_path)
