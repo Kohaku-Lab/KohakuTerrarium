@@ -2,9 +2,11 @@
 
 mod backend;
 mod commands;
+mod files;
 mod navigation;
 mod overlay;
 mod smoke;
+mod tray;
 mod window;
 
 use tauri::{Manager, RunEvent};
@@ -13,6 +15,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 use crate::backend::Backend;
 use crate::commands::DeepLinks;
+use crate::tray::ShellSettings;
 
 fn deliver_deep_link(app: &tauri::AppHandle, url: String) {
     *app.state::<DeepLinks>().0.lock().unwrap() = Some(url.clone());
@@ -47,6 +50,7 @@ pub fn run() {
         .manage(Backend::default())
         .manage(DeepLinks::default())
         .manage(overlay::HitRegions::default())
+        .manage(ShellSettings::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_capabilities,
             commands::request_desktop_attention,
@@ -65,16 +69,42 @@ pub fn run() {
             overlay::overlay_set_bounds,
             overlay::overlay_set_hit_regions,
             overlay::overlay_ack,
+            tray::get_close_to_tray,
+            tray::set_close_to_tray,
+            tray::set_attention_count,
         ])
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
-                window.app_handle().exit(0);
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. }
+                    if window
+                        .app_handle()
+                        .state::<ShellSettings>()
+                        .hides_on_close() =>
+                {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                tauri::WindowEvent::DragDrop(drag) => {
+                    if let Some(main) = window.app_handle().get_webview_window("main") {
+                        let _ = main.eval(files::script(&files::detail(drag)));
+                    }
+                }
+                tauri::WindowEvent::Destroyed => window.app_handle().exit(0),
+                _ => {}
             }
         })
         .setup(move |app| {
             window::create(app)?;
+            if let Ok(directory) = app.path().app_config_dir() {
+                app.state::<ShellSettings>().load(directory);
+            }
             if !headless {
-                window::install_tray(app)?;
+                tray::install(app)?;
+            } else if smoke::tray_probe_requested() {
+                let _ = tray::install(app);
             }
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {

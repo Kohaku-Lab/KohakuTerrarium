@@ -16,6 +16,9 @@ const COMMANDS: &[&str] = &[
     "overlay_set_bounds",
     "overlay_set_hit_regions",
     "overlay_ack",
+    "get_close_to_tray",
+    "set_close_to_tray",
+    "set_attention_count",
 ];
 
 fn main() {

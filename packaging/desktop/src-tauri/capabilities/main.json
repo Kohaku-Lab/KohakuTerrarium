@@ -20,6 +20,9 @@
     "allow-check-shell-update",
     "allow-install-shell-update",
     "allow-open-overlay-window",
-    "allow-close-overlay-window"
+    "allow-close-overlay-window",
+    "allow-get-close-to-tray",
+    "allow-set-close-to-tray",
+    "allow-set-attention-count"
   ]
 }

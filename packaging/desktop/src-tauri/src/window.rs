@@ -1,7 +1,5 @@
-//! The single main window, its navigation policy, and the tray menu.
+//! The single main window and its navigation policy.
 
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::{Color, PageLoadEvent};
 use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
@@ -74,34 +72,4 @@ pub fn focus(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-}
-
-pub fn install_tray(app: &App) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Show KohakuTerrarium", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
-    TrayIconBuilder::with_id("main")
-        .icon(tauri::include_image!(
-            "../../../src/kohakuterrarium/app_icon.png"
-        ))
-        .tooltip("KohakuTerrarium")
-        .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => focus(app),
-            "quit" => app.exit(0),
-            _ => {}
-        })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                focus(tray.app_handle());
-            }
-        })
-        .build(app)?;
-    Ok(())
 }

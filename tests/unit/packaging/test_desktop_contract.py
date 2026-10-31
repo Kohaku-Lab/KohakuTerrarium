@@ -16,6 +16,7 @@ from kohakuterrarium.utils.interpreter import PYTHON_ENV
 ROOT = Path(__file__).resolve().parents[3]
 TAURI = ROOT / "packaging" / "desktop" / "src-tauri"
 SRC = ROOT / "src" / "kohakuterrarium"
+COMMAND_MODULES = ("commands.rs", "overlay.rs", "tray.rs")
 
 
 def _text(path: Path) -> str:
@@ -77,7 +78,7 @@ def _allowed(capability_file: str) -> set[str]:
 
 def test_every_command_is_declared_allowed_and_registered():
     declared = set()
-    for module in ("commands.rs", "overlay.rs"):
+    for module in COMMAND_MODULES:
         declared |= set(
             re.findall(
                 r"#\[tauri::command\]\s*pub (?:async )?fn ([a-z_]+)\(",
@@ -86,7 +87,9 @@ def test_every_command_is_declared_allowed_and_registered():
         )
     manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
     registered = set(
-        re.findall(r"(?:commands|overlay)::([a-z_]+),", _text(TAURI / "src" / "lib.rs"))
+        re.findall(
+            r"(?:commands|overlay|tray)::([a-z_]+),", _text(TAURI / "src" / "lib.rs")
+        )
     )
     assert declared == manifest == registered
     assert declared == _allowed("main.json") | _allowed("overlay.json")
@@ -105,6 +108,38 @@ def test_app_page_origin_is_the_only_remote_capability():
         capability = json.loads(_text(TAURI / "capabilities" / name))
         assert capability["remote"]["urls"] == ["http://127.0.0.1:*"]
         assert capability["windows"] == windows
+
+
+def test_tray_capabilities_the_page_checks_are_declared_by_the_shell():
+    commands_rs = _text(TAURI / "src" / "commands.rs")
+    effects = _text(
+        ROOT
+        / "src"
+        / "kohakuterrarium-frontend"
+        / "src"
+        / "composables"
+        / "useAttentionEffects.js"
+    )
+    for flag in re.findall(r"hostCapabilities\?\.([A-Za-z]+) !== true", effects):
+        assert f'"{flag}": true' in commands_rs, flag
+
+
+def test_file_drop_event_name_matches_the_frontend():
+    files_rs = _text(TAURI / "src" / "files.rs")
+    event = _rust_const(files_rs, "DROP_EVENT")
+    composable = _text(
+        ROOT
+        / "src"
+        / "kohakuterrarium-frontend"
+        / "src"
+        / "composables"
+        / "useDesktopFileDrop.js"
+    )
+    assert f'FILE_DROP_EVENT = "{event}"' in composable
+    for phase in ("enter", "over", "drop", "leave"):
+        assert f'"phase": "{phase}"' in files_rs
+    for phase in ("drop", "leave"):
+        assert f'phase === "{phase}"' in composable
 
 
 def test_overlay_page_parameter_and_window_prefix_match_the_frontend():
@@ -144,7 +179,7 @@ def test_commands_the_frontend_calls_exist_in_the_shell():
     )
     called = set(re.findall(r'(?:hostSupports|call)\("([a-z_]+)"', bridge))
     shell = set()
-    for module in ("commands.rs", "overlay.rs"):
+    for module in COMMAND_MODULES:
         shell |= set(
             re.findall(r"pub (?:async )?fn ([a-z_]+)\(", _text(TAURI / "src" / module))
         )

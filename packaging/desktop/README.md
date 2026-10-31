@@ -51,7 +51,9 @@ exits (status 0 when the page loaded).
 
 With `KT_DESKTOP_SMOKE_OVERLAY` also set, the shell opens a native overlay window
 (`overlay.rs`) and the report's `overlayWindow` says whether that window loaded the
-app page and called a native command from it. The installer tests always set it.
+app page and called a native command from it. `KT_DESKTOP_SMOKE_TRAY` creates the
+tray icon and reports whether its attention badge can be shown and cleared
+(`tray`). The installer tests always set both.
 
 With `KT_DESKTOP_SMOKE_UPDATE` also set, the self-check fetches the update feed and
 downloads the advertised build, which verifies its signature; the report's

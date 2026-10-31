@@ -66,6 +66,7 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
         "KT_CONFIG_DIR": str(config_dir),
         "KT_DESKTOP_SMOKE_OUT": str(report),
         "KT_DESKTOP_SMOKE_OVERLAY": "1",
+        "KT_DESKTOP_SMOKE_TRAY": "1",
     }
     if os.environ.get("KT_DESKTOP_RESOURCES") is None and resources != exe.parent:
         env["KT_DESKTOP_RESOURCES"] = str(resources)
@@ -93,6 +94,11 @@ def check_report(data: dict) -> list[str]:
         problems.append("the shell could not open an overlay window")
     elif overlay.get("pageLoaded") is not True or overlay.get("ipc") is not True:
         problems.append(f"the overlay window did not run the app page: {overlay}")
+    tray = data.get("tray") or {}
+    if tray.get("installed") is not True:
+        problems.append("the shell did not create a tray icon")
+    elif tray.get("badgeShown") is not True or tray.get("badgeCleared") is not True:
+        problems.append(f"the tray icon badge could not be updated: {tray}")
     if data.get("unauthenticatedStatus") != 401:
         problems.append(
             f"a request without the launch cookie got {data.get('unauthenticatedStatus')}, expected 401"

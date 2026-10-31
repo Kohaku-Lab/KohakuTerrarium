@@ -47,6 +47,9 @@ pub fn capabilities() -> Value {
         "autostart": true,
         "deepLink": true,
         "overlayWindows": true,
+        "closeToTray": true,
+        "trayBadge": true,
+        "fileDrop": true,
     })
 }
 

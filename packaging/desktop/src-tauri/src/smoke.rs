@@ -133,24 +133,44 @@ pub fn overlay_probe_requested() -> bool {
     std::env::var_os("KT_DESKTOP_SMOKE_OVERLAY").is_some()
 }
 
-pub fn report(
-    version: &str,
-    port: u16,
-    page_loaded: bool,
-    ipc: bool,
-    update: Option<Value>,
-    overlay: Option<Value>,
-) -> Value {
-    let update_ok = update
+pub fn tray_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_TRAY").is_some()
+}
+
+/// Show and clear the attention badge on the tray icon.
+fn tray_probe(app: &AppHandle) -> Value {
+    let installed = app.tray_by_id("main").is_some();
+    let shown = installed && crate::tray::update_badge(app, 1, 2);
+    let cleared = installed && crate::tray::update_badge(app, 0, 0);
+    json!({ "installed": installed, "badgeShown": shown, "badgeCleared": cleared })
+}
+
+/// Results of the optional probes a self-check was asked to run.
+#[derive(Clone, Default)]
+pub struct Probes {
+    pub update: Option<Value>,
+    pub overlay: Option<Value>,
+    pub tray: Option<Value>,
+}
+
+pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Probes) -> Value {
+    let update_ok = probes
+        .update
         .as_ref()
         .is_none_or(|probe| probe["downloadVerified"] == true || probe["upToDate"] == true);
-    let overlay_ok = overlay
+    let overlay_ok = probes
+        .overlay
         .as_ref()
         .is_none_or(|probe| probe["pageLoaded"] == true && probe["ipc"] == true);
+    let tray_ok = probes
+        .tray
+        .as_ref()
+        .is_none_or(|probe| probe["badgeShown"] == true && probe["badgeCleared"] == true);
     json!({
-        "ok": page_loaded && ipc && update_ok && overlay_ok,
-        "shellUpdate": update,
-        "overlayWindow": overlay,
+        "ok": page_loaded && ipc && update_ok && overlay_ok && tray_ok,
+        "shellUpdate": probes.update,
+        "overlayWindow": probes.overlay,
+        "tray": probes.tray,
         "port": port,
         "pageLoaded": page_loaded,
         "ipcFromAppPage": ipc,
@@ -184,16 +204,22 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
             thread::sleep(Duration::from_millis(100));
         }
         let version = app.package_info().version.to_string();
-        let overlay = overlay_probe_requested().then(|| overlay_probe(&app));
-        let update = update_probe_requested().map(|probe| {
+        let mut probes = Probes {
+            overlay: overlay_probe_requested().then(|| overlay_probe(&app)),
+            tray: tray_probe_requested().then(|| tray_probe(&app)),
+            update: None,
+        };
+        probes.update = update_probe_requested().map(|probe| {
             update_probe(&app, probe, |interim| {
                 let value = report(
                     &version,
                     port,
                     backend.page_loaded(),
                     backend.ipc_confirmed(),
-                    Some(interim.clone()),
-                    overlay.clone(),
+                    Probes {
+                        update: Some(interim.clone()),
+                        ..probes.clone()
+                    },
                 );
                 write_report(&out, &value);
             })
@@ -203,8 +229,7 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
             port,
             backend.page_loaded(),
             backend.ipc_confirmed(),
-            update,
-            overlay,
+            probes,
         );
         write_report(&out, &value);
         app.exit(if value["ok"] == true { 0 } else { 1 });
@@ -259,35 +284,49 @@ mod tests {
 
     #[test]
     fn a_report_is_ok_only_when_the_page_loaded_and_could_call_native_commands() {
-        for (loaded, ipc) in [(false, false), (true, false), (false, true)] {
+        let ok = |loaded, ipc, probes| {
             let port = serve_once("HTTP/1.1 401 Unauthorized");
-            assert_eq!(report("1.0.0", port, loaded, ipc, None, None)["ok"], false);
+            report("1.0.0", port, loaded, ipc, probes)["ok"] == true
+        };
+        for (loaded, ipc) in [(false, false), (true, false), (false, true)] {
+            assert!(!ok(loaded, ipc, Probes::default()));
         }
-        for (probe, ok) in [
+        for (probe, expected) in [
             (json!({ "pageLoaded": true, "ipc": false }), false),
             (json!({ "pageLoaded": false, "ipc": true }), false),
             (json!({ "pageLoaded": true, "ipc": true }), true),
         ] {
-            let port = serve_once("HTTP/1.1 401 Unauthorized");
-            assert_eq!(
-                report("1.0.0", port, true, true, None, Some(probe))["ok"],
-                ok
-            );
+            let probes = Probes {
+                overlay: Some(probe),
+                ..Probes::default()
+            };
+            assert_eq!(ok(true, true, probes), expected);
         }
-        for (probe, ok) in [
+        for (probe, expected) in [
             (json!({ "downloadVerified": false }), false),
             (json!({ "available": false }), false),
             (json!({ "downloadVerified": true }), true),
             (json!({ "available": false, "upToDate": true }), true),
         ] {
-            let port = serve_once("HTTP/1.1 401 Unauthorized");
-            assert_eq!(
-                report("1.0.0", port, true, true, Some(probe), None)["ok"],
-                ok
-            );
+            let probes = Probes {
+                update: Some(probe),
+                ..Probes::default()
+            };
+            assert_eq!(ok(true, true, probes), expected);
+        }
+        for (probe, expected) in [
+            (json!({ "installed": false }), false),
+            (json!({ "badgeShown": true, "badgeCleared": false }), false),
+            (json!({ "badgeShown": true, "badgeCleared": true }), true),
+        ] {
+            let probes = Probes {
+                tray: Some(probe),
+                ..Probes::default()
+            };
+            assert_eq!(ok(true, true, probes), expected);
         }
         let port = serve_once("HTTP/1.1 401 Unauthorized");
-        let healthy = report("1.2.3", port, true, true, None, None);
+        let healthy = report("1.2.3", port, true, true, Probes::default());
         assert_eq!(healthy["ok"], true);
         assert_eq!(healthy["version"], "1.2.3");
         assert_eq!(healthy["ipcFromAppPage"], true);
