@@ -152,9 +152,24 @@ export function setSummonShortcut(shortcut) {
   return callBoolean("set_summon_shortcut", shortcut ?? null)
 }
 
-/** Show the `pending` and `completed` attention counts on the tray icon and taskbar entry. */
-export function setAttentionCount(pending, completed) {
-  return callBoolean("set_attention_count", Math.max(0, pending | 0), Math.max(0, completed | 0))
+/** Show how many sessions are `waiting`, `failed`, `running` and `finished` on the tray icon and taskbar entry. */
+export function setAttentionState({ waiting = 0, failed = 0, running = 0, finished = 0 } = {}) {
+  const count = (value) => Math.max(0, value | 0)
+  return callBoolean("set_attention_state", {
+    waiting: count(waiting),
+    failed: count(failed),
+    running: count(running),
+    finished: count(finished),
+  })
+}
+
+/** Show these sessions in the tray menu: `{ waiting: [{ id, label }], sessions: [{ id, label }] }`. */
+export function setTraySessions({ waiting = [], sessions = [] } = {}) {
+  const entries = (list) => list.map(({ id, label }) => ({ id: String(id), label: String(label) }))
+  return callBoolean("set_tray_sessions", {
+    waiting: entries(waiting),
+    sessions: entries(sessions),
+  })
 }
 
 /** Replace the extension items in the tray menu with `[{ id, label }]`. Resolves ``false`` if the shell has no tray menu. */

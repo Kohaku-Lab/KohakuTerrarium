@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, watch } from "vue"
 
 import { dispatchToChannels } from "@/ext/notificationChannels"
 import {
+  attentionOverview,
   firstAttentionTarget,
   subscribeAttention,
   subscribeAttentionEdges,
@@ -15,7 +16,7 @@ import {
   hostSupports,
   onHostReady,
   requestDesktopAttention as requestHostAttention,
-  setAttentionCount,
+  setAttentionState,
   showDesktopNotification,
 } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
@@ -48,7 +49,7 @@ export function useAttentionEffects() {
   let favicons = []
   let originalFavicons = []
   let pendingDesktopAttention = false
-  let lastBadge = { pending: -1, completed: -1 }
+  let lastBadge = ""
 
   async function detectDesktopSurface() {
     if (!hasDesktopHost()) return
@@ -186,10 +187,11 @@ export function useAttentionEffects() {
 
   function publishTrayBadge() {
     if (!desktopSurface || hostCapabilities?.trayBadge !== true) return
-    const { pending, completed } = totalAttention()
-    if (pending === lastBadge.pending && completed === lastBadge.completed) return
-    lastBadge = { pending, completed }
-    void setAttentionCount(pending, completed)
+    const overview = attentionOverview()
+    const key = JSON.stringify(overview)
+    if (key === lastBadge) return
+    lastBadge = key
+    void setAttentionState(overview)
   }
 
   function openFirstAttention() {

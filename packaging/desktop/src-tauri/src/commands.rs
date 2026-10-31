@@ -54,6 +54,8 @@ pub fn capabilities() -> Value {
         "openFiles": true,
         "popoutWindows": true,
         "nativeDialogs": true,
+        "taskbarProgress": true,
+        "trayMenu": true,
     })
 }
 

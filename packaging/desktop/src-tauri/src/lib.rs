@@ -1,5 +1,6 @@
 //! KohakuTerrarium desktop shell: a native window around the local Python backend.
 
+mod attention;
 mod backend;
 mod commands;
 mod dialogs;
@@ -73,6 +74,7 @@ pub fn run() {
         .manage(overlay::HitRegions::default())
         .manage(opens::PendingOpens::default())
         .manage(ShellSettings::default())
+        .manage(tray::TrayState::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_capabilities,
             commands::request_desktop_attention,
@@ -93,8 +95,9 @@ pub fn run() {
             overlay::overlay_ack,
             tray::get_close_to_tray,
             tray::set_close_to_tray,
-            tray::set_attention_count,
+            attention::set_attention_state,
             tray::set_tray_items,
+            tray::set_tray_sessions,
             summon::get_summon_shortcut,
             summon::set_summon_shortcut,
             opens::take_pending_opens,

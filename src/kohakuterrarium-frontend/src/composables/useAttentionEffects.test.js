@@ -245,7 +245,7 @@ describe("useAttentionEffects", () => {
         get_desktop_capabilities: vi
           .fn()
           .mockResolvedValue({ surface: "desktop", protocol: 1, trayBadge: true }),
-        set_attention_count: setCount,
+        set_attention_state: setCount,
       },
     }
     clearAttentionRegistry()
@@ -253,19 +253,23 @@ describe("useAttentionEffects", () => {
     await nextTick()
     await Promise.resolve()
     await Promise.resolve()
-    expect(setCount).toHaveBeenLastCalledWith(0, 0)
+    expect(setCount).toHaveBeenLastCalledWith({ waiting: 0, failed: 0, running: 0, finished: 0 })
 
     publishAttention("graph-a", "root", { ...createAttentionState(), completed: 2 })
     publishAttention("graph-b", "helper", {
       ...createAttentionState(),
       pending: new Set(["ask-1"]),
+      processing: true,
+      errors: 1,
     })
     await Promise.resolve()
-    expect(setCount).toHaveBeenLastCalledWith(1, 2)
+    expect(setCount).toHaveBeenLastCalledWith({ waiting: 1, failed: 1, running: 1, finished: 2 })
     const calls = setCount.mock.calls.length
     publishAttention("graph-b", "helper", {
       ...createAttentionState(),
       pending: new Set(["ask-1"]),
+      processing: true,
+      errors: 1,
     })
     expect(setCount.mock.calls.length).toBe(calls)
 
@@ -286,7 +290,7 @@ describe("useAttentionEffects", () => {
     window.pywebview = {
       api: {
         get_desktop_capabilities: vi.fn().mockResolvedValue({ surface: "desktop", protocol: 1 }),
-        set_attention_count: setCount,
+        set_attention_state: setCount,
       },
     }
     clearAttentionRegistry()

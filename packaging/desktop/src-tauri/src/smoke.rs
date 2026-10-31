@@ -14,7 +14,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
+use crate::attention::{self, Counts};
 use crate::backend::Backend;
+use crate::tray::{self, TrayState};
 
 const PAGE_TIMEOUT: Duration = Duration::from_secs(120);
 const IPC_TIMEOUT: Duration = Duration::from_secs(90);
@@ -180,9 +182,25 @@ pub fn tray_probe_requested() -> bool {
 /// Show and clear the attention badge on the tray icon.
 fn tray_probe(app: &AppHandle) -> Value {
     let installed = app.tray_by_id("main").is_some();
-    let shown = installed && crate::tray::update_badge(app, 1, 2);
-    let cleared = installed && crate::tray::update_badge(app, 0, 0);
-    json!({ "installed": installed, "badgeShown": shown, "badgeCleared": cleared })
+    let busy = Counts {
+        waiting: 1,
+        failed: 1,
+        running: 2,
+        finished: 2,
+    };
+    let shown = installed && attention::apply(app, &busy);
+    let cleared = installed && attention::apply(app, &Counts::default());
+    let state = app.state::<TrayState>();
+    let pair = |id: &str| (id.to_string(), id.to_uppercase());
+    let menu_shown = installed && tray::set_sessions(app, &state, vec![pair("a")], vec![pair("b")]);
+    let menu_cleared = installed && tray::set_sessions(app, &state, vec![], vec![]);
+    json!({
+        "installed": installed,
+        "badgeShown": shown,
+        "badgeCleared": cleared,
+        "menuShown": menu_shown,
+        "menuCleared": menu_cleared,
+    })
 }
 
 /// Results of the optional probes a self-check was asked to run.
@@ -205,10 +223,11 @@ pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Pr
         .overlay
         .as_ref()
         .is_none_or(|probe| probe["pageLoaded"] == true && probe["ipc"] == true);
-    let tray_ok = probes
-        .tray
-        .as_ref()
-        .is_none_or(|probe| probe["badgeShown"] == true && probe["badgeCleared"] == true);
+    let tray_ok = probes.tray.as_ref().is_none_or(|probe| {
+        ["badgeShown", "badgeCleared", "menuShown", "menuCleared"]
+            .iter()
+            .all(|key| probe[*key] == true)
+    });
     let summon_ok = probes
         .summon
         .as_ref()
@@ -414,7 +433,19 @@ mod tests {
         for (probe, expected) in [
             (json!({ "installed": false }), false),
             (json!({ "badgeShown": true, "badgeCleared": false }), false),
-            (json!({ "badgeShown": true, "badgeCleared": true }), true),
+            (
+                json!({ "badgeShown": true, "badgeCleared": true, "menuShown": true }),
+                false,
+            ),
+            (
+                json!({
+                    "badgeShown": true,
+                    "badgeCleared": true,
+                    "menuShown": true,
+                    "menuCleared": true,
+                }),
+                true,
+            ),
         ] {
             let probes = Probes {
                 tray: Some(probe),

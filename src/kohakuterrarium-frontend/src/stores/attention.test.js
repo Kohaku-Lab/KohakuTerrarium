@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   attentionForScope,
+  attentionOverview,
+  waitingAttentionTargets,
   clearAttentionRegistry,
   createAttentionState,
   markAttentionRead,
@@ -312,5 +314,56 @@ describe("chat attention", () => {
 
     removeAttentionScope("graph-a")
     expect(totalAttention()).toEqual({ pending: 0, completed: 1 })
+  })
+
+  it("counts a failed turn once, stops it running, and clears the count when read", () => {
+    let state = createAttentionState()
+    state = reduceAttention(state, { type: "processing_start" })
+    expect(state.processing).toBe(true)
+    state = reduceAttention(state, { type: "activity", activity_type: "processing_error" })
+    expect(state).toMatchObject({ processing: false, errors: 1, completed: 0 })
+    state = reduceAttention(state, { type: "processing_error" })
+    expect(state.errors).toBe(2)
+
+    const replayed = reduceAttention(state, { type: "processing_error", replay: true })
+    expect(replayed.errors).toBe(2)
+    const historic = reduceAttention(state, { type: "processing_error", history: true })
+    expect(historic.errors).toBe(2)
+
+    expect(markAttentionRead(state).errors).toBe(0)
+    const legacy = reduceAttention(
+      { completed: 0, processing: true, seen: new Set(), pending: new Set() },
+      { type: "processing_error" },
+    )
+    expect(legacy.errors).toBe(1)
+  })
+
+  it("does not raise an attention edge for a failed turn", () => {
+    const { edge, state } = reduceAttentionEdge(
+      { ...createAttentionState(), processing: true },
+      { type: "activity", activity_type: "processing_error" },
+      { scope: "g", tab: "root" },
+    )
+    expect(edge).toBeNull()
+    expect(state.errors).toBe(1)
+  })
+
+  it("summarises every state across tabs and lists what waits for the user", () => {
+    publishAttention("graph-a", "root", {
+      ...createAttentionState(),
+      processing: true,
+      completed: 2,
+    })
+    publishAttention("graph-a", "helper", {
+      ...createAttentionState(),
+      pending: new Set(["x", "y"]),
+      errors: 1,
+    })
+    publishAttention("graph-b", "root", { ...createAttentionState(), processing: true })
+    expect(attentionOverview()).toEqual({ waiting: 2, failed: 1, running: 2, finished: 2 })
+    expect(waitingAttentionTargets()).toEqual([{ scope: "graph-a", tab: "helper", pending: 2 }])
+    clearAttentionRegistry()
+    expect(attentionOverview()).toEqual({ waiting: 0, failed: 0, running: 0, finished: 0 })
+    expect(waitingAttentionTargets()).toEqual([])
   })
 })

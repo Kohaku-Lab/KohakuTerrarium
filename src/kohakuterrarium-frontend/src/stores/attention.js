@@ -13,10 +13,19 @@ function notifyListeners() {
 export function createAttentionState() {
   return {
     completed: 0,
+    errors: 0,
     processing: false,
     seen: new Set(),
     pending: new Set(),
   }
+}
+
+/** Whether ``event`` reports a turn that failed. */
+function isProcessingError(event) {
+  return (
+    event.type === "processing_error" ||
+    (event.type === "activity" && event.activity_type === "processing_error")
+  )
 }
 
 function attentionEventId(event) {
@@ -82,6 +91,12 @@ export function reduceAttention(state, event) {
 
   if (event.type === "processing_start") {
     next.processing = true
+    return next
+  }
+
+  if (isProcessingError(event)) {
+    next.processing = false
+    next.errors = (next.errors ?? 0) + 1
     return next
   }
 
@@ -203,6 +218,28 @@ export function totalAttention() {
   return { pending, completed }
 }
 
+/** Every state the desktop shell shows: `{ waiting, failed, running, finished }` across all tabs. */
+export function attentionOverview() {
+  const overview = { waiting: 0, failed: 0, running: 0, finished: 0 }
+  for (const { state } of snapshots.values()) {
+    overview.waiting += state?.pending?.size ?? 0
+    overview.failed += state?.errors ?? 0
+    overview.running += state?.processing ? 1 : 0
+    overview.finished += state?.completed ?? 0
+  }
+  return overview
+}
+
+/** The scopes with something waiting for the user: `[{ scope, tab, pending }]`, in registration order. */
+export function waitingAttentionTargets() {
+  const targets = []
+  for (const { scope, tab, state } of snapshots.values()) {
+    const pending = state?.pending?.size ?? 0
+    if (pending > 0) targets.push({ scope, tab, pending })
+  }
+  return targets
+}
+
 /** The first tab that needs the user: one waiting for input, else one with finished work. */
 export function firstAttentionTarget() {
   let finished = null
@@ -227,6 +264,7 @@ export function markAttentionRead(state) {
   return {
     ...state,
     completed: 0,
+    errors: 0,
     seen: new Set(state.seen),
     pending: new Set(state.pending),
   }

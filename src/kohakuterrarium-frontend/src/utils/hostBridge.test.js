@@ -18,7 +18,8 @@ import {
   getSummonShortcut,
   openOverlayWindow,
   setSummonShortcut,
-  setAttentionCount,
+  setAttentionState,
+  setTraySessions,
   setCloseToTray,
   overlayWindowsSupported,
   setOverlayBounds,
@@ -187,21 +188,33 @@ describe("hostBridge", () => {
     const api = {
       get_close_to_tray: vi.fn(async () => true),
       set_close_to_tray: vi.fn(async () => true),
-      set_attention_count: vi.fn(async () => true),
+      set_attention_state: vi.fn(async () => true),
+      set_tray_sessions: vi.fn(async () => true),
     }
     window.pywebview = { api }
     expect(await getCloseToTray()).toBe(true)
     expect(await setCloseToTray(false)).toBe(false)
     expect(api.set_close_to_tray).toHaveBeenCalledWith(false)
-    expect(await setAttentionCount(2.9, -4)).toBe(true)
-    expect(api.set_attention_count).toHaveBeenCalledWith(2, 0)
+    expect(await setAttentionState({ waiting: 2.9, failed: -4, running: 1 })).toBe(true)
+    expect(api.set_attention_state).toHaveBeenCalledWith({
+      waiting: 2,
+      failed: 0,
+      running: 1,
+      finished: 0,
+    })
+    expect(await setTraySessions({ waiting: [{ id: 7, label: "A" }] })).toBe(true)
+    expect(api.set_tray_sessions).toHaveBeenCalledWith({
+      waiting: [{ id: "7", label: "A" }],
+      sessions: [],
+    })
 
     api.set_close_to_tray.mockResolvedValue(false)
     expect(await setCloseToTray(true)).toBe(false)
     window.pywebview = { api: {} }
     expect(await getCloseToTray()).toBeNull()
     expect(await setCloseToTray(true)).toBeNull()
-    expect(await setAttentionCount(1, 1)).toBe(false)
+    expect(await setAttentionState({ waiting: 1 })).toBe(false)
+    expect(await setTraySessions()).toBe(false)
   })
 
   it("opens session windows through Tauri only", async () => {

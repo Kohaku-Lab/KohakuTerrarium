@@ -41,6 +41,7 @@ import { useConnectIntent } from "@/composables/useConnectIntent"
 import { useDensity } from "@/composables/useDensity"
 import { useDesktopMenu } from "@/composables/useDesktopMenu"
 import { useDesktopTrayItems } from "@/composables/useDesktopTrayItems"
+import { useDesktopTrayMenu } from "@/composables/useDesktopTrayMenu"
 import { useDesktopPopout } from "@/composables/useDesktopPopout"
 import { useDesktopSummon } from "@/composables/useDesktopSummon"
 import { useDocumentAttention } from "@/composables/useDocumentAttention"
@@ -94,6 +95,7 @@ useDesktopSummon()
 useDesktopPopout()
 useDesktopMenu()
 useDesktopTrayItems()
+useDesktopTrayMenu()
 useDocumentAttention()
 useAttentionEffects()
 useBuiltinCommands()

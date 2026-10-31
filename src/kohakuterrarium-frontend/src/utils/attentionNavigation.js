@@ -2,13 +2,19 @@ import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
 import { useTabsStore } from "@/stores/tabs"
 
-export function navigateToAttention({ scope, tab }) {
-  if (!scope || !tab) return false
-
+/** Show the session ``scope`` in its own tab, opening the tab when it is not open. */
+export function openSessionScope(scope) {
+  if (!scope) return false
   const tabs = useTabsStore()
   const id = `attach:${scope}`
   tabs.openTab({ kind: "attach", id, target: scope })
   tabs.activateTab(id)
+  return true
+}
+
+export function navigateToAttention({ scope, tab }) {
+  if (!scope || !tab) return false
+  openSessionScope(scope)
   useChatStore(scope).openTab(tab)
   return true
 }
