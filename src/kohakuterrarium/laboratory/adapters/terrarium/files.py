@@ -231,7 +231,14 @@ class TerrariumFilesAdapter:
                 raise ScopeError(
                     f"expect_hash mismatch: file at {scope}/{rel} has sha256 {actual}"
                 )
-        await run_mutation_worker(write_bytes_enrolled, target, data)
+        await run_mutation_worker(
+            write_bytes_enrolled,
+            target,
+            data,
+            # Re-check after admission: a session may have attached to the
+            # target while this mutation waited for occupancy.
+            lambda: self._reject_active_session_path(target),
+        )
         return {"written": len(data), "sha256": _hash_bytes(data)}
 
     async def _op_write_begin(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -324,8 +331,14 @@ class TerrariumFilesAdapter:
                 replace_enrolled,
                 transfer.staging,
                 transfer.target,
+                # Re-check after admission, like the guard above: a session
+                # may have attached while the replace waited for occupancy.
+                lambda: self._reject_active_session_path(transfer.target),
                 on_success=lambda: self._transfers.pop(transfer_id, None),
             )
+        except ScopeError:
+            await self._discard_transfer(transfer_id)
+            raise
         except PermissionError as exc:
             # Windows may lock a resumed session target; retain idempotent success.
             if not transfer.target.exists():
@@ -394,7 +407,15 @@ class TerrariumFilesAdapter:
             # enroll nested identities without racing concurrent creates.
             await asyncio.to_thread(shutil.rmtree, target)
         else:
-            await run_mutation_worker(unlink_enrolled, target)
+            await run_mutation_worker(
+                unlink_enrolled,
+                target,
+                # Re-check after admission: a session may have attached to
+                # the target while this mutation waited for occupancy.
+                lambda: self._reject_active_session_path(
+                    target, include_descendants=True
+                ),
+            )
         return {}
 
     async def _op_getcwd(self, body: dict[str, Any]) -> dict[str, Any]:
