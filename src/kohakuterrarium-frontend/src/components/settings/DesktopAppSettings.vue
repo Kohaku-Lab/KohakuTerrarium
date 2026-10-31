@@ -20,6 +20,18 @@
       <el-switch :model-value="shell.settings.value?.restorePopouts !== false" @change="(value) => shell.patch({ restorePopouts: value })" />
     </div>
 
+    <div v-if="showKeepAwake" class="flex items-start justify-between gap-4" data-setting="keep-awake">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.keepAwakeTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.keepAwakeHint") }}</div>
+      </div>
+      <select class="text-xs rounded border border-warm-300 dark:border-warm-600 bg-transparent px-2 py-1" data-keep-awake @change="(event) => shell.patch({ keepAwake: event.target.value })">
+        <option value="never" :selected="shell.settings.value?.keepAwake === 'never'">{{ t("settings.desktop.keepAwakeNever") }}</option>
+        <option value="running" :selected="shell.settings.value?.keepAwake === 'running'">{{ t("settings.desktop.keepAwakeRunning") }}</option>
+        <option value="running-on-ac" :selected="shell.settings.value?.keepAwake === 'running-on-ac'">{{ t("settings.desktop.keepAwakeAc") }}</option>
+      </select>
+    </div>
+
     <div v-if="showAutostart" class="desktop-section-title" data-section="startup">{{ t("settings.desktop.sectionStartup") }}</div>
 
     <div v-if="showAutostart" class="flex items-start justify-between gap-4" data-setting="autostart">
@@ -28,6 +40,14 @@
         <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.autostartHint") }}</div>
       </div>
       <el-switch :model-value="autostart" @change="setLogin" />
+    </div>
+
+    <div v-if="showAutostart && showRestore" class="flex items-start justify-between gap-4" data-setting="start-hidden">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.startHiddenTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.startHiddenHint") }}</div>
+      </div>
+      <el-switch :model-value="shell.settings.value?.startHidden === true" :disabled="!autostart" @change="(value) => shell.patch({ startHidden: value })" />
     </div>
 
     <div v-if="showSummon" class="desktop-section-title" data-section="shortcuts">{{ t("settings.desktop.sectionShortcuts") }}</div>
@@ -90,6 +110,16 @@
       <el-button size="small" :loading="diagnosticsBusy" data-diagnostics-export @click="exportBundle">{{ t("settings.desktop.diagnosticsExport") }}</el-button>
     </div>
 
+    <div v-if="explorerVerbs !== null" class="desktop-section-title" data-section="explorer">{{ t("settings.desktop.sectionExplorer") }}</div>
+
+    <div v-if="explorerVerbs !== null" class="flex items-start justify-between gap-4" data-setting="explorer-verbs">
+      <div>
+        <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.desktop.explorerTitle") }}</div>
+        <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.desktop.explorerHint") }}</div>
+      </div>
+      <el-switch :model-value="explorerVerbs" @change="setExplorer" />
+    </div>
+
     <div v-if="showTerminal || showKeychain" class="desktop-section-title" data-section="integration">{{ t("settings.desktop.sectionIntegration") }}</div>
 
     <div v-if="showTerminal" class="flex items-start justify-between gap-4" data-setting="terminal-command">
@@ -123,7 +153,7 @@ import { acceleratorFromEvent, displayAccelerator } from "@/utils/accelerator"
 import { appUpdateAPI } from "@/utils/appUpdateApi"
 import { appSecretsAPI } from "@/utils/appSecretsApi"
 import { appShimsAPI } from "@/utils/appShimsApi"
-import { checkShellUpdate, getAutostart, getCloseToTray, getSummonShortcut, exportDiagnostics, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, openLogs, repairRuntime, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
+import { checkShellUpdate, desktopCapabilities, getAutostart, getCloseToTray, getExplorerVerbs, getSummonShortcut, setExplorerVerbs, exportDiagnostics, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, openLogs, repairRuntime, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -187,6 +217,12 @@ const backendSummary = computed(() => {
 })
 const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tray"))
 const showRestore = computed(() => hostReady.value && shell.settings.value !== null)
+const showKeepAwake = computed(() => showRestore.value && hostSupports("set_keep_awake"))
+const explorerVerbs = ref(null)
+
+async function setExplorer(enabled) {
+  if (await setExplorerVerbs(enabled)) explorerVerbs.value = enabled
+}
 const secrets = ref({ local: false, mode: "file", available: false, backend: "" })
 const showKeychain = computed(() => secrets.value.local && secrets.value.available)
 const keychainBusy = ref(false)
@@ -261,6 +297,8 @@ async function loadAutostart() {
   const tray = await getCloseToTray()
   if (tray !== null) closeToTray.value = tray
   summonShortcut.value = await getSummonShortcut()
+  const capabilities = await desktopCapabilities()
+  explorerVerbs.value = capabilities?.explorerVerbs === true ? await getExplorerVerbs() : null
 }
 
 function stopRecording() {

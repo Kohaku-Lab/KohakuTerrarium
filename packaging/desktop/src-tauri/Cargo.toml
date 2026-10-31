@@ -34,6 +34,7 @@ getrandom = "0.3"
 url = "2"
 sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
+keepawake = "0.6.1"
 
 [profile.release]
 codegen-units = 1
@@ -41,3 +42,7 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell", "Win32_Foundation"] }
+winreg = "0.56.0"

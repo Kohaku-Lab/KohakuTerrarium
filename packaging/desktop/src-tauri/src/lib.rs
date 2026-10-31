@@ -8,6 +8,7 @@ mod files;
 mod menu;
 mod navigation;
 mod opens;
+mod os;
 mod overlay;
 mod popout;
 mod runtime;
@@ -68,7 +69,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![window::BACKGROUND_FLAG]),
         ))
         .manage(Backend::default())
         .manage(DeepLinks::default())
@@ -77,6 +78,7 @@ pub fn run() {
         .manage(ShellSettings::default())
         .manage(tray::TrayState::default())
         .manage(popout::PopoutRegistry::default())
+        .manage(os::keep_awake::KeepAwakeState::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_capabilities,
             commands::request_desktop_attention,
@@ -106,6 +108,10 @@ pub fn run() {
             popout::open_popout_window,
             popout::popout_ack,
             popout::popout_return,
+            os::keep_awake::set_keep_awake,
+            os::recent::add_recent_session,
+            os::explorer::get_explorer_verbs,
+            os::explorer::set_explorer_verbs,
             runtime::get_backend_status,
             runtime::restart_backend,
             runtime::open_logs,
@@ -151,19 +157,21 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            if let Ok(directory) = app.path().app_config_dir() {
+                app.state::<ShellSettings>().load(directory);
+            }
             window::create(app)?;
             menu::install(app.handle())?;
             if !headless {
                 app.state::<opens::PendingOpens>()
                     .extend(opens::from_launch());
             }
-            if let Ok(directory) = app.path().app_config_dir() {
-                app.state::<ShellSettings>().load(directory);
-            }
             if !headless {
                 summon::restore(app.handle());
                 tray::install(app)?;
                 runtime::watch_tray_line(app.handle().clone());
+                runtime::publish_shell_path(app.handle());
+                os::explorer::sync(app.handle());
             } else if smoke::tray_probe_requested() {
                 let _ = tray::install(app);
             }

@@ -224,6 +224,31 @@ export function openLogs() {
   return callBoolean("open_logs")
 }
 
+/** Keep (``true``) or stop keeping the computer awake. Resolves ``false`` if the shell could not. */
+export function setKeepAwake(on) {
+  return callBoolean("set_keep_awake", Boolean(on))
+}
+
+/** Put a `.kohakutr` file in the system's recent documents (the Windows jump list). */
+export function addRecentSession(path) {
+  return callBoolean("add_recent_session", String(path))
+}
+
+/** Whether the Explorer "Open with KohakuTerrarium" entries are installed, or ``null`` when the shell has none. */
+export async function getExplorerVerbs() {
+  if (hostKind() !== KIND_TAURI || !hostSupports("get_explorer_verbs")) return null
+  try {
+    return (await call("get_explorer_verbs")) === true
+  } catch {
+    return null
+  }
+}
+
+/** Add or remove the Explorer entries. Resolves ``false`` if the shell could not. */
+export function setExplorerVerbs(on) {
+  return callBoolean("set_explorer_verbs", Boolean(on))
+}
+
 /** Reinstall the release shipped with the shell while the backend is stopped. Resolves ``false`` if a restart is already running. */
 export function repairRuntime() {
   return callBoolean("repair_runtime")

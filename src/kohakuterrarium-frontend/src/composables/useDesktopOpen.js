@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted } from "vue"
 
 import { appOpenAPI } from "@/utils/appOpenApi"
-import { onHostReady, takePendingOpens } from "@/utils/hostBridge"
+import { addRecentSession, onHostReady, takePendingOpens } from "@/utils/hostBridge"
 
 /** Page event the desktop shell sends when it is handed a file or folder while running. */
 export const OPEN_EVENT = "kt:desktop-open"
@@ -20,6 +20,7 @@ export async function openDesktopTarget({ kind, path }, { onError } = {}) {
     return true
   }
   if (kind !== "session") return false
+  void addRecentSession(path)
   try {
     const sessionName = await appOpenAPI.openSession(path)
     window.dispatchEvent(new CustomEvent(OPEN_HISTORY_EVENT, { detail: { sessionName } }))

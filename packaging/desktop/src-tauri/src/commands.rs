@@ -59,6 +59,9 @@ pub fn capabilities() -> Value {
         "backendControl": true,
         "runtimeRepair": true,
         "diagnostics": true,
+        "keepAwake": true,
+        "recentSessions": cfg!(windows),
+        "explorerVerbs": cfg!(windows),
     })
 }
 

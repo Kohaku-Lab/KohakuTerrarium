@@ -17,6 +17,8 @@ vi.mock("@/utils/i18n", () => ({
   }),
 }))
 
+import { resetShellSettings } from "@/composables/useShellSettings"
+
 import DesktopAppSettings from "./DesktopAppSettings.vue"
 
 const COMMANDS = ["kt", "kt-cli", "kt-tui"]
@@ -57,6 +59,7 @@ function mountSettings() {
 beforeEach(() => {
   Object.values(shimsApi).forEach((fn) => fn.mockReset())
   Object.values(secretsApi).forEach((fn) => fn.mockReset())
+  resetShellSettings()
   runtimeApi.getRuntime.mockReset()
   runtimeApi.getRuntime.mockRejectedValue(new Error("404"))
   secretsApi.status.mockRejectedValue(new Error("404"))
@@ -373,6 +376,78 @@ describe("DesktopAppSettings", () => {
     expect(invoke).toHaveBeenCalledWith("restart_backend", {})
     await wrapper.find("[data-backend-logs]").trigger("click")
     expect(invoke).toHaveBeenCalledWith("open_logs", {})
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it("sets the keep-awake choice and the Explorer entries only where the shell offers them", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    let verbs = false
+    const invoke = vi.fn(async (name) => {
+      if (name === "get_backend_status") return { state: "running" }
+      if (name === "get_shell_settings") return { keepAwake: "running" }
+      if (name === "get_desktop_capabilities") {
+        return { surface: "desktop", protocol: 1, explorerVerbs: true }
+      }
+      if (name === "get_explorer_verbs") return verbs
+      if (name === "set_explorer_verbs") {
+        verbs = true
+        return true
+      }
+      return name === "patch_shell_settings" ? { ok: true, settings: { keepAwake: "never" } } : true
+    })
+    window.__TAURI_INTERNALS__ = { invoke }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    expect(wrapper.find("[data-keep-awake]").element.value).toBe("running")
+    await wrapper.find("[data-keep-awake]").setValue("never")
+    expect(invoke).toHaveBeenCalledWith("patch_shell_settings", { args: [{ keepAwake: "never" }] })
+
+    const toggle = wrapper.find("[data-setting='explorer-verbs'] .switch")
+    expect(toggle.attributes("data-on")).toBe("false")
+    await toggle.trigger("click")
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith("set_explorer_verbs", { args: [true] })
+    expect(wrapper.find("[data-setting='explorer-verbs'] .switch").attributes("data-on")).toBe(
+      "true",
+    )
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it("offers start-in-tray only with start-at-login on, and saves it", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const invoke = vi.fn(async (name) => {
+      if (name === "get_backend_status") return { state: "running" }
+      if (name === "get_shell_settings") return { startHidden: false }
+      if (name === "get_autostart") return true
+      return name === "patch_shell_settings" ? { ok: true, settings: { startHidden: true } } : true
+    })
+    window.__TAURI_INTERNALS__ = { invoke }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    const toggle = wrapper.find("[data-setting='start-hidden'] .switch")
+    expect(toggle.exists()).toBe(true)
+    await toggle.trigger("click")
+    expect(invoke).toHaveBeenCalledWith("patch_shell_settings", { args: [{ startHidden: true }] })
+    delete window.__TAURI_INTERNALS__
+  })
+
+  it("hides the Explorer entries on a platform without them", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const invoke = vi.fn(async (name) => {
+      if (name === "get_backend_status") return { state: "running" }
+      if (name === "get_shell_settings") return { keepAwake: "running" }
+      if (name === "get_desktop_capabilities") {
+        return { surface: "desktop", protocol: 1, explorerVerbs: false }
+      }
+      return true
+    })
+    window.__TAURI_INTERNALS__ = { invoke }
+    const wrapper = mountSettings()
+    await flushPromises()
+    expect(wrapper.find("[data-setting='explorer-verbs']").exists()).toBe(false)
+    expect(invoke).not.toHaveBeenCalledWith("get_explorer_verbs", expect.anything())
     delete window.__TAURI_INTERNALS__
   })
 

@@ -47,6 +47,7 @@ import { useConnectIntent } from "@/composables/useConnectIntent"
 import { useDensity } from "@/composables/useDensity"
 import { useDesktopCommands } from "@/composables/useDesktopCommands"
 import { useDesktopMenu } from "@/composables/useDesktopMenu"
+import { useKeepAwake } from "@/composables/useKeepAwake"
 import { useDesktopTrayItems } from "@/composables/useDesktopTrayItems"
 import { useDesktopTrayMenu } from "@/composables/useDesktopTrayMenu"
 import { useDesktopPopout } from "@/composables/useDesktopPopout"
@@ -101,6 +102,7 @@ useKeyboardShortcuts()
 useDesktopSummon()
 useDesktopPopout()
 useDesktopCommands()
+useKeepAwake()
 useDesktopMenu()
 useDesktopTrayItems()
 useDesktopTrayMenu()

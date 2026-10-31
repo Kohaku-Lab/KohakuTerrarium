@@ -12,7 +12,7 @@ use crate::window;
 
 /// Page event that tells the app new things are waiting in [`PendingOpens`].
 pub const OPEN_EVENT: &str = "kt:desktop-open";
-const SESSION_EXTENSION: &str = "kohakutr";
+pub const SESSION_EXTENSION: &str = "kohakutr";
 
 /// Targets received before the page could take them.
 #[derive(Default)]

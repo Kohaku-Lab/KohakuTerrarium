@@ -7,6 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::backend::Backend;
 use crate::navigation::{is_internal, is_openable};
 use crate::popout;
+use crate::settings::ShellSettings;
 use crate::smoke;
 
 /// Keeps the native caption in step with the page's light or dark mode.
@@ -32,7 +33,20 @@ pub const THEME_SYNC: &str = r#"(() => {
   else document.addEventListener("DOMContentLoaded", start, { once: true });
 })();"#;
 
+/// Argument the login entry carries, so a start at login can stay in the tray.
+pub const BACKGROUND_FLAG: &str = "--background";
+
+/// Whether this launch should leave the window hidden: the user asked for it and it is a login start.
+pub fn starts_hidden(arguments: &[String], wanted: bool) -> bool {
+    wanted && arguments.iter().any(|argument| argument == BACKGROUND_FLAG)
+}
+
 pub fn create(app: &App) -> tauri::Result<()> {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let hidden = starts_hidden(
+        &arguments,
+        app.state::<ShellSettings>().get_bool("startHidden"),
+    );
     let navigation = app.handle().clone();
     let page_load = app.handle().clone();
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -51,7 +65,7 @@ pub fn create(app: &App) -> tauri::Result<()> {
             }
             false
         })
-        .visible(smoke::output_path().is_none())
+        .visible(smoke::output_path().is_none() && !hidden)
         .on_page_load(move |_window, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished) {
                 return;
@@ -76,5 +90,31 @@ pub fn focus(app: &AppHandle) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(list: &[&str]) -> Vec<String> {
+        list.iter().map(|text| text.to_string()).collect()
+    }
+
+    #[test]
+    fn a_login_start_stays_hidden_only_when_the_user_asked_for_it() {
+        let login = arguments(&["--background"]);
+        assert!(starts_hidden(&login, true));
+        assert!(!starts_hidden(&login, false));
+    }
+
+    #[test]
+    fn a_start_the_user_made_always_shows_the_window() {
+        assert!(!starts_hidden(&[], true));
+        assert!(!starts_hidden(
+            &arguments(&["C:\\work\\chat.kohakutr"]),
+            true
+        ));
+        assert!(!starts_hidden(&arguments(&["--background-ish"]), true));
     }
 }

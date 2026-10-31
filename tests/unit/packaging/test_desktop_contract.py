@@ -171,6 +171,29 @@ def test_session_file_association_and_open_event_match_the_app():
     )
 
 
+def test_the_shell_record_kt_open_reads_is_the_file_the_shell_writes():
+    from kohakuterrarium.cli import open_in_app
+
+    runtime_rs = _text(TAURI / "src" / "runtime" / "mod.rs")
+    assert _rust_const(runtime_rs, "SHELL_RECORD") == open_in_app.SHELL_RECORD
+    assert 'json!({ "exe": exe })' in runtime_rs
+    assert open_in_app.SESSION_SUFFIX == "." + _rust_const(
+        _text(TAURI / "src" / "opens.rs"), "SESSION_EXTENSION"
+    )
+
+
+def test_the_uninstaller_removes_every_explorer_entry_the_app_can_add():
+    conf = json.loads(_text(TAURI / "tauri.conf.json"))
+    hooks = _text(TAURI / conf["bundle"]["windows"]["nsis"]["installerHooks"])
+    explorer_rs = _text(TAURI / "src" / "os" / "explorer.rs")
+    parents = re.findall(r'\(r"([^"]+)", "%[1V]"\)', explorer_rs)
+    assert len(parents) == 2
+    verb = _rust_const(explorer_rs, "VERB")
+    for parent in parents:
+        assert f'DeleteRegKey HKCU "Software\\Classes\\{parent}\\{verb}"' in hooks
+    assert "!macro NSIS_HOOK_POSTUNINSTALL" in hooks
+
+
 def test_file_drop_event_name_matches_the_frontend():
     files_rs = _text(TAURI / "src" / "files.rs")
     event = _rust_const(files_rs, "DROP_EVENT")

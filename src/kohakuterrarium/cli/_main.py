@@ -45,6 +45,7 @@ from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import resolve_then_run, run_agent_cli
 from kohakuterrarium.cli.select.args import add_run_like_args
 from kohakuterrarium.cli.self_update import add_self_update_subparser, self_update_cli
+from kohakuterrarium.cli.open_in_app import add_open_subparser, open_dispatch
 from kohakuterrarium.cli.shims import add_shims_subparser, shims_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.service import add_service_subparser, service_cli
@@ -170,6 +171,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_run_like_args(tui_parser)
 
     add_shims_subparser(subparsers)
+    add_open_subparser(subparsers)
     add_mcp_serve_subparser(subparsers)
 
     list_parser = subparsers.add_parser("list", help="List available agents")
@@ -592,6 +594,7 @@ COMMANDS: dict[str, callable] = {
     "cli": _dispatch_cli_mode,
     "tui": _dispatch_tui_mode,
     "shims": shims_cli,
+    "open": open_dispatch,
     "resume": _dispatch_resume,
     "doctor": dispatch_doctor,
     "list": lambda args: list_cli(args.path),

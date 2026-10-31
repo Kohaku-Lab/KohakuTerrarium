@@ -40,6 +40,20 @@ describe("openDesktopTarget", () => {
     history.stop()
   })
 
+  it("adds an opened session file to the system's recent documents", async () => {
+    openSession.mockResolvedValue("plan-2")
+    const invoke = vi.fn(async () => true)
+    window.__TAURI_INTERNALS__ = { invoke }
+
+    await openDesktopTarget({ kind: "session", path: "C:\\x\\plan.kohakutr" })
+    expect(invoke).toHaveBeenCalledWith("add_recent_session", { args: ["C:\\x\\plan.kohakutr"] })
+
+    invoke.mockClear()
+    await openDesktopTarget({ kind: "workspace", path: "C:\\x" })
+    expect(invoke).not.toHaveBeenCalled()
+    delete window.__TAURI_INTERNALS__
+  })
+
   it("reports a session the server refuses and opens nothing", async () => {
     openSession.mockRejectedValue(new Error("bad file"))
     const history = listen(OPEN_HISTORY_EVENT)

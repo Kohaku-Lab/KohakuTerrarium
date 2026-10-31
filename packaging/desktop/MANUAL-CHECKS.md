@@ -38,5 +38,12 @@ Each section names the milestone that added it and the surface to look at.
 - Break the runtime (rename `~/.kohakuterrarium/runtime/versions/<active>` while the app is closed) and start: the loading page shows the error with Restart backend, Repair runtime, Export diagnostics and Open logs; Repair runtime brings the app up.
 - Command palette: "Desktop: settings / restart backend / export diagnostics / open backend log".
 
+## Operating-system integration (M7)
+- Settings -> Desktop app -> "Keep the computer awake": with "While agents work" start a long turn and check `powercfg /requests` (Windows) lists the app under SYSTEM; it disappears about 20 seconds after the turn ends. "Never" holds nothing; on battery with "on mains power" it holds nothing.
+- Double-click a `.kohakutr` file, then right-click the taskbar icon: it appears under "Recent" in the jump list.
+- Settings -> Explorer: turn "Open folders from Explorer" on; right-click a folder (Windows 11: "Show more options") -> "Open with KohakuTerrarium" opens the new-session dialog in it; turn it off and the entry is gone. After uninstalling with the NSIS installer the entry is gone too.
+- In a terminal with the `kt` command installed: `kt open <folder>` raises the running app on that folder; `kt open file.txt` refuses.
+- Open `kt://new?path=<folder>` and `kt://live/<scope>` from the Run dialog; `kt://install/<name>` shows a confirmation naming the package and installs nothing until "Install" is pressed; `kt://install/https%3A%2F%2Fx` does nothing.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

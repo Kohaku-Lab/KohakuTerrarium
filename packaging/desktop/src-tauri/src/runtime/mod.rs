@@ -15,6 +15,8 @@ use tauri_plugin_opener::OpenerExt;
 use crate::backend::{self, Backend, Phase};
 use crate::tray::{self, TrayState};
 
+/// File in the config folder that tells `kt open` where this app is installed.
+pub const SHELL_RECORD: &str = "desktop-shell.json";
 const BYTES_PER_MB: u64 = 1024 * 1024;
 const LINE_REFRESH: Duration = Duration::from_secs(20);
 const LINE_FIRST_DELAY: Duration = Duration::from_secs(5);
@@ -40,6 +42,20 @@ pub fn describe(backend: &Backend, usage: Option<(u64, usize)>) -> Value {
         "memoryBytes": usage.map(|(bytes, _)| bytes),
         "processes": usage.map(|(_, count)| count),
     })
+}
+
+/// Record where this app is installed so `kt open` can hand it folders and session files.
+pub fn publish_shell_path(app: &AppHandle) {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let directory = backend::config_dir(app);
+    if std::fs::create_dir_all(&directory).is_ok() {
+        let _ = std::fs::write(
+            directory.join(SHELL_RECORD),
+            json!({ "exe": exe }).to_string(),
+        );
+    }
 }
 
 /// Put the current backend summary in the tray menu.
