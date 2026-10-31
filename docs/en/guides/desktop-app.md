@@ -44,6 +44,24 @@ rare; most releases only change the runtime.
 The installed app can put `kt`, `kt-cli` and `kt-tui` on your PATH. It is off by
 default; see [Terminal commands](terminal-commands.md#installed-as-the-desktop-app).
 
+## Tray and attention
+
+The installed app puts an icon in the system tray (menu bar on macOS). The icon
+shows a red dot while something is waiting for your input and a blue dot when
+work has finished; its tooltip says how many, and the taskbar entry (Windows) or
+Dock icon (macOS) carries the same indicator. Clicking the icon brings the window
+back and opens the tab that needs you first.
+
+**Settings → Desktop → Keep running in the tray** (off by default) makes closing the
+window hide it instead of quitting, so agents keep working. Quit from the tray menu.
+The setting is stored in `shell-settings.json` in the app's config folder.
+
+## Dropping files
+
+Drag files from your desktop onto a chat and their full paths are added to the message
+box, one per line, ready for the agent to read. The chat highlights while the files are
+over it; split views drop into whichever chat is under the pointer.
+
 ## Links
 
 Links to other sites open in your default browser, never inside the app window.
