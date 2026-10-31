@@ -45,6 +45,19 @@ def test_a_shim_written_by_an_older_install_is_rewritten_for_this_one(installed)
     assert shims.refresh_installed_shims() == []
 
 
+def test_verbatim_paths_from_the_shell_are_written_as_plain_paths(tmp_path):
+    runtime = (
+        "\\\\?\\C:\\Kt\\python\\python.exe",
+        "\\\\?\\UNC\\host\\share\\bootstrap",
+    )
+    shims.apply_plan(_plan(tmp_path / "bin", runtime))
+
+    text = (tmp_path / "bin" / "kt.cmd").read_text(encoding="utf-8")
+    assert "\\\\?\\" not in text
+    assert '"C:\\Kt\\python\\python.exe" -m' in text
+    assert 'set "PYTHONPATH=\\\\host\\share\\bootstrap"' in text
+
+
 def test_shims_that_already_match_are_left_alone(installed):
     shims.refresh_installed_shims()
     stamp = (installed / "kt.cmd").stat().st_mtime_ns

@@ -116,6 +116,15 @@ def bundled_runtime() -> tuple[str, str] | None:
     return (python, bootstrap) if python and bootstrap else None
 
 
+def _drop_verbatim_prefix(path: str) -> str:
+    """``\\\\?\\C:\\x`` as ``C:\\x``: cmd.exe cannot run or search a verbatim path."""
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+
 def _runtime_wrapper_content(
     system: str, runtime: tuple[str, str], subcmd: str | None
 ) -> str:
@@ -123,6 +132,9 @@ def _runtime_wrapper_content(
     python, bootstrap = runtime
     sub = f" {subcmd}" if subcmd else ""
     if system == "Windows":
+        python, bootstrap = _drop_verbatim_prefix(python), _drop_verbatim_prefix(
+            bootstrap
+        )
         return (
             f"@echo off\nrem {KT_SHIM_MARKER}\nsetlocal\n"
             f'set "PYTHONPATH={bootstrap}"\nset "PYTHONNOUSERSITE=1"\n'
