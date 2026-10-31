@@ -30,6 +30,9 @@ def _seatbelt_usable() -> bool:
 needs_seatbelt = pytest.mark.skipif(
     not _seatbelt_usable(), reason="sandbox-exec is unavailable or nested"
 )
+posix_paths = pytest.mark.skipif(
+    sys.platform == "win32", reason="Seatbelt profiles use POSIX paths and uids"
+)
 
 
 @pytest.fixture
@@ -46,6 +49,7 @@ def dirs(tmp_path, monkeypatch):
     return workspace, outside
 
 
+@posix_paths
 class TestBuildWriteProfile:
     def test_workspace_level_allows_only_listed_roots(self, tmp_path):
         text = seatbelt.build_write_profile(
@@ -97,6 +101,12 @@ class TestBuildWriteProfile:
         allows = [line for line in text.splitlines() if line.startswith("(allow ")]
         assert allows == ["(allow default)", '(allow file-write* (subpath "/dev"))']
         assert str(tmp_path) not in text
+
+    def test_hosts_without_posix_uids_skip_the_tmux_rule(self, tmp_path, monkeypatch):
+        monkeypatch.delattr(seatbelt.os, "getuid")
+        text = seatbelt.build_write_profile(WORKSPACE, tmp_path)
+        assert "tmux-" not in text
+        assert "(deny network-outbound" in text
 
     def test_paths_are_quoted_for_the_profile_language(self, tmp_path):
         odd = tmp_path / 'we"ird'
@@ -266,6 +276,7 @@ class TestEnforceModes:
         )
         assert spawned == [["/bin/true"]]
 
+    @posix_paths
     async def test_auto_confines_where_supported(self, spawned, monkeypatch, tmp_path):
         monkeypatch.setattr(plugin_mod, "seatbelt_available", lambda: True)
         await SandboxPlugin(fs_write_allow=[]).run_subprocess_exec(

@@ -83,13 +83,16 @@ def _subpaths(paths: list[str], cwd: Path) -> list[str]:
 
 
 def _tmux_socket_dirs() -> list[str]:
-    """Where tmux may keep this user's server sockets."""
+    """Where tmux may keep this user's server sockets (none without POSIX uids)."""
+    getuid = getattr(os, "getuid", None)
+    if getuid is None:
+        return []
     bases = {
         "/tmp",
         os.environ.get("TMUX_TMPDIR") or "",
         os.environ.get("TMPDIR") or "",
     }
-    return [f"{base.rstrip('/')}/tmux-{os.getuid()}" for base in sorted(bases) if base]
+    return [f"{base.rstrip('/')}/tmux-{getuid()}" for base in sorted(bases) if base]
 
 
 def _ancestors(paths: list[str], cwd: Path) -> list[str]:
