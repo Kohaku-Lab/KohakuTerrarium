@@ -66,28 +66,56 @@ def test_resource_directories_match_the_layout_and_the_config(backend_rs):
         assert f'"{name}"' in backend_rs
 
 
-def test_every_command_is_declared_allowed_and_registered():
-    commands_rs = _text(TAURI / "src" / "commands.rs")
-    declared = set(
-        re.findall(r"#\[tauri::command\]\s*pub (?:async )?fn ([a-z_]+)\(", commands_rs)
-    )
-    manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
-    registered = set(
-        re.findall(r"commands::([a-z_]+)", _text(TAURI / "src" / "lib.rs"))
-    )
-    capability = json.loads(_text(TAURI / "capabilities" / "main.json"))
-    allowed = {
+def _allowed(capability_file: str) -> set[str]:
+    capability = json.loads(_text(TAURI / "capabilities" / capability_file))
+    return {
         item.removeprefix("allow-").replace("-", "_")
         for item in capability["permissions"]
         if item.startswith("allow-")
     }
-    assert declared == manifest == registered == allowed
+
+
+def test_every_command_is_declared_allowed_and_registered():
+    declared = set()
+    for module in ("commands.rs", "overlay.rs"):
+        declared |= set(
+            re.findall(
+                r"#\[tauri::command\]\s*pub (?:async )?fn ([a-z_]+)\(",
+                _text(TAURI / "src" / module),
+            )
+        )
+    manifest = set(re.findall(r'"([a-z_]+)",', _text(TAURI / "build.rs")))
+    registered = set(
+        re.findall(r"(?:commands|overlay)::([a-z_]+),", _text(TAURI / "src" / "lib.rs"))
+    )
+    assert declared == manifest == registered
+    assert declared == _allowed("main.json") | _allowed("overlay.json")
+
+
+def test_overlay_windows_may_only_call_commands_that_act_on_themselves():
+    main_only = {"open_overlay_window"}
+    overlay = _allowed("overlay.json")
+    assert not overlay & main_only
+    assert {"overlay_start_drag", "overlay_set_bounds", "overlay_ack"} <= overlay
+    assert not overlay & {"install_shell_update", "set_autostart", "show_notification"}
 
 
 def test_app_page_origin_is_the_only_remote_capability():
-    capability = json.loads(_text(TAURI / "capabilities" / "main.json"))
-    assert capability["remote"]["urls"] == ["http://127.0.0.1:*"]
-    assert capability["windows"] == ["main"]
+    for name, windows in (("main.json", ["main"]), ("overlay.json", ["overlay-*"])):
+        capability = json.loads(_text(TAURI / "capabilities" / name))
+        assert capability["remote"]["urls"] == ["http://127.0.0.1:*"]
+        assert capability["windows"] == windows
+
+
+def test_overlay_page_parameter_and_window_prefix_match_the_frontend():
+    overlay_rs = _text(TAURI / "src" / "overlay.rs")
+    param = _rust_const(overlay_rs, "OVERLAY_PARAM")
+    prefix = _rust_const(overlay_rs, "LABEL_PREFIX")
+    windows = _text(
+        ROOT / "src" / "kohakuterrarium-frontend" / "src" / "ext" / "overlayWindows.js"
+    )
+    assert f'OVERLAY_PARAM = "{param}"' in windows
+    assert f'WINDOW_LABEL_PREFIX = "{prefix}"' in windows
 
 
 def test_protocol_version_agrees_across_shells_and_frontend():
@@ -115,9 +143,9 @@ def test_commands_the_frontend_calls_exist_in_the_shell():
         ROOT / "src" / "kohakuterrarium-frontend" / "src" / "utils" / "hostBridge.js"
     )
     called = set(re.findall(r'(?:hostSupports|call)\("([a-z_]+)"', bridge))
-    shell = set(
-        re.findall(
-            r"pub (?:async )?fn ([a-z_]+)\(", _text(TAURI / "src" / "commands.rs")
+    shell = set()
+    for module in ("commands.rs", "overlay.rs"):
+        shell |= set(
+            re.findall(r"pub (?:async )?fn ([a-z_]+)\(", _text(TAURI / "src" / module))
         )
-    )
     assert called and called <= shell

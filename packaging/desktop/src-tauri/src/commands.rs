@@ -21,10 +21,14 @@ pub const PROTOCOL: u32 = 1;
 #[derive(Default)]
 pub struct DeepLinks(pub Mutex<Option<String>>);
 
-type Args = Option<Vec<Value>>;
+pub type Args = Option<Vec<Value>>;
 
-fn string_arg(args: &Args, index: usize) -> Option<&str> {
+pub fn string_arg(args: &Args, index: usize) -> Option<&str> {
     args.as_ref()?.get(index)?.as_str()
+}
+
+pub fn number_arg(args: &Args, index: usize) -> Option<f64> {
+    args.as_ref()?.get(index)?.as_f64()
 }
 
 fn bool_arg(args: &Args, index: usize) -> Option<bool> {
@@ -42,6 +46,7 @@ pub fn capabilities() -> Value {
         "notifications": true,
         "autostart": true,
         "deepLink": true,
+        "overlayWindows": true,
     })
 }
 

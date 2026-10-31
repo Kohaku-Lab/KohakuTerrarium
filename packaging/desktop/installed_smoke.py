@@ -65,6 +65,7 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
         **os.environ,
         "KT_CONFIG_DIR": str(config_dir),
         "KT_DESKTOP_SMOKE_OUT": str(report),
+        "KT_DESKTOP_SMOKE_OVERLAY": "1",
     }
     if os.environ.get("KT_DESKTOP_RESOURCES") is None and resources != exe.parent:
         env["KT_DESKTOP_RESOURCES"] = str(resources)
@@ -87,6 +88,11 @@ def check_report(data: dict) -> list[str]:
         problems.append("the window never loaded the app page")
     if data.get("ipcFromAppPage") is not True:
         problems.append("the app page could not call a native command")
+    overlay = data.get("overlayWindow") or {}
+    if overlay.get("opened") is not True:
+        problems.append("the shell could not open an overlay window")
+    elif overlay.get("pageLoaded") is not True or overlay.get("ipc") is not True:
+        problems.append(f"the overlay window did not run the app page: {overlay}")
     if data.get("unauthenticatedStatus") != 401:
         problems.append(
             f"a request without the launch cookie got {data.get('unauthenticatedStatus')}, expected 401"

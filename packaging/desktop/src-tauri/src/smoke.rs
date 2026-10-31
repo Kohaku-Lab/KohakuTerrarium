@@ -108,19 +108,49 @@ fn update_probe(app: &AppHandle, probe: UpdateProbe, before_install: impl FnOnce
     })
 }
 
+/// Open an overlay window and wait for its page to load and call a native command.
+fn overlay_probe(app: &AppHandle) -> Value {
+    let spec = json!({
+        "label": "overlay-smoke",
+        "key": "smoke",
+        "width": 200,
+        "height": 120,
+    });
+    let opened = crate::overlay::open(app, &spec);
+    let backend = app.state::<Backend>();
+    let deadline = Instant::now() + IPC_TIMEOUT;
+    while opened && !backend.overlay_ipc_confirmed() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+    json!({
+        "opened": opened,
+        "pageLoaded": backend.overlay_page_loaded(),
+        "ipc": backend.overlay_ipc_confirmed(),
+    })
+}
+
+pub fn overlay_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_OVERLAY").is_some()
+}
+
 pub fn report(
     version: &str,
     port: u16,
     page_loaded: bool,
     ipc: bool,
     update: Option<Value>,
+    overlay: Option<Value>,
 ) -> Value {
     let update_ok = update
         .as_ref()
         .is_none_or(|probe| probe["downloadVerified"] == true || probe["upToDate"] == true);
+    let overlay_ok = overlay
+        .as_ref()
+        .is_none_or(|probe| probe["pageLoaded"] == true && probe["ipc"] == true);
     json!({
-        "ok": page_loaded && ipc && update_ok,
+        "ok": page_loaded && ipc && update_ok && overlay_ok,
         "shellUpdate": update,
+        "overlayWindow": overlay,
         "port": port,
         "pageLoaded": page_loaded,
         "ipcFromAppPage": ipc,
@@ -154,6 +184,7 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
             thread::sleep(Duration::from_millis(100));
         }
         let version = app.package_info().version.to_string();
+        let overlay = overlay_probe_requested().then(|| overlay_probe(&app));
         let update = update_probe_requested().map(|probe| {
             update_probe(&app, probe, |interim| {
                 let value = report(
@@ -162,6 +193,7 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
                     backend.page_loaded(),
                     backend.ipc_confirmed(),
                     Some(interim.clone()),
+                    overlay.clone(),
                 );
                 write_report(&out, &value);
             })
@@ -172,6 +204,7 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
             backend.page_loaded(),
             backend.ipc_confirmed(),
             update,
+            overlay,
         );
         write_report(&out, &value);
         app.exit(if value["ok"] == true { 0 } else { 1 });
@@ -228,7 +261,18 @@ mod tests {
     fn a_report_is_ok_only_when_the_page_loaded_and_could_call_native_commands() {
         for (loaded, ipc) in [(false, false), (true, false), (false, true)] {
             let port = serve_once("HTTP/1.1 401 Unauthorized");
-            assert_eq!(report("1.0.0", port, loaded, ipc, None)["ok"], false);
+            assert_eq!(report("1.0.0", port, loaded, ipc, None, None)["ok"], false);
+        }
+        for (probe, ok) in [
+            (json!({ "pageLoaded": true, "ipc": false }), false),
+            (json!({ "pageLoaded": false, "ipc": true }), false),
+            (json!({ "pageLoaded": true, "ipc": true }), true),
+        ] {
+            let port = serve_once("HTTP/1.1 401 Unauthorized");
+            assert_eq!(
+                report("1.0.0", port, true, true, None, Some(probe))["ok"],
+                ok
+            );
         }
         for (probe, ok) in [
             (json!({ "downloadVerified": false }), false),
@@ -237,10 +281,13 @@ mod tests {
             (json!({ "available": false, "upToDate": true }), true),
         ] {
             let port = serve_once("HTTP/1.1 401 Unauthorized");
-            assert_eq!(report("1.0.0", port, true, true, Some(probe))["ok"], ok);
+            assert_eq!(
+                report("1.0.0", port, true, true, Some(probe), None)["ok"],
+                ok
+            );
         }
         let port = serve_once("HTTP/1.1 401 Unauthorized");
-        let healthy = report("1.2.3", port, true, true, None);
+        let healthy = report("1.2.3", port, true, true, None, None);
         assert_eq!(healthy["ok"], true);
         assert_eq!(healthy["version"], "1.2.3");
         assert_eq!(healthy["ipcFromAppPage"], true);

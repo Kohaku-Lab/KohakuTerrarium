@@ -49,6 +49,10 @@ KT_DESKTOP_RESOURCES=<stage dir> cargo run
 backend is ready and the page has loaded the shell writes a JSON report there and
 exits (status 0 when the page loaded).
 
+With `KT_DESKTOP_SMOKE_OVERLAY` also set, the shell opens a native overlay window
+(`overlay.rs`) and the report's `overlayWindow` says whether that window loaded the
+app page and called a native command from it. The installer tests always set it.
+
 With `KT_DESKTOP_SMOKE_UPDATE` also set, the self-check fetches the update feed and
 downloads the advertised build, which verifies its signature; the report's
 `shellUpdate` says what happened. To try it locally: build a signed installer

@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Native calls an extension's floating overlay window may make on itself.",
+  "windows": ["overlay-*"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:event:default",
+    "allow-get-desktop-capabilities",
+    "allow-open-external",
+    "allow-close-overlay-window",
+    "allow-overlay-start-drag",
+    "allow-overlay-set-bounds",
+    "allow-overlay-set-hit-regions",
+    "allow-overlay-ack"
+  ]
+}

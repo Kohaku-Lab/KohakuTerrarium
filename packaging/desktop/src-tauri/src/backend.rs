@@ -37,10 +37,28 @@ pub struct Backend {
     shell_loaded: AtomicBool,
     page_loaded: AtomicBool,
     ipc_confirmed: AtomicBool,
+    overlay_page_loaded: AtomicBool,
+    overlay_ipc_confirmed: AtomicBool,
     stopping: AtomicBool,
 }
 
 impl Backend {
+    pub fn mark_overlay_page_loaded(&self) {
+        self.overlay_page_loaded.store(true, Ordering::SeqCst);
+    }
+
+    pub fn overlay_page_loaded(&self) -> bool {
+        self.overlay_page_loaded.load(Ordering::SeqCst)
+    }
+
+    pub fn confirm_overlay_ipc(&self) {
+        self.overlay_ipc_confirmed.store(true, Ordering::SeqCst);
+    }
+
+    pub fn overlay_ipc_confirmed(&self) -> bool {
+        self.overlay_ipc_confirmed.load(Ordering::SeqCst)
+    }
+
     pub fn confirm_ipc(&self) {
         self.ipc_confirmed.store(true, Ordering::SeqCst);
     }

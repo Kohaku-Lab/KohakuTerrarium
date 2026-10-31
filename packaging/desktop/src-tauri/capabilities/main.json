@@ -18,6 +18,8 @@
     "allow-take-deep-link",
     "allow-smoke-ack",
     "allow-check-shell-update",
-    "allow-install-shell-update"
+    "allow-install-shell-update",
+    "allow-open-overlay-window",
+    "allow-close-overlay-window"
   ]
 }

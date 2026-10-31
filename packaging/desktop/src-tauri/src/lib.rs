@@ -3,6 +3,7 @@
 mod backend;
 mod commands;
 mod navigation;
+mod overlay;
 mod smoke;
 mod window;
 
@@ -45,6 +46,7 @@ pub fn run() {
         ))
         .manage(Backend::default())
         .manage(DeepLinks::default())
+        .manage(overlay::HitRegions::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_capabilities,
             commands::request_desktop_attention,
@@ -57,7 +59,18 @@ pub fn run() {
             commands::smoke_ack,
             commands::check_shell_update,
             commands::install_shell_update,
+            overlay::open_overlay_window,
+            overlay::close_overlay_window,
+            overlay::overlay_start_drag,
+            overlay::overlay_set_bounds,
+            overlay::overlay_set_hit_regions,
+            overlay::overlay_ack,
         ])
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
         .setup(move |app| {
             window::create(app)?;
             if !headless {

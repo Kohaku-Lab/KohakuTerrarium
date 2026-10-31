@@ -10,6 +10,12 @@ const COMMANDS: &[&str] = &[
     "smoke_ack",
     "check_shell_update",
     "install_shell_update",
+    "open_overlay_window",
+    "close_overlay_window",
+    "overlay_start_drag",
+    "overlay_set_bounds",
+    "overlay_set_hit_regions",
+    "overlay_ack",
 ];
 
 fn main() {
