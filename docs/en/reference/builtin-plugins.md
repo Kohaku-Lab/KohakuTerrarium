@@ -69,6 +69,9 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
 | `tmp` | enum | `default` / `private` / `shared` | from profile | Temp directory isolation. |
 | `fs_deny` | list[str] | paths | `[]` | Additional path deny-list (env-var expansion supported). |
 | `network_allowlist` | list[str] | hostnames | `[]` | Allowed hosts when `network=allow`. Empty list = allow all when network is allowed. |
+| `os_enforce` | enum | `auto` / `require` / `off` | `auto` | Kernel write confinement for subprocesses. `auto` = confine where the OS supports it, `require` = refuse to spawn where it does not, `off` = policy checks only. |
+| `fs_write_allow` | list[str] | paths | `[]` | Exceptions you name: writable even inside `fs_deny` (not under `fs_write=deny`). |
+| `locked` | bool | true / false | false | Refuse runtime disable, option changes and working-directory switches (409 from the HTTP API). Can be turned on at runtime, not off; unlock by restarting the server with `KT_SANDBOX_ALLOW_UNLOCK=1`. |
 | `blocked_tools` | list[str] | tool names | `[]` | Tools the agent cannot call regardless of args. |
 
 ### Profile presets
@@ -97,6 +100,38 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   (`pure` blocks all spawns, `fs` blocks network calls, `shell`
   allows everything) and the network allowlist before delegating to
   `asyncio.create_subprocess_exec`.
+- **Kernel write confinement** (macOS): the runner launches each command
+  under `sandbox-exec` with a profile built from `fs_write`, so the command
+  and every process it starts are confined, whatever they do. A script that
+  calls `shutil.rmtree(os.environ["HOME"])` fails with `Operation not
+  permitted`. `workspace` allows writes under the working directory, the
+  system temp directories, the user caches (`~/.cache`, `~/Library/Caches`,
+  `~/.npm`) and `/dev`; `deny` allows only `/dev`; `broad` allows
+  everything. `fs_deny` paths are then unwritable, and so are the directory
+  entries above them, so a denied path cannot be moved away by renaming a
+  parent. `fs_write_allow` entries are writable again, so a narrow exception
+  such as `~/.ssh/sockets` (ssh connection sharing) or `~/.config/gcloud`
+  survives a denied parent. Launchers that would run work outside the
+  sandbox (`open`, `osascript`, `launchctl` and the LaunchServices / Apple
+  Events services) are refused, and so are connections to the control
+  sockets of Docker (Desktop, Colima, OrbStack), Podman, GNU screen, tmux
+  (including `TMUX_TMPDIR`) and iTerm2, which would run commands unconfined.
+  This is a denylist: other local unix sockets stay reachable, because a
+  default-deny would also cut DNS (`mDNSResponder`) and `ssh-agent`. Reads and network are not confined by the kernel: secrets
+  stay readable, so pair the sandbox with `env=filtered` where API keys
+  should not be inherited. `write` / `edit` checks under `fs_write=workspace` admit the same
+  roots. The confinement targets accidental damage (a misdirected `rmtree`,
+  a stray `open`); it is not a boundary against a program that deliberately
+  escapes, for example by submitting a launchd job through a copied
+  launcher or logging in again over `ssh localhost`. Work started that way
+  runs unconfined; run untrusted code as a separate macOS user or in a VM.
+  The shared `/tmp` stays writable, so a creature can still damage another
+  process's scratch files there, and a hard link made inside the workspace
+  can be written through. Since an agent can reach the local API, set
+  `locked: true` so it cannot switch the sandbox off.
+  Commands run in their own process group, and a timeout or cancellation
+  kills the whole tree. Other platforms run unconfined under `auto`; use `require` to refuse
+  instead.
 - **`backend=audit`**: violations are logged via the agent logger
   rather than raised. Useful for first-pass discovery on a new
   workload.

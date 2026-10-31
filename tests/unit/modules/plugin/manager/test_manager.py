@@ -15,6 +15,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    PluginLockedError,
     ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
@@ -134,6 +135,25 @@ class TestEnableDisable:
 
     def test_disable_unknown_returns_false(self):
         assert PluginManager().disable("ghost") is False
+
+    def test_working_dir_pinned_only_by_an_active_plugin(self):
+        pinning = _CallbackPlugin("guard")
+        pinning.pins_working_dir = lambda: True
+        mgr = PluginManager()
+        mgr.register(_CallbackPlugin("other"))
+        mgr.register(pinning)
+        assert mgr.working_dir_pinned_by() == "guard"
+        mgr.disable("guard")
+        assert mgr.working_dir_pinned_by() is None
+
+    def test_plugin_that_refuses_disable_stays_enabled(self):
+        plugin = _CallbackPlugin("guard")
+        plugin.refuses_disable = lambda: True
+        mgr = PluginManager()
+        mgr.register(plugin)
+        with pytest.raises(PluginLockedError, match="'guard' is locked"):
+            mgr.disable("guard")
+        assert mgr.is_enabled("guard") is True
 
     def test_enable_re_enables_disabled_plugin(self):
         mgr = PluginManager()

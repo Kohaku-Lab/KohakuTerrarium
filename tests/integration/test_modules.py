@@ -42,6 +42,7 @@ from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
+from kohakuterrarium.builtins.plugins.sandbox.seatbelt import seatbelt_available
 from kohakuterrarium.builtins.plugins.ui_declarative.plugin import UiDeclarativePlugin
 from kohakuterrarium.builtins.tools.web import deepseek as deepseek_web
 from kohakuterrarium.builtins.tools.web import fetch as web_fetch
@@ -49,6 +50,7 @@ from kohakuterrarium.builtins.tools.web import search as web_search
 from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.files.edit import EditTool
 from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.bash.bash import ShellTool
 from kohakuterrarium.builtins.tools.files.glob import GlobTool
 from kohakuterrarium.builtins.tools.files.grep import GrepTool
 from kohakuterrarium.builtins.tools.web.search import WebSearchTool
@@ -71,6 +73,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext as RuntimePluginContext,
+    PluginLockedError,
     ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
@@ -817,6 +820,33 @@ class TestModulesIntegration:
             denied = await agent.executor.wait_for(denied_job)
             assert "SandboxViolation[fs_read]" in denied.error
             assert "blocked.txt" not in denied.output
+            if seatbelt_available():
+                # The kernel, not the command, decides: a shell that deletes
+                # outside the workspace fails, writes inside it still land.
+                agent.executor.register_tool(ShellTool())
+                rm_job = await agent.executor.submit(
+                    "bash",
+                    {"command": f"rm -f '{outside / 'blocked.txt'}'"},
+                    is_direct=True,
+                )
+                rm_result = await agent.executor.wait_for(rm_job)
+                assert rm_result.exit_code != 0
+                assert (outside / "blocked.txt").read_text(
+                    encoding="utf-8"
+                ) == "outside"
+                write_job = await agent.executor.submit(
+                    "bash", {"command": "echo made > made.txt"}, is_direct=True
+                )
+                assert (await agent.executor.wait_for(write_job)).exit_code == 0
+                assert (work / "made.txt").read_text(encoding="utf-8") == "made\n"
+            # Once locked, neither a disable nor a workspace move can widen it.
+            mgr.set_plugin_options("sandbox", {"locked": True})
+            with pytest.raises(PluginLockedError):
+                agent.workspace.set(outside)
+            with pytest.raises(PluginLockedError):
+                mgr.disable("sandbox")
+            assert agent.executor._working_dir == work
+            assert mgr.is_enabled("sandbox")
             # should_proceed with no veto hooks → True (nothing vetoes).
             assert (
                 await mgr.should_proceed("on_compact_start", context_length=10) is True

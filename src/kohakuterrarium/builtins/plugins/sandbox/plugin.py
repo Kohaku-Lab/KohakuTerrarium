@@ -8,15 +8,28 @@ to subprocess-capable tools.
 import asyncio
 import os
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
+from kohakuterrarium.builtins.plugins.sandbox.seatbelt import (
+    CACHE_ROOTS,
+    build_write_profile,
+    confine_argv,
+    seatbelt_available,
+    temp_roots,
+)
+from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
+    terminate_process_tree,
+    windows_process_kwargs,
+)
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    PluginLockedError,
 )
 from kohakuterrarium.modules.sandbox.parse import parse_profile
 from kohakuterrarium.modules.sandbox.presets import WORKSPACE
@@ -45,6 +58,8 @@ NETWORK_URL_ARGS = {
 }
 
 NETWORK_TOOLS = {"web_search"}
+
+UNLOCK_ENV = "KT_SANDBOX_ALLOW_UNLOCK"
 
 
 class SandboxPlugin(BasePlugin):
@@ -123,6 +138,30 @@ class SandboxPlugin(BasePlugin):
                 "default": [],
                 "doc": "Allowed hosts when network is enabled. Empty = unrestricted.",
             },
+            "os_enforce": {
+                "type": "enum",
+                "values": ["auto", "require", "off"],
+                "default": "auto",
+                "doc": (
+                    "Kernel write confinement for subprocesses (macOS sandbox-exec). "
+                    "auto = confine where supported, require = refuse to spawn "
+                    "elsewhere, off = policy checks only."
+                ),
+            },
+            "fs_write_allow": {
+                "type": "list",
+                "item_type": "string",
+                "default": [],
+                "doc": "Paths writable even inside fs_deny (exceptions you name).",
+            },
+            "locked": {
+                "type": "bool",
+                "default": False,
+                "doc": (
+                    "Refuse runtime disable and option changes. Unlock by "
+                    "restarting the server with KT_SANDBOX_ALLOW_UNLOCK=1."
+                ),
+            },
             "blocked_tools": {
                 "type": "list",
                 "item_type": "string",
@@ -151,6 +190,27 @@ class SandboxPlugin(BasePlugin):
     async def on_unload(self) -> None:
         self._context = None
 
+    def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Apply option overrides unless the plugin is locked against them."""
+        changes = {k: v for k, v in (values or {}).items() if self.options.get(k) != v}
+        if changes and self._locked():
+            raise PluginLockedError(
+                "sandbox is locked; restart the server with "
+                f"{UNLOCK_ENV}=1 to change {sorted(changes)}"
+            )
+        return super().set_options(values)
+
+    def refuses_disable(self) -> bool:
+        """A locked sandbox cannot be switched off at runtime."""
+        return self._locked()
+
+    def pins_working_dir(self) -> bool:
+        """A locked sandbox keeps its workspace root: the working directory."""
+        return self._enabled and self._locked()
+
+    def _locked(self) -> bool:
+        return bool(self.options.get("locked")) and os.environ.get(UNLOCK_ENV) != "1"
+
     def refresh_options(self) -> None:
         """Rebuild policy from runtime-editable plugin options."""
         backend = str(self.options.get("backend") or "auto").lower()
@@ -161,6 +221,10 @@ class SandboxPlugin(BasePlugin):
         self._network_allowlist = {
             str(host).lower() for host in self.options.get("network_allowlist") or []
         }
+        self._os_enforce = str(self.options.get("os_enforce") or "auto").lower()
+        self._write_allow = tuple(
+            str(p) for p in self.options.get("fs_write_allow") or []
+        )
 
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
         """Gate known file/network/tool operations before execution."""
@@ -222,12 +286,34 @@ class SandboxPlugin(BasePlugin):
         if self._profile.network == "deny" and _argv_may_use_network(argv):
             self._violate("network", " ".join(argv), "network command denied")
         return await _run_plain_subprocess(
-            argv,
+            self._confine(argv, cwd),
             cwd=cwd,
             env=env,
             timeout=timeout,
             input_data=input_data,
             max_output_bytes=max_output_bytes,
+        )
+
+    def _confine(self, argv: list[str], cwd: str | Path | None) -> list[str]:
+        """Wrap ``argv`` so the kernel enforces the write policy, when it can."""
+        if self._audit or self._os_enforce == "off":
+            return argv
+        if not seatbelt_available():
+            if self._os_enforce == "require":
+                self._violate(
+                    "syscall", "spawn", "kernel sandbox is unavailable on this host"
+                )
+            return argv
+        workspace = (
+            Path(cwd).resolve()
+            if cwd is not None
+            else _context_cwd(None, self._context)
+        )
+        return confine_argv(
+            argv,
+            build_write_profile(
+                self._profile, workspace, write_allow=self._write_allow
+            ),
         )
 
     def _check_glob(self, args: dict[str, Any], context: Any, cwd: Path) -> None:
@@ -268,18 +354,31 @@ class SandboxPlugin(BasePlugin):
         resolved = (
             path if literal else Path(os.path.expandvars(str(path))).expanduser()
         ).resolve()
+        writing = axis == "fs_write"
+        if (
+            writing
+            and level != "deny"
+            and self._under(resolved, self._write_allow, cwd)
+        ):
+            return
         for denied in self._profile.fs_deny:
             denied_path = _resolve(denied, cwd).resolve()
             if _is_relative_to(resolved, denied_path):
                 self._violate(axis, str(path), f"{tool_name}: path is denied")
         if level == "deny":
             self._violate(axis, str(path), f"{tool_name}: {axis}=deny")
-        if level == "workspace" and not _is_relative_to(resolved, cwd):
+        roots = [str(cwd), *temp_roots(), *CACHE_ROOTS] if writing else [str(cwd)]
+        if level == "workspace" and not self._under(resolved, roots, cwd):
             self._violate(
                 axis,
                 str(path),
                 f"{tool_name}: path is outside working directory ({cwd})",
             )
+
+    @staticmethod
+    def _under(resolved: Path, roots: tuple[str, ...] | list[str], cwd: Path) -> bool:
+        """Whether ``resolved`` lies under any of ``roots``."""
+        return any(_is_relative_to(resolved, _resolve(r, cwd).resolve()) for r in roots)
 
     def _check_network_tool(self, tool_name: str, args: dict[str, Any]) -> None:
         if tool_name in NETWORK_TOOLS:
@@ -430,6 +529,11 @@ async def _run_plain_subprocess(
     max_output_bytes: int | None,
 ) -> dict[str, Any]:
     """Run a subprocess and return bounded byte streams and timeout state."""
+    spawn_kwargs: dict[str, Any] = (
+        windows_process_kwargs()
+        if sys.platform == "win32"
+        else {"start_new_session": True}
+    )
     process = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd is not None else None,
@@ -437,14 +541,17 @@ async def _run_plain_subprocess(
         stdin=asyncio.subprocess.PIPE if input_data is not None else None,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        **spawn_kwargs,
     )
     try:
         stdout, stderr = await asyncio.wait_for(
             process.communicate(input_data), timeout=timeout if timeout else None
         )
+    except asyncio.CancelledError:
+        await terminate_process_tree(process)
+        raise
     except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+        await terminate_process_tree(process)
         return {
             "returncode": 124,
             "stdout": b"",

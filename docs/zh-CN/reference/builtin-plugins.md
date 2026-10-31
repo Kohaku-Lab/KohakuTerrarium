@@ -44,6 +44,9 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
 | `tmp` | enum | `default` / `private` / `shared` | 来自 profile | 临时目录隔离。 |
 | `fs_deny` | list[str] | 路径 | `[]` | 额外的路径黑名单（支持环境变数展开）。 |
 | `network_allowlist` | list[str] | 主机名 | `[]` | `network=allow` 时的允许清单。空清单 = 网络允许时全允许。 |
+| `os_enforce` | enum | `auto` / `require` / `off` | `auto` | 子进程的内核写入限制（macOS `sandbox-exec`）。`auto`＝支持时启用，`require`＝不支持时拒绝启动，`off`＝只做规则检查。 |
+| `fs_write_allow` | list[str] | 路径 | `[]` | 你指定的例外：即使在 `fs_deny` 之内也可写（`fs_write=deny` 时除外）。 |
+| `locked` | bool | true / false | false | 拒绝运行时停用、修改选项与切换工作目录（HTTP 返回 409）。运行时只能开启不能关闭；以 `KT_SANDBOX_ALLOW_UNLOCK=1` 重启服务才能解锁。 |
 | `blocked_tools` | list[str] | 工具名 | `[]` | 不论参数都不允许呼叫的工具。 |
 
 ### Profile 预设

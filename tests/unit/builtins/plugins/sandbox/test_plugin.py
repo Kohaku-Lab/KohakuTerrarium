@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium.builtins.plugins.sandbox import plugin as plugin_mod
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.tools.files.edit import EditTool
 from kohakuterrarium.builtins.tools.files.glob import GlobTool
@@ -16,7 +17,11 @@ from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.builtins.tools.files.tree import TreeTool
 from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.modules.plugin.base import PluginBlockError, PluginContext
+from kohakuterrarium.modules.plugin.base import (
+    PluginBlockError,
+    PluginContext,
+    PluginLockedError,
+)
 from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
 
 
@@ -282,3 +287,103 @@ class TestDeclaredPathArguments:
 )
 def test_builtin_file_tools_declare_their_path_argument(tool_cls):
     assert "path" in tool_cls.path_arguments
+
+
+class TestFileToolWritesMatchTheKernelProfile:
+    """``fs_write=workspace`` admits the same roots for file tools as for commands."""
+
+    async def _write(self, sandbox, target, context):
+        return await sandbox.pre_tool_execute(
+            {"path": str(target), "content": "x"},
+            tool_name="write",
+            tool=WriteTool(),
+            context=context,
+        )
+
+    async def test_write_outside_every_allowed_root_is_blocked(
+        self, paths, monkeypatch
+    ):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [])
+        with pytest.raises(PluginBlockError, match="outside working directory"):
+            await self._write(
+                SandboxPlugin(fs_write_allow=[]), outside / "new.txt", context
+            )
+
+    async def test_write_under_a_temp_root_is_allowed(self, paths, monkeypatch):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [str(outside)])
+        assert (
+            await self._write(
+                SandboxPlugin(fs_write_allow=[]), outside / "n.txt", context
+            )
+            is None
+        )
+
+    async def test_explicit_allow_is_an_exception_to_the_deny_list(
+        self, paths, monkeypatch
+    ):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [])
+        sockets = outside / "sockets"
+        sandbox = SandboxPlugin(fs_deny=[str(outside)], fs_write_allow=[str(sockets)])
+        assert await self._write(sandbox, sockets / "mux", context) is None
+        with pytest.raises(PluginBlockError, match="path is denied"):
+            await self._write(sandbox, outside / "outside.txt", context)
+
+    async def test_deny_list_overrides_the_cache_roots(self, paths, monkeypatch):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [])
+        monkeypatch.setattr(plugin_mod, "CACHE_ROOTS", (str(outside),))
+        sandbox = SandboxPlugin(fs_deny=[str(outside / "secret")])
+        assert await self._write(sandbox, outside / "pip" / "wheel", context) is None
+        with pytest.raises(PluginBlockError, match="path is denied"):
+            await self._write(sandbox, outside / "secret" / "token", context)
+
+    async def test_reads_do_not_gain_the_temp_roots(self, paths, monkeypatch):
+        _, outside, context = paths
+        monkeypatch.setattr(plugin_mod, "temp_roots", lambda: [str(outside)])
+        with pytest.raises(PluginBlockError, match="outside working directory"):
+            await SandboxPlugin(fs_read="workspace").pre_tool_execute(
+                {"path": str(outside / "outside.txt")},
+                tool_name="read",
+                tool=ReadTool(),
+                context=context,
+            )
+
+
+class TestLock:
+    def test_locked_sandbox_refuses_runtime_changes(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        sandbox = SandboxPlugin(locked=True)
+        with pytest.raises(PluginLockedError, match="KT_SANDBOX_ALLOW_UNLOCK"):
+            sandbox.set_options({"backend": "off"})
+        with pytest.raises(PluginLockedError):
+            sandbox.set_options({"locked": False})
+        assert sandbox.refuses_disable() is True
+        assert sandbox.options["backend"] == "auto"
+
+    def test_reapplying_current_values_is_not_a_change(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        sandbox = SandboxPlugin(locked=True, fs_write="workspace")
+        # Resume re-applies the persisted options onto an already-locked plugin.
+        sandbox.set_options({"locked": True, "fs_write": "workspace"})
+
+    def test_server_started_with_the_unlock_flag_may_change_it(self, monkeypatch):
+        monkeypatch.setenv(plugin_mod.UNLOCK_ENV, "1")
+        sandbox = SandboxPlugin(locked=True)
+        assert sandbox.refuses_disable() is False
+        assert sandbox.set_options({"locked": False})["locked"] is False
+
+    def test_locked_sandbox_pins_the_working_dir(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        assert SandboxPlugin(locked=True).pins_working_dir() is True
+        assert SandboxPlugin().pins_working_dir() is False
+        assert SandboxPlugin(locked=True, backend="off").pins_working_dir() is False
+
+    def test_unlocked_sandbox_can_be_locked_at_runtime(self, monkeypatch):
+        monkeypatch.delenv(plugin_mod.UNLOCK_ENV, raising=False)
+        sandbox = SandboxPlugin()
+        assert sandbox.refuses_disable() is False
+        sandbox.set_options({"locked": True})
+        assert sandbox.refuses_disable() is True

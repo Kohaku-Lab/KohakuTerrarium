@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2.creatures import state as state_mod
+from kohakuterrarium.modules.plugin.base import PluginLockedError
 from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
@@ -167,6 +168,16 @@ class TestWrites:
             json={"path": "/x"},
         )
         assert resp.status_code == 400
+
+    def test_set_working_dir_pinned_by_a_locked_plugin(self):
+        svc = _FakeService(
+            raise_on={"set_working_dir": PluginLockedError("pinned by 'sandbox'")}
+        )
+        resp = _client(svc).put(
+            "/sess/creatures/alice/working-dir", json={"path": "/x"}
+        )
+        assert resp.status_code == 409
+        assert "sandbox" in resp.json()["detail"]
 
     def test_set_working_dir_runtime_error(self):
         svc = _FakeService(raise_on={"set_working_dir": RuntimeError("locked")})
