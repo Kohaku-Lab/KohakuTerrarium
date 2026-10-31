@@ -126,6 +126,8 @@ class TestParse:
                         "resizable": True,
                         "clickThrough": True,
                         "defaultVisible": False,
+                        "surface": "window",
+                        "alwaysOnTop": False,
                     },
                     {"kind": "tab", "id": "t"},
                 ],
@@ -135,21 +137,25 @@ class TestParse:
         by_id = {c["id"]: c["overlay"] for c in slot.to_dict()["contributes"]}
         assert by_id["pet"] == {
             "anchor": "bottom-right",
+            "surface": "app",
             "width": 320,
             "height": 240,
             "draggable": True,
             "resizable": False,
             "clickThrough": False,
             "defaultVisible": True,
+            "alwaysOnTop": True,
         }
         assert by_id["hud"] == {
             "anchor": "top-left",
+            "surface": "window",
             "width": 100,
             "height": 50,
             "draggable": False,
             "resizable": True,
             "clickThrough": True,
             "defaultVisible": False,
+            "alwaysOnTop": False,
         }
         assert by_id["t"] == {}
 
@@ -174,6 +180,8 @@ class TestParse:
             ({"kind": "tab", "id": "t", "renderer": "pkg.x"}, "only valid on a widget"),
             ({"kind": "overlay", "id": "o", "owner": "plugin:x"}, "owned by"),
             ({"kind": "overlay", "id": "o", "anchor": "middle"}, "anchor"),
+            ({"kind": "overlay", "id": "o", "surface": "tab"}, "surface"),
+            ({"kind": "overlay", "id": "o", "alwaysOnTop": 1}, "alwaysOnTop"),
             ({"kind": "overlay", "id": "o", "width": 0}, "width"),
             ({"kind": "overlay", "id": "o", "height": True}, "height"),
             ({"kind": "overlay", "id": "o", "draggable": "yes"}, "draggable"),

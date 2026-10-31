@@ -41,11 +41,13 @@ OVERLAY_ANCHORS: tuple[str, ...] = (
     "bottom-right",
     "center",
 )
+OVERLAY_SURFACES: tuple[str, ...] = ("app", "window")
 OVERLAY_FLAGS: tuple[str, ...] = (
     "draggable",
     "resizable",
     "clickThrough",
     "defaultVisible",
+    "alwaysOnTop",
 )
 OVERLAY_MAX_SIZE = 4096
 UI_KINDS: tuple[str, ...] = tuple(MOUNT_OWNER_KINDS)
@@ -258,7 +260,7 @@ def _parse_contribution(
 
 def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
     """Placement options of an ``overlay`` contribution; empty for other kinds."""
-    keys = ("anchor", "width", "height", *OVERLAY_FLAGS)
+    keys = ("anchor", "surface", "width", "height", *OVERLAY_FLAGS)
     if kind != "overlay":
         stray = [k for k in keys if k in raw]
         if stray:
@@ -267,7 +269,10 @@ def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
     anchor = raw.get("anchor", "bottom-right")
     if anchor not in OVERLAY_ANCHORS:
         raise _SlotError(f"{where}.anchor must be one of {list(OVERLAY_ANCHORS)}")
-    out: dict = {"anchor": anchor}
+    surface = raw.get("surface", "app")
+    if surface not in OVERLAY_SURFACES:
+        raise _SlotError(f"{where}.surface must be one of {list(OVERLAY_SURFACES)}")
+    out: dict = {"anchor": anchor, "surface": surface}
     for name in ("width", "height"):
         value = raw.get(name, 320 if name == "width" else 240)
         if (
