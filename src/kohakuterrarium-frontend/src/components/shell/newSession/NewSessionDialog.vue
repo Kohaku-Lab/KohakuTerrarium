@@ -72,13 +72,15 @@ import { randomNameFor } from "@/utils/randomName"
  * machine it runs on and its working directory. By default nothing opens and
  * the view stays put; the user may pick Chat or Chat + inspector instead.
  * `silent` hides that choice (the graph editor stays in view); `initialConfig`
- * arrives with the config already chosen (Studio's Run). `started` fires once
+ * arrives with the config already chosen (Studio's Run); `initialPwd` with the
+ * working directory already chosen (a folder opened from the desktop). `started` fires once
  * it runs with `{id, opened}`.
  */
 const props = defineProps({
   mode: { type: String, default: "creature" },
   silent: { type: Boolean, default: false },
   initialConfig: { type: String, default: "" },
+  initialPwd: { type: String, default: "" },
 })
 const emit = defineEmits(["close", "started"])
 
@@ -98,8 +100,8 @@ const mode = ref(MODES.some((m) => m.id === props.mode) ? props.mode : "creature
 const name = ref("")
 const namePlaceholder = ref(randomNameFor(mode.value))
 const onNode = ref(initialNode(mode.value))
-const pwd = ref("")
-const pwdTouched = ref(false)
+const pwd = ref(props.initialPwd)
+const pwdTouched = ref(Boolean(props.initialPwd))
 const configPath = ref(props.initialConfig)
 const attachMode = ref("none")
 const starting = ref(false)

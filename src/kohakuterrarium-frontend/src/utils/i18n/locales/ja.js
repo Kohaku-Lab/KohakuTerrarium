@@ -331,6 +331,7 @@ export default {
   "settings.desktop.terminalFailed": "ターミナルコマンドを変更できませんでした。",
   "settings.desktop.autostartTitle": "ログイン時に起動",
   "settings.desktop.autostartHint": "サインイン時に KohakuTerrarium を自動的に開きます。",
+  "desktop.openFailed": "{path} を開けませんでした: {reason}",
   "settings.desktop.summonTitle": "呼び出しショートカット",
   "settings.desktop.summonHint":
     "どのアプリからでも KohakuTerrarium を最前面に出し、メッセージ欄にカーソルを置くシステム全体のショートカットです。",

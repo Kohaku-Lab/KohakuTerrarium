@@ -328,6 +328,7 @@ export default {
   "settings.desktop.terminalFailed": "터미널 명령을 변경할 수 없습니다.",
   "settings.desktop.autostartTitle": "로그인 시 시작",
   "settings.desktop.autostartHint": "로그인할 때 KohakuTerrarium을 자동으로 엽니다.",
+  "desktop.openFailed": "{path}을(를) 열 수 없습니다: {reason}",
   "settings.desktop.summonTitle": "불러오기 단축키",
   "settings.desktop.summonHint":
     "어떤 앱에서든 KohakuTerrarium을 맨 앞으로 가져오고 메시지 입력란에 커서를 두는 시스템 전체 단축키입니다.",

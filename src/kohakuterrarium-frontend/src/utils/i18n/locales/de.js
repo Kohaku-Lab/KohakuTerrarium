@@ -343,6 +343,7 @@ export default {
   "settings.desktop.terminalFailed": "Der Terminalbefehl konnte nicht geändert werden.",
   "settings.desktop.autostartTitle": "Beim Anmelden starten",
   "settings.desktop.autostartHint": "KohakuTerrarium beim Anmelden automatisch öffnen.",
+  "desktop.openFailed": "{path} konnte nicht geöffnet werden: {reason}",
   "settings.desktop.summonTitle": "Tastenkürzel zum Herholen",
   "settings.desktop.summonHint":
     "Ein systemweites Tastenkürzel, das KohakuTerrarium aus jeder App nach vorn holt und den Cursor ins Nachrichtenfeld setzt.",

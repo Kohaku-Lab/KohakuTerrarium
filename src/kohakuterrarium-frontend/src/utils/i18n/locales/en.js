@@ -427,6 +427,7 @@ export default {
   "settings.desktop.terminalFailed": "Could not change the terminal command.",
   "settings.desktop.autostartTitle": "Start at login",
   "settings.desktop.autostartHint": "Open KohakuTerrarium automatically when you sign in.",
+  "desktop.openFailed": "Could not open {path}: {reason}",
   "settings.desktop.summonTitle": "Summon shortcut",
   "settings.desktop.summonHint":
     "A system-wide shortcut that brings KohakuTerrarium to the front from any app and puts the cursor in the message box.",

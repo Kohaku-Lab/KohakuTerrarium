@@ -343,6 +343,7 @@ export default {
   "settings.desktop.terminalFailed": "無法變更終端機指令。",
   "settings.desktop.autostartTitle": "登入時啟動",
   "settings.desktop.autostartHint": "登入系統時自動開啟 KohakuTerrarium。",
+  "desktop.openFailed": "無法開啟 {path}：{reason}",
   "settings.desktop.summonTitle": "喚出快速鍵",
   "settings.desktop.summonHint":
     "系統層級快速鍵：在任何應用程式中把 KohakuTerrarium 帶到最前面，並將游標放進訊息輸入框。",

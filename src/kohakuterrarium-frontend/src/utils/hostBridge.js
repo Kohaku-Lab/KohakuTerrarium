@@ -221,6 +221,20 @@ export function ackOverlayWindow() {
   return callBoolean("overlay_ack")
 }
 
+/**
+ * Files and folders the app was launched with or handed while running and the
+ * page has not taken yet: ``[{ kind: "session" | "workspace", path }]``.
+ */
+export async function takePendingOpens() {
+  if (!hostSupports("take_pending_opens")) return []
+  try {
+    const opens = await call("take_pending_opens")
+    return Array.isArray(opens) ? opens : []
+  } catch {
+    return []
+  }
+}
+
 /** The deep link that arrived before the page could ask for it, or ``null``. */
 export async function takeDeepLink() {
   if (!hostSupports("take_deep_link")) return null

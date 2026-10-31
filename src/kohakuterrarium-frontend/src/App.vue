@@ -11,6 +11,7 @@
     <CommandPalette />
     <ShortcutHelp />
     <OverlayLayer />
+    <DesktopOpenHost />
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
     <WorkspaceResumeDialog />
@@ -29,6 +30,7 @@ import CommandPalette from "@/components/chrome/CommandPalette.vue"
 import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
+import DesktopOpenHost from "@/components/shell/DesktopOpenHost.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
 import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
 import OverlayLayer from "@/ext/OverlayLayer.vue"
