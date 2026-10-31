@@ -23,7 +23,9 @@ const emit = defineEmits(["say"])
 const entry = computed(() => messageRenderers.get(props.id) || null)
 
 provide(MESSAGE_BLOCK_INJECT_KEY, {
-  id: props.id,
+  get id() {
+    return props.id
+  },
   source: computed(() => props.source),
   say: (text) => emit("say", text),
 })
