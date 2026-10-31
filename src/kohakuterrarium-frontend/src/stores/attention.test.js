@@ -9,6 +9,7 @@ import {
   reduceAttention,
   reduceAttentionEdge,
   removeAttentionScope,
+  restoreAttentionFromHistory,
   subscribeAttentionEdges,
   totalAttention,
 } from "./attention"
@@ -104,8 +105,38 @@ describe("chat attention", () => {
       { type: "widget", widget_id: "c", renderer: "kt.card", interactive: true },
       { type: "widget_close", widget_id: "c" },
     ]
-    for (const row of rows) state = reduceAttention(state, { ...row, history: true })
+    for (const [index, row] of rows.entries()) {
+      state = reduceAttention(state, { ...row, event_id: index + 1, history: true })
+    }
     expect(state.pending).toEqual(new Set(["a"]))
+  })
+
+  it.each([
+    { type: "widget_ack", kind: "message", status: "accepted" },
+    { type: "widget_close", payload: { reason: "replied" } },
+    { type: "widget_close", payload: { reason: "timeout" } },
+  ])("resolves a history-restored widget with a live $type frame", (close) => {
+    let state = restoreAttentionFromHistory([
+      {
+        type: "widget",
+        event_id: 42,
+        widget_id: "ask",
+        renderer: "kt.ask_text",
+        interactive: true,
+      },
+    ])
+    expect(state.pending).toEqual(new Set(["ask"]))
+    state = reduceAttention(state, { ...close, event_id: "ask" })
+    expect(state.pending.size).toBe(0)
+  })
+
+  it("uses a legacy payload prompt id instead of the history row id", () => {
+    const state = restoreAttentionFromHistory([
+      { type: "ask_text", event_id: 1, interactive: true, payload: { event_id: "ask" } },
+      { type: "ui_supersede", event_id: 2, payload: { event_id: "ask" } },
+    ])
+    expect(state.pending.size).toBe(0)
+    expect(state.seen).toEqual(new Set(["ask"]))
   })
 
   it("rebuilds pending input from history without emitting an external edge", () => {
