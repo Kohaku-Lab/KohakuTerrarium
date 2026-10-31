@@ -9,8 +9,9 @@ import { computed, onBeforeUnmount, onMounted } from "vue"
 
 import OverlayFrame from "@/ext/OverlayFrame.vue"
 import { isOverlayVisible, overlays, syncViewport } from "@/ext/overlays"
+import { windowActive } from "@/ext/overlayWindows"
 
-const shown = computed(() => [...overlays.values()].filter((o) => isOverlayVisible(o.key)))
+const shown = computed(() => [...overlays.values()].filter((o) => isOverlayVisible(o.key) && !windowActive(o.key)))
 
 onMounted(() => {
   syncViewport()

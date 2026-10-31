@@ -49,6 +49,8 @@ export const MOUNT_OWNER_KINDS = {
 
 const OVERLAY_OPTION_NAMES = [
   "anchor",
+  "surface",
+  "alwaysOnTop",
   "width",
   "height",
   "draggable",

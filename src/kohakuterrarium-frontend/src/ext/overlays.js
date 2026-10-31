@@ -48,8 +48,28 @@ function writeStorage() {
 /** Load the saved placements of ``hostKey`` (replaces the in-memory set). */
 export function loadPlacements(hostKey) {
   _storageKey = `${STORAGE_PREFIX}${hostKey}`
+  reloadPlacements()
+}
+
+/** Re-read the current host's saved placements, e.g. after another window changed them. */
+export function reloadPlacements() {
+  if (!_storageKey) return
   for (const key of Object.keys(placements)) delete placements[key]
   Object.assign(placements, readStorage(_storageKey))
+}
+
+/** Whether ``storage`` event ``key`` is where the current host's placements live. */
+export function isPlacementStorageKey(key) {
+  return Boolean(_storageKey) && key === _storageKey
+}
+
+/** Whether the user allowed the overlay to open a native window of its own. */
+export function isWindowAllowed(key) {
+  return placement(key).windowAllowed === true
+}
+
+export function setWindowAllowed(key, allowed) {
+  patch(key, { windowAllowed: Boolean(allowed) })
 }
 
 /** Register an overlay; ``options`` come from the manifest and may be overridden by code. */
@@ -182,8 +202,11 @@ export function beginDrag(key, event, mode = "move") {
 
 /** Forget the saved position and size of one overlay. */
 export function resetOverlay(key) {
-  const { visible } = placement(key)
-  placements[key] = typeof visible === "boolean" ? { visible } : {}
+  const { visible, windowAllowed } = placement(key)
+  const kept = {}
+  if (typeof visible === "boolean") kept.visible = visible
+  if (windowAllowed === true) kept.windowAllowed = true
+  placements[key] = kept
   writeStorage()
 }
 

@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   DESKTOP_PROTOCOL,
+  ackOverlayWindow,
   checkShellUpdate,
+  closeOverlayWindow,
+  openOverlayWindow,
+  overlayWindowsSupported,
+  setOverlayBounds,
+  setOverlayHitRegions,
+  startOverlayDrag,
   installShellUpdate,
   desktopCapabilities,
   getAutostart,
@@ -160,6 +167,37 @@ describe("hostBridge", () => {
     expect(await getAutostart()).toBeNull()
     expect(await setAutostart(true)).toBeNull()
     expect(await takeDeepLink()).toBeNull()
+  })
+
+  it("drives native overlay windows through Tauri only", async () => {
+    const invoke = vi.fn(async () => true)
+    window.__TAURI_INTERNALS__ = { invoke }
+    expect(overlayWindowsSupported()).toBe(true)
+    const spec = { label: "overlay-a", key: "ext:p/o", width: 100, height: 80 }
+    expect(await openOverlayWindow(spec)).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("open_overlay_window", { args: [spec] })
+    expect(await closeOverlayWindow("overlay-a")).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: ["overlay-a"] })
+    expect(await setOverlayBounds(1, 2, 3, 4)).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("overlay_set_bounds", { args: [1, 2, 3, 4] })
+    expect(await setOverlayHitRegions([[0, 0, 5, 5]])).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("overlay_set_hit_regions", { args: [[[0, 0, 5, 5]]] })
+    expect(await startOverlayDrag()).toBe(true)
+    expect(invoke).toHaveBeenLastCalledWith("overlay_start_drag", {})
+    expect(await ackOverlayWindow()).toBe(true)
+
+    delete window.__TAURI_INTERNALS__
+    window.pywebview = { api: { open_overlay_window: async () => true } }
+    expect(overlayWindowsSupported()).toBe(false)
+    window.__TAURI_INTERNALS__ = {
+      invoke: async () => {
+        throw new Error("denied")
+      },
+    }
+    delete window.pywebview
+    expect(await openOverlayWindow(spec)).toBe(false)
+    delete window.__TAURI_INTERNALS__
+    expect(await openOverlayWindow(spec)).toBe(false)
   })
 
   it("onHostReady fires immediately when hosted and again on pywebviewready", () => {

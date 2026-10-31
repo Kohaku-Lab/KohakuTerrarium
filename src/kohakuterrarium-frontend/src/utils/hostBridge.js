@@ -136,6 +136,50 @@ export async function installShellUpdate() {
   }
 }
 
+/** Whether the shell can draw an extension overlay in its own native window. */
+export function overlayWindowsSupported() {
+  return hostKind() === KIND_TAURI && hostSupports("open_overlay_window")
+}
+
+async function callBoolean(name, ...args) {
+  if (!hostSupports(name)) return false
+  try {
+    return (await call(name, ...args)) === true
+  } catch {
+    return false
+  }
+}
+
+/** Open (or show) a native overlay window: `{ label, key, width, height, anchor, alwaysOnTop }`. */
+export function openOverlayWindow(spec) {
+  return callBoolean("open_overlay_window", spec)
+}
+
+/** Close the native overlay window with `label`. */
+export function closeOverlayWindow(label) {
+  return callBoolean("close_overlay_window", String(label))
+}
+
+/** Start dragging the calling overlay window. */
+export function startOverlayDrag() {
+  return callBoolean("overlay_start_drag")
+}
+
+/** Move and resize the calling overlay window (logical screen pixels). */
+export function setOverlayBounds(x, y, width, height) {
+  return callBoolean("overlay_set_bounds", x, y, width, height)
+}
+
+/** Report the `[x, y, width, height]` rectangles of the calling overlay that catch the mouse. */
+export function setOverlayHitRegions(regions) {
+  return callBoolean("overlay_set_hit_regions", regions)
+}
+
+/** Tell the shell the overlay page is running and could call a native command. */
+export function ackOverlayWindow() {
+  return callBoolean("overlay_ack")
+}
+
 /** The deep link that arrived before the page could ask for it, or ``null``. */
 export async function takeDeepLink() {
   if (!hostSupports("take_deep_link")) return null

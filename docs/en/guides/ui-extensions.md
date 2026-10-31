@@ -158,6 +158,8 @@ contributes:
     resizable: false         # default false
     clickThrough: false      # default false
     defaultVisible: true     # default true
+    surface: app             # app | window (window: a native desktop window, see below)
+    alwaysOnTop: true        # window surface only, default true
 ```
 
 ```js
@@ -179,6 +181,33 @@ Inside the component, `useOverlay()` returns `visible` and `bounds` (refs),
   overlay with a switch and "Reset position".
 - Overlays run inline in the dashboard origin, with the same trust as other
   contributions.
+
+#### Desktop window overlays
+
+An overlay with `surface: window` is drawn in its own frameless, transparent
+window on the desktop when the installed app (Tauri shell) hosts the
+dashboard. Everywhere else (browser, `kt app`) it is drawn in the app layer
+exactly like a `surface: app` overlay, so the same component works on every
+host.
+
+- It never opens on its own: the user must switch on **Settings → Overlays →
+  Show on the desktop** for that overlay and confirm a prompt that names the
+  package. Until then it stays in the app layer.
+- `alwaysOnTop` keeps it above other applications; `anchor`, `width` and
+  `height` give its first position on the primary monitor, and the shell
+  remembers where the user moved it.
+- With `clickThrough: true` the window catches the mouse only over elements
+  with the class `kt-overlay-hit`; the rest of the window lets clicks through
+  to whatever is underneath. Call `startDrag(event)` from a `pointerdown`
+  handler on such an element to move the window.
+- Without `clickThrough` the host draws a title bar that drags the window
+  and hides the overlay.
+- In a window overlay `move(left, top)` and `resize(width, height)` take
+  screen pixels, and `hide()` closes the window.
+- The window loads the same dashboard origin and session cookie as the main
+  window. The shell only lets an overlay window move, resize and close
+  itself; it cannot open other windows or use the app's other native
+  commands.
 
 `useOwner()` returns:
 

@@ -22,8 +22,14 @@ import {
   showOverlay,
   toggleOverlay,
 } from "@/ext/overlays"
+import { windowLabel } from "@/ext/overlayWindows"
 import { openExtensionTab } from "@/ext/registry"
-import { EXTENSION_INJECT_KEY, OVERLAY_INJECT_KEY, OWNER_INJECT_KEY } from "@/ext/sdk/keys"
+import {
+  EXTENSION_INJECT_KEY,
+  OVERLAY_INJECT_KEY,
+  OVERLAY_MODE_INJECT_KEY,
+  OWNER_INJECT_KEY,
+} from "@/ext/sdk/keys"
 import { THEME_TOKENS } from "@/ext/sdk/theme"
 import { injectScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
@@ -32,6 +38,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
 import { useTabsStore } from "@/stores/tabs"
 import { useThemeStore } from "@/stores/theme"
+import { closeOverlayWindow, setOverlayBounds, startOverlayDrag } from "@/utils/hostBridge"
 
 export { OwnerCallError } from "@/ext/ownerClient"
 export { useWidget } from "@/components/chat/widgets/useWidget"
@@ -83,14 +90,38 @@ export function useOwner() {
   }
 }
 
+/** `useOverlay()` inside a native overlay window: the window is the overlay, positions are screen pixels. */
+function useWindowOverlay(key) {
+  const size = () => ({ width: window.innerWidth, height: window.innerHeight })
+  const hide = async () => {
+    hideOverlay(key)
+    await closeOverlayWindow(windowLabel(key))
+  }
+  return {
+    visible: computed(() => true),
+    bounds: computed(() => ({ left: window.screenX, top: window.screenY, ...size() })),
+    show: () => {},
+    hide,
+    toggle: hide,
+    move: (left, top) => setOverlayBounds(left, top, size().width, size().height),
+    resize: (width, height) => setOverlayBounds(window.screenX, window.screenY, width, height),
+    startDrag: (event) => {
+      event?.preventDefault?.()
+      return startOverlayDrag()
+    },
+  }
+}
+
 /**
  * Control the overlay the calling component is drawn in: ``visible`` and
  * ``bounds`` are refs; ``startDrag(event)`` moves a click-through overlay
- * from a ``pointerdown`` on any element of its own.
+ * from a ``pointerdown`` on any element of its own. In a native window
+ * overlay ``move`` and ``resize`` use screen pixels.
  */
 export function useOverlay() {
   const key = inject(OVERLAY_INJECT_KEY, null)
   if (!key) throw new Error("useOverlay() must be called inside an overlay contribution")
+  if (inject(OVERLAY_MODE_INJECT_KEY, "app") === "window") return useWindowOverlay(key)
   return {
     visible: computed(() => isOverlayVisible(key)),
     bounds: computed(() => overlayBounds(key)),
