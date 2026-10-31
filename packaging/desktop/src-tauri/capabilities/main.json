@@ -30,6 +30,7 @@
     "allow-set-summon-shortcut",
     "allow-take-pending-opens",
     "allow-open-popout-window",
+    "allow-set-window-chrome",
     "allow-set-keep-awake",
     "allow-add-recent-session",
     "allow-get-explorer-verbs",

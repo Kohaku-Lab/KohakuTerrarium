@@ -224,6 +224,11 @@ export function openLogs() {
   return callBoolean("open_logs")
 }
 
+/** Colour the native caption and border to `[r, g, b]`. Resolves ``false`` where the system cannot. */
+export function setWindowChrome(background) {
+  return callBoolean("set_window_chrome", { background })
+}
+
 /** Keep (``true``) or stop keeping the computer awake. Resolves ``false`` if the shell could not. */
 export function setKeepAwake(on) {
   return callBoolean("set_keep_awake", Boolean(on))

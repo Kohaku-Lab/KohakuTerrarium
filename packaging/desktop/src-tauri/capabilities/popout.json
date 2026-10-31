@@ -11,6 +11,7 @@
     "allow-get-desktop-capabilities",
     "allow-open-external",
     "allow-set-desktop-theme",
+    "allow-set-window-chrome",
     "allow-popout-ack",
     "allow-popout-return"
   ]

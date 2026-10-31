@@ -171,6 +171,10 @@ fn popout_probe(app: &AppHandle) -> Value {
     })
 }
 
+pub fn chrome_probe_requested() -> bool {
+    std::env::var_os("KT_DESKTOP_SMOKE_CHROME").is_some()
+}
+
 pub fn repair_probe_requested() -> bool {
     std::env::var_os("KT_DESKTOP_SMOKE_REPAIR").is_some()
 }
@@ -304,6 +308,7 @@ pub struct Probes {
     pub backend: Option<Value>,
     pub diagnostics: Option<Value>,
     pub repair: Option<Value>,
+    pub chrome: Option<Value>,
 }
 
 pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Probes) -> Value {
@@ -338,6 +343,7 @@ pub fn report(version: &str, port: u16, page_loaded: bool, ipc: bool, probes: Pr
     json!({
         "ok": page_loaded && ipc && update_ok && overlay_ok && tray_ok && summon_ok && popout_ok
             && menu_ok && backend_ok && diagnostics_ok && repair_ok,
+        "windowChrome": probes.chrome,
         "backendRestart": probes.backend,
         "diagnostics": probes.diagnostics,
         "runtimeRepair": probes.repair,
@@ -390,6 +396,12 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
             diagnostics: diagnostics_probe_requested()
                 .then(|| crate::runtime::diagnostics::leak_probe(&app)),
             repair: None,
+            chrome: chrome_probe_requested()
+                .then(|| {
+                    app.get_webview_window("main")
+                        .map(|w| crate::chrome::probe(&w))
+                })
+                .flatten(),
             update: None,
         };
         probes.backend = backend_probe_requested().then(|| backend_probe(&app));

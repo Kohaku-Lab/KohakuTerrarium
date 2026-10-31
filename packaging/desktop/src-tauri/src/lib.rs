@@ -2,6 +2,7 @@
 
 mod attention;
 mod backend;
+mod chrome;
 mod commands;
 mod dialogs;
 mod files;
@@ -108,6 +109,7 @@ pub fn run() {
             popout::open_popout_window,
             popout::popout_ack,
             popout::popout_return,
+            chrome::set_window_chrome,
             os::keep_awake::set_keep_awake,
             os::recent::add_recent_session,
             os::explorer::get_explorer_verbs,

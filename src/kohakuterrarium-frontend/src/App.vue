@@ -48,6 +48,7 @@ import { useDensity } from "@/composables/useDensity"
 import { useDesktopCommands } from "@/composables/useDesktopCommands"
 import { useDesktopMenu } from "@/composables/useDesktopMenu"
 import { useKeepAwake } from "@/composables/useKeepAwake"
+import { useWindowChrome } from "@/composables/useWindowChrome"
 import { useDesktopTrayItems } from "@/composables/useDesktopTrayItems"
 import { useDesktopTrayMenu } from "@/composables/useDesktopTrayMenu"
 import { useDesktopPopout } from "@/composables/useDesktopPopout"
@@ -103,6 +104,7 @@ useDesktopSummon()
 useDesktopPopout()
 useDesktopCommands()
 useKeepAwake()
+useWindowChrome()
 useDesktopMenu()
 useDesktopTrayItems()
 useDesktopTrayMenu()

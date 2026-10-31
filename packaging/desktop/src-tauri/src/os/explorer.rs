@@ -10,16 +10,20 @@ use crate::settings::ShellSettings;
 
 /// The per-user registry root that Explorer merges into its class definitions.
 pub const CLASSES: &str = r"Software\Classes";
+#[cfg(any(windows, test))]
 const VERB: &str = "KohakuTerrarium";
+#[cfg(any(windows, test))]
 const LABEL: &str = "Open with KohakuTerrarium";
 /// Where the entry goes, with the argument that names the folder: the folder itself, and the
 /// empty space inside an open folder.
+#[cfg(any(windows, test))]
 const TARGETS: &[(&str, &str)] = &[
     (r"Directory\shell", "%1"),
     (r"Directory\Background\shell", "%V"),
 ];
 
 /// One context-menu entry: its key below the classes root, caption, icon and command line.
+#[cfg(any(windows, test))]
 #[derive(Debug, PartialEq, Eq)]
 pub struct Entry {
     pub key: String,
@@ -29,6 +33,7 @@ pub struct Entry {
 }
 
 /// The entries that open a folder in the app at `exe`.
+#[cfg(any(windows, test))]
 pub fn entries(exe: &Path) -> Vec<Entry> {
     let exe = exe.display().to_string();
     TARGETS

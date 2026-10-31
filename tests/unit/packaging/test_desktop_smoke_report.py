@@ -56,6 +56,7 @@ def _report(**overrides) -> dict:
             "pidChanged": True,
             "healthStatus": 200,
         },
+        "windowChrome": {"painted": True},
         "summonShortcut": {"registered": True, "released": True},
     }
     report.update(overrides)
@@ -183,3 +184,19 @@ def test_a_healthy_report_has_no_problems(smoke):
 def test_each_failure_is_named(smoke, overrides, fragment):
     problems = smoke.check_report(_report(**overrides))
     assert any(fragment in problem for problem in problems), problems
+
+
+def test_a_caption_colour_is_required_only_where_windows_can_take_it(
+    smoke, monkeypatch
+):
+    monkeypatch.setattr(smoke, "windows_build", lambda: 22621)
+    assert smoke.check_report(_report(windowChrome={"painted": True})) == []
+    problems = smoke.check_report(_report(windowChrome={"painted": False}))
+    assert any("caption colour" in problem for problem in problems), problems
+    missing = smoke.check_report(_report(windowChrome=None))
+    assert any("caption colour" in problem for problem in missing), missing
+
+    monkeypatch.setattr(smoke, "windows_build", lambda: 19045)
+    assert smoke.check_report(_report(windowChrome={"painted": False})) == []
+    monkeypatch.setattr(smoke, "windows_build", lambda: 0)
+    assert smoke.check_report(_report()) == []

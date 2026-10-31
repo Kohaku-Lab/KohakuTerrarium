@@ -73,6 +73,7 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
         "KT_DESKTOP_SMOKE_BACKEND": "1",
         "KT_DESKTOP_SMOKE_DIAGNOSTICS": "1",
         "KT_DESKTOP_SMOKE_REPAIR": "1",
+        "KT_DESKTOP_SMOKE_CHROME": "1",
     }
     if os.environ.get("KT_DESKTOP_RESOURCES") is None and resources != exe.parent:
         env["KT_DESKTOP_RESOURCES"] = str(resources)
@@ -84,6 +85,14 @@ def run_app(exe: Path, resources: Path, config_dir: Path, report: Path) -> dict:
             f"the app exited ({completed.returncode}) without a report\n{completed.stderr}"
         )
     return json.loads(report.read_text(encoding="utf-8"))
+
+
+WINDOWS_11_BUILD = 22000
+
+
+def windows_build() -> int:
+    """The Windows build number, or 0 on any other system."""
+    return sys.getwindowsversion().build if sys.platform == "win32" else 0
 
 
 def check_report(data: dict) -> list[str]:
@@ -124,6 +133,9 @@ def check_report(data: dict) -> list[str]:
         problems.append(
             f"the diagnostics bundle kept a credential or lost the log: {diagnostics}"
         )
+    chrome = data.get("windowChrome") or {}
+    if windows_build() >= WINDOWS_11_BUILD and chrome.get("painted") is not True:
+        problems.append(f"Windows did not accept a caption colour: {chrome}")
     repair = data.get("runtimeRepair") or {}
     if repair.get("repaired") is not True:
         problems.append(f"the runtime could not be repaired: {repair}")

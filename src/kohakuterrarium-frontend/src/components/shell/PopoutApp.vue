@@ -23,6 +23,7 @@ import { computed, onMounted } from "vue"
 import AuthGate from "@/components/auth/AuthGate.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import AttachTab from "@/components/shell/tabs/AttachTab.vue"
+import { useWindowChrome } from "@/composables/useWindowChrome"
 import { useInstancesStore } from "@/stores/instances"
 import { ackPopoutWindow, returnPopoutWindow } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
@@ -32,6 +33,7 @@ const props = defineProps({
   scope: { type: String, required: true },
 })
 
+useWindowChrome()
 const { t } = useI18n()
 const tab = computed(() => ({ id: `popout:${props.scope}`, kind: "attach", target: props.scope }))
 const instances = useInstancesStore()

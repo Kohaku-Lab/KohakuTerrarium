@@ -76,6 +76,7 @@ pub struct Backend {
     restarts: AtomicU32,
     main_loads: AtomicU32,
     relaunching: AtomicBool,
+    watching: AtomicBool,
     port: AtomicU16,
     shell_loaded: AtomicBool,
     page_loaded: AtomicBool,
@@ -607,36 +608,46 @@ fn cycle(
         Ok(()) => {
             backend.restarts.fetch_add(1, Ordering::SeqCst);
             announce(app, Phase::Running, "");
+            if smoke::output_path().is_none() {
+                watch(app.clone());
+            }
         }
         Err(message) => fail(app, message),
     }
     result
 }
 
+/// Watch the backend process and restart it after a crash; one watcher runs at a time.
 fn watch(app: AppHandle) {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(1));
-        let backend = app.state::<Backend>();
-        if backend.stopping.load(Ordering::SeqCst) {
-            return;
-        }
-        if backend.is_relaunching() {
-            continue;
-        }
-        let exited = match backend.child.lock().unwrap().as_mut() {
-            Some(child) => child.try_wait().ok().flatten(),
-            None => continue,
-        };
-        let Some(status) = exited else { continue };
-        let allowed = may_recover(&mut backend.crashes.lock().unwrap(), Instant::now());
-        if allowed && restart(&app).is_ok() {
-            continue;
-        }
-        fail(
-            &app,
-            &format!("The backend stopped unexpectedly ({status}). Restart it from the tray or the settings; details are in app.log."),
-        );
+    if app.state::<Backend>().watching.swap(true, Ordering::SeqCst) {
         return;
+    }
+    thread::spawn(move || {
+        let backend = app.state::<Backend>();
+        loop {
+            thread::sleep(Duration::from_secs(1));
+            if backend.stopping.load(Ordering::SeqCst) {
+                break;
+            }
+            if backend.is_relaunching() {
+                continue;
+            }
+            let exited = match backend.child.lock().unwrap().as_mut() {
+                Some(child) => child.try_wait().ok().flatten(),
+                None => continue,
+            };
+            let Some(status) = exited else { continue };
+            let allowed = may_recover(&mut backend.crashes.lock().unwrap(), Instant::now());
+            if allowed && restart(&app).is_ok() {
+                continue;
+            }
+            fail(
+                &app,
+                &format!("The backend stopped unexpectedly ({status}). Restart it from the tray or the settings; details are in app.log."),
+            );
+            break;
+        }
+        backend.watching.store(false, Ordering::SeqCst);
     });
 }
 
