@@ -6,6 +6,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::backend::Backend;
 use crate::navigation::{is_internal, is_openable};
+use crate::popout;
 use crate::smoke;
 
 /// Keeps the native caption in step with the page's light or dark mode.
@@ -58,6 +59,10 @@ pub fn create(app: &App) -> tauri::Result<()> {
             let backend = page_load.state::<Backend>();
             if payload.url().host_str() == Some("127.0.0.1") {
                 backend.mark_page_loaded();
+                if smoke::output_path().is_none() && backend.claim_popout_restore() {
+                    let app = page_load.clone();
+                    std::thread::spawn(move || popout::restore(&app));
+                }
             } else {
                 backend.mark_shell_loaded();
             }

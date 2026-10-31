@@ -41,10 +41,16 @@ pub struct Backend {
     overlay_ipc_confirmed: AtomicBool,
     popout_page_loaded: AtomicBool,
     popout_ipc_confirmed: AtomicBool,
+    popouts_restored: AtomicBool,
     stopping: AtomicBool,
 }
 
 impl Backend {
+    /// Whether the caller is the first to ask to reopen the last run's session windows.
+    pub fn claim_popout_restore(&self) -> bool {
+        !self.popouts_restored.swap(true, Ordering::SeqCst)
+    }
+
     pub fn mark_popout_page_loaded(&self) {
         self.popout_page_loaded.store(true, Ordering::SeqCst);
     }

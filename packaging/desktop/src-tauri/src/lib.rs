@@ -75,6 +75,7 @@ pub fn run() {
         .manage(opens::PendingOpens::default())
         .manage(ShellSettings::default())
         .manage(tray::TrayState::default())
+        .manage(popout::PopoutRegistry::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_desktop_capabilities,
             commands::request_desktop_attention,
@@ -103,6 +104,7 @@ pub fn run() {
             opens::take_pending_opens,
             popout::open_popout_window,
             popout::popout_ack,
+            popout::popout_return,
             dialogs::pick_folder,
             dialogs::pick_files,
             dialogs::save_file,
@@ -111,6 +113,15 @@ pub fn run() {
         ])
         .on_menu_event(|app, event| menu::on_event(app, &event))
         .on_window_event(|window, event| {
+            if popout::is_popout_label(window.label()) {
+                if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                    window
+                        .app_handle()
+                        .state::<popout::PopoutRegistry>()
+                        .forget(window.label());
+                }
+                return;
+            }
             if window.label() != "main" {
                 return;
             }
@@ -162,7 +173,10 @@ pub fn run() {
         .expect("failed to build the KohakuTerrarium desktop app");
 
     app.run(|app, event| match event {
-        RunEvent::Exit => app.state::<Backend>().stop(),
+        RunEvent::Exit => {
+            popout::remember(app);
+            app.state::<Backend>().stop();
+        }
         #[cfg(target_os = "macos")]
         RunEvent::Opened { urls } => opens::deliver(app, opens::from_file_urls(&urls)),
         _ => {}

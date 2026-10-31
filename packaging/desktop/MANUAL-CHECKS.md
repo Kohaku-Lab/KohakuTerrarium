@@ -16,5 +16,13 @@ Each section names the milestone that added it and the surface to look at.
 - Right-click the tray icon: "Waiting for you" lists the waiting session first, "Sessions" lists the others, and choosing one opens its tab and raises the window.
 - Tray "New session" opens the new-session dialog; "Open folder as session..." opens the OS folder dialog and then the dialog in that folder.
 
+## Session windows (M3)
+- Right-click a session tab -> "Move to new window": a window opens with that session and the tab closes in the main window.
+- Right-click a session in the left rail -> "Open in new window": the window opens and the rail item stays.
+- Drag a session tab out of the main window and release it over the desktop: a window opens under the pointer and the tab closes.
+- Drop a tab on another tab: it reorders as before and no window opens.
+- In a session window, "Return to main window" closes it and the session shows in the main window.
+- Quit with a session window open, start again: the window comes back; close it first and it does not.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

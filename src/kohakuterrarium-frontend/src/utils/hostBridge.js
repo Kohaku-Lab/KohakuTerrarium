@@ -284,7 +284,12 @@ export function popoutWindowsSupported() {
   return hostKind() === KIND_TAURI && hostSupports("open_popout_window")
 }
 
-/** Open (or raise) a native window for one session: `{ label, scope, title }`. */
+/** Close the calling session window; with ``showInMain`` the main window first shows that session. */
+export function returnPopoutWindow(showInMain = false) {
+  return callBoolean("popout_return", Boolean(showInMain))
+}
+
+/** Open (or raise) a native window for one session: `{ label, scope, title, x?, y? }`. */
 export function openPopoutWindow(spec) {
   return callBoolean("open_popout_window", spec)
 }

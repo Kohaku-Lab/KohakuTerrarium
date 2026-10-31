@@ -86,6 +86,11 @@ const SPECS: &[Spec] = &[
         default: || json!({}),
     },
     Spec {
+        key: "restorePopouts",
+        kind: Kind::Bool,
+        default: || json!(true),
+    },
+    Spec {
         key: "popouts",
         kind: Kind::List,
         default: || json!([]),

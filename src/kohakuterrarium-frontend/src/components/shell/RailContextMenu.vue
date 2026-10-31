@@ -12,6 +12,10 @@
         <span class="i-carbon-radar" />
         {{ inspectorOpen ? t("shell.rail.closeInspector") : t("shell.rail.openInspector") }}
       </button>
+      <button v-if="canPopOut" class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" data-test="rail-open-in-window" @click="openInWindow">
+        <span class="i-carbon-launch" />
+        {{ t("shell.rail.openInWindow") }}
+      </button>
       <div class="border-t border-warm-200 dark:border-warm-700 my-1" />
       <button class="w-full text-left px-3 py-1.5 hover:bg-warm-100 dark:hover:bg-warm-800 flex items-center gap-2" :disabled="!chatOpen && !inspectorOpen" :class="{ 'opacity-50 cursor-not-allowed': !chatOpen && !inspectorOpen }" @click="emitAndClose('detach')">
         <span class="i-carbon-disconnect" />
@@ -32,8 +36,10 @@
 <script setup>
 import { computed } from "vue"
 
+import { popOutInstance } from "@/composables/useDesktopPopout"
 import ActionButtons from "@/ext/ActionButtons.vue"
 import { actionsFor } from "@/ext/actions"
+import { popoutWindowsSupported } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
@@ -46,6 +52,13 @@ const { t } = useI18n()
 
 const hasActions = computed(() => actionsFor("rail-item").length > 0)
 const actionContext = () => ({ id: props.instance.id ?? "", name: props.instance.config_name || "" })
+
+const canPopOut = computed(() => popoutWindowsSupported())
+
+function openInWindow() {
+  void popOutInstance(props.instance)
+  emit("close")
+}
 
 function emitAndClose(name) {
   emit(name)

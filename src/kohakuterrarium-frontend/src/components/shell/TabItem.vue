@@ -1,5 +1,5 @@
 <template>
-  <div class="group h-8 flex items-center gap-1.5 pl-3 pr-1.5 text-xs border-r border-warm-200 dark:border-warm-700 cursor-pointer select-none shrink-0" :class="active ? 'bg-[var(--kt-shell-tab-active)] dark:bg-warm-950 text-warm-800 dark:text-warm-200 border-b-2 border-b-iolite' : 'text-warm-600 dark:text-warm-500 hover:bg-warm-300/40 dark:hover:bg-warm-800/40'" :draggable="true" @click="$emit('activate')" @mousedown.middle.prevent="onMiddleClick" @dragstart="onDragStart" @dragover.prevent @drop.stop.prevent="$emit('drop', $event)" @contextmenu.prevent="onContextMenu">
+  <div class="group h-8 flex items-center gap-1.5 pl-3 pr-1.5 text-xs border-r border-warm-200 dark:border-warm-700 cursor-pointer select-none shrink-0" :class="active ? 'bg-[var(--kt-shell-tab-active)] dark:bg-warm-950 text-warm-800 dark:text-warm-200 border-b-2 border-b-iolite' : 'text-warm-600 dark:text-warm-500 hover:bg-warm-300/40 dark:hover:bg-warm-800/40'" :draggable="true" @click="$emit('activate')" @mousedown.middle.prevent="onMiddleClick" @dragstart="onDragStart" @dragend="onDragEnd" @dragover.prevent @drop.stop.prevent="$emit('drop', $event)" @contextmenu.prevent="onContextMenu">
     <span :class="[iconClass, isDashboard ? 'text-iolite' : '']" class="text-sm shrink-0" />
     <span class="truncate max-w-32">{{ label }}</span>
     <span v-if="badge" class="text-xs font-bold" :title="badge === '!' ? 'pending attention' : 'completed attention'">{{ badge }}</span>
@@ -14,11 +14,13 @@
 import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import TabContextMenu from "@/components/shell/TabContextMenu.vue"
+import { dragOutPosition, endedOutsideWindow, moveTabToWindow } from "@/composables/useDesktopPopout"
 import { useSplitDrag } from "@/composables/useSplitDrag"
 import { extensionTabMeta } from "@/ext/registry"
 import { attentionForScope, subscribeAttention } from "@/stores/attention"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { useTabsStore } from "@/stores/tabs"
+import { popoutWindowsSupported } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -69,6 +71,11 @@ function onDragStart(ev) {
   }
   ev.dataTransfer.effectAllowed = "move"
   ev.dataTransfer.setData("text/plain", props.tab.id)
+}
+
+function onDragEnd(ev) {
+  if (props.tab.kind !== "attach" || !popoutWindowsSupported() || !endedOutsideWindow(ev)) return
+  void moveTabToWindow(props.tab, dragOutPosition(ev))
 }
 
 function onContextMenu(ev) {
