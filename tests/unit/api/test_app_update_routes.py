@@ -71,6 +71,24 @@ class TestSettingsRoundTrip:
         assert body["update"]["mode"] == "notify-on-launch"
 
 
+class TestRuntime:
+    def test_a_fresh_install_has_no_active_release(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "kohakuterrarium.launcher.paths._candidate_bundled_release_dirs",
+            lambda: [],
+        )
+        resp = client.get("/api/app/runtime")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["active"] is None
+        assert body["installed"] == []
+        assert body["bundled_newer"] is False
+
+    def test_it_is_not_offered_to_lab_clients(self, client):
+        client.app.state.lab_mode = "lab-client"
+        assert client.get("/api/app/runtime").status_code == 404
+
+
 class TestState:
     def test_state_includes_install_metadata(self, client):
         resp = client.get("/api/app/state")

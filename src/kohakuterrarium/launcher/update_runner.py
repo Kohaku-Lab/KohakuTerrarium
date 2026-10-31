@@ -82,6 +82,12 @@ def _pick_bundled_tarball() -> Path | None:
     return candidates[0] if candidates else None
 
 
+def bundled_version() -> str | None:
+    """Return the version of the release archive shipped with the shell, if any."""
+    tarball = _pick_bundled_tarball()
+    return _bundled_version_from_filename(tarball) if tarball is not None else None
+
+
 def _bundled_version_from_filename(tarball: Path) -> str:
     """Parse the release version from a bundled archive filename."""
     stem = tarball.name

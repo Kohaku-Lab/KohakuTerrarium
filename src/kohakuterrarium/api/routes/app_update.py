@@ -23,6 +23,7 @@ from kohakuterrarium.launcher.migration import (
     is_launcher_install,
     is_legacy_bundle,
 )
+from kohakuterrarium.launcher.runtime_info import describe as describe_runtime
 from kohakuterrarium.launcher.tree_ops import (
     list_installed_versions,
     read_active_pointer,
@@ -112,6 +113,13 @@ async def get_state(request: Request) -> dict[str, Any]:
         "last_check_at": cfg.runtime.last_check_at,
         "last_check_error": cfg.runtime.last_check_error,
     }
+
+
+@router.get("/runtime")
+async def get_runtime(request: Request) -> dict[str, Any]:
+    """Return the active release, the installed ones and the shipped one."""
+    _wrapper_mode_only(request)
+    return await asyncio.to_thread(describe_runtime)
 
 
 @router.post("/feeds/probe")
