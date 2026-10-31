@@ -113,10 +113,14 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   survives a denied parent. Launchers that would run work outside the
   sandbox (`open`, `osascript`, `launchctl` and the LaunchServices / Apple
   Events services) are refused. Reads and network are not confined by the
-  kernel; another login path such as `ssh localhost` is out of scope.
-  `write` / `edit` checks under `fs_write=workspace` admit the same roots. Commands run in
-  their own process group, and a timeout or cancellation kills the whole
-  tree. Other platforms run unconfined under `auto`; use `require` to refuse
+  kernel. `write` / `edit` checks under `fs_write=workspace` admit the same
+  roots. The confinement targets accidental damage (a misdirected `rmtree`,
+  a stray `open`); it is not a boundary against a program that deliberately
+  escapes, for example by submitting a launchd job through a copied
+  launcher or logging in again over `ssh localhost`. Work started that way
+  runs unconfined; run untrusted code as a separate macOS user or in a VM.
+  Commands run in their own process group, and a timeout or cancellation
+  kills the whole tree. Other platforms run unconfined under `auto`; use `require` to refuse
   instead.
 - **`backend=audit`**: violations are logged via the agent logger
   rather than raised. Useful for first-pass discovery on a new
