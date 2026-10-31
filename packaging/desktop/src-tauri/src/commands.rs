@@ -124,6 +124,24 @@ pub async fn check_shell_update(app: AppHandle) -> Value {
     }
 }
 
+/// Download `update`, stop the backend, then install it and restart.
+///
+/// The backend runs from the install directory, so it must have exited before the
+/// installer replaces files it holds open. On Windows the installer takes over the
+/// restart and this process exits during `install`.
+pub async fn apply_update(
+    app: &AppHandle,
+    update: &tauri_plugin_updater::Update,
+) -> Result<std::convert::Infallible, String> {
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|error| error.to_string())?;
+    app.state::<Backend>().stop();
+    update.install(bytes).map_err(|error| error.to_string())?;
+    app.restart()
+}
+
 /// Download and install the newer shell build, then restart into it.
 #[tauri::command]
 pub async fn install_shell_update(app: AppHandle) -> bool {
@@ -133,11 +151,9 @@ pub async fn install_shell_update(app: AppHandle) -> bool {
     let Ok(Some(update)) = updater.check().await else {
         return false;
     };
-    if update.download_and_install(|_, _| {}, || {}).await.is_err() {
-        return false;
-    }
-    app.state::<Backend>().stop();
-    app.restart()
+    apply_update(&app, &update)
+        .await
+        .is_ok_and(|never| match never {})
 }
 
 /// Lets the headless self-check confirm the app page can call native commands.
