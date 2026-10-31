@@ -10,6 +10,7 @@
     </header>
     <div class="flex-1 min-h-0 overflow-hidden">
       <component :is="WIDGETS[side.payload.id]" v-if="isPinnedWidget && WIDGETS[side.payload.id]" mode="side" />
+      <component :is="dockPanelComponent(side.payload.id)" v-else-if="isPinnedWidget && dockPanelComponent(side.payload.id)" />
       <component :is="SIDES[side.kind]" v-else-if="SIDES[side.kind]" :payload="side.payload" />
     </div>
   </aside>
@@ -19,6 +20,7 @@
 import { computed, onBeforeUnmount, ref } from "vue"
 
 import { SIDES, WIDGETS } from "@/components/session-v2/model/registry"
+import { dockPanelComponent, dockPanelTitle } from "@/ext/dockPanels"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
@@ -37,7 +39,7 @@ const ctx = useSessionV2()
 const t = useV2T()
 
 const isPinnedWidget = computed(() => props.side.kind === "widget")
-const title = computed(() => (isPinnedWidget.value ? t(`widget.${props.side.payload.id}.title`) : t(`side.${props.side.kind}.title`)))
+const title = computed(() => (isPinnedWidget.value ? dockPanelTitle(props.side.payload.id, () => t(`widget.${props.side.payload.id}.title`)) : t(`side.${props.side.kind}.title`)))
 
 const SIDE_ICONS = {
   canvas: "i-carbon-image",

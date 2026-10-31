@@ -12,6 +12,7 @@ import { defineComponent, h, markRaw } from "vue"
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { clearActions, registerAction } from "@/ext/actions"
 import { clearDecorators, registerDecorator } from "@/ext/decorators"
+import { clearDockPanels, registerDockPanel } from "@/ext/dockPanels"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
@@ -160,6 +161,15 @@ export function registerContribution(pkg, contribution) {
         description: contribution.description || "",
         component: host,
       })
+      if (contribution.dock) {
+        registerDockPanel({
+          key,
+          label: contribution.label,
+          icon: contribution.icon,
+          order: contribution.order,
+          component: host,
+        })
+      }
       break
     case "rail":
       registerRailGroup({ id: key, component: host, order: contribution.order ?? 100 })
@@ -263,6 +273,7 @@ export function unregisterAllContributions() {
   clearActions()
   clearMessageRenderers()
   clearDecorators()
+  clearDockPanels()
   unregisterCommands(removed.filter((r) => r.kind === "command").map((r) => r.key))
   unregisterRenderers(removed.map((r) => r.key))
   unregisterWidgetRenderersByKey(removed.map((r) => r.key))
@@ -323,6 +334,7 @@ export function provideContributionComponent(pkg, kind, id, component, options =
       ...(kind === "status-item" ? { status: statusOptions(options) } : {}),
       ...(kind === "action" ? { action: actionOptions(options) } : {}),
       ...(kind === "message-decorator" ? { decorator: decoratorOptions(options) } : {}),
+      ...(kind === "panel" ? { dock: options.dock === true } : {}),
       ...(kind === "command"
         ? { shortcut: options.shortcut || "", keywords: options.keywords || "" }
         : {}),

@@ -23,7 +23,7 @@ This guide covers:
 | `settings` | a section in Settings | `package` | host-wide |
 | `tab` | a workspace tab (new-tab menu) | `package` | host-wide |
 | `rail` | a group in the left rail | `package` | host-wide |
-| `panel` | a dockable chat/session side panel | `plugin` | one creature |
+| `panel` | a dockable chat/session side panel; with `dock: true` also a button in the session dock | `plugin` | one creature |
 | `tool-renderer` | replaces the body of that tool's call/result block in chat | `tool` | one creature |
 | `trigger-renderer` | replaces the body of that trigger's event block in chat | `trigger` | one creature |
 | `widget` | draws every chat widget whose renderer id is the contribution's `renderer` | any | wherever the widget opens |
@@ -246,6 +246,22 @@ that the app (`Ctrl+K`, `Ctrl+Shift+L`, `Ctrl+Shift+0`, `Ctrl+1`…`Ctrl+6`)
 or an earlier command already owns is ignored with a console warning. These
 shortcuts work while the app window has focus; system-wide shortcuts are a
 desktop-shell feature.
+
+### Dock panels
+
+A `panel` with `dock: true` also gets a button in the session dock (and a row in
+the phone menu). It opens as the floating widget, titled with the panel's
+`label`, and can be pinned to the side view like the built-in widgets. The panel
+still shows content only while the focused creature has its plugin loaded.
+
+```yaml
+- kind: panel
+  id: queue
+  label: Queue
+  icon: i-carbon-task
+  owner: plugin:job_queue
+  dock: true
+```
 
 ### Status items
 

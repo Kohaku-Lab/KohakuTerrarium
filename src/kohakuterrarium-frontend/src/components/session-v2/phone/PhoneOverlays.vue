@@ -4,14 +4,16 @@
   <PhoneModelSheet v-else-if="sheet?.kind === 'model'" :key="`model:${sheet.payload.agent || ''}`" :initial-agent="sheet.payload.agent || ''" />
   <PhoneAgentSheet v-else-if="sheet?.kind === 'agent'" :key="`agent:${sheet.payload.name}`" :name="sheet.payload.name" />
 
-  <PhoneSheet v-if="ctx.widget.value && WIDGETS[ctx.widget.value]" full :title="t(`widget.${ctx.widget.value}.title`)" :close-label="t('close')" body-class="flex flex-col" :test-id="`phone-widget-${ctx.widget.value}`" @close="ctx.closeWidget()">
-    <component :is="WIDGETS[ctx.widget.value]" :key="ctx.widget.value" mode="side" class="flex-1 min-h-0" />
+  <PhoneSheet v-if="ctx.widget.value && (WIDGETS[ctx.widget.value] || dockPanelComponent(ctx.widget.value))" full :title="dockPanelTitle(ctx.widget.value, () => t(`widget.${ctx.widget.value}.title`))" :close-label="t('close')" body-class="flex flex-col" :test-id="`phone-widget-${ctx.widget.value}`" @close="ctx.closeWidget()">
+    <component :is="WIDGETS[ctx.widget.value]" v-if="WIDGETS[ctx.widget.value]" :key="ctx.widget.value" mode="side" class="flex-1 min-h-0" />
+    <component :is="dockPanelComponent(ctx.widget.value)" v-else :key="ctx.widget.value" class="flex-1 min-h-0" />
   </PhoneSheet>
 
   <Teleport v-if="side" to="body">
     <div class="kt-v2 fixed inset-0 z-[1900]" data-test="phone-side">
       <PhonePage :title="sideTitle" :icon="SIDE_ICONS[side.kind] || ''" :back-label="t('phone.back')" :scroll="false" @back="ctx.closeSide()">
         <component :is="WIDGETS[side.payload.id]" v-if="side.kind === 'widget' && WIDGETS[side.payload.id]" mode="side" class="flex-1 min-h-0" />
+        <component :is="dockPanelComponent(side.payload.id)" v-else-if="side.kind === 'widget' && dockPanelComponent(side.payload.id)" class="flex-1 min-h-0" />
         <component :is="SIDES[side.kind]" v-else-if="SIDES[side.kind]" :payload="side.payload" class="flex-1 min-h-0" />
       </PhonePage>
     </div>
@@ -29,6 +31,7 @@ import { computed } from "vue"
 
 import AddDialog from "@/components/session-v2/add/AddDialog.vue"
 import { SIDES, WIDGETS } from "@/components/session-v2/model/registry"
+import { dockPanelComponent, dockPanelTitle } from "@/ext/dockPanels"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import ConversationSheet from "@/components/session-v2/phone/ConversationSheet.vue"
@@ -59,5 +62,5 @@ const ctx = useSessionV2()
 const t = useV2T()
 const sheet = computed(() => ctx.sheet.value)
 const side = computed(() => ctx.side.value)
-const sideTitle = computed(() => (side.value?.kind === "widget" ? t(`widget.${side.value.payload.id}.title`) : t(`side.${side.value?.kind}.title`)))
+const sideTitle = computed(() => (side.value?.kind === "widget" ? dockPanelTitle(side.value.payload.id, () => t(`widget.${side.value.payload.id}.title`)) : t(`side.${side.value?.kind}.title`)))
 </script>

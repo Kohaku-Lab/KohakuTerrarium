@@ -26,6 +26,12 @@
       <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
     </button>
 
+    <button v-for="panel in extensionPanels" :key="panel.key" type="button" :class="ROW" :data-test="`phone-tool-${panel.key}`" @click="ctx.openWidget(panel.key)">
+      <span :class="panel.icon" class="text-lg text-warm-500 shrink-0" />
+      <span class="flex-1 text-[15px] text-warm-800 dark:text-warm-100">{{ panel.label }}</span>
+      <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
+    </button>
+
     <div :class="HEAD">{{ t("phone.session") }}</div>
     <button type="button" :class="ROW" data-test="phone-menu-add-creature" @click="ctx.openAdd('creature')">
       <span class="i-carbon-add-alt text-lg text-warm-500 shrink-0" /><span class="flex-1 text-[15px] text-warm-800 dark:text-warm-100">{{ t("phone.addCreature") }}</span>
@@ -48,6 +54,7 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useSessionDrives } from "@/components/session-v2/model/useSessionDrives"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import PhoneSheet from "@/components/session-v2/phone/PhoneSheet.vue"
+import { dockPanelList } from "@/ext/dockPanels"
 import { useCanvasStore } from "@/stores/canvas"
 
 /**
@@ -71,6 +78,8 @@ const agentName = computed(() => creatureOfTab(ctx.instance.value, conversationK
 const model = computed(() => modelOfCreature(ctx.instance.value, ctx.chat, agentName.value))
 const actions = computed(() => ctx.column.actions.value)
 const tools = computed(() => phoneTools({ drives: drives.order.length, jobs: Object.keys(ctx.chat.runningJobs || {}).length, artifacts: canvas.artifacts.length }))
+
+const extensionPanels = computed(() => dockPanelList())
 
 function run(name) {
   ctx.closeSheet()

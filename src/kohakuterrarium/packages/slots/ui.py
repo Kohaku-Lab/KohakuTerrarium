@@ -126,6 +126,7 @@ class UIContribution:
     status: dict = field(default_factory=dict)
     action: dict = field(default_factory=dict)
     decorator: dict = field(default_factory=dict)
+    dock: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -148,6 +149,7 @@ class UIContribution:
                 k: list(v) if isinstance(v, list) else v
                 for k, v in self.decorator.items()
             },
+            "dock": self.dock,
         }
 
 
@@ -298,7 +300,20 @@ def _parse_contribution(
         status=_parse_status(raw, kind, where),
         action=_parse_action(raw, kind, where),
         decorator=_parse_decorator(raw, kind, where),
+        dock=_parse_dock(raw, kind, where),
     )
+
+
+def _parse_dock(raw: dict, kind: str, where: str) -> bool:
+    """Whether a ``panel`` also opens from the session dock; false for other kinds."""
+    value = raw.get("dock")
+    if kind != "panel":
+        if value is not None:
+            raise _SlotError(f"{where}.dock is only valid on a panel")
+        return False
+    if value is not None and not isinstance(value, bool):
+        raise _SlotError(f"{where}.dock must be true or false")
+    return bool(value)
 
 
 def _parse_decorator(raw: dict, kind: str, where: str) -> dict:

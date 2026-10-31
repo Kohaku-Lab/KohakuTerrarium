@@ -30,6 +30,7 @@ import { formatTokens } from "@/components/session-v2/model/status/statusModel"
 import { useUsage } from "@/components/session-v2/model/status/useUsage"
 import { useSessionDrives } from "@/components/session-v2/model/useSessionDrives"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
+import { dockPanelList } from "@/ext/dockPanels"
 import { useCanvasStore } from "@/stores/canvas"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 
@@ -50,7 +51,9 @@ const rootEl = ref(null)
 const expanded = ref(readLocalPref(EXPANDED_KEY) !== "0")
 const moreOpen = ref(false)
 
-const items = computed(() =>
+const extensionItems = computed(() => dockPanelList().map((panel) => ({ id: panel.key, icon: panel.icon, label: "", title: panel.label })))
+const items = computed(() => [...builtinItems.value, ...extensionItems.value])
+const builtinItems = computed(() =>
   dockItems({
     drives: drives.order.length,
     jobs: Object.keys(ctx.chat.runningJobs || {}).length,
@@ -62,7 +65,7 @@ const items = computed(() =>
     },
   }),
 )
-const total = computed(() => items.value.reduce((sum, i) => sum + (i.count || 0), 0))
+const total = computed(() => builtinItems.value.reduce((sum, i) => sum + (i.count || 0), 0))
 
 function isActive(id) {
   return ctx.widget.value === id || (ctx.side.value?.kind === "widget" && ctx.side.value.payload?.id === id)

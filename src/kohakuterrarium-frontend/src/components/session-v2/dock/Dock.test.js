@@ -13,6 +13,7 @@ vi.mock("@/components/session-v2/model/status/useUsage", async () => {
 
 import Dock from "./Dock.vue"
 import { createSessionV2, provideSessionV2 } from "@/components/session-v2/model/sessionContext"
+import { clearDockPanels, registerDockPanel } from "@/ext/dockPanels"
 
 function mountDock() {
   let ctx
@@ -34,6 +35,23 @@ function mountDock() {
 beforeEach(() => {
   setActivePinia(createPinia())
   localStorage.clear()
+})
+
+describe("Dock extension panels", () => {
+  it("lists a docked panel, opens it as the widget and clears it with the extensions", async () => {
+    registerDockPanel({ key: "ext:alpha/board", label: "Board", icon: "i-x", order: 1, component: { template: "<div />" } })
+    const { wrapper, ctx } = mountDock()
+    const button = wrapper.find("[data-test='v2-dock-ext:alpha/board']")
+    expect(button.exists()).toBe(true)
+    expect(button.attributes("title")).toBe("Board")
+
+    await button.trigger("click")
+    expect(ctx().widget.value).toBe("ext:alpha/board")
+
+    clearDockPanels()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find("[data-test='v2-dock-ext:alpha/board']").exists()).toBe(false)
+  })
 })
 
 describe("Dock pill", () => {

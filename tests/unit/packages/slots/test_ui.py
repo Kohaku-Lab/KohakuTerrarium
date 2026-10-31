@@ -260,6 +260,43 @@ class TestParse:
         slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
         assert message in slot.error
 
+    def test_panel_dock_flag(self, tmp_path):
+        slot = _slot(
+            tmp_path,
+            {
+                "entry": "ui/index.js",
+                "contributes": [
+                    {"kind": "panel", "id": "side", "owner": "plugin:qq_feed"},
+                    {
+                        "kind": "panel",
+                        "id": "docked",
+                        "owner": "plugin:qq_feed",
+                        "dock": True,
+                    },
+                    {"kind": "tab", "id": "t"},
+                ],
+            },
+        )
+        assert slot.error == ""
+        by_id = {c["id"]: c["dock"] for c in slot.to_dict()["contributes"]}
+        assert by_id == {"side": False, "docked": True, "t": False}
+
+    @pytest.mark.parametrize(
+        "contribution, message",
+        [
+            (
+                {"kind": "panel", "id": "p", "owner": "plugin:qq_feed", "dock": "yes"},
+                "dock must be true or false",
+            ),
+            ({"kind": "tab", "id": "t", "dock": True}, "only valid on a panel"),
+        ],
+    )
+    def test_bad_dock_flag_invalidates_the_package(
+        self, tmp_path, contribution, message
+    ):
+        slot = _slot(tmp_path, {"entry": "ui/index.js", "contributes": [contribution]})
+        assert message in slot.error
+
     def test_message_decorator_options(self, tmp_path):
         slot = _slot(
             tmp_path,
