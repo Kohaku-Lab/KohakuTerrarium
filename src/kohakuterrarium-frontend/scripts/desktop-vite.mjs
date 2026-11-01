@@ -1,10 +1,15 @@
 import { createServer } from "vite"
 import { fileURLToPath } from "node:url"
+import { desktopOptions } from "./vite-desktop.mjs"
 
 const root = fileURLToPath(new URL("../", import.meta.url))
 const owner = JSON.parse(process.env.KT_DESKTOP_DEV_CONFIG || "null")?.owner_pid
 if (!Number.isInteger(owner) || owner <= 0) throw new Error("Missing development session owner")
-const server = await createServer({ root, mode: "desktop" })
+const server = await createServer({
+  ...desktopOptions(process.env.KT_DESKTOP_DEV_CONFIG),
+  root,
+  mode: "desktop",
+})
 await server.listen()
 server.printUrls()
 
