@@ -8,20 +8,12 @@ where the plugin policy allows, whatever the command itself does.
 import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
+from kohakuterrarium.builtins.plugins.sandbox import roots
 from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
-
-CACHE_ROOTS: tuple[str, ...] = (
-    "~/.cache",
-    "~/Library/Caches",
-    "~/.npm",
-)
-
-_ALWAYS_WRITABLE: tuple[str, ...] = ("/dev",)
 
 # Programs and services that start work outside the caller's sandbox
 # (LaunchServices, Apple Events, launchd jobs).
@@ -50,20 +42,9 @@ def seatbelt_available() -> bool:
     return sys.platform == "darwin" and shutil.which(SANDBOX_EXEC) is not None
 
 
-def temp_roots() -> list[str]:
-    """Shared and per-user temporary directories a command may write."""
-    roots = ["/tmp", tempfile.gettempdir()]
-    tmpdir = os.environ.get("TMPDIR")
-    if tmpdir:
-        roots.append(tmpdir)
-    return roots
-
-
 def _real_paths(path: str, cwd: Path) -> list[str]:
     """The literal and symlink-resolved absolute forms of ``path``."""
-    expanded = Path(os.path.expandvars(path)).expanduser()
-    if not expanded.is_absolute():
-        expanded = cwd / expanded
+    expanded = roots.expand(path, cwd)
     forms = {os.path.normpath(str(expanded)), os.path.realpath(expanded)}
     return sorted(forms)
 
@@ -126,11 +107,9 @@ def build_write_profile(
     lines = ["(version 1)", "(allow default)"]
     if profile.fs_write != "broad":
         lines.append("(deny file-write*)")
-        allowed = list(_ALWAYS_WRITABLE)
-        if profile.fs_write == "workspace":
-            allowed += [str(workspace), *temp_roots(), *CACHE_ROOTS]
+        allowed = roots.write_roots(profile, workspace)
         lines.append(f"(allow file-write* {' '.join(_subpaths(allowed, workspace))})")
-    denied = [p for p in profile.fs_deny if not p.startswith("%")]
+    denied = roots.denied_paths(profile)
     if denied:
         rules = _subpaths(denied, workspace) + _ancestors(denied, workspace)
         lines.append(f"(deny file-write* {' '.join(rules)})")

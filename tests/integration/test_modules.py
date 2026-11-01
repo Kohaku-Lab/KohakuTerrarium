@@ -42,7 +42,7 @@ from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
-from kohakuterrarium.builtins.plugins.sandbox.seatbelt import seatbelt_available
+from kohakuterrarium.builtins.plugins.sandbox.confine import confinement_backend
 from kohakuterrarium.builtins.plugins.ui_declarative.plugin import UiDeclarativePlugin
 from kohakuterrarium.builtins.tools.web import deepseek as deepseek_web
 from kohakuterrarium.builtins.tools.web import fetch as web_fetch
@@ -820,7 +820,7 @@ class TestModulesIntegration:
             denied = await agent.executor.wait_for(denied_job)
             assert "SandboxViolation[fs_read]" in denied.error
             assert "blocked.txt" not in denied.output
-            if seatbelt_available():
+            if confinement_backend() is not None:
                 # The kernel, not the command, decides: a shell that deletes
                 # outside the workspace fails, writes inside it still land.
                 agent.executor.register_tool(ShellTool())

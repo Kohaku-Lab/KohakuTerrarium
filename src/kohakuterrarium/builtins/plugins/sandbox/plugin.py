@@ -14,13 +14,11 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlparse
 
-from kohakuterrarium.builtins.plugins.sandbox.seatbelt import (
-    CACHE_ROOTS,
-    build_write_profile,
+from kohakuterrarium.builtins.plugins.sandbox.confine import (
     confine_argv,
-    seatbelt_available,
-    temp_roots,
+    confinement_backend,
 )
+from kohakuterrarium.builtins.plugins.sandbox.roots import workspace_roots
 from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
     terminate_process_tree,
     windows_process_kwargs,
@@ -143,7 +141,8 @@ class SandboxPlugin(BasePlugin):
                 "values": ["auto", "require", "off"],
                 "default": "auto",
                 "doc": (
-                    "Kernel write confinement for subprocesses (macOS sandbox-exec). "
+                    "Kernel write confinement for subprocesses (macOS sandbox-exec, "
+                    "Linux Landlock). "
                     "auto = confine where supported, require = refuse to spawn "
                     "elsewhere, off = policy checks only."
                 ),
@@ -298,7 +297,8 @@ class SandboxPlugin(BasePlugin):
         """Wrap ``argv`` so the kernel enforces the write policy, when it can."""
         if self._audit or self._os_enforce == "off":
             return argv
-        if not seatbelt_available():
+        backend = confinement_backend()
+        if backend is None:
             if self._os_enforce == "require":
                 self._violate(
                     "syscall", "spawn", "kernel sandbox is unavailable on this host"
@@ -310,10 +310,7 @@ class SandboxPlugin(BasePlugin):
             else _context_cwd(None, self._context)
         )
         return confine_argv(
-            argv,
-            build_write_profile(
-                self._profile, workspace, write_allow=self._write_allow
-            ),
+            argv, backend, self._profile, workspace, write_allow=self._write_allow
         )
 
     def _check_glob(self, args: dict[str, Any], context: Any, cwd: Path) -> None:
@@ -367,7 +364,7 @@ class SandboxPlugin(BasePlugin):
                 self._violate(axis, str(path), f"{tool_name}: path is denied")
         if level == "deny":
             self._violate(axis, str(path), f"{tool_name}: {axis}=deny")
-        roots = [str(cwd), *temp_roots(), *CACHE_ROOTS] if writing else [str(cwd)]
+        roots = workspace_roots(cwd) if writing else [str(cwd)]
         if level == "workspace" and not self._under(resolved, roots, cwd):
             self._violate(
                 axis,
