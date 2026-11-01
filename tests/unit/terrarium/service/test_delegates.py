@@ -107,6 +107,7 @@ def _build_service():
     engine.stop = AsyncMock()
     engine.wake = AsyncMock(return_value=False)
     engine.shutdown = AsyncMock()
+    engine.checkpoint_graph = AsyncMock(return_value=True)
     engine.add_channel = AsyncMock()
     engine.remove_channel = AsyncMock()
     engine.connect = AsyncMock()
@@ -374,11 +375,14 @@ class TestPerCreatureOps:
         assert out["text"] == "you are X"
 
     async def test_get_set_working_dir(self):
-        svc, _ = _build_service()
+        svc, c = _build_service()
         out = await svc.get_working_dir("cid")
         assert out == "/wd"
         out2 = await svc.set_working_dir("cid", "/new")
         assert out2 == "/new"
+        # The new directory is what a restart rebuilds the creature in.
+        assert c.build_pwd == "/new"
+        svc._engine.checkpoint_graph.assert_awaited_once_with("g1")
 
     async def test_native_tool_inventory(self):
         svc, _ = _build_service()

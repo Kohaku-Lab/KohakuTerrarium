@@ -74,6 +74,7 @@ from kohakuterrarium.llm.presets.catalog import get_all_presets
 from kohakuterrarium.testing.llm import ScriptEntry
 from kohakuterrarium.terrarium.creature.ops import build_runtime_graph_snapshot_for
 from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.graph.manifest import load_manifest
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.output_log import OutputLogCapture
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
@@ -1615,9 +1616,17 @@ class TestTerrariumIntegration:
         # working dir — get / set round-trip.
         wd = await service.get_working_dir("scout")
         assert wd
-        new_wd = await service.set_working_dir("scout", str(tmp_path))
-        assert new_wd == str(tmp_path)
-        assert await service.get_working_dir("scout") == str(tmp_path)
+        moved = tmp_path / "moved"
+        moved.mkdir()
+        new_wd = await service.set_working_dir("scout", str(moved))
+        assert new_wd == str(moved)
+        assert await service.get_working_dir("scout") == str(moved)
+        # The saved manifest follows, so a restart rebuilds scout there.
+        scout = engine.get_creature("scout")
+        assert scout.build_pwd == str(moved)
+        scout_store = engine._session_stores[scout.graph_id]
+        saved = {c.name: c.pwd for c in load_manifest(scout_store).creatures}
+        assert saved["scout"] == str(moved)
         # plugins / modules — every engine creature carries the built-in
         # cross-cutting plugins (sandbox / budget / permgate / compact).
         plugins = await service.list_plugins("scout")
