@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2.creatures import plugins as plugins_mod
+from kohakuterrarium.modules.plugin.base import PluginLockedError
 from kohakuterrarium.terrarium.service.service import CreatureInfo
 
 
@@ -98,6 +99,16 @@ class TestTogglePlugin:
             json={"enabled": False},
         )
         assert resp.status_code == 200
+
+    def test_locked_plugin_returns_409(self):
+        svc = _FakeService(
+            toggle_raises=PluginLockedError("plugin 'sandbox' is locked")
+        )
+        resp = _client(svc).post(
+            "/sess/creatures/alice/plugins/sandbox/toggle", json={"enabled": False}
+        )
+        assert resp.status_code == 409
+        assert "locked" in resp.json()["detail"]
 
     def test_value_error_returns_404(self):
         svc = _FakeService(toggle_raises=ValueError("plugin not registered"))

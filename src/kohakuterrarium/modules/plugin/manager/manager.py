@@ -13,6 +13,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    PluginLockedError,
 )
 from kohakuterrarium.modules.plugin.dispatch import (
     call_method as _call_method,
@@ -141,6 +142,8 @@ class PluginManager(
     def disable(self, name: str) -> bool:
         for p in self._plugins:
             if getattr(p, "name", "") == name:
+                if p.refuses_disable():
+                    raise PluginLockedError(f"plugin {name!r} is locked")
                 changed = name not in self._disabled
                 self._disabled.add(name)
                 try:
@@ -154,6 +157,13 @@ class PluginManager(
                     self._notify_selection_change()
                 return True
         return False
+
+    def working_dir_pinned_by(self) -> str | None:
+        """Name of an active plugin that forbids switching the working directory."""
+        for plugin in self._active_plugins():
+            if plugin.pins_working_dir():
+                return getattr(plugin, "name", "?")
+        return None
 
     def is_enabled(self, name: str) -> bool:
         return name not in self._disabled and any(

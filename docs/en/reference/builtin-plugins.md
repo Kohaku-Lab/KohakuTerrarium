@@ -69,6 +69,9 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
 | `tmp` | enum | `default` / `private` / `shared` | from profile | Temp directory isolation. |
 | `fs_deny` | list[str] | paths | `[]` | Additional path deny-list (env-var expansion supported). |
 | `network_allowlist` | list[str] | hostnames | `[]` | Allowed hosts when `network=allow`. Empty list = allow all when network is allowed. |
+| `os_enforce` | enum | `auto` / `require` / `off` | `auto` | Kernel write confinement for subprocesses (macOS `sandbox-exec`, Linux Landlock). `auto` = confine where the OS supports it, `require` = refuse to spawn where it does not, `off` = policy checks only. |
+| `fs_write_allow` | list[str] | paths | `[]` | Exceptions you name: writable even inside `fs_deny` (not under `fs_write=deny`). |
+| `locked` | bool | true / false | false | Refuse runtime disable, option changes and working-directory switches (409 from the HTTP API). Can be turned on at runtime, not off; unlock by restarting the server with `KT_SANDBOX_ALLOW_UNLOCK=1`. |
 | `blocked_tools` | list[str] | tool names | `[]` | Tools the agent cannot call regardless of args. |
 
 ### Profile presets
@@ -97,6 +100,58 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   (`pure` blocks all spawns, `fs` blocks network calls, `shell`
   allows everything) and the network allowlist before delegating to
   `asyncio.create_subprocess_exec`.
+- **Kernel write confinement** (macOS and Linux): the runner launches each
+  command so the kernel confines it and every process it starts, whatever
+  they do. A script that calls `shutil.rmtree(os.environ["HOME"])` fails
+  with `Operation not permitted` (macOS) or `Permission denied` (Linux).
+  `workspace` allows writes under the working directory, the system temp
+  directories, the user caches (`~/.cache`, `~/Library/Caches`, `~/.npm`)
+  and `/dev`; `deny` allows only `/dev`; `broad` allows everything.
+  `fs_deny` paths are then unwritable, and so are the directory entries
+  above them, so a denied path cannot be moved away by renaming a parent.
+  `fs_write_allow` entries are writable again, so a narrow exception such as
+  `~/.ssh/sockets` (ssh connection sharing) or `~/.config/gcloud` survives a
+  denied parent. `write` / `edit` checks under `fs_write=workspace` admit
+  the same roots.
+  - **macOS** runs commands under `sandbox-exec` with a Seatbelt profile.
+    Launchers that would run work outside the sandbox (`open`, `osascript`,
+    `launchctl` and the LaunchServices / Apple Events services) are refused,
+    and so are connections to the control sockets of Docker (Desktop,
+    Colima, OrbStack), Podman, GNU screen, tmux (including `TMUX_TMPDIR`)
+    and iTerm2, which would run commands unconfined. This is a denylist:
+    other local unix sockets stay reachable, because a default-deny would
+    also cut DNS (`mDNSResponder`) and `ssh-agent`.
+  - **Linux** uses Landlock (kernel 5.13 or later with Landlock enabled, as
+    in current Ubuntu, Debian, Fedora and Arch kernels; no root or extra
+    package), applied by a small launcher that starts before the command.
+    Landlock can only grant access, so an `fs_deny` path inside a writable
+    root is carved out by granting the entries beside it instead. As a
+    result, nothing new can be created directly in a directory above a
+    denied path (with `fs_write=broad` and the default deny list, that
+    includes the home directory itself), and writable roots and
+    `fs_write_allow` paths must exist when the command starts. Commands run
+    with `no_new_privs`, so `sudo` and other setuid programs cannot gain
+    privileges. `truncate(2)` is confined from kernel 6.2 (Landlock ABI 3);
+    before 5.19 (ABI 2) every rename or link between directories is refused.
+    Landlock does not cover metadata, so `chmod`, `chown` and extended
+    attributes stay possible on any file the user owns (contents and
+    directory entries stay protected).
+    Launchers and control sockets are not refused on Linux: a command can
+    still reach `systemd-run --user`, Docker or tmux through their sockets.
+  Reads and network are not confined by the kernel, so secrets stay
+  readable. The `env` option is recorded but does not strip variables yet,
+  so API keys in the server's environment reach every command. The
+  confinement targets accidental damage (a misdirected `rmtree`, a stray
+  `open`); it is not a boundary against a program that deliberately
+  escapes, for example by submitting a launchd or systemd job or logging in
+  again over `ssh localhost`. Work started that way runs unconfined; run
+  untrusted code as a separate user or in a VM. The shared `/tmp` stays
+  writable, so a creature can still damage another process's scratch files
+  there, and a hard link made inside the workspace can be written through.
+  Since an agent can reach the local API, set `locked: true` so it cannot
+  switch the sandbox off. Commands run in their own process group, and a
+  timeout or cancellation kills the whole tree. Other platforms (Windows)
+  run unconfined under `auto`; use `require` to refuse instead.
 - **`backend=audit`**: violations are logged via the agent logger
   rather than raised. Useful for first-pass discovery on a new
   workload.

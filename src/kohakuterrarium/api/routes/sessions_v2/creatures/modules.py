@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
+from kohakuterrarium.modules.plugin.base import PluginLockedError
 from kohakuterrarium.terrarium.service.service import TerrariumService
 
 router = APIRouter()
@@ -79,6 +80,8 @@ async def set_module_options(
             f"module {module_type!r}/{name!r} not found on "
             f"creature {creature_id!r}",
         )
+    except PluginLockedError as e:
+        raise HTTPException(409, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {

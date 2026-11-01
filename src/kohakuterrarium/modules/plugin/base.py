@@ -38,6 +38,10 @@ class PluginBlockError(Exception):
     """Block a tool or sub-agent call and expose the reason as its result."""
 
 
+class PluginLockedError(ValueError):
+    """A runtime request tried to disable or reconfigure a locked plugin."""
+
+
 @dataclass(frozen=True)
 class ToolVisibility:
     """Per-request tool catalog restriction contributed by a plugin.
@@ -322,6 +326,14 @@ class BasePlugin(UIOwnerMixin):
                 exc_info=True,
             )
         return self.get_options()
+
+    def refuses_disable(self) -> bool:
+        """Whether a runtime request to disable this plugin must be refused."""
+        return False
+
+    def pins_working_dir(self) -> bool:
+        """Whether a runtime working-directory switch must be refused."""
+        return False
 
     def refresh_options(self) -> None:
         """Re-derive internal state after validated option changes."""
