@@ -12,8 +12,12 @@ import os
 import sys
 from pathlib import Path
 
-from kohakuterrarium.builtins.plugins.sandbox import roots
 from kohakuterrarium.builtins.plugins.sandbox.landlock_exec import landlock_abi
+from kohakuterrarium.builtins.plugins.sandbox.roots import (
+    denied_paths,
+    expand,
+    write_roots,
+)
 from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 
 LAUNCHER = Path(__file__).with_name("landlock_exec.py")
@@ -26,7 +30,7 @@ def landlock_available() -> bool:
 
 
 def _real(path: str, cwd: Path) -> Path:
-    return Path(os.path.realpath(roots.expand(path, cwd)))
+    return Path(os.path.realpath(expand(path, cwd)))
 
 
 def _within(path: Path, base: Path) -> bool:
@@ -57,15 +61,15 @@ def write_grants(
 ) -> list[str]:
     """Existing paths a command may write under ``profile``'s write axis.
 
-    Writable roots come from :func:`roots.write_roots`; an ``fs_deny`` path
+    Writable roots come from :func:`write_roots`; an ``fs_deny`` path
     inside one is left out along with the directories above it, so nothing
     can be created directly in those directories while their other entries
     stay writable. ``write_allow`` entries are granted even inside
     ``fs_deny``. Paths that do not exist yet cannot be granted.
     """
-    denied = [_real(p, workspace) for p in roots.denied_paths(profile)]
+    denied = [_real(p, workspace) for p in denied_paths(profile)]
     grants: list[str] = []
-    for root in roots.write_roots(profile, workspace):
+    for root in write_roots(profile, workspace):
         real = _real(root, workspace)
         if real.exists():
             _grant_beneath(real, denied, grants)

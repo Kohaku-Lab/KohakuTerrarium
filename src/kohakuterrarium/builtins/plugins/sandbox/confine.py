@@ -2,7 +2,8 @@
 
 from pathlib import Path
 
-from kohakuterrarium.builtins.plugins.sandbox import landlock, seatbelt
+import kohakuterrarium.builtins.plugins.sandbox.landlock as landlock
+import kohakuterrarium.builtins.plugins.sandbox.seatbelt as seatbelt
 from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 
 SEATBELT = "seatbelt"

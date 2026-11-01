@@ -43,6 +43,7 @@ from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.plugins.sandbox.confine import confinement_backend
+from kohakuterrarium.builtins.plugins.sandbox import roots
 from kohakuterrarium.builtins.plugins.ui_declarative.plugin import UiDeclarativePlugin
 from kohakuterrarium.builtins.tools.web import deepseek as deepseek_web
 from kohakuterrarium.builtins.tools.web import fetch as web_fetch
@@ -553,7 +554,9 @@ class TestModulesIntegration:
     """End-to-end workflows exercising each ``modules/`` protocol through
     a real :class:`Agent`."""
 
-    async def test_plugin_hooks_wrap_a_real_tool_call(self, make_agent, tmp_path):
+    async def test_plugin_hooks_wrap_a_real_tool_call(
+        self, make_agent, tmp_path, monkeypatch
+    ):
         """plugin protocol — the FULL hook surface fires through a real
         agent run: tool pre/post hooks (incl. arg rewrite + a
         ``PluginBlockError`` veto), LLM pre/post hooks, lifecycle
@@ -821,6 +824,8 @@ class TestModulesIntegration:
             assert "SandboxViolation[fs_read]" in denied.error
             assert "blocked.txt" not in denied.output
             if confinement_backend() is not None:
+                # pytest's base temp lies under /tmp on Linux, a writable root.
+                monkeypatch.setattr(roots, "temp_roots", lambda: [])
                 # The kernel, not the command, decides: a shell that deletes
                 # outside the workspace fails, writes inside it still land.
                 agent.executor.register_tool(ShellTool())

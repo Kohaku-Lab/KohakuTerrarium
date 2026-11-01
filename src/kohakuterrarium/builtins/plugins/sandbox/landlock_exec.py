@@ -13,6 +13,7 @@ import ctypes
 import json
 import os
 import stat
+import struct
 import sys
 
 _CREATE_RULESET = 444
@@ -52,11 +53,6 @@ _FILE_RIGHTS = WRITE_FILE | TRUNCATE
 
 class _RulesetAttr(ctypes.Structure):
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
-
-
-class _PathBeneathAttr(ctypes.Structure):
-    _pack_ = 1
-    _fields_ = [("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32)]
 
 
 def _libc() -> ctypes.CDLL:
@@ -128,9 +124,10 @@ def _add_path(libc: ctypes.CDLL, ruleset: int, path: str, handled: int) -> None:
     try:
         is_dir = stat.S_ISDIR(os.fstat(fd).st_mode)
         allowed = handled if is_dir else handled & _FILE_RIGHTS
-        rule = _PathBeneathAttr(allowed_access=allowed, parent_fd=fd)
+        # struct landlock_path_beneath_attr is packed: u64 access, s32 fd.
+        rule = ctypes.create_string_buffer(struct.pack("=Qi", allowed, fd), 12)
         _check(
-            libc.syscall(_ADD_RULE, ruleset, _RULE_PATH_BENEATH, ctypes.byref(rule), 0),
+            libc.syscall(_ADD_RULE, ruleset, _RULE_PATH_BENEATH, rule, 0),
             f"landlock_add_rule({path})",
         )
     finally:

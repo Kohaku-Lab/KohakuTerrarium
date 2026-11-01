@@ -10,7 +10,11 @@ import shutil
 import sys
 from pathlib import Path
 
-from kohakuterrarium.builtins.plugins.sandbox import roots
+from kohakuterrarium.builtins.plugins.sandbox.roots import (
+    denied_paths,
+    expand,
+    write_roots,
+)
 from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 
 SANDBOX_EXEC = "/usr/bin/sandbox-exec"
@@ -44,7 +48,7 @@ def seatbelt_available() -> bool:
 
 def _real_paths(path: str, cwd: Path) -> list[str]:
     """The literal and symlink-resolved absolute forms of ``path``."""
-    expanded = roots.expand(path, cwd)
+    expanded = expand(path, cwd)
     forms = {os.path.normpath(str(expanded)), os.path.realpath(expanded)}
     return sorted(forms)
 
@@ -107,9 +111,9 @@ def build_write_profile(
     lines = ["(version 1)", "(allow default)"]
     if profile.fs_write != "broad":
         lines.append("(deny file-write*)")
-        allowed = roots.write_roots(profile, workspace)
+        allowed = write_roots(profile, workspace)
         lines.append(f"(allow file-write* {' '.join(_subpaths(allowed, workspace))})")
-    denied = roots.denied_paths(profile)
+    denied = denied_paths(profile)
     if denied:
         rules = _subpaths(denied, workspace) + _ancestors(denied, workspace)
         lines.append(f"(deny file-write* {' '.join(rules)})")
