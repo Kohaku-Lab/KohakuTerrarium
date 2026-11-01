@@ -820,7 +820,11 @@ class LocalTerrariumService(
         return _agent_working_dir(self._agent(creature_id))
 
     async def set_working_dir(self, creature_id: str, new_path: str) -> str:
-        return _agent_set_working_dir(self._agent(creature_id), new_path)
+        creature = self._engine.get_creature(creature_id)
+        applied = _agent_set_working_dir(creature.agent, new_path)
+        creature.build_pwd = applied
+        await self._engine.checkpoint_graph(creature.graph_id)
+        return applied
 
     async def native_tool_inventory(self, creature_id: str) -> list[dict[str, Any]]:
         return _agent_native_tool_inventory(self._agent(creature_id))
