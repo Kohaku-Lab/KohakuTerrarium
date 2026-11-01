@@ -10,6 +10,7 @@ import slash from "./slash"
 import messageActions from "./messageActions"
 import lab from "./lab"
 import studioApp from "./studioApp"
+import settingsModels from "./settingsModels"
 
 // ``media``/``links``/``slash``/``messageActions`` carry genuine
 // ``chat.media.*`` / ``chat.link.*`` / ``chat.slash.error`` / ``chat.copy*``
@@ -25,6 +26,7 @@ export const messages = {
     ...messageActions.en,
     ...lab.en,
     ...studioApp.en,
+    ...settingsModels.en,
   },
   "zh-TW": {
     ...zhTW,
@@ -34,6 +36,7 @@ export const messages = {
     ...messageActions["zh-TW"],
     ...lab["zh-TW"],
     ...studioApp["zh-TW"],
+    ...settingsModels["zh-TW"],
   },
   "zh-CN": {
     ...zhCN,
@@ -43,6 +46,7 @@ export const messages = {
     ...messageActions["zh-CN"],
     ...lab["zh-CN"],
     ...studioApp["zh-CN"],
+    ...settingsModels["zh-CN"],
   },
   ja,
   de,
