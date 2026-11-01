@@ -67,17 +67,55 @@ def _validate_package(pkg_dir: Path, name: str) -> None:
 DEP_POLICIES = ("auto", "never")
 
 
-def _pip_install(args: list[str], *, what: str) -> None:
-    """Run ``<this interpreter> -m pip install <args>``; raise on failure.
+NO_PIP = "No module named pip"
 
-    Always targets the running interpreter's environment —
-    a bare PATH ``pip`` may belong to a different Python entirely.
+
+def _run(cmd: list[str]) -> None:
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _stderr_of(error: subprocess.CalledProcessError) -> str:
+    return (error.stderr or b"").decode(errors="replace")
+
+
+def _install_without_pip(python: list[str], args: list[str]) -> None:
+    """Install ``args`` into an interpreter that has no pip.
+
+    Uses ``uv pip`` when uv is on PATH and the interpreter is addressable by one
+    path; otherwise bootstraps pip with ``ensurepip`` and retries.
     """
-    cmd = [*python_command(), "-m", "pip", "install", *args]
+    uv = shutil.which("uv")
+    if uv and len(python) == 1:
+        _run([uv, "pip", "install", "--python", python[0], *args])
+        return
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
+        _run([*python, "-m", "ensurepip", "--default-pip"])
     except subprocess.CalledProcessError as e:
-        stderr = (e.stderr or b"").decode(errors="replace")[-500:]
+        raise PackageError(
+            "This Python has no pip and could not bootstrap one "
+            f"({_stderr_of(e)[-200:].strip()}). Install uv or use an "
+            "environment that includes pip."
+        ) from e
+    _run([*python, "-m", "pip", "install", *args])
+
+
+def _pip_install(args: list[str], *, what: str) -> None:
+    """Install ``args`` into this interpreter's environment; raise on failure.
+
+    Runs ``<this interpreter> -m pip install`` — a bare PATH ``pip`` may belong
+    to a different Python entirely — and falls back to uv or a bootstrapped pip
+    when the interpreter ships without pip.
+    """
+    python = python_command()
+    try:
+        try:
+            _run([*python, "-m", "pip", "install", *args])
+        except subprocess.CalledProcessError as e:
+            if NO_PIP not in _stderr_of(e):
+                raise
+            _install_without_pip(python, args)
+    except subprocess.CalledProcessError as e:
+        stderr = _stderr_of(e)[-500:]
         raise PackageError(
             f"Dependency install failed ({what}). The package files are "
             f"installed but its Python dependencies are not — install them "

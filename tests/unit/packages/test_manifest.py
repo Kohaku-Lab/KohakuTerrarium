@@ -170,6 +170,61 @@ class TestInstallPythonDeps:
         with pytest.raises(PackageError, match="boom"):
             _install_python_deps(tmp_path)
 
+    def _pipless(self, monkeypatch, tmp_path, *, uv, ensurepip_ok=True):
+        (tmp_path / "kohaku.yaml").write_text("name: p\npython_dependencies:\n  - x")
+        monkeypatch.delenv("KT_PYTHON", raising=False)
+        monkeypatch.setattr(man_mod, "python_command", lambda: ["py"])
+        monkeypatch.setattr(man_mod.shutil, "which", lambda name: uv)
+        calls = []
+        has_pip = []
+
+        def run(cmd, **kw):
+            calls.append(cmd)
+            if "ensurepip" in cmd:
+                if not ensurepip_ok:
+                    raise subprocess.CalledProcessError(1, cmd, stderr=b"nope")
+                has_pip.append(True)
+            elif cmd[:3] == ["py", "-m", "pip"] and not has_pip:
+                raise subprocess.CalledProcessError(
+                    1, cmd, stderr=b"No module named pip"
+                )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(man_mod.subprocess, "run", run)
+        return calls
+
+    def test_pipless_interpreter_installs_through_uv(self, tmp_path, monkeypatch):
+        calls = self._pipless(monkeypatch, tmp_path, uv="/bin/uv")
+        _install_python_deps(tmp_path)
+        assert calls[-1] == ["/bin/uv", "pip", "install", "--python", "py", "x"]
+        assert not any("ensurepip" in c for c in calls)
+
+    def test_pipless_interpreter_without_uv_bootstraps_pip(self, tmp_path, monkeypatch):
+        calls = self._pipless(monkeypatch, tmp_path, uv=None)
+        _install_python_deps(tmp_path)
+        assert calls[1] == ["py", "-m", "ensurepip", "--default-pip"]
+        assert calls[2] == ["py", "-m", "pip", "install", "x"]
+
+    def test_pipless_interpreter_that_cannot_bootstrap_says_so(
+        self, tmp_path, monkeypatch
+    ):
+        self._pipless(monkeypatch, tmp_path, uv=None, ensurepip_ok=False)
+        with pytest.raises(PackageError, match="no pip"):
+            _install_python_deps(tmp_path)
+
+    def test_other_pip_failures_do_not_fall_back(self, tmp_path, monkeypatch):
+        (tmp_path / "kohaku.yaml").write_text("name: p\npython_dependencies:\n  - x")
+        calls = []
+
+        def boom(cmd, **kw):
+            calls.append(cmd)
+            raise subprocess.CalledProcessError(1, cmd, stderr=b"resolver failed")
+
+        monkeypatch.setattr(man_mod.subprocess, "run", boom)
+        with pytest.raises(PackageError, match="resolver failed"):
+            _install_python_deps(tmp_path)
+        assert len(calls) == 1
+
     def test_requirements_failure_raises_package_error(self, tmp_path, monkeypatch):
         (tmp_path / "requirements.txt").write_text("x\n")
 

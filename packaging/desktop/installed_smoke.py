@@ -187,6 +187,11 @@ def check_kt_command(python: Path, env: dict[str, str]) -> str:
     return output.strip()
 
 
+def check_pip(python: Path, env: dict[str, str]) -> str:
+    """The shipped interpreter can install extension dependencies."""
+    return run_python(python, ["-m", "pip", "--version"], env).strip()
+
+
 def check_python_tool(python: Path, env: dict[str, str], site: Path) -> None:
     """Execute the python tool with the shipped interpreter and the installed release."""
     tool_env = {**env, "PYTHONPATH": os.pathsep.join([str(site), env["PYTHONPATH"]])}
@@ -256,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
     env = child_environment(args.resources, config_dir)
     site = release_site_packages(config_dir)
     print("kt --version:", check_kt_command(python, env))
+    print("pip:", check_pip(python, env))
     check_python_tool(python, env, site)
     print("python tool: ok")
     check_shims(python, env, site, config_dir / "home")
