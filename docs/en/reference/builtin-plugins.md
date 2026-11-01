@@ -133,6 +133,9 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
     with `no_new_privs`, so `sudo` and other setuid programs cannot gain
     privileges. `truncate(2)` is confined from kernel 6.2 (Landlock ABI 3);
     before 5.19 (ABI 2) every rename or link between directories is refused.
+    Landlock does not cover metadata, so `chmod`, `chown` and extended
+    attributes stay possible on any file the user owns (contents and
+    directory entries stay protected).
     Launchers and control sockets are not refused on Linux: a command can
     still reach `systemd-run --user`, Docker or tmux through their sockets.
   Reads and network are not confined by the kernel, so secrets stay
