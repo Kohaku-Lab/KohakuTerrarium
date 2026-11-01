@@ -190,57 +190,6 @@ describe("SettingsPage model presets", () => {
     expect(keys.find("input").exists()).toBe(false)
   })
 
-  it("refreshes the selected preset without reporting a successful default change as failed", async () => {
-    const preset = { name: "fast", provider: "openai", source: "user", is_default: false }
-    const refreshed = { ...preset, is_default: true }
-    configAPI.getModels.mockResolvedValueOnce([preset]).mockResolvedValueOnce([refreshed])
-    settingsAPI.setDefaultModel.mockResolvedValue({ status: "set", default_model: "openai/fast" })
-    const success = vi.spyOn(ElMessage, "success").mockImplementation(() => {})
-    const error = vi.spyOn(ElMessage, "error").mockImplementation(() => {})
-
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-    wrapper.vm.selectPreset(preset)
-
-    await wrapper.vm.handleSetDefault(preset)
-
-    // A bare name would resolve to whichever provider ships it first.
-    expect(settingsAPI.setDefaultModel).toHaveBeenCalledWith("openai/fast")
-    expect(success).toHaveBeenCalledWith("settings.models.defaultSet:openai/fast")
-    expect(error).not.toHaveBeenCalled()
-    expect(wrapper.vm.editorPreset).toEqual(refreshed)
-  })
-
-  it("sets a built-in preset as default with its provider-qualified identifier", async () => {
-    const preset = {
-      name: "claude-opus-4.8",
-      provider: "anthropic",
-      source: "preset",
-      is_default: false,
-    }
-    const refreshed = { ...preset, is_default: true }
-    configAPI.getModels.mockResolvedValueOnce([preset]).mockResolvedValueOnce([refreshed])
-    settingsAPI.setDefaultModel.mockResolvedValue({
-      status: "set",
-      default_model: "anthropic/claude-opus-4.8",
-    })
-    const success = vi.spyOn(ElMessage, "success").mockImplementation(() => {})
-    const error = vi.spyOn(ElMessage, "error").mockImplementation(() => {})
-
-    const wrapper = mountSettingsPage()
-    await flushPromises()
-    wrapper.vm.selectPreset(preset)
-    // Built-in presets open read-only, which used to hide the button.
-    expect(wrapper.vm.editorMode).toBe("view")
-
-    await wrapper.vm.handleSetDefault(preset)
-
-    expect(settingsAPI.setDefaultModel).toHaveBeenCalledWith("anthropic/claude-opus-4.8")
-    expect(success).toHaveBeenCalledWith("settings.models.defaultSet:anthropic/claude-opus-4.8")
-    expect(error).not.toHaveBeenCalled()
-    expect(wrapper.vm.editorPreset).toEqual(refreshed)
-  })
-
   it("lists registered sections last, in the Extensions group, and renders the open one", async () => {
     const DemoSection = { name: "DemoSection", template: "<p>demo body</p>" }
     registerSettingsSection({ id: "ext:demo/s", label: "Demo", order: 15, component: DemoSection })

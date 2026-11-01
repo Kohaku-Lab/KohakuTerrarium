@@ -55,66 +55,8 @@
           </div>
         </SectionShell>
 
-        <!-- ════════════════════════ Models (master-detail, scrollable list + fixed editor) ════════════════════════
-           On compact density the side-by-side master-detail collapses
-           into a back/forward pattern: the list takes the full pane
-           until a preset is picked, then the editor takes the full
-           pane with a "← Back" button. -->
-        <div v-if="section.id === 'models'" class="flex-1 min-h-0 flex flex-col">
-          <header class="px-8 pt-6 pb-3 max-md:hidden">
-            <h2 class="text-lg font-semibold text-warm-800 dark:text-warm-100">{{ sectionTitle(section) }}</h2>
-            <p class="mt-1 text-sm text-warm-500">{{ sectionHint(section) }}</p>
-          </header>
-          <div class="models-pane flex-1 min-h-0 px-8 pb-6 max-md:px-3 max-md:pb-3">
-            <div class="model-workspace" :class="{ 'is-compact': isCompact }">
-              <aside v-if="!isCompact || !showEditor" class="model-list-pane">
-                <div class="model-list-head">
-                  <el-input v-model="presetSearch" size="small" placeholder="Search name/model…" clearable />
-                  <div class="flex items-center justify-between text-[11px] text-warm-400 mt-2">
-                    <span>{{ filteredPresets.length }} preset{{ filteredPresets.length === 1 ? "" : "s" }}</span>
-                    <el-button size="small" type="primary" plain @click="startNewPreset"> + New </el-button>
-                  </div>
-                </div>
-                <div class="model-list-scroll">
-                  <template v-for="(group, idx) in presetGroups" :key="group.provider">
-                    <div v-if="idx > 0" class="h-px bg-warm-100 dark:bg-warm-800 mx-3 my-1" />
-                    <div class="text-[10px] uppercase tracking-wide text-warm-400 px-3 py-1">
-                      {{ group.provider }}
-                      <span class="normal-case text-warm-400">({{ group.presets.length }})</span>
-                    </div>
-                    <button v-for="preset in group.presets" :key="`${preset.provider}/${preset.name}`" type="button" class="preset-row" :class="{ 'is-active': selectedPresetKey === `${preset.provider}/${preset.name}` }" @click="selectPreset(preset)">
-                      <div class="flex items-center gap-1.5 w-full min-w-0">
-                        <span class="font-medium text-[12px] truncate">{{ preset.name }}</span>
-                        <span v-if="preset.source === 'user'" class="text-[9px] px-1 rounded bg-iolite/15 text-iolite uppercase shrink-0"> user </span>
-                        <span v-if="preset.is_default" class="text-[9px] px-1 rounded bg-aquamarine/20 text-aquamarine uppercase shrink-0"> default </span>
-                        <span v-if="Object.keys(preset.variation_groups || {}).length" class="text-[9px] text-warm-400 shrink-0"> {{ Object.keys(preset.variation_groups).length }} var </span>
-                      </div>
-                      <div class="text-[10px] text-warm-400 font-mono truncate w-full">
-                        {{ preset.model }}
-                      </div>
-                    </button>
-                  </template>
-                  <div v-if="filteredPresets.length === 0" class="text-warm-400 text-[11px] italic p-4 text-center">No matching presets.</div>
-                </div>
-              </aside>
-
-              <section v-if="!isCompact || showEditor" class="model-editor-pane">
-                <button v-if="isCompact && showEditor" type="button" class="model-back-button" @click="compactBackToList">
-                  <span class="i-carbon-arrow-left" />
-                  <span>{{ t("settings.models.backToList") }}</span>
-                </button>
-                <PresetEditor v-if="showEditor" :preset="editorPreset" :backends="backends" :mode="editorMode" @save="handleSavePreset" @cancel="cancelEdit" @clone="clonePreset" @delete="confirmDeletePreset" @set-default="handleSetDefault" />
-                <div v-else class="model-editor-empty">
-                  <p class="text-sm">Select a preset on the left, or click "+ New" to create one.</p>
-                  <p class="text-[11px] mt-2">
-                    Presets live in
-                    <code class="font-mono">~/.kohakuterrarium/llm_profiles.yaml</code>
-                  </p>
-                </div>
-              </section>
-            </div>
-          </div>
-        </div>
+        <!-- ════════════════════════ Models ════════════════════════ -->
+        <ModelsSection v-if="section.id === 'models'" :title="sectionTitle(section)" :hint="sectionHint(section)" :backends="backends" />
 
         <!-- ════════════════════════ MCP Servers ════════════════════════ -->
         <SectionShell v-if="section.id === 'mcp'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
@@ -240,9 +182,9 @@ import OAuthProviderRow from "@/components/settings/OAuthProviderRow.vue"
 import PackageProviderRow from "@/components/settings/PackageProviderRow.vue"
 import ProviderKeyRow from "@/components/settings/ProviderKeyRow.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
-import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
 import AppearanceSection from "@/components/settings/sections/AppearanceSection.vue"
+import ModelsSection from "@/components/settings/sections/ModelsSection.vue"
 import NotificationsSection from "@/components/settings/sections/NotificationsSection.vue"
 import SettingsLayout from "@/components/settings/layout/SettingsLayout.vue"
 import NodeScope from "@/components/settings/ui/NodeScope.vue"
@@ -307,7 +249,6 @@ async function saveKey(provider) {
     keyInput.value = ""
     await loadKeys()
     await loadBackends()
-    await loadPresets()
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || t("settings.keys.saveFailed"))
   }
@@ -319,7 +260,6 @@ async function deleteKey(provider) {
     ElMessage.success(t("settings.keys.deleted", { provider }))
     await loadKeys()
     await loadBackends()
-    await loadPresets()
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || t("settings.keys.deleteFailed"))
   }
@@ -529,162 +469,6 @@ async function deleteBackend(name) {
   }
 }
 
-// ───────── Presets (master-detail) ─────────
-
-const allPresets = ref([])
-const presetSearch = ref("")
-const selectedPresetKey = ref("") // "provider/name"
-const editorMode = ref("new") // "new" | "edit" | "view"
-const editorPreset = ref(null)
-const showEditor = ref(false)
-
-function presetKey(preset) {
-  if (!preset) return ""
-  return `${preset.provider || ""}/${preset.name || ""}`
-}
-
-async function loadPresets() {
-  try {
-    const data = await configAPI.getModels()
-    allPresets.value = Array.isArray(data) ? data : []
-    // Re-point the editor at the freshly-reloaded copy of the same preset
-    // so variation_groups and other derived fields show up after a refresh
-    // rather than only after the user re-selects.
-    if (selectedPresetKey.value) {
-      const match = allPresets.value.find((p) => presetKey(p) === selectedPresetKey.value)
-      if (match) {
-        editorPreset.value = match
-      }
-    }
-  } catch {
-    allPresets.value = []
-  }
-}
-
-const filteredPresets = computed(() => {
-  const query = presetSearch.value.trim().toLowerCase()
-  if (!query) return allPresets.value
-  return allPresets.value.filter((p) => {
-    const hay = `${p.name} ${p.model} ${p.provider || p.login_provider || ""}`.toLowerCase()
-    return hay.includes(query)
-  })
-})
-
-const presetGroups = computed(() => {
-  const map = new Map()
-  for (const preset of filteredPresets.value) {
-    const provider = preset.provider || preset.login_provider || "unknown"
-    if (!map.has(provider)) map.set(provider, [])
-    map.get(provider).push(preset)
-  }
-  return Array.from(map.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([provider, presets]) => ({
-      provider,
-      presets: presets.sort((a, b) => {
-        if (a.source !== b.source) return a.source === "user" ? -1 : 1
-        return a.name.localeCompare(b.name)
-      }),
-    }))
-})
-
-function selectPreset(preset) {
-  selectedPresetKey.value = presetKey(preset)
-  editorPreset.value = preset
-  editorMode.value = preset.source === "user" ? "edit" : "view"
-  showEditor.value = true
-}
-
-function startNewPreset() {
-  selectedPresetKey.value = ""
-  editorPreset.value = null
-  editorMode.value = "new"
-  showEditor.value = true
-}
-
-function cancelEdit() {
-  showEditor.value = false
-  selectedPresetKey.value = ""
-  editorPreset.value = null
-}
-
-// Compact-mode "back to list" — hides the editor pane without
-// clearing `selectedPresetKey`, so when the list re-appears the
-// previously selected row is still highlighted (one tap to re-open).
-function compactBackToList() {
-  showEditor.value = false
-}
-
-function clonePreset() {
-  if (!editorPreset.value) return
-  const base = editorPreset.value
-  const cloneName = `${base.name}-custom`
-  editorPreset.value = {
-    ...base,
-    name: cloneName,
-    source: "user",
-  }
-  selectedPresetKey.value = ""
-  editorMode.value = "new"
-  ElMessage.info(`Cloned ${base.name}. Edit and save to persist.`)
-}
-
-async function handleSavePreset(payload) {
-  try {
-    await settingsAPI.saveProfile(payload)
-    ElMessage.success(t("settings.models.saved", { name: payload.name }))
-    // Set the selection key BEFORE reloading so loadPresets() re-binds the
-    // editor to the newly-saved preset (and its freshly-computed
-    // variation_groups) without requiring a manual re-click.
-    selectedPresetKey.value = `${payload.provider}/${payload.name}`
-    await loadPresets()
-    const saved = allPresets.value.find((p) => presetKey(p) === selectedPresetKey.value)
-    if (saved) selectPreset(saved)
-  } catch (err) {
-    ElMessage.error(err.response?.data?.detail || err.message || t("settings.models.saveFailed"))
-  }
-}
-
-async function handleSetDefault(preset) {
-  if (!preset || !preset.name) return
-  // Send "provider/name": a bare name can exist under several providers.
-  const identifier = preset.provider ? presetKey(preset) : preset.name
-  try {
-    const result = await settingsAPI.setDefaultModel(identifier)
-    ElMessage.success(t("settings.models.defaultSet", { name: result?.default_model || identifier }))
-    await loadPresets()
-  } catch (err) {
-    ElMessage.error(err.response?.data?.detail || t("settings.models.defaultSetFailed"))
-  }
-}
-
-async function confirmDeletePreset(name) {
-  try {
-    await ElMessageBox.confirm(t("settings.models.deleteConfirm"), {
-      confirmButtonText: t("common.delete"),
-      cancelButtonText: t("common.cancel"),
-      type: "warning",
-    })
-  } catch {
-    return
-  }
-  try {
-    // The (provider, name) hierarchy API is the only delete path — the
-    // legacy bare-name fallback was removed in Phase 3 of the studio
-    // cleanup.  Editors that lack a provider hit the error toast below.
-    const preset = editorPreset.value
-    if (!preset?.provider) {
-      throw new Error("Profile has no provider — cannot delete")
-    }
-    await settingsAPI.deleteProfile(name, preset.provider)
-    ElMessage.success(t("settings.models.deleted", { name }))
-    cancelEdit()
-    await loadPresets()
-  } catch (err) {
-    ElMessage.error(err.response?.data?.detail || t("settings.models.deleteFailed"))
-  }
-}
-
 // ───────── MCP ─────────
 
 const mcpServers = ref([])
@@ -755,7 +539,6 @@ onMounted(async () => {
   await loadKeys()
   await loadBackends()
   await loadNativeTools()
-  await loadPresets()
   await loadMCP()
 })
 
@@ -798,92 +581,6 @@ function onOpenDrives() {
   padding-bottom: 1rem;
 }
 
-/* Models section — the workspace fills the content column and scrolls inside. */
-.models-pane {
-  height: 100%;
-}
-
-.model-workspace {
-  display: flex;
-  gap: 0;
-  height: 100%;
-  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--el-bg-color, transparent);
-}
-
-.model-list-pane {
-  display: flex;
-  flex-direction: column;
-  width: 16rem;
-  flex-shrink: 0;
-  border-right: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 18%, transparent);
-  min-height: 0;
-}
-
-/* Compact: list takes full width (no sidebar split) and the editor
-   takes full width when shown. v-if in the template handles which
-   pane renders; this just removes the fixed widths so each fills. */
-.model-workspace.is-compact .model-list-pane {
-  width: 100%;
-  border-right: none;
-}
-.model-workspace.is-compact .model-editor-pane {
-  width: 100%;
-}
-
-.model-back-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
-  margin-bottom: 0.75rem;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 25%, transparent);
-  color: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    background 0.1s ease,
-    border-color 0.1s ease;
-}
-.model-back-button:hover {
-  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 6%, transparent);
-  border-color: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 50%, transparent);
-}
-
-.model-list-head {
-  padding: 0.75rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 15%, transparent);
-  flex-shrink: 0;
-}
-
-.model-list-scroll {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.25rem 0;
-}
-
-.model-editor-pane {
-  flex: 1 1 0;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 1rem;
-}
-
-.model-editor-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  color: var(--el-text-color-placeholder, #909399);
-  padding: 4rem 1rem;
-}
-
 .attention-group {
   display: flex;
   flex-direction: column;
@@ -921,26 +618,5 @@ function onOpenDrives() {
   font-size: 0.625rem;
   line-height: 1rem;
   padding: 0 0.375rem;
-}
-
-.preset-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 0.35rem 0.75rem;
-  background: transparent;
-  border: none;
-  text-align: left;
-  color: inherit;
-  cursor: pointer;
-  width: 100%;
-  transition: background 0.1s ease;
-}
-.preset-row:hover {
-  background: color-mix(in srgb, var(--kt-color-warm-500, #8a8480) 6%, transparent);
-}
-.preset-row.is-active {
-  background: color-mix(in srgb, var(--kt-color-iolite, #5a4fcf) 15%, transparent);
-  color: var(--el-color-primary, var(--kt-color-iolite, #5a4fcf));
 }
 </style>
