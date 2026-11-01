@@ -18,6 +18,14 @@ class SecretStoreRequest(BaseModel):
 
 
 def _status(request: Request) -> dict[str, Any]:
+    if getattr(request.app.state, "desktop_source", False):
+        return {
+            "local": True,
+            "mode": "file",
+            "active": "file",
+            "available": False,
+            "backend": "",
+        }
     return {
         "local": is_local(request),
         "mode": secret_store.configured_mode(),
@@ -38,6 +46,10 @@ async def set_secret_store(
     request: Request, body: SecretStoreRequest
 ) -> dict[str, Any]:
     """Move every stored API key to the key file or the system keychain."""
+    if getattr(request.app.state, "desktop_source", False):
+        raise HTTPException(
+            409, "system keychain management is unavailable in source mode"
+        )
     local_only(request, "the key store can only be changed from this machine")
     try:
         moved = switch_secret_store(body.mode)

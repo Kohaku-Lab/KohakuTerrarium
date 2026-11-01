@@ -49,6 +49,11 @@ afterEach(() => {
   delete window.__TAURI_INTERNALS__
 })
 
+it("preserves unavailable autostart for development shells", async () => {
+  window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => null) }
+  expect(await getAutostart()).toBe(null)
+})
+
 describe("hostBridge", () => {
   it("reports no host in a plain browser and degrades every operation", async () => {
     expect(hostKind()).toBeNull()

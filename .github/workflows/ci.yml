@@ -139,6 +139,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      - run: cargo clippy --all-targets --features source-dev --locked -- -D warnings
+      - run: cargo test --features source-dev --locked
 
   frontend-check:
     runs-on: ubuntu-latest
@@ -152,6 +154,13 @@ jobs:
           node-version: "24"
       - run: npm ci
       - run: npm run format:check
+      - run: npm run test:desktop-dev
+      - name: Run desktop development UI regression tests
+        run: >-
+          npm test -- --maxWorkers=4
+          src/utils/hostBridge.test.js
+          src/components/settings/DesktopAppSettings.test.js
+          src/composables/useBackendStatus.test.js
       - name: Run history and branch regression tests
         run: >-
           npm test -- --maxWorkers=4

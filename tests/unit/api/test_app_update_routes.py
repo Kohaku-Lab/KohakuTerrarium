@@ -26,6 +26,32 @@ def client(tmp_path, monkeypatch):
 
 
 class TestSettingsRoundTrip:
+    @pytest.mark.parametrize(
+        "method,path,body",
+        [
+            ("GET", "/settings", None),
+            ("PUT", "/settings", {}),
+            ("GET", "/state", None),
+            ("GET", "/runtime", None),
+            ("POST", "/feeds/probe", {}),
+            ("POST", "/update", {}),
+            ("POST", "/rollback", {}),
+            ("POST", "/check", {}),
+        ],
+    )
+    def test_source_mode_rejects_runtime_operations(self, client, method, path, body):
+        client.app.state.desktop_source = True
+        response = client.request(method, "/api/app" + path, json=body)
+        assert response.status_code == 409
+        assert "source" in response.json()["detail"].lower()
+
+    def test_source_mode_closes_update_websocket(self, client):
+        client.app.state.desktop_source = True
+        with pytest.raises(WebSocketDisconnect) as error:
+            with client.websocket_connect(_r._WS_PATH):
+                pass
+        assert error.value.code == 4404
+
     def test_get_returns_defaults_on_fresh_install(self, client):
         resp = client.get("/api/app/settings")
         assert resp.status_code == 200

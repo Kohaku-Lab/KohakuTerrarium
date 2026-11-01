@@ -241,13 +241,23 @@ fn backend_probe(app: &AppHandle) -> Value {
     let pid = backend.pid();
     let token = backend.token();
     let usage = pid.and_then(crate::runtime::stats::collect);
+    let loads_before = backend.main_loads();
     let restarted = crate::backend::restart(app);
+    let deadline = Instant::now() + PAGE_TIMEOUT;
+    while crate::development::active()
+        && restarted.is_ok()
+        && backend.main_loads() == loads_before
+        && Instant::now() < deadline
+    {
+        thread::sleep(Duration::from_millis(100));
+    }
     json!({
         "memoryMeasured": usage.is_some_and(|(bytes, _)| bytes > 0),
         "restarted": restarted.is_ok(),
         "error": restarted.err(),
         "pidChanged": pid.is_some() && backend.pid() != pid,
         "sameToken": token.is_some() && backend.token() == token,
+        "authenticatedPageReloaded": !crate::development::active() || backend.main_loads() > loads_before,
         "healthStatus": backend.port().and_then(|port| http_status(port, "/healthz")),
         "restarts": backend.restarts(),
         "state": backend.phase().name(),
@@ -256,9 +266,15 @@ fn backend_probe(app: &AppHandle) -> Value {
 
 /// Whether a backend probe result shows a measured, fully restarted backend.
 fn backend_probe_ok(probe: &Value) -> bool {
-    ["memoryMeasured", "restarted", "pidChanged", "sameToken"]
-        .iter()
-        .all(|key| probe[*key] == true)
+    [
+        "memoryMeasured",
+        "restarted",
+        "pidChanged",
+        "sameToken",
+        "authenticatedPageReloaded",
+    ]
+    .iter()
+    .all(|key| probe[*key] == true)
         && probe["healthStatus"] == 200
         && probe["restarts"] == 1
         && probe["state"] == "running"
@@ -618,6 +634,7 @@ mod tests {
             "restarted": true,
             "pidChanged": true,
             "sameToken": true,
+            "authenticatedPageReloaded": true,
             "healthStatus": 200,
             "restarts": 1,
             "state": "running",
@@ -631,6 +648,7 @@ mod tests {
             (healthy.clone(), true),
             (broken("pidChanged", json!(false)), false),
             (broken("sameToken", json!(false)), false),
+            (broken("authenticatedPageReloaded", json!(false)), false),
             (broken("memoryMeasured", json!(false)), false),
             (broken("healthStatus", Value::Null), false),
             (broken("restarts", json!(2)), false),

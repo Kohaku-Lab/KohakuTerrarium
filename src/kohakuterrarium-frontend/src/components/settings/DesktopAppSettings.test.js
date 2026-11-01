@@ -71,6 +71,27 @@ afterEach(() => {
 })
 
 describe("DesktopAppSettings", () => {
+  it("keeps backend restart but hides maintenance in source development", async () => {
+    shimsApi.status.mockResolvedValue(status())
+    window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (name) => {
+        if (name === "get_desktop_capabilities")
+          return { surface: "desktop", protocol: 1, sourceDevelopment: true }
+        if (name === "get_backend_status") return { state: "running", restarts: 0 }
+        return false
+      }),
+    }
+    const wrapper = mountSettings()
+    await flushPromises()
+    expect(wrapper.find("[data-backend-restart]").exists()).toBe(true)
+    for (const setting of ["runtime", "autostart", "terminal-command", "shell-update"]) {
+      expect(wrapper.find(`[data-setting='${setting}']`).exists()).toBe(false)
+    }
+    expect(runtimeApi.getRuntime).not.toHaveBeenCalled()
+    wrapper.unmount()
+    delete window.__TAURI_INTERNALS__
+  })
+
   it("renders nothing for a server that cannot manage terminal commands", async () => {
     shimsApi.status.mockRejectedValue(new Error("404"))
     const wrapper = mountSettings()

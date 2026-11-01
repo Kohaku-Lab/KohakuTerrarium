@@ -41,6 +41,15 @@ def _client(address="127.0.0.1"):
     return TestClient(app, client=(address, 5000))
 
 
+def test_source_mode_cannot_replace_or_remove_installed_commands(home):
+    client = _client()
+    client.app.state.desktop_source = True
+    assert client.get("/api/app/shims").json()["supported"] is False
+    for action in ("install", "uninstall"):
+        assert client.post(f"/api/app/shims/{action}", json={}).status_code == 409
+    assert home["calls"] == []
+
+
 def test_status_reports_nothing_installed_before_the_user_opts_in(home):
     body = _client().get("/api/app/shims").json()
 

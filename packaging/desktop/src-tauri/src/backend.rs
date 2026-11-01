@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, Manager, Url};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::overlay;
 use crate::popout::{self, PopoutRegistry};
@@ -75,6 +75,8 @@ pub struct Backend {
     crashes: Mutex<Vec<Instant>>,
     restarts: AtomicU32,
     main_loads: AtomicU32,
+    source_generation: AtomicU64,
+    source_confirmed: AtomicU64,
     relaunching: AtomicBool,
     watching: AtomicBool,
     port: AtomicU16,
@@ -90,6 +92,21 @@ pub struct Backend {
 }
 
 impl Backend {
+    pub fn confirm_source_generation(&self, generation: u64) -> bool {
+        generation != 0
+            && generation == self.source_generation.load(Ordering::SeqCst)
+            && self.phase() == Phase::Running
+            && self
+                .source_confirmed
+                .compare_exchange(0, generation, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+    }
+
+    fn next_source_generation(&self) -> u64 {
+        self.source_confirmed.store(0, Ordering::SeqCst);
+        self.source_generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
     pub fn phase(&self) -> Phase {
         *self.phase.lock().unwrap()
     }
@@ -319,6 +336,9 @@ pub fn parse_progress(line: &str) -> Option<Value> {
 }
 
 pub fn config_dir(app: &AppHandle) -> PathBuf {
+    if let Some(config) = crate::development::config() {
+        return config.data.clone();
+    }
     match std::env::var_os("KT_CONFIG_DIR") {
         Some(dir) => PathBuf::from(dir),
         None => app
@@ -331,6 +351,9 @@ pub fn config_dir(app: &AppHandle) -> PathBuf {
 
 /// A command that runs the bundled interpreter with the launcher on its path.
 pub fn python_command(app: &AppHandle, args: &[&str]) -> Result<Command, String> {
+    if crate::development::active() {
+        return Err("runtime maintenance is unavailable in source mode".into());
+    }
     let layout = Layout::from_root(&resource_root(app)?);
     if !layout.python.is_file() {
         return Err(format!(
@@ -367,7 +390,7 @@ fn spawn(
     token: &str,
     port: u16,
 ) -> Result<Child, String> {
-    if !layout.python.is_file() {
+    if !crate::development::active() && !layout.python.is_file() {
         return Err(format!(
             "bundled Python not found at {}",
             layout.python.display()
@@ -381,10 +404,17 @@ fn spawn(
         .open(config.join("app.log"))
         .map_err(|error| format!("cannot open app.log: {error}"))?;
 
-    let mut command = Command::new(&layout.python);
+    let mut command = match crate::development::config() {
+        Some(config) => crate::development::command(config, port, state_path, token),
+        None => {
+            let mut command = Command::new(&layout.python);
+            command
+                .args(arguments(port, state_path, std::process::id()))
+                .envs(environment(layout, token));
+            command
+        }
+    };
     command
-        .args(arguments(port, state_path, std::process::id()))
-        .envs(environment(layout, token))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(log));
@@ -420,6 +450,9 @@ fn wait_ready(
 ) -> Result<u16, String> {
     let mut last_state = None;
     loop {
+        if backend.is_stopping() {
+            return Err("desktop is stopping".into());
+        }
         if let Some(state) = read_state(state_path) {
             match state.status.as_str() {
                 "ready" => return state.port.ok_or_else(|| "backend reported no port".into()),
@@ -510,12 +543,15 @@ fn launch(app: &AppHandle) -> Result<(), String> {
     let backend = app.state::<Backend>();
     let token = new_token();
     *backend.token.lock().unwrap() = Some(token.clone());
-    let port = start_child(app, &token, REQUESTED_PORT)?;
+    let requested = crate::development::config()
+        .map(|c| c.port)
+        .unwrap_or(REQUESTED_PORT);
+    let port = start_child(app, &token, requested)?;
 
     let window = app
         .get_webview_window("main")
         .ok_or("the main window is gone")?;
-    let url = Url::parse(&launch_url(port, &token)).map_err(|error| error.to_string())?;
+    let url = crate::development::entry(port, &token, backend.next_source_generation())?;
     window.navigate(url).map_err(|error| error.to_string())?;
     match smoke::output_path() {
         Some(out) => smoke::finish_when_loaded(app.clone(), port, out),
@@ -531,7 +567,7 @@ fn reload_windows(app: &AppHandle, token: &str, port: u16) {
     let loads_before = backend.main_loads();
     if let (Some(main), Ok(url)) = (
         app.get_webview_window("main"),
-        Url::parse(&launch_url(port, token)),
+        crate::development::entry(port, token, backend.next_source_generation()),
     ) {
         let _ = main.navigate(url);
     }
@@ -562,6 +598,11 @@ fn reload_windows(app: &AppHandle, token: &str, port: u16) {
         while backend.main_loads() == loads_before && Instant::now() < deadline {
             thread::sleep(POLL);
         }
+        if (crate::development::active() && backend.main_loads() == loads_before)
+            || backend.is_stopping()
+        {
+            return;
+        }
         for (window, url) in sessions {
             let _ = window.navigate(url);
         }
@@ -577,7 +618,10 @@ fn relaunch(
     backend.stop_child();
     between(app)?;
     let token = backend.token().ok_or("the backend was never started")?;
-    let port = start_child(app, &token, backend.port().unwrap_or(REQUESTED_PORT))?;
+    let requested = crate::development::config()
+        .map(|config| config.port)
+        .unwrap_or_else(|| backend.port().unwrap_or(REQUESTED_PORT));
+    let port = start_child(app, &token, requested)?;
     reload_windows(app, &token, port);
     Ok(())
 }
@@ -589,6 +633,9 @@ pub fn restart(app: &AppHandle) -> Result<(), String> {
 
 /// Reinstall the release shipped with the shell while the backend is stopped, then start it again.
 pub fn repair(app: &AppHandle) -> Result<(), String> {
+    if crate::development::active() {
+        return Err("runtime repair is unavailable in source mode".into());
+    }
     cycle(app, crate::runtime::repair::run)
 }
 
@@ -665,6 +712,20 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_confirmation_requires_current_running_generation_once() {
+        let backend = Backend::default();
+        let first = backend.next_source_generation();
+        assert!(!backend.confirm_source_generation(first));
+        backend.set_phase(Phase::Running);
+        assert!(!backend.confirm_source_generation(0));
+        assert!(backend.confirm_source_generation(first));
+        assert!(!backend.confirm_source_generation(first));
+        let second = backend.next_source_generation();
+        assert!(!backend.confirm_source_generation(first));
+        assert!(backend.confirm_source_generation(second));
+    }
 
     #[test]
     fn automatic_restarts_stop_after_three_crashes_in_two_minutes() {

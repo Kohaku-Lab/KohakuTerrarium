@@ -38,10 +38,16 @@ class UninstallRequest(BaseModel):
 
 
 def _local_only(request: Request) -> None:
+    if getattr(request.app.state, "desktop_source", False):
+        raise HTTPException(
+            409, "terminal command installation is unavailable in source mode"
+        )
     local_only(request, "terminal commands can only be managed locally")
 
 
 def _status(request: Request) -> dict[str, Any]:
+    if getattr(request.app.state, "desktop_source", False):
+        return {"local": True, "supported": False, "installed": [], "commands": []}
     plan = build_plan()
     installed = [name for name in SHIM_SUBCOMMANDS if is_ours(shim_path(plan, name))]
     return {

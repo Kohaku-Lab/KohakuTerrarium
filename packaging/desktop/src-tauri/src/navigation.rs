@@ -11,6 +11,9 @@ const SHELL_HOST: &str = "tauri.localhost";
 
 /// Whether `url` may load in the app window given the backend `port`.
 pub fn is_internal(url: &Url, port: Option<u16>) -> bool {
+    if crate::development::internal(url) {
+        return true;
+    }
     match url.scheme() {
         "tauri" | "about" | "asset" | "ipc" | "data" | "blob" => true,
         "http" | "https" => match url.host_str() {

@@ -44,6 +44,8 @@ ws_router = APIRouter()
 
 def _wrapper_mode_only(request: Request) -> None:
     """Reject the call when the host isn't a wrapper / standalone install."""
+    if getattr(request.app.state, "desktop_source", False):
+        raise HTTPException(409, "runtime maintenance is unavailable in source mode")
     lab_mode = getattr(request.app.state, "lab_mode", "standalone")
     if lab_mode == "lab-client":
         raise HTTPException(
@@ -260,7 +262,7 @@ async def _stream_update(ws: WebSocket) -> None:
 async def ws_update(ws: WebSocket) -> None:
     """Stream an eligible launcher update or close with a mode-specific refusal."""
     lab_mode = getattr(ws.app.state, "lab_mode", "standalone")
-    if lab_mode == "lab-client":
+    if lab_mode == "lab-client" or getattr(ws.app.state, "desktop_source", False):
         await ws.close(code=4404)
         return
     if not is_launcher_install():

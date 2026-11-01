@@ -47,6 +47,17 @@ def _client(address="127.0.0.1"):
     return TestClient(app, client=(address, 5000))
 
 
+def test_source_mode_cannot_switch_to_shared_system_keychain(vault):
+    client = _client()
+    client.app.state.desktop_source = True
+    assert client.get("/api/app/secret-store").json()["available"] is False
+    assert (
+        client.post("/api/app/secret-store", json={"mode": "keychain"}).status_code
+        == 409
+    )
+    assert vault.items == {}
+
+
 def test_status_reports_the_file_store_and_an_available_keychain(vault):
     body = _client().get("/api/app/secret-store").json()
 

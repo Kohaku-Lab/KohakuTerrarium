@@ -56,8 +56,17 @@ pub fn create(app: &App) -> tauri::Result<()> {
     );
     let navigation = app.handle().clone();
     let page_load = app.handle().clone();
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title("KohakuTerrarium")
+    let page = if crate::development::active() {
+        "__kt_desktop_boot"
+    } else {
+        "index.html"
+    };
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(page.into()))
+        .title(if crate::development::active() {
+            "KohakuTerrarium Development"
+        } else {
+            "KohakuTerrarium"
+        })
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 500.0)
         .transparent(material != Material::None)
@@ -68,6 +77,11 @@ pub fn create(app: &App) -> tauri::Result<()> {
         })
         .initialization_script(THEME_SYNC)
         .initialization_script(material::page_script(material).unwrap_or_default())
+        .initialization_script(if crate::development::active() {
+            crate::development::READY_SCRIPT
+        } else {
+            ""
+        })
         .on_navigation(move |url| {
             let port = navigation.state::<Backend>().port();
             if is_internal(url, port) {
@@ -84,6 +98,12 @@ pub fn create(app: &App) -> tauri::Result<()> {
                 return;
             }
             let backend = page_load.state::<Backend>();
+            if crate::development::active() {
+                if payload.url().path() == "/__kt_desktop_boot" {
+                    backend.mark_shell_loaded();
+                }
+                return;
+            }
             if payload.url().host_str() == Some("127.0.0.1") {
                 backend.mark_page_loaded();
                 if smoke::output_path().is_none() && backend.claim_popout_restore() {

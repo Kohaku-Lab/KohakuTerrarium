@@ -130,7 +130,7 @@ fn default_position(app: &AppHandle, spec: &Spec) -> (f64, f64) {
 }
 
 pub fn overlay_url(port: u16, key: &str) -> Option<Url> {
-    Url::parse_with_params(&format!("http://127.0.0.1:{port}/"), [(OVERLAY_PARAM, key)]).ok()
+    Url::parse_with_params(&crate::development::origin(port), [(OVERLAY_PARAM, key)]).ok()
 }
 
 /// Open the overlay window described by `spec`, or show it if it already exists.

@@ -1,4 +1,5 @@
-import { defineConfig } from "vite"
+import { defineConfig, mergeConfig } from "vite"
+import { desktopOptions } from "./scripts/vite-desktop.mjs"
 import vue from "@vitejs/plugin-vue"
 import VueRouter from "unplugin-vue-router/vite"
 import AutoImport from "unplugin-auto-import/vite"
@@ -13,7 +14,7 @@ import extSharedPlugin from "./scripts/vite-ext-shared.mjs"
 // Backend the dev server proxies to; set KT_API_TARGET when the API runs on another port.
 const apiTarget = process.env.KT_API_TARGET || "http://127.0.0.1:8001"
 
-export default defineConfig({
+const baseConfig = {
   plugins: [
     VueRouter({
       routesFolder: "src/pages",
@@ -76,4 +77,10 @@ export default defineConfig({
       },
     },
   },
-})
+}
+
+export default defineConfig(({ mode }) =>
+  mode === "desktop"
+    ? mergeConfig(baseConfig, desktopOptions(process.env.KT_DESKTOP_DEV_CONFIG))
+    : baseConfig,
+)

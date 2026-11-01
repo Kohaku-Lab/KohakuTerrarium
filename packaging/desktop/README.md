@@ -35,6 +35,13 @@ Tauri shell ── spawns ──> python/python(.exe) -m kohakuterrarium.launche
 The Rust constants and names that Python and the frontend also use are compared by
 `tests/unit/packaging/test_desktop_contract.py`.
 
+## Develop from source
+
+Run `python scripts/dev_desktop.py` after the one-time editable Python, npm and
+Rust setup. The real desktop window loads local Python and Vite without rebuilding
+a release archive. See [DEVELOPMENT.md](DEVELOPMENT.md) for setup, isolation,
+restart behavior and validation boundaries.
+
 ## Build
 
 ```
