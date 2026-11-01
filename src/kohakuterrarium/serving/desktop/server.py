@@ -9,6 +9,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from kohakuterrarium.cli.shims import refresh_installed_shims
 from kohakuterrarium.serving.web import (
     WEB_DIST_DIR,
     _resolve_config_dirs,
@@ -111,8 +112,6 @@ def start_desktop_server(port: int, log_level: str):
 def _refresh_shims() -> None:
     """Point installed terminal commands at this install; failures only reach the log."""
     try:
-        from kohakuterrarium.cli.shims import refresh_installed_shims
-
         for line in refresh_installed_shims():
             logger.info("shims: %s", line)
     except Exception as exc:
