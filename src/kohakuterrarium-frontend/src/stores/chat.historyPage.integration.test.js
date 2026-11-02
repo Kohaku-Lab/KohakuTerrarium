@@ -147,6 +147,42 @@ describe("paged history consumers", () => {
     await chat.initHistoryPage("root")
     expect(chat.messagesByTab.root[0].rawContent[2].extension.value[1].keep).toBe(true)
     expect(source.content[1].file.data_base64).toHaveLength(1024 * 1024)
+
+    chat.tabs = ["root", "bob"]
+    chat.messagesByTab.bob = []
+    chat.runningJobs = {}
+    api.mockImplementation(async (_session, target) => ({
+      ...page([event(80, "text", { content: target })], { older: false }),
+      live_job_ids: [`${target}-job`],
+    }))
+    for (const order of [
+      ["root", "bob"],
+      ["bob", "root"],
+    ]) {
+      for (const target of order) await chat.initHistoryPage(target)
+      expect(chat.runningJobs).toMatchObject({
+        "root-job": { tab: "root" },
+        "bob-job": { tab: "bob" },
+      })
+    }
+    chat._onMessage({
+      type: "activity",
+      activity_type: "tool_done",
+      source: "root",
+      job_id: "bob-job",
+    })
+    expect(chat.runningJobs["bob-job"].tab).toBe("bob")
+    for (const target of ["bob", "root"]) {
+      chat._onMessage({
+        type: "activity",
+        activity_type: "tool_done",
+        source: target,
+        job_id: `${target}-job`,
+      })
+      expect(chat.runningJobs[`${target}-job`]).toBeUndefined()
+      if (target === "bob") expect(chat.runningJobs["root-job"].tab).toBe("root")
+    }
+    expect(chat.runningJobs).toEqual({})
   })
 
   it("keeps a delayed older response cache-only and rejects materialization after history mutation", async () => {
@@ -266,9 +302,11 @@ describe("paged history consumers", () => {
   it("reuses the saved source for older reads, maps channel messages, and never starts saved jobs", async () => {
     const api = vi
       .spyOn(sessionAPI, "getHistoryPage")
-      .mockResolvedValueOnce(
-        page([{ _history_key: "c20", sender: "a", content: "new" }], { stream: "channel" }),
-      )
+      .mockResolvedValueOnce({
+        ...page([{ _history_key: "c20", sender: "a", content: "new" }], { stream: "channel" }),
+        live_job_ids: ["alice-job", "bob-job"],
+        is_processing: true,
+      })
       .mockResolvedValueOnce(
         page([{ _history_key: "c10", sender: "b", content: "old" }], {
           stream: "channel",
@@ -277,6 +315,8 @@ describe("paged history consumers", () => {
       )
     const live = vi.spyOn(terrariumAPI, "getHistoryPage")
     await chat.initHistoryPage("root", { kind: "saved", sessionName: "saved-one" })
+    expect(chat.runningJobs).toEqual({})
+    expect(chat.processingByTab.root).toBe(false)
     await chat.prefetchOlderHistory("root")
     chat.materializeOlderHistory("root")
     expect(content(chat)).toEqual(["old", "new"])
@@ -284,6 +324,16 @@ describe("paged history consumers", () => {
     expect(api.mock.calls[1].slice(0, 2)).toEqual(["saved-one", "root"])
     expect(live).not.toHaveBeenCalled()
     expect(chat.runningJobs).toEqual({})
+    api.mockResolvedValueOnce({
+      ...page([event(40, "text", { content: "saved reply" })], { older: false }),
+      live_job_ids: ["alice-job", "bob-job"],
+      is_processing: true,
+    })
+    await chat.initHistoryPage("root", { kind: "saved", sessionName: "saved-one" })
+    expect(content(chat)).toEqual(["saved reply"])
+    expect(chat.runningJobs).toEqual({})
+    expect(chat.processingByTab.root).toBe(false)
+    expect(live).not.toHaveBeenCalled()
   })
 
   it("uses explicit snapshot fallback only for an empty event source", async () => {
