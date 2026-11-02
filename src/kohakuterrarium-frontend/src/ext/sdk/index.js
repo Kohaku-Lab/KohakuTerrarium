@@ -44,8 +44,12 @@ import { useTabsStore } from "@/stores/tabs"
 import { useThemeStore } from "@/stores/theme"
 import { closeOverlayWindow, setOverlayBounds, startOverlayDrag } from "@/utils/hostBridge"
 
+export { default as ActionButton } from "@/components/common/ActionButton.vue"
+export { default as SettingsGroup } from "@/components/settings/ui/SettingsGroup.vue"
+export { default as SettingsRow } from "@/components/settings/ui/SettingsRow.vue"
 export { OwnerCallError } from "@/ext/ownerClient"
 export { useWidget } from "@/components/chat/widgets/useWidget"
+export { useWorkContext } from "@/ext/workContext"
 export { SDK_VERSION, satisfiesRange } from "@/ext/sdk/version"
 export {
   FRAME_MESSAGES,

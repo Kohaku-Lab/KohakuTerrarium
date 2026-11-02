@@ -48,6 +48,14 @@ See [`plugins/README.md`](plugins/README.md) for the full reference.
 | subagent_tracker | `pre/post_subagent_run`, `on_task_promoted` | Advanced |
 | webhook_notifier | All callbacks, `inject_event`, `switch_model` | Advanced |
 
+## Packages (`packages/`)
+
+Installable extensions combining backend modules with dashboard UI:
+
+| Package | UI | Features |
+|---------|----|----------|
+| [Virtual pets](packages/virtual_pet/README.md) | Settings + session-aware application overlay | User library, Codex V1/V2 import, active session work cues, hover jumps, click waves, and directional drag animations |
+
 ## Code (`code/`)
 
 Programmatic usage: embedding agents in your own applications.

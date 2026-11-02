@@ -16,6 +16,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: /^@kohakuterrarium\/ui-sdk$/,
+        replacement: fileURLToPath(new URL("./src/ext/sdk/mock.js", import.meta.url)),
+      },
+      {
         find: /^monaco-editor$/,
         replacement: fileURLToPath(
           new URL("./node_modules/monaco-editor/esm/vs/editor/editor.main.js", import.meta.url),

@@ -1,6 +1,7 @@
 import { computed } from "vue"
 
 const snapshots = new Map()
+const workPeriods = new Map()
 const listeners = new Set()
 const edgeListeners = new Set()
 const INTERACTIVE_TYPES = new Set(["ask_text", "confirm", "selection", "card"])
@@ -62,6 +63,7 @@ function closesAttention(event) {
 }
 
 export function reduceAttention(state, event) {
+  if (event?.type === "activity") event = { ...event, type: event.activity_type }
   if (!event || event.replay) return state
   if (event.history) {
     const eventId = attentionEventId(event)
@@ -91,11 +93,13 @@ export function reduceAttention(state, event) {
 
   if (event.type === "processing_start") {
     next.processing = true
+    next.background = false
     return next
   }
 
   if (isProcessingError(event)) {
     next.processing = false
+    next.background = false
     next.errors = (next.errors ?? 0) + 1
     return next
   }
@@ -105,12 +109,19 @@ export function reduceAttention(state, event) {
     // a completion: no counter, no attention edge. The auto-wake turn that
     // reports the result raises its own genuine edge later.
     if (next.processing && !event.awaiting_background) next.completed += 1
+    next.background = event.awaiting_background === true
     next.processing = false
     return next
   }
 
   if (event.type === "idle") {
     next.processing = false
+    return next
+  }
+
+  if (["processing_error", "turn_error", "interrupt", "stopped"].includes(event.type)) {
+    next.processing = false
+    next.background = false
     return next
   }
 
@@ -187,13 +198,50 @@ export function restoreAttentionFromHistory(events, current = createAttentionSta
   }
 }
 
-export function publishAttention(scope, tab, state) {
+export function publishAttention(scope, tab, state, event) {
   if (!scope || !tab) return
+  if (event?.type === "activity") event = { ...event, type: event.activity_type }
+  const before = workForScope(scope).busy
   snapshots.set(`${scope}\0${tab}`, { scope, tab, state })
+  if (!tab.startsWith("ch:") && !event?.replay && !event?.history) {
+    const period = { ...(workPeriods.get(scope) || { started: 0, outcome: "idle" }) }
+    const busy = workForScope(scope).busy
+    if (!before && busy && (!event || event.type === "processing_start")) {
+      period.outcome = "idle"
+      if (event?.type === "processing_start") period.started++
+    }
+    if (["processing_error", "turn_error"].includes(event?.type)) period.outcome = "failed"
+    if (
+      before &&
+      !busy &&
+      period.outcome !== "failed" &&
+      ["processing_end", "tool_done", "tool_error", "subagent_done", "subagent_error"].includes(
+        event?.type,
+      )
+    )
+      period.outcome = "ready"
+    workPeriods.set(scope, period)
+  }
   notifyListeners()
 }
 
+/** Current observed work across a session; started advances only on live idle-to-work edges. */
+export function workForScope(scope) {
+  let busy = false,
+    waiting = false
+  for (const snapshot of snapshots.values()) {
+    if (snapshot.scope !== scope || snapshot.tab.startsWith("ch:")) continue
+    const state = snapshot.state
+    busy ||= Boolean(state.processing || state.background)
+    waiting ||= state.pending.size > 0
+  }
+  const period = workPeriods.get(scope)
+  const status = waiting ? "waiting" : busy ? "running" : period?.outcome || "idle"
+  return { status, busy, started: period?.started || 0 }
+}
+
 export function removeAttentionScope(scope) {
+  workPeriods.delete(scope)
   let changed = false
   for (const [key, snapshot] of snapshots) {
     if (snapshot.scope !== scope) continue
@@ -272,6 +320,7 @@ export function subscribeAttention(listener) {
 
 export function clearAttentionRegistry() {
   snapshots.clear()
+  workPeriods.clear()
   notifyListeners()
 }
 

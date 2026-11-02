@@ -1,6 +1,6 @@
 ---
 title: Examples
-summary: Tour of the bundled example creatures, terrariums, and code. What to read first and why.
+summary: Tour of the bundled example creatures, terrariums, packages, and code. What to read first and why.
 tags:
   - guides
   - examples
@@ -10,7 +10,7 @@ tags:
 
 For readers looking for runnable code and config to learn from.
 
-The `examples/` tree groups runnable material by kind: standalone agent configs, terrarium configs, plugin implementations, and Python scripts that embed the framework. Each folder illustrates a pattern you can copy or inherit from.
+The `examples/` tree groups runnable material by kind: standalone agent configs, terrarium configs, plugin implementations, installable packages, and Python scripts that embed the framework. Each folder illustrates a pattern you can copy or inherit from.
 
 Concept primer: [boundaries](../concepts/boundaries.md). Examples intentionally cover the edges.
 
@@ -64,6 +64,18 @@ One example per hook category. Use these as a reference when writing your own.
 | `webhook_notifier` | Fire-and-forget callbacks, `inject_event`, `switch_model` | advanced |
 
 Related guide: [Plugins](plugins.md). See `examples/plugins/README.md` for the full field-by-field walk-through.
+
+## `examples/packages/`: installable extensions
+
+Packages combine Python backend modules and dashboard UI without modifying creature
+configurations. Install them on the backend hosting your dashboard; see each
+package's README for setup and multi-user enablement details.
+
+| Package | Pattern | What it shows |
+|---|---|---|
+| [Virtual pets](../../../examples/packages/virtual_pet/README.md) | Package-owned settings + application overlay | User-scoped sprite library, Codex V1/V2 import, active session awareness, interactive drag/hover/click animations |
+
+Related guides: [Packages](packages.md), [UI extensions](ui-extensions.md).
 
 ## `examples/code/`: Python embedding
 

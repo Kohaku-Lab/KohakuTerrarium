@@ -866,6 +866,35 @@ class TestPackagesIntegration:
         uninstall_package("uibad")
         assert get_package_ui("uipkg") is None and list_package_ui() == []
 
+        pet_source = Path(__file__).parents[2] / "examples/packages/virtual_pet"
+        assert install_package(str(pet_source)) == "virtual-pet"
+        pet_slot = get_package_ui("virtual-pet")
+        assert pet_slot.error == ""
+        overlay = next(c for c in pet_slot.contributions if c.kind == "overlay")
+        assert overlay.owner == "package:virtual-pet"
+        assert overlay.overlay == {
+            "anchor": "bottom-right",
+            "surface": "app",
+            "width": 224,
+            "height": 280,
+            "draggable": True,
+            "resizable": False,
+            "clickThrough": True,
+            "defaultVisible": True,
+            "alwaysOnTop": True,
+        }
+        assert not _load_manifest(get_package_root("virtual-pet")).get("plugins")
+        uninstall_package("virtual-pet")
+        assert (
+            install_package(str(pet_source), name_override="pet-alias") == "pet-alias"
+        )
+        renamed_pet = get_package_ui("pet-alias")
+        assert renamed_pet.error == ""
+        assert [c.owner for c in renamed_pet.contributions] == ["package:pet-alias"] * 2
+        assert resolve_ui_asset(renamed_pet, "index.js").is_file()
+        assert uninstall_package("pet-alias") is True
+        assert get_package_ui("pet-alias") is None
+
         # ---- kt uninstall alpha ----
         assert studio_packages.uninstall_package_op("alpha") is True
         assert not (packages_dir / "alpha").exists()

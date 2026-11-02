@@ -52,6 +52,7 @@ import { useI18n } from "@/utils/i18n"
 const props = defineProps({
   groups: { type: Array, required: true },
   modelValue: { type: String, default: "" },
+  revealRequest: { type: Number, default: 0 },
 })
 const emit = defineEmits(["update:modelValue"])
 
@@ -83,13 +84,14 @@ function pick(id) {
 }
 
 watch(
-  () => props.modelValue,
+  () => [props.modelValue, props.revealRequest],
   () => {
     showList.value = false
   },
 )
 
 onMounted(() => {
-  showList.value = isCompact.value && !consumeDirectOpen()
+  const direct = consumeDirectOpen()
+  showList.value = isCompact.value && !direct && !props.revealRequest
 })
 </script>

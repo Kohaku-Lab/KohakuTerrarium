@@ -34,6 +34,8 @@ end — mirroring the REST+WS call sequences the Vue frontend
   prove the lab-only ``/api/nodes`` surface 404s in standalone mode.
 """
 
+import asyncio
+import base64
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -44,6 +46,7 @@ from fastapi.testclient import TestClient
 
 import kohakuterrarium.api.routes.persistence.preflight_metadata as _preflight_metadata
 import kohakuterrarium.api.routes.persistence.resume.cluster as _resume_cluster
+from kohakuterrarium import tool
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import get_service_legacy, set_service
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
@@ -66,6 +69,7 @@ from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.llm_seam import real_llm_providers
 from tests.helpers.kt_biome import find_kt_biome_source
+from tests.helpers.pet_archive import pet_archive
 from tests.helpers.resume_metadata_contention import resume_with_metadata_contention
 
 pytestmark = pytest.mark.timeout(60)
@@ -1562,6 +1566,69 @@ class TestApiIntegration:
         resp = client.delete(f"/api/sessions/active/{session_id}")
         assert resp.status_code == 404
 
+        pet_source = Path(__file__).parents[2] / "examples/packages/virtual_pet"
+        _catalog_packages_ops.install_package_op(str(pet_source), editable=True)
+        ref = {"owner": "package:virtual-pet"}
+        assert (
+            client.post("/api/extensions/owner/state", json=ref).json()["state"]["pets"]
+            == []
+        )
+        with (
+            client.websocket_connect("/ws/extensions/owner") as settings_ws,
+            client.websocket_connect("/ws/extensions/owner") as overlay_ws,
+        ):
+            for socket in (settings_ws, overlay_ws):
+                socket.send_json({"op": "subscribe", "id": "pets", **ref})
+                assert socket.receive_json()["type"] == "subscribed"
+            imported = client.post(
+                "/api/extensions/owner/call",
+                json={
+                    **ref,
+                    "action": "import",
+                    "args": {"archive": base64.b64encode(pet_archive()).decode()},
+                },
+            )
+            assert imported.status_code == 200
+            key = imported.json()["result"]["selected"]
+            actions = {"running-right": 8, "running-left": 8, "waving": 4, "jumping": 5}
+            assert imported.json()["result"]["pets"][0]["interactions"] == actions
+            for socket in (settings_ws, overlay_ws):
+                published = socket.receive_json()["data"]
+                assert published["selected"] == key
+                assert published["pets"][0]["interactions"] == actions
+            duplicate = client.post(
+                "/api/extensions/owner/call",
+                json={
+                    **ref,
+                    "action": "import",
+                    "args": {"archive": base64.b64encode(pet_archive()).decode()},
+                },
+            )
+            assert duplicate.json()["result"] == imported.json()["result"]
+            sprite = client.post(
+                "/api/extensions/owner/call",
+                json={**ref, "action": "sprite", "args": {"key": key}},
+            )
+            assert sprite.status_code == 200 and sprite.json()["result"].startswith(
+                "data:image/png;base64,"
+            )
+            assert (
+                client.post(
+                    "/api/extensions/owner/call",
+                    json={**ref, "action": "remove", "args": {"key": key}},
+                ).status_code
+                == 200
+            )
+            for socket in (settings_ws, overlay_ws):
+                assert socket.receive_json()["data"]["pets"] == []
+        assert (
+            client.post("/api/extensions/owner/state", json=ref).json()["state"][
+                "selected"
+            ]
+            is None
+        )
+        assert _catalog_packages_ops.uninstall_package_op("virtual-pet") is True
+
     def test_session_persistence_and_resume_workflow(
         self,
         client: TestClient,
@@ -2394,6 +2461,62 @@ terrarium:
         resp = client.get("/api/sessions/active/agents")
         assert resp.status_code == 200
         assert resp.json() == []
+
+        async def start_owned_jobs():
+            gates = {name: asyncio.Event() for name in ("alice", "bob")}
+
+            @tool
+            async def ownership_gate(owner: str) -> str:
+                """Wait until the owning creature's job is released."""
+                await gates[owner].wait()
+                return owner
+
+            engine = get_service_legacy().engine
+            tasks = {}
+            jobs = {}
+            for name, creature_id in (("alice", alice_id), ("bob", bob_id)):
+                agent = engine.get_creature(creature_id).agent
+                agent.add_tool(ownership_gate)
+                jobs[name] = await agent.executor.submit(
+                    "ownership_gate", {"owner": name}, is_direct=True
+                )
+                tasks[name] = agent.executor._tasks[jobs[name]]
+            return gates, tasks, jobs
+
+        gates, tasks, jobs = client.portal.call(start_owned_jobs)
+
+        async def release_owned_job(name):
+            gates[name].set()
+            await tasks[name]
+
+        try:
+            for order in (("alice", "bob"), ("bob", "alice")):
+                for target in order:
+                    response = client.get(
+                        f"/api/sessions/{session_id}/creatures/{target}/history"
+                    )
+                    assert response.status_code == 200, response.text
+                    assert response.json()["live_job_ids"] == [jobs[target]]
+                saved = client.get(f"/api/sessions/{session_id}/history/alice")
+                assert saved.status_code == 200, saved.text
+                assert set(saved.json()["live_job_ids"]) == set(jobs.values())
+            client.portal.call(release_owned_job, "bob")
+            for target in ("bob", "alice"):
+                response = client.get(
+                    f"/api/sessions/{session_id}/creatures/{target}/history"
+                )
+                assert response.json()["live_job_ids"] == (
+                    [jobs["alice"]] if target == "alice" else []
+                )
+            client.portal.call(release_owned_job, "alice")
+            for target in ("alice", "bob"):
+                response = client.get(
+                    f"/api/sessions/{session_id}/creatures/{target}/history"
+                )
+                assert response.json()["live_job_ids"] == []
+        finally:
+            for name in ("alice", "bob"):
+                client.portal.call(release_owned_job, name)
 
         # Declare a shared channel and send a message to it.
         resp = client.post(
