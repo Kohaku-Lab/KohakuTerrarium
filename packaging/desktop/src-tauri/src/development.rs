@@ -171,9 +171,10 @@ pub const READY_SCRIPT: &str = r#"(() => {
   if (window.top !== window) return;
   const generation = Number(new URL(location.href).searchParams.get('kt_dev_generation'));
   if (!generation) return;
+  const authenticationProbe = '/api/settings/ui-prefs';
   window.addEventListener('DOMContentLoaded', async () => {
     try {
-      const response = await fetch('/api/settings/ui-prefs', {credentials:'same-origin', cache:'no-store'});
+      const response = await fetch(authenticationProbe, {credentials:'same-origin', cache:'no-store'});
       if (!response.ok) throw new Error('Desktop authentication failed: ' + response.status);
       await window.__TAURI_INTERNALS__.invoke('source_page_ready', {generation});
       const url = new URL(location.href); url.searchParams.delete('kt_dev_generation');

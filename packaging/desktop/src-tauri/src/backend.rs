@@ -204,6 +204,10 @@ impl Backend {
         self.ipc_confirmed.store(true, Ordering::SeqCst);
     }
 
+    pub fn reset_ipc(&self) {
+        self.ipc_confirmed.store(false, Ordering::SeqCst);
+    }
+
     pub fn ipc_confirmed(&self) -> bool {
         self.ipc_confirmed.load(Ordering::SeqCst)
     }
@@ -272,6 +276,10 @@ impl Layout {
 
 pub fn launch_url(port: u16, token: &str) -> String {
     format!("http://127.0.0.1:{port}/?{QUERY_PARAM}={token}")
+}
+
+pub fn bootstrap_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/healthz")
 }
 
 pub fn new_token() -> String {
@@ -551,7 +559,11 @@ fn launch(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("the main window is gone")?;
-    let url = crate::development::entry(port, &token, backend.next_source_generation())?;
+    let url = if crate::development::active() {
+        crate::development::entry(port, &token, backend.next_source_generation())?
+    } else {
+        tauri::Url::parse(&bootstrap_url(port)).map_err(|error| error.to_string())?
+    };
     window.navigate(url).map_err(|error| error.to_string())?;
     match smoke::output_path() {
         Some(out) => smoke::finish_when_loaded(app.clone(), port, out),

@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from kohakuterrarium.api.routes._local import is_source_development
 from kohakuterrarium.launcher import settings as _launcher_settings
 from kohakuterrarium.launcher.feeds import (
     FeedError,
@@ -44,7 +45,7 @@ ws_router = APIRouter()
 
 def _wrapper_mode_only(request: Request) -> None:
     """Reject the call when the host isn't a wrapper / standalone install."""
-    if getattr(request.app.state, "desktop_source", False):
+    if is_source_development(request):
         raise HTTPException(409, "runtime maintenance is unavailable in source mode")
     lab_mode = getattr(request.app.state, "lab_mode", "standalone")
     if lab_mode == "lab-client":
@@ -262,7 +263,7 @@ async def _stream_update(ws: WebSocket) -> None:
 async def ws_update(ws: WebSocket) -> None:
     """Stream an eligible launcher update or close with a mode-specific refusal."""
     lab_mode = getattr(ws.app.state, "lab_mode", "standalone")
-    if lab_mode == "lab-client" or getattr(ws.app.state, "desktop_source", False):
+    if lab_mode == "lab-client" or is_source_development(ws):
         await ws.close(code=4404)
         return
     if not is_launcher_install():

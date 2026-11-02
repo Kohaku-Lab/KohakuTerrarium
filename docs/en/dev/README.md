@@ -52,3 +52,5 @@ imports, logging instead of `print`).
 Every subpackage under `src/kohakuterrarium/` has its own `README.md`
 covering the files it contains. Those are the most accurate description
 of "what actually lives here." Use them together with this section.
+
+- [Tauri source development](../../../packaging/desktop/DEVELOPMENT.md)

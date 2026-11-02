@@ -12,6 +12,7 @@ tags:
 
 ## 章節
 
+- [Tauri 原始碼開發模式](../../../packaging/desktop/DEVELOPMENT.md)：以本機 Python 與 Vite 驗證桌面修改。
 - [內部結構](internals.md)：執行期的整體組裝：事件佇列、控制器迴圈、executor、子代理管理、外掛包裝。
 - [相依圖](dependency-graph.md)：模組 import 方向的不變式與強制它們的測試。
 - [前端](frontend.md)：Vue 3 dashboard 的版面、狀態 store、WebSocket 連接，以及如何貢獻 UI 變更。

@@ -71,6 +71,35 @@ afterEach(() => {
 })
 
 describe("DesktopAppSettings", () => {
+  it("waits for capabilities before showing runtime maintenance", async () => {
+    shimsApi.status.mockResolvedValue(status())
+    let resolveCapabilities
+    const capabilities = new Promise((resolve) => {
+      resolveCapabilities = resolve
+    })
+    window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (name) => {
+        if (name === "get_desktop_capabilities") return capabilities
+        if (name === "get_backend_status") return { state: "running", restarts: 0 }
+        return false
+      }),
+    }
+    const wrapper = mountSettings()
+    try {
+      await flushPromises()
+      expect(wrapper.find("[data-setting='runtime']").exists()).toBe(false)
+      expect(runtimeApi.getRuntime).not.toHaveBeenCalled()
+      resolveCapabilities({ surface: "desktop", protocol: 1, sourceDevelopment: false })
+      await flushPromises()
+      expect(wrapper.find("[data-setting='runtime']").exists()).toBe(true)
+      expect(runtimeApi.getRuntime).toHaveBeenCalledOnce()
+    } finally {
+      resolveCapabilities(null)
+      wrapper.unmount()
+      delete window.__TAURI_INTERNALS__
+    }
+  })
+
   it("keeps backend restart but hides maintenance in source development", async () => {
     shimsApi.status.mockResolvedValue(status())
     window.__TAURI_INTERNALS__ = {

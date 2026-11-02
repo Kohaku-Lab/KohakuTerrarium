@@ -5,17 +5,16 @@ building a release archive or installer for each change.
 
 ## Prepare once
 
-Install Python 3.12+, Node.js/npm, Rust through rustup, and the platform's
+Use Python 3.12+ for development (the package declares Python >=3.10; the
+CI matrix tests 3.12+). Install uv, Node.js/npm, Rust through rustup, and the platform's
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). Windows needs
 C++ build tools and WebView2; macOS needs Xcode command-line tools.
 
 From the repository root:
 
 ```sh
-python -m venv .venv
-# Windows
-.venv/Scripts/python -m pip install -e ".[dev]"
-# macOS: .venv/bin/python -m pip install -e ".[dev]"
+uv venv --python 3.12 .venv
+uv pip install -e ".[dev]"
 npm ci --prefix src/kohakuterrarium-frontend
 ```
 
@@ -31,7 +30,8 @@ python scripts/dev_desktop.py
 ```
 
 The runner finds the repository independently of the working directory, defaults
-to its `.venv`, and verifies that Python imports this checkout.
+to its `.venv`, and verifies that Python imports this checkout. Relative
+`--python` and `--data-dir` paths are resolved from the current working directory.
 
 | Edit | Verify in the desktop window |
 | --- | --- |
@@ -81,7 +81,15 @@ lifetime to cover CLI failure paths that would otherwise leave services behind.
 Vite forwards `/api`, `/ws/` and the dedicated launch handshake to Python without
 rewriting Host/Origin. The existing one-time token and HttpOnly cookie gate remains
 enabled. On restart, session windows wait for the main page's authenticated API
-confirmation for the current generation.
+confirmation for the current generation. The protected `/api/settings/ui-prefs`
+request verifies that the WebView sends a valid session cookie; a completed
+redirect or a successful `/healthz` request does not establish authentication.
+
+The bundled shell first loads the backend's `/healthz` document, then starts the
+token exchange from that exact origin. This keeps macOS WebView navigation from
+dropping the Strict cookie on a cross-site redirect from the embedded loading
+page. The bootstrap document is not counted as application readiness. Source mode
+already starts on the Vite origin and keeps its existing handshake.
 
 ```sh
 pytest tests/unit/packaging/test_dev_desktop.py tests/unit/serving/desktop/test_server.py
@@ -94,4 +102,6 @@ cargo test --locked
 
 The existing `KT_DESKTOP_SMOKE_OUT` harness supports source mode, including
 `KT_DESKTOP_SMOKE_BACKEND`, `KT_DESKTOP_SMOKE_POPOUT` and
-`KT_DESKTOP_SMOKE_OVERLAY`. Installer/update/repair probes require a packaged app.
+`KT_DESKTOP_SMOKE_OVERLAY`. The main-window smoke acknowledgement requires a mounted Vue application and a
+successful authenticated request from the WebView. Installer/update/repair probes
+require a packaged app.

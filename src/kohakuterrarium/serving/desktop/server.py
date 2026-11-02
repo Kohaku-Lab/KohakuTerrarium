@@ -130,11 +130,7 @@ def run_server_child(
 ) -> int:
     """Start a desktop server child and publish its ready or error state."""
     try:
-        server, actual_port = (
-            start_desktop_server(port, log_level, source=True)
-            if source
-            else start_desktop_server(port, log_level)
-        )
+        server, actual_port = start_desktop_server(port, log_level, source=source)
         _publish_state(state_path, status="ready", port=actual_port)
         if not source:
             _refresh_shims()

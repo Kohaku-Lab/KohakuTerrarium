@@ -64,7 +64,7 @@
           <KButton size="sm" data-backend-logs @click="openLogs">{{ t("settings.desktop.backendLogs") }}</KButton>
           <KButton size="sm" data-backend-restart :disabled="backend.status.value.state === 'restarting'" @click="backend.restart">{{ t("settings.desktop.backendRestart") }}</KButton>
         </SettingsRow>
-        <SettingsRow v-if="!sourceDevelopment" data-setting="runtime" :title="t('settings.desktop.runtimeTitle')">
+        <SettingsRow v-if="sourceDevelopment === false" data-setting="runtime" :title="t('settings.desktop.runtimeTitle')">
           <template #detail>
             <div class="mt-0.5 text-[12px] text-warm-500" data-runtime-summary>{{ runtimeSummary }}</div>
             <div v-if="runtime?.bundled_newer" class="mt-1 text-[12px] text-amber-shadow dark:text-amber-light" data-runtime-newer>{{ t("settings.desktop.runtimeNewer", { version: runtime.bundled }) }}</div>
@@ -131,11 +131,11 @@ const error = ref("")
 const justChanged = ref(false)
 const autostart = ref(false)
 const hostReady = ref(hasDesktopHost())
-const sourceDevelopment = ref(false)
+const sourceDevelopment = ref(hasDesktopHost() ? null : false)
 
 const terminalEnabled = computed(() => shims.value.commands.length > 0 && shims.value.installed.length === shims.value.commands.length)
-const showTerminal = computed(() => !sourceDevelopment.value && available.value && shims.value.supported && shims.value.local)
-const showAutostart = computed(() => !sourceDevelopment.value && hostReady.value && hostSupports("get_autostart"))
+const showTerminal = computed(() => sourceDevelopment.value === false && available.value && shims.value.supported && shims.value.local)
+const showAutostart = computed(() => sourceDevelopment.value === false && hostReady.value && hostSupports("get_autostart"))
 const shell = useShellSettings()
 const backend = useBackendStatus()
 const runtime = ref(null)
@@ -192,7 +192,7 @@ async function setExplorer(enabled) {
   if (await setExplorerVerbs(enabled)) explorerVerbs.value = enabled
 }
 const secrets = ref({ local: false, mode: "file", available: false, backend: "" })
-const showKeychain = computed(() => !sourceDevelopment.value && secrets.value.local && secrets.value.available)
+const showKeychain = computed(() => sourceDevelopment.value === false && secrets.value.local && secrets.value.available)
 const keychainBusy = ref(false)
 const keychainError = ref("")
 const closeToTray = ref(false)
@@ -200,7 +200,7 @@ const showSummon = computed(() => hostReady.value && hostSupports("get_summon_sh
 const summonShortcut = ref(null)
 const summonRecording = ref(false)
 const summonError = ref(false)
-const showUpdate = computed(() => !sourceDevelopment.value && hostReady.value && hostSupports("check_shell_update"))
+const showUpdate = computed(() => sourceDevelopment.value === false && hostReady.value && hostSupports("check_shell_update"))
 const updateStatus = ref("idle")
 const updateVersion = ref("")
 const updateBusy = ref(false)
@@ -269,7 +269,7 @@ async function loadAutostart() {
   summonShortcut.value = await getSummonShortcut()
   const capabilities = await desktopCapabilities()
   sourceDevelopment.value = capabilities?.sourceDevelopment === true
-  if (!sourceDevelopment.value && hasDesktopHost()) void loadRuntime()
+  if (sourceDevelopment.value === false && hasDesktopHost()) void loadRuntime()
   explorerVerbs.value = capabilities?.explorerVerbs === true ? await getExplorerVerbs() : null
   notifyActionsSupported.value = capabilities?.notificationActions === true
 }

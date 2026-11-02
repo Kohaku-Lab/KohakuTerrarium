@@ -42,6 +42,14 @@ pub fn starts_hidden(arguments: &[String], wanted: bool) -> bool {
     wanted && arguments.iter().any(|argument| argument == BACKGROUND_FLAG)
 }
 
+fn bootstrap_script(url: &tauri::Url, port: u16, token: &str) -> Option<String> {
+    if url.as_str() != crate::backend::bootstrap_url(port) {
+        return None;
+    }
+    let destination = serde_json::to_string(&crate::backend::launch_url(port, token)).ok()?;
+    Some(format!("location.replace({destination})"))
+}
+
 pub fn create(app: &App) -> tauri::Result<()> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let hidden = starts_hidden(
@@ -104,6 +112,12 @@ pub fn create(app: &App) -> tauri::Result<()> {
                 }
                 return;
             }
+            if let (Some(port), Some(token)) = (backend.port(), backend.token()) {
+                if let Some(script) = bootstrap_script(payload.url(), port, &token) {
+                    let _ = _window.eval(script);
+                    return;
+                }
+            }
             if payload.url().host_str() == Some("127.0.0.1") {
                 backend.mark_page_loaded();
                 if smoke::output_path().is_none() && backend.claim_popout_restore() {
@@ -133,6 +147,27 @@ mod tests {
 
     fn arguments(list: &[&str]) -> Vec<String> {
         list.iter().map(|text| text.to_string()).collect()
+    }
+
+    #[test]
+    fn launch_token_is_only_passed_to_the_exact_backend_bootstrap_document() {
+        let url = tauri::Url::parse(&crate::backend::bootstrap_url(8002)).unwrap();
+        assert_eq!(
+            bootstrap_script(&url, 8002, "secret"),
+            Some("location.replace(\"http://127.0.0.1:8002/?kt_launch=secret\")".into())
+        );
+        for wrong in [
+            "http://127.0.0.1:8001/healthz",
+            "http://localhost:8002/healthz",
+            "http://foreign.test:8002/healthz",
+            "https://127.0.0.1:8002/healthz",
+            "http://127.0.0.1:8002/healthz?next=evil",
+            "http://127.0.0.1:8002/healthz#fragment",
+            "http://user@127.0.0.1:8002/healthz",
+            "http://127.0.0.1:8002/",
+        ] {
+            assert!(bootstrap_script(&tauri::Url::parse(wrong).unwrap(), 8002, "secret").is_none());
+        }
     }
 
     #[test]

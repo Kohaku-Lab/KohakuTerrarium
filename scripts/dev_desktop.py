@@ -68,6 +68,8 @@ def check_ports(frontend: int, backend: int) -> None:
         with socket.socket() as listener:
             if os.name == "nt":
                 listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 listener.bind(("127.0.0.1", port))
             except OSError as exc:

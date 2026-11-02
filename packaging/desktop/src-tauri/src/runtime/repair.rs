@@ -58,14 +58,17 @@ pub fn run(app: &AppHandle) -> Result<(), String> {
 
 /// Reinstall the shipped release and start the backend again; `false` when a restart is under way.
 #[tauri::command]
-pub fn repair_runtime(app: AppHandle) -> bool {
+pub fn repair_runtime(app: AppHandle) -> Result<bool, String> {
+    if crate::development::active() {
+        return Err("runtime repair is unavailable in source mode".into());
+    }
     if app.state::<Backend>().is_relaunching() {
-        return false;
+        return Ok(false);
     }
     thread::spawn(move || {
         let _ = backend::repair(&app);
     });
-    true
+    Ok(true)
 }
 
 #[cfg(test)]

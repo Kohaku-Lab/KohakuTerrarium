@@ -58,11 +58,7 @@ export function desktopOptions(raw) {
               const shell = fileURLToPath(
                 new URL("../../../packaging/desktop/shell/index.html", import.meta.url),
               )
-              const html = readFileSync(shell, "utf8").replace(
-                'actions.appendChild(actionButton("Repair runtime", "repair_runtime"))',
-                "",
-              )
-              res.end(html)
+              res.end(readFileSync(shell, "utf8"))
               return
             }
             if (
