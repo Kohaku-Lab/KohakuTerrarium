@@ -6,6 +6,7 @@ use tauri::AppHandle;
 use crate::commands::{string_arg, Args};
 
 /// Page event carrying `detail.token` and `detail.id` (the pressed button, `null` for the body).
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const ACTION_EVENT: &str = "kt:desktop-notification-action";
 const MAX_ACTIONS: usize = 3;
 const MAX_LABEL: usize = 40;
@@ -46,6 +47,7 @@ pub fn actions_of(spec: &Value) -> Vec<Action> {
 }
 
 /// Script that tells the page which button of the notification `token` was pressed.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn choice_script(token: &str, id: Option<&str>) -> String {
     let json = |text: &str| serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
     let id = id.map_or_else(|| "null".to_string(), json);
