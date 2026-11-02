@@ -101,7 +101,7 @@ pub fn create(app: &App) -> tauri::Result<()> {
             false
         })
         .visible(smoke::output_path().is_none() && !hidden)
-        .on_page_load(move |_window, payload| {
+        .on_page_load(move |window, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished) {
                 return;
             }
@@ -114,7 +114,7 @@ pub fn create(app: &App) -> tauri::Result<()> {
             }
             if let (Some(port), Some(token)) = (backend.port(), backend.token()) {
                 if let Some(script) = bootstrap_script(payload.url(), port, &token) {
-                    let _ = _window.eval(script);
+                    let _ = window.eval(script);
                     return;
                 }
             }

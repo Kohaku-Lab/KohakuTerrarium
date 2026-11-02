@@ -22,7 +22,7 @@ const PAGE_TIMEOUT: Duration = Duration::from_secs(120);
 const IPC_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Confirms a mounted application and authenticated request inside the WebView.
-const ACK_SCRIPT: &str = include_str!("../../shell/smoke-ack.js");
+const ACK_SCRIPT: &str = include_str!("smoke-ack.js");
 
 pub fn output_path() -> Option<PathBuf> {
     std::env::var_os("KT_DESKTOP_SMOKE_OUT").map(PathBuf::from)

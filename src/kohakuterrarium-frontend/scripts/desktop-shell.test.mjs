@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom"
 
 const shell = new URL("../../../packaging/desktop/shell/", import.meta.url)
 const html = await readFile(new URL("index.html", shell), "utf8")
-const ack = await readFile(new URL("smoke-ack.js", shell), "utf8")
+const ack = await readFile(new URL("../src-tauri/src/smoke-ack.js", shell), "utf8")
 
 for (const runtimeRepair of [true, false]) {
   test(`startup repair respects runtimeRepair=${runtimeRepair}`, async () => {

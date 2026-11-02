@@ -120,7 +120,7 @@ pub fn origin(port: u16) -> String {
 
 pub fn entry(port: u16, token: &str, generation: u64) -> Result<Url, String> {
     if !active() {
-        return Url::parse(&crate::backend::launch_url(port, token)).map_err(|e| e.to_string());
+        return Url::parse(&crate::backend::bootstrap_url(port)).map_err(|e| e.to_string());
     }
     let mut url = Url::parse(&origin(port)).map_err(|e| e.to_string())?;
     url.set_path("/__kt_desktop_launch");
@@ -210,6 +210,16 @@ pub fn source_page_ready(window: WebviewWindow, generation: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packaged_entry_bootstraps_initial_and_restarted_windows() {
+        assert!(!active());
+        for (port, generation) in [(8001, 1), (8001, 2), (8002, 3)] {
+            let url = entry(port, "launch-secret", generation).unwrap();
+            assert_eq!(url.as_str(), format!("http://127.0.0.1:{port}/healthz"));
+            assert!(url.query().is_none());
+        }
+    }
 
     fn configuration() -> Config {
         Config {

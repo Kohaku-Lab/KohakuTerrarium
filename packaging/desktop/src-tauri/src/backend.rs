@@ -559,11 +559,7 @@ fn launch(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or("the main window is gone")?;
-    let url = if crate::development::active() {
-        crate::development::entry(port, &token, backend.next_source_generation())?
-    } else {
-        tauri::Url::parse(&bootstrap_url(port)).map_err(|error| error.to_string())?
-    };
+    let url = crate::development::entry(port, &token, backend.next_source_generation())?;
     window.navigate(url).map_err(|error| error.to_string())?;
     match smoke::output_path() {
         Some(out) => smoke::finish_when_loaded(app.clone(), port, out),
