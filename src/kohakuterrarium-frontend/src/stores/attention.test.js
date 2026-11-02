@@ -14,6 +14,7 @@ import {
   restoreAttentionFromHistory,
   subscribeAttentionEdges,
   totalAttention,
+  workForScope,
 } from "./attention"
 
 describe("chat attention", () => {
@@ -198,7 +199,11 @@ describe("chat attention", () => {
 
     expect(state.completed).toBe(0)
     expect(state.processing).toBe(false)
+    expect(state.background).toBe(true)
     expect(edges).toEqual([])
+    for (const type of ["processing_error", "turn_error", "interrupt", "stopped"]) {
+      expect(reduceAttention(state, { type }).background).toBe(false)
+    }
   })
 
   it("counts the genuine completion after the background wait ends", () => {
@@ -353,16 +358,110 @@ describe("chat attention", () => {
     expect(attentionForScope("graph-a")).toEqual({ pending: 1, completed: 2 })
     expect(totalAttention()).toEqual({ pending: 1, completed: 3 })
 
+    let root = createAttentionState()
+    let worker = createAttentionState()
+    const drive = (tab, state, event) => {
+      const next = reduceAttention(state, event)
+      publishAttention("graph-a", tab, next, event)
+      return next
+    }
+    root = drive("root", root, { type: "processing_start" })
+    expect(workForScope("graph-a")).toMatchObject({ status: "waiting", busy: true, started: 1 })
+    root = drive("root", root, { type: "processing_start" })
+    worker = drive("worker", worker, { type: "processing_start" })
+    expect(workForScope("graph-a").started).toBe(1)
+    root = drive("root", root, { type: "processing_end" })
+    expect(workForScope("graph-a").busy).toBe(true)
+    publishAttention("graph-a", "reviewer", createAttentionState())
+    worker = drive("worker", worker, { type: "processing_error" })
+    expect(workForScope("graph-a")).toMatchObject({ status: "failed", busy: false })
+    publishAttention("graph-a", "reviewer", createAttentionState())
+    worker = drive("worker", worker, { type: "processing_start", replay: true })
+    expect(workForScope("graph-a").started).toBe(1)
+    publishAttention("graph-a", "worker", { ...createAttentionState(), processing: true })
+    expect(workForScope("graph-a").started).toBe(1)
+    worker = drive("worker", worker, { type: "idle" })
+    worker = drive("worker", worker, { type: "processing_start" })
+    expect(workForScope("graph-a").started).toBe(2)
+    expect(workForScope("graph-a").status).toBe("running")
+    worker = drive("worker", worker, { type: "processing_end", awaiting_background: true })
+    expect(workForScope("graph-a")).toMatchObject({ status: "running", busy: true })
+    worker = drive("worker", worker, { type: "processing_start" })
+    expect(workForScope("graph-a").started).toBe(2)
+    worker = drive("worker", worker, { type: "processing_end" })
+    expect(workForScope("graph-a").busy).toBe(false)
+    worker = drive("worker", worker, { type: "turn_error" })
+    root = drive("root", root, { type: "processing_start" })
+    expect(workForScope("graph-a").status).toBe("running")
+    root = drive("root", root, { type: "processing_end" })
+    expect(workForScope("graph-a").status).toBe("ready")
     removeAttentionScope("graph-a")
+    expect(workForScope("graph-a")).toEqual({ status: "idle", busy: false, started: 0 })
     expect(totalAttention()).toEqual({ pending: 0, completed: 1 })
+  })
+
+  it("rebaselines settled outcomes on restored work without replaying live starts", () => {
+    let root = createAttentionState()
+    let worker = createAttentionState()
+    const drive = (tab, state, event) => {
+      const next = reduceAttention(state, event)
+      publishAttention("g", tab, next, event)
+      return next
+    }
+    root = drive("root", root, { type: "processing_start" })
+    root = drive("root", root, { type: "processing_error" })
+    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 1 })
+    publishAttention("g", "root", root)
+    expect(workForScope("g").status).toBe("failed")
+    root = { ...root, processing: true }
+    publishAttention("g", "root", root)
+    publishAttention("g", "root", root)
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 1 })
+    root = drive("root", root, { type: "processing_end" })
+    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 1 })
+
+    root = drive("root", root, { type: "processing_start" })
+    worker = drive("worker", worker, { type: "processing_start" })
+    worker = drive("worker", worker, { type: "processing_error" })
+    publishAttention("g", "root", root)
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 2 })
+    root = drive("root", root, { type: "processing_end" })
+    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 2 })
+
+    worker = { ...worker, background: true }
+    publishAttention("g", "worker", worker)
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 2 })
+    publishAttention("g", "worker", { ...worker, background: false }, { type: "tool_done" })
+    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 2 })
+  })
+
+  it("retains a failed period through its background yield and settlement", () => {
+    let state = createAttentionState()
+    const drive = (event) => {
+      state = reduceAttention(state, event)
+      publishAttention("g", "root", state, event)
+    }
+    drive({ type: "processing_start" })
+    drive({ type: "processing_error" })
+    drive({ type: "processing_end", awaiting_background: true })
+    drive({ type: "idle" })
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 1 })
+    state = { ...state, background: false }
+    drive({ type: "tool_done" })
+    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 1 })
+    expect(state.completed).toBe(0)
+    drive({ type: "processing_start" })
+    drive({ type: "processing_end" })
+    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 2 })
   })
 
   it("counts a failed turn once, stops it running, and clears the count when read", () => {
     let state = createAttentionState()
     state = reduceAttention(state, { type: "processing_start" })
     expect(state.processing).toBe(true)
+    state = reduceAttention(state, { type: "processing_end", awaiting_background: true })
     state = reduceAttention(state, { type: "activity", activity_type: "processing_error" })
-    expect(state).toMatchObject({ processing: false, errors: 1, completed: 0 })
+    expect(state).toMatchObject({ processing: false, background: false, errors: 1, completed: 0 })
     state = reduceAttention(state, { type: "processing_error" })
     expect(state.errors).toBe(2)
 

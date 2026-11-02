@@ -32,6 +32,7 @@ import {
 } from "@/stores/chatCommandResults"
 import { useClusterStore } from "@/stores/cluster"
 import { useInstancesStore } from "@/stores/instances"
+import { useHostsStore } from "@/stores/hosts"
 import { useLocaleStore } from "@/stores/locale"
 import { useMessagesStore } from "@/stores/messages"
 import { useNotificationsStore } from "@/stores/notifications"
@@ -876,6 +877,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
   // Track job lifecycle: started jobs and completed jobs
   const startedJobs = {} // jobId -> tool part reference
   const completedJobs = new Set() // jobIds that received done/error
+  const pendingJobs = {}
   const interactiveMessages = new Map()
   const widgetMessages = new Map()
 
@@ -1086,7 +1088,9 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       tc = findToolByJobId(jobId)
     }
     if (!tc && cur) {
-      tc = [...cur.parts].reverse().find((p) => p.type === "tool" && p.name === name)
+      tc = [...cur.parts]
+        .reverse()
+        .find((p) => p.type === "tool" && p.name === name && (!jobId || !p.jobId))
     }
     if (!tc) {
       // Search all messages as final fallback (name match, or partial match for sub-agents)
@@ -1098,6 +1102,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           .find(
             (p) =>
               p.type === "tool" &&
+              (!jobId || !p.jobId) &&
               (p.name === name || p.name.startsWith(name) || name.startsWith(p.name)) &&
               !p.result,
           )
@@ -1172,6 +1177,17 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
 
   for (const evt of events) {
     const t = evt.type
+    const jobId = evt.job_id || evt.call_id || ""
+    if (jobId && (t === "tool_call" || t === "subagent_call")) {
+      pendingJobs[jobId] = {
+        name: evt.name || (t === "subagent_call" ? "subagent" : "tool"),
+        type: t === "subagent_call" ? "subagent" : "tool",
+        startedAt: _evtStartedTs(evt),
+      }
+    }
+    if (jobId && (t === "tool_result" || t === "subagent_result")) {
+      completedJobs.add(jobId)
+    }
     curEventKey = evt._history_key ?? (typeof evt.event_id === "number" ? `e${evt.event_id}` : null)
 
     // Skip events on a non-selected branch of their turn (siblings of
@@ -1760,17 +1776,12 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
 
   // Determine which jobs are still pending (started but no done/error).
   // Mark them as "running" so live WS events can update them.
-  const pendingJobs = {}
+  for (const jobId of completedJobs) delete pendingJobs[jobId]
+  for (const job of Object.values(pendingJobs)) job.startedAt ??= Date.now()
   for (const [jobId, toolPart] of Object.entries(startedJobs)) {
-    if (!completedJobs.has(jobId)) {
+    if (pendingJobs[jobId]) {
       toolPart.status = "running"
-      // Prefer the event-derived start; Date.now() only as last resort.
-      toolPart.startedAt = toolPart.startedAt || Date.now()
-      pendingJobs[jobId] = {
-        name: toolPart.name,
-        type: toolPart.kind === "subagent" ? "subagent" : "tool",
-        startedAt: toolPart.startedAt,
-      }
+      toolPart.startedAt = pendingJobs[jobId].startedAt
       if (toolPart.children) {
         for (const child of toolPart.children) {
           if (child.status === "done" && !child.result) {
@@ -2207,6 +2218,8 @@ const _chatStoreOptions = {
     _jobTimer: null,
     /** @type {string | null} */
     _instanceId: null,
+    /** Saved-host identity of the current live binding; null denotes same-origin. */
+    _instanceHostId: null,
     /** Canonical graph id for the active instance. For terrarium-typed
      *  instances this is the routing key for ``terrariumAPI`` and the
      *  ``/ws/sessions/{gid}/creatures/{target}/chat`` URL. For solo
@@ -2488,6 +2501,8 @@ const _chatStoreOptions = {
 
     initForInstance(instance, options = {}) {
       const { initialTab = null, autoReconnect = true } = options
+      const hostId = useHostsStore().activeHostId
+      const hostChanged = this._instanceHostId !== hostId
       // A solo creature that grew via group_add_node is reported by
       // the backend as ``terrarium`` after the second creature joins.
       // Without this type-change check the chat store stays in
@@ -2503,9 +2518,9 @@ const _chatStoreOptions = {
       // chatting with the original creature; defaulting to ``creatures[0]``
       // (sorted by creature_id) would yank focus to whichever creature
       // happens to sort first.
-      const willReInit = !this._ws || this._instanceId !== instance.id || typeChanged
-      const preservedActiveTab = willReInit ? this.activeTab : null
-      if (this._instanceId === instance.id && this._ws && !typeChanged) {
+      const willReInit = !this._ws || this._instanceId !== instance.id || typeChanged || hostChanged
+      const preservedActiveTab = willReInit && !hostChanged ? this.activeTab : null
+      if (this._instanceId === instance.id && this._ws && !typeChanged && !hostChanged) {
         // Already inited; just switch the active tab if a hint was
         // passed (used by the graph editor's "open chat" on inner
         // creatures so the right sub-tab pops up without a reload).
@@ -2524,6 +2539,7 @@ const _chatStoreOptions = {
       this._cleanup()
       const generation = ++this._instanceGeneration
       this._instanceId = instance.id
+      this._instanceHostId = hostId
       this._instanceGraphId = instance.graph_id || instance.id
       this._instanceType = instance.type
       this._autoReconnect = autoReconnect
@@ -3117,7 +3133,12 @@ const _chatStoreOptions = {
         this._reconnectDelay = Math.min(delay * 2, 10000)
         this._reconnectTimer = setTimeout(() => {
           this._reconnectTimer = null
-          if (generation !== this._instanceGeneration) return
+          if (generation !== this._instanceGeneration || ws !== this._ws) return
+          if (this._instanceHostId !== useHostsStore().activeHostId) {
+            this._ws = null
+            this.wsStatus = "closed"
+            return
+          }
           reconnect()
         }, delay)
       }
@@ -3180,9 +3201,13 @@ const _chatStoreOptions = {
      * Pure branch-switch rebuilds pass ``fetchedAt = null`` and never
      * remove.
      */
-    _reconcileRunningJobs(tab, pendingJobs, fetchedAt = null) {
-      const pendingIds = new Set(Object.keys(pendingJobs))
+    _reconcileRunningJobs(tab, pendingJobs, fetchedAt = null, liveJobIds = null) {
+      const liveIds = Array.isArray(liveJobIds) ? new Set(liveJobIds) : null
+      const pendingIds = new Set(
+        Object.keys(pendingJobs).filter((id) => !liveIds || liveIds.has(id)),
+      )
       for (const [jobId, job] of Object.entries(pendingJobs)) {
+        if (!pendingIds.has(jobId)) continue
         const existing = this.runningJobs[jobId]
         // Keep the earliest known start — a live entry pre-dates any
         // rebuild approximation and must not be pushed forward.
@@ -3201,15 +3226,25 @@ const _chatStoreOptions = {
           startedAt,
         }
       }
+      for (const jobId of liveIds || []) {
+        if (!this.runningJobs[jobId]) {
+          this.runningJobs[jobId] = {
+            name: jobId,
+            tab,
+            startedAt: fetchedAt ?? Date.now(),
+            promotable: false,
+          }
+        }
+      }
       if (fetchedAt != null) {
         for (const [jobId, job] of Object.entries(this.runningJobs)) {
           if (job.tab !== tab) continue
-          if (pendingIds.has(jobId)) continue
+          if ((liveIds || pendingIds).has(jobId)) continue
           if (job.startedAt == null || job.startedAt >= fetchedAt) continue
           delete this.runningJobs[jobId]
         }
       }
-      if (pendingIds.size > 0) this._ensureJobTimer()
+      if (pendingIds.size > 0 || liveIds?.size > 0) this._ensureJobTimer()
       this._checkJobTimer()
     },
 
@@ -3336,6 +3371,8 @@ const _chatStoreOptions = {
       if (source && this.toolArgsProgressByTab[source] && endsToolArgsProgress(data)) {
         delete this.toolArgsProgressByTab[source]
       }
+      const runningKey =
+        source && data.type === "activity" ? this._trackRunningJob(source, data) : null
       if (source) {
         if (
           [
@@ -3348,7 +3385,21 @@ const _chatStoreOptions = {
             "widget",
             "widget_close",
             "widget_ack",
-          ].includes(data.type)
+            "processing_start",
+            "processing_end",
+            "processing_error",
+            "idle",
+          ].includes(data.type) ||
+          (data.type === "activity" &&
+            [
+              "processing_error",
+              "tool_start",
+              "tool_done",
+              "tool_error",
+              "subagent_start",
+              "subagent_done",
+              "subagent_error",
+            ].includes(data.activity_type))
         ) {
           this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
         }
@@ -3373,8 +3424,19 @@ const _chatStoreOptions = {
             summary: _attentionEdgeSummary(data, this._attentionStreamTextByTab[source]),
           },
         )
+        if (!data.replay && !data.history) {
+          const hasJobs = Object.values(this.runningJobs).some((job) => job.tab === source)
+          if (hasJobs) state.background = true
+          else if (
+            data.type === "activity" &&
+            ["tool_done", "tool_error", "subagent_done", "subagent_error"].includes(
+              data.activity_type,
+            )
+          )
+            state.background = false
+        }
         this.attentionByTab[source] = state
-        publishAttention(scope, source, state)
+        publishAttention(scope, source, state, data)
       }
 
       if (data.type === "user_input") {
@@ -3423,7 +3485,7 @@ const _chatStoreOptions = {
         this._finishStream(source)
         this._scheduleBranchResync(source)
       } else if (data.type === "activity") {
-        this._handleActivity(source, data)
+        this._handleActivity(source, data, runningKey)
       } else if (data.type === "image") {
         this._handleAssistantImage(source, data)
       } else if (data.type === "channel_message") {
@@ -3828,7 +3890,52 @@ const _chatStoreOptions = {
       queue.splice(idx, 1)
     },
 
-    _handleActivity(source, data) {
+    _trackRunningJob(source, data) {
+      if (data.replay || data.history) return null
+      const at = data.activity_type
+      if (at === "tool_start" || at === "subagent_start") {
+        let key = data.job_id || data.id || "tc_" + Date.now()
+        if (!data.job_id && !data.id) {
+          while (this.runningJobs[key]) key += "_"
+        }
+        this.runningJobs[key] = {
+          name: data.name || "unknown",
+          type: at === "subagent_start" ? "subagent" : "tool",
+          startedAt: this.runningJobs[key]?.startedAt ?? Date.now(),
+          promotable: !data.background,
+          tab: source,
+        }
+        this._ensureJobTimer()
+        this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
+        return key
+      }
+      if (
+        ["tool_done", "tool_error", "subagent_done", "subagent_error", "task_promoted"].includes(at)
+      ) {
+        const key =
+          data.job_id ||
+          (this.runningJobs[data.id]?.tab === source ? data.id : null) ||
+          Object.entries(this.runningJobs)
+            .reverse()
+            .find(
+              ([, job]) =>
+                job.tab === source &&
+                job.name === (data.name || "unknown") &&
+                job.type === (at.startsWith("subagent_") ? "subagent" : "tool"),
+            )?.[0]
+        const job = this.runningJobs[key]
+        if (job?.tab === source) {
+          if (at === "task_promoted") job.promotable = false
+          else delete this.runningJobs[key]
+        }
+        this._checkJobTimer()
+        this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
+        return key || ""
+      }
+      return null
+    },
+
+    _handleActivity(source, data, runningKey = this._trackRunningJob(source, data)) {
       const at = data.activity_type
       const name = data.name || "unknown"
 
@@ -3967,7 +4074,6 @@ const _chatStoreOptions = {
         return
       }
 
-      // Ensure we have a tab for this source
       if (!this.messagesByTab[source]) return
       // Branch isolation — every remaining activity below mutates the
       // displayed message list. If this frame is for a branch the user
@@ -3983,7 +4089,9 @@ const _chatStoreOptions = {
       // snapshotted before this frame cannot clobber the fresher live
       // state when it resolves (e.g. a tool_done landing during the
       // fetch must not be reverted to "running" by the stale replay).
-      this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
+      if (runningKey === null) {
+        this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
+      }
 
       if (at === "wire_inbound") {
         // Output-wiring delivery from another creature. The fields
@@ -4147,7 +4255,7 @@ const _chatStoreOptions = {
           const tail = last.parts[last.parts.length - 1]
           if (tail.type === "text") tail._streaming = false
         }
-        const toolId = data.id || "tc_" + Date.now()
+        const toolId = data.id || runningKey || "tc_" + Date.now()
         const jobId = data.job_id || ""
         const startedPart = {
           type: "tool",
@@ -4166,17 +4274,6 @@ const _chatStoreOptions = {
         }
         last.parts.push(startedPart)
         this._indexToolPart(source, startedPart, msgs)
-        // Track all tasks as running jobs (direct tasks are promotable)
-        const runKey = jobId || toolId
-        const isBg = data.background || false
-        this.runningJobs[runKey] = {
-          name,
-          type: at === "subagent_start" ? "subagent" : "tool",
-          startedAt: Date.now(),
-          promotable: !isBg,
-          tab: source,
-        }
-        this._ensureJobTimer()
       } else if (at === "tool_done" || at === "subagent_done") {
         let tc = this._findToolPart(source, msgs, name, data.job_id)
         if (!tc) {
@@ -4212,8 +4309,6 @@ const _chatStoreOptions = {
         if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
         if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
         if (at === "subagent_done") this._recordSubagentUsage(source, data.job_id, data)
-        delete this.runningJobs[tc.jobId || tc.id]
-        this._checkJobTimer()
       } else if (at === "tool_error" || at === "subagent_error") {
         let tc = this._findToolPart(source, msgs, name, data.job_id)
         if (!tc) {
@@ -4249,8 +4344,6 @@ const _chatStoreOptions = {
         if (data.prompt_tokens != null) tc.prompt_tokens = data.prompt_tokens
         if (data.completion_tokens != null) tc.completion_tokens = data.completion_tokens
         if (at === "subagent_error") this._recordSubagentUsage(source, data.job_id, data)
-        delete this.runningJobs[tc.jobId || tc.id]
-        this._checkJobTimer()
       } else if (at === "subagent_token_update") {
         // Live token usage update from a running sub-agent
         const saName = data.subagent || ""
@@ -4299,12 +4392,6 @@ const _chatStoreOptions = {
               child.result = data.detail || ""
             }
           }
-        }
-      } else if (at === "task_promoted") {
-        // Task promoted to background — mark as no longer promotable
-        const promJobId = data.job_id || ""
-        if (promJobId && this.runningJobs[promJobId]) {
-          this.runningJobs[promJobId].promotable = false
         }
       }
     },
@@ -5362,7 +5449,10 @@ const _chatStoreOptions = {
      *     right value.
      */
     async _resyncHistory(tab = this.activeTab, options = {}) {
-      if (!this._instanceId || !tab) return false
+      const hostId = this._instanceHostId
+      const hostCurrent = () =>
+        hostId === this._instanceHostId && hostId === useHostsStore().activeHostId
+      if (!this._instanceId || !tab || !hostCurrent()) return false
       const branchOwned = () => !options.branchOwner || this._branchOpOwned(options.branchOwner)
       if (!branchOwned()) return false
       // Per-tab request sequence. Two resyncs for the same tab can be in
@@ -5378,6 +5468,7 @@ const _chatStoreOptions = {
       const mutationGeneration = this._historyMutationSeqByTab[tab] || 0
       const requestedInstanceId = this._instanceId
       const canApply = () =>
+        hostCurrent() &&
         branchOwned() &&
         requestId === this._historyRequestSeqByTab[tab] &&
         this._instanceId === requestedInstanceId &&
@@ -5386,7 +5477,7 @@ const _chatStoreOptions = {
       const preFetchMessages = options.initialLoad ? this.messagesByTab[tab] || [] : null
       try {
         const { terrariumAPI } = await import("@/utils/api")
-        if (!branchOwned()) return false
+        if (!branchOwned() || !hostCurrent()) return false
         // Capture BEFORE the fetch: a tab-owned job that starts while
         // this request is in flight is newer than the history it
         // returns, so job-reconciliation must not prune it.
@@ -5432,6 +5523,8 @@ const _chatStoreOptions = {
             )
           }
           if (data?.is_processing) this.processingByTab[tab] = true
+          if (typeof data?.is_processing === "boolean")
+            this._publishWorkSnapshot(tab, data.is_processing)
           if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
           return true
         }
@@ -5454,6 +5547,8 @@ const _chatStoreOptions = {
             ),
           )
           if (data?.is_processing) this.processingByTab[tab] = true
+          if (typeof data?.is_processing === "boolean")
+            this._publishWorkSnapshot(tab, data.is_processing)
           if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
           return true
         }
@@ -5528,6 +5623,8 @@ const _chatStoreOptions = {
         // Restore a running turn's flag (e.g. after a cap-drop forced
         // it off); the false edge stays WS-owned (idle frame).
         if (data.is_processing === true) this.processingByTab[tab] = true
+        if (typeof data.is_processing === "boolean")
+          this._publishWorkSnapshot(tab, data.is_processing)
         delete this._branchResyncPendingByTab[tab]
         return true
       } catch (e) {
@@ -5553,14 +5650,27 @@ const _chatStoreOptions = {
         : _replayEvents([], events, branchView, tab)
       const { messages, pendingJobs } = replay
       if (liveJobIds == null && _historyPageMap(this).has(tab)) {
+        const appliedMax = this._appliedMaxEventIdByTab[tab]
+        for (const event of events) {
+          const jobId = event.job_id || event.call_id
+          if (
+            (event.type === "tool_call" || event.type === "subagent_call") &&
+            typeof event.event_id === "number" &&
+            appliedMax != null &&
+            event.event_id <= appliedMax &&
+            !this.runningJobs[jobId]
+          )
+            delete pendingJobs[jobId]
+        }
         for (const message of messages) {
           for (const part of message.parts || []) {
             if (
               part.type === "tool" &&
               part.status === "running" &&
               part.jobId &&
-              this._findToolPart(tab, this.messagesByTab[tab] || [], part.name, part.jobId)
-                ?.status === "interrupted"
+              (!pendingJobs[part.jobId] ||
+                this._findToolPart(tab, this.messagesByTab[tab] || [], part.name, part.jobId)
+                  ?.status === "interrupted")
             ) {
               part.status = "interrupted"
               delete pendingJobs[part.jobId]
@@ -5600,7 +5710,7 @@ const _chatStoreOptions = {
       // ``fetchedAt`` (set only by _resyncHistory) unlocks removals of
       // tab-owned jobs the history no longer lists; branch-switch
       // rebuilds pass null and only add/merge.
-      this._reconcileRunningJobs(tab, pendingJobs, fetchedAt)
+      this._reconcileRunningJobs(tab, pendingJobs, fetchedAt, liveJobIds)
     },
 
     /**
@@ -5776,7 +5886,13 @@ const _chatStoreOptions = {
         if (!msg.parts) continue
         for (let j = msg.parts.length - 1; j >= 0; j--) {
           const p = msg.parts[j]
-          if (p.type === "tool" && p.name === name && p.status === "running") return p
+          if (
+            p.type === "tool" &&
+            p.name === name &&
+            p.status === "running" &&
+            (!jobId || !p.jobId)
+          )
+            return p
         }
       }
       return null
@@ -6261,6 +6377,7 @@ const _chatStoreOptions = {
       this._cleanup()
       this._instanceGeneration++
       this._instanceId = null
+      this._instanceHostId = null
       this._instanceGraphId = null
       this._instanceType = null
       this.tabs = []
@@ -6771,23 +6888,29 @@ const _chatStoreOptions = {
       }
       if (controller) return controller
       const graphId = this._instanceGraphId
+      const fetchLive = (fetch, params) => {
+        if (this._instanceHostId !== useHostsStore().activeHostId) {
+          throw new Error("History belongs to a different host")
+        }
+        return fetch(graphId, tab, params)
+      }
       controller = createHistoryPageController({
         kind,
         fetchPage:
           kind === "saved"
             ? (params) => sessionAPI.getHistoryPage(opts.sessionName, tab, params)
-            : (params) => terrariumAPI.getHistoryPage(graphId, tab, params),
+            : (params) => fetchLive(terrariumAPI.getHistoryPage, params),
         getSourceKey: () =>
           kind === "saved"
             ? `saved:${opts.sessionName}:${tab}:${this._instanceId}`
-            : `live:${this._instanceGraphId}:${tab}:${this._instanceId}`,
+            : `live:${this._instanceGraphId}:${tab}:${this._instanceId}:${this._instanceHostId}:${useHostsStore().activeHostId}`,
         getInstanceGeneration: () => this._instanceGeneration,
         getMutationGeneration: () => this._historyMutationSeqByTab[tab] || 0,
         pageSize: opts.pageSize || 400,
         fetchDetail:
           kind === "saved"
             ? (params) => sessionAPI.getHistoryDetail(opts.sessionName, tab, params)
-            : (params) => terrariumAPI.getHistoryDetail(graphId, tab, params),
+            : (params) => fetchLive(terrariumAPI.getHistoryDetail, params),
         onChange: (state) => {
           this.historyPageByTab[tab] = { ...this.historyPageByTab[tab], ...state }
         },
@@ -6834,6 +6957,16 @@ const _chatStoreOptions = {
       }
     },
 
+    _publishWorkSnapshot(tab, processing = this.processingByTab[tab]) {
+      this.attentionByTab[tab] = {
+        ...(this.attentionByTab[tab] || createAttentionState()),
+        processing: processing === true,
+        background:
+          processing !== true && Object.values(this.runningJobs).some((job) => job.tab === tab),
+      }
+      publishAttention(scopeOfStoreId(this.$id) || "default", tab, this.attentionByTab[tab])
+    },
+
     _applyHistoryPageRecords(
       tab,
       controller,
@@ -6866,8 +6999,10 @@ const _chatStoreOptions = {
         )
         if (controller.kind !== "saved")
           this._reconcileRunningJobs(tab, replay.pendingJobs, fetchedAt)
-        if (controller.kind !== "saved" && payload.is_processing === true)
-          this.processingByTab[tab] = true
+        if (controller.kind !== "saved") {
+          this.processingByTab[tab] = payload.is_processing === true
+          this._publishWorkSnapshot(tab)
+        }
         this.historyPageByTab[tab] = { ...controller.getState(), initialized: true }
         return
       }
@@ -6896,6 +7031,10 @@ const _chatStoreOptions = {
           ),
         )
         this._setHistoryDetails(tab, records)
+        if (controller.kind !== "saved") {
+          this._reconcileRunningJobs(tab, {}, fetchedAt, payload.live_job_ids)
+          this._publishWorkSnapshot(tab)
+        }
         return
       }
       const events = this._projectHistoryPageRecords(records || [], stream)
@@ -6921,7 +7060,7 @@ const _chatStoreOptions = {
           events,
           this.attentionByTab[tab] || createAttentionState(),
         )
-        publishAttention(scopeOfStoreId(this.$id) || "default", tab, this.attentionByTab[tab])
+        this._publishWorkSnapshot(tab)
       }
       const maxEventId = this._maxEventId(events)
       if (maxEventId != null) this._appliedMaxEventIdByTab[tab] = maxEventId
@@ -6934,6 +7073,9 @@ const _chatStoreOptions = {
      *  the current head. */
     async initHistoryPage(tab, opts = {}) {
       if (!tab) return { applied: false }
+      const kind = opts.kind || _historyPageMap(this).get(tab)?.kind || "live"
+      if (kind !== "saved" && this._instanceHostId !== useHostsStore().activeHostId)
+        return { applied: false }
       const controller = this._controllerForTab(tab, opts)
       return controller.initialize(undefined, opts.canApply)
     },
@@ -6953,6 +7095,9 @@ const _chatStoreOptions = {
     /** Refresh the newest side of the paged range (no older-range change). */
     async refreshHistoryHead(tab, opts = {}) {
       if (!tab) return { applied: false }
+      const kind = opts.kind || _historyPageMap(this).get(tab)?.kind || "live"
+      if (kind !== "saved" && this._instanceHostId !== useHostsStore().activeHostId)
+        return { applied: false }
       const controller = this._controllerForTab(tab, opts)
       return controller.refreshHead(opts.canApply)
     },

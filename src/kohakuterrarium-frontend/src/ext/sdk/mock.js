@@ -30,6 +30,25 @@ export {
   satisfiesRange,
 }
 
+export const ActionButton = {
+  props: {
+    type: { default: "button" },
+    disabled: Boolean,
+    variant: String,
+    size: String,
+    icon: String,
+  },
+  template: `<button :type="type" :disabled="disabled"><slot /></button>`,
+}
+export const SettingsGroup = {
+  props: ["title", "description"],
+  template: `<section><header><h3 v-if="title">{{ title }}</h3><p v-if="description">{{ description }}</p><slot name="action" /></header><div><slot /></div></section>`,
+}
+export const SettingsRow = {
+  props: ["title", "hint", "status", "tone", "inline"],
+  template: `<div><div>{{ title }}</div><p v-if="hint">{{ hint }}</p><slot name="detail" /><p v-if="status" data-row-status>{{ status }}</p><slot /></div>`,
+}
+
 let _current = null
 
 export class OwnerCallError extends Error {
@@ -64,6 +83,7 @@ export function createMockHost(options = {}) {
     session: options.session ?? null,
     creature: options.creature ?? null,
     events: options.events || [],
+    work: options.work ?? null,
     locale: options.locale || "en",
     dark: options.dark ?? false,
     confirmAnswer: options.confirmAnswer ?? true,
@@ -304,6 +324,11 @@ export function useOverlay() {
 export function useHost() {
   const host = current()
   return computed(() => host.state.host)
+}
+
+export function useWorkContext() {
+  const host = current()
+  return computed(() => host.state.work)
 }
 
 export function useSession() {

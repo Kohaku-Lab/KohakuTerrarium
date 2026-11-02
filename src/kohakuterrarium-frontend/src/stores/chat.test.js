@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { terrariumAPI } from "@/utils/api"
 import { subscribeAttentionEdges } from "./attention"
 import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
+import { workForScope, clearAttentionRegistry } from "./attention.js"
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -3731,6 +3732,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
   })
 
   it("resync restores a running turn's processing flag from is_processing", async () => {
+    clearAttentionRegistry()
     const chat = useChatStore()
     chat._instanceId = "agent_1"
     chat._instanceGraphId = "agent_1"
@@ -3753,7 +3755,24 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
     await chat._resyncHistory("main")
 
     expect(chat.processingByTab.main).toBe(true)
-
+    expect(workForScope("default")).toMatchObject({ busy: true, status: "running", started: 0 })
+    getHistorySpy.mockResolvedValue({ events: [...originalEvents], is_processing: false })
+    await chat._resyncHistory("main")
+    expect(workForScope("default")).toMatchObject({ busy: false, started: 0 })
+    let release
+    getHistorySpy.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    )
+    const stale = chat._resyncHistory("main")
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"))
+    chat._onMessage({ type: "processing_start", source: "main" })
+    release({ events: [...originalEvents], is_processing: false })
+    await stale
+    expect(workForScope("default")).toMatchObject({ busy: true, started: 1 })
+    clearAttentionRegistry()
     getHistorySpy.mockRestore()
   })
 
@@ -4635,7 +4654,7 @@ describe("chat store — branch isolation during streaming", () => {
     expect(chat.messagesByTab.main[0].parts[0].content).toBe("ok")
   })
 
-  it("off-branch tool_start activities are dropped instead of injected into the wrong branch", () => {
+  it("tracks off-branch jobs without injecting their message parts into the viewed branch", () => {
     const chat = useChatStore()
     chat.messagesByTab = { main: [{ id: "h1", role: "user", content: "hi" }] }
     chat.activeTab = "main"
@@ -4654,7 +4673,24 @@ describe("chat store — branch isolation during streaming", () => {
     // The tool call would have created an assistant message + tool
     // part if it had landed — guard says it must not.
     expect(chat.messagesByTab.main).toHaveLength(1)
-    expect(chat.runningJobs.job_1).toBeUndefined()
+    expect(chat.runningJobCountForTab("main")).toBe(1)
+    expect(chat.runningJobs.job_1.promotable).toBe(true)
+    chat._handleActivity("main", {
+      activity_type: "task_promoted",
+      job_id: "job_1",
+      turn_index: 1,
+      branch_id: 2,
+    })
+    expect(chat.runningJobs.job_1.promotable).toBe(false)
+    chat._handleActivity("main", {
+      activity_type: "tool_done",
+      name: "bash",
+      job_id: "job_1",
+      turn_index: 1,
+      branch_id: 2,
+    })
+    expect(chat.runningJobCountForTab("main")).toBe(0)
+    expect(chat.messagesByTab.main).toEqual([{ id: "h1", role: "user", content: "hi" }])
   })
 })
 
@@ -5708,56 +5744,65 @@ describe("chat store — concurrent history resyncs apply in order", () => {
     getHistorySpy.mockRestore()
   })
 
-  it("an in-flight load cannot clobber a tool result that landed during the fetch", async () => {
-    const chat = useChatStore()
-    chat._instanceId = "agent_1"
-    chat._instanceGraphId = "agent_1"
-    chat.activeTab = "main"
-    chat.tabs = ["main"]
-    chat.messagesByTab = { main: [] }
-    chat.branchViewByTab = {}
-    let resolveHistory
-    const importActual = await vi.importActual("@/utils/api")
-    const getHistorySpy = vi
-      .spyOn(importActual.terrariumAPI, "getHistory")
-      .mockImplementation(() => new Promise((resolve) => (resolveHistory = resolve)))
+  it.each([1, 2])(
+    "an in-flight load cannot clobber a tool result on branch %i during the fetch",
+    async (branchId) => {
+      const chat = useChatStore()
+      chat._instanceId = "agent_1"
+      chat._instanceGraphId = "agent_1"
+      chat.activeTab = "main"
+      chat.tabs = ["main"]
+      chat.messagesByTab = { main: [] }
+      chat.branchViewByTab = { main: { 1: 1 } }
+      let resolveHistory
+      const importActual = await vi.importActual("@/utils/api")
+      const getHistorySpy = vi
+        .spyOn(importActual.terrariumAPI, "getHistory")
+        .mockImplementation(() => new Promise((resolve) => (resolveHistory = resolve)))
 
-    const load = chat._loadHistory("main")
-    // ``_loadHistory`` reaches ``terrariumAPI.getHistory`` through a
-    // dynamic import; one macrotask is enough for the deferred promise
-    // to settle and the mock resolver to be installed.
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(resolveHistory).toBeTypeOf("function")
-    chat._handleActivity("main", {
-      activity_type: "tool_start",
-      name: "bash",
-      job_id: "job_1",
-      args: { command: "sleep 10" },
-      background: false,
-      id: "tc_1",
-    })
-    chat._handleActivity("main", {
-      activity_type: "tool_done",
-      name: "bash",
-      job_id: "job_1",
-      output: "ok",
-    })
-    resolveHistory({
-      events: [
-        { type: "processing_start", event_id: 1 },
-        { type: "tool_call", name: "bash", call_id: "job_1", event_id: 2, args: {} },
-        { type: "processing_end", event_id: 3 },
-      ],
-      is_processing: false,
-    })
+      const load = chat._loadHistory("main")
+      // ``_loadHistory`` reaches ``terrariumAPI.getHistory`` through a
+      // dynamic import; one macrotask is enough for the deferred promise
+      // to settle and the mock resolver to be installed.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(resolveHistory).toBeTypeOf("function")
+      chat._handleActivity("main", {
+        activity_type: "tool_start",
+        name: "bash",
+        job_id: "job_1",
+        args: { command: "sleep 10" },
+        background: false,
+        id: "tc_1",
+        turn_index: 1,
+        branch_id: branchId,
+      })
+      chat._handleActivity("main", {
+        activity_type: "tool_done",
+        name: "bash",
+        job_id: "job_1",
+        output: "ok",
+        turn_index: 1,
+        branch_id: branchId,
+      })
+      resolveHistory({
+        events: [
+          { type: "processing_start", event_id: 1 },
+          { type: "tool_call", name: "bash", call_id: "job_1", event_id: 2, args: {} },
+          { type: "processing_end", event_id: 3 },
+        ],
+        is_processing: false,
+      })
 
-    expect(await load).toBe(false)
-    const part = chat.messagesByTab.main[0].parts[0]
-    expect(part.status).toBe("done")
-    expect(part.result).toBe("ok")
-    expect(chat.runningJobs.job_1).toBeUndefined()
-    getHistorySpy.mockRestore()
-  })
+      expect(await load).toBe(false)
+      if (branchId === 1) {
+        const part = chat.messagesByTab.main[0].parts[0]
+        expect(part.status).toBe("done")
+        expect(part.result).toBe("ok")
+      } else expect(chat.messagesByTab.main).toEqual([])
+      expect(chat.runningJobs.job_1).toBeUndefined()
+      getHistorySpy.mockRestore()
+    },
+  )
 
   it("a transient load failure preserves current history", async () => {
     const chat = useChatStore()

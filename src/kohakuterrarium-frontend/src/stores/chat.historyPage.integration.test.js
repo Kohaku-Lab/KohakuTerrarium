@@ -6,7 +6,7 @@ import { useChatStore } from "./chat"
 import { indexOfSemanticKey, semanticKey } from "@/components/chat/chatRenderWindow"
 import TabItem from "@/components/shell/TabItem.vue"
 import { useAttentionEffects } from "@/composables/useAttentionEffects"
-import { clearAttentionRegistry } from "@/stores/attention"
+import { clearAttentionRegistry, subscribeAttention, workForScope } from "@/stores/attention"
 import api, { sessionAPI, terrariumAPI } from "@/utils/api"
 
 function event(id, type = "user_message", extra = {}) {
@@ -447,6 +447,95 @@ describe("paged history consumers", () => {
     expect(chat.processingByTab.root).toBe(true)
     expect(chat.attentionByTab.root).toBe(attention)
     expect(chat.historyPageByTab.root.hasNewer).toBe(true)
+
+    const branches = [1, 2].map((branch) =>
+      event(600 + branch, "tool_call", {
+        turn_index: 20,
+        branch_id: branch,
+        name: "build",
+        job_id: `branch-${branch}`,
+        ts: 1,
+        args: {},
+      }),
+    )
+    const both = ["branch-1", "branch-2"]
+    chat.branchViewByTab.root = { 20: 1 }
+    api.mockResolvedValueOnce(page(branches, { live_job_ids: both, older: false }))
+    await chat.initHistoryPage("root")
+    expect(chat.runningJobCountForTab("root")).toBe(2)
+    expect(chat.runningJobs["branch-2"].startedAt).toBe(1000)
+    expect(
+      chat.messagesByTab.root
+        .flatMap((m) => m.parts || [])
+        .filter((p) => p.type === "tool")
+        .map((p) => p.jobId),
+    ).toEqual(["branch-1"])
+    expect(chat.selectBranch(20, 2, "root")).toBe(true)
+    expect(chat.runningJobCountForTab("root")).toBe(2)
+    expect(
+      chat.messagesByTab.root
+        .flatMap((m) => m.parts || [])
+        .filter((p) => p.type === "tool")
+        .map((p) => p.jobId),
+    ).toEqual(["branch-2"])
+    api.mockResolvedValueOnce(page([], { live_job_ids: both, older: false }))
+    await chat.refreshHistoryHead("root")
+    expect(chat.runningJobCountForTab("root")).toBe(2)
+    expect(chat.runningJobs["branch-2"].startedAt).toBe(1000)
+    api.mockResolvedValueOnce(page([], { live_job_ids: ["branch-2"], older: false }))
+    await chat.refreshHistoryHead("root")
+    expect(chat.runningJobCountForTab("root")).toBe(1)
+    expect(chat.runningJobs["branch-2"].startedAt).toBe(1000)
+    expect(chat.selectBranch(20, 1, "root")).toBe(true)
+    expect(chat.runningJobCountForTab("root")).toBe(1)
+    expect(
+      chat.messagesByTab.root
+        .flatMap((m) => m.parts || [])
+        .filter((p) => p.type === "tool")
+        .map((p) => [p.jobId, p.status]),
+    ).toEqual([["branch-1", "interrupted"]])
+    api.mockResolvedValueOnce(page([], { live_job_ids: [], older: false }))
+    await chat.refreshHistoryHead("root")
+    expect(chat.runningJobCountForTab("root")).toBe(0)
+
+    api.mockResolvedValueOnce(page([], { live_job_ids: ["outside-page"], older: true }))
+    const observed = []
+    const stop = subscribeAttention(() => observed.push(workForScope("default")))
+    try {
+      await chat.initHistoryPage("root")
+    } finally {
+      stop()
+    }
+    expect(observed.length).toBeGreaterThan(0)
+    expect(
+      observed.every((work) => work.busy && work.status === "running" && work.started === 0),
+    ).toBe(true)
+    expect(chat.runningJobCountForTab("root")).toBe(1)
+    expect(workForScope("default")).toMatchObject({ busy: true, status: "running", started: 0 })
+    api.mockResolvedValueOnce(
+      page(
+        [
+          event(800, "tool_call", { name: "build", job_id: "outside-page", ts: 2, args: {} }),
+          event(801, "tool_result", { name: "build", job_id: "other-job", output: "other result" }),
+        ],
+        { live_job_ids: ["outside-page"], older: false },
+      ),
+    )
+    await chat.initHistoryPage("root")
+    expect(chat.runningJobCountForTab("root")).toBe(1)
+    expect(chat.runningJobs["outside-page"].name).toBe("build")
+    expect(chat.runningJobs["outside-page"].startedAt).toBe(2000)
+    const rendered = chat.messagesByTab.root
+      .flatMap((m) => m.parts || [])
+      .filter((p) => p.type === "tool")
+    expect(rendered.map((p) => [p.jobId, p.status, p.result])).toEqual([
+      ["outside-page", "running", ""],
+      ["other-job", "done", "other result"],
+    ])
+    api.mockResolvedValueOnce(page([], { live_job_ids: [], older: false }))
+    await chat.initHistoryPage("root")
+    expect(chat.runningJobCountForTab("root")).toBe(0)
+    expect(workForScope("default").busy).toBe(false)
   })
 })
 

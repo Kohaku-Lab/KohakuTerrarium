@@ -34,6 +34,7 @@ end — mirroring the REST+WS call sequences the Vue frontend
   prove the lab-only ``/api/nodes`` surface 404s in standalone mode.
 """
 
+import base64
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -66,6 +67,7 @@ from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.llm_seam import real_llm_providers
 from tests.helpers.kt_biome import find_kt_biome_source
+from tests.helpers.pet_archive import pet_archive
 from tests.helpers.resume_metadata_contention import resume_with_metadata_contention
 
 pytestmark = pytest.mark.timeout(60)
@@ -1561,6 +1563,69 @@ class TestApiIntegration:
         # Deleting it again → 404.
         resp = client.delete(f"/api/sessions/active/{session_id}")
         assert resp.status_code == 404
+
+        pet_source = Path(__file__).parents[2] / "examples/packages/virtual_pet"
+        _catalog_packages_ops.install_package_op(str(pet_source), editable=True)
+        ref = {"owner": "package:virtual-pet"}
+        assert (
+            client.post("/api/extensions/owner/state", json=ref).json()["state"]["pets"]
+            == []
+        )
+        with (
+            client.websocket_connect("/ws/extensions/owner") as settings_ws,
+            client.websocket_connect("/ws/extensions/owner") as overlay_ws,
+        ):
+            for socket in (settings_ws, overlay_ws):
+                socket.send_json({"op": "subscribe", "id": "pets", **ref})
+                assert socket.receive_json()["type"] == "subscribed"
+            imported = client.post(
+                "/api/extensions/owner/call",
+                json={
+                    **ref,
+                    "action": "import",
+                    "args": {"archive": base64.b64encode(pet_archive()).decode()},
+                },
+            )
+            assert imported.status_code == 200
+            key = imported.json()["result"]["selected"]
+            actions = {"running-right": 8, "running-left": 8, "waving": 4, "jumping": 5}
+            assert imported.json()["result"]["pets"][0]["interactions"] == actions
+            for socket in (settings_ws, overlay_ws):
+                published = socket.receive_json()["data"]
+                assert published["selected"] == key
+                assert published["pets"][0]["interactions"] == actions
+            duplicate = client.post(
+                "/api/extensions/owner/call",
+                json={
+                    **ref,
+                    "action": "import",
+                    "args": {"archive": base64.b64encode(pet_archive()).decode()},
+                },
+            )
+            assert duplicate.json()["result"] == imported.json()["result"]
+            sprite = client.post(
+                "/api/extensions/owner/call",
+                json={**ref, "action": "sprite", "args": {"key": key}},
+            )
+            assert sprite.status_code == 200 and sprite.json()["result"].startswith(
+                "data:image/png;base64,"
+            )
+            assert (
+                client.post(
+                    "/api/extensions/owner/call",
+                    json={**ref, "action": "remove", "args": {"key": key}},
+                ).status_code
+                == 200
+            )
+            for socket in (settings_ws, overlay_ws):
+                assert socket.receive_json()["data"]["pets"] == []
+        assert (
+            client.post("/api/extensions/owner/state", json=ref).json()["state"][
+                "selected"
+            ]
+            is None
+        )
+        assert _catalog_packages_ops.uninstall_package_op("virtual-pet") is True
 
     def test_session_persistence_and_resume_workflow(
         self,

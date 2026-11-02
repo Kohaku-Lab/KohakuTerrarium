@@ -35,6 +35,9 @@ vi.mock("@/utils/i18n", () => ({
 }))
 
 import SettingsPage from "./SettingsPage.vue"
+import SettingsTab from "@/components/shell/tabs/SettingsTab.vue"
+import { useTabsStore } from "@/stores/tabs"
+import { useDensity } from "@/composables/useDensity"
 import {
   registerSettingsSection,
   unregisterSettingsSection,
@@ -42,9 +45,10 @@ import {
 import { selectSection } from "@/stores/settingsNav"
 import { configAPI, settingsAPI } from "@/utils/api"
 
-function mountSettingsPage(section = "") {
+function mountSettingsPage(section = "", compact = false) {
   if (section) selectSection(section)
   return shallowMount(SettingsPage, {
+    props: compact ? { section, sectionRequest: 1 } : {},
     global: {
       plugins: [ElementPlus],
       stubs: {
@@ -55,7 +59,8 @@ function mountSettingsPage(section = "") {
         ElButton: false,
         ElInput: false,
         ElTag: false,
-        SettingsLayout: { template: "<div><slot /></div>" },
+        SettingsLayout: compact ? false : { template: "<div><slot /></div>" },
+        PhonePage: false,
         SectionShell: { template: "<section><slot name='aside' /><slot /></section>" },
       },
     },
@@ -201,11 +206,56 @@ describe("SettingsPage model presets", () => {
       expect(wrapper.vm.groups.at(-1).id).toBe("extensions")
       expect(ids).not.toContain("sites")
       expect(wrapper.findComponent(DemoSection).exists()).toBe(true)
+      await wrapper.setProps({ section: "ext:demo/s", sectionRequest: 1 })
+      expect(wrapper.vm.activeTab).toBe("ext:demo/s")
+      selectSection("models")
+      registerSettingsSection({ id: "ext:other/s", label: "Other", component: DemoSection })
+      await flushPromises()
+      expect(wrapper.vm.activeTab).toBe("models")
+      unregisterSettingsSection("ext:other/s")
+      await wrapper.setProps({ sectionRequest: 2 })
+      expect(wrapper.vm.activeTab).toBe("ext:demo/s")
       unregisterSettingsSection("ext:demo/s")
       await flushPromises()
       expect(wrapper.findComponent(DemoSection).exists()).toBe(false)
+      expect(wrapper.vm.activeTab).toBe(wrapper.vm.sections[0].id)
+      wrapper.unmount()
+      useDensity().setOverride("compact")
+      registerSettingsSection({ id: "ext:demo/s", label: "Demo", component: DemoSection })
+      const phone = mountSettingsPage("ext:demo/s", true)
+      await flushPromises()
+      expect(phone.find("[data-test='settings-page']").exists()).toBe(true)
+      await phone.find("[data-test='phone-page-back']").trigger("click")
+      expect(phone.find("[data-settings-nav]").exists()).toBe(true)
+      await phone.setProps({ sectionRequest: 2 })
+      expect(phone.find("[data-test='settings-page']").exists()).toBe(true)
+      phone.unmount()
+      const tabs = useTabsStore()
+      tabs.openTab({ kind: "settings", id: "settings", section: "ext:demo/s" })
+      const mountTab = () =>
+        shallowMount(SettingsTab, {
+          props: { tab: tabs.byId.settings },
+          global: { stubs: { SettingsPage: false, SettingsLayout: true } },
+        })
+      const tab = mountTab()
+      await flushPromises()
+      expect(tab.findComponent(SettingsPage).vm.activeTab).toBe("ext:demo/s")
+      expect(tabs.byId.settings.section).toBe("")
+      selectSection("models")
+      await flushPromises()
+      tab.unmount()
+      const remounted = mountTab()
+      await flushPromises()
+      expect(remounted.findComponent(SettingsPage).vm.activeTab).toBe("models")
+      tabs.openTab({ kind: "settings", id: "settings", section: "ext:demo/s" })
+      await flushPromises()
+      expect(remounted.findComponent(SettingsPage).vm.activeTab).toBe("ext:demo/s")
+      expect(tabs.byId.settings.section).toBe("")
+      remounted.unmount()
     } finally {
+      useDensity().setOverride("auto")
       unregisterSettingsSection("ext:demo/s")
+      unregisterSettingsSection("ext:other/s")
     }
   })
 })

@@ -1,6 +1,6 @@
 <template>
   <div class="kt-v2 settings-page">
-    <SettingsLayout :groups="groups" :model-value="activeTab" @update:model-value="selectSection">
+    <SettingsLayout :groups="groups" :model-value="activeTab" :reveal-request="revealRequest" @update:model-value="selectSection">
       <template v-for="section in activeSections" :key="section.id">
         <!-- ════════════════════════ Registered (non-inline) sections ════════════════════════ -->
         <SectionShell v-if="!section.inline" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
@@ -168,7 +168,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, onMounted } from "vue"
+import { computed, reactive, ref, onMounted, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import AccountSection from "@/components/account/AccountSection.vue"
@@ -202,6 +202,10 @@ import { configAPI, settingsAPI } from "@/utils/api"
 
 const { t } = useI18n()
 const { isCompact } = useDensity()
+const props = defineProps({
+  section: { type: String, default: "" },
+  sectionRequest: { type: Number, default: 0 },
+})
 
 registerBuiltinSettingsSections()
 const groups = computed(() => visibleSettingsGroups())
@@ -209,6 +213,22 @@ const sections = computed(() => groups.value.flatMap((group) => group.sections))
 const currentSection = computed(() => sections.value.find((section) => section.id === activeSection.value) || sections.value[0] || null)
 const activeTab = computed(() => currentSection.value?.id || "")
 const activeSections = computed(() => (currentSection.value ? [currentSection.value] : []))
+const emit = defineEmits(["section-applied"])
+const revealRequest = ref(0)
+let appliedSectionRequest = null
+watch(
+  () => [props.section, props.sectionRequest, sections.value.map((s) => s.id).join("|")],
+  () => {
+    const request = JSON.stringify([props.section, props.sectionRequest])
+    if (request !== appliedSectionRequest && sections.value.some((s) => s.id === props.section)) {
+      selectSection(props.section)
+      appliedSectionRequest = request
+      revealRequest.value += 1
+      emit("section-applied", { section: props.section, request: props.sectionRequest })
+    }
+  },
+  { immediate: true },
+)
 
 const sectionTitle = (section) => (section.labelKey ? t(section.labelKey) : section.label)
 const sectionHint = (section) => (section.descriptionKey ? t(section.descriptionKey) : section.description)

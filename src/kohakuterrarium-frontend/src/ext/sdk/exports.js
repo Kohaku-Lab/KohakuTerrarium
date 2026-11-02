@@ -7,6 +7,9 @@
  */
 export const SDK_EXPORT_NAMES = [
   "SDK_VERSION",
+  "ActionButton",
+  "SettingsGroup",
+  "SettingsRow",
   "satisfiesRange",
   "defineExtension",
   "useExtension",
@@ -19,6 +22,7 @@ export const SDK_EXPORT_NAMES = [
   "useGraphNode",
   "OwnerCallError",
   "useHost",
+  "useWorkContext",
   "useSession",
   "useCreature",
   "useSessionEvents",

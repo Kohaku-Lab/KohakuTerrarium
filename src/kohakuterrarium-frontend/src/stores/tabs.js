@@ -186,11 +186,27 @@ export const useTabsStore = defineStore("tabs", {
 
     // ─── tab CRUD ──────────────────────────────────────────────
 
-    /** Add or activate a tab. No-op (just activates + focuses) if the
-     *  id is already open. New tabs land in the focused group. */
+    /** Consume an applied settings jump without clearing a newer request. */
+    acknowledgeSettingsSection(id, { section, request }) {
+      const tab = this.byId[id]
+      if (
+        tab?.kind !== "settings" ||
+        tab.section !== section ||
+        (tab.sectionRequest || 0) !== request
+      )
+        return
+      tab.section = ""
+      this._dirty()
+    },
+
+    /** Add or activate a tab. New tabs land in the focused group. */
     openTab(spec) {
       this._ensureTree()
       if (this.byId[spec.id]) {
+        if (spec.kind === "settings" && typeof spec.section === "string") {
+          this.byId[spec.id].section = spec.section
+          this.byId[spec.id].sectionRequest = (this.byId[spec.id].sectionRequest || 0) + 1
+        }
         if (["attach", "inspector"].includes(spec.kind)) this.updateSurfaceMeta(spec.target, spec)
         const gid = this._groupOf(spec.id)
         if (gid) {

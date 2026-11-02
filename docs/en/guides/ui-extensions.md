@@ -14,7 +14,8 @@ This guide covers:
 5. [The owner RPC and push protocol](#the-owner-rpc-and-push-protocol)
 6. [Loading, assets and security](#loading-assets-and-security)
 7. [Developer workflow](#developer-workflow)
-8. [Built-in contributions](#built-in-contributions)
+8. [Example: session-aware virtual pet overlay](#example-session-aware-virtual-pet-overlay)
+9. [Built-in contributions](#built-in-contributions)
 
 ## Mount points and owners
 
@@ -139,7 +140,7 @@ export default defineExtension((kt) => {
 | `kt.assetUrl(path)` | URL of a file under the UI root, with a currently valid token (tokens are renewed before they expire) |
 | `kt.api.get/post/put/patch/delete/request` | raw-route fallback, `/api/ext/<pkg>/<path>` on the active host |
 | `kt.ws(path)` | WebSocket to `/api/ext/<pkg>/<path>` (raw fallback) |
-| `kt.openTab(id)` | open one of the package's tabs |
+| `kt.openTab(id)` | open one of the package's tab contributions by its string id; use the SDK's named `openTab` export for core tabs such as Settings |
 | `kt.registerCommand(id, handler, options?)`, `kt.storage` | provide a [command](#commands-and-shortcuts) handler; per-package [storage](#host-services) |
 | `kt.registerStatusItem(id, component, options?)` | provide a [status-bar segment](#status-items) |
 | `kt.registerMessageRenderer(id, component, options?)` | provide the component of a [message renderer](#message-renderers); an undeclared one needs `options.renderer` |
@@ -153,12 +154,82 @@ export default defineExtension((kt) => {
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
-`useOwner`, `useOverlay`, `useMessageBlock`, `useMessage`, `useFileView`, `useGraphNode`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
+`useOwner`, `useOverlay`, `useWidget`, `useMessageBlock`, `useMessage`, `useFileView`, `useGraphNode`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
 `hostInfo`, `useHost`, `useSession`, `useCreature`,
-`useSessionEvents`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
+`useSessionEvents`, `useWorkContext`, `useLocale`, `useTheme`, `THEME_TOKENS`, `notify`,
+`ActionButton`, `SettingsGroup`, `SettingsRow`,
 `confirm`, `openTab`, `FRAME_PROTOCOL`, `FRAME_MESSAGES`, `FRAME_SUPPORTED`,
 `FrameIsolationUnsupportedError`, `createFrameBridge` (the dashboard side of
 the frame protocol; frame pages use `window.kt` instead).
+
+### Observed session work
+
+`useWorkContext()` returns a read-only Vue computed ref reflecting the aggregate
+activity of the **dashboard's active session tab**.
+
+Unlike `useSession()`, which accesses the session surrounding the calling component,
+`useWorkContext()` follows the focused tab and returns `null` when that tab is not an
+active live-session attach view (such as Settings, the catalog, or an offline saved-session tab).
+It aggregates existing chat and attention facts across observed creatures in that
+session (excluding channel tabs) without starting a separate session monitor.
+After switching dashboard hosts, it returns `null` until the focused session is
+bound to the selected host; events from an old binding are not relabeled as new-host work.
+
+| Field | Meaning |
+|---|---|
+| `hostId` | The session binding's host ID (matching the selected dashboard host), or `null` for the same-origin host. |
+| `sessionId` | Target session or graph ID of the active attach tab. |
+| `label` | Tab display label, falling back to its target ID. |
+| `status` | Current work state: `'idle'`, `'running'`, `'waiting'`, `'ready'`, or `'failed'`. |
+| `busy` | Whether any observed creature is processing or awaiting background work, independent of pending input. |
+| `started` | In-memory counter of observed live idle-to-busy transitions. |
+
+#### Status Precedence
+
+1. **`waiting`**: An input prompt is awaiting user response. Takes precedence whenever input is required, and can coexist with `busy: true` or `busy: false`.
+2. **`running`**: Observed creatures are actively working or background jobs are in progress (`busy: true`).
+3. **`ready` / `failed`**: The outcome of the most recently settled work. `ready` marks observed work settlement, rather than an attention-level completion counter or a guarantee that a final response turn has finished (for example, a background job can complete before an auto-wake reporting turn begins).
+4. **`idle`**: No active work or pending input.
+
+Settled outcomes (`ready`/`failed`) remain in the snapshot after work finishes; consuming components choose their own display lifetimes.
+
+#### The `started` Counter
+
+The `started` counter increments exclusively on live `processing_start` events that transition a session from idle to busy. It is not advanced by historical replays, reconnected session snapshots, or optimistic composer state.
+
+Consuming components should establish a fresh baseline upon mounting, switching hosts or sessions, scope disposal, or whenever the counter decreases. Do not persist this counter as a task ID or replay past cues from it. Only host-observed sessions are covered.
+
+For automated testing, `createMockHost({ work: snapshot })` accepts initial work snapshots, and updating `host.state.work` drives consumers directly.
+
+### Settings UI and localization
+
+Package settings sections automatically inherit the host settings layout (outer title, description, width, and padding). Custom contributions should render directly within this container without duplicating the page header.
+
+Import shared Vue controls from `@kohakuterrarium/ui-sdk`:
+
+- `SettingsGroup`: Groups related setting rows into a captioned card matching built-in settings. Props: `title`, `description`. Slots: default (content rows), `action` (card-level action button).
+- `SettingsRow`: Renders an individual setting row. Props: `title` (required), `hint` (optional string), `status` (optional authored status text), `tone` (`'muted' | 'ok' | 'warn' | 'error'`, controls status text color), `inline` (boolean; preserves horizontal layout on narrow screens). Slots: default (interactive controls), `detail` (additional setting details rendered within the text column below the hint). Note that `status` is authored text, not an enum.
+- `ActionButton`: Standardized button component. Props: `variant` (`'primary' | 'secondary' | 'ghost' | 'danger'`), `size` (`'sm' | 'md'`), `disabled`, `type`, `icon`. Slots: default (label). Events: `click`.
+
+The testing mock exports semantic doubles of these controls. Use the public `THEME_TOKENS` for custom styling rather than internal host CSS classes, and verify layouts across light, dark, keyboard, and narrow screen viewports.
+
+`useLocale()` provides the active locale. Packages supply their own translation dictionaries. Authored UI text—such as labels, tooltips, confirmations, and error envelopes—should be localized. User-imported names and raw backend diagnostics should remain unlocalized data. Locale changes should update UI strings reactively without interrupting active animations or resetting transient message timers.
+
+Application settings are distinct from session settings. To open or focus a specific extension settings section, use the SDK's **named export**:
+
+```js
+import { openTab } from "@kohakuterrarium/ui-sdk"
+
+const openPetSettings = () => openTab({
+  kind: "settings",
+  id: "settings",
+  section: "ext:virtual-pet/pets",
+})
+```
+
+The section key follows `ext:<installed-package-name>/<section-id>`. When constructing it inside a contribution component, `useExtension().package` supplies the installed name dynamically, ensuring deep links work even if the package is renamed at install time. Repeated calls will focus that section even if the Settings tab is already open.
+
+*(Note: `kt.openTab("tab-id")` is reserved for opening custom tab contributions declared by your package, and takes a simple string ID rather than an options object).*
 
 ### Overlays
 
@@ -816,6 +887,17 @@ kt serve
 - Tests: `npm install && npm test`. `ui/test/kt-sdk/sdk-mock.js` is a test
   double of the SDK (`createMockHost({ owner: { state, actions } })`,
   `host.emit(event, data)`, `host.registered`, `host.ownerCalls`).
+
+## Example: session-aware virtual pet overlay
+
+The [`examples/packages/virtual_pet/`](../../../examples/packages/virtual_pet/README.md)
+package provides a complete reference implementation combining custom settings with an
+application overlay:
+- **Settings tab:** Uses `SettingsGroup`, `SettingsRow`, and `ActionButton` to import, preview, and manage Codex V1/V2 sprite sheets independently of any running session.
+- **Companion overlay:** Uses `useWorkContext()` to mirror the active session's work state (busy, waiting for input, ready, failed) with animated sprite feedback.
+- **Deep links:** Demonstrates opening extension settings programmatically from within the overlay.
+
+For API contracts and design details, see [Observed session work](#observed-session-work) and [Settings UI and localization](#settings-ui-and-localization). For full setup, interaction gestures, and sprite format requirements, see the [package README](../../../examples/packages/virtual_pet/README.md).
 
 ## Built-in contributions
 

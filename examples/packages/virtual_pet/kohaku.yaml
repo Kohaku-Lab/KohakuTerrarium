@@ -1,0 +1,24 @@
+name: virtual-pet
+version: 0.1.0
+description: A quiet floating Codex pet following the focused session.
+ui:
+  sdk: ">=1,<2"
+  entry: ui/index.js
+  styles: [ui/style.css]
+  handler: kt_virtual_pet.settings:PetSettings
+  contributes:
+    - kind: overlay
+      id: pet
+      label: Virtual pet
+      icon: i-carbon-face-wink
+      surface: app
+      anchor: bottom-right
+      width: 224
+      height: 280
+      draggable: true
+      clickThrough: true
+      defaultVisible: true
+    - kind: settings
+      id: pets
+      label: Virtual pets
+      description: Import and choose your companion on this backend.
