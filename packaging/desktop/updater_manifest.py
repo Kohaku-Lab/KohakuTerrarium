@@ -9,6 +9,9 @@ Usage::
     python packaging/desktop/updater_manifest.py --assets release/ \\
         --base-url https://github.com/<repo>/releases/download/<tag> \\
         --notes-url https://github.com/<repo>/releases/tag/<tag> --out release/latest.json
+
+``--version`` publishes the project's own version (as semver) so nightlies that share an
+installer version are told apart; ``--semver`` prints that form, which the shell build records.
 """
 
 import argparse
@@ -26,8 +29,22 @@ PLATFORMS = {
 }
 
 
+PRE_RELEASE = re.compile(r"^(\d+\.\d+\.\d+)\.?(dev|a|b|rc|alpha|beta)\.?(\d+)")
+
+
 class ManifestError(Exception):
     pass
+
+
+def semver_of(version: str) -> str:
+    """The semantic version of a PEP 440 one: ``2.2.1.dev5`` is ``2.2.1-dev.5``, ``2.2.1`` stays."""
+    pre = PRE_RELEASE.match(version)
+    if pre:
+        return f"{pre.group(1)}-{pre.group(2)}.{pre.group(3)}"
+    core = re.match(r"^(\d+\.\d+\.\d+)", version)
+    if not core:
+        raise ManifestError(f"cannot parse version {version!r}")
+    return core.group(1)
 
 
 def collect(assets: Path) -> tuple[str, dict[str, dict]]:
@@ -72,12 +89,28 @@ def build(version: str, entries: dict[str, dict], base_url: str, notes: str) -> 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--assets", type=Path, required=True)
-    parser.add_argument("--base-url", required=True)
+    parser.add_argument("--assets", type=Path)
+    parser.add_argument("--base-url")
     parser.add_argument("--notes-url", default="")
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument(
+        "--version",
+        help="project version to publish instead of the installers' numeric one",
+    )
+    parser.add_argument(
+        "--semver",
+        metavar="VERSION",
+        help="print the semantic form of VERSION and exit",
+    )
     args = parser.parse_args(argv)
+    if args.semver:
+        print(semver_of(args.semver))
+        return 0
+    if not (args.assets and args.base_url and args.out):
+        parser.error("--assets, --base-url and --out are required")
     version, entries = collect(args.assets)
+    if args.version:
+        version = semver_of(args.version)
     manifest = build(version, entries, args.base_url, args.notes_url)
     args.out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"updater manifest for {version}: {', '.join(manifest['platforms'])}")

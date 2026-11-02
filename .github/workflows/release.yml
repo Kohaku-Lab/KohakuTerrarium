@@ -407,6 +407,12 @@ jobs:
       - name: Install the Tauri CLI
         run: npm install --global @tauri-apps/cli@2
 
+      # Installers carry only the numeric X.Y.Z; the shell records the full
+      # version so a nightly can tell whether a newer nightly exists.
+      - name: Record the shell build identity
+        shell: bash
+        run: echo "KT_SHELL_BUILD=$(python packaging/desktop/updater_manifest.py --semver '${{ needs.meta.outputs.version }}')" >> "$GITHUB_ENV"
+
       # With the signing key present the build also writes signed updater
       # artifacts; without it (forks) the installers are still built.
       - name: Build installers (Windows)
@@ -642,6 +648,7 @@ jobs:
           # nightly carries one too so the signed path can be tried against it.
           if compgen -G "release/*.sig" > /dev/null; then
             python packaging/desktop/updater_manifest.py \
+              --version "${{ needs.meta.outputs.version }}" \
               --assets release \
               --base-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ needs.meta.outputs.tag }}" \
               --notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${{ needs.meta.outputs.tag }}" \
@@ -691,6 +698,25 @@ jobs:
           # publish as prereleases, so a v2.0.0.dev6 never shows up as
           # "Latest" on the release page. Resolved once, in ``meta``.
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
+
+      # Nightly shells read the newest nightly's updater manifest from this
+      # fixed address.
+      - name: Publish the nightly shell manifest
+        if: needs.meta.outputs.channel == 'nightly' && hashFiles('release/latest.json') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag="manifests-nightly"
+          if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release create "${tag}" \
+              --title "Channel manifest: nightly" \
+              --notes "Auto-updated channel manifest for nightly. Do not delete." \
+              --prerelease \
+              -R "${GITHUB_REPOSITORY}"
+          fi
+          cp release/latest.json shell.json
+          gh release upload "${tag}" shell.json --clobber -R "${GITHUB_REPOSITORY}"
 
       - name: Prune old nightly releases
         if: needs.meta.outputs.keep_nightlies != ''

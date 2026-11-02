@@ -103,6 +103,52 @@ def test_main_writes_the_file(manifest_tool, tmp_path, capsys):
     assert "windows-x86_64" in capsys.readouterr().out
 
 
+def test_pep_440_versions_become_the_semver_the_shell_compares(manifest_tool):
+    semver = manifest_tool.semver_of
+
+    assert semver("2.2.1") == "2.2.1"
+    assert semver("2.2.1.dev5") == "2.2.1-dev.5"
+    assert semver("2.2.1b2") == "2.2.1-b.2"
+    assert semver("2.2.1rc1") == "2.2.1-rc.1"
+    assert semver("2.2.1.post3") == "2.2.1"
+    with pytest.raises(manifest_tool.ManifestError):
+        semver("latest")
+
+
+def test_a_nightly_publishes_its_own_version_not_the_installers(
+    manifest_tool, tmp_path, capsys
+):
+    assets = tmp_path / "a"
+    assets.mkdir()
+    _assets(assets, version="2.3.0")
+    out = tmp_path / "shell.json"
+
+    code = manifest_tool.main(
+        [
+            "--assets",
+            str(assets),
+            "--base-url",
+            "https://x.test/d",
+            "--version",
+            "2.3.0.dev7",
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert code == 0
+    manifest = json.loads(out.read_text(encoding="utf-8"))
+    assert manifest["version"] == "2.3.0-dev.7"
+    assert manifest["platforms"]["windows-x86_64"]["url"].endswith(
+        "KohakuTerrarium_2.3.0_x64-setup.exe"
+    )
+
+
+def test_the_semver_mode_prints_and_needs_no_assets(manifest_tool, capsys):
+    assert manifest_tool.main(["--semver", "2.3.0.dev7"]) == 0
+    assert capsys.readouterr().out.strip() == "2.3.0-dev.7"
+
+
 def test_the_shell_trusts_the_published_key_and_reads_the_release_feed():
     conf = json.loads(
         (DESKTOP / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
