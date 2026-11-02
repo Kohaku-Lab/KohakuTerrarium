@@ -140,7 +140,8 @@ def test_tray_capabilities_the_page_checks_are_declared_by_the_shell():
         / "useAttentionEffects.js"
     )
     for flag in re.findall(r"hostCapabilities\?\.([A-Za-z]+) !== true", effects):
-        assert f'"{flag}": true' in commands_rs, flag
+        declared = f'"{flag}": true' in commands_rs or f'"{flag}": cfg!(' in commands_rs
+        assert declared, flag
 
 
 def test_session_file_association_and_open_event_match_the_app():

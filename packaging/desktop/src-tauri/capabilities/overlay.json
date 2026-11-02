@@ -14,6 +14,7 @@
     "allow-overlay-start-drag",
     "allow-overlay-set-bounds",
     "allow-overlay-set-hit-regions",
-    "allow-overlay-ack"
+    "allow-overlay-ack",
+    "allow-focus-session"
   ]
 }

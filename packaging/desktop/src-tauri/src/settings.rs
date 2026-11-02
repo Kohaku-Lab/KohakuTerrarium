@@ -53,7 +53,7 @@ const SPECS: &[Spec] = &[
     Spec {
         key: "windowMaterial",
         kind: Kind::Choice(&["auto", "none", "mica", "acrylic"]),
-        default: || json!("auto"),
+        default: || json!("none"),
     },
     Spec {
         key: "followAccent",
@@ -347,7 +347,7 @@ mod tests {
             assert!(snapshot.get(spec.key).is_some(), "{}", spec.key);
         }
         assert_eq!(snapshot["keepAwake"], "running");
-        assert_eq!(snapshot["windowMaterial"], "auto");
+        assert_eq!(snapshot["windowMaterial"], "none");
         assert_eq!(snapshot["updateChannel"], "stable");
         assert_eq!(snapshot["zoom"], json!({}));
         assert_eq!(snapshot["popouts"], json!([]));

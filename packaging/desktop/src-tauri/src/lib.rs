@@ -6,9 +6,13 @@ mod chrome;
 mod commands;
 mod context_menu;
 mod dialogs;
+mod dragout;
 mod files;
+mod hud;
+mod material;
 mod menu;
 mod navigation;
+mod notify;
 mod opens;
 mod os;
 mod overlay;
@@ -18,6 +22,7 @@ mod settings;
 mod smoke;
 mod summon;
 mod tray;
+mod updater;
 mod window;
 
 use tauri::{Manager, RunEvent};
@@ -86,6 +91,7 @@ pub fn run() {
             commands::request_desktop_attention,
             commands::open_external,
             commands::show_notification,
+            notify::show_action_notification,
             commands::get_autostart,
             commands::set_autostart,
             commands::set_desktop_theme,
@@ -99,6 +105,7 @@ pub fn run() {
             overlay::overlay_set_bounds,
             overlay::overlay_set_hit_regions,
             overlay::overlay_ack,
+            hud::focus_session,
             tray::get_close_to_tray,
             tray::set_close_to_tray,
             attention::set_attention_state,
@@ -121,6 +128,7 @@ pub fn run() {
             runtime::open_logs,
             runtime::repair::repair_runtime,
             runtime::diagnostics::export_diagnostics,
+            dragout::start_file_drag,
             dialogs::pick_folder,
             dialogs::pick_files,
             dialogs::save_file,

@@ -110,6 +110,7 @@ pub fn action_of(menu_id: &str) -> Option<(&'static str, &str)> {
     match menu_id {
         "new" => Some(("new", "")),
         "folder" => Some(("folder", "")),
+        "hud" => Some(("hud", "")),
         _ => None,
     }
 }
@@ -177,6 +178,7 @@ pub fn layout(
     }
     entries.push(item("new", "New session"));
     entries.push(item("folder", "Open folder as session..."));
+    entries.push(item("hud", "Show or hide agents HUD"));
     entries.push(Entry::Separator);
     if !extensions.is_empty() {
         for (id, label) in extensions {
@@ -460,6 +462,7 @@ mod tests {
         assert_eq!(action_of("session:s2"), Some(("session", "s2")));
         assert_eq!(action_of("new"), Some(("new", "")));
         assert_eq!(action_of("folder"), Some(("folder", "")));
+        assert_eq!(action_of("hud"), Some(("hud", "")));
         assert_eq!(action_of("quit"), None);
         assert_eq!(action_of("ext:x"), None);
         assert_eq!(action_of("header"), None);
@@ -488,6 +491,7 @@ mod tests {
                 "-",
                 "new",
                 "folder",
+                "hud",
                 "-",
                 "restart-backend",
                 "diagnostics",
@@ -525,6 +529,7 @@ mod tests {
                 "-",
                 "new",
                 "folder",
+                "hud",
                 "-",
                 "ext:pkg/x",
                 "-",

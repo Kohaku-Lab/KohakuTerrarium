@@ -5,6 +5,7 @@ use tauri::{App, AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::backend::Backend;
+use crate::material::{self, Material};
 use crate::navigation::{is_internal, is_openable};
 use crate::popout;
 use crate::settings::ShellSettings;
@@ -47,14 +48,26 @@ pub fn create(app: &App) -> tauri::Result<()> {
         &arguments,
         app.state::<ShellSettings>().get_bool("startHidden"),
     );
+    let material = material::resolve(
+        &app.state::<ShellSettings>()
+            .get_text("windowMaterial")
+            .unwrap_or_default(),
+        material::windows_build(),
+    );
     let navigation = app.handle().clone();
     let page_load = app.handle().clone();
-    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("KohakuTerrarium")
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 500.0)
-        .background_color(Color(0xe3, 0xdd, 0xd5, 0xff))
+        .transparent(material != Material::None)
+        .background_color(if material == Material::None {
+            Color(0xe3, 0xdd, 0xd5, 0xff)
+        } else {
+            Color(0, 0, 0, 0)
+        })
         .initialization_script(THEME_SYNC)
+        .initialization_script(material::page_script(material).unwrap_or_default())
         .on_navigation(move |url| {
             let port = navigation.state::<Backend>().port();
             if is_internal(url, port) {
@@ -82,6 +95,7 @@ pub fn create(app: &App) -> tauri::Result<()> {
             }
         })
         .build()?;
+    material::apply(&window, material);
     Ok(())
 }
 

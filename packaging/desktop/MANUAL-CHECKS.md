@@ -51,5 +51,18 @@ Each section names the milestone that added it and the surface to look at.
 - Right-click a tab: the operating system's own menu opens (refresh, move to new window, the close commands, then extension actions); Close left/right/others are greyed when nothing applies; Escape closes it without doing anything. In a browser the in-page menu still appears.
 - Ctrl+P (or "Desktop: print this conversation" in the palette): the print preview shows the conversation without the tab strip, rail, status bar and message box, and long chats continue onto further pages.
 
+- Right-click a session in the left rail: the operating system's menu opens (open or close chat, open or close inspector, open in new window, detach all tabs, end conversation, then extension actions); Detach is greyed while nothing is open for the session.
+- Settings -> Desktop app -> Window material (Windows 11 22H2 or later): choose Mica, restart the app: the left sidebar shows a faint translucent tint of the wallpaper, every other surface stays solid, and dark mode follows the theme. "Off" restores the solid sidebar after a restart. Before Windows 11 22H2 nothing changes.
+
+## Notifications and the agents HUD (M8, M10)
+- Settings -> Desktop app -> "Answer approvals from notifications" (Windows only): turn it on, make a session ask to run a gated tool while the window is in the background: the toast shows the question and an "Allow once" and a "Deny" button but no "Always allow". Pressing a button answers the prompt without bringing the window forward; clicking the toast body opens the session on the prompt. With the switch off, or on macOS, the toast has no buttons.
+- Command palette "Agents HUD: show or hide" (or the tray entry "Show or hide agents HUD"): a small always-on-top window lists running sessions with their creatures and token counts, working ones first; clicking a session raises the main window on it; hiding it closes the window. In a browser the same list floats inside the page.
+
+## Files (M7)
+- Settings -> Workspace file tree (local backend only): drag a file row out of the window onto the desktop or into another application: a copy of the file lands there with its name. Folders cannot be dragged, and with a remote host selected nothing drags.
+
+## Updates (M9)
+- With the runtime channel set to nightly (Settings -> Updates), "Check for updates" in Settings -> Desktop app finds a newer nightly shell when one exists and says "up to date" when the installed build is the newest nightly; on the stable channel it only ever offers stable releases. Needs two nightlies published after this change.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

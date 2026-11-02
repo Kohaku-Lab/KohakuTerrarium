@@ -35,6 +35,8 @@ url = "2"
 sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
 keepawake = "0.6.1"
+drag = "2"
+semver = "1"
 
 [profile.release]
 codegen-units = 1
@@ -44,5 +46,6 @@ panic = "abort"
 strip = true
 
 [target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_Controls"] }
 winreg = "0.56.0"
+tauri-winrt-notification = "0.8"

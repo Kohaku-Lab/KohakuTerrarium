@@ -10,7 +10,6 @@ use tauri::{AppHandle, Manager, State, Theme, UserAttentionType, WebviewWindow};
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_updater::UpdaterExt;
 
 use crate::backend::Backend;
 use crate::navigation::is_openable;
@@ -44,6 +43,7 @@ pub fn capabilities() -> Value {
         "nativeAttention": true,
         "openExternal": true,
         "notifications": true,
+        "notificationActions": cfg!(windows),
         "autostart": true,
         "deepLink": true,
         "overlayWindows": true,
@@ -54,6 +54,7 @@ pub fn capabilities() -> Value {
         "openFiles": true,
         "popoutWindows": true,
         "nativeDialogs": true,
+        "fileDragOut": true,
         "taskbarProgress": true,
         "trayMenu": true,
         "backendControl": true,
@@ -131,7 +132,7 @@ pub fn set_desktop_theme(window: WebviewWindow, args: Args) -> bool {
 /// Whether a newer shell build is published for this platform.
 #[tauri::command]
 pub async fn check_shell_update(app: AppHandle) -> Value {
-    let updater = match app.updater() {
+    let updater = match crate::updater::for_app(&app) {
         Ok(updater) => updater,
         Err(error) => return json!({ "available": false, "error": error.to_string() }),
     };
@@ -167,7 +168,7 @@ pub async fn apply_update(
 /// Download and install the newer shell build, then restart into it.
 #[tauri::command]
 pub async fn install_shell_update(app: AppHandle) -> bool {
-    let Ok(updater) = app.updater() else {
+    let Ok(updater) = crate::updater::for_app(&app) else {
         return false;
     };
     let Ok(Some(update)) = updater.check().await else {
