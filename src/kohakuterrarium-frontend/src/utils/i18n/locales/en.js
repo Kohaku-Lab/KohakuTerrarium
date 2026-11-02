@@ -1620,6 +1620,19 @@ export default {
   "settings.desktop.keepAwakeNever": "Never",
   "settings.desktop.keepAwakeRunning": "While agents work",
   "settings.desktop.keepAwakeAc": "While agents work, on mains power",
+  "hud.open": "Show {name}",
+  "hud.empty": "No running sessions.",
+  "hud.failed": "Could not reach the backend.",
+  "settings.desktop.notifyActionsTitle": "Answer approvals from notifications",
+  "settings.desktop.notifyActionsHint":
+    "Shows the approval buttons on the system notification, so a tool can be allowed or denied without opening the window. Only the primary and deny choices appear.",
+  "settings.desktop.materialTitle": "Window material",
+  "settings.desktop.materialHint":
+    "A translucent backdrop behind the sidebar on Windows 11. Takes effect after restarting the app.",
+  "settings.desktop.material.none": "Off",
+  "settings.desktop.material.auto": "Follow the system",
+  "settings.desktop.material.mica": "Mica",
+  "settings.desktop.material.acrylic": "Acrylic",
   "settings.desktop.sectionExplorer": "File manager",
   "settings.desktop.explorerTitle": "Open folders from Explorer",
   "settings.desktop.explorerHint":

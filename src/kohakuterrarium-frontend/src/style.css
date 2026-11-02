@@ -67,6 +67,23 @@
   background-color: var(--color-bg);
 }
 
+/*
+ * Window material (set by the desktop shell when the window has a Mica or Acrylic backdrop):
+ * the page behind the shell is transparent and only the rail is translucent, so the material
+ * shows in the sidebar while every content surface stays opaque.
+ */
+html[data-kt-material],
+html[data-kt-material] body,
+html[data-kt-material] .kt-macro-shell {
+  background: transparent;
+}
+html[data-kt-material] .kt-rail-pane {
+  background: rgba(220, 213, 203, 0.55);
+}
+html.dark[data-kt-material] .kt-rail-pane {
+  background: rgba(38, 34, 31, 0.45);
+}
+
 /* Mobile: bump every chrome tier so the rail / nav / tabs hit
  * readable sizes without per-component overrides.  The "body" tier
  * jumps to 1rem (16px @ html base) — matching the input-font-size

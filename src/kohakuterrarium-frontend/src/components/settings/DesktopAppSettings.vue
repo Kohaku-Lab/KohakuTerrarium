@@ -15,6 +15,14 @@
             <option value="running-on-ac" :selected="shell.settings.value?.keepAwake === 'running-on-ac'">{{ t("settings.desktop.keepAwakeAc") }}</option>
           </select>
         </SettingsRow>
+        <SettingsRow v-if="showRestore && notifyActionsSupported" data-setting="notify-actions" :title="t('settings.desktop.notifyActionsTitle')" :hint="t('settings.desktop.notifyActionsHint')" inline>
+          <el-switch :model-value="shell.settings.value?.notifyActions === true" @change="(value) => shell.patch({ notifyActions: value })" />
+        </SettingsRow>
+        <SettingsRow v-if="showRestore" data-setting="window-material" :title="t('settings.desktop.materialTitle')" :hint="t('settings.desktop.materialHint')">
+          <select class="kt-v2-edge kt-v2-panel h-8 px-2 rounded-lg border text-sm text-warm-700 dark:text-warm-200" data-window-material @change="(event) => shell.patch({ windowMaterial: event.target.value })">
+            <option v-for="choice in MATERIALS" :key="choice" :value="choice" :selected="(shell.settings.value?.windowMaterial || 'none') === choice">{{ t(`settings.desktop.material.${choice}`) }}</option>
+          </select>
+        </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup v-if="showAutostart" :title="t('settings.desktop.sectionStartup')" data-section="startup">
@@ -110,8 +118,11 @@ import { appSecretsAPI } from "@/utils/appSecretsApi"
 import { appShimsAPI } from "@/utils/appShimsApi"
 import { checkShellUpdate, desktopCapabilities, getAutostart, getCloseToTray, getExplorerVerbs, getSummonShortcut, setExplorerVerbs, exportDiagnostics, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, openLogs, repairRuntime, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
+import { followRuntimeChannel } from "@/utils/shellUpdateChannel"
 
 const { t } = useI18n()
+
+const MATERIALS = ["none", "auto", "mica", "acrylic"]
 
 const shims = ref({ supported: false, installed: [], commands: [], target_dir: "", on_path: false })
 const available = ref(false)
@@ -174,6 +185,7 @@ const showTray = computed(() => hostReady.value && hostSupports("get_close_to_tr
 const showRestore = computed(() => hostReady.value && shell.settings.value !== null)
 const showKeepAwake = computed(() => showRestore.value && hostSupports("set_keep_awake"))
 const explorerVerbs = ref(null)
+const notifyActionsSupported = ref(false)
 
 async function setExplorer(enabled) {
   if (await setExplorerVerbs(enabled)) explorerVerbs.value = enabled
@@ -195,6 +207,7 @@ const updateBusy = ref(false)
 async function checkUpdate() {
   updateBusy.value = true
   try {
+    await followRuntimeChannel(shell)
     const result = await checkShellUpdate()
     if (result?.available) {
       updateVersion.value = result.version || ""
@@ -210,6 +223,7 @@ async function checkUpdate() {
 async function installUpdate() {
   updateBusy.value = true
   try {
+    await followRuntimeChannel(shell)
     if (!(await installShellUpdate())) updateStatus.value = "failed"
   } finally {
     updateBusy.value = false
@@ -254,6 +268,7 @@ async function loadAutostart() {
   summonShortcut.value = await getSummonShortcut()
   const capabilities = await desktopCapabilities()
   explorerVerbs.value = capabilities?.explorerVerbs === true ? await getExplorerVerbs() : null
+  notifyActionsSupported.value = capabilities?.notificationActions === true
 }
 
 function stopRecording() {

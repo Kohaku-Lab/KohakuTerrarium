@@ -1,6 +1,7 @@
 import { onBeforeUnmount, onMounted, watch } from "vue"
 
 import { OPEN_WORKSPACE_EVENT } from "@/composables/useDesktopOpen"
+import { toggleHud } from "@/ext/hud"
 import { subscribeAttention, waitingAttentionTargets } from "@/stores/attention"
 import { useInstancesStore } from "@/stores/instances"
 import {
@@ -64,6 +65,8 @@ export function useDesktopTrayMenu() {
     } else if (kind === "folder") {
       const path = await pickFolderNative({ title: t("studio.picker.title") })
       if (path) window.dispatchEvent(new CustomEvent(OPEN_WORKSPACE_EVENT, { detail: { path } }))
+    } else if (kind === "hud") {
+      toggleHud()
     } else if (kind === "session") {
       const target = waitingAttentionTargets().find((entry) => entry.scope === id)
       if (!target || !navigateToAttention(target)) openSessionScope(id)

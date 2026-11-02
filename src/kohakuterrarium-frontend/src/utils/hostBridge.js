@@ -95,6 +95,20 @@ export async function showDesktopNotification(title, body) {
   }
 }
 
+/**
+ * Show a system notification with buttons (`[{ id, label }]`); the pressed one comes back as a
+ * `kt:desktop-notification-action` page event carrying `token`. Resolves ``false`` when it cannot.
+ */
+export function showActionNotification(title, body, actions, token) {
+  return callBoolean(
+    "show_action_notification",
+    String(title),
+    String(body),
+    actions,
+    String(token),
+  )
+}
+
 /** Whether the shell starts the app at login, or ``null`` when it cannot say. */
 export async function getAutostart() {
   if (!hostSupports("get_autostart")) return null
@@ -283,6 +297,16 @@ export async function exportDiagnostics(path) {
   }
 }
 
+/** Whether the shell can start a native drag of files out of the window. */
+export function fileDragOutSupported() {
+  return hostKind() === KIND_TAURI && hostSupports("start_file_drag")
+}
+
+/** Start a native drag of the files at `paths` (absolute, on this machine). Resolves ``false`` when none qualifies. */
+export function startFileDrag(paths) {
+  return callBoolean("start_file_drag", paths)
+}
+
 /** Whether the shell can show the operating system's own file and folder dialogs. */
 export function nativeDialogsSupported() {
   return hostKind() === KIND_TAURI && hostSupports("pick_folder")
@@ -354,6 +378,11 @@ async function callBoolean(name, ...args) {
   } catch {
     return false
   }
+}
+
+/** Bring the main window forward showing the running session `scope`; called by the HUD window. */
+export function focusSession(scope) {
+  return callBoolean("focus_session", String(scope))
 }
 
 /** Open (or show) a native overlay window: `{ label, key, width, height, anchor, alwaysOnTop }`. */

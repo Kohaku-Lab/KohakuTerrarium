@@ -1,6 +1,6 @@
 <template>
   <div class="relative h-full shrink-0" :class="collapsible ? '' : 'w-full'" :style="collapsible ? { width: (isCollapsed ? COLLAPSED_RAIL_WIDTH : width) + 'px' } : null">
-    <nav v-if="isCollapsed" class="h-full flex flex-col items-center gap-1 py-3 border-r border-warm-200 dark:border-warm-700 bg-[var(--kt-shell-rail)] dark:bg-warm-800/40 overflow-hidden" data-test="rail-collapsed">
+    <nav v-if="isCollapsed" class="kt-rail-pane h-full flex flex-col items-center gap-1 py-3 border-r border-warm-200 dark:border-warm-700 bg-[var(--kt-shell-rail)] dark:bg-warm-800/40 overflow-hidden" data-test="rail-collapsed">
       <button class="shrink-0 rounded-full" :title="t('shell.rail.expand')" @click="toggleCollapsed">
         <BrandMark class="w-7 h-7 rounded-full" />
       </button>
@@ -14,7 +14,7 @@
       <button class="shrink-0 w-8 h-8 flex items-center justify-center rounded-md text-warm-600 dark:text-warm-400 hover:text-warm-800 dark:hover:text-warm-200" :title="theme.dark ? t('shell.rail.themeToLight') : t('shell.rail.themeToDark')" @click="theme.toggle()"><span :class="theme.dark ? 'i-carbon-sun' : 'i-carbon-moon'" /></button>
       <button class="shrink-0 text-[10px] uppercase tracking-wider text-warm-600 dark:text-warm-400 hover:text-warm-800 dark:hover:text-warm-200 py-1" :title="t('shell.rail.cycleLocale')" @click="cycleLocale">{{ locale.current ?? "en" }}</button>
     </nav>
-    <nav v-else class="h-full flex flex-col border-r border-warm-200 dark:border-warm-700 bg-[var(--kt-shell-rail)] dark:bg-warm-800/40 overflow-hidden">
+    <nav v-else class="kt-rail-pane h-full flex flex-col border-r border-warm-200 dark:border-warm-700 bg-[var(--kt-shell-rail)] dark:bg-warm-800/40 overflow-hidden">
       <!-- Brand + cluster pill + command palette trigger -->
       <div class="relative flex shrink-0 items-center gap-2 px-3 py-3">
         <BrandMark class="w-7 h-7 rounded-full shrink-0" />

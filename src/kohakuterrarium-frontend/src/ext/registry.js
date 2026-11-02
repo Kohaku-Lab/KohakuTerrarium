@@ -23,6 +23,7 @@ import {
   registerGraphPanel,
 } from "@/ext/graphSlots"
 import { registerCommand, unregisterCommands } from "@/ext/commands"
+import { registerHud } from "@/ext/hud"
 import { clearOverlays, overlays, registerOverlay } from "@/ext/overlays"
 import { registerToolRenderer, registerTriggerRenderer, unregisterRenderers } from "@/ext/renderers"
 import {
@@ -330,6 +331,7 @@ export function unregisterAllContributions() {
     else if (kind === "settings") unregisterSettingsSection(key)
   }
   clearOverlays()
+  registerHud()
   clearStatusItems()
   clearActions()
   clearMessageRenderers()

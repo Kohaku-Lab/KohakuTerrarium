@@ -38,7 +38,8 @@ export function wantsWindow(overlay) {
 /** Whether this overlay is drawn in a native window instead of the app. */
 export function windowActive(key) {
   const overlay = overlays.get(key)
-  return wantsWindow(overlay) && isWindowAllowed(key) && overlayWindowsSupported()
+  const allowed = overlay?.options.firstParty === true || isWindowAllowed(key)
+  return wantsWindow(overlay) && allowed && overlayWindowsSupported()
 }
 
 function spec(overlay) {

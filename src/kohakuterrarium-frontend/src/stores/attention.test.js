@@ -291,6 +291,47 @@ describe("chat attention", () => {
     expect(state.pending).toEqual(new Set(["ask"]))
   })
 
+  it("carries a confirm prompt's question and answer buttons on its waiting edge", () => {
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    reduceAttentionEdge(
+      createAttentionState(),
+      {
+        type: "confirm",
+        interactive: true,
+        ui_event_id: "gate1",
+        payload: {
+          prompt: "Allow tool: bash?",
+          detail: "ls -la",
+          options: [
+            { id: "allow_once", label: "Allow once", style: "primary" },
+            { id: "bad" },
+            { id: "deny", label: "Deny", style: "danger" },
+          ],
+        },
+      },
+      { scope: "graph-a", tab: "root" },
+    )
+    reduceAttentionEdge(
+      createAttentionState(),
+      { type: "ask_text", interactive: true, ui_event_id: "ask1", payload: { prompt: "Name?" } },
+      { scope: "graph-a", tab: "root" },
+    )
+    unsubscribe()
+
+    expect(edges[0]).toMatchObject({
+      kind: "waiting-input",
+      eventId: "gate1",
+      prompt: "Allow tool: bash?",
+      detail: "ls -la",
+      options: [
+        { id: "allow_once", label: "Allow once", style: "primary" },
+        { id: "deny", label: "Deny", style: "danger" },
+      ],
+    })
+    expect(edges[1].options).toBeUndefined()
+  })
+
   it("marks completion read without clearing pending input", () => {
     let state = createAttentionState()
     state = reduceAttention(state, { type: "processing_start" })

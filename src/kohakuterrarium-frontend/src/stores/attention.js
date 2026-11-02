@@ -121,6 +121,20 @@ export function reduceAttention(state, event) {
   return next
 }
 
+/** The question and answer buttons of a confirm prompt, as `{ prompt, detail, options }`. */
+function confirmPrompt(event) {
+  if (event.type !== "confirm" || !Array.isArray(event.payload?.options)) return {}
+  const options = event.payload.options
+    .filter((option) => option && typeof option.id === "string" && typeof option.label === "string")
+    .map(({ id, label, style }) => ({ id, label, ...(style ? { style } : {}) }))
+  if (!options.length) return {}
+  return {
+    prompt: String(event.payload.prompt ?? ""),
+    detail: String(event.payload.detail ?? ""),
+    options,
+  }
+}
+
 /** Reduce and report only genuine attention edges. */
 export function reduceAttentionEdge(state, event, target = {}) {
   const next = reduceAttention(state, event)
@@ -141,6 +155,7 @@ export function reduceAttentionEdge(state, event, target = {}) {
         kind,
         ...(eventId ? { eventId } : {}),
         ...(target.summary ? { summary: target.summary } : {}),
+        ...(kind === "waiting-input" ? confirmPrompt(event) : {}),
       }
     : null
   if (edge?.scope && edge?.tab) {

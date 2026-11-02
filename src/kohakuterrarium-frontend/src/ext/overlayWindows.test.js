@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import OverlayLayer from "@/ext/OverlayLayer.vue"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
+import { toggleHud } from "@/ext/hud"
 import { hideOverlay, isOverlayVisible, loadPlacements, setWindowAllowed } from "@/ext/overlays"
 import {
   OVERLAY_PARAM,
@@ -129,6 +130,28 @@ describe("native overlay windows", () => {
     hideOverlay(KEY)
     syncOverlayWindows()
     expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [label] })
+  })
+
+  it("opens the built-in HUD in a window without asking, and lists it in the app when there is no shell", () => {
+    expect(windowActive("hud")).toBe(false)
+
+    const invoke = tauri()
+    expect(windowActive("hud")).toBe(true)
+    expect(isOverlayVisible("hud")).toBe(false)
+
+    toggleHud()
+    syncOverlayWindows()
+    const opens = invoke.mock.calls.filter(([name]) => name === "open_overlay_window")
+    expect(opens).toHaveLength(1)
+    expect(opens[0][1].args[0]).toMatchObject({
+      key: "hud",
+      anchor: "top-right",
+      alwaysOnTop: true,
+    })
+
+    toggleHud()
+    syncOverlayWindows()
+    expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [windowLabel("hud")] })
   })
 
   it("follows visibility and consent changes while running", async () => {

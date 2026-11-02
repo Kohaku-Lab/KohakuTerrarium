@@ -10,6 +10,7 @@
 import { watchEffect } from "vue"
 
 import { activeLayoutStore } from "@/composables/useActiveLayout"
+import { toggleHud } from "@/ext/hud"
 import { useLayoutStore } from "@/stores/layout"
 import { usePaletteStore } from "@/stores/palette"
 import { fireLayoutEditRequested, fireLayoutSaveAsRequested } from "@/utils/layoutEvents"
@@ -33,6 +34,13 @@ export function useBuiltinCommands() {
     icon: "i-carbon-save",
     keywords: "preset",
     handler: () => fireLayoutSaveAsRequested(),
+  })
+  palette.register({
+    id: "hud:toggle",
+    label: "Agents HUD: show or hide",
+    icon: "i-carbon-dashboard",
+    keywords: "overlay running creatures tokens",
+    handler: () => toggleHud(),
   })
   palette.register({
     id: "layout:reset-current",

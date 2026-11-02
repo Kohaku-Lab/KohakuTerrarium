@@ -12,7 +12,7 @@
           <el-switch :model-value="isOverlayVisible(overlay.key)" data-test="overlay-switch" @change="toggleOverlay(overlay.key)" />
         </div>
       </div>
-      <div v-if="canUseWindow(overlay)" class="mt-2 flex items-center justify-between gap-3 text-xs" data-test="overlay-window-row">
+      <div v-if="canUseWindow(overlay) && !overlay.options.firstParty" class="mt-2 flex items-center justify-between gap-3 text-xs" data-test="overlay-window-row">
         <span>Show on the desktop, outside this window</span>
         <el-switch :model-value="isWindowAllowed(overlay.key)" data-test="overlay-window-switch" @change="(on) => changeWindowAllowed(overlay, on)" />
       </div>

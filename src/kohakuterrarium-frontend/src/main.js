@@ -6,6 +6,7 @@ import App from "./App.vue"
 
 import { startUiExtensions } from "@/ext/loader"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
+import { registerHud } from "@/ext/hud"
 import { overlayKeyFromSearch, startOverlayWindows } from "@/ext/overlayWindows"
 import { installSharedModules } from "@/ext/shared"
 import { initializeAttentionPrefs } from "@/stores/attentionPrefs"
@@ -87,6 +88,7 @@ async function bootstrap() {
   app.use(router)
 
   registerBuiltinPanels()
+  registerHud()
   installSharedModules()
 
   if (secondary) {

@@ -124,11 +124,11 @@ describe("overlay state", () => {
     }
   })
 
-  it("is removed with the rest of the contributions", () => {
-    declare()
-    expect(overlays.size).toBe(1)
+  it("is removed with the rest of the contributions, leaving the built-in HUD", () => {
+    const key = declare()
+    expect(overlays.has(key)).toBe(true)
     unregisterAllContributions()
-    expect(overlays.size).toBe(0)
+    expect([...overlays.keys()]).toEqual(["hud"])
     expect(Object.keys(placements)).toEqual([])
   })
 

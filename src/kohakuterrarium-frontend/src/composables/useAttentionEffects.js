@@ -8,7 +8,10 @@ import {
   subscribeAttentionEdges,
   totalAttention,
 } from "@/stores/attention"
+import { useShellSettings } from "@/composables/useShellSettings"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
+import { useChatStore } from "@/stores/chat"
+import { showActionToast } from "@/utils/actionNotification"
 import { attentionTargetLabel, navigateToAttention } from "@/utils/attentionNavigation"
 import {
   desktopCapabilities,
@@ -39,6 +42,7 @@ export async function requestNotificationPermission() {
 
 export function useAttentionEffects() {
   const prefs = useAttentionPrefs()
+  const shell = useShellSettings()
   const { t } = useI18n()
   let unsubscribeEdges
   let unsubscribeAttention
@@ -150,8 +154,45 @@ export function useAttentionEffects() {
       (event.kind === "waiting-input" && prefs.state.notifyWaiting) ||
       (event.kind === "completed" && prefs.state.notifyCompletion)
     if (!enabled) return
+    const actions = toastActions(event)
+    if (actions.length) {
+      void notifyWithActions(event, actions)
+      return
+    }
     const { title, body } = notificationContent(event)
     void showDesktopNotification(title, body)
+  }
+
+  /** The buttons a notification may carry: answers that do not need a second look. */
+  function toastActions(event) {
+    if (
+      event.kind !== "waiting-input" ||
+      hostCapabilities?.notificationActions !== true ||
+      shell.settings.value?.notifyActions !== true
+    ) {
+      return []
+    }
+    return (event.options || []).filter((option) => option.style !== "secondary")
+  }
+
+  async function notifyWithActions(event, actions) {
+    const target = attentionTargetLabel(event)
+    const detail = prefs.state.notificationPreview ? event.detail : ""
+    const shown = await showActionToast(
+      {
+        title: event.prompt || t("attention.notify.waitingTitle"),
+        body: [target, detail].filter(Boolean).join(" · "),
+        actions: actions.map(({ id, label }) => ({ id, label })),
+      },
+      (id) => {
+        const answered = id && useChatStore(event.scope).submitUIReply(event.tab, event.eventId, id)
+        if (!answered) navigateToAttention(event)
+      },
+    )
+    if (!shown) {
+      const content = notificationContent(event)
+      void showDesktopNotification(content.title, content.body)
+    }
   }
 
   function requestDesktopAttention() {
