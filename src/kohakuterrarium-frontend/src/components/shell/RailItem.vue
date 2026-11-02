@@ -1,5 +1,5 @@
 <template>
-  <div class="group flex items-center gap-2 px-3 py-1.5 hover:bg-warm-300/50 dark:hover:bg-warm-700/50 cursor-pointer" :class="{ 'opacity-70': resuming }" @click="onRowClick" @contextmenu.prevent="showMenu = true">
+  <div class="group flex items-center gap-2 px-3 py-1.5 hover:bg-warm-300/50 dark:hover:bg-warm-700/50 cursor-pointer" :class="{ 'opacity-70': resuming }" @click="onRowClick" @contextmenu.prevent="onContextMenu">
     <!-- Status dot -->
     <span class="w-2 h-2 rounded-full shrink-0" :class="statusColor" />
 
@@ -21,9 +21,14 @@ import { computed, ref } from "vue"
 import { ElMessage } from "element-plus"
 
 import RailContextMenu from "@/components/shell/RailContextMenu.vue"
+import { railMenuItems } from "@/components/shell/railMenu"
+import { popOutInstance } from "@/composables/useDesktopPopout"
+import { runActionMenuId } from "@/ext/actions"
 import { useConversationsStore } from "@/stores/conversations"
 import { useTabsStore } from "@/stores/tabs"
+import { popoutWindowsSupported } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
+import { nativeMenuSupported, showNativeMenu } from "@/utils/nativeMenu"
 
 const props = defineProps({ instance: { type: Object, required: true } })
 const tabs = useTabsStore()
@@ -48,6 +53,37 @@ const statusColor = computed(() => {
     }[props.instance.status] ?? "bg-warm-400"
   )
 })
+
+function runMenuChoice(id) {
+  switch (id) {
+    case "toggle-chat":
+      return void toggleChat()
+    case "toggle-inspector":
+      return void toggleInspector()
+    case "open-in-window":
+      return void popOutInstance(props.instance)
+    case "detach":
+      return onDetach()
+    case "end":
+      return void endConversation()
+    default:
+      return void runActionMenuId(id, { id: props.instance.id ?? "", name: props.instance.config_name || "" })
+  }
+}
+
+async function onContextMenu() {
+  if (nativeMenuSupported()) {
+    const items = railMenuItems({
+      instance: props.instance,
+      chatOpen: chatOpen.value,
+      inspectorOpen: inspectorOpen.value,
+      canPopOut: popoutWindowsSupported(),
+      t,
+    })
+    if (await showNativeMenu(items, runMenuChoice)) return
+  }
+  showMenu.value = true
+}
 
 async function onRowClick() {
   if (resuming.value) return
