@@ -646,7 +646,7 @@ def test_server_child_publishes_ready_state(monkeypatch, tmp_path):
     monkeypatch.setattr(
         desktop_server,
         "start_desktop_server",
-        lambda _port, _level: (server, 8002),
+        lambda _port, _level, *, source=False: (server, 8002),
     )
 
     assert desktop_server.run_server_child(8001, "ERROR", state) == 0
@@ -660,7 +660,9 @@ def test_server_child_publishes_startup_error(monkeypatch, tmp_path):
     monkeypatch.setattr(
         desktop_server,
         "start_desktop_server",
-        lambda _port, _level: (_ for _ in ()).throw(RuntimeError("bind failed")),
+        lambda _port, _level, *, source=False: (_ for _ in ()).throw(
+            RuntimeError("bind failed")
+        ),
     )
 
     assert desktop_server.run_server_child(8001, "ERROR", state) == 1
@@ -692,7 +694,7 @@ def test_server_child_reports_runtime_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(
         desktop_server,
         "start_desktop_server",
-        lambda _port, _level: (server, 8002),
+        lambda _port, _level, *, source=False: (server, 8002),
     )
 
     assert desktop_server.run_server_child(8001, "ERROR", state) == 1
@@ -736,7 +738,7 @@ def test_server_child_exits_when_ui_parent_dies(monkeypatch, tmp_path):
     monkeypatch.setattr(
         desktop_server,
         "start_desktop_server",
-        lambda _port, _level: (server, 8002),
+        lambda _port, _level, *, source=False: (server, 8002),
     )
     monkeypatch.setattr(desktop_server, "_pid_alive", lambda _pid: False)
 
@@ -753,7 +755,7 @@ def test_server_child_honors_shutdown_state(monkeypatch, tmp_path):
     monkeypatch.setattr(
         desktop_server,
         "start_desktop_server",
-        lambda _port, _level: (server, 8002),
+        lambda _port, _level, *, source=False: (server, 8002),
     )
 
     def request_shutdown(_seconds):

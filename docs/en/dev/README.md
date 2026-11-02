@@ -30,6 +30,8 @@ imports, logging instead of `print`).
   discipline and how to verify with `scripts/dep_graph.py`.
 - [Frontend](frontend.md): Vue 3 dashboard, panel registration,
   WebSocket contracts.
+- [Tauri source development](../../../packaging/desktop/DEVELOPMENT.md):
+  check local Python and Vite changes in the real desktop window.
 
 ## When to read what
 

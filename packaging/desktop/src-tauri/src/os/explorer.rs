@@ -121,12 +121,18 @@ pub fn sync(app: &AppHandle) {
 /// Whether the Explorer entries are installed for this copy of the app.
 #[tauri::command]
 pub fn get_explorer_verbs() -> bool {
+    if crate::development::active() {
+        return false;
+    }
     std::env::current_exe().is_ok_and(|exe| is_installed(CLASSES, &exe))
 }
 
 /// Add (`[true]`) or remove (`[false]`) the Explorer entries and remember the choice.
 #[tauri::command]
 pub fn set_explorer_verbs(settings: State<ShellSettings>, args: Args) -> bool {
+    if crate::development::active() {
+        return false;
+    }
     let Some(on) = args
         .as_ref()
         .and_then(|values| values.first())

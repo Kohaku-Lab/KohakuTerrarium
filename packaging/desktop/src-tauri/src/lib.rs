@@ -5,6 +5,7 @@ mod backend;
 mod chrome;
 mod commands;
 mod context_menu;
+mod development;
 mod dialogs;
 mod dragout;
 mod files;
@@ -45,6 +46,7 @@ fn deliver_deep_link(app: &tauri::AppHandle, url: String) {
 }
 
 pub fn run() {
+    development::initialize().expect("invalid desktop development configuration");
     let headless = smoke::output_path().is_some();
     let mut builder = tauri::Builder::default();
     if !headless {
@@ -87,6 +89,7 @@ pub fn run() {
         .manage(popout::PopoutRegistry::default())
         .manage(os::keep_awake::KeepAwakeState::default())
         .invoke_handler(tauri::generate_handler![
+            development::source_page_ready,
             commands::get_desktop_capabilities,
             commands::request_desktop_attention,
             commands::open_external,
@@ -178,6 +181,7 @@ pub fn run() {
                 app.state::<ShellSettings>().load(directory);
             }
             window::create(app)?;
+            development::watch_owner(app.handle().clone())?;
             menu::install(app.handle())?;
             if !headless {
                 app.state::<opens::PendingOpens>()
@@ -187,8 +191,10 @@ pub fn run() {
                 summon::restore(app.handle());
                 tray::install(app)?;
                 runtime::watch_tray_line(app.handle().clone());
-                runtime::publish_shell_path(app.handle());
-                os::explorer::sync(app.handle());
+                if !development::active() {
+                    runtime::publish_shell_path(app.handle());
+                    os::explorer::sync(app.handle());
+                }
             } else if smoke::tray_probe_requested() {
                 let _ = tray::install(app);
             }

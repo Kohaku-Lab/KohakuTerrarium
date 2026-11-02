@@ -44,7 +44,8 @@ pub fn capabilities() -> Value {
         "openExternal": true,
         "notifications": true,
         "notificationActions": cfg!(windows),
-        "autostart": true,
+        "autostart": !crate::development::active(),
+        "sourceDevelopment": crate::development::active(),
         "deepLink": true,
         "overlayWindows": true,
         "closeToTray": true,
@@ -58,13 +59,13 @@ pub fn capabilities() -> Value {
         "taskbarProgress": true,
         "trayMenu": true,
         "backendControl": true,
-        "runtimeRepair": true,
+        "runtimeRepair": !crate::development::active(),
         "diagnostics": true,
         "keepAwake": true,
         "contextMenus": true,
         "windowChrome": cfg!(windows),
         "recentSessions": cfg!(windows),
-        "explorerVerbs": cfg!(windows),
+        "explorerVerbs": cfg!(windows) && !crate::development::active(),
     })
 }
 
@@ -102,12 +103,18 @@ pub fn show_notification(app: AppHandle, args: Args) -> bool {
 }
 
 #[tauri::command]
-pub fn get_autostart(app: AppHandle) -> bool {
-    app.autolaunch().is_enabled().unwrap_or(false)
+pub fn get_autostart(app: AppHandle) -> Option<bool> {
+    if crate::development::active() {
+        return None;
+    }
+    Some(app.autolaunch().is_enabled().unwrap_or(false))
 }
 
 #[tauri::command]
 pub fn set_autostart(app: AppHandle, args: Args) -> bool {
+    if crate::development::active() {
+        return false;
+    }
     let Some(enabled) = bool_arg(&args, 0) else {
         return false;
     };
@@ -132,6 +139,9 @@ pub fn set_desktop_theme(window: WebviewWindow, args: Args) -> bool {
 /// Whether a newer shell build is published for this platform.
 #[tauri::command]
 pub async fn check_shell_update(app: AppHandle) -> Value {
+    if crate::development::active() {
+        return json!({"available": false, "error": "source development mode"});
+    }
     let updater = match crate::updater::for_app(&app) {
         Ok(updater) => updater,
         Err(error) => return json!({ "available": false, "error": error.to_string() }),
@@ -156,6 +166,9 @@ pub async fn apply_update(
     app: &AppHandle,
     update: &tauri_plugin_updater::Update,
 ) -> Result<std::convert::Infallible, String> {
+    if crate::development::active() {
+        return Err("shell updates are unavailable in source mode".into());
+    }
     let bytes = update
         .download(|_, _| {}, || {})
         .await
@@ -168,6 +181,9 @@ pub async fn apply_update(
 /// Download and install the newer shell build, then restart into it.
 #[tauri::command]
 pub async fn install_shell_update(app: AppHandle) -> bool {
+    if crate::development::active() {
+        return false;
+    }
     let Ok(updater) = crate::updater::for_app(&app) else {
         return false;
     };

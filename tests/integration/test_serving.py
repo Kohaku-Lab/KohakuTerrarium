@@ -32,8 +32,13 @@ a port bound, a snapshot field).
 """
 
 import json
+import os
 import socket
+import subprocess
+import sys
+import time
 
+import httpx
 import pytest
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
@@ -587,6 +592,81 @@ class TestServingIntegration:
         # the failure mode ``run_web_server`` surfaces to the CLI.
         with pytest.raises(RuntimeError, match="No free port found"):
             find_free_port(start=chosen, host=host, max_tries=0)
+
+        # The source desktop entry point runs the real API without staged assets,
+        # exchanges the normal one-time launch token, then obeys shell shutdown.
+        source_state = tmp_path / "source-state.json"
+        env = {
+            **os.environ,
+            "KT_CONFIG_DIR": str(tmp_path / "source-data"),
+            "KT_DESKTOP_LAUNCH_TOKEN": "integration-source-token",
+            "KT_SECRET_STORE": "file",
+        }
+        command = [
+            sys.executable,
+            "-m",
+            "kohakuterrarium.serving.desktop.server",
+            "--source",
+            "--port",
+            "0",
+            "--state-path",
+            str(source_state),
+            "--parent-pid",
+            str(os.getpid()),
+        ]
+        with (tmp_path / "source.log").open("w", encoding="utf-8") as log:
+            process = subprocess.Popen(command, env=env, stdout=log, stderr=log)
+            try:
+                deadline = time.monotonic() + 40
+                while not source_state.exists() and time.monotonic() < deadline:
+                    assert process.poll() is None, (tmp_path / "source.log").read_text(
+                        encoding="utf-8"
+                    )
+                    time.sleep(0.1)
+                ready = json.loads(source_state.read_text())
+                assert ready["status"] == "ready", ready
+                chosen = ready["port"]
+                assert chosen > 0
+                with httpx.Client(
+                    base_url=f"http://127.0.0.1:{chosen}", trust_env=False
+                ) as client:
+                    assert client.get("/api/settings/ui-prefs").status_code == 401
+                    handshake = client.get(
+                        "/?kt_launch=integration-source-token&kt_dev_generation=1"
+                    )
+                    assert handshake.status_code == 302
+                    assert handshake.headers["location"] == "/?kt_dev_generation=1"
+                    assert "HttpOnly" in handshake.headers["set-cookie"]
+                    assert client.get("/api/settings/ui-prefs").status_code == 200
+                    assert client.get("/api/app/runtime").status_code == 409
+                    assert (
+                        client.get(
+                            "/api/settings/ui-prefs",
+                            headers={"Origin": "http://foreign.test"},
+                        ).status_code
+                        == 403
+                    )
+                    assert client.get("/").status_code == 404
+                # A second source server must fail, rather than silently changing
+                # ports and detaching from Vite's fixed proxy target.
+                conflict_state = tmp_path / "conflict-state.json"
+                conflict_command = command.copy()
+                conflict_command[conflict_command.index("--port") + 1] = str(chosen)
+                conflict_command[conflict_command.index("--state-path") + 1] = str(
+                    conflict_state
+                )
+                conflict = subprocess.run(
+                    conflict_command, env=env, stdout=log, stderr=log, timeout=40
+                )
+                assert conflict.returncode == 1
+                assert json.loads(conflict_state.read_text())["status"] == "error"
+                source_state.write_text('{"status":"shutdown"}', encoding="utf-8")
+                assert process.wait(timeout=15) == 0
+                assert not (tmp_path / "source-data" / "desktop-shell.json").exists()
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=10)
 
     def test_web_resolve_config_dirs_discovers_local_project_layout(
         self, tmp_path, monkeypatch

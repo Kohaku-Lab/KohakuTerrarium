@@ -129,7 +129,11 @@
           var button = document.createElement("button")
           button.textContent = label
           button.onclick = function () {
-            core.invoke(command).catch(function () {})
+            core.invoke(command).then(function (accepted) {
+              if (accepted === false) window.__ktShowError("The action is already in progress or unavailable.")
+            }).catch(function (error) {
+              window.__ktShowError(error)
+            })
           }
           return button
         }
@@ -145,7 +149,11 @@
             var actions = document.createElement("div")
             actions.className = "actions"
             actions.appendChild(actionButton("Restart backend", "restart_backend"))
-            actions.appendChild(actionButton("Repair runtime", "repair_runtime"))
+            core.invoke("get_desktop_capabilities").then(function (capabilities) {
+              if (capabilities && capabilities.runtimeRepair === true && actions.isConnected) {
+                actions.appendChild(actionButton("Repair runtime", "repair_runtime"))
+              }
+            }).catch(function () {})
             actions.appendChild(actionButton("Export diagnostics", "export_diagnostics"))
             actions.appendChild(actionButton("Open logs", "open_logs"))
             detail.appendChild(actions)

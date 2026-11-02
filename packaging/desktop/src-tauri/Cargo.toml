@@ -14,6 +14,9 @@ crate-type = ["rlib"]
 name = "kohakuterrarium"
 path = "src/main.rs"
 
+[features]
+source-dev = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

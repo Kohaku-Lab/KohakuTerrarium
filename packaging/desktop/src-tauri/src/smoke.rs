@@ -21,9 +21,8 @@ use crate::tray::{self, TrayState};
 const PAGE_TIMEOUT: Duration = Duration::from_secs(120);
 const IPC_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Runs in the app page: a native call from the loopback origin must succeed.
-const ACK_SCRIPT: &str =
-    "window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke('smoke_ack').catch(() => {})";
+/// Confirms a mounted application and authenticated request inside the WebView.
+const ACK_SCRIPT: &str = include_str!("smoke-ack.js");
 
 pub fn output_path() -> Option<PathBuf> {
     std::env::var_os("KT_DESKTOP_SMOKE_OUT").map(PathBuf::from)
@@ -241,13 +240,24 @@ fn backend_probe(app: &AppHandle) -> Value {
     let pid = backend.pid();
     let token = backend.token();
     let usage = pid.and_then(crate::runtime::stats::collect);
+    let loads_before = backend.main_loads();
     let restarted = crate::backend::restart(app);
+    let deadline = Instant::now() + PAGE_TIMEOUT;
+    while restarted.is_ok() && backend.main_loads() == loads_before && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(100));
+    }
+    let reloaded = restarted.is_ok() && backend.main_loads() > loads_before;
+    if reloaded {
+        backend.reset_ipc();
+        wait_for_ipc(app);
+    }
     json!({
         "memoryMeasured": usage.is_some_and(|(bytes, _)| bytes > 0),
         "restarted": restarted.is_ok(),
         "error": restarted.err(),
         "pidChanged": pid.is_some() && backend.pid() != pid,
         "sameToken": token.is_some() && backend.token() == token,
+        "authenticatedPageReloaded": reloaded && backend.ipc_confirmed(),
         "healthStatus": backend.port().and_then(|port| http_status(port, "/healthz")),
         "restarts": backend.restarts(),
         "state": backend.phase().name(),
@@ -256,9 +266,15 @@ fn backend_probe(app: &AppHandle) -> Value {
 
 /// Whether a backend probe result shows a measured, fully restarted backend.
 fn backend_probe_ok(probe: &Value) -> bool {
-    ["memoryMeasured", "restarted", "pidChanged", "sameToken"]
-        .iter()
-        .all(|key| probe[*key] == true)
+    [
+        "memoryMeasured",
+        "restarted",
+        "pidChanged",
+        "sameToken",
+        "authenticatedPageReloaded",
+    ]
+    .iter()
+    .all(|key| probe[*key] == true)
         && probe["healthStatus"] == 200
         && probe["restarts"] == 1
         && probe["state"] == "running"
@@ -370,6 +386,18 @@ fn write_report(path: &PathBuf, value: &Value) {
     );
 }
 
+/// Wait for an authenticated acknowledgement from the current app document.
+fn wait_for_ipc(app: &AppHandle) {
+    let backend = app.state::<Backend>();
+    let deadline = Instant::now() + IPC_TIMEOUT;
+    while !backend.ipc_confirmed() && Instant::now() < deadline {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.eval(ACK_SCRIPT);
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
 /// Report once the app page has loaded, then exit.
 pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
     thread::spawn(move || {
@@ -378,13 +406,7 @@ pub fn finish_when_loaded(app: AppHandle, port: u16, out: PathBuf) {
         while !backend.page_loaded() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(100));
         }
-        let ipc_deadline = Instant::now() + IPC_TIMEOUT;
-        while !backend.ipc_confirmed() && Instant::now() < ipc_deadline {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.eval(ACK_SCRIPT);
-            }
-            thread::sleep(Duration::from_millis(500));
-        }
+        wait_for_ipc(&app);
         let version = app.package_info().version.to_string();
         let mut probes = Probes {
             overlay: overlay_probe_requested().then(|| overlay_probe(&app)),
@@ -618,6 +640,7 @@ mod tests {
             "restarted": true,
             "pidChanged": true,
             "sameToken": true,
+            "authenticatedPageReloaded": true,
             "healthStatus": 200,
             "restarts": 1,
             "state": "running",
@@ -631,6 +654,7 @@ mod tests {
             (healthy.clone(), true),
             (broken("pidChanged", json!(false)), false),
             (broken("sameToken", json!(false)), false),
+            (broken("authenticatedPageReloaded", json!(false)), false),
             (broken("memoryMeasured", json!(false)), false),
             (broken("healthStatus", Value::Null), false),
             (broken("restarts", json!(2)), false),

@@ -1,4 +1,5 @@
 const COMMANDS: &[&str] = &[
+    "source_page_ready",
     "get_desktop_capabilities",
     "request_desktop_attention",
     "open_external",

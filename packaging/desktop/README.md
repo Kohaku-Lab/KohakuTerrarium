@@ -12,6 +12,18 @@ Tauri shell ── spawns ──> python/python(.exe) -m kohakuterrarium.launche
  shell/index.html        http://127.0.0.1:<port>/?kt_launch=<token>  (cookie-gated)
 ```
 
+After either initial startup or backend restart, the main window opens `/healthz`
+on the backend first and starts the token exchange from there. This also covers
+restarting from the loading shell's failure page. A redirect that starts on the
+loading page is cross-site, and macOS WebView can omit the `SameSite=Strict`
+session cookie on that redirect. The `/healthz` document does not count as the
+app page having loaded.
+
+This navigation applies to packaged builds on all desktop platforms, including
+Windows and macOS. The `desktop-shell` CI job runs Rust checks and tests, not a
+packaged WebView smoke test; packaged startup and failure recovery need separate
+platform validation.
+
 ## Layout
 
 | Path | Purpose |
@@ -35,6 +47,13 @@ Tauri shell ── spawns ──> python/python(.exe) -m kohakuterrarium.launche
 The Rust constants and names that Python and the frontend also use are compared by
 `tests/unit/packaging/test_desktop_contract.py`.
 
+## Develop from source
+
+Run `python scripts/dev_desktop.py` after the one-time editable Python, npm and
+Rust setup. The real desktop window loads local Python and Vite without rebuilding
+a release archive. See [DEVELOPMENT.md](DEVELOPMENT.md) for setup, isolation,
+restart behavior and validation boundaries.
+
 ## Build
 
 ```
@@ -53,7 +72,8 @@ KT_DESKTOP_RESOURCES=<stage dir> cargo run
 
 `KT_DESKTOP_SMOKE_OUT=<file>` runs headless: the window stays hidden, and once the
 backend is ready and the page has loaded the shell writes a JSON report there and
-exits (status 0 when the page loaded).
+exits. Status 0 requires the Vue app to be mounted and an authenticated request
+from the WebView to succeed, along with any additional probes that were requested.
 
 With `KT_DESKTOP_SMOKE_OVERLAY` also set, the shell opens a native overlay window
 (`overlay.rs`) and the report's `overlayWindow` says whether that window loaded the

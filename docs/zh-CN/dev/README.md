@@ -16,6 +16,7 @@ tags:
 - [依赖图](dependency-graph.md)：说明模块 import 方向的不变量，以及用于强制校验这些规则的测试。
 - [前端架构](frontend.md)：介绍 Vue 3 仪表板的布局、状态 store、WebSocket 连接方式，以及如何贡献 UI 变更。
 - [测试](testing.md)：三层纪律（unit / integration / e2e）、审计循环、`ScriptedLLM` / `TestAgentBuilder` harness，以及多节点测试 pattern（`RealLabWorker`）。
+- [Tauri 源码开发模式](../../../packaging/desktop/DEVELOPMENT.md)：在真实桌面窗口中用本地 Python 与 Vite 验证修改（英文）。
 
 ## 项目治理
 

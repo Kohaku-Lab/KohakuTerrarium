@@ -405,7 +405,10 @@ jobs:
           node-version: "24"
 
       - name: Install the Tauri CLI
-        run: npm install --global @tauri-apps/cli@2
+        shell: bash
+        run: |
+          version=$(node -p "require('./src/kohakuterrarium-frontend/package.json').devDependencies['@tauri-apps/cli']")
+          npm install --global "@tauri-apps/cli@$version"
 
       # Installers carry only the numeric X.Y.Z; the shell records the full
       # version so a nightly can tell whether a newer nightly exists.

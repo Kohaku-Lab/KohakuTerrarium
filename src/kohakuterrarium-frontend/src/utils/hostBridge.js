@@ -113,7 +113,8 @@ export function showActionNotification(title, body, actions, token) {
 export async function getAutostart() {
   if (!hostSupports("get_autostart")) return null
   try {
-    return (await call("get_autostart")) === true
+    const enabled = await call("get_autostart")
+    return typeof enabled === "boolean" ? enabled : null
   } catch {
     return null
   }

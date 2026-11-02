@@ -75,7 +75,7 @@ def create_app(**kwargs):
     return factory(**kwargs)
 
 
-def start_desktop_server(port: int, log_level: str):
+def start_desktop_server(port: int, log_level: str, *, source: bool = False):
     """Start the desktop FastAPI server and return its server and bound port."""
     configure_utf8_stdio(log=True)
     raise_fd_limit(log=True)
@@ -83,7 +83,7 @@ def start_desktop_server(port: int, log_level: str):
     enable_file_logging()
     set_level(log_level)
     enable_stderr_logging(log_level)
-    if not WEB_DIST_DIR.is_dir():
+    if not source and not WEB_DIST_DIR.is_dir():
         raise RuntimeError(
             "web_dist not found — run 'npm run build --prefix "
             "src/kohakuterrarium-frontend' first"
@@ -98,14 +98,16 @@ def start_desktop_server(port: int, log_level: str):
     app = create_app(
         creatures_dirs=creatures_dirs,
         terrariums_dirs=terrariums_dirs,
-        static_dir=WEB_DIST_DIR,
+        static_dir=None if source else WEB_DIST_DIR,
     )
+    app.state.desktop_source = source
     mark_startup("desktop_app_created", surface="desktop")
     return start_uvicorn_with_port_fallback(
         app,
         requested_port=port,
         host="127.0.0.1",
         log_level="warning",
+        max_tries=1 if source else 50,
     )
 
 
@@ -119,13 +121,19 @@ def _refresh_shims() -> None:
 
 
 def run_server_child(
-    port: int, log_level: str, state_path: Path, parent_pid: int = 0
+    port: int,
+    log_level: str,
+    state_path: Path,
+    parent_pid: int = 0,
+    *,
+    source: bool = False,
 ) -> int:
     """Start a desktop server child and publish its ready or error state."""
     try:
-        server, actual_port = start_desktop_server(port, log_level)
+        server, actual_port = start_desktop_server(port, log_level, source=source)
         _publish_state(state_path, status="ready", port=actual_port)
-        _refresh_shims()
+        if not source:
+            _refresh_shims()
         mark_startup("desktop_server_ready", surface="desktop", port=actual_port)
         while not server.should_exit:
             if parent_pid and not _pid_alive(parent_pid):
@@ -166,6 +174,7 @@ def run_server_child(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--source", action="store_true")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument(
         "--log-level",
@@ -180,6 +189,7 @@ def main() -> int:
         args.log_level,
         args.state_path,
         parent_pid=args.parent_pid,
+        source=args.source,
     )
 
 

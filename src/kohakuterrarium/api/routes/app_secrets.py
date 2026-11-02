@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from kohakuterrarium.api.auth.dependencies import verify_admin_token
-from kohakuterrarium.api.routes._local import is_local, local_only
+from kohakuterrarium.api.routes._local import (
+    is_local,
+    is_source_development,
+    local_only,
+)
 from kohakuterrarium.llm.profiles import secret_store
 from kohakuterrarium.llm.profiles.api_keys import switch_secret_store
 
@@ -18,6 +22,14 @@ class SecretStoreRequest(BaseModel):
 
 
 def _status(request: Request) -> dict[str, Any]:
+    if is_source_development(request):
+        return {
+            "local": True,
+            "mode": "file",
+            "active": "file",
+            "available": False,
+            "backend": "",
+        }
     return {
         "local": is_local(request),
         "mode": secret_store.configured_mode(),
@@ -38,6 +50,10 @@ async def set_secret_store(
     request: Request, body: SecretStoreRequest
 ) -> dict[str, Any]:
     """Move every stored API key to the key file or the system keychain."""
+    if is_source_development(request):
+        raise HTTPException(
+            409, "system keychain management is unavailable in source mode"
+        )
     local_only(request, "the key store can only be changed from this machine")
     try:
         moved = switch_secret_store(body.mode)

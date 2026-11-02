@@ -28,11 +28,7 @@ pub fn is_popout_label(label: &str) -> bool {
 }
 
 pub fn popout_url(port: u16, scope: &str) -> Option<Url> {
-    Url::parse_with_params(
-        &format!("http://127.0.0.1:{port}/"),
-        [(POPOUT_PARAM, scope)],
-    )
-    .ok()
+    Url::parse_with_params(&crate::development::origin(port), [(POPOUT_PARAM, scope)]).ok()
 }
 
 /// A session window: its label, the session it shows and its title.

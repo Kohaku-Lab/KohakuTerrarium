@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from kohakuterrarium.api.auth.dependencies import verify_admin_token
-from kohakuterrarium.api.routes._local import is_local, local_only
+from kohakuterrarium.api.routes._local import (
+    is_local,
+    is_source_development,
+    local_only,
+)
 from kohakuterrarium.cli.shims import (
     MODE_DEFER_PIPX,
     SHIM_SUBCOMMANDS,
@@ -38,10 +42,16 @@ class UninstallRequest(BaseModel):
 
 
 def _local_only(request: Request) -> None:
+    if is_source_development(request):
+        raise HTTPException(
+            409, "terminal command installation is unavailable in source mode"
+        )
     local_only(request, "terminal commands can only be managed locally")
 
 
 def _status(request: Request) -> dict[str, Any]:
+    if is_source_development(request):
+        return {"local": True, "supported": False, "installed": [], "commands": []}
     plan = build_plan()
     installed = [name for name in SHIM_SUBCOMMANDS if is_ours(shim_path(plan, name))]
     return {

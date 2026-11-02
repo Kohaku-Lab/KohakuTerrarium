@@ -47,6 +47,7 @@
     "allow-pick-files",
     "allow-save-file",
     "allow-get-shell-settings",
-    "allow-patch-shell-settings"
+    "allow-patch-shell-settings",
+    "allow-source-page-ready"
   ]
 }
