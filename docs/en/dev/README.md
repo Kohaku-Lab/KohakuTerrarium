@@ -30,6 +30,8 @@ imports, logging instead of `print`).
   discipline and how to verify with `scripts/dep_graph.py`.
 - [Frontend](frontend.md): Vue 3 dashboard, panel registration,
   WebSocket contracts.
+- [Tauri source development](../../../packaging/desktop/DEVELOPMENT.md):
+  check local Python and Vite changes in the real desktop window.
 
 ## When to read what
 
@@ -52,5 +54,3 @@ imports, logging instead of `print`).
 Every subpackage under `src/kohakuterrarium/` has its own `README.md`
 covering the files it contains. Those are the most accurate description
 of "what actually lives here." Use them together with this section.
-
-- [Tauri source development](../../../packaging/desktop/DEVELOPMENT.md)
