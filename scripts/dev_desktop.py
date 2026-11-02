@@ -79,7 +79,7 @@ def check_ports(frontend: int, backend: int) -> None:
 def configuration(python: Path, data: Path, frontend: int, backend: int) -> dict:
     """Construct the shared source-mode configuration."""
     return {
-        "python": str(python.resolve()),
+        "python": str(python.absolute()),
         "repository": str(ROOT),
         "data": str(data.resolve()),
         "frontend": f"http://127.0.0.1:{frontend}/",
@@ -121,7 +121,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        check_source(args.python.resolve(), ROOT)
+        check_source(args.python.absolute(), ROOT)
         check_ports(args.frontend_port, args.backend_port)
         node = shutil.which("node")
         if not node:
