@@ -176,7 +176,7 @@ jobs:
       - name: Run tool and plugin settings regression tests
         run: >-
           npm test -- --maxWorkers=4
-          src/components/settings/modules/ModuleSettings.test.js
+          src/components/settings/modules
           src/components/panels/modules/ModuleEditForm.test.js
           src/components/settings/SettingsPage.test.js
           src/components/session-v2/phone/PhoneTabs.test.js

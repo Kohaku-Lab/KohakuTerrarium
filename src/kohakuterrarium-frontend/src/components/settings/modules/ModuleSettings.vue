@@ -5,7 +5,7 @@
       <el-input :model-value="query" :disabled="busy" @update:model-value="changeView(() => (query = $event))" size="small" clearable class="!w-48 ml-auto" :placeholder="t('settings.modules.filter')" />
       <button type="button" class="i-carbon-renew text-warm-500" :aria-label="t('settings.modules.refresh')" :disabled="busy" @click="load" />
     </div>
-    <p v-if="error" class="text-sm text-coral" role="alert">{{ error }}</p>
+    <p v-if="error" class="text-sm text-coral" role="alert">{{ t("settings.moduleForm.operationError") }}: {{ error }}</p>
     <p v-if="loading" class="text-sm text-warm-500">{{ t("settings.modules.loading") }}</p>
     <p v-else-if="!visible.length" class="text-sm text-warm-500">{{ t("settings.modules.empty") }}</p>
     <div v-for="module in visible" :key="keyOf(module)" class="rounded-lg border kt-v2-line">
@@ -13,7 +13,7 @@
         <component :is="hasOptions(module) ? 'button' : 'div'" :type="hasOptions(module) ? 'button' : undefined" :disabled="hasOptions(module) ? busy : undefined" class="flex-1 min-w-0 text-left" :aria-expanded="hasOptions(module) ? selected === keyOf(module) : undefined" @click="hasOptions(module) && changeView(() => select(module))">
           <span class="font-mono text-sm text-warm-800 dark:text-warm-100">{{ module.name }}</span>
           <span v-if="module.type === 'native_tool'" class="ml-2 text-xs text-warm-500">{{ t("settings.modules.native") }}</span>
-          <span v-if="module.description" :title="module.description" class="block text-xs text-warm-500 mt-1">{{ module.name === "web_search" && module.type === "tool" ? t("settings.search.description") : module.description }}</span>
+          <span v-if="descriptionOf(module)" :title="descriptionOf(module)" class="block text-xs text-warm-500 mt-1">{{ descriptionOf(module) }}</span>
         </component>
         <el-switch v-if="module.type === 'plugin'" :model-value="module.enabled" :loading="toggling === module.name" :disabled="busy" :aria-label="module.name" @change="toggle(module, $event)" />
         <span class="w-4 shrink-0" aria-hidden="true">
@@ -21,7 +21,7 @@
         </span>
       </div>
       <div v-if="hasOptions(module) && selected === keyOf(module)" class="border-t kt-v2-line px-3 py-4">
-        <ModuleEditForm ref="editors" :name="module.name" :schema="module.schema" :values="editorValues" :disabled="busy" :presentation="module.type === 'tool' && module.name === 'web_search' ? searchPresentation : undefined" :submit-fn="submitter(module)" @applied="editorValues = $event.options" />
+        <ModuleEditForm ref="editors" :name="module.name" :schema="module.schema" :values="editorValues" :disabled="busy" :presentation="presentationOf(module)" :submit-fn="submitter(module)" @applied="editorValues = $event.options" />
       </div>
     </div>
   </div>
@@ -30,7 +30,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from "vue"
 
-import { webSearchPresentation } from "./searchPresentation"
+import { moduleDescription, modulePresentation, moduleSearchText } from "./modulePresentation"
 
 import ModuleEditForm from "@/components/panels/modules/ModuleEditForm.vue"
 import { useSectionLoad } from "@/components/session-v2/settings/useSectionTarget"
@@ -43,7 +43,8 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
-const searchPresentation = (values) => webSearchPresentation(values, t)
+const descriptionOf = (module) => moduleDescription(module, t)
+const presentationOf = (module) => (values) => modulePresentation(module, values, t)
 const sessionId = props.sessionId
 const creatureId = props.creatureId
 const editors = ref([])
@@ -64,7 +65,7 @@ const keyOf = (module) => `${module.type}:${module.name}`
 const visible = computed(() =>
   modules.value.filter((module) => {
     const matchesType = tab.value === "plugins" ? module.type === "plugin" : module.type !== "plugin"
-    return matchesType && `${module.name} ${module.description || ""}`.toLowerCase().includes(query.value.toLowerCase())
+    return matchesType && moduleSearchText(module).toLowerCase().includes(query.value.toLowerCase())
   }),
 )
 

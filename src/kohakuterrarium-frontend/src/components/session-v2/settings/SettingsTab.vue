@@ -1,12 +1,12 @@
 <template>
   <div v-if="isCompact" class="kt-v2-canvas h-full flex flex-col min-h-0" data-test="v2-settings">
-    <PhonePage v-if="phoneSection" :title="t(`set.${phoneSection}.title`)" :icon="iconOf(phoneSection)" :back-label="t('phone.back')" :test-id="`v2-settings-page-${phoneSection}`" @back="phoneSection = null">
+    <PhonePage v-if="phoneSection" :title="sectionTitle(phoneSection)" :icon="iconOf(phoneSection)" :back-label="t('phone.back')" :test-id="`v2-settings-page-${phoneSection}`" @back="phoneSection = null">
       <component :is="SECTION_COMPONENTS[phoneSection]" :key="phoneSection" />
     </PhonePage>
     <nav v-else class="flex-1 min-h-0 overflow-y-auto py-2" :aria-label="t('set.nav')">
       <button v-for="s in SETTINGS_SECTIONS" :key="s.id" type="button" class="kt-v2-line border-x-0 border-t-0 w-full min-h-14 flex items-center gap-3 px-4 border-b text-left active:bg-warm-200/60 dark:active:bg-warm-800" :data-test="`v2-settings-nav-${s.id}`" @click="phoneSection = s.id">
         <span :class="s.icon" class="text-lg text-warm-500 shrink-0" />
-        <span class="flex-1 min-w-0 text-[15px] text-warm-800 dark:text-warm-100">{{ t(`set.${s.id}.title`) }}</span>
+        <span class="flex-1 min-w-0 text-[15px] text-warm-800 dark:text-warm-100">{{ sectionTitle(s.id) }}</span>
         <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
       </button>
     </nav>
@@ -14,7 +14,7 @@
 
   <div v-else class="kt-v2-canvas h-full flex min-h-0" data-test="v2-settings">
     <nav class="kt-v2-panel kt-v2-edge w-56 shrink-0 flex flex-col gap-0.5 p-3 border-r" :aria-label="t('set.nav')">
-      <button v-for="s in SETTINGS_SECTIONS" :key="s.id" class="h-9 px-3 rounded-lg flex items-center gap-2.5 text-sm text-left transition-colors" :class="section === s.id ? 'bg-iolite/10 text-iolite dark:text-iolite-light font-medium' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800'" :aria-current="section === s.id ? 'page' : undefined" :data-test="`v2-settings-nav-${s.id}`" @click="setSection(s.id)"><span :class="s.icon" class="shrink-0" />{{ t(`set.${s.id}.title`) }}</button>
+      <button v-for="s in SETTINGS_SECTIONS" :key="s.id" class="h-9 px-3 rounded-lg flex items-center gap-2.5 text-sm text-left transition-colors" :class="section === s.id ? 'bg-iolite/10 text-iolite dark:text-iolite-light font-medium' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800'" :aria-current="section === s.id ? 'page' : undefined" :data-test="`v2-settings-nav-${s.id}`" @click="setSection(s.id)"><span :class="s.icon" class="shrink-0" />{{ sectionTitle(s.id) }}</button>
     </nav>
     <div class="flex-1 min-w-0 overflow-y-auto">
       <component :is="SECTION_COMPONENTS[section]" :key="section" />
@@ -36,6 +36,7 @@ import ModelSection from "@/components/session-v2/settings/ModelSection.vue"
 import TriggersSection from "@/components/session-v2/settings/TriggersSection.vue"
 import WorkspaceSection from "@/components/session-v2/settings/WorkspaceSection.vue"
 import { useDensity } from "@/composables/useDensity"
+import { useI18n } from "@/utils/i18n"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 
 /**
@@ -54,6 +55,8 @@ const SECTION_COMPONENTS = {
 const KEY = "kt.v2.settings.section"
 
 const t = useV2T()
+const { t: sharedT } = useI18n()
+const sectionTitle = (id) => (id === "modules" ? sharedT("settings.section.modules") : t(`set.${id}.title`))
 const { isCompact } = useDensity()
 const stored = readLocalPref(KEY)
 const section = ref(SECTION_COMPONENTS[stored] ? stored : "model")

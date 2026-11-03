@@ -2,6 +2,7 @@ export function webSearchPresentation(values, t) {
   const text = (key) => t(`settings.search.${key}`)
   const backend = values.backend || "duckduckgo"
   return {
+    spacious: true,
     advancedLabel: text("advanced"),
     availabilityLabel: text("availability"),
     unavailable: text("unavailable"),
