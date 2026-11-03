@@ -14,9 +14,19 @@ FRONTEND = ROOT / "src" / "kohakuterrarium-frontend"
 TAURI = ROOT / "packaging" / "desktop" / "src-tauri"
 
 
-def interpreter(root: Path) -> Path:
-    """Return the checkout's default virtual-environment interpreter."""
-    return root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+PRODUCTION_IDENTIFIER = "com.kohaku.terrarium"
+DEVELOPMENT_IDENTIFIER = "com.kohaku.terrarium.development"
+
+
+def interpreter() -> Path:
+    """Return the interpreter running this script."""
+    return Path(sys.executable)
+
+
+def production_data() -> Path:
+    """Return the data folder the installed app uses."""
+    configured = os.environ.get("KT_CONFIG_DIR")
+    return Path(configured) if configured else Path.home() / ".kohakuterrarium"
 
 
 def check_source(python: Path, repository: Path) -> None:
@@ -90,11 +100,22 @@ def configuration(python: Path, data: Path, frontend: int, backend: int) -> dict
     }
 
 
-def tauri_config(config: dict) -> dict:
-    """Return a development-only override for the installed Tauri CLI."""
+def tauri_config(config: dict, production: bool = False) -> dict:
+    """Return a development-only override for the installed Tauri CLI.
+
+    Production keeps the installed app's identifier, so shell settings and
+    WebView storage are shared with it.
+    """
+    identity = (
+        {"identifier": PRODUCTION_IDENTIFIER, "productName": "KohakuTerrarium"}
+        if production
+        else {
+            "identifier": DEVELOPMENT_IDENTIFIER,
+            "productName": "KohakuTerrarium Development",
+        }
+    )
     return {
-        "identifier": "com.kohaku.terrarium.development",
-        "productName": "KohakuTerrarium Development",
+        **identity,
         "bundle": {"active": False, "resources": None},
         "build": {
             "devUrl": config["frontend"],
@@ -109,8 +130,22 @@ def tauri_config(config: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--python", type=Path, default=interpreter(ROOT))
-    parser.add_argument("--data-dir", type=Path, default=ROOT / ".internal/desktop-dev")
+    parser.add_argument(
+        "--python",
+        type=Path,
+        default=interpreter(),
+        help="Interpreter for the backend (default: the one running this script)",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        help="Data folder (default: .internal/desktop-dev, or the installed app's with --production)",
+    )
+    parser.add_argument(
+        "--production",
+        action="store_true",
+        help="Use the installed app's data folder and app identity; quit the installed app first",
+    )
     parser.add_argument("--frontend-port", type=int, default=15173)
     parser.add_argument("--backend-port", type=int, default=18001)
     parser.add_argument(
@@ -122,6 +157,10 @@ def main() -> int:
         "--no-watch", action="store_true", help="Disable Rust file watching"
     )
     args = parser.parse_args()
+    if args.data_dir is None:
+        args.data_dir = (
+            production_data() if args.production else ROOT / ".internal/desktop-dev"
+        )
     try:
         check_source(args.python.absolute(), ROOT)
         check_ports(args.frontend_port, args.backend_port)
@@ -154,7 +193,7 @@ def main() -> int:
             "--features",
             "source-dev",
             "--config",
-            json.dumps(tauri_config(config)),
+            json.dumps(tauri_config(config, args.production)),
         ]
         if args.no_watch:
             command.append("--no-watch")

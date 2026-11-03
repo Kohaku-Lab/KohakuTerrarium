@@ -29,9 +29,16 @@ python scripts/dev_desktop.py --check
 python scripts/dev_desktop.py
 ```
 
-The runner locates the repository from its own path, uses the checkout's `.venv`
-by default, and verifies that this Python imports the checkout. Relative
-`--python` and `--data-dir` values are resolved from the current directory.
+The runner locates the repository from its own path, uses the interpreter that
+runs it by default (so start it with the checkout's environment), and verifies
+that this Python imports the checkout. Relative `--python` and `--data-dir`
+values are resolved from the current directory.
+
+`--production` runs the source backend on the installed app's data folder
+(`KT_CONFIG_DIR`, else `~/.kohakuterrarium`) with its app identifier, so shell
+settings and WebView storage are shared too. Quit the installed app first; both
+use the same single-instance lock and data folder. An explicit `--data-dir`
+still wins. Keys stored in the system keychain are not read in source mode.
 
 | Edit | Verify in the desktop window |
 | --- | --- |
@@ -59,7 +66,7 @@ python scripts/dev_desktop.py --no-watch
   A busy port fails the start; the runner never attaches to or stops its owner.
 - Python data defaults to `.internal/desktop-dev`. A separate application
   identifier isolates shell settings and WebView storage from the installed app;
-  credentials are not copied over.
+  credentials are not copied over (unless `--production`).
 - Runtime repair, packaged updates, autostart, Explorer registration, terminal
   command installation and system-keychain management are disabled both in the UI
   and at their native/API entry points. Keys are stored in a file. Provider

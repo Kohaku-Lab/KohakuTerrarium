@@ -63,6 +63,22 @@ def test_configuration_is_serializable_and_uses_separate_identity(tmp_path):
     )
 
 
+def test_the_running_interpreter_is_the_default_backend_python():
+    assert dev.interpreter() == Path(sys.executable)
+
+
+def test_production_uses_the_installed_apps_data_and_identity(tmp_path, monkeypatch):
+    monkeypatch.delenv("KT_CONFIG_DIR", raising=False)
+    assert dev.production_data() == Path.home() / ".kohakuterrarium"
+    monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "config"))
+    assert dev.production_data() == tmp_path / "config"
+    config = dev.configuration(Path(sys.executable), tmp_path, 15173, 18001)
+    production = dev.tauri_config(config, production=True)
+    assert production["identifier"] == "com.kohaku.terrarium"
+    assert production["productName"] == "KohakuTerrarium"
+    assert dev.tauri_config(config)["identifier"].endswith(".development")
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX TIME_WAIT reuse")
 def test_closed_server_port_can_be_checked_immediately():
     with socket.socket() as spare, socket.socket() as server:
