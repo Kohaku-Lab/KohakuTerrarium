@@ -2667,6 +2667,12 @@ async def _drive_journey(
         }
         recipe_path = terra_dir / "terrarium.yaml"
         recipe_path.write_text(yaml.safe_dump(recipe), encoding="utf-8")
+        default_url = "/api/settings/module-defaults/plugin/budget"
+        saved = await host.http.put(
+            default_url, json={"values": {"walltime_budget": {"hard": 321}}}
+        )
+        assert saved.status_code == 200, saved.text
+
         rr = await asyncio.wait_for(
             host.http.post(
                 "/api/sessions/active/terrarium",
@@ -2681,6 +2687,12 @@ async def _drive_journey(
         )
         if rr.status_code == 200:
             deployed = rr.json()["creatures"]
+            for member in deployed:
+                module_url = f"/api/sessions/{rr.json()['session_id']}/creatures/{member['creature_id']}/modules/plugin/budget/options"
+                current = await host.http.get(module_url)
+                assert current.status_code == 200, current.text
+                assert current.json()["options"]["walltime_budget"] == {"hard": 321}
+
             bugs.check(
                 "29b2 recipe members are deployed together on w1",
                 {member["name"] for member in deployed} == {"intake", "worker"}

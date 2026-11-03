@@ -95,6 +95,8 @@ const dictErrors = ref({})
 const status = ref("idle") // 'idle' | 'saving' | 'saved' | 'error'
 const errorMsg = ref("")
 
+let savePromise = null
+let echoedOptions = null
 let saveTimer = null
 let savedFlashTimer = null
 // Strict monotonic generation counter so a slower in-flight save can
@@ -166,6 +168,10 @@ function onDictInput(key, raw) {
 }
 
 function syncFromProps() {
+  if (echoedOptions && JSON.stringify(props.values) === JSON.stringify(echoedOptions)) {
+    echoedOptions = null
+    return
+  }
   // Rebuild draft + initial from incoming values + schema defaults.
   // Cancel any pending save — values may have changed underneath us
   // (toggle, external edit, reload).
@@ -204,13 +210,24 @@ function changedKeys() {
 }
 
 async function flushSave() {
+  while (savePromise) await savePromise
+  const pending = saveChanges()
+  savePromise = pending
+  try {
+    return await pending
+  } finally {
+    if (savePromise === pending) savePromise = null
+  }
+}
+
+async function saveChanges() {
   if (hasDictError.value) {
     // Don't try to save while a JSON dict field has a parse error;
     // the form will retry once the user fixes the input.
-    return
+    return false
   }
   const payload = changedKeys()
-  if (!Object.keys(payload).length) return
+  if (!Object.keys(payload).length) return true
 
   const myGen = ++saveGen
   status.value = "saving"
@@ -219,8 +236,8 @@ async function flushSave() {
     const result = await props.submitFn(props.name, payload)
     // Drop the result if a newer save (or sync from props) has fired
     // since this call started.
-    if (myGen !== saveGen) return
-    const applied = result?.options || draft.value
+    if (myGen !== saveGen) return false
+    const applied = { ...initial.value, ...payload, ...(result?.options || {}) }
     initial.value = deepClone(applied)
     // Don't blow away the draft — it might already have newer edits
     // on top of `applied`. Update only the keys we just persisted.
@@ -230,15 +247,18 @@ async function flushSave() {
       }
     }
     status.value = "saved"
+    echoedOptions = deepClone(initial.value)
     emit("applied", { name: props.name, options: initial.value })
     if (savedFlashTimer) clearTimeout(savedFlashTimer)
     savedFlashTimer = setTimeout(() => {
       if (status.value === "saved") status.value = "idle"
     }, SAVED_FLASH_MS)
+    return true
   } catch (e) {
-    if (myGen !== saveGen) return
+    if (myGen !== saveGen) return false
     status.value = "error"
     errorMsg.value = e?.response?.data?.detail || e?.message || String(e)
+    return false
   }
 }
 
@@ -253,7 +273,7 @@ function scheduleSave() {
 watch(
   draft,
   () => {
-    if (JSON.stringify(draft.value) === JSON.stringify(initial.value)) return
+    if (!savePromise && JSON.stringify(draft.value) === JSON.stringify(initial.value)) return
     scheduleSave()
   },
   { deep: true },
@@ -273,4 +293,5 @@ onBeforeUnmount(() => {
     savedFlashTimer = null
   }
 })
+defineExpose({ flushSave })
 </script>

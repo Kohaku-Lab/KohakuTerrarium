@@ -162,9 +162,25 @@ tools:
 
 Use `/module set web_search backend deepseek_api` and
 `/module set web_fetch backend deepseek` to switch a running creature; options
-persist in its session. In the GUI, open the running creature's chat, then
-**Modules → Tools → web_search / web_fetch** in the right-hand status rail;
-changes save automatically. In the Textual TUI, press **F2 → Tools**, select the
+persist in its session. In the GUI, open the session's **Settings → Tools &
+Plugins → Tools → web_search / web_fetch**, choosing the creature to edit when
+there is more than one. Changes save automatically and apply to subsequent calls.
+
+**Global Settings → Tools & Plugins** stores defaults in
+`~/.kohakuterrarium/module-defaults.json` (or the configured `KT_CONFIG_DIR`).
+These initialize new Studio sessions only, including every member of a new
+terrarium and sessions created on laboratory workers. Explicit creature options
+and plugin enablement take precedence. Defaults configure available components;
+they do not install or add tools. The global catalog includes configurable
+built-in tools and discovered plugins; session settings also expose configurable
+custom tools loaded by that creature.
+
+Each session keeps its own configuration. Editing global defaults never changes
+running, dormant, resumed, or forked sessions. Session edits affect only the
+selected creature and changed fields, and persist across save/resume. Model,
+provider/account, workspace, environment, trigger, and other settings retain
+their existing behavior. Global saves require administrator access on hosts that
+enforce it. In the Textual TUI, press **F2 → Tools**, select the
 tool, and choose **Save**. The Rich CLI also offers `/module edit web_search`
 and `/module edit web_fetch`.
 

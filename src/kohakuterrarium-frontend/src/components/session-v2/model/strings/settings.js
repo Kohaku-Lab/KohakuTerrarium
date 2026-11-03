@@ -10,6 +10,7 @@ export default {
     "set.filter": "Filter…",
     "set.refresh": "Refresh",
     "set.noMatches": "No matches",
+    "set.modules.title": "Tools & Plugins",
     "set.model.title": "Model",
     "set.model.hint":
       "The model each creature in this session runs on. Pick new ones and apply them together.",
@@ -71,6 +72,7 @@ export default {
     "set.filter": "篩選…",
     "set.refresh": "重新整理",
     "set.noMatches": "沒有符合的項目",
+    "set.modules.title": "工具與外掛",
     "set.model.title": "模型",
     "set.model.hint": "此工作階段中每個生物使用的模型。選好後一起套用。",
     "set.model.creature": "生物",
@@ -127,6 +129,7 @@ export default {
     "set.filter": "筛选…",
     "set.refresh": "刷新",
     "set.noMatches": "没有匹配的项目",
+    "set.modules.title": "工具与插件",
     "set.model.title": "模型",
     "set.model.hint": "此会话中每个 Creature 使用的模型。选好后一起应用。",
     "set.model.creature": "Creature",

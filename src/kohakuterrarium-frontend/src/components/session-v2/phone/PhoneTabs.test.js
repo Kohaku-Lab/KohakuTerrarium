@@ -6,6 +6,8 @@ vi.mock("@/composables/useDensity", () => ({
   useDensity: () => ({ isCompact: { value: true }, isExpansive: { value: false } }),
 }))
 vi.mock("@/utils/api", () => ({
+  moduleAPI: { list: vi.fn(async () => []) },
+  moduleDefaultsAPI: { list: vi.fn(async () => []) },
   configAPI: { getModels: vi.fn(async () => []) },
   terrariumAPI: { startCreature: vi.fn(), stopCreature: vi.fn(), switchCreatureModel: vi.fn() },
 }))
@@ -37,7 +39,11 @@ beforeEach(() => {
 describe("phone Settings", () => {
   it("lists the sections and opens one as a page; the model page opens a creature's model sheet", async () => {
     const { wrapper, ctx } = mountInSession(SettingsTab, { tab: "settings" })
-    expect(wrapper.findAll("[data-test^='v2-settings-nav-']")).toHaveLength(6)
+    expect(wrapper.findAll("[data-test^='v2-settings-nav-']")).toHaveLength(7)
+    await wrapper.find("[data-test='v2-settings-nav-modules']").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-test='module-settings']").exists()).toBe(true)
+    await wrapper.find("[data-test='phone-page-back']").trigger("click")
     await wrapper.find("[data-test='v2-settings-nav-env']").trigger("click")
     expect(wrapper.find("[data-test='env-section']").exists()).toBe(true)
     await wrapper.find("[data-test='phone-page-back']").trigger("click")

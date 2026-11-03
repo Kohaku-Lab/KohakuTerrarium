@@ -354,6 +354,18 @@ export default {
   "settings.section.appearance": "Appearance",
   "settings.section.notifications": "Notifications",
   "settings.section.desktop": "Desktop",
+  "settings.section.modules": "Tools & Plugins",
+  "settings.desc.modules":
+    "Defaults for new sessions only. Explicit creature settings take precedence; existing sessions keep their configuration.",
+  "settings.modules.sessionHint":
+    "Edit the selected creature’s current session configuration. Changes are saved with this session.",
+  "settings.modules.tools": "Tools",
+  "settings.modules.plugins": "Plugins",
+  "settings.modules.filter": "Filter tools and plugins…",
+  "settings.modules.refresh": "Refresh",
+  "settings.modules.loading": "Loading…",
+  "settings.modules.empty": "No matching configurable components.",
+  "settings.modules.native": "Provider-native",
   "settings.section.runtime": "Agent runtime",
   "settings.section.software": "Software",
   "settings.section.storage": "Storage",

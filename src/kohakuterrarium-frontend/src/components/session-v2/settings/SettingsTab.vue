@@ -31,6 +31,7 @@ import PhonePage from "@/components/session-v2/phone/PhonePage.vue"
 import CostSection from "@/components/session-v2/settings/CostSection.vue"
 import EnvSection from "@/components/session-v2/settings/EnvSection.vue"
 import ExtensionsSection from "@/components/session-v2/settings/ExtensionsSection.vue"
+import ModulesSection from "@/components/session-v2/settings/ModulesSection.vue"
 import ModelSection from "@/components/session-v2/settings/ModelSection.vue"
 import TriggersSection from "@/components/session-v2/settings/TriggersSection.vue"
 import WorkspaceSection from "@/components/session-v2/settings/WorkspaceSection.vue"
@@ -43,6 +44,7 @@ import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
  */
 const SECTION_COMPONENTS = {
   model: ModelSection,
+  modules: ModulesSection,
   env: EnvSection,
   triggers: TriggersSection,
   cost: CostSection,

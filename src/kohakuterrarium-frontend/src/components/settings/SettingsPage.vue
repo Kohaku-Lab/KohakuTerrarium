@@ -55,6 +55,10 @@
           </div>
         </SectionShell>
 
+        <SectionShell v-if="section.id === 'modules'" :title="sectionTitle(section)" :hint="sectionHint(section)">
+          <ModuleSettings />
+        </SectionShell>
+
         <!-- ════════════════════════ Models ════════════════════════ -->
         <ModelsSection v-if="section.id === 'models'" :title="sectionTitle(section)" :hint="sectionHint(section)" :backends="backends" />
 
@@ -174,6 +178,7 @@ import { ElMessage, ElMessageBox } from "element-plus"
 import AccountSection from "@/components/account/AccountSection.vue"
 import AccountUsagePanel from "@/components/settings/account/AccountUsagePanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
+import ModuleSettings from "@/components/settings/modules/ModuleSettings.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
 import DesktopAppSettings from "@/components/settings/DesktopAppSettings.vue"
