@@ -16,7 +16,14 @@ async def initialize_modules(
         saved = defaults.get(kind, {}).get(name, {})
         if not saved:
             continue
-        options = {**saved.get("options", {}), **module.get("configured_options", {})}
+        configured = module.get("configured_options", {})
+        options = {
+            key: value
+            for key, value in saved.get("options", {}).items()
+            if key not in configured
+        }
+        if kind == "native_tool" and options:
+            options = {**options, **configured}
         if options:
             await service.set_module_options(creature_id, kind, name, options)
         if (

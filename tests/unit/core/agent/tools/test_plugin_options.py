@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.core.agent.tools.plugin_options import (
     PLUGIN_OPTIONS_STATE_SUFFIX,
     PluginOptions,
@@ -265,3 +266,35 @@ class TestLoadPrivateStateStoreFailure:
         opts = PluginOptions(agent)
         out = opts._load_private_state()
         assert out == {}
+
+
+def test_partial_runtime_overrides_preserve_constructor_options_across_resume():
+    config = [
+        {"name": "budget", "enabled": False, "options": {"turn_budget": [20, 40]}}
+    ]
+    store = _FakeStore()
+    manager = init_plugins(config)
+    options = PluginOptions(_make_agent(manager=manager, store=store))
+    applied = options.set("budget", {"walltime_budget": {"hard": 300}})
+    assert applied["turn_budget"] == [20, 40]
+    assert options.get("budget") == {"walltime_budget": {"hard": 300}}
+    options.set("budget", {"tool_call_budget": {"hard": 50}})
+    restored_manager = init_plugins(config)
+    restored = PluginOptions(_make_agent(manager=restored_manager, store=store))
+    restored.apply()
+    assert restored_manager.get_plugin("budget").get_options() == {
+        "turn_budget": [20, 40],
+        "walltime_budget": {"hard": 300},
+        "tool_call_budget": {"hard": 50},
+    }
+    assert not restored_manager.is_enabled("budget")
+    assert restored.get("budget") == {
+        "walltime_budget": {"hard": 300},
+        "tool_call_budget": {"hard": 50},
+    }
+    restored.set("budget", {"walltime_budget": {"hard": 400}})
+    restored.apply()
+    assert restored_manager.get_plugin("budget").get_options()["walltime_budget"] == {
+        "hard": 400
+    }
+    assert restored.get("budget")["tool_call_budget"] == {"hard": 50}

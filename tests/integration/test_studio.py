@@ -454,7 +454,16 @@ class TestStudioIntegration:
             creature_data.setdefault("tools", []).append(
                 {"name": "web_search", "need_content": False}
             )
+            creature_data["plugins"] = [
+                {
+                    "name": "budget",
+                    "enabled": False,
+                    "options": {"turn_budget": [20, 40]},
+                }
+            ]
             config_file.write_text(yaml.safe_dump(creature_data))
+            with pytest.raises(ValueError, match="numeric"):
+                patch_defaults("plugin", "budget", {"turn_budget": {"hard": "abc"}})
             patch_defaults(
                 "tool", "web_search", {"fallback": "duckduckgo", "need_content": True}
             )
@@ -467,6 +476,10 @@ class TestStudioIntegration:
                 initialized.tool_options.get("web_search")["fallback"] == "duckduckgo"
             )
             assert initialized.tool_options.get("web_search")["need_content"] is False
+            assert initialized.plugins.get_plugin("budget").get_options()[
+                "turn_budget"
+            ] == [20, 40]
+            assert not initialized.plugins.is_enabled("budget")
             initialized.tool_options.set("web_search", {"need_content": True})
             patch_defaults(
                 "tool", "web_search", {"fallback": "none", "need_content": False}
@@ -760,6 +773,10 @@ class TestStudioIntegration:
             assert resumed_agent.plugins.get_plugin("budget").get_options()[
                 "walltime_budget"
             ] == {"hard": 300}
+            assert resumed_agent.plugins.get_plugin("budget").get_options()[
+                "turn_budget"
+            ] == [20, 40]
+            assert not resumed_agent.plugins.is_enabled("budget")
             resumed_history = await studio.sessions.chat.history(
                 resumed.session_id, resumed_cid
             )

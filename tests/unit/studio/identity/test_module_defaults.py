@@ -44,6 +44,21 @@ def test_catalog_and_partial_saves_preserve_other_defaults():
         ("tool", "web_search", {"backend": "missing"}, None, ValueError),
         ("tool", "web_fetch", {}, True, ValueError),
         ("plugin", "budget", {"missing": 5}, None, ValueError),
+        ("plugin", "budget", {"turn_budget": {"hard": "abc"}}, None, ValueError),
+        (
+            "plugin",
+            "budget",
+            {"walltime_budget": {"soft": "abc", "hard": 300}},
+            None,
+            ValueError,
+        ),
+        (
+            "plugin",
+            "budget",
+            {"tool_call_budget": {"hard": float("inf")}},
+            None,
+            ValueError,
+        ),
         ("native_tool", "image_gen", {"size": "1x1"}, None, ValueError),
     ],
 )

@@ -76,6 +76,8 @@ def patch_defaults(
         entry = saved.setdefault(module_type, {}).setdefault(name, {})
         candidate = {**entry.get("options", {}), **values}
         cleaned = validators[module_type](name, candidate, module["schema"])
+        if module_type == "plugin" and cleaned:
+            init_plugins([]).set_plugin_options(name, cleaned)
         entry["options"] = cleaned
         if enabled is not None:
             entry["enabled"] = enabled

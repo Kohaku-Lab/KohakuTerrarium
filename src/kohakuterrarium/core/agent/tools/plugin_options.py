@@ -42,8 +42,10 @@ class PluginOptions:
         if manager is None:
             raise KeyError(plugin_name)
         applied = manager.set_plugin_options(plugin_name, values or {})
-        if applied:
-            self._values[plugin_name] = dict(applied)
+        keys = self.get(plugin_name).keys() | (values or {}).keys()
+        overrides = {key: applied[key] for key in keys if key in applied}
+        if overrides:
+            self._values[plugin_name] = overrides
         else:
             self._values.pop(plugin_name, None)
         self._persist()
@@ -82,7 +84,9 @@ class PluginOptions:
                 )
                 continue
             if applied:
-                self._values[str(plugin_name)] = dict(applied)
+                self._values[str(plugin_name)] = {
+                    key: applied[key] for key in values if key in applied
+                }
         self._persist()
 
     # ── Internals ───────────────────────────────────────────────

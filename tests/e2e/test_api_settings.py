@@ -69,7 +69,7 @@ tools:
 plugins:
   - name: budget
     options:
-      turn_budget: {soft: 20, hard: 40}
+      turn_budget: [20, 40]
 """
 
 
@@ -508,6 +508,15 @@ class TestApiSettingsJourney:
             == 400
         )
 
+        before_invalid = client.get(defaults_url).json()
+        invalid_budget = client.put(
+            f"{defaults_url}/plugin/budget",
+            json={"values": {"turn_budget": {"hard": "abc"}}},
+        )
+        assert invalid_budget.status_code == 400
+        assert "numeric" in invalid_budget.json()["detail"]
+        assert client.get(defaults_url).json() == before_invalid
+
         # ── 7. Per-creature settings on a live creature ───────────────
         # Start a 1-creature session (frontend: agentAPI.create).
         resp = client.post(
@@ -527,10 +536,7 @@ class TestApiSettingsJourney:
         modules = {(m["type"], m["name"]): m for m in resp.json()["modules"]}
         assert ("plugin", "budget") in modules
         assert modules[("plugin", "budget")]["enabled"] is True
-        assert modules[("plugin", "budget")]["options"]["turn_budget"] == {
-            "soft": 20,
-            "hard": 40,
-        }
+        assert modules[("plugin", "budget")]["options"]["turn_budget"] == [20, 40]
         assert modules[("plugin", "budget")]["options"]["walltime_budget"] == {
             "hard": 300
         }
@@ -616,7 +622,7 @@ class TestApiSettingsJourney:
         assert resp.status_code == 200
         opts = resp.json()
         assert "turn_budget" in opts["schema"]
-        assert opts["options"]["turn_budget"] == {"soft": 20, "hard": 40}
+        assert opts["options"]["turn_budget"] == [20, 40]
 
         # 7c. Apply new plugin options through the module API.
         resp = client.put(

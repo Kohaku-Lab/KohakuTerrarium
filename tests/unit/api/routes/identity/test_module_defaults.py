@@ -28,6 +28,15 @@ def test_global_defaults_require_admin_without_affecting_reads():
         }
 
         headers = {"X-Admin-Token": "test-admin"}
+        before_invalid = defaults_path().read_bytes()
+        invalid = client.put(
+            "/api/settings/module-defaults/plugin/budget",
+            json={"values": {"turn_budget": {"hard": "abc"}}},
+            headers=headers,
+        )
+        assert invalid.status_code == 400
+        assert "numeric" in invalid.json()["detail"]
+        assert defaults_path().read_bytes() == before_invalid
         assert (
             client.put(
                 url, json={"values": {"backend": "invalid"}}, headers=headers
