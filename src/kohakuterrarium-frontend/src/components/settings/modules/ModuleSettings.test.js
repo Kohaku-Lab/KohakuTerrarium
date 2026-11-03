@@ -34,7 +34,7 @@ const modules = () => [
 ]
 const stubs = {
   ElInput: defineComponent({
-    props: ["modelValue"],
+    props: ["modelValue", "size"],
     emits: ["update:modelValue"],
     template:
       '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
@@ -196,3 +196,66 @@ it("keeps a newer edit when an earlier save is still in flight", async () => {
   expect(backend).toBe("duckduckgo")
   expect(wrapper.find("select").element.value).toBe("duckduckgo")
 })
+
+it.each([
+  ["global", {}],
+  ["session", { sessionId: "s", creatureId: "a" }],
+])(
+  "omits empty expanders in %s settings while keeping plugin toggles and real editors",
+  async (_scope, props) => {
+    const entries = [
+      ...modules(),
+      {
+        type: "plugin",
+        name: "goal",
+        description: "Goal guidance",
+        schema: {},
+        options: {},
+        enabled: false,
+      },
+      { type: "plugin", name: "no_schema", options: {}, enabled: false },
+      {
+        type: "plugin",
+        name: "configurable",
+        schema: { limit: { type: "string", default: "10" } },
+        options: { limit: "10" },
+        enabled: true,
+      },
+      { type: "tool", name: "plain_tool", schema: {}, options: {}, enabled: null },
+    ]
+    moduleDefaultsAPI.list.mockResolvedValue(entries)
+    moduleAPI.list.mockResolvedValue(entries)
+    wrapper = mount(ModuleSettings, { props, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findAll("button[aria-expanded]").map((button) => button.text())).not.toContain(
+      "plain_tool",
+    )
+    await open("web_search")
+    expect(wrapper.find("select").exists()).toBe(true)
+    await open("settings.modules.plugins")
+    const row = (name) =>
+      wrapper.findAll(".rounded-lg.border").find((entry) => entry.text().includes(name))
+    for (const name of ["goal", "no_schema"]) {
+      expect(row(name).find("[aria-expanded]").exists()).toBe(false)
+      expect(row(name).find(".i-carbon-chevron-down").exists()).toBe(false)
+      await row(name).find(".text-left").trigger("click")
+      expect(row(name).findComponent(ModuleEditForm).exists()).toBe(false)
+    }
+    expect(row("goal").text()).toContain("Goal guidance")
+    await row("goal").find("button").trigger("click")
+    await flushPromises()
+    if (props.sessionId) expect(moduleAPI.toggle).toHaveBeenCalledWith("s", "a", "plugin", "goal")
+    else expect(moduleDefaultsAPI.patch).toHaveBeenCalledWith("plugin", "goal", { enabled: true })
+    await open("configurable")
+    await row("configurable").find("input").setValue("20")
+    await vi.advanceTimersByTimeAsync(500)
+    if (props.sessionId)
+      expect(moduleAPI.setOptions).toHaveBeenCalledWith("s", "a", "plugin", "configurable", {
+        limit: "20",
+      })
+    else
+      expect(moduleDefaultsAPI.patch).toHaveBeenCalledWith("plugin", "configurable", {
+        values: { limit: "20" },
+      })
+  },
+)

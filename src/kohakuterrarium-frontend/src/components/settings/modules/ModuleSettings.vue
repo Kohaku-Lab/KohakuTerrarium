@@ -10,15 +10,17 @@
     <p v-else-if="!visible.length" class="text-sm text-warm-500">{{ t("settings.modules.empty") }}</p>
     <div v-for="module in visible" :key="keyOf(module)" class="rounded-lg border kt-v2-line">
       <div class="flex items-center gap-3 px-3 py-3">
-        <button type="button" class="flex-1 min-w-0 text-left" :aria-expanded="selected === keyOf(module)" @click="selected = selected === keyOf(module) ? null : keyOf(module)">
+        <component :is="hasOptions(module) ? 'button' : 'div'" :type="hasOptions(module) ? 'button' : undefined" class="flex-1 min-w-0 text-left" :aria-expanded="hasOptions(module) ? selected === keyOf(module) : undefined" @click="hasOptions(module) && (selected = selected === keyOf(module) ? null : keyOf(module))">
           <span class="font-mono text-sm text-warm-800 dark:text-warm-100">{{ module.name }}</span>
           <span v-if="module.type === 'native_tool'" class="ml-2 text-xs text-warm-500">{{ t("settings.modules.native") }}</span>
           <span v-if="module.description" :title="module.description" class="block text-xs text-warm-500 mt-1">{{ module.name === "web_search" && module.type === "tool" ? t("settings.search.description") : module.description }}</span>
-        </button>
+        </component>
         <el-switch v-if="module.type === 'plugin'" :model-value="module.enabled" :loading="toggling === module.name" :disabled="Boolean(toggling)" :aria-label="module.name" @change="toggle(module, $event)" />
-        <span class="i-carbon-chevron-down text-warm-400" />
+        <span class="w-4 shrink-0" aria-hidden="true">
+          <span v-if="hasOptions(module)" class="i-carbon-chevron-down text-warm-400" />
+        </span>
       </div>
-      <div v-if="selected === keyOf(module)" class="border-t kt-v2-line px-3 py-4">
+      <div v-if="hasOptions(module) && selected === keyOf(module)" class="border-t kt-v2-line px-3 py-4">
         <ModuleEditForm ref="editors" :name="module.name" :schema="module.schema" :values="module.options" :presentation="module.type === 'tool' && module.name === 'web_search' ? searchPresentation : undefined" :submit-fn="submitter(module)" @applied="module.options = $event.options" />
       </div>
     </div>
@@ -54,6 +56,7 @@ const error = ref("")
 const toggling = ref("")
 let generation = 0
 
+const hasOptions = (module) => Object.keys(module.schema || {}).length > 0
 const keyOf = (module) => `${module.type}:${module.name}`
 const visible = computed(() =>
   modules.value.filter((module) => {
