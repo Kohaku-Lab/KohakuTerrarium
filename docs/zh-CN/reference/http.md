@@ -601,6 +601,31 @@ Response：`{"status": "deleted", "name"}`。
 
 同 `GET /api/configs/models`。
 
+### 工具与插件默认值
+
+#### `GET /api/settings/module-defaults`
+
+返回 `{"modules": [...]}`。每项包含 `type`、`name`、`description`、`schema`、
+`options` 和 `enabled`；选项合并内置值与已保存的默认值，不改变任何会话。
+
+#### `PUT /api/settings/module-defaults/{module_type}/{name}`
+
+更新单个组件的默认值。`module_type` 为 `tool`、`native_tool` 或 `plugin`。
+以下请求体适用于 `plugin/budget`：
+
+```json
+{"values": {"walltime_budget": {"hard": 300}}, "enabled": false}
+```
+
+- `values` 默认为 `{}`，只更新指定选项字段，保留其他字段和组件；嵌套对象按整个字段替换。
+- `enabled` 可选，仅支持插件。
+- 默认值只用于新建 Studio 会话；Creature 显式配置优先，已有会话不变。
+- 启用管理员校验时，需要 `X-Admin-Token` 请求头。
+
+返回 `{"options": {...}, "enabled": true | false | null}`。无效选项在保存前拒绝。
+错误：`400` 选项无效或组件不支持开关；`401` 管理员令牌缺失或无效；
+`404` 组件不存在；`409` 保存冲突，可重试；`422` 请求体格式错误。
+
 ### UI prefs
 
 #### `GET /api/settings/ui-prefs`

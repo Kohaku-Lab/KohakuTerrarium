@@ -664,6 +664,20 @@ export const agentAPI = {
  * For terrarium-attached creatures, ``sid`` is the terrarium id and
  * ``creatureId`` is the per-target id.
  */
+export const moduleDefaultsAPI = {
+  async list() {
+    const { data } = await api.get("/settings/module-defaults")
+    return data.modules || []
+  },
+  async patch(type, name, body) {
+    const { data } = await api.put(
+      `/settings/module-defaults/${encodeURIComponent(type)}/${encodeURIComponent(name)}`,
+      body,
+    )
+    return data
+  },
+}
+
 export const moduleAPI = {
   /** List every configurable module (any type) on this creature. */
   async list(sessionId, creatureId) {

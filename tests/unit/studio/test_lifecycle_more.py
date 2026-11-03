@@ -215,7 +215,7 @@ class TestStartTerrariumPackageRef:
         )
         monkeypatch.setattr(lifecycle, "_session_dir", lambda: str(tmp_path))
 
-        async def _apply(c, pwd=None, llm=None, strict=True, session=None):
+        async def _apply(c, pwd=None, llm=None, strict=True, session=None, start=True):
             return SimpleNamespace(graph_id="g-new", creature_ids=set())
 
         engine.apply_recipe = _apply

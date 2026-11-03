@@ -25,6 +25,7 @@ from typing import Any
 import kohakuterrarium.terrarium.channels.channels as _terrarium_channels
 import kohakuterrarium.terrarium.graph.topology as _terrarium_topology
 import kohakuterrarium.terrarium.graph.snapshot as _terrarium_topology_snap
+from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.core.agent.history.selection import persist_plugin_selection
 from kohakuterrarium.core.agent.tools.options import (
@@ -320,6 +321,36 @@ def agent_list_modules(agent: Any) -> list[dict[str, Any]]:
     out.extend(_inventory_plugins(agent))
     out.extend(_inventory_native_tools(agent))
     out.extend(_inventory_tools(agent))
+    config = getattr(agent, "config", None)
+    plugin_specs = resolve_plugin_specs(getattr(config, "default_plugins", []))
+    plugin_specs.extend(getattr(config, "plugins", []))
+    configured_plugins = {
+        spec["name"]: spec
+        for spec in plugin_specs
+        if isinstance(spec, dict) and spec.get("name")
+    }
+    for entry in out:
+        name = entry["name"]
+        if entry["type"] == "plugin":
+            spec = configured_plugins.get(name)
+            entry["configured_options"] = {
+                key: value
+                for key, value in (spec.get("options", {}) if spec else {}).items()
+                if key in entry["schema"]
+            }
+            entry["configured_enabled"] = spec.get("enabled", True) if spec else None
+        else:
+            tool = agent.registry.get_tool(name)
+            entry["configured_options"] = dict(
+                getattr(getattr(tool, "config", None), "extra", {}) or {}
+            )
+            entry["configured_options"] = {
+                key: value
+                for key, value in entry["configured_options"].items()
+                if key in entry["schema"]
+            }
+            if entry["type"] == "native_tool":
+                entry["options"] = {**entry["configured_options"], **entry["options"]}
     return out
 
 

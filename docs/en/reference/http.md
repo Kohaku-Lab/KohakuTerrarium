@@ -673,6 +673,35 @@ Response: `{"status": "deleted", "name"}`.
 
 Same as `GET /api/configs/models`.
 
+### Tool and plugin defaults
+
+#### `GET /api/settings/module-defaults`
+
+Returns `{"modules": [...]}`. Each entry includes `type`, `name`, `description`,
+`schema`, `options`, and `enabled`; options combine built-in values with saved
+defaults. This request does not change any session.
+
+#### `PUT /api/settings/module-defaults/{module_type}/{name}`
+
+Update defaults for one component. `module_type` is `tool`, `native_tool`, or
+`plugin`. Body example for `plugin/budget`:
+
+```json
+{"values": {"walltime_budget": {"hard": 300}}, "enabled": false}
+```
+
+- `values` defaults to `{}` and updates only supplied option fields. Other
+  fields and components are preserved; nested objects are replaced as a field.
+- `enabled` is optional and supported only for plugins.
+- Defaults apply only when creating new Studio sessions. Explicit creature
+  configuration takes precedence; existing sessions are unchanged.
+- When the admin gate is enabled, send the `X-Admin-Token` header.
+
+Returns `{"options": {...}, "enabled": true | false | null}`. Invalid options
+are rejected before saving. Errors: `400` invalid options or unsupported
+enablement, `401` missing/invalid admin token, `404` unknown component,
+`409` concurrent save (retry), `422` invalid request body.
+
 ### UI prefs
 
 #### `GET /api/settings/ui-prefs`

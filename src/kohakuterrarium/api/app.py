@@ -92,6 +92,9 @@ from kohakuterrarium.api.routes.identity import (
     session_summary as identity_session_summary,
 )
 from kohakuterrarium.api.routes.identity import settings as identity_settings
+from kohakuterrarium.api.routes.identity import (
+    module_defaults as identity_module_defaults,
+)
 from kohakuterrarium.api.routes.identity import ui_prefs as identity_ui_prefs
 from kohakuterrarium.api.routes.persistence import artifacts as persistence_artifacts
 from kohakuterrarium.api.routes.persistence import fork as persistence_fork
@@ -801,6 +804,9 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     # Identity configuration remains under ``/api/settings`` to match the
     # frontend settings contract.
     app.include_router(identity_llm.router, prefix="/api/settings", tags=["identity"])
+    app.include_router(
+        identity_module_defaults.router, prefix="/api/settings", tags=["identity"]
+    )
     app.include_router(
         identity_api_keys.router, prefix="/api/settings", tags=["identity"]
     )

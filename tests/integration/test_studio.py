@@ -41,9 +41,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 from kohakuvault import KVault
 
 import kohakuterrarium.session.vault.io as vault_io
+from kohakuterrarium.studio.identity.module_defaults import patch_defaults
 from kohakuterrarium.errors import (
     InvalidRequestError,
     NotFoundError,
@@ -447,7 +449,45 @@ class TestStudioIntegration:
             console_line = "typed at the server console\n"
             console = io.StringIO(console_line)
             monkeypatch.setattr(sys, "stdin", console)
+            config_file = creature_dir / "config.yaml"
+            creature_data = yaml.safe_load(config_file.read_text())
+            creature_data.setdefault("tools", []).append(
+                {"name": "web_search", "need_content": False}
+            )
+            creature_data["plugins"] = [
+                {
+                    "name": "budget",
+                    "enabled": False,
+                    "options": {"turn_budget": [20, 40]},
+                }
+            ]
+            config_file.write_text(yaml.safe_dump(creature_data))
+            with pytest.raises(ValueError, match="numeric"):
+                patch_defaults("plugin", "budget", {"turn_budget": {"hard": "abc"}})
+            patch_defaults(
+                "tool", "web_search", {"fallback": "duckduckgo", "need_content": True}
+            )
+            patch_defaults("plugin", "budget", {"walltime_budget": {"hard": 300}})
             session = await studio.sessions.start_creature(str(creature_dir))
+            initialized = studio.sessions.find_creature(
+                session.session_id, "scout"
+            ).agent
+            assert (
+                initialized.tool_options.get("web_search")["fallback"] == "duckduckgo"
+            )
+            assert initialized.tool_options.get("web_search")["need_content"] is False
+            assert initialized.plugins.get_plugin("budget").get_options()[
+                "turn_budget"
+            ] == [20, 40]
+            assert not initialized.plugins.is_enabled("budget")
+            initialized.tool_options.set("web_search", {"need_content": True})
+            patch_defaults(
+                "tool", "web_search", {"fallback": "none", "need_content": False}
+            )
+            assert (
+                initialized.tool_options.get("web_search")["fallback"] == "duckduckgo"
+            )
+            assert initialized.tool_options.get("web_search")["need_content"] is True
             assert session.name == "scout"
             assert len(session.creatures) == 1
             creature_id = session.creatures[0]["creature_id"]
@@ -723,6 +763,20 @@ class TestStudioIntegration:
             } == expected_saved
             assert len(resumed.creatures) == 1
             resumed_cid = resumed.creatures[0]["creature_id"]
+            resumed_agent = studio.sessions.find_creature(
+                resumed.session_id, resumed_cid
+            ).agent
+            assert (
+                resumed_agent.tool_options.get("web_search")["fallback"] == "duckduckgo"
+            )
+            assert resumed_agent.tool_options.get("web_search")["need_content"] is True
+            assert resumed_agent.plugins.get_plugin("budget").get_options()[
+                "walltime_budget"
+            ] == {"hard": 300}
+            assert resumed_agent.plugins.get_plugin("budget").get_options()[
+                "turn_budget"
+            ] == [20, 40]
+            assert not resumed_agent.plugins.is_enabled("budget")
             resumed_history = await studio.sessions.chat.history(
                 resumed.session_id, resumed_cid
             )
@@ -1382,7 +1436,27 @@ class TestStudioIntegration:
                     },
                 ),
             ]
+            patch_defaults(
+                "plugin", "budget", {"walltime_budget": {"hard": 321}}, enabled=False
+            )
             team = await studio.sessions.start_terrarium(str(recipe))
+            for member in team.creatures:
+                member_agent = studio.sessions.find_creature(
+                    team.session_id, member["creature_id"]
+                ).agent
+                assert member_agent.plugins.get_plugin("budget").get_options()[
+                    "walltime_budget"
+                ] == {"hard": 321}
+                assert not member_agent.plugins.is_enabled("budget")
+            patch_defaults("plugin", "budget", {"walltime_budget": {"hard": 400}})
+            for member in team.creatures:
+                assert studio.sessions.find_creature(
+                    team.session_id, member["creature_id"]
+                ).agent.plugins.get_plugin("budget").get_options()[
+                    "walltime_budget"
+                ] == {
+                    "hard": 321
+                }
             assert team.name == "rt-team"
             team_sid = team.session_id
             assert {c["name"] for c in team.creatures} == {"lead", "worker"}

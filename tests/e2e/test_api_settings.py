@@ -69,7 +69,7 @@ tools:
 plugins:
   - name: budget
     options:
-      turn_budget: {soft: 20, hard: 40}
+      turn_budget: [20, 40]
 """
 
 
@@ -463,6 +463,60 @@ class TestApiSettingsJourney:
         # 1.0 = the 100% default aligned with the frontend (7222561c).
         assert values["kt-desktop-zoom"] == 1.0
 
+        defaults_url = "/api/settings/module-defaults"
+        catalog = client.get(defaults_url)
+        assert catalog.status_code == 200
+        assert any(m["name"] == "web_search" for m in catalog.json()["modules"])
+        assert (
+            client.put(
+                f"{defaults_url}/tool/web_search",
+                json={"values": {"fallback": "duckduckgo"}},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"{defaults_url}/tool/web_search",
+                json={"values": {"need_content": True}},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"{defaults_url}/plugin/budget",
+                json={"values": {"walltime_budget": {"hard": 300}}, "enabled": False},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.put(
+                f"{defaults_url}/tool/web_search",
+                json={"values": {"backend": "invalid"}},
+            ).status_code
+            == 400
+        )
+        assert (
+            client.put(
+                f"{defaults_url}/plugin/missing", json={"enabled": True}
+            ).status_code
+            == 404
+        )
+        assert (
+            client.put(
+                f"{defaults_url}/tool/web_fetch", json={"enabled": True}
+            ).status_code
+            == 400
+        )
+
+        before_invalid = client.get(defaults_url).json()
+        invalid_budget = client.put(
+            f"{defaults_url}/plugin/budget",
+            json={"values": {"turn_budget": {"hard": "abc"}}},
+        )
+        assert invalid_budget.status_code == 400
+        assert "numeric" in invalid_budget.json()["detail"]
+        assert client.get(defaults_url).json() == before_invalid
+
         # ── 7. Per-creature settings on a live creature ───────────────
         # Start a 1-creature session (frontend: agentAPI.create).
         resp = client.post(
@@ -482,6 +536,35 @@ class TestApiSettingsJourney:
         modules = {(m["type"], m["name"]): m for m in resp.json()["modules"]}
         assert ("plugin", "budget") in modules
         assert modules[("plugin", "budget")]["enabled"] is True
+        assert modules[("plugin", "budget")]["options"]["turn_budget"] == [20, 40]
+        assert modules[("plugin", "budget")]["options"]["walltime_budget"] == {
+            "hard": 300
+        }
+        assert modules[("tool", "web_search")]["options"]["fallback"] == "duckduckgo"
+        assert modules[("tool", "web_search")]["options"]["need_content"] is True
+        assert (
+            client.put(
+                f"{defaults_url}/tool/web_search",
+                json={"values": {"fallback": "none", "need_content": False}},
+            ).status_code
+            == 200
+        )
+        current_url = f"/api/sessions/{session_id}/creatures/{creature_id}/modules/tool/web_search/options"
+        assert client.get(current_url).json()["options"]["fallback"] == "duckduckgo"
+        assert client.get(current_url).json()["options"]["need_content"] is True
+        newer = client.post(
+            "/api/sessions/active/creature",
+            json={"config_path": str(creature_dir), "name": "new-defaults"},
+        )
+        assert newer.status_code == 200, newer.text
+        newer = newer.json()
+        newer_url = f"/api/sessions/{newer['session_id']}/creatures/new-defaults/modules/tool/web_search/options"
+        assert client.get(newer_url).json()["options"]["fallback"] == "none"
+        assert client.get(newer_url).json()["options"]["need_content"] is False
+        assert (
+            client.delete(f"/api/sessions/active/{newer['session_id']}").status_code
+            == 200
+        )
 
         for name, backend, baseline in (
             ("web_search", "deepseek_api", "duckduckgo"),
@@ -539,7 +622,7 @@ class TestApiSettingsJourney:
         assert resp.status_code == 200
         opts = resp.json()
         assert "turn_budget" in opts["schema"]
-        assert opts["options"]["turn_budget"] == {"soft": 20, "hard": 40}
+        assert opts["options"]["turn_budget"] == [20, 40]
 
         # 7c. Apply new plugin options through the module API.
         resp = client.put(

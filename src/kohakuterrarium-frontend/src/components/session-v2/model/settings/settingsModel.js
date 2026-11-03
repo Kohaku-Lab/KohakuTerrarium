@@ -7,6 +7,7 @@
 /** Settings sections, in nav order. */
 export const SETTINGS_SECTIONS = [
   { id: "model", icon: "i-carbon-chip" },
+  { id: "modules", icon: "i-carbon-tools" },
   { id: "env", icon: "i-carbon-cloud" },
   { id: "triggers", icon: "i-carbon-event" },
   { id: "cost", icon: "i-carbon-currency-dollar" },

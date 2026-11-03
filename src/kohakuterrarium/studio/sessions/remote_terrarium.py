@@ -6,6 +6,8 @@ from pathlib import Path
 
 from kohakuterrarium.studio.deploy import deploy_creature_to_node
 from kohakuterrarium.studio.sessions.handles import Session
+from kohakuterrarium.studio.identity.module_defaults import load_defaults
+from kohakuterrarium.studio.sessions.module_defaults import initialize_modules
 from kohakuterrarium.studio.sessions.registry import meta_for
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.multi_node.service import MultiNodeTerrariumService
@@ -57,12 +59,14 @@ async def start_remote_terrarium(
         else str(remote_root)
     )
 
+    defaults = load_defaults()
     remote_service = service.service_for(on_node)
     graph, creatures = await remote_service.apply_recipe(
         remote_recipe,
         pwd=pwd,
         llm=llm,
         persist=True,
+        start=not defaults,
     )
     registered_ids: list[str] = []
     try:
@@ -77,6 +81,11 @@ async def start_remote_terrarium(
         for creature in creatures:
             service._home[creature.creature_id] = on_node
             registered_ids.append(creature.creature_id)
+        for creature in creatures:
+            await initialize_modules(service, creature.creature_id, defaults)
+        if defaults:
+            for creature in creatures:
+                await service.start_creature(creature.creature_id)
         requested_name = name.strip() if name and name.strip() else None
         base_name = requested_name or load_terrarium_config(config_path).name
         existing_names = {entry.get("name") for entry in meta_for(service).values()}

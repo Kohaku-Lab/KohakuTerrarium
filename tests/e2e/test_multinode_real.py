@@ -1356,6 +1356,8 @@ async def test_subprocess_worker_spawn_and_chat_round_trip(tmp_path, monkeypatch
     install_scripted_llm(monkeypatch, script=["sub-scout reporting in"])
     cfg_dir = _write_creature_config(tmp_path, "sub_scout", "You are sub_scout.")
 
+    config_file = cfg_dir / "config.yaml"
+    config_file.write_text(config_file.read_text() + "tools:\n  - name: web_search\n")
     async with RealLabHost(tmp_path) as host:
         async with RealLabSubprocessWorker(
             "sub-worker-1",
@@ -1365,6 +1367,12 @@ async def test_subprocess_worker_spawn_and_chat_round_trip(tmp_path, monkeypatch
         ) as worker:
             await worker.wait_for_join(host, timeout=OP_TIMEOUT * 4)
 
+            default_url = "/api/settings/module-defaults/tool/web_search"
+            saved = await host.http.put(
+                default_url,
+                json={"values": {"fallback": "duckduckgo", "need_content": True}},
+            )
+            assert saved.status_code == 200, saved.text
             resp = await asyncio.wait_for(
                 host.http.post(
                     "/api/sessions/active/creature",
@@ -1383,6 +1391,19 @@ async def test_subprocess_worker_spawn_and_chat_round_trip(tmp_path, monkeypatch
             creature_id = creature_entry["creature_id"]
             assert creature_entry.get("home_node") == "sub-worker-1"
 
+            module_url = f"/api/sessions/{session_id}/creatures/{creature_id}/modules/tool/web_search/options"
+            current = await host.http.get(module_url)
+            assert current.json()["options"]["fallback"] == "duckduckgo"
+            assert current.json()["options"]["need_content"] is True
+            await host.http.put(default_url, json={"values": {"need_content": False}})
+            assert (await host.http.get(module_url)).json()["options"][
+                "need_content"
+            ] is True
+            changed = await host.http.put(
+                module_url, json={"values": {"need_content": False}}
+            )
+            assert changed.status_code == 200, changed.text
+            assert changed.json()["options"]["fallback"] == "duckduckgo"
             chat_path = f"/ws/sessions/{session_id}/creatures/{creature_id}/chat"
             async with host.api_ws(chat_path) as ws:
                 reply = await asyncio.wait_for(

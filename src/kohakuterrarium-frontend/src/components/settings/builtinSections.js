@@ -73,6 +73,15 @@ export const BUILTIN_SECTIONS = [
     keywords: ["server", "tools"],
   },
   {
+    id: "modules",
+    labelKey: "settings.section.modules",
+    descriptionKey: "settings.desc.modules",
+    icon: "i-carbon-tools",
+    group: "agents",
+    order: 20,
+    keywords: ["tools", "plugins", "search", "backend", "defaults"],
+  },
+  {
     id: "runtime",
     labelKey: "settings.section.runtime",
     descriptionKey: "settings.desc.runtime",

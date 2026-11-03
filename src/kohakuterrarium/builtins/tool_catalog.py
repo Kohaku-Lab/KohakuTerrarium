@@ -213,6 +213,36 @@ def list_provider_native_tools() -> list[dict[str, object]]:
     return out
 
 
+def list_configurable_tools() -> list[dict]:
+    """Return schemas and initial values for configurable built-in tools."""
+    _run_deferred_loaders()
+    out = []
+    for name, cls in sorted(_BUILTIN_TOOLS.items()):
+        native = getattr(cls, "is_provider_native", False)
+        schema_method = (
+            "provider_native_option_schema" if native else "runtime_option_schema"
+        )
+        method = getattr(cls, schema_method, None)
+        if method is None or method.__qualname__.startswith("BaseTool."):
+            continue
+        tool = cls()
+        schema = getattr(tool, schema_method)()
+        if schema:
+            out.append(
+                {
+                    "type": "native_tool" if native else "tool",
+                    "name": name,
+                    "description": tool.description,
+                    "schema": schema,
+                    "options": {
+                        key: spec.get("default") for key, spec in schema.items()
+                    },
+                    "enabled": None,
+                }
+            )
+    return out
+
+
 def get_provider_native_option_schema(name: str) -> dict[str, dict[str, object]]:
     """Return the option schema for a single provider-native tool.
 

@@ -257,7 +257,7 @@ class TestStartTerrarium:
         cfg = TerrariumConfig(name="test-terra", creatures=[], channels=[])
         seen_apply_kwargs: dict = {}
 
-        async def _apply(c, pwd=None, llm=None, strict=True, session=None):
+        async def _apply(c, pwd=None, llm=None, strict=True, session=None, start=True):
             seen_apply_kwargs.update(strict=strict, session=session)
             return SimpleNamespace(graph_id="g-new", creature_ids=set())
 

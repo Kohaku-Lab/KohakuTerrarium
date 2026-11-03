@@ -604,6 +604,31 @@ Response：`{"status": "deleted", "name"}`。
 
 同 `GET /api/configs/models`。
 
+### 工具與外掛預設值
+
+#### `GET /api/settings/module-defaults`
+
+傳回 `{"modules": [...]}`。每項包含 `type`、`name`、`description`、`schema`、
+`options` 和 `enabled`；選項合併內建值與已儲存的預設值，不改變任何工作階段。
+
+#### `PUT /api/settings/module-defaults/{module_type}/{name}`
+
+更新單一元件的預設值。`module_type` 為 `tool`、`native_tool` 或 `plugin`。
+以下請求內容適用於 `plugin/budget`：
+
+```json
+{"values": {"walltime_budget": {"hard": 300}}, "enabled": false}
+```
+
+- `values` 預設為 `{}`，只更新指定選項欄位，保留其他欄位和元件；巢狀物件按整個欄位取代。
+- `enabled` 選填，僅支援外掛。
+- 預設值只用於新建 Studio 工作階段；Creature 明確設定優先，既有工作階段不變。
+- 啟用管理員驗證時，需要 `X-Admin-Token` 請求標頭。
+
+傳回 `{"options": {...}, "enabled": true | false | null}`。無效選項在儲存前拒絕。
+錯誤：`400` 選項無效或元件不支援開關；`401` 管理員權杖缺少或無效；
+`404` 元件不存在；`409` 儲存衝突，可重試；`422` 請求內容格式錯誤。
+
 ### UI prefs
 
 #### `GET /api/settings/ui-prefs`

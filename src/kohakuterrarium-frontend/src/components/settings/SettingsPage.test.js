@@ -67,6 +67,14 @@ function mountSettingsPage(section = "", compact = false) {
   })
 }
 
+it("opens Tools & Plugins defaults from global settings", async () => {
+  setActivePinia(createPinia())
+  const wrapper = mountSettingsPage("modules")
+  await flushPromises()
+  expect(wrapper.findComponent({ name: "ModuleSettings" }).exists()).toBe(true)
+  wrapper.unmount()
+})
+
 describe("SettingsPage model presets", () => {
   beforeEach(() => {
     vi.clearAllMocks()

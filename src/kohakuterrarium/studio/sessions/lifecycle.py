@@ -16,6 +16,8 @@ from kohakuterrarium.studio.sessions.cluster import fold as cluster_fold
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions import live as _live
 from kohakuterrarium.studio.sessions import summary as _summary
+from kohakuterrarium.studio.identity.module_defaults import load_defaults
+from kohakuterrarium.studio.sessions.module_defaults import initialize_modules
 from kohakuterrarium.studio.sessions.find import (
     apply_creature_name,
     apply_creature_name as _apply_creature_name,  # noqa: F401 — legacy alias
@@ -111,6 +113,7 @@ async def start_creature(
     paths; host-local files can first be copied via
     ``POST /api/nodes/{node_id}/deploy/creature``.
     """
+    defaults = load_defaults()
     # Only host-targeted paths can be validated against the host filesystem;
     # remote workers validate their own paths during creature creation.
     if on_node == "_host":
@@ -133,6 +136,7 @@ async def start_creature(
                 strict=False,
                 name=name,
                 io="none",
+                start=not defaults,
             )
         elif config is not None:
             creature = await engine.add_creature(
@@ -143,14 +147,22 @@ async def start_creature(
                 strict=False,
                 name=name,
                 io="none",
+                start=not defaults,
             )
         else:
             raise ValueError("Must provide config_path or config")
         sid = creature.graph_id
         cid = creature.creature_id
-        await attach_session_store_for_creature(
-            engine, creature, config_path=config_path or ""
-        )
+        try:
+            await attach_session_store_for_creature(
+                engine, creature, config_path=config_path or ""
+            )
+            await initialize_modules(service, cid, defaults)
+            if defaults:
+                await engine.start(cid)
+        except BaseException:
+            await engine.remove_creature(cid)
+            raise
         meta_for(service)[sid] = {
             "name": creature.name,
             "config_path": config_path or "",
@@ -177,8 +189,16 @@ async def start_creature(
         llm=llm,
         on_node=on_node,
         name=name.strip() if name and name.strip() else None,
+        start=not defaults,
     )
     sid = info.graph_id
+    try:
+        await initialize_modules(service, info.creature_id, defaults)
+        if defaults:
+            await service.start_creature(info.creature_id)
+    except BaseException:
+        await service.remove_creature(info.creature_id)
+        raise
     remote_session_path = ""
     conversation_id = ""
     host = getattr(service, "_host", None)
@@ -215,7 +235,7 @@ async def start_creature(
         "model": str(getattr(info, "model", "") or ""),
         "llm_name": str(getattr(info, "llm_name", "") or ""),
         "is_privileged": bool(getattr(info, "is_privileged", False)),
-        "running": bool(getattr(info, "is_running", True)),
+        "running": bool(defaults) or info.is_running,
     }
     logger.info(
         "Remote creature session started",
@@ -232,7 +252,7 @@ async def start_creature(
                 "creature_id": info.creature_id,
                 "name": info.name,
                 "home_node": on_node,
-                "running": info.is_running,
+                "running": bool(defaults) or info.is_running,
                 "is_privileged": info.is_privileged,
                 # An empty model denotes a deferred provider awaiting model selection.
                 "model": getattr(info, "model", "") or "",
@@ -308,6 +328,7 @@ async def start_terrarium(
             on_node=on_node,
         )
 
+    defaults = load_defaults()
     engine = _resolve_engine_for_recipe(service)
     pwd = _normalize_pwd(pwd)
     if config_path:
@@ -321,7 +342,12 @@ async def start_terrarium(
     # Studio owns the richer recipe metadata store. Disabling autosession avoids
     # two live handles for the same path, which would prevent deletion on Windows.
     graph = await engine.apply_recipe(
-        cfg, pwd=pwd, llm=llm, strict=False, session=False
+        cfg,
+        pwd=pwd,
+        llm=llm,
+        strict=False,
+        session=False,
+        start=not defaults,
     )
     sid = graph.graph_id
 
@@ -357,8 +383,21 @@ async def start_terrarium(
         await engine.attach_session(sid, store)
         stores_for(service)[sid] = store
         _index_hooks.attach(sid, store, sess_dir)
-    except Exception as e:  # pragma: no cover - defensive
-        logger.warning("Session store creation failed", error=str(e))
+        for cid in graph.creature_ids:
+            await initialize_modules(service, cid, defaults)
+        if defaults:
+            for cid in graph.creature_ids:
+                await engine.start(cid)
+    except Exception as exc:
+        if defaults:
+            for cid in list(graph.creature_ids):
+                await engine.remove_creature(cid, split=False)
+            raise
+        logger.warning("Session store creation failed", error=str(exc))
+    except BaseException:
+        for cid in list(graph.creature_ids):
+            await engine.remove_creature(cid, split=False)
+        raise
 
     meta_for(service)[sid] = {
         "name": (name.strip() if name and name.strip() else cfg.name),

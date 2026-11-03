@@ -173,6 +173,13 @@ jobs:
           src/stores/chat.editRerunGuards.test.js
           src/components/chat/ChatPanel.history
           src/components/chat/chatHistoryExpand.test.js
+      - name: Run tool and plugin settings regression tests
+        run: >-
+          npm test -- --maxWorkers=4
+          src/components/settings/modules
+          src/components/panels/modules/ModuleEditForm.test.js
+          src/components/settings/SettingsPage.test.js
+          src/components/session-v2/phone/PhoneTabs.test.js
       - run: npm run build
       - name: Verify frontend build output
         working-directory: .
