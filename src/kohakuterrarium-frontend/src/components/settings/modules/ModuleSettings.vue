@@ -13,13 +13,13 @@
         <button type="button" class="flex-1 min-w-0 text-left" :aria-expanded="selected === keyOf(module)" @click="selected = selected === keyOf(module) ? null : keyOf(module)">
           <span class="font-mono text-sm text-warm-800 dark:text-warm-100">{{ module.name }}</span>
           <span v-if="module.type === 'native_tool'" class="ml-2 text-xs text-warm-500">{{ t("settings.modules.native") }}</span>
-          <span v-if="module.description" class="block text-xs text-warm-500 mt-1">{{ module.description }}</span>
+          <span v-if="module.description" :title="module.description" class="block text-xs text-warm-500 mt-1">{{ module.name === "web_search" && module.type === "tool" ? t("settings.search.description") : module.description }}</span>
         </button>
         <el-switch v-if="module.type === 'plugin'" :model-value="module.enabled" :loading="toggling === module.name" :disabled="Boolean(toggling)" :aria-label="module.name" @change="toggle(module, $event)" />
         <span class="i-carbon-chevron-down text-warm-400" />
       </div>
       <div v-if="selected === keyOf(module)" class="border-t kt-v2-line px-3 py-4">
-        <ModuleEditForm ref="editors" :name="module.name" :schema="module.schema" :values="module.options" :submit-fn="submitter(module)" @applied="module.options = $event.options" />
+        <ModuleEditForm ref="editors" :name="module.name" :schema="module.schema" :values="module.options" :presentation="module.type === 'tool' && module.name === 'web_search' ? searchPresentation : undefined" :submit-fn="submitter(module)" @applied="module.options = $event.options" />
       </div>
     </div>
   </div>
@@ -27,6 +27,8 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref } from "vue"
+
+import { webSearchPresentation } from "./searchPresentation"
 
 import ModuleEditForm from "@/components/panels/modules/ModuleEditForm.vue"
 import { useSectionLoad } from "@/components/session-v2/settings/useSectionTarget"
@@ -39,6 +41,7 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
+const searchPresentation = (values) => webSearchPresentation(values, t)
 const sessionId = props.sessionId
 const creatureId = props.creatureId
 const editors = ref([])
