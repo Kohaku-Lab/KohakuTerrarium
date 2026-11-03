@@ -15,24 +15,24 @@
           </label>
 
           <!-- enum -->
-          <el-select v-if="entry.spec?.type === 'enum'" v-model="draft[entry.key]" :size="presentation ? 'default' : 'small'" :placeholder="entry.ui.placeholder || String(entry.spec?.default ?? '')">
+          <el-select :disabled="disabled" v-if="entry.spec?.type === 'enum'" v-model="draft[entry.key]" :size="presentation ? 'default' : 'small'" :placeholder="entry.ui.placeholder || String(entry.spec?.default ?? '')">
             <el-option v-for="v in entry.spec?.values || []" :key="v" :value="v" :label="enumLabel(entry, v)" :disabled="Boolean(entry.spec?.disabled_values?.[v])" />
           </el-select>
 
           <!-- bool -->
-          <el-switch v-else-if="entry.spec?.type === 'bool'" v-model="draft[entry.key]" />
+          <el-switch :disabled="disabled" v-else-if="entry.spec?.type === 'bool'" v-model="draft[entry.key]" />
 
           <!-- int / float -->
-          <el-input-number v-else-if="entry.spec?.type === 'int' || entry.spec?.type === 'float'" v-model="draft[entry.key]" :min="entry.spec?.min" :max="entry.spec?.max" :step="entry.spec?.type === 'float' ? 0.1 : 1" :precision="entry.spec?.type === 'float' ? undefined : 0" size="small" controls-position="right" class="!w-full" />
+          <el-input-number :disabled="disabled" v-else-if="entry.spec?.type === 'int' || entry.spec?.type === 'float'" v-model="draft[entry.key]" :min="entry.spec?.min" :max="entry.spec?.max" :step="entry.spec?.type === 'float' ? 0.1 : 1" :precision="entry.spec?.type === 'float' ? undefined : 0" size="small" controls-position="right" class="!w-full" />
 
           <!-- list of strings (newline-separated textarea) -->
-          <el-input v-else-if="entry.spec?.type === 'list' && (entry.spec?.item_type === 'string' || !entry.spec?.item_type)" :model-value="listToText(draft[entry.key])" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" size="small" placeholder="One value per line" @update:model-value="draft[entry.key] = textToList($event)" />
+          <el-input :disabled="disabled" v-else-if="entry.spec?.type === 'list' && (entry.spec?.item_type === 'string' || !entry.spec?.item_type)" :model-value="listToText(draft[entry.key])" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" size="small" placeholder="One value per line" @update:model-value="draft[entry.key] = textToList($event)" />
 
           <!-- dict (JSON textarea) -->
-          <el-input v-else-if="entry.spec?.type === 'dict'" :model-value="objToJson(draft[entry.key])" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" size="small" placeholder='{"soft": 30, "hard": 50}' @update:model-value="onDictInput(entry.key, $event)" />
+          <el-input :disabled="disabled" v-else-if="entry.spec?.type === 'dict'" :model-value="objToJson(draft[entry.key])" type="textarea" :autosize="{ minRows: 3, maxRows: 12 }" size="small" placeholder='{"soft": 30, "hard": 50}' @update:model-value="onDictInput(entry.key, $event)" />
 
           <!-- string (default) -->
-          <el-input v-else v-model="draft[entry.key]" :size="presentation ? 'default' : 'small'" :placeholder="entry.ui.placeholder || String(entry.spec?.default ?? '')" />
+          <el-input :disabled="disabled" v-else v-model="draft[entry.key]" :size="presentation ? 'default' : 'small'" :placeholder="entry.ui.placeholder || String(entry.spec?.default ?? '')" />
 
           <p v-if="dictErrors[entry.key]" class="text-[10px] text-coral font-mono">{{ dictErrors[entry.key] }}</p>
           <p v-if="entry.ui.hint || entry.spec?.hint" :class="presentation ? 'text-xs text-warm-500 leading-relaxed' : 'text-[10px] text-warm-400'">{{ entry.ui.hint || entry.spec.hint }}</p>
@@ -98,6 +98,7 @@ const props = defineProps({
   /** Async callback: (name, changedValues) → server response. Throws on error. */
   submitFn: { type: Function, required: true },
   presentation: { type: Function, default: null },
+  disabled: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(["applied"])

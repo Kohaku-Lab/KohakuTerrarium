@@ -78,6 +78,7 @@ afterEach(() => {
 async function open(name) {
   const button = wrapper.findAll("button").find((b) => b.text().includes(name))
   await button.trigger("click")
+  await flushPromises()
 }
 
 it("edits global defaults with field patches and plugin enablement", async () => {
@@ -259,3 +260,158 @@ it.each([
       })
   },
 )
+
+it("reopens with the confirmed backend after saving on collapse", async () => {
+  let backend = "duckduckgo"
+  moduleDefaultsAPI.patch.mockImplementation(async (_kind, _name, body) => {
+    backend = body.values.backend
+    return { options: { backend } }
+  })
+  wrapper = mount(ModuleSettings, { global: { stubs } })
+  await flushPromises()
+  await open("web_search")
+  await wrapper.find("select").setValue("codex")
+  await open("web_search")
+  await flushPromises()
+  expect(backend).toBe("codex")
+  await open("web_search")
+  expect(wrapper.find("select").element.value).toBe("codex")
+})
+
+it("preserves saved native fields when another field is edited after reopening", async () => {
+  let current = { size: "auto", quality: "high" }
+  moduleAPI.setOptions.mockImplementation(async (_s, _c, _k, _n, values) => {
+    current = { ...values }
+    return { options: current }
+  })
+  wrapper = mount(ModuleSettings, { props: { sessionId: "s", creatureId: "a" }, global: { stubs } })
+  await flushPromises()
+  await open("image_gen")
+  await wrapper.findComponent(ModuleEditForm).find("input").setValue("1024x1024")
+  await open("image_gen")
+  await flushPromises()
+  expect(current.size).toBe("1024x1024")
+  await open("image_gen")
+  await wrapper.find("select").setValue("auto")
+  await vi.advanceTimersByTimeAsync(500)
+  expect(current).toEqual({ size: "1024x1024", quality: "auto" })
+})
+
+it("disables editing and navigation during refresh, then accepts new edits", async () => {
+  let release
+  moduleDefaultsAPI.list.mockResolvedValueOnce(modules()).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve
+      }),
+  )
+  wrapper = mount(ModuleSettings, { global: { stubs } })
+  await flushPromises()
+  await open("web_search")
+  await wrapper.find("button[aria-label='settings.modules.refresh']").trigger("click")
+  await flushPromises()
+  expect(wrapper.find("select").element.disabled).toBe(true)
+  expect(wrapper.find("input").element.disabled).toBe(true)
+  expect(wrapper.find("button[aria-pressed='false']").element.disabled).toBe(true)
+  expect(wrapper.find("button[aria-expanded='true']").element.disabled).toBe(true)
+  expect(wrapper.find("button[aria-label='settings.modules.refresh']").element.disabled).toBe(true)
+  release(modules())
+  await flushPromises()
+  expect(wrapper.find("select").element.disabled).toBe(false)
+  expect(moduleDefaultsAPI.patch).not.toHaveBeenCalled()
+  await wrapper.find("select").setValue("codex")
+  await vi.advanceTimersByTimeAsync(500)
+  expect(moduleDefaultsAPI.patch).toHaveBeenCalledWith("tool", "web_search", {
+    values: { backend: "codex" },
+  })
+})
+
+it("waits for an in-flight save before closing, and ignores overlapping navigation", async () => {
+  let release
+  moduleDefaultsAPI.patch.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        release = resolve
+      }),
+  )
+  wrapper = mount(ModuleSettings, { global: { stubs } })
+  await flushPromises()
+  await open("web_search")
+  await wrapper.find("select").setValue("codex")
+  await vi.advanceTimersByTimeAsync(500)
+  await open("web_search")
+  expect(wrapper.find("select").exists()).toBe(true)
+  expect(wrapper.find("input").element.disabled).toBe(true)
+  await open("image_gen")
+  expect(wrapper.findComponent(ModuleEditForm).props("name")).toBe("web_search")
+  release({ options: { backend: "codex", fallback: "none" } })
+  await flushPromises()
+  expect(wrapper.findComponent(ModuleEditForm).exists()).toBe(false)
+  await open("web_search")
+  expect(wrapper.find("select").element.value).toBe("codex")
+  expect(moduleDefaultsAPI.patch).toHaveBeenCalledTimes(1)
+})
+
+it("keeps failed drafts open when closing, filtering, switching tabs or refreshing", async () => {
+  moduleDefaultsAPI.patch.mockRejectedValue(new Error("save rejected"))
+  wrapper = mount(ModuleSettings, { global: { stubs } })
+  await flushPromises()
+  await open("web_search")
+  await wrapper.find("select").setValue("codex")
+  for (const action of [
+    () => open("web_search"),
+    () => open("settings.modules.plugins"),
+    () => wrapper.find("input").setValue("image_gen"),
+    () => wrapper.find("button[aria-label='settings.modules.refresh']").trigger("click"),
+  ]) {
+    await action()
+    await flushPromises()
+    expect(wrapper.find("select").element.value).toBe("codex")
+    expect(wrapper.find("select").element.disabled).toBe(false)
+    expect(wrapper.text()).toContain("save rejected")
+    expect(wrapper.find("input").element.value).toBe("")
+  }
+  expect(moduleDefaultsAPI.list).toHaveBeenCalledTimes(1)
+})
+
+it.each(["tab", "filter"])(
+  "saves edits before hiding through %s and restores confirmed values",
+  async (navigation) => {
+    wrapper = mount(ModuleSettings, { global: { stubs } })
+    await flushPromises()
+    await open("web_search")
+    await wrapper.find("select").setValue("codex")
+    if (navigation === "tab") {
+      await open("settings.modules.plugins")
+      await open("settings.modules.tools")
+    } else {
+      await wrapper.find("input").setValue("image_gen")
+      await flushPromises()
+      expect(wrapper.findComponent(ModuleEditForm).exists()).toBe(false)
+      await wrapper.find("input").setValue("")
+      await flushPromises()
+    }
+    expect(wrapper.find("select").element.value).toBe("codex")
+    expect(moduleDefaultsAPI.patch).toHaveBeenCalledWith("tool", "web_search", {
+      values: { backend: "codex" },
+    })
+  },
+)
+
+it("keeps the current editor usable after refresh fails", async () => {
+  moduleDefaultsAPI.list
+    .mockResolvedValueOnce(modules())
+    .mockRejectedValueOnce(new Error("refresh failed"))
+  wrapper = mount(ModuleSettings, { global: { stubs } })
+  await flushPromises()
+  await open("web_search")
+  await wrapper.find("button[aria-label='settings.modules.refresh']").trigger("click")
+  await flushPromises()
+  expect(wrapper.find("[role='alert']").text()).toContain("refresh failed")
+  expect(wrapper.find("select").element.disabled).toBe(false)
+  await wrapper.find("select").setValue("codex")
+  await vi.advanceTimersByTimeAsync(500)
+  expect(moduleDefaultsAPI.patch).toHaveBeenCalledWith("tool", "web_search", {
+    values: { backend: "codex" },
+  })
+})
