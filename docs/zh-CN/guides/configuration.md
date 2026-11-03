@@ -117,9 +117,16 @@ tools:
 ```
 
 可用 `/module set web_search backend deepseek_api` 和
-`/module set web_fetch backend deepseek` 热切换，选项随会话保存。
-GUI 中打开运行中 Creature 的聊天，在右侧状态栏选择
-**Modules → Tools → web_search / web_fetch**，修改后自动保存。
+`/module set web_fetch backend deepseek` 切换运行中的 Creature。
+网页版与桌面 GUI 的入口一致：
+
+- **会话设置 → 工具与插件**：编辑所选代理的当前配置，修改自动保存、对后续调用生效，并随会话保存和恢复。
+- **全局设置 → 工具与插件**：设置新建 Studio 会话的默认值，包括 Terrarium 成员和实验室工作节点上的新会话。Creature 显式指定的选项和插件开关优先。
+
+全局默认值不影响已有、恢复或分叉的会话。会话修改只更新所选代理和指定字段，其他设置行为不变。
+默认值只配置已有组件，不会添加工具或安装插件。全局目录包含可配置的内置工具和已发现的插件；会话设置还包含该代理已加载的可配置自定义工具。
+
+默认值保存在 `~/.kohakuterrarium/module-defaults.json`；设置了 `KT_CONFIG_DIR` 时使用该目录。启用管理员令牌的主机需要管理员权限才能保存全局配置。
 Textual TUI 按 **F2 → Tools**，选择工具后编辑并按 **Save**；
 Rich CLI 也可用 `/module edit web_search` 或 `/module edit web_fetch` 打开编辑器。
 

@@ -117,9 +117,16 @@ tools:
 ```
 
 可用 `/module set web_search backend deepseek_api` 與
-`/module set web_fetch backend deepseek` 即時切換，選項隨工作階段儲存。
-GUI 中開啟執行中 Creature 的聊天，在右側狀態列選擇
-**Modules → Tools → web_search / web_fetch**，修改後自動儲存。
+`/module set web_fetch backend deepseek` 切換執行中的 Creature。
+網頁版與桌面 GUI 的入口一致：
+
+- **工作階段設定 → 工具與外掛**：編輯所選代理目前的設定，修改自動儲存、對後續呼叫生效，並隨工作階段儲存及還原。
+- **全域設定 → 工具與外掛**：設定新建 Studio 工作階段的預設值，包括 Terrarium 成員和實驗室工作節點上的新工作階段。Creature 明確指定的選項和外掛開關優先。
+
+全域預設值不影響既有、還原或分叉的工作階段。工作階段修改只更新所選代理和指定欄位，其他設定行為不變。
+預設值只設定既有元件，不會新增工具或安裝外掛。全域目錄包含可設定的內建工具和已發現的外掛；工作階段設定還包含該代理已載入的可設定自訂工具。
+
+預設值儲存在 `~/.kohakuterrarium/module-defaults.json`；設定了 `KT_CONFIG_DIR` 時使用該目錄。啟用管理員權杖的主機需要管理員權限才能儲存全域設定。
 Textual TUI 按 **F2 → Tools**，選擇工具後編輯並按 **Save**；
 Rich CLI 也可用 `/module edit web_search` 或 `/module edit web_fetch` 開啟編輯器。
 
