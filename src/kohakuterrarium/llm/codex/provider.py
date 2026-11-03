@@ -95,9 +95,7 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         self._retry_policy = RetryPolicy.from_value(retry_policy)
         self._api_key = api_key
         self._base_url = base_url
-        self._request_image_limit = initial_image_limit(
-            api_key, base_url or CODEX_BASE_URL
-        )
+        self._request_image_limit = initial_image_limit()
         self.extra_body = dict(extra_body or {})
         self._ws_connection_options = ws_options.build_websocket_connection_options(
             self.extra_body.get("websocket_connection_options"), timeout=timeout

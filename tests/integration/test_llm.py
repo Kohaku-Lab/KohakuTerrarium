@@ -2048,9 +2048,8 @@ class TestLlmIntegration:
             ]
             saved_budget_history = messages_to_dicts(budget_history)
             bounded = await responses_provider.chat_complete(budget_history)
-            assert bounded.content == "bounded" and len(budget_requests) == 2
-            assert len(budget_requests[0]["input"][0]["content"]) == 56
-            parts = budget_requests[1]["input"][0]["content"]
+            assert bounded.content == "bounded" and len(budget_requests) == 1
+            parts = budget_requests[0]["input"][0]["content"]
             assert "6 image(s) omitted" in parts[0]["text"]
             assert [part["image_url"] for part in parts[1:]] == [
                 f"https://example.invalid/synthetic/{index}" for index in range(6, 56)
@@ -2059,7 +2058,8 @@ class TestLlmIntegration:
             assert (
                 await responses_provider.chat_complete(budget_history)
             ).content == "bounded"
-            assert budget_requests[2]["input"] == budget_requests[1]["input"]
+            assert len(budget_requests) == 2
+            assert budget_requests[1]["input"] == budget_requests[0]["input"]
 
             session_store = SessionStore(
                 tmp_path / "custom-input-root" / "selected.kohakutr"

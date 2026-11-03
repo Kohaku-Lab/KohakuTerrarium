@@ -15,11 +15,9 @@ _LIMIT_ERROR = re.compile(
 )
 
 
-def initial_image_limit(api_key: str | None, base_url: str) -> int | None:
-    """Apply the default cap only to the known Codex OAuth endpoint."""
-    if not api_key and base_url.rstrip("/") == CODEX_BASE_URL:
-        return CODEX_MAX_IMAGES
-    return None
+def initial_image_limit() -> int:
+    """Apply the default image budget to every Codex endpoint."""
+    return CODEX_MAX_IMAGES
 
 
 def reported_image_limit(

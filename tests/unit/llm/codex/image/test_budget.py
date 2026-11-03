@@ -177,39 +177,46 @@ async def custom_backend():
         await provider.close()
 
 
-async def test_custom_backend_has_no_unverified_fifty_image_limit(custom_backend):
+async def test_custom_backend_caps_first_request_at_newest_fifty(custom_backend):
     provider, requests, _ = custom_backend
-    messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
+    messages = [{"role": "user", "content": [_image(i) for i in range(62)]}]
+    original = deepcopy(messages)
     assert (await provider.chat_complete(messages)).content == "ok"
-    assert len(requests[0]["input"][0]["content"]) == 56
+    assert len(requests) == 1
+    sent = requests[0]["input"][0]["content"]
+    assert "12 image(s) omitted" in sent[0]["text"]
+    assert [p["image_url"] for p in sent[1:]] == [
+        f"https://example.invalid/{i}" for i in range(12, 62)
+    ]
+    assert messages == original
 
 
 async def test_custom_backend_learns_rejected_limit_and_bounds_future_calls(
     custom_backend,
 ):
     provider, requests, failures = custom_backend
-    failures.append("Exceeded maximum number of images (50) allowed in the request")
+    failures.append("Exceeded maximum number of images (25) allowed in the request")
     messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
     original = deepcopy(messages)
     assert (await provider.chat_complete(messages)).content == "ok"
     assert len(requests) == 2
     sent = requests[-1]["input"][0]["content"]
     assert [p["image_url"] for p in sent if p["type"] == "input_image"] == [
-        f"https://example.invalid/{i}" for i in range(6, 56)
+        f"https://example.invalid/{i}" for i in range(31, 56)
     ]
     assert (await provider.chat_complete(messages)).content == "ok"
     assert requests[-1]["input"] == requests[-2]["input"]
     assert messages == original
     clone = provider.with_model("another-model")
-    assert clone._request_image_limit is None
-    failures.append("Exceeded maximum number of images (25) allowed in the request")
+    assert clone._request_image_limit == 50
+    failures.append("Exceeded maximum number of images (10) allowed in the request")
     assert (await clone.chat_complete(messages)).content == "ok"
-    assert clone._request_image_limit == 25
-    assert provider._request_image_limit == 50
-    assert len(requests[-2]["input"][0]["content"]) == 56
+    assert clone._request_image_limit == 10
+    assert provider._request_image_limit == 25
+    assert len(requests[-2]["input"][0]["content"]) == 51
     assert (
         sum(p["type"] == "input_image" for p in requests[-1]["input"][0]["content"])
-        == 25
+        == 10
     )
 
 
@@ -225,8 +232,8 @@ async def test_unrelated_rejection_is_not_retried(custom_backend):
 @pytest.mark.parametrize(
     "second",
     [
-        "Exceeded maximum number of images (50) allowed in the request",
         "Exceeded maximum number of images (25) allowed in the request",
+        "Exceeded maximum number of images (10) allowed in the request",
     ],
 )
 async def test_repeated_image_rejection_removes_the_images_and_says_so(
@@ -234,7 +241,7 @@ async def test_repeated_image_rejection_removes_the_images_and_says_so(
 ):
     provider, requests, pending = custom_backend
     pending.extend(
-        ["Exceeded maximum number of images (50) allowed in the request", second]
+        ["Exceeded maximum number of images (25) allowed in the request", second]
     )
     repairs = []
     provider.on_context_repair(repairs.append)
@@ -256,8 +263,8 @@ async def test_endless_image_rejection_stops_once_the_ladder_is_spent(custom_bac
     messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
     with pytest.raises(BadRequestError):
         await provider.chat_complete(messages)
-    # limit learned, then newest media stripped; nothing else is left to remove.
-    assert len(requests) == 3
+    # The default is already 50; strip refused media without relearning it.
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize(
@@ -286,14 +293,14 @@ def test_only_explicit_rejected_request_can_lower_the_limit(
     assert reported_image_limit(error, existing) == expected
 
 
-def test_only_known_oauth_endpoint_defaults_to_fifty_images():
+def test_all_codex_endpoints_default_to_fifty_images():
     provider = CodexOAuthProvider(model="synthetic")
     assert provider._request_image_limit == 50
     assert provider.with_model("another")._request_image_limit == 50
-    assert CodexOAuthProvider(api_key="test")._request_image_limit is None
+    assert CodexOAuthProvider(api_key="test")._request_image_limit == 50
     assert (
         CodexOAuthProvider(base_url="https://example.invalid")._request_image_limit
-        is None
+        == 50
     )
 
 
@@ -319,7 +326,7 @@ async def test_websocket_learning_respects_output_budget_and_continuation(
                             "type": "error",
                             "status": 400,
                             "code": "invalid_request_error",
-                            "message": "Exceeded maximum number of images (50) allowed in the request",
+                            "message": "Exceeded maximum number of images (25) allowed in the request",
                         }
                     )
                 )
@@ -355,12 +362,12 @@ async def test_websocket_learning_respects_output_budget_and_continuation(
                         chunks.append(chunk)
                 assert len(requests) == 1
                 assert chunks == ["partial"]
-                assert provider._request_image_limit is None
+                assert provider._request_image_limit == 50
                 return
             assert (await provider.chat_complete(messages)).content == ""
             assert len(requests) == 2
-            assert len(requests[0]["input"][0]["content"]) == 56
-            assert provider._request_image_limit == 50
+            assert len(requests[0]["input"][0]["content"]) == 51
+            assert provider._request_image_limit == 25
             if budget == 0:
                 # No replay budget: the rejection is answered by removing the
                 # refused images, a reduced request rather than a retry.
@@ -370,7 +377,7 @@ async def test_websocket_learning_respects_output_budget_and_continuation(
                 assert messages == original
                 return
             expected = fix_tool_call_pairing(
-                to_responses_input(limit_codex_images(messages))
+                to_responses_input(limit_codex_images(messages, 25))
             )
             assert requests[-1]["input"] == expected
             assert "previous_response_id" not in requests[-1]
@@ -381,7 +388,7 @@ async def test_websocket_learning_respects_output_budget_and_continuation(
             await provider.chat_complete(extended)
             assert "previous_response_id" not in requests[-1]
             assert requests[-1]["input"] == fix_tool_call_pairing(
-                to_responses_input(limit_codex_images(extended))
+                to_responses_input(limit_codex_images(extended, 25))
             )
             assert messages == original
         finally:
