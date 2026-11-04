@@ -19,6 +19,11 @@ on:
         default: "stable"
         type: choice
         options: [stable, beta, nightly]
+      dry_run:
+        description: "Build and self-check everything, publish nothing"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -272,6 +277,7 @@ jobs:
 
   # ── Aggregate sidecars into channel manifests ─────────────────────
   publish-channel-manifests:
+    if: ${{ !inputs.dry_run }}
     needs: [meta, build-release-tree]
     runs-on: ubuntu-latest
     steps:
@@ -555,6 +561,7 @@ jobs:
 
   # ── Docker images (unchanged) ──────────────────────────────────────
   build-docker:
+    if: ${{ !inputs.dry_run }}
     needs: [meta, build-wheel]
     runs-on: ubuntu-latest
     strategy:
@@ -637,6 +644,7 @@ jobs:
 
   # ── PyPI publish (unchanged) ───────────────────────────────────────
   publish-pypi:
+    if: ${{ !inputs.dry_run }}
     needs: [meta, build-wheel]
     runs-on: ubuntu-latest
     environment: release
@@ -653,6 +661,7 @@ jobs:
 
   # ── GitHub Release (release-tree tarballs + desktop installers) ──
   github-release:
+    if: ${{ !inputs.dry_run }}
     needs: [meta, build-wheel, build-release-tree, build-desktop-tauri, publish-channel-manifests]
     runs-on: ubuntu-latest
     steps:
