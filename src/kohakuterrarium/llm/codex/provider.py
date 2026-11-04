@@ -2,6 +2,8 @@
 
 import asyncio
 import hashlib
+import importlib
+import importlib.util
 import logging
 from contextlib import aclosing
 from copy import deepcopy
@@ -9,13 +11,8 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-try:
-    from openai import AsyncOpenAI
-
-    HAS_OPENAI = True
-except ImportError:
-    AsyncOpenAI = None  # type: ignore[assignment,misc]
-    HAS_OPENAI = False
+AsyncOpenAI = None
+HAS_OPENAI = importlib.util.find_spec("openai") is not None
 
 from kohakuterrarium.llm.responses import ws_options
 from kohakuterrarium.llm.base import (
@@ -146,13 +143,19 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         key = self._api_key or (self._tokens.access_token if self._tokens else None)
         if not key:
             return
+        try:
+            client_class = AsyncOpenAI or importlib.import_module("openai").AsyncOpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "openai not installed. Install with: pip install openai"
+            ) from exc
 
         # A response hook keeps rate-limit capture identical across request modes.
         http_client = httpx.AsyncClient(
             event_hooks={"response": [_capture_rate_limit_headers]},
             timeout=self.timeout,
         )
-        self._client = AsyncOpenAI(
+        self._client = client_class(
             api_key=key,
             base_url=self._base_url or CODEX_BASE_URL,
             timeout=self.timeout,

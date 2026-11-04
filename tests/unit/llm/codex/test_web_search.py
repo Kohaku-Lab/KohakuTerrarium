@@ -461,8 +461,9 @@ class TestCodexSubscriptionSearchBackend:
     @pytest.mark.parametrize(
         "model", [None, "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-6-astra"]
     )
+    @pytest.mark.parametrize("lazy_sdk", [False, True])
     async def test_sends_forced_live_search_with_cached_subscription(
-        self, monkeypatch, model
+        self, monkeypatch, model, lazy_sdk
     ):
         captured = {}
 
@@ -503,7 +504,19 @@ class TestCodexSubscriptionSearchBackend:
                 captured["closed"] = True
 
         monkeypatch.setattr(search_mod, "_load_valid_tokens", valid_tokens)
-        monkeypatch.setattr(search_mod, "AsyncOpenAI", lambda **kwargs: _Client())
+        client = lambda **kwargs: _Client()
+        if lazy_sdk:
+
+            def sdk(name):
+                assert name == "openai"
+                return SimpleNamespace(AsyncOpenAI=client)
+
+            monkeypatch.setattr(search_mod, "AsyncOpenAI", None)
+            monkeypatch.setattr(
+                search_mod, "importlib", SimpleNamespace(import_module=sdk)
+            )
+        else:
+            monkeypatch.setattr(search_mod, "AsyncOpenAI", client)
 
         backend = (
             CodexSubscriptionSearchBackend()

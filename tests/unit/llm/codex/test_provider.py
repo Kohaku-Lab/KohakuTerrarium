@@ -4,10 +4,15 @@ import asyncio
 import base64
 import io
 import json
+import os
 import random
+import subprocess
+import sys
 import time
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -34,7 +39,38 @@ class _FakeTokens:
         return False
 
 
+def test_provider_configuration_does_not_import_the_request_sdk():
+    root = Path(__file__).resolve().parents[4]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from kohakuterrarium.llm.codex.provider import CodexOAuthProvider; "
+            "p=CodexOAuthProvider(model='test-model',api_key='test-key'); "
+            "assert p._client is None; assert 'openai' not in sys.modules",
+        ],
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(root / "src")},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.returncode == 0
+
+
 class TestApiKeyMode:
+    def test_missing_sdk_at_client_creation_keeps_no_partial_client(self, monkeypatch):
+        def unavailable(name):
+            assert name == "openai"
+            raise ImportError("unavailable SDK")
+
+        monkeypatch.setattr(cp, "AsyncOpenAI", None)
+        monkeypatch.setattr(cp, "importlib", SimpleNamespace(import_module=unavailable))
+        provider = CodexOAuthProvider(model="test-model", api_key="test-key")
+        with pytest.raises(ImportError, match="openai not installed"):
+            provider._rebuild_client()
+        assert provider._client is None
+
     async def test_api_key_mode_skips_oauth_and_uses_base_url(self, monkeypatch):
         # Any attempt to OAuth-login should fail the test loudly.
         async def _boom(*a, **k):

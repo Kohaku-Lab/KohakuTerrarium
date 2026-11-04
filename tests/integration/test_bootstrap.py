@@ -33,6 +33,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.bootstrap.io import create_input, create_output
 from kohakuterrarium.builtins.outputs import StdoutOutput
+from kohakuterrarium.builtins.tool_catalog import list_builtin_tools
 from kohakuterrarium.bootstrap.llm import (
     _create_from_inline,
     _extract_controller_data,
@@ -645,6 +646,11 @@ class TestBootstrapIntegration:
         # stop() tears the trigger back down.
         assert heartbeat.is_running is False
         assert agent.llm.call_count == 2
+
+        configured_tools = set(agent.registry.list_tools())
+        discovered = list_builtin_tools()
+        assert {"read", "python", "web_search", "mcp_list"} <= set(discovered)
+        assert set(agent.registry.list_tools()) == configured_tools
 
         for name in ("explore", "critic"):
             agent.subagent_manager.llm = ScriptedLLM(
