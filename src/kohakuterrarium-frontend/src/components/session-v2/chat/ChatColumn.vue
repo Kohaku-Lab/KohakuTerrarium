@@ -32,6 +32,7 @@ import ChatComposerBar from "@/components/session-v2/chat/ChatComposerBar.vue"
 import ChatEmptyHero from "@/components/session-v2/chat/ChatEmptyHero.vue"
 import ConversationStrip from "@/components/session-v2/chat/ConversationStrip.vue"
 import { useComposerSend } from "@/components/session-v2/chat/useComposerSend"
+import { useFileDropHint } from "@/components/session-v2/chat/useFileDropHint"
 import { useTranscriptViewport } from "@/components/session-v2/chat/useTranscriptViewport"
 import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
@@ -147,30 +148,10 @@ function renderMessage(message, context) {
   ])
 }
 
-const dragOver = ref(false)
-let dragDepth = 0
-const hasFiles = (ev) => Array.from(ev.dataTransfer?.types || []).includes("Files")
-function onDragEnter(ev) {
-  if (!hasFiles(ev)) return
-  ev.preventDefault()
-  dragDepth += 1
-  dragOver.value = true
-}
-function onDragLeave(ev) {
-  if (!hasFiles(ev)) return
-  dragDepth = Math.max(0, dragDepth - 1)
-  if (!dragDepth) dragOver.value = false
-}
-function onDragOver(ev) {
-  if (hasFiles(ev)) ev.preventDefault()
-}
-function onDrop(ev) {
-  dragDepth = 0
-  dragOver.value = false
-  if (!hasFiles(ev)) return
-  ev.preventDefault()
-  composer.composerEl.value?.addFiles?.(ev.dataTransfer?.files || [], undefined, "drop")
-}
+const {
+  dragOver,
+  handlers: { onDragEnter, onDragLeave, onDragOver, onDrop },
+} = useFileDropHint((dropped) => composer.composerEl.value?.addFiles?.(dropped, undefined, "drop"))
 
 function onGlobalKeydown(e) {
   if (!e.defaultPrevented && e.key === "Escape" && ctx.focused.value && viewport.processing.value) chat.interrupt(tabKey.value)
