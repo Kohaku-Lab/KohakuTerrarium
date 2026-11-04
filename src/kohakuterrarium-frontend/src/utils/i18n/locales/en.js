@@ -529,6 +529,9 @@ export default {
   "settings.desktop.updateCurrent": "You have the latest version.",
   "settings.desktop.updateAvailable": "Version {version} is available.",
   "settings.desktop.updateInstall": "Install and restart",
+  "settings.desktop.updateAvailableManual":
+    "Version {version} is available. This install is updated by downloading the new package.",
+  "settings.desktop.updateDownload": "Open the releases page",
   "settings.desktop.updateFailed": "The update check or installation failed.",
   "settings.prefs.readingSize": "Reading size",
   "settings.prefs.readingSizeHint":

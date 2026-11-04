@@ -16,6 +16,18 @@ pub fn parse(text: &str) -> Option<Shortcut> {
     text.parse().ok()
 }
 
+/// Whether the session lets an app grab a system-wide key: not under a Linux Wayland session.
+pub fn supported() -> bool {
+    allows_global_shortcut(
+        cfg!(target_os = "linux"),
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+    )
+}
+
+fn allows_global_shortcut(linux: bool, session: Option<&str>) -> bool {
+    !(linux && session.is_some_and(|kind| kind.eq_ignore_ascii_case("wayland")))
+}
+
 /// Bring the window forward and tell the page.
 pub fn summon(app: &AppHandle) {
     window::focus(app);
@@ -95,6 +107,14 @@ mod tests {
         ] {
             assert!(parse(text).is_some(), "{text}");
         }
+    }
+
+    #[test]
+    fn only_a_linux_wayland_session_refuses_a_global_shortcut() {
+        assert!(allows_global_shortcut(false, Some("wayland")));
+        assert!(allows_global_shortcut(true, Some("x11")));
+        assert!(allows_global_shortcut(true, None));
+        assert!(!allows_global_shortcut(true, Some("Wayland")));
     }
 
     #[test]

@@ -439,6 +439,9 @@ export default {
   "settings.desktop.updateCurrent": "已是最新版本。",
   "settings.desktop.updateAvailable": "有可用的新版本 {version}。",
   "settings.desktop.updateInstall": "安裝並重新啟動",
+  "settings.desktop.updateAvailableManual":
+    "有可用的新版本 {version}。此安裝需要下載新的安裝包來更新。",
+  "settings.desktop.updateDownload": "開啟發佈頁面",
   "settings.desktop.updateFailed": "檢查或安裝更新失敗。",
 
   "settings.prefs.mobileZoom": "手機縮放",

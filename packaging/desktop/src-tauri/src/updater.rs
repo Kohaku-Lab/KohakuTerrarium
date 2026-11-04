@@ -28,6 +28,19 @@ pub fn follows_nightly(channel: Option<&str>, own: Option<&Version>) -> bool {
     channel == Some("nightly") && own.is_some()
 }
 
+/// Whether the shell can replace itself: everywhere except a Linux install that is not an
+/// AppImage, which its package manager (or a manual download) updates.
+pub fn installs_in_place() -> bool {
+    can_install_in_place(
+        cfg!(target_os = "linux"),
+        std::env::var_os("APPIMAGE").is_some(),
+    )
+}
+
+fn can_install_in_place(linux: bool, appimage: bool) -> bool {
+    !linux || appimage
+}
+
 /// The updater for the chosen channel.
 pub fn for_app(app: &AppHandle) -> tauri_plugin_updater::Result<Updater> {
     let channel = app.state::<ShellSettings>().get_text("updateChannel");
@@ -71,6 +84,13 @@ mod tests {
         assert!(!follows_nightly(Some("stable"), Some(&own)));
         assert!(!follows_nightly(None, Some(&own)));
         assert!(!follows_nightly(Some("nightly"), None));
+    }
+
+    #[test]
+    fn only_an_appimage_replaces_itself_on_linux() {
+        assert!(can_install_in_place(false, false));
+        assert!(can_install_in_place(true, true));
+        assert!(!can_install_in_place(true, false));
     }
 
     #[test]

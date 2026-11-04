@@ -48,10 +48,11 @@
         <SettingsRow data-setting="shell-update" :title="t('settings.desktop.updateTitle')" :hint="t('settings.desktop.updateHint')">
           <template #detail>
             <div v-if="updateStatus === 'current'" class="mt-1 text-[12px] text-warm-500" data-update-status>{{ t("settings.desktop.updateCurrent") }}</div>
-            <div v-else-if="updateStatus === 'available'" class="mt-1 text-[12px] text-iolite dark:text-iolite-light" data-update-status>{{ t("settings.desktop.updateAvailable", { version: updateVersion }) }}</div>
+            <div v-else-if="updateStatus === 'available'" class="mt-1 text-[12px] text-iolite dark:text-iolite-light" data-update-status>{{ t(shellUpdateInstall ? "settings.desktop.updateAvailable" : "settings.desktop.updateAvailableManual", { version: updateVersion }) }}</div>
             <div v-else-if="updateStatus === 'failed'" class="mt-1 text-[12px] text-coral" data-update-status>{{ t("settings.desktop.updateFailed") }}</div>
           </template>
-          <KButton v-if="updateStatus === 'available'" variant="primary" size="sm" data-update-install :disabled="updateBusy" @click="installUpdate">{{ t("settings.desktop.updateInstall") }}</KButton>
+          <KButton v-if="updateStatus === 'available' && !shellUpdateInstall" variant="primary" size="sm" data-update-download @click="openReleases">{{ t("settings.desktop.updateDownload") }}</KButton>
+          <KButton v-else-if="updateStatus === 'available'" variant="primary" size="sm" data-update-install :disabled="updateBusy" @click="installUpdate">{{ t("settings.desktop.updateInstall") }}</KButton>
           <KButton v-else size="sm" data-update-check :disabled="updateBusy" @click="checkUpdate">{{ t("settings.desktop.updateCheck") }}</KButton>
         </SettingsRow>
       </SettingsGroup>
@@ -117,12 +118,14 @@ import { appUpdateAPI } from "@/utils/appUpdateApi"
 import { appSecretsAPI } from "@/utils/appSecretsApi"
 import { appShimsAPI } from "@/utils/appShimsApi"
 import { checkShellUpdate, desktopCapabilities, getAutostart, getCloseToTray, getExplorerVerbs, getSummonShortcut, setExplorerVerbs, exportDiagnostics, hasDesktopHost, hostSupports, installShellUpdate, onHostReady, openLogs, repairRuntime, setAutostart, setCloseToTray, setSummonShortcut } from "@/utils/hostBridge"
+import { openExternal } from "@/utils/externalLinks"
 import { useI18n } from "@/utils/i18n"
 import { followRuntimeChannel } from "@/utils/shellUpdateChannel"
 
 const { t } = useI18n()
 
 const MATERIALS = ["none", "auto", "mica", "acrylic"]
+const RELEASES_URL = "https://github.com/Kohaku-Lab/KohakuTerrarium/releases"
 
 const shims = ref({ supported: false, installed: [], commands: [], target_dir: "", on_path: false })
 const available = ref(false)
@@ -196,7 +199,9 @@ const showKeychain = computed(() => sourceDevelopment.value === false && secrets
 const keychainBusy = ref(false)
 const keychainError = ref("")
 const closeToTray = ref(false)
-const showSummon = computed(() => hostReady.value && hostSupports("get_summon_shortcut"))
+const summonSupported = ref(true)
+const shellUpdateInstall = ref(true)
+const showSummon = computed(() => hostReady.value && hostSupports("get_summon_shortcut") && summonSupported.value)
 const summonShortcut = ref(null)
 const summonRecording = ref(false)
 const summonError = ref(false)
@@ -219,6 +224,10 @@ async function checkUpdate() {
   } finally {
     updateBusy.value = false
   }
+}
+
+function openReleases() {
+  openExternal(RELEASES_URL)
 }
 
 async function installUpdate() {
@@ -272,6 +281,8 @@ async function loadAutostart() {
   if (sourceDevelopment.value === false && hasDesktopHost()) void loadRuntime()
   explorerVerbs.value = capabilities?.explorerVerbs === true ? await getExplorerVerbs() : null
   notifyActionsSupported.value = capabilities?.notificationActions === true
+  summonSupported.value = capabilities?.summonShortcut !== false
+  shellUpdateInstall.value = capabilities?.shellUpdateInstall !== false
 }
 
 function stopRecording() {

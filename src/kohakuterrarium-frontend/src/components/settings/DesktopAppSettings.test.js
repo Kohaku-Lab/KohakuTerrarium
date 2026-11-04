@@ -371,6 +371,34 @@ describe("DesktopAppSettings", () => {
     expect(api.install_shell_update).toHaveBeenCalled()
   })
 
+  it("sends a package-managed install to the releases page and hides an unsupported summon key", async () => {
+    shimsApi.status.mockResolvedValue(status({ supported: false }))
+    const api = {
+      get_desktop_capabilities: vi.fn(async () => ({
+        surface: "desktop",
+        protocol: 1,
+        shellUpdateInstall: false,
+        summonShortcut: false,
+      })),
+      get_summon_shortcut: vi.fn(async () => ({ shortcut: null })),
+      check_shell_update: vi.fn(async () => ({ available: true, version: "9.1.0" })),
+      install_shell_update: vi.fn(async () => false),
+      open_external: vi.fn(async () => true),
+    }
+    window.pywebview = { api }
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    expect(wrapper.find("[data-summon-record]").exists()).toBe(false)
+    await wrapper.find("[data-update-check]").trigger("click")
+    await flushPromises()
+    expect(wrapper.find("[data-update-status]").text()).toContain("updateAvailableManual")
+    expect(wrapper.find("[data-update-install]").exists()).toBe(false)
+    await wrapper.find("[data-update-download]").trigger("click")
+    expect(api.open_external).toHaveBeenCalledWith(expect.stringContaining("/releases"))
+    expect(api.install_shell_update).not.toHaveBeenCalled()
+  })
+
   it("says the app is current, and reports a failed check or install", async () => {
     shimsApi.status.mockResolvedValue(status({ supported: false }))
     const api = {

@@ -513,6 +513,9 @@ export default {
   "settings.desktop.updateCurrent": "已是最新版本。",
   "settings.desktop.updateAvailable": "有可用的新版本 {version}。",
   "settings.desktop.updateInstall": "安装并重启",
+  "settings.desktop.updateAvailableManual":
+    "有可用的新版本 {version}。此安装需要下载新的安装包来更新。",
+  "settings.desktop.updateDownload": "打开发布页面",
   "settings.desktop.updateFailed": "检查或安装更新失败。",
   "settings.prefs.readingSize": "阅读大小",
   "settings.prefs.readingSizeHint": "放大界面文字及保持文字可读所需的控件。",
