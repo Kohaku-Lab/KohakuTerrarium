@@ -1,7 +1,7 @@
 <template>
-  <SectionShell :title="t('set.model.title')" :hint="isCompact ? t('phone.modelHint') : t('set.model.hint')" :error="error" :status="status">
-    <div v-if="isCompact" class="-m-3" data-test="v2-settings-models">
-      <button v-for="row in rows" :key="row.name" type="button" class="kt-v2-line border-x-0 border-t-0 w-full min-h-14 flex items-center gap-3 px-4 py-2 border-b last:border-b-0 text-left active:bg-warm-200/60 dark:active:bg-warm-800" :data-test="`v2-settings-model-${row.name}`" @click="session.openSheet('model', { agent: row.name })">
+  <SectionShell :title="t('set.model.title')" :hint="isCompact ? t('phone.modelHint') : t('set.model.hint')" :error="error" :status="status" bare>
+    <SettingsGroup v-if="isCompact" data-test="v2-settings-models">
+      <button v-for="row in rows" :key="row.name" type="button" class="w-full min-h-14 flex items-center gap-3 px-4 py-2 text-left active:bg-warm-200/60 dark:active:bg-warm-800" :data-test="`v2-settings-model-${row.name}`" @click="session.openSheet('model', { agent: row.name })">
         <span class="flex-1 min-w-0">
           <span class="block truncate text-[15px] font-medium text-warm-800 dark:text-warm-100">{{ row.name }}</span>
           <span class="flex items-center gap-2 min-w-0 text-xs">
@@ -11,31 +11,15 @@
         </span>
         <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
       </button>
-    </div>
+    </SettingsGroup>
     <div v-else-if="loading" class="text-sm text-warm-400">{{ t("loading") }}</div>
-    <table v-else class="w-full text-sm" data-test="v2-settings-models">
-      <thead>
-        <tr class="text-left text-[11px] uppercase tracking-wider text-warm-400">
-          <th class="py-2 pr-4 font-medium">{{ t("set.model.creature") }}</th>
-          <th class="py-2 pr-4 font-medium">{{ t("set.model.current") }}</th>
-          <th class="py-2 pr-4 font-medium w-[22rem]">{{ t("set.model.switchTo") }}</th>
-          <th class="py-2 font-medium">{{ t("set.model.context") }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in rows" :key="row.name" class="border-t kt-v2-line align-middle">
-          <td class="py-2.5 pr-4 font-medium text-warm-800 dark:text-warm-100">{{ row.name }}</td>
-          <td class="py-2.5 pr-4 font-mono text-xs text-iolite dark:text-iolite-light">{{ row.current || "—" }}</td>
-          <td class="py-2.5 pr-4">
-            <el-select v-model="drafts[row.name]" size="small" filterable class="w-full" :placeholder="t('set.model.pick')" :disabled="saving">
-              <el-option v-for="m in models" :key="modelId(m)" :label="modelId(m)" :value="modelId(m)" />
-            </el-select>
-            <div v-if="rowErrors[row.name]" class="mt-1 text-xs text-coral">{{ rowErrors[row.name] }}</div>
-          </td>
-          <td class="py-2.5 font-mono text-xs text-warm-500">{{ row.context ? formatTokens(row.context) : "—" }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <SettingsGroup v-else data-test="v2-settings-models">
+      <SettingsRow v-for="row in rows" :key="row.name" :title="row.name" :hint="rowHint(row)" :status="rowErrors[row.name] || ''" tone="error">
+        <el-select v-model="drafts[row.name]" size="small" filterable class="!w-80" :placeholder="t('set.model.pick')" :disabled="saving">
+          <el-option v-for="m in models" :key="modelId(m)" :label="modelId(m)" :value="modelId(m)" />
+        </el-select>
+      </SettingsRow>
+    </SettingsGroup>
     <template v-if="!isCompact" #actions>
       <span class="flex-1 text-xs text-warm-400">{{ changed.length ? t("set.pending", { n: changed.length }) : "" }}</span>
       <button class="h-8 px-3 rounded-md text-sm text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800 disabled:opacity-40" :disabled="!changed.length || saving" @click="resetDrafts">{{ t("set.reset") }}</button>
@@ -53,6 +37,8 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
 import { onShownAgain } from "@/components/session-v2/settings/useSectionTarget"
+import SettingsGroup from "@/components/settings/ui/SettingsGroup.vue"
+import SettingsRow from "@/components/settings/ui/SettingsRow.vue"
 import { useDensity } from "@/composables/useDensity"
 import { configAPI, terrariumAPI } from "@/utils/api"
 
@@ -95,6 +81,7 @@ const rows = computed(() =>
     return { name, current: currentModel(name), context: live?.maxContext || c?.max_context || session.instance.value?.max_context || 0 }
   }),
 )
+const rowHint = (row) => (row.context ? `${t("set.model.context")}: ${formatTokens(row.context)}` : "")
 const changed = computed(() => rows.value.filter((r) => drafts[r.name] && drafts[r.name] !== r.current))
 
 function resetDrafts() {

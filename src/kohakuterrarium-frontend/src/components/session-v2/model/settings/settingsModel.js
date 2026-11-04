@@ -4,15 +4,33 @@
  * the cost estimate for known model prices.
  */
 
-/** Settings sections, in nav order. */
-export const SETTINGS_SECTIONS = [
-  { id: "model", icon: "i-carbon-chip" },
-  { id: "modules", icon: "i-carbon-tools" },
-  { id: "env", icon: "i-carbon-cloud" },
-  { id: "triggers", icon: "i-carbon-event" },
-  { id: "cost", icon: "i-carbon-currency-dollar" },
-  { id: "workspace", icon: "i-carbon-folder" },
-  { id: "extensions", icon: "i-carbon-cube" },
+/** Settings sections, in nav order, by group (`labelKey` is a Settings-tab string). */
+export const SETTINGS_GROUPS = [
+  {
+    id: "agent",
+    labelKey: "set.group.agent",
+    sections: [
+      { id: "model", icon: "i-carbon-chip", keywords: ["llm", "provider"] },
+      { id: "modules", icon: "i-carbon-tools", keywords: ["tools", "plugins", "mcp"] },
+      { id: "workspace", icon: "i-carbon-folder", keywords: ["directory", "cwd", "path"] },
+      { id: "env", icon: "i-carbon-cloud", keywords: ["environment", "variables", "pwd"] },
+    ],
+  },
+  {
+    id: "activity",
+    labelKey: "set.group.activity",
+    sections: [
+      { id: "triggers", icon: "i-carbon-event", keywords: ["timer", "schedule", "events"] },
+      { id: "cost", icon: "i-carbon-currency-dollar", keywords: ["tokens", "usage", "price"] },
+    ],
+  },
+  {
+    id: "packages",
+    labelKey: "set.group.packages",
+    sections: [
+      { id: "extensions", icon: "i-carbon-cube", keywords: ["packages", "creatures", "plugins"] },
+    ],
+  },
 ]
 
 /** USD per 1M tokens (input / cached input / output), matched by model-name prefix. */

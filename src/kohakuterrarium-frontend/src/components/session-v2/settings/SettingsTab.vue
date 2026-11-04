@@ -1,33 +1,14 @@
 <template>
-  <div v-if="isCompact" class="kt-v2-canvas h-full flex flex-col min-h-0" data-test="v2-settings">
-    <PhonePage v-if="phoneSection" :title="sectionTitle(phoneSection)" :icon="iconOf(phoneSection)" :back-label="t('phone.back')" :test-id="`v2-settings-page-${phoneSection}`" @back="phoneSection = null">
-      <component :is="SECTION_COMPONENTS[phoneSection]" :key="phoneSection" />
-    </PhonePage>
-    <nav v-else class="flex-1 min-h-0 overflow-y-auto py-2" :aria-label="t('set.nav')">
-      <button v-for="s in SETTINGS_SECTIONS" :key="s.id" type="button" class="kt-v2-line border-x-0 border-t-0 w-full min-h-14 flex items-center gap-3 px-4 border-b text-left active:bg-warm-200/60 dark:active:bg-warm-800" :data-test="`v2-settings-nav-${s.id}`" @click="phoneSection = s.id">
-        <span :class="s.icon" class="text-lg text-warm-500 shrink-0" />
-        <span class="flex-1 min-w-0 text-[15px] text-warm-800 dark:text-warm-100">{{ sectionTitle(s.id) }}</span>
-        <span class="i-carbon-chevron-right text-warm-400 shrink-0" />
-      </button>
-    </nav>
-  </div>
-
-  <div v-else class="kt-v2-canvas h-full flex min-h-0" data-test="v2-settings">
-    <nav class="kt-v2-panel kt-v2-edge w-56 shrink-0 flex flex-col gap-0.5 p-3 border-r" :aria-label="t('set.nav')">
-      <button v-for="s in SETTINGS_SECTIONS" :key="s.id" class="h-9 px-3 rounded-lg flex items-center gap-2.5 text-sm text-left transition-colors" :class="section === s.id ? 'bg-iolite/10 text-iolite dark:text-iolite-light font-medium' : 'text-warm-600 dark:text-warm-300 hover:bg-warm-200/60 dark:hover:bg-warm-800'" :aria-current="section === s.id ? 'page' : undefined" :data-test="`v2-settings-nav-${s.id}`" @click="setSection(s.id)"><span :class="s.icon" class="shrink-0" />{{ sectionTitle(s.id) }}</button>
-    </nav>
-    <div class="flex-1 min-w-0 overflow-y-auto">
-      <component :is="SECTION_COMPONENTS[section]" :key="section" />
-    </div>
-  </div>
+  <SettingsLayout :groups="groups" :model-value="section" data-test="v2-settings" @update:model-value="setSection">
+    <component :is="SECTION_COMPONENTS[section]" :key="section" />
+  </SettingsLayout>
 </template>
 
 <script setup>
-import { ref } from "vue"
+import { computed, ref } from "vue"
 
-import { SETTINGS_SECTIONS } from "@/components/session-v2/model/settings/settingsModel"
+import { SETTINGS_GROUPS } from "@/components/session-v2/model/settings/settingsModel"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
-import PhonePage from "@/components/session-v2/phone/PhonePage.vue"
 import CostSection from "@/components/session-v2/settings/CostSection.vue"
 import EnvSection from "@/components/session-v2/settings/EnvSection.vue"
 import ExtensionsSection from "@/components/session-v2/settings/ExtensionsSection.vue"
@@ -35,13 +16,13 @@ import ModulesSection from "@/components/session-v2/settings/ModulesSection.vue"
 import ModelSection from "@/components/session-v2/settings/ModelSection.vue"
 import TriggersSection from "@/components/session-v2/settings/TriggersSection.vue"
 import WorkspaceSection from "@/components/session-v2/settings/WorkspaceSection.vue"
-import { useDensity } from "@/composables/useDensity"
+import SettingsLayout from "@/components/settings/layout/SettingsLayout.vue"
 import { useI18n } from "@/utils/i18n"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 
 /**
- * The Settings tab: section nav on the left, one whole-page form on the
- * right. Phones list the sections and open one as its own page.
+ * The session's Settings tab: the same grouped, searchable section list as the global Settings
+ * page, with one section's form beside it. Phones list the sections and open one as its own page.
  */
 const SECTION_COMPONENTS = {
   model: ModelSection,
@@ -57,12 +38,17 @@ const KEY = "kt.v2.settings.section"
 const t = useV2T()
 const { t: sharedT } = useI18n()
 const sectionTitle = (id) => (id === "modules" ? sharedT("settings.section.modules") : t(`set.${id}.title`))
-const { isCompact } = useDensity()
+
+const groups = computed(() =>
+  SETTINGS_GROUPS.map((group) => ({
+    id: group.id,
+    label: t(group.labelKey),
+    sections: group.sections.map((section) => ({ ...section, label: sectionTitle(section.id) })),
+  })),
+)
+
 const stored = readLocalPref(KEY)
 const section = ref(SECTION_COMPONENTS[stored] ? stored : "model")
-const phoneSection = ref(null)
-
-const iconOf = (id) => SETTINGS_SECTIONS.find((s) => s.id === id)?.icon || ""
 
 function setSection(id) {
   section.value = id

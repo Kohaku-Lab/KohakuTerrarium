@@ -1,5 +1,5 @@
 <template>
-  <SectionShell :title="t('set.triggers.title')" :hint="t('set.triggers.hint')" :error="error">
+  <SectionShell :title="t('set.triggers.title')" :hint="t('set.triggers.hint')" :error="error" bare>
     <template #aside>
       <div class="flex items-center gap-3">
         <CreaturePicker v-model="target" />
@@ -8,36 +8,11 @@
     </template>
     <div v-if="loading" class="text-sm text-warm-400">{{ t("loading") }}</div>
     <div v-else-if="!triggers.length" class="rounded-lg border border-dashed kt-v2-edge px-4 py-8 text-center text-sm text-warm-400">{{ t("set.triggers.empty") }}</div>
-    <div v-else-if="isCompact" class="-m-3" data-test="v2-settings-triggers">
-      <div v-for="tr in triggers" :key="tr.trigger_id" class="kt-v2-line px-4 py-2.5 border-b last:border-b-0">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="flex-1 min-w-0 truncate text-sm font-medium text-warm-800 dark:text-warm-100">{{ tr.trigger_type }}</span>
-          <span class="inline-flex items-center gap-1.5 shrink-0 text-xs" :class="tr.running ? 'text-aquamarine' : 'text-warm-400'"><span class="w-1.5 h-1.5 rounded-full" :class="tr.running ? 'bg-aquamarine' : 'bg-warm-400'" />{{ tr.running ? t("set.triggers.running") : t("set.triggers.idle") }}</span>
-        </div>
-        <div class="truncate font-mono text-xs text-warm-500">{{ tr.trigger_id }}</div>
-        <div class="font-mono text-[11px] text-warm-400">{{ formatTs(tr.created_at) }}</div>
-      </div>
-    </div>
-    <table v-else class="w-full text-sm" data-test="v2-settings-triggers">
-      <thead>
-        <tr class="text-left text-[11px] uppercase tracking-wider text-warm-400">
-          <th class="py-2 pr-4 font-medium">{{ t("set.triggers.type") }}</th>
-          <th class="py-2 pr-4 font-medium">{{ t("set.triggers.id") }}</th>
-          <th class="py-2 pr-4 font-medium">{{ t("set.triggers.state") }}</th>
-          <th class="py-2 font-medium">{{ t("set.triggers.created") }}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="tr in triggers" :key="tr.trigger_id" class="border-t kt-v2-line">
-          <td class="py-2 pr-4 font-medium text-warm-800 dark:text-warm-100">{{ tr.trigger_type }}</td>
-          <td class="py-2 pr-4 font-mono text-xs text-warm-500">{{ tr.trigger_id }}</td>
-          <td class="py-2 pr-4">
-            <span class="inline-flex items-center gap-1.5 text-xs" :class="tr.running ? 'text-aquamarine' : 'text-warm-400'"><span class="w-1.5 h-1.5 rounded-full" :class="tr.running ? 'bg-aquamarine' : 'bg-warm-400'" />{{ tr.running ? t("set.triggers.running") : t("set.triggers.idle") }}</span>
-          </td>
-          <td class="py-2 font-mono text-xs text-warm-500">{{ formatTs(tr.created_at) }}</td>
-        </tr>
-      </tbody>
-    </table>
+    <SettingsGroup v-else data-test="v2-settings-triggers">
+      <SettingsRow v-for="tr in triggers" :key="tr.trigger_id" :title="tr.trigger_type" :hint="`${tr.trigger_id} · ${formatTs(tr.created_at)}`" inline>
+        <span class="inline-flex items-center gap-1.5 text-xs" :class="tr.running ? 'text-aquamarine' : 'text-warm-400'"><span class="w-1.5 h-1.5 rounded-full" :class="tr.running ? 'bg-aquamarine' : 'bg-warm-400'" />{{ tr.running ? t("set.triggers.running") : t("set.triggers.idle") }}</span>
+      </SettingsRow>
+    </SettingsGroup>
   </SectionShell>
 </template>
 
@@ -49,13 +24,13 @@ import { useSessionV2 } from "@/components/session-v2/model/sessionContext"
 import { useV2T } from "@/components/session-v2/model/v2Strings"
 import CreaturePicker from "@/components/session-v2/settings/CreaturePicker.vue"
 import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
+import SettingsGroup from "@/components/settings/ui/SettingsGroup.vue"
+import SettingsRow from "@/components/settings/ui/SettingsRow.vue"
 import { useSectionLoad, useSectionTarget } from "@/components/session-v2/settings/useSectionTarget"
-import { useDensity } from "@/composables/useDensity"
 import { terrariumAPI } from "@/utils/api"
 
-/** A creature's active triggers; one stacked row each on phones. */
+/** A creature's active triggers, one row each. */
 const t = useV2T()
-const { isCompact } = useDensity()
 const session = useSessionV2()
 const target = useSectionTarget(session)
 const triggers = ref([])
