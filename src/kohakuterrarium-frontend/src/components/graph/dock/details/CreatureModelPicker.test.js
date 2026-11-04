@@ -281,20 +281,63 @@ describe("CreatureModelPicker in the graph sidebar", () => {
     },
   )
 
-  it("rejects a late completion after runtime ownership changes during graph readback", async () => {
-    const readback = deferred()
-    snapshotAPI.mockReturnValue(readback.promise)
-    const wrapper = await sidebar()
-    await choose(wrapper)
-    await button(wrapper, "Switch").trigger("click")
-    await flushPromises()
-    expect(snapshotAPI).toHaveBeenCalledOnce()
-    hosts.activeHostId = "new-host"
-    readback.resolve(snapshot(CANONICAL))
-    await flushPromises()
-    expect(ElMessage.success).not.toHaveBeenCalled()
-    expect(ElMessage.warning).not.toHaveBeenCalled()
-  })
+  it.each(["host", "user", "host round trip"])(
+    "preserves the current graph when an old readback finishes after a %s change",
+    async (change) => {
+      const readback = deferred()
+      snapshotAPI.mockReturnValueOnce(readback.promise)
+      const wrapper = await sidebar()
+      await choose(wrapper)
+      await button(wrapper, "Switch").trigger("click")
+      await flushPromises()
+      expect(snapshotAPI).toHaveBeenCalledOnce()
+      if (change === "user") auth.sameOriginUser = { id: "new-user", username: "new-user" }
+      else hosts.activeHostId = "new-host"
+      if (change === "host round trip") hosts.activeHostId = null
+      const currentGraph = snapshot("codex/current-runtime")
+      live.handleEvent({ type: "snapshot", snapshot: currentGraph })
+      await flushPromises()
+      readback.resolve(snapshot(CANONICAL))
+      await flushPromises()
+      expect(live.snapshot).toEqual(currentGraph)
+      expect(wrapper.get(".model-pill").text()).toContain("codex/current-runtime")
+      expect(ElMessage.success).not.toHaveBeenCalled()
+      expect(ElMessage.warning).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each(["host", "user", "host round trip"])(
+    "opens a fresh draft for the same selected IDs after a %s change",
+    async (change) => {
+      const wrapper = await sidebar()
+      await choose(wrapper)
+      if (change === "user") auth.sameOriginUser = { id: "new-user", username: "new-user" }
+      else hosts.activeHostId = "new-host"
+      if (change === "host round trip") hosts.activeHostId = null
+      live.handleEvent({ type: "snapshot", snapshot: snapshot() })
+      await flushPromises()
+      expect(wrapper.find(".model-row").exists()).toBe(false)
+      expect(wrapper.get(".model-pill").attributes("disabled")).toBeUndefined()
+      await wrapper.get(".model-pill").trigger("click")
+      await flushPromises()
+      expect(wrapper.find("code").text()).toBe(CURRENT)
+      expect(
+        wrapper.findAll(".variation-chip").some((chip) => chip.classes().includes("is-active")),
+      ).toBe(false)
+      await wrapper
+        .findAll(".model-row")
+        .find((row) => row.text().includes("other"))
+        .trigger("click")
+      await button(wrapper, "Switch").trigger("click")
+      await flushPromises()
+      expect(switchAPI).toHaveBeenCalledExactlyOnceWith(
+        "selected-session",
+        "immutable-a",
+        "codex/other",
+      )
+      expect(ElMessage.success).toHaveBeenCalledOnce()
+    },
+  )
 
   it("warns about failed readback without rejecting an accepted switch", async () => {
     snapshotAPI.mockRejectedValue(new Error("graph offline"))
