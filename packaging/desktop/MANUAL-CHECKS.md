@@ -64,5 +64,11 @@ Each section names the milestone that added it and the surface to look at.
 ## Updates (M9)
 - With the runtime channel set to nightly (Settings -> Updates), "Check for updates" in Settings -> Desktop app finds a newer nightly shell when one exists and says "up to date" when the installed build is the newest nightly; on the stable channel it only ever offers stable releases. Needs two nightlies published after this change.
 
+## Linux (x64 and arm64)
+- Install the `.deb` (Ubuntu 22.04 or later) and the `.rpm` (Fedora) on a real desktop: the app starts from the launcher entry, opens a window, and a `.kohakutr` file and a `kt://` link open in it.
+- Run the `.AppImage` directly: Settings -> Desktop app -> Check for updates offers the install button; on a `.deb` or `.rpm` install the same row offers "Open the releases page" instead.
+- On a Wayland session the Shortcuts section of Settings -> Desktop app is absent; on X11 the summon shortcut works.
+- Turn on close-to-tray on GNOME without the AppIndicator extension: the window closes with no icon to bring it back, so leave it off there.
+
 ## Settings (all shells)
 - Settings -> Desktop: every toggle survives closing and reopening the app.

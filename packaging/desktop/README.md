@@ -112,6 +112,25 @@ with the key whose public half is in `tauri.conf.json`. The private half is the
 installers and no updater artifacts. The Python runtime updates separately through
 the launcher.
 
+## Linux
+
+Releases carry a `.deb`, an `.rpm` and an `.AppImage` for x64 and arm64 (the arm64 ones are
+built on Arm runners). They need WebKitGTK 4.1, so Ubuntu 22.04, Debian 12, Fedora 36 or later.
+Install by downloading the package for your distribution:
+
+```
+sudo apt install ./KohakuTerrarium_<version>_amd64.deb     # or sudo dnf install ./KohakuTerrarium-<version>-1.x86_64.rpm
+```
+
+The AppImage updates itself like the Windows and macOS builds. A `.deb` or `.rpm` install is
+updated by downloading and installing a newer package; Settings → Desktop app → Updates says
+a newer one exists and opens the releases page. Neither package is signed or served from a
+package repository. The Python runtime still updates through the launcher on every format.
+
+Limits on Linux: the system-wide summon shortcut is unavailable under Wayland; close-to-tray
+needs a desktop that shows tray icons (GNOME needs the AppIndicator extension). Windows-only
+features (window material, notification buttons, Explorer verbs, recent sessions) are absent.
+
 ## Signing
 
 Builds are unsigned for Windows and ad-hoc signed for macOS. Signing steps in CI run
