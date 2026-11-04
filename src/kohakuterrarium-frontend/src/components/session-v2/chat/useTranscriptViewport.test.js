@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { KeepAlive, computed, defineComponent, h, nextTick, reactive, ref } from "vue"
 
 import { useTranscriptViewport } from "./useTranscriptViewport"
@@ -99,6 +99,83 @@ describe("useTranscriptViewport in a cached column", () => {
     s.showColumn.value = true
     await settle()
     expect(el.scrollTop).toBe(300)
+    s.wrapper.unmount()
+  })
+})
+
+describe("useTranscriptViewport width changes", () => {
+  function watchedViewport(rect) {
+    const callbacks = []
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback) {
+          callbacks.push(callback)
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    const el = document.createElement("div")
+    const paragraph = document.createElement("p")
+    el.appendChild(paragraph)
+    let width = 800
+    Object.defineProperty(el, "clientWidth", { get: () => width })
+    Object.defineProperty(el, "scrollHeight", { value: 2000, configurable: true })
+    Object.defineProperty(el, "clientHeight", { value: 400, configurable: true })
+    el.getBoundingClientRect = () => ({ top: 100, bottom: 500, height: 400 })
+    paragraph.getBoundingClientRect = () => ({
+      top: rect.top,
+      bottom: rect.top + rect.height,
+      height: rect.height,
+    })
+    document.body.appendChild(el)
+    return {
+      el,
+      resize: (next) => {
+        width = next
+        callbacks.forEach((callback) => callback())
+      },
+    }
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("keeps a reader on the tail when the column is resized", async () => {
+    const s = setup()
+    const { el, resize } = watchedViewport({ top: 0, height: 100 })
+    s.viewport.handlers.onViewportReady(el)
+    await settle()
+    el.scrollTop = 1500
+    resize(500)
+    expect(el.scrollTop).toBe(2000)
+    s.wrapper.unmount()
+  })
+
+  it("keeps the same line at the top for a reader above the tail", async () => {
+    const s = setup()
+    const rect = { top: -100, height: 400 }
+    const { el, resize } = watchedViewport(rect)
+    s.viewport.handlers.onViewportReady(el)
+    await settle()
+    el.scrollTop = 300
+    s.viewport.handlers.onScroll()
+    await settle()
+    // Narrower: the paragraph reflows to twice the height and starts lower.
+    Object.assign(rect, { top: 40, height: 800 })
+    resize(500)
+    expect(el.scrollTop).toBe(300 + 340)
+    s.wrapper.unmount()
+  })
+
+  it("ignores a resize that leaves the width as it was", async () => {
+    const s = setup()
+    const { el, resize } = watchedViewport({ top: 0, height: 100 })
+    s.viewport.handlers.onViewportReady(el)
+    await settle()
+    el.scrollTop = 1500
+    resize(800)
+    expect(el.scrollTop).toBe(1500)
     s.wrapper.unmount()
   })
 })

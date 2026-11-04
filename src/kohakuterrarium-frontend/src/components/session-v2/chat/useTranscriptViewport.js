@@ -37,6 +37,7 @@ import {
   useChatRenderWindow,
 } from "@/components/chat/chatRenderWindow"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
+import { captureReadingAnchor, restoreReadingAnchor } from "@/components/chat/readingAnchor"
 
 const NEAR_BOTTOM_PX = 80
 
@@ -145,11 +146,34 @@ export function useTranscriptViewport({ chat, tabKey, instanceId, positions = ne
   // False while a cached column is hidden: its detached element measures zero.
   let shown = true
 
+  // The line at the top of the view while reading above the tail, kept for a width change to restore.
+  let readingAnchor = null
+
   function updateNearBottom() {
     const el = viewportEl.value
     if (!el || !shown) return
     isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
     lastScrollTop = el.scrollTop
+    readingAnchor = isNearBottom.value ? null : captureReadingAnchor(el)
+  }
+
+  // A width change reflows the text: stay on the tail, or keep the same line at the top.
+  let widthObserver = null
+  let viewportWidth = 0
+  function observeWidth(viewport) {
+    widthObserver?.disconnect()
+    widthObserver = null
+    viewportWidth = viewport.clientWidth
+    if (typeof ResizeObserver === "undefined") return
+    widthObserver = new ResizeObserver(() => {
+      const width = viewport.clientWidth
+      if (!shown || !width || Math.abs(width - viewportWidth) < 1) return
+      viewportWidth = width
+      if (isNearBottom.value) viewport.scrollTop = viewport.scrollHeight
+      else restoreReadingAnchor(viewport, readingAnchor)
+      updateNearBottom()
+    })
+    widthObserver.observe(viewport)
   }
 
   function savePosition(inst = instanceId.value, tab = tabKey.value) {
@@ -253,6 +277,7 @@ export function useTranscriptViewport({ chat, tabKey, instanceId, positions = ne
     onViewportReady(viewport) {
       viewportEl.value = viewport
       viewport.classList.add("chat-messages-viewport")
+      observeWidth(viewport)
       nextTick(() => {
         if (viewportEl.value !== viewport) return
         forceScrollOnNextUpdate.value = !restorePosition()
@@ -265,6 +290,9 @@ export function useTranscriptViewport({ chat, tabKey, instanceId, positions = ne
     if (!viewportEl.value) return
     savePosition()
     viewportEl.value = null
+    widthObserver?.disconnect()
+    widthObserver = null
+    readingAnchor = null
     if (scrollFrame !== null) {
       cancelAnimationFrame(scrollFrame)
       scrollFrame = null
@@ -404,6 +432,7 @@ export function useTranscriptViewport({ chat, tabKey, instanceId, positions = ne
     readingEpoch += 1
     scrollScheduler.dispose()
     historyExpander.dispose()
+    widthObserver?.disconnect()
     if (scrollFrame !== null) cancelAnimationFrame(scrollFrame)
   })
 

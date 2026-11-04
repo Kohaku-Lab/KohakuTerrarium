@@ -173,19 +173,20 @@ onUnmounted(unlisten)
 </script>
 
 <style scoped>
-/* Messages and composer share one centered reading column: 48rem, widening to 66rem on a wide column. */
+/* Messages and composer share one centered reading column of a fixed maximum width: resizing the column changes the empty margins first and reflows the text only once the margins are used up. */
 .kt-v2-chatcol {
+  --kt-v2-read-width: 58rem;
   container-type: inline-size;
 }
 .kt-v2-transcript :deep(.chat-messages-viewport) {
   container-type: size;
 }
 .kt-v2-read {
-  max-width: clamp(48rem, 66cqi, 66rem);
+  max-width: var(--kt-v2-read-width);
 }
 .kt-v2-transcript :deep(.kt-conversation-list) {
   width: 100%;
-  max-width: clamp(48rem, 66cqi, 66rem);
+  max-width: var(--kt-v2-read-width);
   margin-inline: auto;
   padding-inline: 1rem;
 }
