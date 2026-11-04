@@ -8,17 +8,25 @@ They are one feature — a chunk written by the driver is only meaningful
 against the ops that reassemble it — so they are exercised together.
 """
 
+import asyncio
 import base64
 import hashlib
+from pathlib import Path
 
 import pytest
+from aiofiles.base import AiofilesContextManager
+from aiofiles.threadpool.binary import AsyncBufferedReader
 
 from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory.adapters.terrarium.files import (
     STREAM_CHUNK_BYTES,
     TerrariumFilesAdapter,
 )
-from kohakuterrarium.laboratory.file_transfer import stream_write_file
+from kohakuterrarium.laboratory.file_transfer import (
+    FileTransferSourceError,
+    stream_write_file,
+    stream_write_path,
+)
 
 
 def _sha(data: bytes) -> str:
@@ -251,6 +259,205 @@ class TestStreamWriteOps:
 
 
 class TestStreamWriteFile:
+    @pytest.mark.parametrize("size", [0, 7, 2 * STREAM_CHUNK_BYTES + 19])
+    async def test_path_transfer_reads_bounded_chunks_and_respects_worker_limit(
+        self, adapter, tmp_path, monkeypatch, size
+    ):
+        payload = (bytes(range(256)) * (size // 256 + 1))[:size]
+        source = tmp_path / "source.kohakutr"
+        source.write_bytes(payload)
+        reads, handles, sent = [], [], []
+        read = AsyncBufferedReader.read
+        dispatch = adapter._dispatch
+
+        async def observe_read(stream, size=-1):
+            if Path(stream.name) == source:
+                reads.append(size)
+                handles.append(stream)
+            return await read(stream, size)
+
+        async def lower_limit(msg):
+            if msg.type == "write_chunk":
+                sent.append(len(base64.b64decode(msg.body["bytes_b64"])))
+            result = await dispatch(msg)
+            if msg.type == "write_begin":
+                result["chunk_size"] = 32768
+            return result
+
+        monkeypatch.setattr(AsyncBufferedReader, "read", observe_read)
+        monkeypatch.setattr(adapter, "_dispatch", lower_limit)
+        sender = _FakeSender(adapter)
+        result = await stream_write_path(
+            sender,
+            "worker-1",
+            "recipe://path",
+            "saved.kohakutr",
+            source,
+            chunk_size=4 * STREAM_CHUNK_BYTES,
+        )
+        assert result == {"written": size, "sha256": _sha(payload)}
+        target = tmp_path / "kt-config/recipes/path/saved.kohakutr"
+        assert target.read_bytes() == payload
+        assert reads and all(0 < count <= STREAM_CHUNK_BYTES for count in reads)
+        assert len({id(handle) for handle in handles}) == 1
+        assert all(handle.closed for handle in handles)
+        assert all(0 < count <= 32768 for count in sent)
+        assert sender.calls.count("write_chunk") == (size + 32767) // 32768
+        assert adapter._transfers == {}
+
+    @pytest.mark.parametrize("failure", ["cancel", "close_error"])
+    async def test_source_close_failure_precedes_remote_commit(
+        self, adapter, tmp_path, monkeypatch, failure
+    ):
+        source = tmp_path / "closing.bin"
+        source.write_bytes(b"replacement")
+        target = tmp_path / "kt-config/recipes/close/target.bin"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"original")
+        sender = _FakeSender(adapter)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        original_exit = AiofilesContextManager.__aexit__
+
+        async def blocked_exit(manager, *args):
+            if manager._obj is None or Path(manager._obj.name) != source:
+                return await original_exit(manager, *args)
+            entered.set()
+            try:
+                await release.wait()
+            finally:
+                await original_exit(manager, *args)
+            if failure == "close_error":
+                raise OSError("source close failed")
+
+        monkeypatch.setattr(AiofilesContextManager, "__aexit__", blocked_exit)
+        task = asyncio.create_task(
+            stream_write_path(
+                sender, "worker-1", "recipe://close", "target.bin", source
+            )
+        )
+        await entered.wait()
+        if failure == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            release.set()
+            with pytest.raises(FileTransferSourceError, match="source close failed"):
+                await task
+        assert "write_commit" not in sender.calls
+        assert sender.calls[-1] == "write_abort"
+        assert target.read_bytes() == b"original"
+        assert adapter._transfers == {}
+        assert not list(target.parent.glob(".staging-stream-*"))
+        source.unlink()
+
+    @pytest.mark.parametrize("mutation", ["same_size", "truncate", "grow"])
+    async def test_changed_source_aborts_without_replacing_target(
+        self, adapter, tmp_path, monkeypatch, mutation
+    ):
+        source = tmp_path / "changing.bin"
+        source.write_bytes(b"before" * 1024)
+        target = tmp_path / "kt-config/recipes/change/target.bin"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"keep original target")
+        dispatch = adapter._dispatch
+
+        async def mutate(msg):
+            result = await dispatch(msg)
+            if msg.type == "write_begin":
+                if mutation == "grow":
+                    with source.open("ab") as file:
+                        file.write(b"new suffix")
+                else:
+                    source.write_bytes(
+                        b"after!" * (1024 if mutation == "same_size" else 2)
+                    )
+            return result
+
+        monkeypatch.setattr(adapter, "_dispatch", mutate)
+        sender = _FakeSender(adapter)
+        with pytest.raises(RuntimeError, match="changed during transfer|overran"):
+            await stream_write_path(
+                sender, "worker-1", "recipe://change", "target.bin", source
+            )
+        assert sender.calls[-1] == "write_abort"
+        assert "write_commit" not in sender.calls
+        assert target.read_bytes() == b"keep original target"
+        assert not list(target.parent.glob(".staging-stream-*"))
+        assert adapter._transfers == {}
+
+    @pytest.mark.parametrize("from_path", [False, True])
+    @pytest.mark.parametrize("phase", ["write_chunk", "write_commit"])
+    async def test_cancellation_discards_known_staging_and_preserves_target(
+        self, adapter, tmp_path, monkeypatch, from_path, phase
+    ):
+        source = tmp_path / "cancel.bin"
+        source.write_bytes(b"new content")
+        target = tmp_path / "kt-config/recipes/cancel/target.bin"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"keep")
+        dispatch = adapter._dispatch
+
+        async def cancel(msg):
+            if msg.type == phase:
+                raise asyncio.CancelledError("transfer cancelled")
+            return await dispatch(msg)
+
+        monkeypatch.setattr(adapter, "_dispatch", cancel)
+        sender = _FakeSender(adapter)
+        write = stream_write_path if from_path else stream_write_file
+        with pytest.raises(asyncio.CancelledError, match="transfer cancelled"):
+            await write(
+                sender,
+                "worker-1",
+                "recipe://cancel",
+                "target.bin",
+                source if from_path else b"new content",
+            )
+        assert sender.calls[-1] == "write_abort"
+        assert adapter._transfers == {}
+        assert not list(target.parent.glob(".staging-stream-*"))
+        assert target.read_bytes() == b"keep"
+        source.unlink()
+
+    @pytest.mark.parametrize("after_begin", [False, True])
+    async def test_source_read_errors_are_typed_and_cleanup_is_preserved(
+        self, adapter, tmp_path, monkeypatch, after_begin
+    ):
+        source = tmp_path / "unreadable.bin"
+        source.write_bytes(b"content")
+        sender = _FakeSender(adapter)
+        read = AsyncBufferedReader.read
+
+        async def fail_read(stream, size=-1):
+            if Path(stream.name) == source and (
+                not after_begin or "write_begin" in sender.calls
+            ):
+                raise OSError("source read failed")
+            return await read(stream, size)
+
+        monkeypatch.setattr(AsyncBufferedReader, "read", fail_read)
+        with pytest.raises(FileTransferSourceError, match="source read failed"):
+            await stream_write_path(
+                sender, "worker-1", "recipe://failure", "target.bin", source
+            )
+        assert sender.calls == (["write_begin", "write_abort"] if after_begin else [])
+        assert adapter._transfers == {}
+        source.unlink()
+
+    async def test_missing_source_never_starts_a_transfer(self, adapter, tmp_path):
+        sender = _FakeSender(adapter)
+        with pytest.raises(FileTransferSourceError):
+            await stream_write_path(
+                sender,
+                "worker-1",
+                "recipe://failure",
+                "target.bin",
+                tmp_path / "missing",
+            )
+        assert sender.calls == []
+
     async def test_roundtrip_multi_chunk(self, adapter, tmp_path):
         # A payload several chunks long — proves the driver slices and
         # the ops reassemble byte-for-byte.
