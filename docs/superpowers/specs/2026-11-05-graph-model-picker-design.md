@@ -20,7 +20,7 @@ A user viewing a creature in the relationship graph should be able to change its
 
 Use Vue 3 and JavaScript, the existing `ModelSwitcherShared.vue` and its injected context, and a graph-local adapter mounted in `CreatureDetails.vue`. This choice is implementation judgment, not an additional user requirement. Keep existing graph colors, typography, and spacing; the existing model pill supplies the affordance and drawer. Do not add a second model-editor implementation.
 
-The adapter receives the creature and graph view, captures runtime/session/creature ownership across asynchronous operations, and uses `terrariumAPI.switchCreatureModel`. It refreshes the shared graph feed after a successful request. Readback failure is distinguishable from switch failure. A key tied to creature/session identity prevents a draft from moving to another creature.
+The adapter receives the creature and graph view, captures runtime/session/creature ownership across asynchronous operations, and uses `terrariumAPI.switchCreatureModel`. It refreshes the shared graph feed after a successful request. The feed also validates runtime ownership before publishing an asynchronous snapshot, so a late readback cannot overwrite another host or user's graph. Readback failure is distinguishable from switch failure. A key tied to creature/session identity prevents a draft from moving to another creature.
 
 ## Verification
 
