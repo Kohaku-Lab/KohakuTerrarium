@@ -16,7 +16,7 @@
 import { computed } from "vue"
 
 const STATUSES = new Set(["done", "current", "todo"])
-const TONES = new Set(["neutral", "info", "success", "warning", "danger"])
+const TONES = new Set(["neutral", "info", "tip", "success", "warning", "danger"])
 
 const props = defineProps({
   mode: { type: String, default: "steps" },

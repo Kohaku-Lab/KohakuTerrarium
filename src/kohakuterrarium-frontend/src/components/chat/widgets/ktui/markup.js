@@ -98,6 +98,11 @@ const NAME = /[A-Za-z_][A-Za-z0-9_.-]*/y
 const ATTR = /[A-Za-z_][A-Za-z0-9_-]*/y
 const BLOCK_START = /^<ui(?=[\s>/]|$)/
 const FENCE = /^(`{3,}|~{3,})/
+const IMPLICIT_COMPONENTS = (
+  "accordion badge button callout chart compare diagram gallery kv progress " +
+  "quiz rating steps stat tabs timeline timer tree"
+).split(" ")
+const IMPLICIT_START = new RegExp(String.raw`^<(?:${IMPLICIT_COMPONENTS.join("|")})(?=[\s>/]|$)`)
 const ANY_CLOSE = /<\/[A-Za-z_]/g
 const PARTIAL_START = /^<(u(i)?)?$/
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -312,6 +317,44 @@ function blockEnd(text, start) {
   return [text.length, false]
 }
 
+function elementEnd(text, start) {
+  let lexed
+  try {
+    lexed = lex(text, start, { stopAtUiClose: true })
+  } catch (err) {
+    if (!(err instanceof MarkupError)) throw err
+    return null
+  }
+  if (lexed.incomplete || !lexed.tokens.length) return [text.length, false]
+  const last = lexed.tokens[lexed.tokens.length - 1]
+  if (last.kind === "close" || last.selfClosing) return [last.end, true]
+  return [text.length, false]
+}
+
+/** A run of bare components from ``start`` as ``[<ui> source, end, closed]``, or null. */
+function implicitBlock(text, start) {
+  const parts = []
+  let pos = start
+  let end = start
+  let closed = true
+  for (;;) {
+    const found = elementEnd(text, pos)
+    if (!found) {
+      if (!parts.length) return null
+      break
+    }
+    ;[end, closed] = found
+    parts.push(text.slice(pos, end))
+    if (!closed) break
+    let probe = end
+    while (probe < text.length && " \t\r\n".includes(text[probe])) probe++
+    if (probe >= text.length || !IMPLICIT_START.test(text.slice(probe, probe + 24))) break
+    pos = probe
+  }
+  const body = parts.join("\n")
+  return [closed ? `<ui>\n${body}\n</ui>` : `<ui>\n${body}`, end, closed]
+}
+
 /**
  * Split a reply into ``{kind: "markdown", text}`` and
  * ``{kind: "ui", source, closed}`` segments.
@@ -345,6 +388,13 @@ export function splitMarkup(text, { holdPartial = false } = {}) {
           fence = ""
       } else if (marker) {
         fence = marker[1]
+      } else if (IMPLICIT_START.test(stripped) && implicitBlock(source, i + indent)) {
+        const [blockSource, end, closed] = implicitBlock(source, i + indent)
+        if (i > mdStart) segments.push({ kind: "markdown", text: source.slice(mdStart, i) })
+        segments.push({ kind: "ui", source: blockSource, closed })
+        mdStart = i = end
+        atLineStart = false
+        continue
       } else if (BLOCK_START.test(stripped)) {
         const start = i + indent
         const [end, closed] = blockEnd(source, start)

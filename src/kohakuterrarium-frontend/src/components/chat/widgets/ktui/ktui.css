@@ -123,6 +123,9 @@
 .ktui-tone-info {
   color: #5b8def;
 }
+.ktui-tone-tip {
+  color: #9b6dd6;
+}
 .ktui-tone-success {
   color: #4cb782;
 }
@@ -264,6 +267,9 @@
   background: color-mix(in srgb, var(--ktui-callout) 9%, transparent);
   border-radius: 0.375rem;
   padding: 0.5rem 0.75rem;
+}
+.ktui-callout-neutral {
+  --ktui-callout: #8a8f98;
 }
 .ktui-callout-tip {
   --ktui-callout: #9b6dd6;

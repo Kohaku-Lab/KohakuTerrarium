@@ -143,7 +143,7 @@ const props = defineProps({
 const INPUTS = new Set(["number", "slider", "text_input", "select", "radio", "toggle", "checkbox", "date"])
 const EXTRA_TYPES = new Set(["html", "math", "link", "icon", "gallery", "compare", "copy", "timer", "quiz", "rating"])
 const SPECIAL_CHARTS = new Set(["radar", "heatmap", "gauge"])
-const CALLOUT_TONES = new Set(["info", "tip", "success", "warning", "danger"])
+const CALLOUT_TONES = new Set(["neutral", "info", "tip", "success", "warning", "danger"])
 
 const ctx = useKtUi()
 const markdownOrigin = usePlatformOrigin()

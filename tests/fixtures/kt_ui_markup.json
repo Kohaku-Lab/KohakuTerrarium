@@ -57,7 +57,51 @@
         {"kind": "ui", "source": "<ui><text>a \"</ui>\" b</text></ui>", "closed": true}
       ]
     },
-    {"name": "</ui> inside an html element does not close the block", "text": "See:\n<ui><html><p>a </ui> b</p></html></ui>\nafter", "segments": [{"kind": "markdown", "text": "See:\n"}, {"kind": "ui", "source": "<ui><html><p>a </ui> b</p></html></ui>", "closed": true}, {"kind": "markdown", "text": "\nafter"}]}
+    {"name": "</ui> inside an html element does not close the block", "text": "See:\n<ui><html><p>a </ui> b</p></html></ui>\nafter", "segments": [{"kind": "markdown", "text": "See:\n"}, {"kind": "ui", "source": "<ui><html><p>a </ui> b</p></html></ui>", "closed": true}, {"kind": "markdown", "text": "\nafter"}]},
+    {
+      "name": "bare components outside <ui> become one implicit block",
+      "text": "Pick:\n\n<callout tone=\"info\">Note</callout>\n\n<button send=\"a\">A</button>\n<button send=\"b\">B</button>\ntail",
+      "segments": [
+        {
+          "kind": "markdown",
+          "text": "Pick:\n\n"
+        },
+        {
+          "kind": "ui",
+          "source": "<ui>\n<callout tone=\"info\">Note</callout>\n<button send=\"a\">A</button>\n<button send=\"b\">B</button>\n</ui>",
+          "closed": true
+        },
+        {
+          "kind": "markdown",
+          "text": "\ntail"
+        }
+      ]
+    },
+    {
+      "name": "a bare component still streaming is an open implicit block",
+      "text": "hi\n<callout>Wor",
+      "segments": [
+        {
+          "kind": "markdown",
+          "text": "hi\n"
+        },
+        {
+          "kind": "ui",
+          "source": "<ui>\n<callout>Wor",
+          "closed": false
+        }
+      ]
+    },
+    {
+      "name": "HTML-like tags and inline mentions never open an implicit block",
+      "text": "Use `<button>` or\n<table><tr><td>x</td></tr></table>\n<buttonx>",
+      "segments": [
+        {
+          "kind": "markdown",
+          "text": "Use `<button>` or\n<table><tr><td>x</td></tr></table>\n<buttonx>"
+        }
+      ]
+    }
   ],
   "convert": [
     {

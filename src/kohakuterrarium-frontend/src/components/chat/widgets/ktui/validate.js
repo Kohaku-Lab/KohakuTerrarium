@@ -10,7 +10,7 @@
 import { freeNames, parse } from "./expr.js"
 
 const GAP = ["none", "sm", "md", "lg"]
-const TONE = ["neutral", "info", "success", "warning", "danger"]
+const TONE = ["neutral", "info", "tip", "success", "warning", "danger"]
 const INPUT = { bind: "var!", label: "text" }
 export const ICONS = [
   "check",
@@ -77,7 +77,7 @@ const COMPONENTS = {
     tone: `enum|${TONE.join("|")}`,
     trend: "value",
   },
-  callout: { value: "text!", title: "text", tone: "enum|info|tip|success|warning|danger" },
+  callout: { value: "text!", title: "text", tone: `enum|${TONE.join("|")}` },
   quote: { value: "text!", cite: "text" },
   steps: { items: "value!", current: "num" },
   timeline: { items: "value!" },

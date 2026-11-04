@@ -36,6 +36,12 @@ _ATTR = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
 _BLOCK_START = re.compile(r"<ui(?=[\s>/]|$)")
 _FENCE = re.compile(r"(`{3,}|~{3,})")
 _ANY_CLOSE = re.compile(r"</[A-Za-z_]")
+# Components with no HTML meaning: written bare at a line start they open an implicit block.
+IMPLICIT_COMPONENTS = (
+    "accordion badge button callout chart compare diagram gallery kv progress "
+    "quiz rating steps stat tabs timeline timer tree"
+).split()
+_IMPLICIT_START = re.compile(rf"<(?:{'|'.join(IMPLICIT_COMPONENTS)})(?=[\s>/]|$)")
 
 
 class MarkupError(ValueError):
@@ -276,11 +282,54 @@ def _block_end(text: str, start: int) -> tuple[int, bool]:
     return len(text), False
 
 
+def _element_end(text: str, start: int) -> tuple[int, bool] | None:
+    """End of the one element at ``start`` and whether it closed; ``None`` if malformed."""
+    try:
+        lexed = lex(text, start, stop_at_ui_close=True)
+    except MarkupError:
+        return None
+    if lexed.incomplete or not lexed.tokens:
+        return len(text), False
+    last = lexed.tokens[-1]
+    if last.kind == "close" or last.self_closing:
+        return last.end, True
+    return len(text), False
+
+
+def _implicit_block(text: str, start: int) -> tuple[str, int, bool] | None:
+    """A run of bare components from ``start`` as ``(<ui> source, end, closed)``.
+
+    The run ends at the first line that does not open another bare component.
+    """
+    parts: list[str] = []
+    pos, closed = start, True
+    while True:
+        found = _element_end(text, pos)
+        if found is None:
+            if not parts:
+                return None
+            break
+        end, closed = found
+        parts.append(text[pos:end])
+        if not closed:
+            break
+        probe = end
+        while probe < len(text) and text[probe] in " \t\r\n":
+            probe += 1
+        if probe >= len(text) or not _IMPLICIT_START.match(text, probe):
+            break
+        pos = probe
+    body = "\n".join(parts)
+    return (f"<ui>\n{body}\n</ui>" if closed else f"<ui>\n{body}"), end, closed
+
+
 def split_message(text: str) -> list[dict[str, Any]]:
     """Cut a reply into ``markdown`` and ``ui`` segments (``source``, ``closed``).
 
     A block starts with ``<ui`` at the start of a line (up to three spaces of
     indent) outside fenced code; an open block runs to the end of the text.
+    A line that starts with a component that has no HTML meaning (``callout``,
+    ``button``, …) opens an implicit block holding that run of components.
     """
     segments: list[dict[str, Any]] = []
     md_start, i, n = 0, 0, len(text)
@@ -303,6 +352,16 @@ def split_message(text: str) -> list[dict[str, Any]]:
                         fence = ""
             elif marker:
                 fence = marker.group(1)
+            elif _IMPLICIT_START.match(stripped) and (
+                implicit := _implicit_block(text, i + indent)
+            ):
+                source, end, closed = implicit
+                if i > md_start:
+                    segments.append({"kind": "markdown", "text": text[md_start:i]})
+                segments.append({"kind": "ui", "source": source, "closed": closed})
+                md_start = i = end
+                at_line_start = False
+                continue
             elif _BLOCK_START.match(stripped):
                 start = i + indent
                 end, closed = _block_end(text, start)
@@ -325,6 +384,7 @@ __all__ = [
     "Attr",
     "Lexed",
     "MarkupError",
+    "IMPLICIT_COMPONENTS",
     "NESTED_RAW",
     "RAW_CHILD",
     "TEXT_CHILD",

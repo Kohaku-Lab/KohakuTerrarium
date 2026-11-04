@@ -77,6 +77,15 @@ class TestValidSpec:
         validated = validate_spec({"root": {"type": "text", "value": "hi"}})
         assert validated.interactive is False and validated.send_names == set()
 
+    def test_every_toned_component_takes_the_same_tones(self):
+        tones = ["neutral", "info", "tip", "success", "warning", "danger"]
+        nodes = [
+            {"type": kind, "value": 1 if kind == "progress" else "x", "tone": tone}
+            for kind in ("callout", "badge", "stat", "progress")
+            for tone in tones
+        ]
+        assert validate_spec({"root": {"type": "stack", "children": nodes}})
+
     def test_build_scope_evaluates_computed_with_state_override(self):
         validated = validate_spec(BILL)
         assert build_scope(validated)["each"] == 44
@@ -150,7 +159,7 @@ class TestErrors:
                 ],
                 "rows": [],
             },
-            {"type": "callout", "value": "x", "tone": "neutral"},
+            {"type": "callout", "value": "x", "tone": "error"},
             {"type": "progress", "value": 1, "style": "pie"},
             {"type": "chart", "kind": "funnel", "series": []},
             {"type": "accordion", "children": []},

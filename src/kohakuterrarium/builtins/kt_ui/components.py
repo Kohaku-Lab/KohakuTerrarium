@@ -41,8 +41,7 @@ class Component:
 
 
 _GAP = ("none", "sm", "md", "lg")
-_TONE = ("neutral", "info", "success", "warning", "danger")
-_CALLOUT_TONE = ("info", "tip", "success", "warning", "danger")
+_TONE = ("neutral", "info", "tip", "success", "warning", "danger")
 CHART_KINDS = (
     "bar",
     "stacked",
@@ -170,7 +169,7 @@ COMPONENTS: dict[str, Component] = {
         {
             "value": Prop("text", required=True),
             "title": Prop("text"),
-            "tone": Prop("enum", choices=_CALLOUT_TONE),
+            "tone": Prop("enum", choices=_TONE),
         }
     ),
     "quote": Component({"value": Prop("text", required=True), "cite": Prop("text")}),
