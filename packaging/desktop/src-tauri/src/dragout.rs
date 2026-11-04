@@ -38,16 +38,33 @@ pub fn start_file_drag(window: WebviewWindow, args: Args) -> bool {
     }
     let dragged = window.clone();
     window
-        .run_on_main_thread(move || {
-            let _ = drag::start_drag(
-                &dragged,
-                drag::DragItem::Files(files),
-                drag::Image::Raw(PREVIEW_ICON.to_vec()),
-                |_result, _position| {},
-                drag::Options::default(),
-            );
-        })
+        .run_on_main_thread(move || begin(&dragged, files))
         .is_ok()
+}
+
+#[cfg(target_os = "linux")]
+fn begin(window: &WebviewWindow, files: Vec<PathBuf>) {
+    let Ok(gtk_window) = window.gtk_window() else {
+        return;
+    };
+    let _ = drag::start_drag(
+        &gtk_window,
+        drag::DragItem::Files(files),
+        drag::Image::Raw(PREVIEW_ICON.to_vec()),
+        |_result, _position| {},
+        drag::Options::default(),
+    );
+}
+
+#[cfg(not(target_os = "linux"))]
+fn begin(window: &WebviewWindow, files: Vec<PathBuf>) {
+    let _ = drag::start_drag(
+        window,
+        drag::DragItem::Files(files),
+        drag::Image::Raw(PREVIEW_ICON.to_vec()),
+        |_result, _position| {},
+        drag::Options::default(),
+    );
 }
 
 #[cfg(test)]
