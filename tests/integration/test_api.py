@@ -2705,6 +2705,26 @@ terrarium:
         graph_channels = {c["name"] for c in graph["channels"]}
         assert "team" in graph_channels
 
+        models_before = {c["creature_id"]: c["llm_name"] for c in graph["creatures"]}
+        resp = client.post(
+            f"/api/sessions/{session_id}/creatures/{bob_id}/model",
+            json={"model": "openai/gpt-5.4-nano"},
+        )
+        assert resp.status_code == 200, resp.text
+        canonical_model = resp.json()["model"]
+        assert canonical_model == "openai/gpt-5.4-nano"
+        assert models_before[bob_id] != canonical_model
+        resp = client.get("/api/runtime/graph")
+        assert resp.status_code == 200
+        switched_graph = next(
+            g for g in resp.json()["graphs"] if g["graph_id"] == session_id
+        )
+        models_after = {
+            c["creature_id"]: c["llm_name"] for c in switched_graph["creatures"]
+        }
+        assert models_after[bob_id] == canonical_model
+        assert models_after[alice_id] == models_before[alice_id]
+
         # Metrics now reports a multi-creature graph as a terrarium.
         resp = client.get("/api/metrics/snapshot")
         assert resp.status_code == 200
