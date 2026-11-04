@@ -51,7 +51,7 @@ pub fn capabilities() -> Value {
         "closeToTray": true,
         "trayBadge": true,
         "fileDrop": true,
-        "summonShortcut": true,
+        "summonShortcut": crate::summon::supported(),
         "openFiles": true,
         "popoutWindows": true,
         "nativeDialogs": true,
@@ -60,6 +60,7 @@ pub fn capabilities() -> Value {
         "trayMenu": true,
         "backendControl": true,
         "runtimeRepair": !crate::development::active(),
+        "shellUpdateInstall": crate::updater::installs_in_place() && !crate::development::active(),
         "diagnostics": true,
         "keepAwake": true,
         "contextMenus": true,
@@ -169,6 +170,9 @@ pub async fn apply_update(
     if crate::development::active() {
         return Err("shell updates are unavailable in source mode".into());
     }
+    if !crate::updater::installs_in_place() {
+        return Err("this install is updated by downloading a new package".into());
+    }
     let bytes = update
         .download(|_, _| {}, || {})
         .await
@@ -181,7 +185,7 @@ pub async fn apply_update(
 /// Download and install the newer shell build, then restart into it.
 #[tauri::command]
 pub async fn install_shell_update(app: AppHandle) -> bool {
-    if crate::development::active() {
+    if crate::development::active() || !crate::updater::installs_in_place() {
         return false;
     }
     let Ok(updater) = crate::updater::for_app(&app) else {

@@ -60,6 +60,31 @@ def test_manifest_lists_each_signed_platform_with_its_download_url(
     assert manifest["pub_date"].endswith("Z")
 
 
+def test_only_the_appimage_updates_a_linux_install(manifest_tool, tmp_path):
+    _assets(tmp_path)
+    for name in (
+        "KohakuTerrarium_2.3.0_amd64.AppImage",
+        "KohakuTerrarium_2.3.0_aarch64.AppImage",
+    ):
+        (tmp_path / name).write_bytes(b"appimage")
+        (tmp_path / f"{name}.sig").write_text(f"sig-of-{name}", encoding="utf-8")
+    for name in (
+        "KohakuTerrarium_2.3.0_amd64.deb",
+        "KohakuTerrarium-2.3.0-1.x86_64.rpm",
+    ):
+        (tmp_path / name).write_bytes(b"package")
+    version, entries = manifest_tool.collect(tmp_path)
+    assert version == "2.3.0"
+    assert set(entries) == {
+        "windows-x86_64",
+        "darwin-aarch64",
+        "linux-x86_64",
+        "linux-aarch64",
+    }
+    assert entries["linux-x86_64"]["name"].endswith("_amd64.AppImage")
+    assert entries["linux-aarch64"]["name"].endswith("_aarch64.AppImage")
+
+
 def test_the_msi_is_not_an_update_target(manifest_tool, tmp_path):
     _, entries = manifest_tool.collect(_assets(tmp_path))
     assert all(not entry["name"].endswith(".msi") for entry in entries.values())

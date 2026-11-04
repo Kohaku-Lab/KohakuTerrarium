@@ -16,6 +16,18 @@ pub fn parse(text: &str) -> Option<Shortcut> {
     text.parse().ok()
 }
 
+/// Whether the session lets an app grab a system-wide key: not under a Linux Wayland session.
+pub fn supported() -> bool {
+    allows_global_shortcut(
+        cfg!(target_os = "linux"),
+        std::env::var("XDG_SESSION_TYPE").ok().as_deref(),
+    )
+}
+
+fn allows_global_shortcut(linux: bool, session: Option<&str>) -> bool {
+    !(linux && session.is_some_and(|kind| kind.eq_ignore_ascii_case("wayland")))
+}
+
 /// Bring the window forward and tell the page.
 pub fn summon(app: &AppHandle) {
     window::focus(app);
@@ -42,8 +54,12 @@ fn apply(app: &AppHandle, previous: Option<&str>, next: Option<&str>) -> bool {
     }
 }
 
-/// Rarely used, and a key all three desktop platforms map (macOS stops at F20).
-const PROBE: &str = "Control+Alt+Shift+F19";
+/// Rarely used. macOS stops at F20 and a stock X11 keymap stops at F12, so Linux probes with F12.
+const PROBE: &str = if cfg!(target_os = "linux") {
+    "Control+Alt+Shift+F12"
+} else {
+    "Control+Alt+Shift+F19"
+};
 
 /// Register and release the probe shortcut, leaving saved settings alone.
 pub fn probe(app: &AppHandle) -> Value {
@@ -98,10 +114,23 @@ mod tests {
     }
 
     #[test]
+    fn only_a_linux_wayland_session_refuses_a_global_shortcut() {
+        assert!(allows_global_shortcut(false, Some("wayland")));
+        assert!(allows_global_shortcut(true, Some("x11")));
+        assert!(allows_global_shortcut(true, None));
+        assert!(!allows_global_shortcut(true, Some("Wayland")));
+    }
+
+    #[test]
     fn the_probe_shortcut_parses_and_uses_a_key_macos_can_bind() {
         assert!(parse(PROBE).is_some());
         let key: u32 = PROBE.rsplit('F').next().unwrap().parse().unwrap();
-        assert!((13..=20).contains(&key));
+        let range = if cfg!(target_os = "linux") {
+            1..=12
+        } else {
+            13..=20
+        };
+        assert!(range.contains(&key));
     }
 
     #[test]

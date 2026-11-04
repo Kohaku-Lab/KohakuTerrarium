@@ -18,7 +18,7 @@
     "active": true,
     "category": "DeveloperTool",
     "shortDescription": "Universal agent framework desktop app",
-    "targets": ["msi", "nsis", "dmg", "app"],
+    "targets": ["msi", "nsis", "dmg", "app", "deb", "rpm", "appimage"],
     "icon": [
       "../../../src/kohakuterrarium/app_icon.png",
       "../../../src/kohakuterrarium/app_icon.icns",
@@ -42,6 +42,15 @@
       "nsis": {
         "installMode": "currentUser",
         "installerHooks": "nsis-hooks.nsh"
+      }
+    },
+    "linux": {
+      "deb": {
+        "section": "devel",
+        "depends": ["libayatana-appindicator3-1"]
+      },
+      "rpm": {
+        "depends": ["libayatana-appindicator-gtk3"]
       }
     },
     "macOS": {
