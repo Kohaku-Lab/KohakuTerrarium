@@ -73,3 +73,15 @@ describe("Dock pill", () => {
     expect(wrapper.find("[data-test='v2-dock-more']").exists()).toBe(true)
   })
 })
+
+describe("Dock more menu", () => {
+  it("floats over the widget above it instead of taking layout space", async () => {
+    const { wrapper, ctx } = mountDock()
+    ctx().openWidget("usage")
+    await wrapper.find("[data-test='v2-dock-more']").trigger("click")
+    const menu = wrapper.find("[data-test='v2-dock-more-menu']")
+    expect(menu.classes()).toEqual(expect.arrayContaining(["absolute", "bottom-full"]))
+    expect(wrapper.find("[data-test='v2-dock']").classes()).toContain("relative")
+    expect(ctx().widget.value).toBe("usage")
+  })
+})

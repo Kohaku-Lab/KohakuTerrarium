@@ -1,6 +1,6 @@
 <template>
-  <div ref="rootEl" class="flex flex-col items-end gap-2" data-test="v2-dock">
-    <div v-if="moreOpen" class="kt-v2-float kt-v2-edge rounded-lg border shadow-lg py-1 w-52" data-test="v2-dock-more-menu">
+  <div ref="rootEl" class="relative flex flex-col items-end gap-2" data-test="v2-dock">
+    <div v-if="moreOpen" class="kt-v2-float kt-v2-edge absolute bottom-full right-0 z-10 mb-2 rounded-lg border shadow-lg py-1 w-52" data-test="v2-dock-more-menu">
       <button v-for="item in MORE_ITEMS" :key="item.id" class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-warm-700 dark:text-warm-200 hover:bg-warm-100 dark:hover:bg-warm-800" :data-test="`v2-more-${item.id}`" @click="openMore(item)"><span :class="item.icon" />{{ t(item.target === "side" ? `side.${item.id}.title` : `widget.${item.id}.title`) }}</button>
     </div>
 
