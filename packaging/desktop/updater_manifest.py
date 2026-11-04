@@ -2,7 +2,7 @@
 
 The release job runs this over the collected release assets. Each platform entry
 points at a signed installer (Windows: the per-user setup executable, macOS: the
-app archive) and carries the signature file's contents.
+app archive, Linux: the AppImage) and carries the signature file's contents.
 
 Usage::
 
@@ -25,6 +25,12 @@ PLATFORMS = {
     "windows-x86_64": re.compile(r"^KohakuTerrarium_(\d+\.\d+\.\d+)_x64-setup\.exe$"),
     "darwin-aarch64": re.compile(
         r"^KohakuTerrarium_(\d+\.\d+\.\d+)_aarch64\.app\.tar\.gz$"
+    ),
+    "linux-x86_64": re.compile(
+        r"^KohakuTerrarium_(\d+\.\d+\.\d+)_(?:amd64|x86_64)\.AppImage$"
+    ),
+    "linux-aarch64": re.compile(
+        r"^KohakuTerrarium_(\d+\.\d+\.\d+)_(?:aarch64|arm64)\.AppImage$"
     ),
 }
 
