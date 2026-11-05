@@ -1,7 +1,7 @@
 """Full-screen chrome, after the web's v2 session view.
 
-* **Pages** (the tab strip on top): Chat · Graph · Status · Workspace · Debug · Settings. Chat
-  is the conversation; the others are whole pages (``pages.py``); Settings opens ``/config``.
+* **Pages** (the tab strip on top): Chat · Graph · Status · Debug · Settings. Chat is the
+  conversation; the others are whole pages (``pages.py``).
 * **Conversation rail** (left, Chat only): agents, then channels, each with a status mark and
   an unread count. Picking one shows its conversation; a channel's chat sends as ``human``.
 * **Side panel** (right, Chat only): what is going on, in sections (``side.py``).
@@ -28,7 +28,6 @@ PAGE_TABS = (
     ("chat", "Chat"),
     ("graph", "Graph"),
     ("status", "Status"),
-    ("workspace", "Workspace"),
     ("debug", "Debug"),
     ("settings", "Settings"),
 )
@@ -56,10 +55,11 @@ class Chrome:
 
     def build(self) -> None:
         app = self.shell.app
-        self.rail = app.panels.add(Pane(side="left", min=14, **self._saved("rail")))
+        rail = Pane(side="left", min=14, title="Chats", **self._saved("rail"))
+        self.rail = app.panels.add(rail)
         self.tree = self.rail.add(Tree(items=[]))
         self.tabs = app.head.add(TabStrip(tabs=self._page_tabs(), active=0))
-        side = Pane(side="right", min=20, **self._saved("side"))
+        side = Pane(side="right", min=20, title="Activity", **self._saved("side"))
         self.side_pane = app.panels.add(side)
         self.side.build(self.side_pane)
         self.refresh()
@@ -195,10 +195,11 @@ class Chrome:
         if ev.id in self.side.lists() or ev.id in self.pages.trees():
             if ev.kind == "select":
                 self.choose(str(ev.value or ""))
-            elif ev.kind == "change" and self.page == "workspace":
-                value = ev.data.get("value") or {}
-                if self.pages.files.expand(str(value.get("expand", ""))):
-                    self.pages.refresh(force=True)
+            return True
+        name = self.pages.fields().get(ev.id)
+        if name is not None:
+            if ev.kind == "change" and ev.value is not None:
+                self.shell.spawn(self.shell.settings.apply(name, str(ev.value)))
             return True
         return False
 
@@ -226,8 +227,14 @@ class Chrome:
                 shell.spawn(shell.board.trace(cid, job_id))
             case "creature" | "channel":
                 self.open(value)
-            case "file":
-                shell.spawn(self.pages.files.preview(shell, rest))
+            case "model" | "key" | "info":
+                shell.spawn(self._setting(value))
+
+    async def _setting(self, value: str) -> None:
+        await self.shell.settings.act(value)
+        # a model or key changed in the dialog: the page shows the new value
+        if self.page == "settings":
+            self.pages.refresh(force=True)
 
     def open(self, value: str) -> None:
         """Shows a conversation: ``creature:<id>`` or ``channel:<name>``."""
@@ -244,13 +251,8 @@ class Chrome:
     def show_page(self, page: str) -> None:
         shell = self.shell
         values = [v for v, _ in PAGE_TABS]
-        if shell.mode != "fullscreen" and page != "settings":
+        if shell.mode != "fullscreen":
             # pages are full screen only (a page shown inline would go to scrollback)
-            return
-        if page == "settings":
-            # a page that is a dialog: the strip stays on the page that was shown
-            self.tabs.update(active=values.index(self.page))
-            shell.spawn(shell.settings.open())
             return
         if page == "chat":
             self.to_chat()

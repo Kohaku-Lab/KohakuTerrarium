@@ -361,7 +361,12 @@ class TestKtuiWorkflow:
                 lambda: "Allow tool: write? · answered elsewhere" in _seen(app),
                 "the card closed by the other client",
             )
-            assert not any(line.startswith("│ Allow tool") for line in app.screen())
+            # (the closing line reaches scrollback on the frame that removes the card, which
+            # the screen copy may not have caught yet)
+            await _until(
+                lambda: not any(l.startswith("│ Allow tool") for l in app.screen()),
+                "the card gone from the screen",
+            )
             assert shell.interactions.count == 0
 
             # a multi-select question: the default is ticked, space ticks more, enter answers
@@ -552,9 +557,6 @@ class TestKtuiWorkflow:
             shell.attach(helper)
             run = asyncio.create_task(shell.run())
             await _until(lambda: shell.composer is not None, "the composer")
-            await _until(
-                lambda: "● 2 creatures" in "\n".join(app.screen()), "the creatures row"
-            )
 
             await _type(app, "@helper hi")
             await _until(
@@ -562,7 +564,8 @@ class TestKtuiWorkflow:
                 is not None,
                 "helper's answer",
             )
-            await _until(lambda: "new" in "\n".join(app.screen()), "the unread count")
+            unread = shell.entries["helper"].view
+            await _until(lambda: unread.unread > 0, "the unread count")
             assert "helper reply" not in _seen(app), "unfocused output stays off-screen"
 
             await _type(app, "/focus helper")
@@ -570,7 +573,7 @@ class TestKtuiWorkflow:
             seen = _seen(app)
             assert seen.index("── helper ──") < seen.index("helper reply")
             assert shell.focused.creature is helper
-            assert "new" not in "\n".join(app.screen())
+            assert unread.unread == 0
 
             # a creature that joins the graph while ktui runs is attached and can be talked to
             late = _creature(
@@ -578,9 +581,6 @@ class TestKtuiWorkflow:
             )
             await engine.add_creature(late, graph=helper.graph_id)
             await _until(lambda: "late" in shell.entries, "the late creature attached")
-            await _until(
-                lambda: "● 3 creatures" in "\n".join(app.screen()), "three creatures"
-            )
             await _type(app, "@late hey")
             await _until(
                 lambda: late.agent.controller.conversation.get_last_assistant_message()

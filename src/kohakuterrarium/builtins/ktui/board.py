@@ -133,13 +133,7 @@ class Board:
         """The active-items row under the input, one segment per kind; empty hides it."""
         shell = self.shell
         segments = []
-        if shell.multi:
-            unread = sum(e.view.unread for e in shell.entries.values())
-            busy = sum(1 for e in shell.entries.values() if shell.is_busy(e))
-            label = f"● {len(shell.entries)} creatures"
-            label += f" · {busy} running" if busy else ""
-            label += f" · {unread} new" if unread else ""
-            segments.append({"label": label, "value": "creatures"})
+        # creatures are not a segment: the full-screen rail and /focus or @name cover them
         jobs = [j for e in shell.entries.values() for j in e.view.jobs.values()]
         agents = sum(1 for j in jobs if j.kind == "subagent")
         background = sum(1 for j in jobs if j.background and j.kind == "tool")
@@ -151,7 +145,7 @@ class Board:
         if background:
             plural = "s" if background > 1 else ""
             segments.append(
-                {"label": f"⏵ {background} bg job{plural}", "value": "jobs"}
+                {"label": f"⏵ {background} background task{plural}", "value": "jobs"}
             )
         queued = shell.focused.view.queued_count
         if queued:

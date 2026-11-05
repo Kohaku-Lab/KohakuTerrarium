@@ -9,7 +9,7 @@ sub-agent's trace, a member's chat). Nothing going on: one quiet line.
 
 from typing import TYPE_CHECKING, Any
 
-from kohakutui.ui import KV, Node, Table, Text, Tree
+from kohakutui.ui import KV, Field, Node, Stack, Table, Text, Tree
 
 import kohakuterrarium.builtins.ktui.chrome_data as data
 
@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 
 EMPTY = "Nothing running."
 
-# (key, title or None, kind: tree | kv | table | text, payload)
+# (key, title or None, kind: tree | kv | table | text | fields, payload); fields: a list of
+# {"name", "label", "options", "value"} select controls
 Section = tuple[str, str | None, str, Any]
 
 
@@ -59,6 +60,9 @@ class Sections:
         self.spaced = spaced
         # [key, kind, title node or None, body node, last (title, payload)]
         self._shown: list[list[Any]] = []
+        # field node id → its name, for the change events of "fields" sections
+        self.fields: dict[int, str] = {}
+        self._field_nodes: dict[str, Node] = {}
 
     def trees(self) -> set[int]:
         return {s[3].id for s in self._shown if s[1] == "tree"}
@@ -75,7 +79,13 @@ class Sections:
                 continue
             if shown[2] is not None:
                 shown[2].update(value=self._title(title or "", i))
-            _update(shown[3], kind, payload)
+            if kind == "fields":
+                for f in payload:
+                    node = self._field_nodes.get(f["name"])
+                    if node is not None:
+                        node.update(value=f["value"])
+            else:
+                _update(shown[3], kind, payload)
             shown[4] = (title, payload)
 
     def clear(self) -> None:
@@ -90,11 +100,26 @@ class Sections:
                 shown[2].remove()
             shown[3].remove()
         self._shown = []
+        self.fields.clear()
+        self._field_nodes.clear()
         for i, (key, title, kind, payload) in enumerate(sections):
             header = None
             if title is not None:
                 header = self.parent.add(Text(self._title(title, i), bold=True))
-            body = self.parent.add(_spec(kind, payload))
+            if kind == "fields":
+                body = self.parent.add(Stack())
+                for f in payload:
+                    spec = Field(
+                        control="select",
+                        label=f["label"],
+                        options=f["options"],
+                        value=f["value"],
+                    )
+                    node = body.add(spec)
+                    self.fields[node.id] = f["name"]
+                    self._field_nodes[f["name"]] = node
+            else:
+                body = self.parent.add(_spec(kind, payload))
             self._shown.append([key, kind, header, body, (title, payload)])
 
 

@@ -46,7 +46,7 @@ BINDINGS = {
     "alt+s": "toggle_side",
     "ctrl+pagedown": "next_chat",
     "ctrl+pageup": "prev_chat",
-    **{f"alt+{n}": f"page_{n}" for n in range(1, 7)},
+    **{f"alt+{n}": f"page_{n}" for n in range(1, 6)},
 }
 
 

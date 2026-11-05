@@ -1,12 +1,13 @@
-"""Full-screen pages beside Chat, as the web's session tabs: Graph, Status, Workspace and
-Debug. Each is a kohakutui document shown where the chat is, kept up to date while shown.
+"""Full-screen pages beside Chat, as the web's session tabs: Graph, Status, Debug and
+Settings. Each is a kohakutui document shown where the chat is, kept up to date while shown.
 
 * **Graph**: the focused graph as a tree; enter or a click on a creature or channel opens
   its chat.
 * **Status**: the focused creature's figures, then tables of agents, channels, sub-agents,
   jobs and drives.
-* **Workspace**: the working directory (folders open on demand); enter previews a file.
 * **Debug**: the log tail (KT's log, warnings, stray output), newest at the bottom.
+* **Settings**: the display choices as fields (←/→ change, applied at once), then models,
+  API keys, providers and MCP servers (enter acts: pick a model, set a key).
 """
 
 from typing import TYPE_CHECKING
@@ -14,14 +15,13 @@ from typing import TYPE_CHECKING
 from kohakutui.ui import Node
 
 import kohakuterrarium.builtins.ktui.chrome_data as data
-from kohakuterrarium.builtins.ktui.aux_files import FileTree
 from kohakuterrarium.builtins.ktui.logtail import LogTail
 from kohakuterrarium.builtins.ktui.side import Section, Sections
 
 if TYPE_CHECKING:
     from kohakuterrarium.builtins.ktui.shell import KtuiShell
 
-PAGES = ("graph", "status", "workspace", "debug")
+PAGES = ("graph", "status", "debug", "settings")
 LOG_SHOWN = 400
 
 
@@ -34,7 +34,6 @@ class Pages:
         self.shell = shell
         self.drives = drives
         self.logs = logs
-        self.files = FileTree()
         self.docs: dict[str, Node] = {}
         self.sections: dict[str, Sections] = {}
         self.shown: str | None = None
@@ -52,12 +51,18 @@ class Pages:
     def trees(self) -> set[int]:
         return {i for s in self.sections.values() for i in s.trees()}
 
+    def fields(self) -> dict[int, str]:
+        return {i: n for s in self.sections.values() for i, n in s.fields.items()}
+
     def refresh(self, force: bool = False) -> None:
         """Redraws the shown page (only what changed)."""
         page = self.shown
         if page is None or page not in self.sections:
             return
         if page == "debug" and not force and self.logs.count == self._log_count:
+            return
+        # settings change only through the page itself (or a dialog it opened)
+        if page == "settings" and not force:
             return
         try:
             content = self._content(page)
@@ -77,12 +82,8 @@ class Pages:
                 ]
             case "status":
                 return self._status()
-            case "workspace":
-                items = self.files.items()
-                return [
-                    ("tree", str(self.files.root), "tree", items),
-                    ("hint", None, "text", "→ opens a folder · enter previews a file"),
-                ]
+            case "settings":
+                return self._settings()
             case "debug":
                 self._log_count = self.logs.count
                 lines = self.logs.snapshot(LOG_SHOWN)
@@ -90,6 +91,17 @@ class Pages:
                 body = "\n".join(lines) or "no log lines yet"
                 return [("log", "Log · KT, warnings and stray output", "text", body)]
         return []
+
+    def _settings(self) -> list[Section]:
+        settings = self.shell.settings
+        out: list[Section] = [
+            ("display", "Display · ←/→ change", "fields", settings.display_fields())
+        ]
+        for title, rows in settings.sections():
+            out.append((title, title, "tree", rows))
+        hint = "tab or F6 moves between entries · enter acts on one"
+        out.append(("hint", None, "text", hint))
+        return out
 
     def _status(self) -> list[Section]:
         shell = self.shell

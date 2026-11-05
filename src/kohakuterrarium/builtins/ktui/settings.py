@@ -83,6 +83,37 @@ class Settings:
         items += _safe(self._mcp_items, "mcp")
         return items
 
+    def display_fields(self) -> list[dict]:
+        """The display choices as select fields (the Settings page)."""
+        return [
+            {
+                "name": item["value"].removeprefix("set:"),
+                "label": item["label"],
+                "options": item["choices"][0][1],
+                "value": next(iter(item["chosen"].values())),
+            }
+            for item in self.items()
+            if item.get("group") == "display"
+        ]
+
+    def sections(self) -> list[tuple[str, list[dict]]]:
+        """The rest of the settings by section, as list entries (the Settings page)."""
+        out: list[tuple[str, list[dict]]] = []
+        for title, group in (
+            ("Models", "models"),
+            ("API keys", "keys"),
+            ("Providers", "providers"),
+            ("MCP servers", "mcp"),
+        ):
+            rows = [
+                {"label": i["label"], "detail": i.get("detail"), "value": i["value"]}
+                for i in self.items()
+                if i.get("group") == group
+            ]
+            if rows:
+                out.append((title, rows))
+        return out
+
     def _model_items(self) -> list[dict]:
         entry = self.shell.focused
         try:
@@ -177,9 +208,16 @@ class Settings:
         value = answer.get("value") if isinstance(answer, dict) else answer
         choices = answer.get("choices", {}) if isinstance(answer, dict) else {}
         kind, _, rest = str(value).partition(":")
+        if kind == "set":
+            await self.apply(rest, str(choices.get(rest, "")))
+        else:
+            await self.act(str(value))
+
+    async def act(self, value: str) -> None:
+        """Acts on a settings entry that is not a choice (the picker and the Settings page)."""
+        shell = self.shell
+        kind, _, rest = value.partition(":")
         match kind:
-            case "set":
-                await self._apply(rest, str(choices.get(rest, "")))
             case "model" if rest == "session":
                 await self.pick_model(shell.focused)
             case "model":
@@ -191,7 +229,8 @@ class Settings:
             case "info":
                 shell.app.notify(f"{rest}: {ELSEWHERE}", "info")
 
-    async def _apply(self, name: str, option: str) -> None:
+    async def apply(self, name: str, option: str) -> None:
+        """Sets a display choice (``renderer``, ``theme``, ``verbosity``, ``links``)."""
         shell = self.shell
         match name:
             case "renderer":

@@ -17,13 +17,12 @@ every creature of a running engine, rendered inline (scrollback), hybrid or full
 | `models.py` | `/model` picker items from KT presets, answers back to selectors |
 | `output.py` | `KtuiOutput`: a creature's default output; maps every KT output event to the view or the shell; reports the `kt.ui` renderer (not `kt.app`); `on_widget` takes kt.ui widgets and turns the legacy kinds back into their events |
 | `view.py` | `CreatureView`: one creature's document (a kohakutui document of its own), drawn focused or not; only the focused creature uses the live region |
-| `chrome.py` | `Chrome`: full screen after the web's v2 session view: the page tabs on top (Chat, Graph, Status, Workspace, Debug, Settings), the conversation rail (agents, channels) and the side panel on the Chat page; panel sizes saved in `ktui.json`; alt+1…6, alt+r / alt+s, ctrl+pgup / ctrl+pgdn |
+| `chrome.py` | `Chrome`: full screen after the web's v2 session view: the page tabs on top (Chat, Graph, Status, Debug, Settings), the conversation rail (agents, channels) and the side panel on the Chat page; panel sizes saved in `ktui.json`; alt+1…5, alt+r / alt+s, ctrl+pgup / ctrl+pgdn |
 | `chrome_data.py` | What the chrome shows, read from the shell: jobs, sub-agents, the graph, members, scratchpad, widgets, status rows, drives (read in the background) |
 | `side.py` | `Side`: the Chat page's right panel, only the sections with content (members of the open channel, jobs, sub-agents, drives, widgets, scratchpad); `Sections`, the titled lists it and the pages draw with |
-| `pages.py` | `Pages`: Graph, Status, Workspace and Debug, each a document shown where the chat is |
+| `pages.py` | `Pages`: Graph, Status, Debug and Settings, each a document shown where the chat is |
 | `channels.py` | `ChannelView`: a channel's conversation (history, live traffic) in a document; the composer sends to it as `human` while it is shown |
 | `logtail.py` | `LogTail`: while ktui runs, `print`, stderr, Python warnings and log records (KT's from INFO, other packages' from WARNING) go to the Logs tab and `/logs` instead of over the UI |
-| `aux_files.py` | `FileTree`: the Workspace page's tree, folders loaded when opened, a docked file preview |
 | `view_subagents.py` | `SubagentCells`: foreground sub-agents as ◆ cells with their tool calls nested (mixed into the view) |
 | `inline_ui.py` | `ReplyStream`: a streamed reply cut into Markdown and `<ui>` blocks (`kt_ui.markup_lex.split_message`); lines that may open a block are held back until decided |
 | `ui_block.py` | `BlockView`: one `<ui>` block or tool widget: state, `let` values, redraws, live → frozen, where state is saved (inline state or the widget service) |
@@ -54,13 +53,14 @@ The engine launcher is `terrarium/engine/cli/ktui.py`.
   are written under a `── name ──` divider. Creatures that join the focus creature's graph
   while ktui runs are attached; ones removed from the engine are let go.
 - **Full screen** (ctrl+t, or `renderer: fullscreen`), after the web's v2 session view:
-  page tabs across the top (Chat, Graph, Status, Workspace, Debug, Settings; alt+1…6). The
+  page tabs across the top (Chat, Graph, Status, Debug, Settings; alt+1…5). The
   Chat page has the conversation rail on the left (agents with a status mark and unread
   count, then the graph's channels: picking one shows its conversation, a channel's sends
   as `human`) and a side panel on the right with only what has content (the channel's
-  members, jobs, sub-agents, drives, widgets, scratchpad). Graph, Status, Workspace and
-  Debug take the whole page; Settings opens `/config`. Drag a divider to resize, double-click
-  it to collapse, click a strip to open; alt+r / alt+s toggle the rail / side panel, ctrl+pgup
+  members, jobs, sub-agents, drives, widgets, scratchpad). Graph, Status, Debug and Settings
+  take the whole page (Settings: display choices as fields, ←/→ applies; models, keys,
+  providers, MCP below). A click on a panel's title collapses it, a click on its strip opens
+  it; drag a divider to resize; alt+r / alt+s toggle the rail / side panel, ctrl+pgup
   / ctrl+pgdn step through the conversations, F6 moves the keys between the chat, the tabs,
   the panels and the input (a click on the input or esc gives it the keys back). The input,
   the spinner row and notices sit in the chat column. Panel sizes are remembered.
