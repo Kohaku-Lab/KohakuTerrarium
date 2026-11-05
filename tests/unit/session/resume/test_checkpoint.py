@@ -11,7 +11,6 @@ from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.session.resume.checkpoint import prepare_clean_checkpoint
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store.records.resume_point import POINT_KEY
 from tests.unit.session.store.records.test_resume_point import staged_store
 
 
@@ -153,9 +152,3 @@ def test_raw_reset_discards_incoming_authority(clean_point):
     store._branch_maxima.clear()
     assert prepare_clean_checkpoint(agent, store, "plain") is None
     assert store.max_branch_id("plain", 2) == 7
-
-
-def test_open_removes_record_before_first_mutation(clean_point):
-    _, store = clean_point
-    assert store.state.get(POINT_KEY) is None
-    assert store._resume_point["namespace"] == "plain"

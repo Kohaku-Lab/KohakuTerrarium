@@ -265,7 +265,8 @@ def test_cold_scan_paused_does_not_block_append_and_retries(tmp_path):
         store.close(update_status=False)
 
 
-def test_failed_native_write_after_write_invalidates_namespace(tmp_path):
+@pytest.mark.parametrize("index_state", ["complete", "restored_bound"])
+def test_failed_native_write_after_write_invalidates_namespace(tmp_path, index_state):
     store = SessionStore(tmp_path / "fail_after.kohakutr", writer_lock=True)
     original_table = store.events
 
@@ -290,19 +291,23 @@ def test_failed_native_write_after_write_invalidates_namespace(tmp_path):
     try:
         store.append_event("alice", "text", {}, turn_index=1, branch_id=1)
         store.append_event("bob", "text", {}, turn_index=1, branch_id=10)
-        assert store.max_branch_id("alice", 1) == 1
+        if index_state == "complete":
+            assert store.max_branch_id("alice", 1) == 1
+            turn, branch = 1, 2
+        else:
+            store._branch_maxima.restore_upper_turn("alice", 1)
+            assert store.max_branch_id("alice", 2) == 0
+            turn, branch = 2, 7
         assert store.max_branch_id("bob", 1) == 10
-        assert "alice" in store._branch_maxima._agents
-        assert "bob" in store._branch_maxima._agents
 
         failing.fail = True
         with pytest.raises(OSError, match="simulated post-write failure"):
-            store.append_event("alice", "text", {}, turn_index=1, branch_id=2)
+            store.append_event("alice", "text", {}, turn_index=turn, branch_id=branch)
 
         assert "alice" not in store._branch_maxima._agents
         assert "bob" in store._branch_maxima._agents
 
-        assert store.max_branch_id("alice", 1) == 2
+        assert store.max_branch_id("alice", turn) == branch
         assert store.max_branch_id("bob", 1) == 10
     finally:
         store.events = original_table

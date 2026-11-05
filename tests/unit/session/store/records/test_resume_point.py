@@ -58,31 +58,40 @@ def staged_store(path):
     return store
 
 
-@pytest.mark.parametrize("operation", ["save_branch_snapshot", "save_state", "flush"])
-def test_failed_snapshot_does_not_stage_a_new_point(tmp_path, monkeypatch, operation):
+@pytest.mark.parametrize(
+    "operation", [None, "save_branch_snapshot", "save_state", "flush"]
+)
+def test_snapshot_publication_requires_success(tmp_path, monkeypatch, operation):
     path = tmp_path / "failed.kohakutr"
     store = staged_store(path)
     try:
         output = SessionOutput(
-            "plain", store, SimpleNamespace(config=AgentConfig(name="plain"))
+            "plain",
+            store,
+            SimpleNamespace(
+                config=AgentConfig(name="plain"),
+                plugins=PluginManager(),
+                executor=Executor(),
+            ),
         )
 
         def fail_save(*args, **kwargs):
             raise OSError("snapshot write failed")
 
-        monkeypatch.setattr(store, operation, fail_save)
+        if operation is not None:
+            monkeypatch.setattr(store, operation, fail_save)
         output._persist_turn_snapshot(
             [{"role": "user", "content": "different unsaved context"}],
             BRANCH,
             {"turn_count": 1},
             COMPACT,
         )
-        assert store._resume_candidate is None
+        assert (store._resume_candidate is not None) == (operation is None)
     finally:
         monkeypatch.undo()
         store.close(update_status=False)
     with closing(SessionStore.open_readonly(path)) as check:
-        assert check.state.get(POINT_KEY) is None
+        assert (check.state.get(POINT_KEY) is not None) == (operation is None)
 
 
 @pytest.mark.parametrize("runtime", ["plugin", "running_job", "pending_job"])
@@ -342,5 +351,8 @@ def test_close_does_not_publish_unsupported_final_state(tmp_path, unsupported):
 )
 def test_unsupported_messages_are_not_certified(message):
     assert not text_messages([message])
+
+
+def test_empty_or_missing_messages_are_not_certified():
     assert not text_messages([])
     assert not text_messages(None)
