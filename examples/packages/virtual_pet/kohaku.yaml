@@ -18,6 +18,7 @@ ui:
       draggable: true
       clickThrough: true
       defaultVisible: true
+      startupGroup: pet
     - kind: settings
       id: pets
       label: Virtual pets

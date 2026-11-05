@@ -135,9 +135,11 @@ export default defineExtension((kt) => {
 | Member | Purpose |
 |---|---|
 | `kt.package`, `kt.sdkVersion` | identity |
+| `kt.onDispose(callback)` | Register synchronous cleanup for package unload, reload, host switch or failed registration. Returns a function that unregisters the callback. Callbacks registered after disposal run immediately. |
 | `registerTab / registerPanel / registerRailGroup / registerSettingsSection / registerToolRenderer / registerTriggerRenderer / registerWidgetRenderer (id, component, options?)` | provide the component for a declared contribution. An undeclared id is added on the fly; runtime-owned kinds then need `options.owner`, and an undeclared widget needs `options.renderer`. `registerWidgetRenderer` also takes `version` and `surfaces` (`chat`, `canvas`, `side-panel`, `modal`). |
 | `kt.t(key, params)` | message from the package's i18n bundles (`{name}` interpolation) |
 | `kt.assetUrl(path)` | URL of a file under the UI root, with a currently valid token (tokens are renewed before they expire) |
+| `await kt.freshAssetUrl(path)` | Mint a new asset token and return a URL; use for iframe navigation or resource loads after a long idle period. Rejects if renewal fails or the extension/host changes. Do not reuse an iframe's old token-bearing URL for navigation. |
 | `kt.api.get/post/put/patch/delete/request` | raw-route fallback, `/api/ext/<pkg>/<path>` on the active host |
 | `kt.ws(path)` | WebSocket to `/api/ext/<pkg>/<path>` (raw fallback) |
 | `kt.openTab(id)` | open one of the package's tab contributions by its string id; use the SDK's named `openTab` export for core tabs such as Settings |
@@ -152,6 +154,22 @@ export default defineExtension((kt) => {
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
+
+SDK 1.1 adds `NewSessionDialog` and `openChat`; packages using them must declare
+`ui.sdk: ">=1.1,<2"`.
+
+`NewSessionDialog` exposes the host's normal creation dialog. Mount it only after
+a user action, preferably in a Vue `Teleport` to `body`. Optional props
+`initialConfig`, `initialName`, `initialPwd` and `initialAttachMode`
+(`none` by default, `chat`, or `both`) prefill the form; they never start a
+session by themselves. Handle `close` to unmount it. `started` carries
+`{id, opened}` after a successful start.
+
+`await openChat({sessionId, creatureId?}, {signal?})` opens a running session
+and focuses the requested creature (ID, source name, or `root`). It validates
+the target through the host, reuses the chat tab, and never creates a creature
+or sends a message. It rejects unavailable targets and returns `false` for
+cancelled navigation or a host/account change during lookup.
 
 `SDK_VERSION`, `satisfiesRange`, `defineExtension`, `useExtension`,
 `useOwner`, `useOverlay`, `useWidget`, `useMessageBlock`, `useMessage`, `useFileView`, `useGraphNode`, `OwnerCallError`, `notifyDesktop`, `openExternal`,
@@ -175,14 +193,32 @@ session (excluding channel tabs) without starting a separate session monitor.
 After switching dashboard hosts, it returns `null` until the focused session is
 bound to the selected host; events from an old binding are not relabeled as new-host work.
 
+Companions can use `useWorkContext({ retainLast: true })` to keep observing the
+last focused live-session tab while visiting a preview or Settings. Tracking
+starts with the extension host, before the companion mounts. Focusing another
+live session changes the binding; closing its tab or switching hosts clears it.
+This observes the existing chat connection and does not open a background monitor.
+
+`includeSpeech: true` additionally exposes `speech`, an ephemeral snapshot of the
+selected creature's live reply output: `{ stream, sequence, text, active, at }`.
+`text` is only the latest chunk's last 256 UTF-16 code units; `at` is its local
+receipt time in milliseconds. A changed `stream` establishes a new baseline and
+`sequence` deduplicates repeated snapshots. Inactive snapshots clear the text.
+Consumers must expire stale chunks and stop on disconnect, selection changes or
+`active: false`. This opt-in does not expose the transcript, replay history,
+reasoning, tools or another creature's output, and does not create an LLM call.
+
 | Field | Meaning |
 |---|---|
 | `hostId` | The session binding's host ID (matching the selected dashboard host), or `null` for the same-origin host. |
 | `sessionId` | Target session or graph ID of the active attach tab. |
 | `label` | Tab display label, falling back to its target ID. |
+| `creatureId` | Selected creature target within that session; empty on channel tabs. |
+| `connected` | Whether the bound chat WebSocket is open. A disconnected snapshot is not a fresh outcome. |
 | `status` | Current work state: `'idle'`, `'running'`, `'waiting'`, `'ready'`, or `'failed'`. |
 | `busy` | Whether any observed creature is processing or awaiting background work, independent of pending input. |
 | `started` | In-memory counter of observed live idle-to-busy transitions. |
+| `completed` | In-memory counter of live work settlements with no pending input. Closing a question, history replay, and restored snapshots do not increment it. |
 
 #### Status Precedence
 
@@ -196,6 +232,8 @@ Settled outcomes (`ready`/`failed`) remain in the snapshot after work finishes; 
 #### The `started` Counter
 
 The `started` counter increments exclusively on live `processing_start` events that transition a session from idle to busy. It is not advanced by historical replays, reconnected session snapshots, or optimistic composer state.
+
+Use increases in `completed` to trigger a new result cue; a transition from `waiting` to a retained `ready` outcome alone is not a new result. The same reset and binding rules apply to both counters.
 
 Consuming components should establish a fresh baseline upon mounting, switching hosts or sessions, scope disposal, or whenever the counter decreases. Do not persist this counter as a task ID or replay past cues from it. Only host-observed sessions are covered.
 
@@ -255,11 +293,30 @@ contributes:
 ```js
 kt.registerOverlay("pet", Pet, { anchor: "top-left" })   // options override the manifest
 kt.showOverlay("pet"); kt.hideOverlay("pet"); kt.toggleOverlay("pet")
+kt.isOverlayVisible("pet")  // reactive visibility, including a native window still loading
 ```
 
 Inside the component, `useOverlay()` returns `visible` and `bounds` (refs),
 `show()`, `hide()`, `toggle()`, `move(left, top)`, `resize(width, height)` and
-`startDrag(event)`.
+`startDrag(event)`, `mode` (`app` or `window`) and `setHitRegions(regions)`.
+Regions are up to 16 `[x, y, width, height]` rectangles in overlay-local CSS
+pixels; `[]` passes all input through and `null` restores the normal host
+behavior. Use them for transparent canvas/iframe content whose DOM box is larger
+than its visible content. In-app movement then clamps the content, allowing
+transparent margins outside the viewport. Native windows use the same regions
+for mouse pass-through.
+
+`await getViewport(x, y)` returns the visible `[left, top, width, height]` in
+overlay-local CSS pixels. Use it to keep menus inside the host viewport, or
+the monitor work area at `(x, y)` for native windows. A transparent overlay
+can extend beyond that area. Older desktop shells return `null`; fall back to
+the overlay's own dimensions in that case.
+
+An optional `controller` component in `registerOverlay` options is mounted once
+in the main window while the package is loaded, including when the overlay is
+hidden or rendered in its own window. It receives `useExtension()` but no
+`useOverlay()` context. Use it for lightweight work/command forwarding and
+cleanup, not a second renderer.
 
 - By default the host draws a title bar with a hide button and, when
   `resizable`, a resize grip. With `clickThrough: true` the host draws no
@@ -269,6 +326,22 @@ Inside the component, `useOverlay()` returns `visible` and `bounds` (refs),
 - The overlay loads the first time it is shown. Position, size and visibility
   are remembered per host in the browser; Settings → Overlays lists every
   overlay with a switch and "Reset position".
+- Settings → Overlays also offers an expandable configuration section when the
+  same package declares exactly one settings contribution. It loads only when
+  expanded, including before the overlay has ever been shown. If a package has
+  several settings sections, select a local ID at registration with
+  `kt.registerOverlay("pet", Pet, { settingsSection: "preferences" })`. This
+  explicit link becomes available after the entry loads; cross-package IDs are
+  rejected.
+- Optional manifest fields `startupGroup: pet` and `startupFallback: true` join
+  an overlay group and nominate a fallback. After all enabled contributions and
+  saved visibility are loaded, the host opens the first declared fallback only
+  if that group has no visible overlay. This runs once per host/user per app
+  run; hiding an overlay does not immediately resurrect it. Grouped visibility
+  uses the existing debounced UI-preference backend as well as local placement.
+  An inline entry can consume its one-shot selection with
+  `kt.consumeStartupFallback(id)` to initialize a default appearance. A disabled
+  package never participates. Other pet extensions should declare the same group.
 - Overlays run inline in the dashboard origin, with the same trust as other
   contributions.
 
@@ -293,7 +366,9 @@ host.
 - Without `clickThrough` the host draws a title bar that drags the window
   and hides the overlay.
 - In a window overlay `move(left, top)` and `resize(width, height)` take
-  screen pixels, and `hide()` closes the window.
+  logical pixels, and `hide()` closes the window. Resizing preserves native
+  bottom-center anchor; placement uses shell geometry rather than WebView `screenX/Y`.
+  Reset position clears saved placement and recenters an open overlay.
 - The window loads the same dashboard origin and session cookie as the main
   window. The shell only lets an overlay window move, resize and close
   itself; it cannot open other windows or use the app's other native
@@ -658,6 +733,7 @@ fallback otherwise:
 | `openExternal(url)` | opens `http(s):` and `mailto:` links outside the app. Resolves `false` for any other scheme. |
 | `hostInfo()` | `{ kind: "tauri" \| "pywebview" \| "browser" }` |
 | `kt.storage.get(key, fallback?)`, `.set(key, value)`, `.remove(key)` | JSON values in this browser/profile, separate for each package; kept in memory when storage is blocked. |
+| `await kt.preferences.get(key, fallback?)`, `.set(key, value)`, `.remove(key)` | Inline extensions only: infrequent JSON settings, scoped per package, using KT's existing hybrid UI preferences. Reads use local values first and await the backend fallback; writes are locally immediate and debounced to the current host's UI preference store. |
 
 `useOwner()` returns:
 

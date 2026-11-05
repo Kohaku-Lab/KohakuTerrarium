@@ -1,0 +1,4 @@
+vendor/
+# Model resources are private imports, never package assets.
+ui/model/
+*.zip

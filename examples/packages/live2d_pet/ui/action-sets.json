@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "sets": {
+    "dragon": {
+      "label": "Dragon companion",
+      "actions": {
+        "think": {
+          "description": "Wing beats and gentle body sway",
+          "seconds": 5,
+          "maxSeconds": 15,
+          "playback": {
+            "type": "preset",
+            "name": "running"
+          }
+        },
+        "listen": {
+          "description": "Open fan at the side, then close and lower it",
+          "seconds": 5,
+          "maxSeconds": 15,
+          "playback": {
+            "type": "preset",
+            "name": "waiting"
+          }
+        },
+        "celebrate": {
+          "description": "A single wing stretch",
+          "seconds": 3.4,
+          "maxSeconds": 3.4,
+          "playback": {
+            "type": "preset",
+            "name": "ready"
+          }
+        },
+        "concern": {
+          "description": "A concerned expression",
+          "seconds": 3,
+          "maxSeconds": 8,
+          "playback": {
+            "type": "preset",
+            "name": "failed"
+          }
+        },
+        "nod": {
+          "description": "Two gentle acknowledging nods, then return upright",
+          "seconds": 2,
+          "maxSeconds": 4,
+          "playback": {
+            "type": "motion",
+            "name": "Nod"
+          }
+        }
+      },
+      "version": 1,
+      "model": "dragon",
+      "defaults": {
+        "running": "think",
+        "waiting": "listen",
+        "ready": "celebrate",
+        "failed": "concern"
+      }
+    },
+    "deepseek": {
+      "label": "DeepSeek companion",
+      "actions": {
+        "think": {
+          "description": "Raise an index finger and sway",
+          "seconds": 5,
+          "maxSeconds": 15,
+          "playback": {
+            "type": "preset",
+            "name": "running"
+          }
+        },
+        "listen": {
+          "description": "Lean forward, then smoothly straighten",
+          "seconds": 5,
+          "maxSeconds": 15,
+          "playback": {
+            "type": "preset",
+            "name": "waiting"
+          }
+        },
+        "celebrate": {
+          "description": "Raise, hold and lower a hand",
+          "seconds": 3.4,
+          "maxSeconds": 3.4,
+          "playback": {
+            "type": "preset",
+            "name": "ready"
+          }
+        },
+        "concern": {
+          "description": "A concerned expression",
+          "seconds": 3,
+          "maxSeconds": 8,
+          "playback": {
+            "type": "preset",
+            "name": "failed"
+          }
+        },
+        "nod": {
+          "description": "Two gentle acknowledging nods, then return upright",
+          "seconds": 2,
+          "maxSeconds": 4,
+          "playback": {
+            "type": "motion",
+            "name": "Nod"
+          }
+        },
+        "blush": {
+          "description": "A brief blush",
+          "seconds": 3,
+          "maxSeconds": 8,
+          "playback": {
+            "type": "expression",
+            "name": "脸红"
+          }
+        }
+      },
+      "version": 1,
+      "model": "deepseek",
+      "defaults": {
+        "running": "think",
+        "waiting": "listen",
+        "ready": "celebrate",
+        "failed": "concern"
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+name: live2d-pet-demo
+version: 0.4.0
+description: Configurable Live2D companion for KohakuTerrarium.
+creatures:
+  - name: companion
+    description: A conversational Live2D companion with optional visual expression.
+tools:
+  - name: l2d
+    module: kt_live2d.control
+    class: Live2DControl
+ui:
+  api: kt_live2d.api:router
+  sdk: ">=1.1,<2"
+  entry: ui/index.js
+  styles: [ui/extension.css]
+  contributes:
+    - kind: settings
+      id: preferences
+      label: Live2D 宠物
+      description: Choose a companion, default appearance, size and interaction preferences.
+    - kind: tab
+      id: preview
+      label: Live2D 宠物
+      icon: i-carbon-face-wink
+    - kind: overlay
+      id: dragon
+      label: Live2D 宠物
+      surface: window
+      anchor: bottom-right
+      width: 384
+      height: 516
+      draggable: true
+      clickThrough: true
+      defaultVisible: false
+      startupGroup: pet
+      startupFallback: true

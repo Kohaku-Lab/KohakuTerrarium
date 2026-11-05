@@ -1,0 +1,481 @@
+:root {
+  color-scheme: light;
+  font:
+    14px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #3f3544;
+  background: #fcf9f7;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+main {
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 290px;
+}
+.viewport {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: radial-gradient(
+    ellipse at 48% 40%,
+    #fff 10%,
+    #f6e9ef 70%,
+    #ebe1f0
+  );
+}
+.viewport::before {
+  content: "";
+  position: absolute;
+  inset: 20px;
+  border: 1px solid #ad87952b;
+  border-radius: 18px;
+  pointer-events: none;
+}
+.heading {
+  position: absolute;
+  top: 36px;
+  left: 40px;
+  z-index: 1;
+  pointer-events: none;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #9c748b;
+  font-weight: 600;
+}
+h1 {
+  font-size: 26px;
+  font-weight: 500;
+  margin: 8px 0;
+  letter-spacing: 2px;
+}
+h1 span {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 1px;
+  opacity: 0.55;
+  margin-top: 4px;
+}
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+canvas:active {
+  cursor: grabbing;
+}
+.status {
+  position: absolute;
+  bottom: 50px;
+  left: 32px;
+  font-size: 12px;
+  background: #fff9;
+  padding: 6px 12px;
+  border-radius: 20px;
+  max-width: calc(100% - 64px);
+}
+.status.error {
+  background: #fff0ed;
+  color: #a0362b;
+}
+.hint {
+  position: absolute;
+  bottom: 30px;
+  left: 44px;
+  color: #8e778a;
+  font-size: 10px;
+  pointer-events: none;
+}
+aside {
+  padding: 30px 24px 18px;
+  overflow: auto;
+  border-left: 1px solid #e9dfe6;
+}
+h2 {
+  font-size: 21px;
+  font-weight: 550;
+  margin: 10px 0 5px;
+}
+header p,
+.note {
+  font-size: 11px;
+  color: #9d8c99;
+}
+fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+fieldset:disabled {
+  opacity: 0.45;
+}
+fieldset section {
+  border-top: 1px solid #ece3e8;
+  padding: 14px 0;
+}
+h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+button {
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid #e6d9e1;
+  border-radius: 9px;
+  background: #fff;
+  color: #73596c;
+  padding: 8px 11px;
+  cursor: pointer;
+}
+button:hover {
+  background: #f4e8ef;
+}
+button[aria-pressed="true"] {
+  background: #865e7b;
+  border-color: #865e7b;
+  color: white;
+}
+label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 9px 0;
+  font-size: 12px;
+}
+input {
+  accent-color: #956b87;
+}
+input[type="range"] {
+  width: 100%;
+  margin: 6px 0 16px;
+}
+footer {
+  color: #aa99a5;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.comparison-controls {
+  margin-bottom: 20px;
+}
+.quality-heading {
+  margin-top: 16px;
+}
+.framing {
+  margin-bottom: 10px;
+}
+.comparison-controls p {
+  font-size: 11px;
+  color: #8e778a;
+}
+body.dark .viewport {
+  background: radial-gradient(ellipse at 48% 40%, #393342, #1c1b24);
+  color: #ede0eb;
+}
+body.dark .status {
+  background: #25222dcc;
+  color: #e2cbdc;
+}
+html.mini,
+body.mini {
+  background: transparent;
+}
+body.mini main {
+  display: block;
+}
+body.mini .viewport {
+  height: 100%;
+  background: transparent;
+}
+body.mini aside,
+body.mini .heading,
+body.mini .hint,
+body.mini .viewport::before {
+  display: none;
+}
+body.mini .status {
+  bottom: 10px;
+  left: 10px;
+  font-size: 10px;
+}
+body.mini.ready .status {
+  display: none;
+}
+body.mini.ready .status.error {
+  display: block;
+}
+#pet-menu-button {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+  display: none;
+  background: #fff9;
+}
+#mini-hint {
+  display: none;
+  position: absolute;
+  bottom: 6px;
+  width: 100%;
+  text-align: center;
+  font-size: 10px;
+  color: #85647b;
+  pointer-events: none;
+}
+body.mini.ready #pet-menu-button,
+body.mini.ready #mini-hint {
+  display: block;
+}
+body.mini canvas {
+  cursor: pointer;
+}
+#pet-menu {
+  position: fixed;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 12px));
+  max-height: calc(100dvh - 12px);
+  overflow: hidden;
+  border: 1px solid #e5d6e1;
+  border-radius: 12px;
+  box-shadow: 0 8px 28px #3f254526;
+  background: #fffafdf5;
+  color: #73596c;
+}
+#pet-menu[hidden] {
+  display: none;
+}
+.pet-menu-content {
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 14px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: #b9a4b466 transparent;
+}
+@supports selector(::-webkit-scrollbar) {
+  .pet-menu-content {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+}
+.pet-menu-content::-webkit-scrollbar {
+  width: 3px;
+}
+.pet-menu-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pet-menu-content::-webkit-scrollbar-thumb {
+  background: #b9a4b466;
+  border-radius: 8px;
+}
+.pet-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 10px 10px 4px 14px;
+}
+#pet-menu-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  appearance: none;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: #73596c80;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+}
+#pet-menu-close:hover {
+  color: #73596c;
+}
+#pet-menu-close:focus-visible {
+  color: #73596c;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.pet-menu-footer {
+  flex-shrink: 0;
+  padding: 10px 12px;
+  border-top: 1px solid #e5d6e1;
+  background: #fffafd;
+}
+#pet-close {
+  width: 100%;
+}
+#pet-menu strong {
+  font-size: 14px;
+}
+.pet-menu-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+.pet-menu-actions button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pet-menu-actions h3 {
+  grid-column: 1 / -1;
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
+#pet-menu p {
+  font-size: 10px;
+  margin: 10px 0 0;
+}
+@media (max-width: 650px) {
+  main {
+    grid-template-columns: minmax(0, 1fr) 210px;
+  }
+  aside {
+    padding: 20px 14px;
+  }
+  .heading {
+    top: 25px;
+    left: 26px;
+  }
+  h1 {
+    font-size: 20px;
+  }
+}
+
+#work-status {
+  position: absolute;
+  z-index: 2;
+  top: 145px;
+  left: 32px;
+  max-width: calc(100% - 64px);
+  padding: 7px 12px;
+  border-radius: 14px;
+  background: #fffc;
+  color: #73596c;
+  font-size: 12px;
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#work-status[data-status="waiting"] {
+  background: #fff0cc;
+  color: #885d16;
+}
+#work-status[data-status="failed"] {
+  background: #ffe3e0;
+  color: #9f4039;
+}
+#work-status[data-status="running"] {
+  background: #e6eefc;
+  color: #4d6693;
+}
+.mini #work-status {
+  top: 36px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  font-size: 10px;
+}
+
+body:not(.debug) .debug-only {
+  display: none !important;
+}
+.pet-quick-settings {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+.pet-quick-settings label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+}
+.pet-quick-settings select {
+  flex: 1;
+  min-width: 0;
+  max-width: 190px;
+  border: 1px solid #dac7d5;
+  border-radius: 6px;
+  background: white;
+  color: #73596c;
+  padding: 4px;
+}
+.pet-quick-settings input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  accent-color: #9c7c94;
+}
+.pet-quick-settings output {
+  flex-shrink: 0;
+  min-width: 36px;
+  text-align: right;
+}
+
+body.mini:not(.debug) #pet-menu-button,
+body.mini:not(.debug) #work-status,
+body.mini:not(.debug) #mini-hint {
+  display: none !important;
+}
+#mini-metrics {
+  display: none;
+}
+body.mini.debug canvas {
+  height: calc(100% - 52px);
+  margin-top: 28px;
+}
+body.mini.debug #work-status {
+  top: 2px;
+  left: 4px;
+  max-width: calc(100% - 75px);
+  padding: 3px 6px;
+  font-size: 10px;
+}
+body.mini.debug #pet-menu-button {
+  top: 0;
+  right: 2px;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+body.mini.debug #mini-metrics {
+  display: block;
+  position: absolute;
+  bottom: 3px;
+  width: 100%;
+  text-align: center;
+  font-size: 9px;
+  color: #85647b;
+  pointer-events: none;
+}
+body.mini.debug #mini-hint {
+  bottom: 16px;
+  font-size: 9px;
+}

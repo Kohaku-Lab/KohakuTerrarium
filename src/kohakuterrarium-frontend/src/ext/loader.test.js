@@ -98,6 +98,28 @@ describe("ui extension loader", () => {
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
+  it("disposes extension resources once on unload, including late registrations", async () => {
+    listing([pkg("alpha")])
+    await reloadUiExtensions()
+    let handle
+    const dispose = vi.fn()
+    setLoaderDeps({
+      importModule: async () => ({
+        default: (kt) => {
+          handle = kt
+          kt.onDispose(dispose)
+        },
+      }),
+    })
+    await ensurePackageLoaded("alpha")
+    unloadUiExtensions()
+    unloadUiExtensions()
+    expect(dispose).toHaveBeenCalledTimes(1)
+    const late = vi.fn()
+    handle.onDispose(late)
+    expect(late).toHaveBeenCalledTimes(1)
+  })
+
   it("never loads disabled, broken or incompatible packages", async () => {
     listing([
       pkg("off", { enabled: false }),
@@ -239,6 +261,44 @@ describe("ui extension loader", () => {
     await refreshAssetTokens()
     expect(alpha.assetUrl("x.png")).toBe("/api/ext/alpha/ui/T3-alpha/x.png")
     expect(alpha.assetUrl("x.png")).not.toContain("/-/")
+  })
+
+  it("refreshes asset URLs on demand after expiry or a server restart and rejects stale handles", async () => {
+    let clock = 1000
+    let minted = 0
+    setLoaderDeps({
+      now: () => clock,
+      builtinPackages: () => [],
+      enableCompiler: async () => true,
+      fetchJson: async () => ({}),
+      importModule: async () => ({ default: (kt) => kt.registerSettingsSection("s", Comp) }),
+    })
+    api.post.mockImplementation(async () => ({
+      data: { token: `T${++minted}`, expires_at: clock + 21600 },
+    }))
+    listing([pkg("alpha")])
+    await reloadUiExtensions()
+    await ensurePackageLoaded("alpha")
+    const handle = findPackage("alpha").handle
+    const old = handle.assetUrl("stage.html")
+    clock += 21601
+    expect(await handle.freshAssetUrl("stage.html")).toBe("/api/ext/alpha/ui/T2/stage.html")
+    expect(old).toContain("/T1/")
+    expect(await handle.freshAssetUrl("stage.html")).toContain("/T3/")
+    api.post.mockRejectedValueOnce(new Error("offline"))
+    await expect(handle.freshAssetUrl("stage.html")).rejects.toThrow("offline")
+    let finish
+    api.post.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    const pending = handle.freshAssetUrl("stage.html")
+    unloadUiExtensions()
+    finish({ data: { token: "OLD-HOST", expires_at: clock + 21600 } })
+    await expect(pending).rejects.toThrow(/no longer active/)
+    await expect(handle.freshAssetUrl("stage.html")).rejects.toThrow(/no longer active/)
   })
 
   it("re-imports the entry with a fresh token after a failed import", async () => {

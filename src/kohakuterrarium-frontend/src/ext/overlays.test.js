@@ -18,6 +18,8 @@ import {
   resizeOverlay,
   resolveBounds,
   showOverlay,
+  setOverlayInteractionRegions,
+  syncViewport,
   toggleOverlay,
   viewport,
 } from "@/ext/overlays"
@@ -129,6 +131,21 @@ describe("overlay state", () => {
     expect(isOverlayVisible(key)).toBe(true)
     resetOverlay(key)
     expect(isOverlayVisible(key)).toBe(true)
+  })
+
+  it("preserves cropped edge placement on resize and keeps it reachable after viewport changes", () => {
+    const key = declare({ width: 400, height: 400 })
+    setOverlayInteractionRegions(key, [[100, 50, 200, 300]])
+    expect(() => setOverlayInteractionRegions(key, [null])).not.toThrow()
+    moveOverlay(key, -100, 50)
+    resizeOverlay(key, 400, 400)
+    expect(overlayBounds(key).left).toBe(-100)
+    moveOverlay(key, 700, 50)
+    const original = window.innerWidth
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 })
+    syncViewport()
+    expect(overlayBounds(key).left).toBe(200)
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: original })
   })
 
   it("survives blocked storage", () => {

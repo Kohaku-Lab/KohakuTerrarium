@@ -17,21 +17,35 @@
         <el-switch :model-value="overlay.options.desktopPet ? windowPreference(overlay.key) !== false : isWindowAllowed(overlay.key)" data-test="overlay-window-switch" @change="(on) => changeWindowAllowed(overlay, on)" />
       </div>
       <p v-if="windowFailure(overlay.key)" class="mt-2 text-xs text-gem-amber" role="status">{{ windowFailure(overlay.key) }} <button type="button" class="underline" @click="retryOverlayWindow(overlay.key)">Retry desktop</button></p>
+      <details v-if="settingsFor(overlay)" class="mt-3 border-t border-warm-200 pt-3 dark:border-warm-700" data-test="overlay-settings" @toggle="(event) => (expanded[overlay.key] = event.target.open)">
+        <summary class="cursor-pointer text-sm">{{ settingsFor(overlay).label }}</summary>
+        <component :is="settingsFor(overlay).component" v-if="expanded[overlay.key]" :active="true" />
+      </details>
     </div>
     <div v-if="!list.length" class="text-xs text-warm-500" data-test="overlays-empty">No installed extension provides an overlay.</div>
   </div>
 </template>
 
 <script setup>
-import { computed } from "vue"
+import { computed, reactive } from "vue"
 
 import { confirm } from "@/ext/sdk"
 import { isOverlayVisible, isWindowAllowed, overlays, resetOverlay, setWindowAllowed, toggleOverlay } from "@/ext/overlays"
 import { resetNativeOverlay, retryOverlayWindow, wantsWindow, windowFailure } from "@/ext/overlayWindows"
 import { windowPreference } from "@/ext/overlays"
 import { overlayWindowsSupported } from "@/utils/hostBridge"
+import { settingsSections } from "@/stores/settingsSectionRegistry"
 
 const list = computed(() => [...overlays.values()])
+const expanded = reactive({})
+
+function settingsFor(overlay) {
+  const id = overlay.options.settingsSection
+  // Manifest contributions exist before the lazy extension entry has loaded.
+  const candidates = [...settingsSections.values()].filter((s) => s.id.startsWith(`ext:${overlay.pkg}/`))
+  const section = id ? settingsSections.get(`ext:${overlay.pkg}/${id}`) : candidates.length === 1 ? candidates[0] : null
+  return section && (!section.visible || section.visible()) ? section : null
+}
 
 function reset(key) {
   if (!resetNativeOverlay(key)) resetOverlay(key)

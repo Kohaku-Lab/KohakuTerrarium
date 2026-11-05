@@ -30,19 +30,36 @@ loader) goes through it.
 """
 
 import os
+import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 import yaml
 
+from fastapi import HTTPException
+
+from examples.packages.live2d_pet.kt_live2d.api import (
+    companions,
+    Binding,
+    bind,
+    events,
+    remove_binding,
+)
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
+
 from kohakuterrarium import Terrarium
+from kohakuterrarium.core.config.load import load_agent_config
 from kohakuterrarium.errors import PackageNotInstalledError
 from kohakuterrarium.llm.profiles.backends import (
     load_backends,
     load_yaml_store,
     validate_backend_type,
 )
-from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from examples.packages.live2d_pet.kt_live2d.actions import ACTION_SETS
+from kohakuterrarium.modules.tool.base import ToolContext
+from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.testing.llm_seam import real_llm_providers
 from kohakuterrarium.packages import locations
 from kohakuterrarium.packages.install import install_package, uninstall_package
@@ -536,6 +553,178 @@ class TestPackagesIntegration:
                 creature.agent.config.agent_path
                 == (installed / "creatures" / "swe").resolve()
             )
+            peer = await engine.add_creature(
+                "@alpha/creatures/swe",
+                name="pet-peer",
+                start=False,
+                llm=ScriptedLLM([]),
+            )
+            await engine.connect(creature, peer, channel="pet-tasks")
+            await engine.wire_output(creature, peer.creature_id)
+            await engine._runtime_prompt.refresh_creature(creature)
+            graph_prompt = (
+                creature.agent.controller.conversation.get_system_message().content
+            )
+            graph_section = graph_prompt[graph_prompt.index("<!-- runtime-graph -->") :]
+            service = LocalTerrariumService(engine)
+            assert (await companions(service))["companions"] == []
+            request = Binding(
+                lease="test-ui",
+                enabled=True,
+                sessionId=creature.graph_id,
+                creatureId=creature.creature_id,
+                model="dragon",
+            )
+            context = ToolContext(
+                agent_name=creature.name,
+                session=creature.agent.session,
+                working_dir=bundle_root,
+                agent=creature.agent,
+            )
+            skill_tool = creature.agent.registry.get_tool("skill")
+            original_model = creature.agent.config.llm_profile
+            original_provider = creature.agent.llm
+            skill_args = {"name": "live2d-expression"}
+            assert (await skill_tool.execute(skill_args, context)).error
+            assert (await bind(request, service))["enabled"]
+            assert (
+                graph_section
+                in creature.agent.controller.conversation.get_system_message().content
+            )
+            prompt = creature.agent._controller_config.system_prompt
+            assert "`live2d-expression`" in prompt
+            assert "Automatic work-state animation already covers" not in prompt
+            skill_result = await skill_tool.execute(skill_args, context)
+            assert not skill_result.error
+            assert (
+                "Automatic work-state animation already covers" in skill_result.output
+            )
+            assert "Skill directory:" in skill_result.output
+            assert creature.agent.config.llm_profile == original_model
+            assert creature.agent.llm is original_provider
+            tool = creature.agent.registry.get_tool("l2d")
+            assert tool is not None
+            assert (await companions(service))["companions"] == []
+            await tool.execute(
+                {"operation": "perform", "action": "listen", "seconds": 2}
+            )
+            delivered = await events("test-ui", service)
+            assert delivered["command"]["action"] == "listen"
+            with pytest.raises(HTTPException):
+                await events("another-ui", service)
+            with pytest.raises(HTTPException):
+                await bind(
+                    request.model_copy(update={"sessionId": "wrong-session"}), service
+                )
+            assert creature.agent.registry.get_tool("l2d") is tool
+            await bind(Binding(lease="another-ui", enabled=False), service)
+            assert creature.agent.registry.get_tool("l2d") is tool
+            await bind(Binding(lease="test-ui", enabled=False), service)
+            assert (
+                graph_section
+                in creature.agent.controller.conversation.get_system_message().content
+            )
+            assert creature.agent.registry.get_tool("l2d") is None
+            assert (await skill_tool.execute(skill_args, context)).error
+            assert (
+                "`live2d-expression`"
+                not in creature.agent._controller_config.system_prompt
+            )
+            assert creature.agent.llm is original_provider
+            assert (
+                await tool.execute({"operation": "perform", "action": "listen"})
+            ).error
+            await bind(request, service)
+            remove_binding(engine)
+            assert creature.agent.registry.get_tool("l2d") is None
+            assert (await skill_tool.execute(skill_args, context)).error
+            with pytest.raises(HTTPException, match="Companion"):
+                await bind(request.model_copy(update={"mode": "agent"}), service)
+            assert creature.agent.registry.get_tool("l2d") is None
+            pet_source = Path(__file__).parents[2] / "examples/packages/live2d_pet"
+            studio_packages.install_package_op(
+                str(pet_source), editable=True, deps="never"
+            )
+            companion_llm = ScriptedLLM(
+                [
+                    ScriptEntry(
+                        "[/l2d]@@operation=perform\n@@action=nod\n@@seconds=2\n[l2d/]",
+                        match="greet visually",
+                    ),
+                    "Hello!",
+                ]
+            )
+            companion_config = load_agent_config("@live2d-pet-demo/creatures/companion")
+            companion_config.tool_format = "bracket"
+            companion = await engine.add_creature(
+                companion_config,
+                start=True,
+                llm=companion_llm,
+                io="headless",
+                session=False,
+            )
+            configured_tool = companion.agent.registry.get_tool("l2d")
+            assert (await companions(service))["companions"] == [
+                {
+                    "sessionId": companion.graph_id,
+                    "creatureId": companion.creature_id,
+                    "label": companion.config_name or companion.name,
+                }
+            ]
+            assert configured_tool.purpose == "companion"
+            assert (await configured_tool.execute({"operation": "actions"})).error
+            dedicated = request.model_copy(
+                update={
+                    "lease": "companion-ui",
+                    "mode": "agent",
+                    "sessionId": companion.graph_id,
+                    "creatureId": companion.creature_id,
+                }
+            )
+            assert (await bind(dedicated, service))["mode"] == "agent"
+            assert companion.agent.registry.get_tool("l2d") is configured_tool
+            assert companion_llm.call_count == 0
+            result = await companion.run("greet visually", timeout=10)
+            assert result.ok
+            assert (await events("companion-ui", service))["command"]["action"] == "nod"
+            catalog = deepcopy(ACTION_SETS["dragon"])
+            catalog["label"] = "My companion"
+            catalog["actions"]["acknowledge"] = catalog["actions"].pop("nod")
+            await bind(dedicated.model_copy(update={"actionSet": catalog}), service)
+            inventory = json.loads(
+                (await configured_tool.execute({"operation": "actions"})).output
+            )
+            assert (
+                "acknowledge" in inventory["actions"]
+                and "nod" not in inventory["actions"]
+            )
+            with pytest.raises(HTTPException):
+                await bind(
+                    dedicated.model_copy(update={"actionSet": {"model": "other"}}),
+                    service,
+                )
+            assert configured_tool.catalog["label"] == "My companion"
+            companion_skill = companion.agent.skills.get("live2d-expression")
+            remove_binding(engine)
+            assert companion.agent.registry.get_tool("l2d") is configured_tool
+            assert not companion_skill.enabled
+            assert (await configured_tool.execute({"operation": "actions"})).error
+            companion_skill.enabled = True
+            await bind(dedicated, service)
+            remove_binding(engine)
+            assert companion_skill.enabled
+            assert companion.agent.llm is companion_llm
+            await engine.remove_creature(companion)
+            assert (await companions(service))["companions"] == []
+            assert studio_packages.uninstall_package_op("live2d-pet-demo")
+            other_skill = Skill(
+                "live2d-expression", "User skill", "Keep user instructions"
+            )
+            creature.agent.skills.add(other_skill)
+            with pytest.raises(HTTPException, match="already owns"):
+                await bind(request, service)
+            assert creature.agent.skills.get("live2d-expression") is other_skill
+            assert creature.agent.registry.get_tool("l2d") is None
             # A bad ref out of the same entry point is a typed error.
             with pytest.raises(PackageNotInstalledError):
                 await engine.add_creature("@ghostpkg/creatures/x", start=False)

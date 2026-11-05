@@ -1,0 +1,5 @@
+# Preserve generated SDK output; review the runtime sources instead.
+ui/runtime/player.js linguist-generated=true -whitespace
+ui/runtime/live2dcubismcore.min.js linguist-vendored=true -whitespace
+ui/runtime/shaders/* linguist-vendored=true
+ui/model/** linguist-vendored=true

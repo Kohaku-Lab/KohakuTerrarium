@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>龙娘 · KohakuTerrarium</title>
+    <link rel="stylesheet" href="stage.css?v=quality-2" />
+  </head>
+  <body>
+    <main>
+      <section class="viewport" aria-label="龙娘模型预览">
+        <div class="heading">
+          <span class="eyebrow">KOHAKU TERRARIUM / LIVE2D</span>
+          <h1>龙娘的小天地<span>原始高清模型 · 互动预览</span></h1>
+        </div>
+        <div id="work-status" role="status">未绑定会话 · 先打开一个聊天</div>
+        <canvas id="model" aria-label="可互动的龙娘 Live2D 模型"></canvas>
+        <div class="status" id="status" role="status">正在准备 Live2D…</div>
+        <div class="hint">摸摸头 · 点击身体 · 拖动空白处调整位置</div>
+        <button
+          id="pet-menu-button"
+          disabled
+          aria-label="龙娘动作菜单"
+          aria-expanded="false"
+        >
+          动作 ▾
+        </button>
+        <div id="mini-metrics" class="debug-only"></div>
+        <div id="mini-hint">摸摸头 · 点击身体 · 右键选动作</div>
+      </section>
+      <aside>
+        <section class="comparison-controls" aria-label="角色和画质">
+          <h3>角色</h3>
+          <div class="buttons" id="model-choices"></div>
+          <h3 class="quality-heading">画质</h3>
+          <div class="buttons">
+            <button data-quality="standard">性能优先 · 2K</button
+            ><button data-quality="high">高品质 · 4K</button>
+          </div>
+          <p>拖动空白处定位，最高可放大至 500%。切换画质会保留位置与表情。</p>
+        </section>
+        <header>
+          <span class="eyebrow">DRAGON COMPANION</span>
+          <h2>让她动起来</h2>
+          <p>试试翅膀、扇子与小表情。</p>
+        </header>
+        <fieldset disabled id="controls">
+          <section>
+            <h3>画面</h3>
+            <label for="zoom"
+              ><span>缩放</span><output id="zoom-value">100%</output></label
+            ><input
+              type="range"
+              id="zoom"
+              min="0.5"
+              max="5"
+              step="0.05"
+              value="1"
+            />
+            <div class="buttons framing">
+              <button data-framing="1">全身 · 100%</button>
+              <button data-framing="2">半身 · 200%</button>
+              <button data-framing="3">细节 · 300%</button>
+            </div>
+            <div class="buttons">
+              <button id="background">切换深色背景</button
+              ><button id="reset">重置画面</button>
+            </div>
+          </section>
+          <section>
+            <h3>循环动作</h3>
+            <div class="buttons">
+              <button data-motion="Idle" aria-pressed="true">自然待机</button
+              ><button data-motion="Sleep" aria-pressed="false">
+                闭眼打盹
+              </button>
+            </div>
+          </section>
+          <section>
+            <h3>姿态开关</h3>
+            <div class="buttons expressions">
+              <button data-expression="抬手" title="原始资源：抬手">
+                侧举折扇</button
+              ><button data-expression="抬手2" title="原始资源：抬手2">
+                持扇掩面</button
+              ><button data-expression="开扇" title="原始资源：开扇">
+                合起折扇</button
+              ><button data-expression="扇面" title="原始资源：扇面">
+                切换扇面</button
+              ><button data-expression="变" title="原始资源：变">
+                幼年态（小个子）</button
+              ><button data-expression="">全部恢复</button>
+            </div>
+            <p class="note">
+              再点一次关闭，可叠加。操作扇子会自动抬手，换扇面时自动展开。
+            </p>
+          </section>
+          <section class="work-preview debug-only">
+            <h3>工作动作试演</h3>
+            <div class="buttons">
+              <button data-demo-state="running">试演：忙碌</button>
+              <button data-demo-state="ready">试演：有结果</button>
+              <button data-demo-state="waiting">试演：提问</button>
+              <button data-demo-state="idle">试演：待机</button>
+              <button data-demo-state="live">跟随真实会话</button>
+            </div>
+          </section>
+          <section>
+            <h3>互动</h3>
+            <label
+              ><span>视线跟随</span
+              ><input type="checkbox" id="tracking" checked /></label
+            ><label
+              ><span>头发与衣摆物理</span
+              ><input type="checkbox" id="physics" checked /></label
+            ><label
+              ><span>暂停动画</span><input type="checkbox" id="pause"
+            /></label>
+          </section>
+        </fieldset>
+        <footer>
+          <span class="debug-only" id="metrics">Live2D Cubism Web R5</span
+          ><br />KohakuTerrarium · Live2D 宠物
+          <p id="credits"></p>
+        </footer>
+      </aside>
+    </main>
+    <section id="pet-menu" role="dialog" aria-label="龙娘动作" hidden>
+      <div class="pet-menu-header">
+        <strong>龙娘动作</strong>
+        <button
+          id="pet-menu-close"
+          type="button"
+          aria-label="关闭菜单"
+          title="关闭菜单"
+        >
+          ×
+        </button>
+      </div>
+      <div class="pet-menu-content">
+        <div class="pet-menu-actions"></div>
+        <p>闲置 60 秒会打盹，移入鼠标唤醒。</p>
+      </div>
+      <div class="pet-menu-footer" hidden>
+        <button id="pet-close" hidden>关闭宠物</button>
+      </div>
+    </section>
+    <script src="runtime/live2dcubismcore.min.js"></script>
+    <script type="module" src="stage.js?v=quality-2"></script>
+  </body>
+</html>

@@ -9,11 +9,12 @@
  * from inside contribution components.
  */
 
-import { computed, getCurrentInstance, inject, onUnmounted } from "vue"
+import { computed, getCurrentInstance, inject, onUnmounted, ref } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import {
   beginDrag,
+  setOverlayInteractionRegions,
   hideOverlay,
   isOverlayVisible,
   moveOverlay,
@@ -22,6 +23,7 @@ import {
   resizeOverlay,
   showOverlay,
   toggleOverlay,
+  viewport,
 } from "@/ext/overlays"
 import { setOverlayContentReady, windowLabel } from "@/ext/overlayWindows"
 import { beginOverlayMove, useOverlayPointer } from "@/ext/overlayInput"
@@ -41,6 +43,7 @@ import { injectScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
 import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { useLocaleStore } from "@/stores/locale"
 import { useTabsStore } from "@/stores/tabs"
 import { useAuthStore } from "@/stores/auth"
@@ -49,12 +52,16 @@ import {
   closeOverlayWindow,
   openOverlaySettings,
   setOverlayBounds,
+  getOverlayBounds,
+  getOverlayViewport,
+  resizeOverlayWindow,
   startOverlayDrag,
 } from "@/utils/hostBridge"
 
 export { default as ActionButton } from "@/components/common/ActionButton.vue"
 export { default as SettingsGroup } from "@/components/settings/ui/SettingsGroup.vue"
 export { default as SettingsRow } from "@/components/settings/ui/SettingsRow.vue"
+export { default as NewSessionDialog } from "@/components/shell/newSession/NewSessionDialog.vue"
 export { OwnerCallError } from "@/ext/ownerClient"
 export { useWidget } from "@/components/chat/widgets/useWidget"
 export { useWorkContext } from "@/ext/workContext"
@@ -109,6 +116,19 @@ export function useOwner() {
 /** `useOverlay()` inside a native overlay window: the window is the overlay, positions are screen pixels. */
 function useWindowOverlay(key) {
   const size = () => ({ width: window.innerWidth, height: window.innerHeight })
+  const bounds = ref({ left: 0, top: 0, ...size() })
+  let disposed = false
+  const update = (box) => {
+    if (!disposed && box)
+      bounds.value = { left: box[0], top: box[1], width: box[2], height: box[3] }
+  }
+  const changed = (event) => update(event.detail)
+  window.addEventListener("kt-overlay-native-bounds", changed)
+  void getOverlayBounds().then(update)
+  onUnmounted(() => {
+    disposed = true
+    window.removeEventListener("kt-overlay-native-bounds", changed)
+  })
   const hide = async () => {
     hideOverlay(key)
     await closeOverlayWindow(windowLabel(key))
@@ -120,13 +140,16 @@ function useWindowOverlay(key) {
       if (available)
         window.dispatchEvent(new CustomEvent("kt:overlay-content-ready", { detail: key }))
     },
+    setHitRegions: (regions) =>
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: regions })),
     visible: computed(() => true),
-    bounds: computed(() => ({ left: window.screenX, top: window.screenY, ...size() })),
+    bounds,
+    getViewport: getOverlayViewport,
     show: () => {},
     hide,
     toggle: hide,
     move: (left, top) => setOverlayBounds(left, top, size().width, size().height),
-    resize: (width, height) => setOverlayBounds(window.screenX, window.screenY, width, height),
+    resize: (width, height) => resizeOverlayWindow(width, height),
     startDrag: (event) => {
       event?.preventDefault?.()
       return beginOverlayMove() || startOverlayDrag()
@@ -151,8 +174,20 @@ export function useOverlay() {
     mode: "app",
     pointer: useOverlayPointer("app"),
     ready: (available = true) => setOverlayContentReady(overlay, available),
+    setHitRegions: (regions) => setOverlayInteractionRegions(key, regions),
     visible: computed(() => isOverlayVisible(key)),
     bounds: computed(() => overlayBounds(key)),
+    getViewport: async () => {
+      const box = overlayBounds(key)
+      const left = Math.max(0, -box.left)
+      const top = Math.max(0, -box.top)
+      return [
+        left,
+        top,
+        Math.max(0, Math.min(box.width, viewport.width - box.left) - left),
+        Math.max(0, Math.min(box.height, viewport.height - box.top) - top),
+      ]
+    },
     show: () => showOverlay(key),
     hide: () => hideOverlay(key),
     toggle: () => toggleOverlay(key),
@@ -287,4 +322,28 @@ export function openTab(target) {
   }
   if (typeof target === "string") return openExtensionTab(target)
   return useTabsStore().openTab(target)
+}
+
+/** Open a live chat and focus a creature by ID, source name or the privileged `root` alias. */
+export async function openChat({ sessionId, creatureId } = {}, { signal } = {}) {
+  if (!sessionId || signal?.aborted) return false
+  const scope = getRuntimeScope()
+  const instance = await useInstancesStore().fetchOne(sessionId)
+  if (scope !== getRuntimeScope() || signal?.aborted) return false
+  const creatures = instance?.creatures || []
+  const creature =
+    creatureId &&
+    (creatures.find((item) => item.creature_id === creatureId) ||
+      creatures.find((item) => (creatureId === "root" ? item.is_root : item.name === creatureId)))
+  if (!instance || (creatureId && !creature)) throw new Error("Conversation is no longer available")
+  const initialTab = creature ? (creature.is_root ? "root" : creature.name) : null
+  useTabsStore().openTab({
+    kind: "attach",
+    id: `attach:${sessionId}`,
+    target: sessionId,
+    initialTab,
+    config_name: instance.config_name,
+  })
+  if (initialTab) useChatStore(sessionId).openTab(initialTab)
+  return true
 }

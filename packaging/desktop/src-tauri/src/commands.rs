@@ -50,6 +50,8 @@ pub fn capabilities() -> Value {
         "overlayWindows": true,
         "overlayPointer": crate::overlay::pointer_supported(),
         "overlayPresentation": 1,
+        "overlayResize": true,
+        "overlayPlacementV1": true,
         "closeToTray": true,
         "trayBadge": true,
         "fileDrop": true,

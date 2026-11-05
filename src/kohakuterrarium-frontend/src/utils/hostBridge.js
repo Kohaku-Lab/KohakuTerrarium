@@ -426,6 +426,56 @@ export function setOverlayBounds(x, y, width, height) {
   return callBoolean("overlay_set_bounds", x, y, width, height)
 }
 
+/** Resize in place; WebView screen coordinates are not authoritative. */
+export async function resizeOverlayWindow(width, height) {
+  const capabilities = await desktopCapabilities()
+  if (capabilities?.overlayResize) return callBoolean("overlay_resize", width, height)
+  const bounds = await getOverlayBounds()
+  return setOverlayBounds(
+    bounds?.[0] ?? window.screenX,
+    bounds?.[1] ?? window.screenY,
+    width,
+    height,
+  )
+}
+
+/** Native placement snapshot/restore; never compare these coordinates with WebView screen values. */
+export async function overlayPlacement(operation = "read", placement = null) {
+  if (!(await desktopCapabilities())?.overlayPlacementV1) return null
+  try {
+    return await call("overlay_placement", operation, placement)
+  } catch {
+    return null
+  }
+}
+
+export async function getOverlayBounds() {
+  try {
+    const bounds = await call("overlay_get_bounds")
+    return Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)
+      ? bounds
+      : null
+  } catch {
+    return null
+  }
+}
+
+/** Visible monitor work area in overlay-relative CSS pixels. */
+export async function getOverlayViewport(x, y) {
+  try {
+    const rect = await call("overlay_get_viewport", x, y)
+    return Array.isArray(rect) &&
+      rect.length === 4 &&
+      rect.every(Number.isFinite) &&
+      rect[2] >= 0 &&
+      rect[3] >= 0
+      ? rect
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** Report the `[x, y, width, height]` rectangles of the calling overlay that catch the mouse. */
 export function setOverlayHitRegions(regions, input) {
   return input === undefined

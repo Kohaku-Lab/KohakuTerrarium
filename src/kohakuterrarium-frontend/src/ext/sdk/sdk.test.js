@@ -1,4 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { createPinia, setActivePinia } from "pinia"
+import { useInstancesStore } from "@/stores/instances"
+import { useTabsStore } from "@/stores/tabs"
+import { useChatStore } from "@/stores/chat"
 
 import * as Sdk from "@/ext/sdk/index"
 import * as Mock from "@/ext/sdk/mock"
@@ -50,6 +54,48 @@ describe("extension Element Plus stylesheet", () => {
 })
 
 describe("UI SDK surface", () => {
+  it("opens the requested live creature and ignores cancelled navigation or missing targets", async () => {
+    setActivePinia(createPinia())
+    const instance = {
+      id: "session",
+      config_name: "Dragon chat",
+      creatures: [
+        { creature_id: "lookalike", name: "cid", is_root: false },
+        { creature_id: "cid", name: "dragon", is_root: true },
+        { creature_id: "other", name: "helper", is_root: false },
+      ],
+    }
+    const fetch = vi.spyOn(useInstancesStore(), "fetchOne").mockResolvedValue(instance)
+    const tabs = useTabsStore()
+    const chat = useChatStore("session")
+    try {
+      expect(await Sdk.openChat({ sessionId: "session", creatureId: "cid" })).toBe(true)
+      expect(tabs.activeTab).toMatchObject({ target: "session", config_name: "Dragon chat" })
+      expect(chat.activeTab).toBe("root")
+      await Sdk.openChat({ sessionId: "session", creatureId: "other" })
+      expect(chat.activeTab).toBe("helper")
+      await expect(Sdk.openChat({ sessionId: "session", creatureId: "missing" })).rejects.toThrow(
+        "no longer available",
+      )
+      expect(chat.activeTab).toBe("helper")
+      let finish
+      fetch.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+      const cancel = new AbortController()
+      const pending = Sdk.openChat(
+        { sessionId: "session", creatureId: "cid" },
+        { signal: cancel.signal },
+      )
+      cancel.abort()
+      finish(instance)
+      expect(await pending).toBe(false)
+      expect(chat.activeTab).toBe("helper")
+      expect(await Sdk.openChat()).toBe(false)
+    } finally {
+      fetch.mockRestore()
+      tabs.closeAll()
+    }
+  })
+
   it("exports exactly the published names, and the mock exports them too", () => {
     expect(Object.keys(Sdk).sort()).toEqual([...SDK_EXPORT_NAMES].sort())
     for (const name of SDK_EXPORT_NAMES) expect(Mock[name], name).toBeDefined()
@@ -58,6 +104,7 @@ describe("UI SDK surface", () => {
 
   it("checks version ranges", () => {
     expect(satisfiesRange(SDK_VERSION, ">=1,<2")).toBe(true)
+    expect(satisfiesRange(SDK_VERSION, ">=1.1,<2")).toBe(true)
     expect(satisfiesRange("1.4.2", "^1.2")).toBe(true)
     expect(satisfiesRange("2.0.0", "^1.2")).toBe(false)
     expect(satisfiesRange("1.2.9", "~1.2")).toBe(true)

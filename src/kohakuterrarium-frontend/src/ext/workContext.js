@@ -1,35 +1,82 @@
-import { computed, inject, onUnmounted, ref } from "vue"
+import { computed, effectScope, onUnmounted, ref, watch } from "vue"
 
 import { subscribeAttention, workForScope } from "@/stores/attention"
 import { useChatStore } from "@/stores/chat"
 import { useHostsStore } from "@/stores/hosts"
 import { useTabsStore } from "@/stores/tabs"
-import { getRuntimeScope } from "@/stores/runtimeScope"
+import { useWorkSpeech } from "./workSpeech"
 
-/** Read-only observed work of the focused live session, or null outside one. */
-export const WORK_CONTEXT_KEY = "kt:work-context"
+const trackers = new WeakMap()
 
-export function useWorkContext(scope = null, label = "") {
-  const relayed = inject(WORK_CONTEXT_KEY, null)
-  if (relayed) return relayed
+/** Track the last focused live tab for the lifetime of the extension host. */
+export function startWorkContextTracking() {
+  const tabs = useTabsStore()
+  if (trackers.has(tabs)) return trackers.get(tabs)
+  const hosts = useHostsStore()
+  const last = ref(null)
+  const scope = effectScope(true)
+  let owner
+  scope.run(() =>
+    watch(
+      () => {
+        const host = `${hosts.activeHostId}|${hosts.activeHost?.currentUser?.id ?? ""}`
+        const tab = tabs.activeTab
+        return {
+          host,
+          id: tabs.activeId,
+          live: tab?.kind === "attach" && !!tab.target,
+          retained: last.value && tabs.byId[last.value],
+        }
+      },
+      ({ host, id, live, retained }) => {
+        const switched = owner !== undefined && host !== owner
+        owner = host
+        if (switched || !retained) last.value = null
+        if (switched) return
+        if (live) last.value = id
+      },
+      { immediate: true, flush: "sync" },
+    ),
+  )
+  const tracker = {
+    last,
+    stop: () => {
+      scope.stop()
+      trackers.delete(tabs)
+    },
+  }
+  trackers.set(tabs, tracker)
+  return tracker
+}
+
+/** Read-only observed work, optionally retained while visiting non-session tabs. */
+export function useWorkContext({ retainLast = false, includeSpeech = false } = {}) {
   const tabs = useTabsStore()
   const hosts = useHostsStore()
+  const tracker = retainLast ? startWorkContextTracking() : null
   const revision = ref(0)
   const off = subscribeAttention(() => revision.value++)
   onUnmounted(off)
-  return computed(() => {
-    revision.value
-    const tab = scope ? { kind: "attach", target: scope, label } : tabs.activeTab
+  const binding = computed(() => {
+    const tab = tracker ? tabs.byId[tracker.last.value] : tabs.activeTab
     if (tab?.kind !== "attach" || !tab.target) return null
     const chat = useChatStore(tab.target)
-    const hostId = chat._instanceHostId
-    if (hostId !== hosts.activeHostId || chat._instanceRuntimeScope !== getRuntimeScope())
-      return null
+    return chat._instanceHostId === hosts.activeHostId ? chat : null
+  })
+  const speech = includeSpeech ? useWorkSpeech(binding) : null
+  return computed(() => {
+    revision.value
+    const chat = binding.value
+    if (!chat) return null
+    const tab = tracker ? tabs.byId[tracker.last.value] : tabs.activeTab
     return Object.freeze({
-      hostId,
+      hostId: chat._instanceHostId,
       sessionId: tab.target,
-      label: tab.label || tab.target,
+      creatureId: chat.terrariumTarget || "",
+      label: tab.label || tab.config_name || tab.target,
+      connected: chat.wsStatus === "open",
       ...workForScope(tab.target),
+      ...(speech ? { speech: speech.value } : {}),
     })
   })
 }

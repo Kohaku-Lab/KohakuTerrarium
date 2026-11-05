@@ -128,6 +128,8 @@ class TestParse:
                         "defaultVisible": False,
                         "surface": "window",
                         "alwaysOnTop": False,
+                        "startupGroup": "pet",
+                        "startupFallback": True,
                     },
                     {"kind": "tab", "id": "t"},
                 ],
@@ -156,6 +158,8 @@ class TestParse:
             "clickThrough": True,
             "defaultVisible": False,
             "alwaysOnTop": False,
+            "startupGroup": "pet",
+            "startupFallback": True,
         }
         assert by_id["t"] == {}
 
@@ -619,6 +623,21 @@ class TestParse:
             ({"kind": "tab", "id": "t", "keywords": "x"}, "only valid on a command"),
             ({"kind": "overlay", "id": "o", "surface": "tab"}, "surface"),
             ({"kind": "overlay", "id": "o", "alwaysOnTop": 1}, "alwaysOnTop"),
+            ({"kind": "overlay", "id": "o", "startupGroup": "../pet"}, "startupGroup"),
+            (
+                {"kind": "overlay", "id": "o", "startupFallback": True},
+                "startupFallback",
+            ),
+            (
+                {
+                    "kind": "overlay",
+                    "id": "o",
+                    "startupGroup": "pet",
+                    "startupFallback": 1,
+                },
+                "startupFallback",
+            ),
+            ({"kind": "tab", "id": "o", "startupGroup": "pet"}, "only valid"),
             ({"kind": "overlay", "id": "o", "width": 0}, "width"),
             ({"kind": "overlay", "id": "o", "height": True}, "height"),
             ({"kind": "overlay", "id": "o", "draggable": "yes"}, "draggable"),
