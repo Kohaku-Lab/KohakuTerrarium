@@ -30,9 +30,8 @@ class KtuiConfig:
     theme: str = "kohaku-dark"
     verbosity: str = "medium"
     links: str = "auto"
-    # full-screen panes ("rail", "aux"): {"width": int, "collapsed": bool}, and the aux tab
+    # full-screen panels ("rail", "side"): {"width": int, "collapsed": bool}
     panes: dict = field(default_factory=dict)
-    aux_tab: str = "jobs"
 
     @staticmethod
     def default_path() -> Path:
@@ -77,8 +76,6 @@ class KtuiConfig:
             for name, p in self.panes.items()
             if isinstance(p, dict)
         }
-        if not isinstance(self.aux_tab, str):
-            self.aux_tab = "jobs"
         return self
 
     def save(self, path: Path | None = None) -> None:

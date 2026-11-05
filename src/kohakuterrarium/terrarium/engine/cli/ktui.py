@@ -52,7 +52,7 @@ async def run_engine_with_ktui(
         shell.attach(creature)
 
     # from here nothing prints over the UI: stray output and warnings go to the Logs tab
-    shell.chrome.aux.capture()
+    shell.chrome.capture()
     try:
         if not focus.is_running:
             await engine.start(focus)
@@ -72,7 +72,7 @@ async def run_engine_with_ktui(
                 await entry.output.on_resume(history)
         await shell.run(resume_events=pending or None)
     finally:
-        shell.chrome.aux.close()
+        shell.chrome.release()
         if swap_input:
             agent.input = previous_input
         if store is not None:

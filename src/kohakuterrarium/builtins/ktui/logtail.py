@@ -37,6 +37,8 @@ class LogTail(logging.Handler):
         self.guard = threading.Lock()
         self.on_line = on_line
         self.unseen = 0
+        # lines added so far (a reader can tell whether anything new came)
+        self.count = 0
         self.setFormatter(FORMAT)
         self._saved: tuple[Any, Any] | None = None
         self._root: logging.Handler | None = None
@@ -51,6 +53,7 @@ class LogTail(logging.Handler):
     def add(self, line: str, warning: bool = False) -> None:
         with self.guard:
             self.lines.extend(line.splitlines() or [""])
+            self.count += 1
             if warning:
                 self.unseen += 1
         self.on_line()

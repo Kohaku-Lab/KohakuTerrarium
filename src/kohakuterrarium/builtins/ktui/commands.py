@@ -64,7 +64,7 @@ async def run_command(shell: Any, text: str) -> None:
             await shell.board.open()
             return
         case "logs":
-            await shell.chrome.aux.show_logs()
+            await shell.chrome.show_logs()
             return
         case "config" | "settings":
             await shell.settings.open()

@@ -40,12 +40,13 @@ BINDINGS = {
     "alt+j": "next_approval",
     "ctrl+k": "approve",
     "ctrl+x": "unqueue",
-    # full screen: show or hide the rail and the aux pane, step through or pick the tabs
+    # full screen: show or hide the conversation rail and the side panel, pick a page,
+    # step through the conversations
     "alt+r": "toggle_rail",
-    "alt+a": "toggle_aux",
-    "ctrl+pagedown": "next_tab",
-    "ctrl+pageup": "prev_tab",
-    **{f"alt+{n}": f"tab_{n}" for n in range(1, 10)},
+    "alt+s": "toggle_side",
+    "ctrl+pagedown": "next_chat",
+    "ctrl+pageup": "prev_chat",
+    **{f"alt+{n}": f"page_{n}" for n in range(1, 7)},
 }
 
 
@@ -155,13 +156,17 @@ class KtuiShell:
                 self.app.notify(
                     f"{creature.name} joined · @{creature.name} or ↓", "info"
                 )
+        if self.focus_id in self.entries and self.focus_id not in alive:
+            # the focus is leaving: back to its chat first (a shown channel or page gives
+            # way) while it is still there to show
+            self.chrome.to_chat()
+            self.chrome.leave_channel()
         for cid in [c for c in self.entries if c not in alive]:
             entry = self.entries.pop(cid)
             entry.view.doc.remove()
             self.app.notify(f"{entry.creature.name} left", "info")
         if self.focus_id not in self.entries and self.entries:
-            # the focus left: the next creature's document, a shown channel tab closes over
-            self.chrome.leave_channel()
+            # the next creature's chat
             self.focus_id = next(iter(self.entries))
             view = self.focused.view
             view.focused = False
@@ -201,10 +206,12 @@ class KtuiShell:
         return len(self.entries) > 1
 
     def focus(self, cid: str) -> None:
-        """Shows creature ``cid`` (``""``: the focused one, also back from a channel tab)."""
+        """Shows creature ``cid`` (``""``: the focused one, also back from a channel) on the
+        Chat page."""
         cid = cid or self.focus_id
         if cid not in self.entries:
             return
+        self.chrome.to_chat()
         if self.chrome.leave_channel() and cid == self.focus_id:
             view = self.focused.view
             view.set_focused(True, f"── {view.name} ──")
@@ -222,8 +229,8 @@ class KtuiShell:
 
     def turn_finished(self, view: CreatureView) -> None:
         if not view.focused:
-            where = "its tab" if self.mode == "fullscreen" else "↓"
-            self.app.notify(f"{view.name} finished · {where} to switch", "info")
+            where = "the rail" if self.mode == "fullscreen" else "↓"
+            self.app.notify(f"{view.name} finished · {where} to switch to it", "info")
 
     # -- lifecycle ------------------------------------------------------
 
@@ -232,7 +239,7 @@ class KtuiShell:
         self.app.start()
         try:
             # nothing may print over the UI from here on: it goes to the Logs tab
-            self.chrome.aux.capture()
+            self.chrome.capture()
             self._mount()
             if resume_events:
                 await self.focused.output.on_resume(resume_events)
@@ -315,6 +322,9 @@ class KtuiShell:
                 self._ctrl_c(int(ev.data.get("count", 1) or 1))
             case "mode_changed":
                 self.mode = ev.data.get("mode", self.mode)
+                if self.mode == "inline":
+                    # pages are full screen only: inline is always the conversation
+                    self.chrome.to_chat()
                 for entry in self.entries.values():
                     entry.view.mode_changed(self.mode == "inline")
                 # the chrome is kept up to date only while drawn
@@ -340,9 +350,9 @@ class KtuiShell:
                 self.interactions.approve_oldest()
             case "unqueue":
                 self._unqueue()
-            case "toggle_rail" | "toggle_aux" | "next_tab" | "prev_tab":
+            case "toggle_rail" | "toggle_side" | "next_chat" | "prev_chat":
                 self.chrome.action(name)
-            case _ if name.startswith("tab_"):
+            case _ if name.startswith("page_"):
                 self.chrome.action(name)
 
     def _ctrl_c(self, count: int) -> None:

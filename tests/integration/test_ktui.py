@@ -592,27 +592,40 @@ class TestKtuiWorkflow:
             await engine.remove_creature(late)
             await _until(lambda: "late" not in shell.entries, "the late creature gone")
 
-            # full screen: the rail lists the graph's channels, a click opens its tab
+            # full screen: pages on top, the rail lists agents and the graph's channels
             await engine.add_channel(helper.graph_id, "review", "review requests")
             app.inject({"key": "ctrl+t"})
             await _until(lambda: "#review" in "\n".join(app.screen()), "the rail")
             rows = app.screen()
-            assert "helper" in rows[0] and "Jobs" in rows[0], "tab strip and aux tabs"
-            y = next(i for i, line in enumerate(rows) if "#review" in line[:30])
-            app.inject({"click": (rows[y].index("#review"), y)})
-            await _until(lambda: "#review ×" in app.screen()[0], "the channel tab")
+            assert "Chat" in rows[0] and "Status" in rows[0], "the page tabs"
+
+            def click(word: str) -> None:
+                rows = app.screen()
+                y = next(i for i, line in enumerate(rows) if word in line[:30])
+                app.inject({"click": (rows[y].index(word), y)})
+
+            # a channel picked in the rail: its chat, and typing sends to the channel
+            click("#review")
+            await _until(lambda: "#review  ◂" in "\n".join(app.screen()), "the channel")
             await _type(app, "please look")
             channel = engine.channel(helper.graph_id, "review")
             await _until(
                 lambda: any(m.content == "please look" for m in channel.history),
                 "the message on the channel",
             )
-            assert helper.agent.controller.conversation.get_last_assistant_message()
             await _until(
-                lambda: "please look" in "\n".join(app.screen()), "it in the tab"
+                lambda: "please look" in "\n".join(app.screen()), "it in the chat"
             )
-            # closing the tab shows the creature again; the composer talks to it
-            app.inject({"middle": (app.screen()[0].index("#review"), 0)})
+            # a page replaces the chat (and its panels); alt+1 is the chat again
+            app.inject({"key": "alt+3"})
+            await _until(
+                lambda: any(line.startswith("Agents") for line in app.screen()),
+                "the Status page",
+            )
+            app.inject({"key": "alt+1"})
+            await _until(lambda: "#review  ◂" in "\n".join(app.screen()), "chat again")
+            # the creature picked in the rail: its chat; the composer talks to it again
+            click("helper")
             await _until(lambda: "helper reply" in "\n".join(app.screen()), "back")
             # the rail divider dragged: the width is remembered
             divider = app.screen()[1].index("│")
