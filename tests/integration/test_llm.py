@@ -2046,6 +2046,7 @@ class TestLlmIntegration:
                     ]
                 )
             ]
+            (tmp_path / "image-context.json").write_text('{"count":75}')
             saved_budget_history = messages_to_dicts(budget_history)
             bounded = await responses_provider.chat_complete(budget_history)
             assert bounded.content == "bounded" and len(budget_requests) == 2
@@ -2061,6 +2062,7 @@ class TestLlmIntegration:
             ).content == "bounded"
             assert budget_requests[2]["input"] == budget_requests[1]["input"]
 
+            (tmp_path / "image-context.json").write_text('{"count":50}')
             session_store = SessionStore(
                 tmp_path / "custom-input-root" / "selected.kohakutr"
             )

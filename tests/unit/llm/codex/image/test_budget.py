@@ -16,6 +16,7 @@ from kohakuterrarium.llm.codex.image.budget import (
 )
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.responses.ws import ResponsesWSSession, ResponsesWSError
+from kohakuterrarium.utils.config_dir import config_dir
 
 pytestmark = pytest.mark.real_llm_provider
 
@@ -146,6 +147,7 @@ def test_rotating_image_budget_prevents_stale_websocket_continuation():
 
 @pytest.fixture
 async def custom_backend():
+    (config_dir() / "image-context.json").write_text('{"count":75}')
     requests = []
     failures = []
 
@@ -177,11 +179,19 @@ async def custom_backend():
         await provider.close()
 
 
-async def test_custom_backend_has_no_unverified_fifty_image_limit(custom_backend):
+async def test_custom_backend_uses_live_count(custom_backend):
     provider, requests, _ = custom_backend
-    messages = [{"role": "user", "content": [_image(i) for i in range(56)]}]
-    assert (await provider.chat_complete(messages)).content == "ok"
-    assert len(requests[0]["input"][0]["content"]) == 56
+    messages = [{"role": "user", "content": [_image(i) for i in range(80)]}]
+    original = deepcopy(messages)
+    for count in (50, 25, 75):
+        (config_dir() / "image-context.json").write_text(json.dumps({"count": count}))
+        assert (await provider.chat_complete(messages)).content == "ok"
+        assert [
+            p["image_url"]
+            for p in requests[-1]["input"][0]["content"]
+            if p["type"] == "input_image"
+        ] == [f"https://example.invalid/{i}" for i in range(80 - count, 80)]
+    assert messages == original
 
 
 async def test_custom_backend_learns_rejected_limit_and_bounds_future_calls(
@@ -201,12 +211,12 @@ async def test_custom_backend_learns_rejected_limit_and_bounds_future_calls(
     assert requests[-1]["input"] == requests[-2]["input"]
     assert messages == original
     clone = provider.with_model("another-model")
-    assert clone._request_image_limit is None
+    assert clone._request_image_limit == 50
     failures.append("Exceeded maximum number of images (25) allowed in the request")
     assert (await clone.chat_complete(messages)).content == "ok"
     assert clone._request_image_limit == 25
     assert provider._request_image_limit == 50
-    assert len(requests[-2]["input"][0]["content"]) == 56
+    assert len(requests[-2]["input"][0]["content"]) == 51
     assert (
         sum(p["type"] == "input_image" for p in requests[-1]["input"][0]["content"])
         == 25
@@ -286,10 +296,10 @@ def test_only_explicit_rejected_request_can_lower_the_limit(
     assert reported_image_limit(error, existing) == expected
 
 
-def test_only_known_oauth_endpoint_defaults_to_fifty_images():
+def test_providers_start_without_a_learned_ceiling():
     provider = CodexOAuthProvider(model="synthetic")
-    assert provider._request_image_limit == 50
-    assert provider.with_model("another")._request_image_limit == 50
+    assert provider._request_image_limit is None
+    assert provider.with_model("another")._request_image_limit is None
     assert CodexOAuthProvider(api_key="test")._request_image_limit is None
     assert (
         CodexOAuthProvider(base_url="https://example.invalid")._request_image_limit
@@ -301,6 +311,7 @@ def test_only_known_oauth_endpoint_defaults_to_fifty_images():
 async def test_websocket_learning_respects_output_budget_and_continuation(
     budget, partial
 ):
+    (config_dir() / "image-context.json").write_text('{"count":75}')
     requests = []
 
     async def respond(socket):

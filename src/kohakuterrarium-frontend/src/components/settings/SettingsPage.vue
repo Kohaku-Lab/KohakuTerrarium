@@ -145,6 +145,10 @@
           <div class="flex flex-col gap-4">
             <div class="kt-v2-card p-5 max-md:p-3">
               <SessionSummaryPanel />
+              <SettingsRow class="mt-4" :title="t('settings.imageContext.title')">
+                <el-input-number v-model="imageContext.count" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :disabled="imageContext.busy" data-test="image-context-count" />
+                <el-button type="primary" :disabled="imageContext.busy || !imageContext.ready || !Number.isSafeInteger(imageContext.count) || imageContext.count < 1" data-test="image-context-save" @click="updateImageContext({ write: true })">{{ t("common.save") }}</el-button>
+              </SettingsRow>
             </div>
             <div class="kt-v2-card p-5 max-md:p-3">
               <DriveSettingsPanel @open-drives="onOpenDrives" />
@@ -172,7 +176,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, onMounted, watch } from "vue"
+import { computed, reactive, ref, onMounted, watch, onDeactivated, onBeforeUnmount } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import AccountSection from "@/components/account/AccountSection.vue"
@@ -182,6 +186,9 @@ import ModuleSettings from "@/components/settings/modules/ModuleSettings.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
 import DesktopAppSettings from "@/components/settings/DesktopAppSettings.vue"
+import SettingsRow from "@/components/settings/ui/SettingsRow.vue"
+import { onShownAgain } from "@/components/session-v2/settings/useSectionTarget"
+import { useHostsStore } from "@/stores/hosts"
 import DriveSettingsPanel from "@/components/settings/DriveSettingsPanel.vue"
 import OAuthProviderRow from "@/components/settings/OAuthProviderRow.vue"
 import PackageProviderRow from "@/components/settings/PackageProviderRow.vue"
@@ -234,6 +241,29 @@ watch(
   },
   { immediate: true },
 )
+
+const hosts = useHostsStore()
+const imageContext = ref({})
+async function updateImageContext({ write = false } = {}) {
+  if (write && !imageContext.value.ready) return
+  const form = reactive({ count: write ? imageContext.value.count : undefined, ready: write, busy: true })
+  imageContext.value = form
+  if (activeTab.value !== "runtime") return
+  try {
+    const result = await (write ? settingsAPI.writeConfigFile("image-context", JSON.stringify({ count: form.count })) : settingsAPI.readConfigFile("image-context"))
+    if (!write) form.count = result.content.trim() ? JSON.parse(result.content).count : 50
+    form.ready = true
+    if (write && form === imageContext.value) ElMessage.success(t("common.status.done"))
+  } catch (error) {
+    if (form === imageContext.value) ElMessage.error(String(error.response?.data?.detail || error.message))
+  } finally {
+    form.busy = false
+  }
+}
+watch(() => [activeTab.value, hosts.activeHostId, hosts.activeBaseURL, hosts.activeUserToken], updateImageContext, { immediate: true, flush: "sync" })
+onShownAgain(updateImageContext)
+onDeactivated(() => (imageContext.value = {}))
+onBeforeUnmount(() => (imageContext.value = {}))
 
 const sectionTitle = (section) => (section.labelKey ? t(section.labelKey) : section.label)
 const sectionHint = (section) => (section.descriptionKey ? t(section.descriptionKey) : section.description)

@@ -29,6 +29,7 @@ export const messages = {
     ...studioApp.en,
     ...settingsModels.en,
     ...settingsModules.en,
+    "settings.imageContext.title": "Codex image context (default 50)",
   },
   "zh-TW": {
     ...zhTW,
@@ -40,6 +41,7 @@ export const messages = {
     ...studioApp["zh-TW"],
     ...settingsModels["zh-TW"],
     ...settingsModules["zh-TW"],
+    "settings.imageContext.title": "Codex 圖片上下文數量（預設 50）",
   },
   "zh-CN": {
     ...zhCN,
@@ -51,6 +53,7 @@ export const messages = {
     ...studioApp["zh-CN"],
     ...settingsModels["zh-CN"],
     ...settingsModules["zh-CN"],
+    "settings.imageContext.title": "Codex 图片上下文数量（默认 50）",
   },
   ja: { ...ja, ...settingsModules.ja },
   de: { ...de, ...settingsModules.de },

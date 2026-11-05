@@ -158,6 +158,12 @@ class TestApiSettingsJourney:
         creature_dir: Path,
         scripted_llm: ScriptedLLM,
     ) -> None:
+        config_url = "/api/settings/config-files/image-context/content"
+        for content, status in (('{"count":75}', 200), ('{"count":0}', 422)):
+            resp = client.put(config_url, json={"content": content})
+            assert resp.status_code == status
+        assert client.get(config_url).json()["content"] == '{"count":75}'
+
         # ── 1. Identity: LLM backend CRUD ─────────────────────────────
         # Baseline: only the built-in backends, no user backends.
         resp = client.get("/api/settings/backends")
