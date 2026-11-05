@@ -6,11 +6,14 @@ import threading
 import weakref
 
 import pytest
+from kohakuvault import KVault
 
+from kohakuterrarium import Agent
 from kohakuterrarium.session.resume import async_flow as resume_async
 from kohakuterrarium.session.resume.async_flow import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.session.store.events import branch_index as branch_index_module
 
 
 def _interrupted_session(tmp_path):
@@ -39,6 +42,91 @@ def _interrupted_session(tmp_path):
     finally:
         store.close(update_status=False)
     return path
+
+
+async def test_clean_checkpoint_continues_without_historical_payload_scan(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "clean-creature"
+    config.mkdir()
+    (config / "config.yaml").write_text(
+        "name: clean\nsystem_prompt: checkpoint test\n"
+        "controller: {tool_format: bracket, include_tools_in_prompt: false, "
+        "include_hints_in_prompt: false}\n"
+        "input: {type: none}\noutput: {type: none}\n"
+    )
+    path = tmp_path / "clean.kohakutr"
+    agent = await Agent.build(config, llm=ScriptedLLM(["saved answer"]))
+    store = SessionStore(path)
+    store.init_meta("clean", "agent", str(config), str(tmp_path), ["clean"])
+    agent.attach_session_store(store)
+    try:
+        await agent.start()
+        await agent.run("saved question")
+        assert store._resume_candidate is not None
+        expected = agent.controller.conversation.snapshot_messages(
+            preserve_pending_tail=True
+        )
+    finally:
+        await agent.stop()
+        assert store._resume_candidate is not None
+        historical_keys = {
+            f"clean:e{index:06d}" for index in range(store._event_seq["clean"])
+        }
+        store.close(update_status=False)
+
+    reads = []
+    original = SessionStore.get_events
+    original_prefix = branch_index_module.read_prefix
+
+    def observed_get_events(self, *args, **kwargs):
+        reads.append("get_events")
+        return original(self, *args, **kwargs)
+
+    def observed_prefix(*args, **kwargs):
+        reads.append("branch-index")
+        return original_prefix(*args, **kwargs)
+
+    for method in ("get", "__getitem__", "get_many"):
+        original_read = getattr(KVault, method)
+
+        def observe_payload(self, key, *args, _read=original_read, **kwargs):
+            requested = key if isinstance(key, (list, tuple)) else [key]
+            if any(
+                (k.decode() if isinstance(k, bytes) else k) in historical_keys
+                for k in requested
+            ):
+                reads.append("historical-payload")
+            return _read(self, key, *args, **kwargs)
+
+        monkeypatch.setattr(KVault, method, observe_payload)
+    monkeypatch.setattr(SessionStore, "get_events", observed_get_events)
+    monkeypatch.setattr(branch_index_module, "read_prefix", observed_prefix)
+    for turn in (2, 3):
+        llm = ScriptedLLM([f"continued {turn}"])
+        resumed, reopened = await resume_agent_async(path, llm=llm)
+        try:
+            assert (
+                resumed.controller.conversation.snapshot_messages(
+                    preserve_pending_tail=True
+                )
+                == expected
+            )
+            assert resumed._turn_index == turn - 1
+            await resumed.start()
+            result = await resumed.run(f"next question {turn}")
+            assert result.text == f"continued {turn}"
+            assert resumed._turn_index == turn
+            assert resumed._branch_id == 1
+            assert llm.call_count == 1
+            assert any(m.get("content") == "saved question" for m in llm.last_messages)
+            expected = resumed.controller.conversation.snapshot_messages(
+                preserve_pending_tail=True
+            )
+        finally:
+            await resumed.stop()
+            reopened.close(update_status=False)
+    assert reads == []
 
 
 async def test_recovery_scans_off_loop_and_persists_text_once(tmp_path, monkeypatch):

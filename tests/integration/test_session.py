@@ -29,6 +29,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent.history import message_history as _message_history_mod
@@ -83,6 +85,7 @@ from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.session.resume.resume import detect_session_type, resume_agent
 from kohakuterrarium.session.resume.async_flow import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store.events import branch_index as _branch_index_mod
 from kohakuterrarium.session.store.lifecycle.version import (
     FORMAT_VERSION,
     detect_format_version,
@@ -1267,6 +1270,102 @@ class TestSessionIntegration:
         finally:
             forked_session.store.close()
         host_store.close()
+
+        clean_config = _write_agent_config(tmp_path / "checkpoint-first", name="plain")
+        clean_path = tmp_path / "checkpoint-first.kohakutr"
+        clean_llm = ScriptedLLM(["[/echo]retained result[echo/]", "tool completed"])
+        clean_agent = await Agent.build(
+            clean_config, llm=clean_llm, io="headless", tools=[_EchoTool()]
+        )
+        clean_store = _new_store(clean_path, config_path=clean_config, agents=["plain"])
+        clean_agent.attach_session_store(clean_store)
+        try:
+            await clean_agent.start()
+            assert (await clean_agent.run("use echo once")).text.endswith(
+                "tool completed"
+            )
+            expected_context = clean_agent.controller.conversation.snapshot_messages(
+                preserve_pending_tail=True
+            )
+            original_events = await clean_store.run(clean_store.get_events, "plain")
+            assert any(e["type"] == "tool_result" for e in original_events)
+        finally:
+            await clean_agent.stop()
+            clean_store.close(update_status=False)
+
+        full_reads = []
+        get_events = SessionStore.get_events
+        read_branches = _branch_index_mod.read_prefix
+
+        def observe_full_read(store, *args, **kwargs):
+            full_reads.append("get_events")
+            return get_events(store, *args, **kwargs)
+
+        def observe_branch_read(*args, **kwargs):
+            full_reads.append("branch_index")
+            return read_branches(*args, **kwargs)
+
+        for next_turn in (2, 3):
+            next_llm = ScriptedLLM([f"continued {next_turn}"])
+            with monkeypatch.context() as checkpoint_reads:
+                checkpoint_reads.setattr(SessionStore, "get_events", observe_full_read)
+                checkpoint_reads.setattr(
+                    _branch_index_mod, "read_prefix", observe_branch_read
+                )
+                continued, continuation_store = await resume_agent_async(
+                    clean_path,
+                    llm=next_llm,
+                    input_module=NoneInput(),
+                    output_module=NoneOutput(),
+                )
+                try:
+                    assert (
+                        continued.controller.conversation.snapshot_messages(
+                            preserve_pending_tail=True
+                        )
+                        == expected_context
+                    )
+                    continued.add_tool(_EchoTool())
+                    await continued.start()
+                    assert (
+                        await continued.run(f"continue {next_turn}")
+                    ).text == f"continued {next_turn}"
+                    assert (continued._turn_index, continued._branch_id) == (
+                        next_turn,
+                        1,
+                    )
+                    assert next_llm.call_count == 1
+                    assert "echoed: retained result" in str(next_llm.last_messages)
+                    assert any(
+                        m.get("metadata", {}).get("tool_result_phase") == "final"
+                        for m in expected_context
+                    )
+                    expected_context = (
+                        continued.controller.conversation.snapshot_messages(
+                            preserve_pending_tail=True
+                        )
+                    )
+                finally:
+                    await continued.stop()
+                    continuation_store.close(update_status=False)
+            assert full_reads == []
+        verified = SessionStore(clean_path)
+        try:
+            continued_events = verified.get_events("plain")
+            assert [e for e in continued_events if e["type"] == "tool_result"] == [
+                e for e in original_events if e["type"] == "tool_result"
+            ]
+            user_events = [e for e in continued_events if e["type"] == "user_message"]
+            assert [(e["turn_index"], e["branch_id"]) for e in user_events] == [
+                (1, 1),
+                (2, 1),
+                (3, 1),
+            ]
+            assert len({e["event_id"] for e in continued_events}) == len(
+                continued_events
+            )
+        finally:
+            verified.close(update_status=False)
 
     async def test_memory_index_and_search_finds_exact_turn(
         self, patched_llm, tmp_path

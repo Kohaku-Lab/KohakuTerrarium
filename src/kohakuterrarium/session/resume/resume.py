@@ -43,6 +43,7 @@ from kohakuterrarium.session.resume.branch import (
 from kohakuterrarium.session.resume.build import (
     build_conversation as _build_conversation,
 )
+from kohakuterrarium.session.resume.checkpoint import prepare_clean_checkpoint
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -326,13 +327,19 @@ def _reapply_options(agent: Any, agent_name: str, attribute: str) -> None:
 def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     """Restore identity, conversation, branch state, scratchpad, and pending work."""
     align_agent_name(agent, agent_name)
-    # One raw event read serves every restoration step.
-    events = store.get_events(agent_name)
-    prepared = prepare_saved_snapshot(store, agent_name, events)
+    prepared = prepare_clean_checkpoint(agent, store, agent_name)
+    clean_checkpoint = prepared is not None
+    events = [] if clean_checkpoint else store.get_events(agent_name)
+    if not clean_checkpoint:
+        prepared = prepare_saved_snapshot(store, agent_name, events)
     agent._context_cutoff_event_id = (
         prepared.get("context_cutoff_event_id", 0) if prepared is not None else 0
     )
-    loaded = _load_conversation_result(store, agent_name, events, prepared)
+    loaded = (
+        _LoadedConversation(prepared["messages"])
+        if clean_checkpoint
+        else _load_conversation_result(store, agent_name, events, prepared)
+    )
     saved_messages = loaded.messages
     installed = None
     if saved_messages is not None:
@@ -343,7 +350,15 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
             "Conversation restored", agent=agent_name, messages=len(saved_messages)
         )
 
-    _restore_turn_branch_state(agent, store, agent_name, events)
+    if clean_checkpoint:
+        selected = prepared["selected"]
+        agent._turn_index = max(selected)
+        agent._branch_id = selected[agent._turn_index]
+        agent._parent_branch_path = [
+            (t, selected[t]) for t in sorted(selected) if t < agent._turn_index
+        ]
+    else:
+        _restore_turn_branch_state(agent, store, agent_name, events)
 
     # Repair a mismatched snapshot or a missing completed ancestor tool result.
     persisted = load_persisted_branch_view(store, agent_name)

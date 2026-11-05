@@ -46,6 +46,7 @@ store/
     ├── jobs.py          JobRecordsMixin
     ├── artifacts.py     session-local binary artifacts
     ├── rollup.py        denormalized per-turn summaries
+    ├── resume_point.py  clean empty-tail continuation publication
     └── snapshot.py      independent conversation checkpoints per branch lineage
 ```
 
@@ -78,3 +79,25 @@ beyond assembly (constructor ordering, cross-part glue).
 `_init_affinity` → `_init_handle` (path, enrolment) → `_init_events` →
 `_init_channels` → `_init_subagents` → open tables → restore counters.
 Enrolment precedes any native open; a failed open discards partial handles.
+Writable construction consumes a previous clean continuation record after counter
+restoration; read-only construction does not consume it.
+
+## Clean continuation points
+
+`records/resume_point.py` stages metadata for the current ordinary text checkpoint.
+`lifecycle/handle.py` publishes it only after event flush and clean counter commit.
+No messages are duplicated in the continuation record. Any writable open removes
+the persisted record before exposing its tables for subsequent mutation.
+
+The incoming point and a staged replacement are valid only in the event index's
+current invalidation epoch. Bulk/raw history changes must restore counters or
+clear the branch index, as required for existing derived indexes. This also
+invalidates checkpoint authority, even when keys and logical event IDs do not
+change. Ordinary appends invalidate the point; same-or-earlier-turn hook timing
+can advance its physical position without changing the conversation watermark.
+
+`session/resume/checkpoint.py` checks the supported state and installs a bound on
+occupied turns. A first ordinary input beyond that bound can allocate its branch
+without reconstructing historical branch maxima. Queries at or below the bound
+still use the normal complete index. Unsupported cases retain legacy restoration;
+this is not a general history index or arbitrary-tail reducer.
