@@ -8,6 +8,9 @@ runtime. DeepSeek art is imported by each user and is never bundled.
 
 Open **Settings → Overlays → Live2D 宠物**, expand its settings and select
 **显示宠物**. The separate Live2D settings section and tab use the same state.
+Settings group appearance, interaction behavior, control mode and advanced options;
+the action-set controls have their own section. Narrow panels stack controls and
+mode descriptions vertically.
 
 - Choose either model, default appearance (including the dragon's juvenile
   form), idle animation and **50–300%** size. Sizes fit the available viewport.
@@ -21,6 +24,8 @@ Open **Settings → Overlays → Live2D 宠物**, expand its settings and select
   It hides the pet and releases control; show it again
   from Live2D settings. The size slider previews its percentage while dragging
   and applies the size on release, keeping the menu stationary during the drag.
+  Menus stay inside the visible host area; desktop menus use the monitor work
+  area, excluding system bars, even when the transparent window extends offscreen.
 - In the Tauri desktop app, enable **Show on the desktop** under Overlays to
   move the companion outside KT. Browser and pywebview hosts keep the in-app
   overlay. **Reset position** recovers a misplaced desktop companion.

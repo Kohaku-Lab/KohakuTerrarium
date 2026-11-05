@@ -25,6 +25,22 @@ export const PetSettings = defineComponent({
         h("span", [label, hint ? h("small", hint) : null]),
         control,
       ]);
+    const group = (title, children) =>
+      h("section", { class: "l2d-setting-group", "aria-label": title }, [
+        h("h3", title),
+        ...children,
+      ]);
+    const toggle = (key, label, hint = "") =>
+      field(
+        label,
+        h("input", {
+          type: "checkbox",
+          checked: store.state.value[key],
+          "aria-label": label,
+          onChange: (event) => store.update({ [key]: event.target.checked }),
+        }),
+        hint,
+      );
     const select = (label, value, choices, change) =>
       h(
         "select",
@@ -63,117 +79,124 @@ export const PetSettings = defineComponent({
               "收起宠物",
             ),
           ]),
-          field(
-            "角色",
-            select("Live2D 角色", model, MODEL_NAMES, (value) =>
-              store.update({ model: value }),
-            ),
-          ),
-          h(ModelResources),
-          field(
-            "大小",
-            h("span", { class: "l2d-size-control" }, [
-              h("input", {
-                type: "range",
-                min: 50,
-                max: 300,
-                step: 5,
-                value: Math.round(current.scale * 100),
-                "aria-label": "宠物大小",
-                onInput: (event) =>
-                  changeModel({ scale: Number(event.target.value) / 100 }),
-              }),
-              h("output", `${Math.round(current.scale * 100)}%`),
-            ]),
-            "100% 为当前推荐大小，超出窗口时自动适配。",
-          ),
-          field(
-            "默认待机",
-            select("默认待机动作", current.idle, IDLE_CHOICES[model], (idle) =>
-              changeModel({ idle }),
-            ),
-            modelAdapter(model).interaction.sleep
-              ? "闭眼打盹会优先于工作动作；选择其他待机可恢复互动。"
-              : "使用模型自带的自然待机动作。",
-          ),
-          h("fieldset", { class: "l2d-appearance" }, [
-            h("legend", "默认形态与表情"),
-            ...Object.entries(expressionChoices(model)).map(([name, label]) =>
-              h(
-                "button",
-                {
-                  "aria-pressed": current.expressions.includes(name),
-                  onClick: () =>
-                    changeModel({
-                      expressions: toggleAppearance(prefs, model, name),
-                    }),
-                },
-                label,
+          group("角色与外观", [
+            field(
+              "角色",
+              select("Live2D 角色", model, MODEL_NAMES, (value) =>
+                store.update({ model: value }),
               ),
             ),
-            h(
-              "button",
-              { onClick: () => changeModel({ expressions: [] }) },
-              "恢复默认形象",
+            h(ModelResources),
+            field(
+              "大小",
+              h("span", { class: "l2d-size-control" }, [
+                h("input", {
+                  type: "range",
+                  min: 50,
+                  max: 300,
+                  step: 5,
+                  value: Math.round(current.scale * 100),
+                  "aria-label": "宠物大小",
+                  onInput: (event) =>
+                    changeModel({ scale: Number(event.target.value) / 100 }),
+                }),
+                h("output", `${Math.round(current.scale * 100)}%`),
+              ]),
+              "100% 为当前推荐大小，超出窗口时自动适配。",
+            ),
+            field(
+              "默认待机",
+              select(
+                "默认待机动作",
+                current.idle,
+                IDLE_CHOICES[model],
+                (idle) => changeModel({ idle }),
+              ),
+              modelAdapter(model).interaction.sleep
+                ? "闭眼打盹会优先于工作动作；选择其他待机可恢复互动。"
+                : "使用模型自带的自然待机动作。",
+            ),
+            h("fieldset", { class: "l2d-appearance" }, [
+              h("legend", "默认形态与表情"),
+              ...Object.entries(expressionChoices(model)).map(([name, label]) =>
+                h(
+                  "button",
+                  {
+                    "aria-pressed": current.expressions.includes(name),
+                    onClick: () =>
+                      changeModel({
+                        expressions: toggleAppearance(prefs, model, name),
+                      }),
+                  },
+                  label,
+                ),
+              ),
+              h(
+                "button",
+                { onClick: () => changeModel({ expressions: [] }) },
+                "恢复默认形象",
+              ),
+            ]),
+            field(
+              "画质",
+              select(
+                "宠物画质",
+                prefs.quality,
+                { high: "高品质 · 4K", standard: "性能优先 · 2K" },
+                (quality) => store.update({ quality }),
+              ),
+              "高清适合放大查看，会增加显存占用。",
             ),
           ]),
-          field(
-            "画质",
-            select(
-              "宠物画质",
-              prefs.quality,
-              { high: "高品质 · 4K", standard: "性能优先 · 2K" },
-              (quality) => store.update({ quality }),
-            ),
-            "高清适合放大查看，会增加显存占用。",
-          ),
-          ...[
-            ["followWork", "跟随会话动作"],
-            ["talkingMouth", "说话口型"],
-            ["tracking", "视线跟随"],
-            ["physics", "头发与衣摆物理"],
-            ...(modelAdapter(model).interaction.sleep
-              ? [["autoSleep", "闲置一分钟自动打盹"]]
-              : []),
-            ["debug", "Debug 调试功能"],
-          ].map(([key, label]) =>
-            field(
-              label,
-              h("input", {
-                type: "checkbox",
-                checked: prefs[key],
-                "aria-label": label,
-                onChange: (event) =>
-                  store.update({ [key]: event.target.checked }),
-              }),
-              key === "talkingMouth"
-                ? "随回复正文开合嘴巴，遇标点停顿，结束或中断时收口。三种模式通用，不产生语音或额外模型调用。"
-                : key === "debug"
-                  ? "显示动作试演、画质比较、缩放检查和性能信息。"
+          group("互动行为", [
+            ...[
+              ["followWork", "跟随会话动作"],
+              ["talkingMouth", "说话口型"],
+              ["tracking", "视线跟随"],
+              ["physics", "头发与衣摆物理"],
+              ...(modelAdapter(model).interaction.sleep
+                ? [["autoSleep", "闲置一分钟自动打盹"]]
+                : []),
+            ].map(([key, label]) =>
+              toggle(
+                key,
+                label,
+                key === "talkingMouth"
+                  ? "随回复正文开合嘴巴，遇标点停顿，结束或中断时收口。三种模式通用，不产生语音或额外模型调用。"
                   : "",
+              ),
             ),
-          ),
-          field(
-            "交互模式",
-            select(
-              "交互模式",
-              prefs.controlMode,
-              CONTROL_MODES,
-              (controlMode) => store.update({ controlMode }),
+          ]),
+          group("交互模式", [
+            field(
+              "当前模式",
+              select(
+                "交互模式",
+                prefs.controlMode,
+                CONTROL_MODES,
+                (controlMode) => store.update({ controlMode }),
+              ),
             ),
-          ),
-          h(ControlSettings),
+            h(ControlSettings),
+          ]),
           h(ActionSettings),
           bridge.renderError.value
             ? h("p", { role: "alert" }, bridge.renderError.value)
             : null,
-          prefs.debug
-            ? h(
-                "button",
-                { onClick: () => kt.openTab("preview") },
-                "打开调试预览",
-              )
-            : null,
+          group("高级设置", [
+            toggle(
+              "debug",
+              "Debug 调试功能",
+              "显示动作试演、画质比较、缩放检查和性能信息。",
+            ),
+            prefs.debug
+              ? h(
+                  "button",
+                  { onClick: () => kt.openTab("preview") },
+                  "打开调试预览",
+                )
+              : null,
+          ]),
           h(
             "button",
             { onClick: () => store.reset(model) },

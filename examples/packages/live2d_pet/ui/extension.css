@@ -85,6 +85,7 @@
   font-size: 13px;
   padding: 12px 0;
   max-width: 680px;
+  container-type: inline-size;
 }
 .l2d-settings p {
   opacity: 0.75;
@@ -95,23 +96,26 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 0;
+  padding: 16px 0;
+  line-height: 1.6;
   border-bottom: 1px solid var(--el-border-color, #e9dfe6);
 }
 .l2d-setting-row small {
   display: block;
   opacity: 0.65;
-  font-size: 11px;
-  margin-top: 4px;
-  max-width: 320px;
+  font-size: 12px;
+  margin-top: 6px;
+  max-width: 380px;
 }
 .l2d-settings select,
 .l2d-settings button {
+  font: inherit;
   color: inherit;
   background: var(--el-bg-color, white);
   border: 1px solid var(--el-border-color, #dac7d5);
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 9px 14px;
+  min-height: 38px;
   cursor: pointer;
 }
 .l2d-settings button[aria-pressed="true"] {
@@ -147,9 +151,12 @@
 .l2d-mode-guide {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
-  gap: 8px 16px;
-  margin: 14px 0;
-  line-height: 1.6;
+  gap: 16px 24px;
+  margin: 18px 0;
+  padding: 18px;
+  border-radius: 10px;
+  background: var(--el-fill-color-light, #f3f0ec);
+  line-height: 1.8;
 }
 .l2d-mode-guide dt {
   font-weight: 600;
@@ -269,4 +276,61 @@
 .l2d-action-settings .l2d-action-status {
   margin: 12px 0 0;
   overflow-wrap: anywhere;
+}
+
+.l2d-setting-group {
+  margin: 28px 0;
+}
+.l2d-setting-group h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.l2d-setting-group > .l2d-setting-row:last-child {
+  border-bottom: 0;
+}
+.l2d-setting-row > span:first-child {
+  min-width: 0;
+}
+.l2d-settings select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='m1 1 5 5 5-5' fill='none' stroke='%238a7f89' stroke-width='1.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  min-width: 170px;
+  max-width: 100%;
+  min-height: 40px;
+  flex-shrink: 0;
+}
+.l2d-setting-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0 2px 0 12px;
+  flex-shrink: 0;
+  accent-color: var(--el-color-primary, #876b86);
+  cursor: pointer;
+}
+.l2d-size-control {
+  flex-shrink: 0;
+}
+.l2d-size-control input {
+  width: 140px;
+  min-height: 28px;
+}
+@container (max-width: 520px) {
+  .l2d-setting-row:has(select),
+  .l2d-setting-row:has(.l2d-size-control) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .l2d-mode-guide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding: 14px;
+  }
+  .l2d-mode-guide dd:not(:last-child) {
+    margin-bottom: 12px;
+  }
 }
