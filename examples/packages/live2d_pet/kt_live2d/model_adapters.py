@@ -1,5 +1,8 @@
 """Import contracts; runtime behavior lives in ui/models/<id>.js."""
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 DEEPSEEK_EXPRESSIONS = (
     "脸红",
     "流泪",
@@ -49,4 +52,57 @@ def adapt_deepseek(manifest: dict, available: set[str]) -> tuple[dict, tuple[str
     return {**manifest, "FileReferences": refs}, DEEPSEEK_WORK
 
 
-IMPORT_ADAPTERS = {"deepseek": adapt_deepseek}
+@dataclass(frozen=True)
+class ImportAdapter:
+    normalize: Callable[[dict, set[str]], tuple[dict, tuple[str, ...]]]
+    # Only known original exports may omit an explicit adapter declaration.
+    legacy_files: frozenset[str] = frozenset()
+
+
+IMPORT_ADAPTERS = {
+    "deepseek": ImportAdapter(
+        adapt_deepseek,
+        frozenset(
+            [f"Exp3/{name}.exp3.json" for name in DEEPSEEK_EXPRESSIONS]
+            + list(DEEPSEEK_WORK)
+            + ["Animation/IDLE.motion3.json"]
+        ),
+    ),
+}
+
+
+def resolve_adapter(manifest: dict, available: set[str], expected: str | None) -> str:
+    """Resolve a data-only binding, never executable code from the archive."""
+    declared = []
+    if "KohakuTerrarium" in manifest:
+        binding = manifest["KohakuTerrarium"]
+        if not isinstance(binding, dict) or not isinstance(binding.get("adapter"), str):
+            raise ValueError("模型的 KohakuTerrarium.adapter 声明不合法。")
+        declared.append(binding["adapter"])
+    legacy = manifest.get("Demo")
+    if isinstance(legacy, dict) and "profile" in legacy:
+        if not isinstance(legacy["profile"], str):
+            raise ValueError("模型的 Demo.profile 声明不合法。")
+        declared.append(legacy["profile"])
+    if len(set(declared)) > 1:
+        raise ValueError("模型文件中的适配器声明不一致。")
+    if declared:
+        model = declared[0]
+        if model == "dragon":
+            raise ValueError("龙娘资源已内置，无需导入；请在角色中选择龙娘。")
+        if model not in IMPORT_ADAPTERS:
+            raise ValueError("此模型尚未适配，请先添加对应适配器。")
+    else:
+        matches = [
+            name
+            for name, adapter in IMPORT_ADAPTERS.items()
+            if adapter.legacy_files and adapter.legacy_files <= available
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "无法识别模型，请确认资源完整且已在模型文件中声明对应适配器。"
+            )
+        model = matches[0]
+    if expected is not None and expected != model:
+        raise ValueError("资源包与请求导入的模型不匹配。")
+    return model

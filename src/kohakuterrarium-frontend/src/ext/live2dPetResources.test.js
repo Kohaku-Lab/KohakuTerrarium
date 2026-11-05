@@ -17,9 +17,9 @@ it("keeps the current model after rejected imports and switches/reloads only aft
     package: "resource-settings",
     routes: {
       "GET /models": { deepseek: null },
-      "POST /models/deepseek": () => {
+      "POST /models": () => {
         if (!valid) throw { response: { data: { detail: "缺少模型资源" } } }
-        return { version, bytes: 100 }
+        return { model: valid === "unexpected" ? "dragon" : "deepseek", version, bytes: 100 }
       },
     },
   })
@@ -32,8 +32,9 @@ it("keeps the current model after rejected imports and switches/reloads only aft
     expect(wrapper.get('[aria-label="已有模型适配器"]').text()).toContain(
       "大肥鱼 DeepSeek未导入资源",
     )
-    expect(wrapper.get('select[aria-label="导入模型适配器"]').element.value).toBe("deepseek")
-    expect(wrapper.text()).toContain("其他模型需先添加适配器")
+    expect(wrapper.find("select").exists()).toBe(false)
+    expect(wrapper.text()).toContain("适配与形象绑定，导入时自动识别")
+    expect(wrapper.text()).toContain("其他模型需先添加适配")
     const input = wrapper.get('input[type="file"]')
     Object.defineProperty(input.element, "files", {
       configurable: true,
@@ -42,6 +43,11 @@ it("keeps the current model after rejected imports and switches/reloads only aft
     await input.trigger("change")
     await flushPromises()
     expect(wrapper.get('[role="alert"]').text()).toContain("缺少模型")
+    expect(settingsFor(host.kt).state.value.model).toBe("dragon")
+    valid = "unexpected"
+    await input.trigger("change")
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain("导入失败")
     expect(settingsFor(host.kt).state.value.model).toBe("dragon")
     valid = true
     await input.trigger("change")

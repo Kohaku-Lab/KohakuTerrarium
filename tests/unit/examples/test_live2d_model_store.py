@@ -1,6 +1,5 @@
 """Private imports are bounded, complete, versioned and never partial."""
 
-import io
 import json
 import os
 import stat
@@ -22,64 +21,19 @@ from examples.packages.live2d_pet.kt_live2d.model_store import (
 )
 
 
-@pytest.fixture
-def model_zip(tmp_path):
-    """Small exported asset files; real Cubism validation has separate coverage."""
-    image = io.BytesIO()
-    Image.new("RGBA", (16, 32), (180, 100, 30, 120)).save(image, format="PNG")
-    entries = {
-        "fish.model3.json": json.dumps(
-            {
-                "Version": 3,
-                "FileReferences": {
-                    "Moc": "fish.moc3",
-                    "Physics": "fish.physics3.json",
-                    "Textures": ["texture.png"],
-                },
-            }
-        ).encode(),
-        "fish.moc3": b"MOC3" + bytes(100),
-        "fish.physics3.json": b'{"Version":3}',
-        "texture.png": image.getvalue(),
-        "NOTICE.txt": b"Keep the supplied notice.",
-        "unrelated.html": b"<script>bad()</script>",
-    }
-    entries.update(
-        {
-            f"Exp3/{name}.exp3.json": b'{"Parameters":[]}'
-            for name in DEEPSEEK_EXPRESSIONS
-        }
-    )
-    entries.update(
-        {
-            name: b'{"Curves":[],"Meta":{"Duration":1}}'
-            for name in (*DEEPSEEK_WORK, "Animation/IDLE.motion3.json")
-        }
-    )
-
-    def write(changes=None):
-        source = tmp_path / "model.zip"
-        values = {**entries, **(changes or {})}
-        with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name, data in values.items():
-                if data is not None:
-                    archive.writestr(f"export/{name}", data)
-        return source
-
-    return write
-
-
 def test_import_generates_both_qualities_and_keeps_previous_on_failure(
     tmp_path, model_zip
 ):
     root = tmp_path / "private"
     assert current_model(root, "deepseek") is None
-    first = import_model(root, "deepseek", model_zip())
+    first = import_model(root, None, model_zip())
+    assert first["model"] == "deepseek"
     assert current_model(root, "deepseek") == first
     for quality in ("high", "standard"):
         path = model_file(root, "deepseek", first["version"], f"{quality}.model3.json")
         manifest = json.loads(path.read_text())
         assert manifest["Demo"]["profile"] == "deepseek"
+        assert manifest["KohakuTerrarium"] == {"adapter": "deepseek"}
         assert manifest["Demo"]["textureBytes"] == 16 * 32 * (
             4 if quality == "high" else 1
         )
@@ -114,7 +68,28 @@ def test_import_generates_both_qualities_and_keeps_previous_on_failure(
             import_model(root, "deepseek", model_zip(changes))
         assert current_model(root, "deepseek") == first
         assert len(list((root / "deepseek").iterdir())) == 2
-    second = import_model(root, "deepseek", model_zip())
+    for metadata in (
+        {"KohakuTerrarium": {"adapter": "unknown"}},
+        {"KohakuTerrarium": {"adapter": "dragon"}},
+        {"KohakuTerrarium": {"adapter": "deepseek"}, "Demo": {"profile": "dragon"}},
+        {"KohakuTerrarium": []},
+    ):
+        with pytest.raises(ValueError):
+            import_model(root, None, model_zip(**metadata))
+        assert current_model(root, "deepseek") == first
+        assert len(list(root.iterdir())) == 1
+    with pytest.raises(ValueError, match="不匹配"):
+        import_model(
+            root,
+            None,
+            model_zip(
+                {"Exp3/脸红.exp3.json": None}, KohakuTerrarium={"adapter": "deepseek"}
+            ),
+        )
+    assert current_model(root, "deepseek") == first
+    second = import_model(
+        root, None, model_zip(KohakuTerrarium={"adapter": "deepseek"})
+    )
     assert second["version"] != first["version"]
     assert current_model(root, "deepseek") == second
     assert model_file(root, "deepseek", first["version"], "high.model3.json").exists()
@@ -165,7 +140,7 @@ def test_real_imported_fish_manifest_has_all_adapter_assets(tmp_path):
             if path.is_file():
                 archive.write(path, path.relative_to(source))
     root = tmp_path / "private"
-    imported = import_model(root, "deepseek", archive_path)
+    imported = import_model(root, None, archive_path)
     totals = []
     for quality in ("high", "standard"):
         manifest = json.loads(

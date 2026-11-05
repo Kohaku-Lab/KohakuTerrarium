@@ -8,8 +8,6 @@ export const ModelResources = defineComponent({
     const kt = useExtension();
     const store = settingsFor(kt);
     const adapters = Object.values(models);
-    const importable = adapters.filter((adapter) => !adapter.bundled);
-    const selected = ref(importable[0]?.id || "");
     const installed = ref({}),
       loaded = ref(false),
       busy = ref(false);
@@ -26,8 +24,7 @@ export const ModelResources = defineComponent({
     });
     async function importFile(event) {
       const file = event.target.files?.[0];
-      if (!file || busy.value || !selected.value) return;
-      const model = selected.value;
+      if (!file || busy.value) return;
       failed.value = false;
       if (file.size > 128 * 1024 * 1024) {
         message.value = "ZIP 不能超过 128 MiB。";
@@ -38,10 +35,17 @@ export const ModelResources = defineComponent({
       busy.value = true;
       message.value = "正在导入并准备两档画质…";
       try {
-        const { data } = await kt.api.post(`/models/${model}`, file, {
+        const { data } = await kt.api.post("/models", file, {
           headers: { "Content-Type": "application/zip" },
           timeout: 180000,
         });
+        const model = data.model;
+        if (
+          !Object.hasOwn(models, model) ||
+          models[model].bundled ||
+          !/^[a-f0-9]{32}$/.test(data.version)
+        )
+          throw new Error("Invalid imported model");
         installed.value = { ...installed.value, [model]: data };
         loaded.value = true;
         store.update({
@@ -64,7 +68,12 @@ export const ModelResources = defineComponent({
     return () =>
       h("fieldset", { class: "l2d-appearance l2d-model-resources" }, [
         h("legend", "模型资源"),
-        h("strong", "已有适配器"),
+        h("strong", "已适配模型"),
+        h(
+          "p",
+          { class: "l2d-resource-summary" },
+          "适配与形象绑定，导入时自动识别。",
+        ),
         h(
           "ul",
           { class: "l2d-adapters", "aria-label": "已有模型适配器" },
@@ -84,48 +93,33 @@ export const ModelResources = defineComponent({
             ]),
           ),
         ),
-        h("p", "选择匹配的适配器；其他模型需先添加适配器。"),
         h("div", { class: "l2d-resource-controls" }, [
-          h("label", [
-            "适配器 ",
-            h(
-              "select",
-              {
-                "aria-label": "导入模型适配器",
-                value: selected.value,
+          h(
+            "label",
+            { class: "l2d-import-button", "aria-disabled": busy.value },
+            [
+              h("span", busy.value ? "正在导入…" : "导入 L2D 模型"),
+              h("input", {
+                type: "file",
+                accept: ".zip,application/zip",
                 disabled: busy.value,
-                onChange: (event) => {
-                  selected.value = event.target.value;
-                  message.value = "";
-                  failed.value = false;
-                },
-              },
-              importable.map((adapter) =>
-                h("option", { value: adapter.id }, adapter.name),
-              ),
-            ),
-          ]),
-          h("label", { class: "l2d-import-button" }, [
-            h("span", busy.value ? "正在导入…" : "导入 L2D 模型"),
-            h("input", {
-              type: "file",
-              accept: ".zip,application/zip",
-              disabled: busy.value || !selected.value,
-              "aria-label": "导入 L2D 模型",
-              onChange: importFile,
-            }),
-          ]),
+                "aria-label": "导入 L2D 模型",
+                onChange: importFile,
+              }),
+            ],
+          ),
+          h(
+            "small",
+            "选择模型资源 ZIP（≤128 MiB），保留原目录结构。其他模型需先添加适配。",
+          ),
         ]),
-        h(
-          "small",
-          `请选择模型运行资源 ZIP（≤128 MiB）。${models[selected.value]?.importHint || "保留原目录结构。"}`,
-        ),
         message.value
           ? h(
               "p",
               {
                 role: failed.value ? "alert" : "status",
                 "aria-live": "polite",
+                class: "l2d-resource-status",
               },
               message.value,
             )

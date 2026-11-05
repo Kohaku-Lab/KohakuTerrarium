@@ -14,7 +14,7 @@ from kohakuterrarium.api.ext import require_user
 
 @pytest.mark.asyncio
 async def test_model_routes_reject_invalid_uploads_and_isolate_users(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, model_zip
 ):
     monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
     app = FastAPI()
@@ -23,6 +23,22 @@ async def test_model_routes_reject_invalid_uploads_and_isolate_users(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         assert (await client.get("/models")).json() == {"deepseek": None}
+        imported = await client.post("/models", content=model_zip().read_bytes())
+        assert imported.status_code == 200
+        first = imported.json()
+        assert first["model"] == "deepseek"
+        assert (await client.get("/models")).json()["deepseek"] == first
+        manifest = await client.get(
+            f"/models/deepseek/files/{first['version']}/high.model3.json"
+        )
+        assert manifest.json()["KohakuTerrarium"] == {"adapter": "deepseek"}
+        rejected = await client.post(
+            "/models",
+            content=model_zip(KohakuTerrarium={"adapter": "unknown"}).read_bytes(),
+        )
+        assert rejected.status_code == 400
+        assert (await client.get("/models")).json()["deepseek"] == first
+        assert (await client.post("/models", content=b"bad ZIP")).status_code == 400
         assert (
             await client.post("/models/deepseek", content=b"bad ZIP")
         ).status_code == 400
@@ -35,9 +51,7 @@ async def test_model_routes_reject_invalid_uploads_and_isolate_users(
             for _ in range(MAX_UPLOAD // (1024**2) + 1):
                 yield bytes(1024**2)
 
-        assert (
-            await client.post("/models/deepseek", content=oversized())
-        ).status_code == 413
+        assert (await client.post("/models", content=oversized())).status_code == 413
         version = "a" * 32
         folder = resource_root(SimpleNamespace(id=12)) / "deepseek" / version
         folder.mkdir(parents=True)

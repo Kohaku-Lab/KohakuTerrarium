@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 
 from PIL import Image
 
-from .model_adapters import IMPORT_ADAPTERS
+from .model_adapters import IMPORT_ADAPTERS, resolve_adapter
 
 MAX_UPLOAD = 128 * 1024 * 1024
 MAX_UNPACKED = 512 * 1024 * 1024
@@ -54,7 +54,7 @@ def current_model(root: Path, model: str) -> dict | None:
         if not VERSION.fullmatch(version):
             return None
         info = read_json((root / model / version / "inventory.json").read_bytes())
-        return {"version": version, "bytes": info["bytes"]}
+        return {"model": model, "version": version, "bytes": info["bytes"]}
     except (OSError, ValueError, KeyError):
         return None
 
@@ -89,7 +89,7 @@ def _archive_files(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
     return files
 
 
-def _prepare(archive: zipfile.ZipFile, destination: Path, model: str) -> dict:
+def _prepare(archive: zipfile.ZipFile, destination: Path, model: str | None) -> dict:
     files = _archive_files(archive)
     manifests = [path for path in files if path.endswith(".model3.json")]
     # Prepared exports may contain both qualities. Always derive from the best one.
@@ -121,7 +121,9 @@ def _prepare(archive: zipfile.ZipFile, destination: Path, model: str) -> dict:
     refs = manifest.get("FileReferences")
     if manifest.get("Version") != 3 or not isinstance(refs, dict):
         raise ValueError("需要 Cubism 3 格式的模型描述。")
-    manifest, extra = IMPORT_ADAPTERS[model](manifest, available)
+    model = resolve_adapter(manifest, available, model)
+    manifest, extra = IMPORT_ADAPTERS[model].normalize(manifest, available)
+    manifest["KohakuTerrarium"] = {"adapter": model}
     refs = manifest["FileReferences"]
     textures = refs.get("Textures")
     if not isinstance(textures, list) or not 1 <= len(textures) <= 8:
@@ -225,6 +227,7 @@ def _prepare(archive: zipfile.ZipFile, destination: Path, model: str) -> dict:
         )
     paths = [p for p in destination.rglob("*") if p.is_file()]
     inventory = {
+        "model": model,
         "files": [p.relative_to(destination).as_posix() for p in paths],
         "bytes": sum(p.stat().st_size for p in paths),
     }
@@ -232,15 +235,14 @@ def _prepare(archive: zipfile.ZipFile, destination: Path, model: str) -> dict:
     return inventory
 
 
-def import_model(root: Path, model: str, source: Path) -> dict:
-    if model not in IMPORT_ADAPTERS:
+def import_model(root: Path, model: str | None, source: Path) -> dict:
+    if model is not None and model not in IMPORT_ADAPTERS:
         raise ValueError("此模型没有资源导入适配器。")
     if source.stat().st_size > MAX_UPLOAD:
         raise ValueError("ZIP 不能超过 128 MiB。")
-    folder = root / model
-    folder.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
     version = uuid.uuid4().hex
-    with tempfile.TemporaryDirectory(prefix=".import-", dir=folder) as temp:
+    with tempfile.TemporaryDirectory(prefix=".import-", dir=root) as temp:
         staging = Path(temp) / "model"
         staging.mkdir()
         try:
@@ -257,6 +259,9 @@ def import_model(root: Path, model: str, source: Path) -> dict:
             raise ValueError(
                 "无法导入：ZIP 或模型资源损坏，请选择完整的运行资源包。"
             ) from exc
+        model = inventory["model"]
+        folder = root / model
+        folder.mkdir(parents=True, exist_ok=True)
         staging.rename(folder / version)
         pointer = Path(temp) / "current"
         pointer.write_text(version)
@@ -265,4 +270,4 @@ def import_model(root: Path, model: str, source: Path) -> dict:
         except OSError:
             shutil.rmtree(folder / version)
             raise
-    return {"version": version, "bytes": inventory["bytes"]}
+    return {"model": model, "version": version, "bytes": inventory["bytes"]}

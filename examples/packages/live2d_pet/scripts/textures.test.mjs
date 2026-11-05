@@ -129,6 +129,7 @@ test(
           `${quality}/texture_0.webp`,
         ]);
         assert.equal(prepared.Demo.textureBytes, edge * edge * 4);
+        assert.deepEqual(prepared.KohakuTerrarium, { adapter: "fixture" });
         assert.equal(
           prepared.Demo.textures[0].file,
           `${quality}/texture_0.webp`,

@@ -15,10 +15,11 @@ DeepSeek, and a ZIP never installs executable adapter code.
 4. Rebuild the runtime and validate the real model in both quality levels and
    all three interaction modes.
 
-Settings lists all runtime adapters under **已有适配器**, independently of
-whether resources are installed. For adapters with `bundled: false`, users
-select that adapter and choose **导入 L2D 模型**. Keep the JavaScript, action-set
-and Python registry IDs consistent; adding an adapter does not ship its artwork.
+Settings lists all runtime adapters under **已适配模型**, independently of
+whether resources are installed. Users choose **导入 L2D 模型** and select a ZIP;
+its model file determines the adapter. There is no adapter selector. Keep the
+JavaScript, action-set and Python registry IDs consistent; adding an adapter does
+not ship its artwork. The bundled dragon appears in the list and needs no import.
 
 ## Runtime adapter
 
@@ -36,7 +37,7 @@ dragon and DeepSeek adapters as worked examples. Each adapter supplies:
 | `nod` | Head/body keyframes for the shared nod animation |
 | `workMotions`, `workPose`, `exitParameters`, `releaseDuration` | Authored clips and state transitions |
 | `configurePreview`, `framingPan` | Model-specific preview labels and framing |
-| `shortName`, `importHint` | Import UI label and required ZIP layout for external models |
+| `shortName` | Short display name for import feedback |
 
 The player calls `workPose({state, t, action, previous, exitFrom, idleStyle,
 model, sample})`. Return a map of parameter IDs to target values. `sample(name,
@@ -54,11 +55,34 @@ capabilities before allowing agent control.
 ## Import contract
 
 For an external model, add an import normalizer to `kt_live2d/model_adapters.py`
-and register it in `IMPORT_ADAPTERS`. It receives the parsed manifest and names
+and register `ImportAdapter(normalize=your_normalizer)` in `IMPORT_ADAPTERS`.
+It receives the parsed manifest and names
 available beside it, and returns a normalized manifest plus any extra work clips.
 Validate the capabilities needed by the adapter instead of accepting an unrelated
-model with the wrong motions. The settings panel discovers import controls from
+model with the wrong motions. The settings panel lists supported models from
 the runtime registry; the authenticated API uses the Python registry.
+
+Bind the model to its registered adapter in the exported `.model3.json`:
+
+```json
+"KohakuTerrarium": { "adapter": "deepseek" }
+```
+
+This top-level property names installed adapter code; it cannot load code from
+the ZIP. Generated manifests retain this binding. An unknown, malformed or
+conflicting declaration is rejected, and the normalizer still validates the
+declared model's required assets. The bundled dragon declares `dragon`.
+
+Older prepared exports using `Demo.profile` remain supported. For known original
+exports only, an adapter may register a nonempty `legacy_files` signature. Without
+a declaration, exactly one registered signature must match all its required
+filenames. DeepSeek's original `Animation/` and `Exp3/` export is supported this
+way, so existing ZIPs need no edits. Unknown or ambiguous packages are rejected.
+New adapters should use the explicit declaration instead of guessing from names.
+
+`POST /models` identifies and imports the model, returning `model`, `version`
+and `bytes`. The older `POST /models/{model}` route remains compatible but also
+checks that the requested ID matches the model's binding.
 
 The shared importer accepts one exported model per ZIP, optionally wrapped in a
 folder. It checks paths, file count, sizes, required files and JSON structure,

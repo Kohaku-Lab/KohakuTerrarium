@@ -236,19 +236,22 @@ is included, but its model files must be imported separately.
 
 In **Settings → Extensions → Live2D 宠物**:
 
-1. Check **已有适配器** (available adapters). Every registered adapter appears,
+1. Check **已适配模型** (adapted models). Every registered adapter appears,
    including models whose resources have not been imported. The status shows
    **已内置** (bundled), **已导入** (imported), or **未导入资源** (not imported).
-2. Select the adapter matching your model, then choose **导入 L2D 模型**.
-3. Select a ZIP containing the model's runtime export, preserving its folder
-   structure. After a successful import, KT selects the model and offers both
-   texture quality levels. Switch models using the regular character selector.
+2. Choose **导入 L2D 模型** and select a ZIP containing the model's runtime
+   export, preserving its folder structure. KT reads the adapter binding from
+   the model file; no manual adapter selection is needed. Original DeepSeek
+   exports are also recognized automatically.
+3. After a successful import, KT selects the model and offers both texture
+   quality levels. Switch models using the regular character selector.
 
 An **adapter** defines a model's expressions, gestures, mouth and interaction
 mapping. **Resources** are its model, textures and animation files. The adapter
 list describes supported models; it is not a list of files installed on your
 computer. Importing resources does not create an adapter. For another model,
-first [add and register its adapter](ADAPTERS.md), then import its matching ZIP.
+first [add and register its adapter and model-file binding](ADAPTERS.md), then
+import its matching ZIP. Unsupported or mismatched resources are rejected.
 
 For DeepSeek, include `.model3.json`, `.moc3`, textures, physics, `Animation/`
 and `Exp3/`; omit PSD and other authoring files. A prepared export with

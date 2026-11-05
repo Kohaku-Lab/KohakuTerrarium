@@ -27,9 +27,12 @@ async def models(root: Path = Depends(resource_root)):
     return {model: current_model(root, model) for model in IMPORT_ADAPTERS}
 
 
+@router.post("/models")
 @router.post("/models/{model}")
-async def upload(model: str, request: Request, root: Path = Depends(resource_root)):
-    if model not in IMPORT_ADAPTERS:
+async def upload(
+    request: Request, model: str | None = None, root: Path = Depends(resource_root)
+):
+    if model is not None and model not in IMPORT_ADAPTERS:
         raise HTTPException(400, "此角色不支持导入资源。")
     if _import_lock.locked():
         raise HTTPException(409, "已有模型正在导入，请稍后重试。")

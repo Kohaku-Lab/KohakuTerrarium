@@ -208,6 +208,7 @@ export async function prepareTextures(
         textures.push({ file, ...size });
       }
       copy.FileReferences.Textures = textures.map((t) => t.file);
+      copy.KohakuTerrarium = { adapter: profile };
       copy.Demo = {
         profile,
         quality,

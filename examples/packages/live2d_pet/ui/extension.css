@@ -193,6 +193,12 @@
 
 .l2d-model-resources {
   display: block;
+  min-width: 0;
+  padding: 18px;
+  margin: 20px 0;
+}
+.l2d-model-resources .l2d-resource-summary {
+  margin: 6px 0 16px;
 }
 .l2d-model-resources small {
   display: block;
@@ -223,20 +229,44 @@
 .l2d-adapters {
   list-style: none;
   padding: 0;
-  margin: 8px 0 16px;
+  margin: 0 0 20px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light, #f3f0ec);
 }
 .l2d-adapters li {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 5px 0;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px 14px;
+}
+.l2d-adapters li + li {
+  border-top: 1px solid var(--el-border-color, #dac7d5);
+}
+.l2d-adapters small {
+  white-space: nowrap;
 }
 .l2d-resource-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  justify-items: start;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
+}
+.l2d-resource-controls .l2d-import-button {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 9px 16px;
+  background: var(--el-bg-color, white);
+}
+.l2d-resource-controls [aria-disabled="true"] {
+  opacity: 0.6;
+}
+.l2d-model-resources .l2d-resource-status {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
 }
 
 .l2d-action-settings {

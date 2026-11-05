@@ -12422,7 +12422,6 @@ var models = {
 		id: "deepseek",
 		name: "大肥鱼 DeepSeek",
 		shortName: "大肥鱼",
-		importHint: "含模型、纹理、Animation 和 Exp3 文件夹；保留原目录结构。",
 		bundled: false,
 		size: [384, 516],
 		fps: 30,
