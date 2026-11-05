@@ -20,6 +20,7 @@ every creature of a running engine, rendered inline (scrollback), hybrid or full
 | `chrome.py` | `Chrome`: full screen's rail (creatures, channels), the tab strip over the chat and the aux pane; pane sizes saved in `ktui.json`; alt+r / alt+a, alt+1…9, ctrl+pgup / ctrl+pgdn |
 | `channels.py` | `ChannelView`: a channel tab, its history and live traffic in a document; the composer sends to it as `human` while shown |
 | `aux_tabs.py` | `Aux`: the aux pane's tabs (Jobs, Agents, Status, Graph, Pad, Drives, Widgets, Files, Logs) |
+| `logtail.py` | `LogTail`: while ktui runs, `print`, stderr, Python warnings and log records (KT's from INFO, other packages' from WARNING) go to the Logs tab and `/logs` instead of over the UI |
 | `aux_files.py` | `FileTree`: the Files tab, directories loaded when opened, a docked preview |
 | `view_subagents.py` | `SubagentCells`: foreground sub-agents as ◆ cells with their tool calls nested (mixed into the view) |
 | `inline_ui.py` | `ReplyStream`: a streamed reply cut into Markdown and `<ui>` blocks (`kt_ui.markup_lex.split_message`); lines that may open a block are held back until decided |
@@ -55,7 +56,9 @@ The engine launcher is `terrarium/engine/cli/ktui.py`.
   creature, closable channel tabs), and an aux pane on the right (see `aux_tabs.py`). Drag a
   divider to resize, double-click it to collapse, click a strip to open; alt+r / alt+a toggle
   the rail / aux pane, alt+1…9 pick a tab, ctrl+pgup / ctrl+pgdn step through the tabs, F6 moves the keys
-  between the chat, the tabs, the panes and the input. Sizes and the aux tab are remembered.
+  between the chat, the tabs, the panes and the input (a click on the input or esc gives
+  it the keys back). The input, the spinner row and notices sit in the chat column, between
+  the panes. Sizes and the aux tab are remembered.
   A channel tab replays the channel's history and follows it; typing there sends to the
   channel as `human`.
 - **Active row** (↓ from the input): one segment per kind (creatures, sub-agents, jobs,

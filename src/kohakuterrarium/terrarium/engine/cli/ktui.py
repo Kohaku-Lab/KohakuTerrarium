@@ -13,7 +13,7 @@ from kohakuterrarium.builtins.ktui.shell import KtuiShell
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine.engine import Terrarium
-from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
+from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
@@ -51,7 +51,8 @@ async def run_engine_with_ktui(
     for creature in [focus, *(c for c in graph if c is not focus)]:
         shell.attach(creature)
 
-    suppress_logging()
+    # from here nothing prints over the UI: stray output and warnings go to the Logs tab
+    shell.chrome.aux.capture()
     try:
         if not focus.is_running:
             await engine.start(focus)
@@ -71,7 +72,7 @@ async def run_engine_with_ktui(
                 await entry.output.on_resume(history)
         await shell.run(resume_events=pending or None)
     finally:
-        restore_logging()
+        shell.chrome.aux.close()
         if swap_input:
             agent.input = previous_input
         if store is not None:

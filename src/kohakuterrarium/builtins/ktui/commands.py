@@ -17,6 +17,7 @@ LOCAL_COMMANDS = [
     {"name": "config", "desc": "settings: display, models, keys, providers, MCP"},
     {"name": "theme", "desc": "colour theme (remembered)"},
     {"name": "renderer", "desc": "inline · hybrid · fullscreen (remembered)"},
+    {"name": "logs", "desc": "the newest log lines, warnings and stray output"},
     {"name": "exit", "desc": "leave"},
 ]
 
@@ -61,6 +62,9 @@ async def run_command(shell: Any, text: str) -> None:
             return
         case "agents":
             await shell.board.open()
+            return
+        case "logs":
+            await shell.chrome.aux.show_logs()
             return
         case "config" | "settings":
             await shell.settings.open()

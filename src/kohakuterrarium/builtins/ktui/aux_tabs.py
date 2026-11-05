@@ -17,20 +17,18 @@ Tabs, after the web's side panels and kt-tui's tabs:
 The body is rebuilt only when what it shows changed.
 """
 
-import logging
-import threading
 import time
-from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from kohakutui import Event
-from kohakutui.ui import KV, Node, TabStrip, Text, Tree
+from kohakutui.ui import KV, Card, Node, TabStrip, Text, Tree
 
 from kohakuterrarium.builtins.cli_rich.dialogs.drive.format import (
     project_view,
     status_label,
 )
 from kohakuterrarium.builtins.ktui.aux_files import FileTree
+from kohakuterrarium.builtins.ktui.logtail import LogTail
 from kohakuterrarium.builtins.ktui.format import duration, one_line, tokens
 from kohakuterrarium.builtins.ktui.trace import board_detail, board_label
 from kohakuterrarium.terrarium.drive.models import ActorRef
@@ -53,32 +51,8 @@ AUX_TABS = (
     ("files", "Files"),
     ("logs", "Logs"),
 )
-LOG_LINES = 300
 # drives are loaded from the service at most this often (seconds)
 DRIVE_EVERY = 3.0
-
-
-class _LogTail(logging.Handler):
-    """Keeps the newest log lines of the ``kohakuterrarium`` loggers."""
-
-    def __init__(self, on_line: Any):
-        super().__init__(logging.INFO)
-        self.lines: deque[str] = deque(maxlen=LOG_LINES)
-        # records come from any thread; the UI copies the lines under the same lock
-        self.guard = threading.Lock()
-        self.on_line = on_line
-        self.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname).1s %(message)s", "%H:%M:%S")
-        )
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            line = self.format(record)
-            with self.guard:
-                self.lines.append(line)
-            self.on_line()
-        except Exception:  # never raise out of logging
-            pass
 
 
 class Aux:
@@ -94,24 +68,49 @@ class Aux:
         self.list: Node | None = None
         self._shown: str = ""
         self.files = FileTree()
-        self._logs = _LogTail(self._log_line)
+        self._logs = LogTail(self._log_line)
         self._log_dirty = False
         self._drives: list[dict] = []
         self._drives_at = 0.0
         self._drive_task: Any = None
+        self._tabs_shown: list[dict] = []
+
+    def _tab_items(self) -> list[dict]:
+        """The tabs; Logs carries the count of warnings not seen yet."""
+        unseen = self._logs.unseen if self.tab != "logs" else 0
+        return [
+            {
+                "label": label,
+                "value": value,
+                "badge": str(unseen) if value == "logs" and unseen else None,
+            }
+            for value, label in AUX_TABS
+        ]
 
     def build(self, pane: Node) -> None:
-        tabs = [{"label": label, "value": value} for value, label in AUX_TABS]
         active = [v for v, _ in AUX_TABS].index(self.tab)
-        self.strip = pane.add(TabStrip(tabs=tabs, active=active))
+        self._tabs_shown = self._tab_items()
+        self.strip = pane.add(TabStrip(tabs=self._tabs_shown, active=active))
         self.pane = pane
-        logging.getLogger("kohakuterrarium").addHandler(self._logs)
         self.refresh(force=True)
 
+    def capture(self) -> None:
+        """Stray prints, warnings and log records go to the Logs tab (every mode)."""
+        self._logs.capture()
+
     def close(self) -> None:
-        logging.getLogger("kohakuterrarium").removeHandler(self._logs)
+        self._logs.release()
         if self._drive_task is not None:
             self._drive_task.cancel()
+
+    async def show_logs(self) -> None:
+        """``/logs``: the tail docked at the input (inline has no aux pane)."""
+        lines = self._logs.snapshot(40)
+        self._logs.unseen = 0
+        body = "```\n" + ("\n".join(lines) or "no log lines yet") + "\n```"
+        await self.shell.panel(
+            Card(title="Logs", body=body, actions=[{"id": "close", "label": "Close"}])
+        )
 
     # -- events ---------------------------------------------------------
 
@@ -157,6 +156,10 @@ class Aux:
         """Rebuilds the body when its content changed (or ``force``)."""
         if self.strip is None:
             return
+        tabs = self._tab_items()
+        if tabs != self._tabs_shown:
+            self._tabs_shown = tabs
+            self.strip.update(tabs=tabs)
         if self.tab == "logs" and not (force or self._log_dirty):
             return
         self._log_dirty = False
@@ -199,8 +202,8 @@ class Aux:
             case "files":
                 return self._tree(self.files.items(), "empty directory")
             case "logs":
-                with self._logs.guard:
-                    lines = list(self._logs.lines)[-80:]
+                self._logs.unseen = 0
+                lines = self._logs.snapshot(80)
                 body = "\n".join(reversed(lines)) or "no log lines yet"
                 return Text(body, tone="faint"), None
         return Text(""), None

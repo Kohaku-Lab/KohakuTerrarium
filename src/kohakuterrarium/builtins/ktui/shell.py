@@ -231,6 +231,8 @@ class KtuiShell:
         """Takes the terminal, replays ``resume_events`` into the focus view, serves events."""
         self.app.start()
         try:
+            # nothing may print over the UI from here on: it goes to the Logs tab
+            self.chrome.aux.capture()
             self._mount()
             if resume_events:
                 await self.focused.output.on_resume(resume_events)
@@ -248,10 +250,11 @@ class KtuiShell:
             for task in list(self._tasks - self._turns):
                 task.cancel()
             self.interactions.hide()
-            self.chrome.close()
             self.tool_widgets.close_all()
             self.detach_all()
             self.app.stop()
+            # last: until the terminal is given back, stray output still goes to the Logs tab
+            self.chrome.close()
 
     def exit(self) -> None:
         self._done.set()

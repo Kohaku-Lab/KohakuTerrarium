@@ -380,7 +380,36 @@ def get_logger(name: str, level: int | str = logging.INFO) -> KTLogger:
         root_logger.setLevel(logging.INFO)
         root_logger.propagate = False
 
+    _forward_package(name)
     return cast(KTLogger, logger)
+
+
+class _ToKohakuTerrarium(logging.Handler):
+    """Hands a package's records to the ``kohakuterrarium`` logger's handlers (the log file,
+    and stderr or a UI when attached), whichever are current."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # marked, so a root handler that also sees it (it propagates) can tell
+        record.kt_forwarded = True
+        target = logging.getLogger("kohakuterrarium")
+        if record.levelno >= target.getEffectiveLevel():
+            target.handle(record)
+
+
+_forwarded: set[str] = set()
+
+
+def _forward_package(name: str) -> None:
+    """Loggers made through :func:`get_logger` outside ``kohakuterrarium`` (packages such
+    as ``kt_biome``) log where KT does; without this, Python's last-resort handler prints
+    their warnings to stderr, over a terminal UI."""
+    top = name.split(".", 1)[0]
+    if top == "kohakuterrarium" or top in _forwarded:
+        return
+    _forwarded.add(top)
+    # records still propagate (an app's or pytest's root handlers see them too); having a
+    # handler on the way is what keeps the last-resort one quiet
+    logging.getLogger(top).addHandler(_ToKohakuTerrarium())
 
 
 def set_level(level: int | str) -> None:
