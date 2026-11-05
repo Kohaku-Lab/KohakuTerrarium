@@ -14,6 +14,7 @@
     "allow-overlay-start-drag",
     "allow-overlay-set-bounds",
     "allow-overlay-resize",
+    "allow-overlay-placement",
     "allow-overlay-get-bounds",
     "allow-overlay-get-viewport",
     "allow-overlay-set-hit-regions",

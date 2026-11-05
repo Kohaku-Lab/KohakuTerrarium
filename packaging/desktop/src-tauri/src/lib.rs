@@ -17,6 +17,7 @@ mod notify;
 mod opens;
 mod os;
 mod overlay;
+mod overlay_placement;
 mod overlay_viewport;
 mod popout;
 mod runtime;
@@ -108,6 +109,7 @@ pub fn run() {
             overlay::overlay_start_drag,
             overlay::overlay_set_bounds,
             overlay::overlay_resize,
+            overlay_placement::overlay_placement,
             overlay::overlay_get_bounds,
             overlay_viewport::overlay_get_viewport,
             overlay::overlay_set_hit_regions,

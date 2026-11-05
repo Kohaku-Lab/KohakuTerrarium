@@ -296,6 +296,7 @@ describe("OverlayWindowApp", () => {
     expect(invoke).toHaveBeenLastCalledWith("overlay_set_bounds", {
       args: [10, 20, window.innerWidth, window.innerHeight],
     })
+    invoke.mockResolvedValueOnce({ surface: "desktop", protocol: 1, overlayResize: true })
     await control.resize(300, 200)
     expect(invoke).toHaveBeenLastCalledWith("overlay_resize", {
       args: [300, 200],

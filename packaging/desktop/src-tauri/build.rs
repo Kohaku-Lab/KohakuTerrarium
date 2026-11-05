@@ -17,6 +17,7 @@ const COMMANDS: &[&str] = &[
     "overlay_start_drag",
     "overlay_set_bounds",
     "overlay_resize",
+    "overlay_placement",
     "overlay_get_bounds",
     "overlay_get_viewport",
     "overlay_set_hit_regions",

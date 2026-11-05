@@ -48,6 +48,8 @@ pub fn capabilities() -> Value {
         "sourceDevelopment": crate::development::active(),
         "deepLink": true,
         "overlayWindows": true,
+        "overlayResize": true,
+        "overlayPlacementV1": true,
         "closeToTray": true,
         "trayBadge": true,
         "fileDrop": true,

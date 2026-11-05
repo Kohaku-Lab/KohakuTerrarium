@@ -427,8 +427,26 @@ export function setOverlayBounds(x, y, width, height) {
 }
 
 /** Resize in place; WebView screen coordinates are not authoritative. */
-export function resizeOverlayWindow(width, height) {
-  return callBoolean("overlay_resize", width, height)
+export async function resizeOverlayWindow(width, height) {
+  const capabilities = await desktopCapabilities()
+  if (capabilities?.overlayResize) return callBoolean("overlay_resize", width, height)
+  const bounds = await getOverlayBounds()
+  return setOverlayBounds(
+    bounds?.[0] ?? window.screenX,
+    bounds?.[1] ?? window.screenY,
+    width,
+    height,
+  )
+}
+
+/** Native placement snapshot/restore; never compare these coordinates with WebView screen values. */
+export async function overlayPlacement(operation = "read", placement = null) {
+  if (!(await desktopCapabilities())?.overlayPlacementV1) return null
+  try {
+    return await call("overlay_placement", operation, placement)
+  } catch {
+    return null
+  }
 }
 
 export async function getOverlayBounds() {
