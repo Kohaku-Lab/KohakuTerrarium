@@ -216,6 +216,12 @@
     "reason": "Textual dependencies are loaded only for resumed TUI sessions."
   },
   {
+    "file": "src/kohakuterrarium/cli/resume.py",
+    "function": "run_engine_with_ktui",
+    "target": "kohakuterrarium.terrarium.engine.cli.ktui",
+    "reason": "kohakutui is loaded only for resumed ktui sessions."
+  },
+  {
     "file": "src/kohakuterrarium/cli/run.py",
     "function": "_run",
     "target": "kohakuterrarium.terrarium.engine.cli.rich",
@@ -226,6 +232,12 @@
     "function": "_run",
     "target": "kohakuterrarium.terrarium.engine.cli.tui",
     "reason": "Textual dependencies are loaded only after the TUI surface is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.engine.cli.ktui",
+    "reason": "kohakutui is loaded only after the ktui surface is selected."
   },
   {
     "file": "src/kohakuterrarium/studio/hooks.py",

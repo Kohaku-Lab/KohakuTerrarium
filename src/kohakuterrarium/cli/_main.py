@@ -115,11 +115,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--mode",
-        choices=["cli", "plain", "tui", "none"],
+        choices=["cli", "plain", "tui", "ktui", "none"],
         default=None,
         help=(
             "Input/output mode. ``cli`` = rich inline prompt-toolkit "
             "Application, ``tui`` = full-screen Textual app, "
+            "``ktui`` = the kohakutui front end (inline / hybrid / "
+            "full screen, remembered in ktui.json), "
             "``plain`` = dumb stdout/stdin, ``none`` = headless: don't "
             "mount any user-facing IO shell, let the creature drive "
             "itself via its configured input/output modules (Discord "
@@ -204,11 +206,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     resume_parser.add_argument(
         "--mode",
-        choices=["cli", "plain", "tui"],
+        choices=["cli", "plain", "tui", "ktui"],
         default=None,
         help=(
             "Input/output surface. cli/plain=rich inline CLI, "
-            "tui=full-screen Textual app. Omit for the default "
+            "tui=full-screen Textual app, ktui=kohakutui front end. Omit for the default "
             "full-screen TUI."
         ),
     )

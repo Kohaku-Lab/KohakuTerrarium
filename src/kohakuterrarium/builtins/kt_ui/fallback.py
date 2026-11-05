@@ -326,6 +326,13 @@ def _each(node: dict, scope: dict[str, Any], out: list[str], depth: int) -> None
         out.append("  " * depth + f"… {len(items) - MAX_EACH_ITEMS} more")
 
 
+def node_text(node: Any, scope: dict[str, Any]) -> str:
+    """Text form of one spec node in ``scope``, for renderers that draw the rest themselves."""
+    out: list[str] = []
+    _render(node, scope, out, 0)
+    return "\n".join(line.rstrip() for line in out if line.strip())
+
+
 def render_fallback(
     validated: ValidatedSpec, state: dict[str, Any] | None = None
 ) -> str:
@@ -342,4 +349,10 @@ def render_fallback(
     return text
 
 
-__all__ = ["MAX_FALLBACK_CHARS", "format_cell", "render_fallback", "sparkline"]
+__all__ = [
+    "MAX_FALLBACK_CHARS",
+    "format_cell",
+    "node_text",
+    "render_fallback",
+    "sparkline",
+]

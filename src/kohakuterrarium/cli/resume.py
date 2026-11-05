@@ -25,6 +25,7 @@ from kohakuterrarium.utils.logging import (
     enable_stderr_logging,
     set_level,
 )
+from kohakuterrarium.terrarium.engine.cli.ktui_support import ktui_unavailable
 
 
 async def run_engine_with_rich_cli(engine, focus, store):
@@ -37,6 +38,12 @@ async def run_engine_with_rich_cli(engine, focus, store):
 
 async def run_engine_with_tui(engine, focus, store):
     from kohakuterrarium.terrarium.engine.cli.tui import run_engine_with_tui as run
+
+    await run(engine, focus, store)
+
+
+async def run_engine_with_ktui(engine, focus, store):
+    from kohakuterrarium.terrarium.engine.cli.ktui import run_engine_with_ktui as run
 
     await run(engine, focus, store)
 
@@ -63,6 +70,9 @@ def resume_cli(
 
     if log_stderr == "on":
         enable_stderr_logging(log_level)
+    if io_mode == "ktui" and (reason := ktui_unavailable()):
+        print(reason, file=sys.stderr)
+        return 1
 
     path = _resolve_session(query, last=last)
     if path is None:
@@ -139,7 +149,9 @@ async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
         # it, so neither launcher's stdin-swap fires; both drive input
         # via ``inject_input``. ``plain`` has no distinct engine surface
         # — alias it to the rich inline CLI.
-        if io_mode in ("cli", "plain"):
+        if io_mode == "ktui":
+            await run_engine_with_ktui(engine, focus, store)
+        elif io_mode in ("cli", "plain"):
             await run_engine_with_rich_cli(engine, focus, store)
         else:
             await run_engine_with_tui(engine, focus, store)

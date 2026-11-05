@@ -26,6 +26,13 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import kohakutui  # noqa: F401  (ktui's renderer: a source install until 0.2.0 ships)
+except ImportError:
+    # kohakutui is not a dependency yet (see terrarium/engine/cli/ktui_support.py); without
+    # it the ktui suites cannot import, so they are not collected
+    collect_ignore = ["integration/test_ktui.py", "unit/builtins/ktui"]
+
 # Ensure ``src/`` is on the import path even outside the editable
 # install — some CI configurations don't run ``pip install -e .`` first.
 _ROOT = Path(__file__).resolve().parents[1]

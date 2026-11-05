@@ -30,6 +30,7 @@ from kohakuterrarium.utils.logging import (
     set_level,
 )
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
+from kohakuterrarium.terrarium.engine.cli.ktui_support import ktui_unavailable
 
 logger = get_logger(__name__)
 
@@ -96,7 +97,7 @@ def run_agent_cli(
     set_level(log_level)
     # Stderr logging would corrupt prompt-toolkit's redraw region —
     # only enable it when the chosen surface leaves the terminal free.
-    overlay_owns_terminal = io_mode in ("tui", "cli")
+    overlay_owns_terminal = io_mode in ("tui", "cli", "ktui")
     if log_stderr == "on" or (log_stderr == "auto" and not overlay_owns_terminal):
         enable_stderr_logging(log_level)
 
@@ -106,6 +107,9 @@ def run_agent_cli(
             "falling back to the creature's configured IO."
         )
         io_mode = None
+    if io_mode == "ktui" and (reason := ktui_unavailable()):
+        print(reason, file=sys.stderr)
+        return 1
 
     try:
         path = resolve_any_path(agent_path)
@@ -236,7 +240,7 @@ async def _run(
                 # Terminal-owning surfaces must replace CLIInput before startup;
                 # otherwise both consumers race for stdin. Configured I/O modes
                 # require the creature to start immediately.
-                start=(io_mode not in ("cli", "tui")),
+                start=(io_mode not in ("cli", "tui", "ktui")),
             )
             focus_creature_id = creature.creature_id
             graph_id = creature.graph_id
@@ -276,6 +280,17 @@ async def _run(
                     creature_id=focus_creature_id,
                 )
                 await run_engine_with_rich_cli(engine, focus_creature_id, store)
+            elif io_mode == "ktui":
+                from kohakuterrarium.terrarium.engine.cli.ktui import (
+                    run_engine_with_ktui,
+                )
+
+                mark_startup(
+                    "surface_run_begin",
+                    surface="ktui",
+                    creature_id=focus_creature_id,
+                )
+                await run_engine_with_ktui(engine, focus_creature_id, store)
             elif io_mode == "tui":
                 from kohakuterrarium.terrarium.engine.cli.tui import run_engine_with_tui
 
