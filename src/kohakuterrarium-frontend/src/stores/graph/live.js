@@ -5,9 +5,10 @@
  */
 
 import { defineStore } from "pinia"
-import { computed, reactive, ref, shallowRef } from "vue"
+import { computed, reactive, ref, shallowRef, watch } from "vue"
 
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { runtimeGraphAPI } from "@/utils/api"
 import { buildGraphModel, channelNodeId } from "@/utils/graph/data/model"
 import { wsUrl } from "@/utils/wsUrl"
@@ -47,13 +48,31 @@ export const useGraphLiveStore = defineStore("graphLive", () => {
   let inflight = null
   let poll = null
   let lastSnapshotText = ""
+  let runtimeGeneration = 0
+
+  watch(
+    getRuntimeScope,
+    () => {
+      runtimeGeneration++
+      inflight = null
+      snapshot.value = null
+      lastSnapshotText = ""
+      loading.value = false
+      error.value = ""
+      for (const id of Object.keys(lastMessages)) delete lastMessages[id]
+      for (const id of Object.keys(pulses)) delete pulses[id]
+    },
+    { flush: "sync" },
+  )
 
   async function refresh() {
     if (inflight) return inflight
+    const generation = runtimeGeneration
     loading.value = !snapshot.value
-    inflight = runtimeGraphAPI
+    const request = runtimeGraphAPI
       .snapshot()
       .then((data) => {
+        if (generation !== runtimeGeneration) return
         const text = JSON.stringify(data)
         if (text !== lastSnapshotText) {
           lastSnapshotText = text
@@ -62,13 +81,16 @@ export const useGraphLiveStore = defineStore("graphLive", () => {
         error.value = ""
       })
       .catch((err) => {
+        if (generation !== runtimeGeneration) return
         error.value = err?.response?.data?.detail || err?.message || String(err)
       })
       .finally(() => {
+        if (generation !== runtimeGeneration || inflight !== request) return
         loading.value = false
         inflight = null
       })
-    return inflight
+    inflight = request
+    return request
   }
 
   function scheduleRefresh(delay = REFRESH_DEBOUNCE_MS) {

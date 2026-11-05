@@ -44,6 +44,7 @@ from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.core.agent import model as _agent_model
 from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
@@ -108,12 +109,7 @@ output:
 
 @pytest.fixture
 def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
-    """Replace the live LLM provider at BOTH bind points.
-
-    ``bootstrap.llm.create_llm_provider`` is the canonical factory;
-    ``bootstrap.agent_init`` imports it by name, so the second patch is
-    required or the agent-init path reaches a real provider.
-    """
+    """Share deterministic replies across startup and model switching."""
     llm = ScriptedLLM([_REPLY_ONE, _REPLY_TWO, _REPLY_TWO, _REPLY_TWO])
 
     def _fake_create(config, selector=None):
@@ -121,6 +117,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
 
     monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", _fake_create)
     monkeypatch.setattr(_agent_init, "create_llm_provider", _fake_create)
+    monkeypatch.setattr(_agent_model, "create_llm_from_profile_name", lambda name: llm)
     return llm
 
 
@@ -403,6 +400,27 @@ class TestApiTerrariumJourney:
             "bob",
             "carol",
         }
+
+        models_before = {
+            c["creature_id"]: c["llm_name"] for c in graphs[session_id]["creatures"]
+        }
+        resp = client.post(
+            f"/api/sessions/{session_id}/creatures/{carol_id}/model",
+            json={"model": "openai/gpt-5.4-nano"},
+        )
+        assert resp.status_code == 200, resp.text
+        canonical_model = resp.json()["model"]
+        assert canonical_model == "openai/gpt-5.4-nano"
+        assert models_before[carol_id] != canonical_model
+        resp = client.get("/api/runtime/graph")
+        assert resp.status_code == 200
+        switched_graph = next(
+            g for g in resp.json()["graphs"] if g["graph_id"] == session_id
+        )
+        models_after = {
+            c["creature_id"]: c["llm_name"] for c in switched_graph["creatures"]
+        }
+        assert models_after == {**models_before, carol_id: canonical_model}
 
         # A hot-plugged creature joins the graph with NO channel edges.
         # Wire carol to listen on the recipe's ``relay`` channel so it

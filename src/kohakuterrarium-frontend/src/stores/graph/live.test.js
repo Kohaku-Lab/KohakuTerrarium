@@ -5,6 +5,8 @@ vi.mock("@/utils/api", () => ({ runtimeGraphAPI: { snapshot: vi.fn() } }))
 vi.mock("@/utils/wsUrl", () => ({ wsUrl: (path) => `ws://test${path}` }))
 
 import { runtimeGraphAPI } from "@/utils/api"
+import { useAuthStore } from "@/stores/auth"
+import { useHostsStore } from "@/stores/hosts"
 import { channelNodeId } from "@/utils/graph/data/model"
 
 import { useGraphLiveStore } from "./live"
@@ -43,7 +45,23 @@ const snapshot = {
   ],
 }
 
+function deferred() {
+  let resolve, reject
+  const promise = new Promise((yes, no) => {
+    resolve = yes
+    reject = no
+  })
+  return { promise, resolve, reject }
+}
+
+function changeRuntime(change) {
+  if (change === "user") useAuthStore().sameOriginUser = { id: "new-user" }
+  else useHostsStore().activeHostId = "new-host"
+  if (change === "host round trip") useHostsStore().activeHostId = null
+}
+
 beforeEach(() => {
+  localStorage.clear()
   setActivePinia(createPinia())
   FakeSocket.instances = []
   vi.stubGlobal("WebSocket", FakeSocket)
@@ -134,6 +152,69 @@ describe("graph live store", () => {
     runtimeGraphAPI.snapshot.mockResolvedValueOnce({ ...snapshot, version: 2 })
     await live.refresh()
     expect(live.snapshot).not.toBe(first)
+  })
+
+  it.each(["host", "user", "host round trip"])(
+    "does not publish a pending snapshot after a %s change",
+    async (change) => {
+      const live = useGraphLiveStore()
+      const pending = deferred()
+      runtimeGraphAPI.snapshot.mockReturnValueOnce(pending.promise)
+      const request = live.refresh()
+      changeRuntime(change)
+      const current = { ...snapshot, version: 2 }
+      live.handleEvent({ type: "snapshot", snapshot: current })
+      live.error = "current runtime error"
+      pending.resolve({ ...snapshot, version: 3 })
+      await request
+      expect(live.snapshot).toEqual(current)
+      expect(live.error).toBe("current runtime error")
+    },
+  )
+
+  it.each(["host", "user", "host round trip"])(
+    "starts an independent refresh after a %s change and retains its pending state",
+    async (change) => {
+      const live = useGraphLiveStore()
+      const old = deferred()
+      const current = deferred()
+      runtimeGraphAPI.snapshot.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+      const previous = live.refresh()
+      changeRuntime(change)
+      const request = live.refresh()
+      const shared = live.refresh()
+      expect(runtimeGraphAPI.snapshot).toHaveBeenCalledTimes(2)
+      old.reject(new Error("old runtime failed"))
+      await previous
+      expect(live.error).toBe("")
+      expect(live.loading).toBe(true)
+      const coalesced = live.refresh()
+      expect(runtimeGraphAPI.snapshot).toHaveBeenCalledTimes(2)
+      current.resolve({ ...snapshot, version: 2 })
+      await Promise.all([request, shared, coalesced])
+      expect(live.snapshot.version).toBe(2)
+      expect(live.error).toBe("")
+      expect(live.loading).toBe(false)
+    },
+  )
+
+  it("clears old graph metadata on runtime change and permits identical new content to publish", async () => {
+    const live = useGraphLiveStore()
+    await live.refresh()
+    live.handleEvent({
+      type: "channel_message",
+      graph_id: "g1",
+      channel: "tasks",
+      content: "old message",
+    })
+    changeRuntime("host")
+    expect(live.snapshot).toBeNull()
+    expect(live.error).toBe("")
+    expect(live.loading).toBe(false)
+    expect(live.lastMessages).toEqual({})
+    expect(live.pulses).toEqual({})
+    await live.refresh()
+    expect(live.model.creatures.map((c) => c.id)).toEqual(["a"])
   })
 
   it("keeps the previous snapshot and reports the error when a read fails", async () => {

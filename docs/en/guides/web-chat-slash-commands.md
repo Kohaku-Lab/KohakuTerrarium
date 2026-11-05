@@ -12,6 +12,10 @@ Selecting a skill inserts `/<skill>` and sends it as ordinary chat input so the 
 
 The inventory is cached briefly per session tab and refreshed after expiry. Changing sessions or tabs cannot apply a stale response to the new composer.
 
+## Switching models from the graph
+
+In **Graph**, select a creature and click its model in the right-hand **Details** sidebar. The same model picker used by Chat opens without leaving the graph. Choose a model and any variations, then click **Switch**. The change applies only to the selected creature; **Cancel** leaves it unchanged. The graph and sidebar refresh after switching. Sample graphs are read-only.
+
 ## API
 
 - `GET /api/sessions/{session_id}/creatures/{creature_id}/command-inventory`

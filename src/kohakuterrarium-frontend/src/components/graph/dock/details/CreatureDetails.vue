@@ -22,7 +22,7 @@
 
     <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
       <dt class="text-warm-500">{{ t("graph.field.model") }}</dt>
-      <dd class="font-mono text-warm-700 dark:text-warm-300 truncate">{{ creature.model || "—" }}</dd>
+      <dd class="min-w-0 text-warm-700 dark:text-warm-300"><CreatureModelPicker :key="`${runtimeGeneration}:${creature.sessionId}:${creature.id}`" :creature="creature" :view="view" /></dd>
       <dt class="text-warm-500">{{ t("graph.field.config") }}</dt>
       <dd class="font-mono text-warm-700 dark:text-warm-300 truncate">{{ creature.configName || "—" }}</dd>
       <dt class="text-warm-500">{{ t("graph.field.session") }}</dt>
@@ -80,12 +80,14 @@
 </template>
 
 <script setup>
-import { computed } from "vue"
+import { computed, ref, watch } from "vue"
 
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { statusStyle } from "@/components/graph/graphTheme"
 import { creatureDeleteRequest } from "@/components/graph/dock/details/deleteRequests"
+import CreatureModelPicker from "@/components/graph/dock/details/CreatureModelPicker.vue"
 import { formatTokens, percentOf } from "@/components/session-v2/model/status/statusModel"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { channelNodeId } from "@/utils/graph/data/model"
 import { useI18n } from "@/utils/i18n"
 
@@ -97,6 +99,8 @@ const props = defineProps({
 defineEmits(["open-chat", "confirm"])
 
 const { t } = useI18n()
+const runtimeGeneration = ref(0)
+watch(getRuntimeScope, () => runtimeGeneration.value++, { flush: "sync" })
 
 const status = computed(() => statusStyle(props.creature.status))
 const sessionName = computed(() => props.view.model.sessions.find((s) => s.id === props.creature.sessionId)?.name || props.creature.sessionId)
