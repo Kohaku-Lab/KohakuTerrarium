@@ -2982,6 +2982,11 @@ class TestCoreIntegration:
             )
             async with resumed:
                 restored = resumed.list_creatures()[0]
+                # the engine runs it on NoneInput: its input loop leaves the saved history
+                # for the front end that attaches next (kt resume --mode ktui / cli / tui)
+                # instead of replaying it into the configured output first
+                await asyncio.sleep(0.2)
+                assert restored.agent._pending_resume_events, "history kept for the UI"
                 assert (
                     await restored.run("after resume", timeout=5)
                 ).text == "resumed OK"

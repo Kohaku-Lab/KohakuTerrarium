@@ -262,6 +262,17 @@ async def run_engine_with_tui(
     mark_startup("tui_creatures_started", surface="tui", creature_id=focus_creature_id)
 
     await tui.start()
+    # Resumed creatures leave their saved history for the surface (NoneInput does not replay
+    # it): draw it into each creature's tab now that the app is up.
+    for creature in engine.list_creatures():
+        history = getattr(creature.agent, "_pending_resume_events", None)
+        if creature.graph_id != graph_id or not history:
+            continue
+        creature.agent._pending_resume_events = None
+        try:
+            await creature.agent.output_router.default_output.on_resume(history)
+        except Exception as exc:
+            logger.warning("TUI session replay failed", error=str(exc), exc_info=True)
     # Wire ESC → interrupt AFTER tui.start() creates the AgentTUI.
     # The previous wiring ran BEFORE tui.start() when ``tui._app`` was
     # still None, so the ``if tui._app:`` guard made it a permanent

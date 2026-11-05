@@ -36,6 +36,11 @@ class BaseInputModule(ABC):
     """Provide lifecycle and slash-command dispatch for input adapters."""
 
     supports_busy_commands = False
+    # On resume the agent replays the saved history to its output when its input loop starts.
+    # Inputs that stand in for a front end attached later (the engine's NoneInput, ktui's
+    # placeholder) set this False: the history is left in ``_pending_resume_events`` for that
+    # front end, instead of going to whatever output happens to be attached first.
+    replay_resume_history = True
 
     def __init__(self):
         self.command_idle_waiter: Callable[[], Awaitable[None]] | None = None

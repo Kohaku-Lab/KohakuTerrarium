@@ -44,8 +44,10 @@ class AgentDriveMixin:
         non-engine standalone path; both routes share this body.
         """
         try:
-            # Replay session history to output if resuming
-            if self._pending_resume_events:
+            # Replay session history to output if resuming; an input standing in for a later
+            # front end leaves it for that front end (BaseInputModule.replay_resume_history)
+            replays = getattr(self.input, "replay_resume_history", True)
+            if self._pending_resume_events and replays:
                 await self.output_router.emit(
                     OutputEvent(
                         type="resume_batch",

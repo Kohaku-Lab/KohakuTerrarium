@@ -13,6 +13,9 @@ logger = get_logger(__name__)
 class NoneInput(BaseInputModule):
     """Remain blocked until stopped while producing no input events."""
 
+    # the surface that attaches to an engine-run creature replays its history (see base)
+    replay_resume_history = False
+
     def __init__(self, **_options: Any):
         super().__init__()
         self._stop_event: asyncio.Event | None = None
