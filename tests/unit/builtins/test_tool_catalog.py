@@ -113,13 +113,14 @@ def test_class_exports_discovery_and_native_schema_remain_available():
         assert exported in tools.__all__
     with pytest.raises(AttributeError, match="NoSuchTool"):
         getattr(tools, "NoSuchTool")
-    assert (
-        tool_catalog.get_provider_native_option_schema("image_gen")["quality"][
-            "default"
-        ]
-        == "auto"
-    )
     assert tool_catalog.get_provider_native_option_schema("not_a_tool") == {}
+    assert tool_catalog.get_provider_native_option_schema("image_gen") == {}
+    assert tool_catalog.list_provider_native_tools() == []
+
+
+def test_native_tool_schema_and_listing(native_image_gen):
+    schema = tool_catalog.get_provider_native_option_schema("image_gen")
+    assert schema["quality"]["default"] == "auto"
     assert "image_gen" in {
         item["name"] for item in tool_catalog.list_provider_native_tools()
     }
