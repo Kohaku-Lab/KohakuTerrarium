@@ -137,6 +137,11 @@
 .l2d-appearance legend {
   padding: 0 6px;
 }
+.l2d-appearance .l2d-appearance-hint {
+  flex-basis: 100%;
+  margin: 0 0 6px;
+  font-size: 12px;
+}
 .l2d-size-control {
   display: flex;
   align-items: center;

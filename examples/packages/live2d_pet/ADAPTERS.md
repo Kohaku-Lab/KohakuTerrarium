@@ -31,6 +31,7 @@ dragon and DeepSeek adapters as worked examples. Each adapter supplies:
 | `id`, `name`, `size`, `fps`, `bundled` | Stable identity, display and resource policy |
 | `idleChoices`, `interaction` | Idle choices, click cycle and optional sleep |
 | `expressions`, `expressionGroups` | Appearance labels and mutually exclusive groups |
+| `appearanceStates` | Persistent body/age/outfit choices backed by expression resources |
 | `normalizeExpressions`, `toggleExtras` | Model-specific appearance dependencies |
 | `aliases`, `mouth`, `headParts` | Rendered head axes, mouth parameter and touch areas |
 | `boundsParameter` | Optional parameter whose extremes define framing bounds |
@@ -51,6 +52,19 @@ Add the model's semantic action set to `ui/action-sets.json`. That registry is
 shared with Python, so the three interaction modes and agent tool automatically
 use its actions. The player validates the catalog against actual loaded model
 capabilities before allowing agent control.
+
+`appearanceStates` separates persistent identity/appearance from actions and
+temporary expressions. The dragon declares juvenile form (`变`); DeepSeek
+declares its body types, clothing, glasses and accessories. These happen to use
+Cubism expression files, but are not actions. Existing saved `expressions` lists
+remain compatible; the adapter supplies their semantic classification.
+
+State parameters belong to the user's appearance selection. The renderer resets
+their motion baseline, applies the selected state, and preserves its values across
+work, touch, physics and agent action layers. Custom expression/pose actions cannot
+target these state parameters. Automatic sleep retains the state while resting
+hand poses; waking restores poses without restarting retained states. Settings and
+the context menu display states separately, and resetting expressions keeps them.
 
 ## Import contract
 

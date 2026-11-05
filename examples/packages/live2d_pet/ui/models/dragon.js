@@ -16,6 +16,7 @@ export const dragon = {
   releaseDuration: 800,
   idleChoices: { gentle: "轻柔待机", wings: "舒展翅膀", sleep: "闭眼打盹" },
   expressions: DRAGON_EXPRESSIONS,
+  appearanceStates: ["变"],
   expressionGroups: [["抬手", "抬手2"]],
   interaction: {
     key: "kt-live2d-dragon-interaction-v1",

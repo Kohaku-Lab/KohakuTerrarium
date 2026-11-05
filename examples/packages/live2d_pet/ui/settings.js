@@ -116,27 +116,47 @@ export const PetSettings = defineComponent({
                 ? "闭眼打盹会优先于工作动作；选择其他待机可恢复互动。"
                 : "使用模型自带的自然待机动作。",
             ),
-            h("fieldset", { class: "l2d-appearance" }, [
-              h("legend", "默认形态与表情"),
-              ...Object.entries(expressionChoices(model)).map(([name, label]) =>
+            ...[true, false].map((appearance) => {
+              const states = modelAdapter(model).appearanceStates || [];
+              const matches = (name) => states.includes(name) === appearance;
+              return h("fieldset", { class: "l2d-appearance" }, [
+                h("legend", appearance ? "形象状态" : "默认姿势与表情"),
+                appearance
+                  ? h(
+                      "p",
+                      { class: "l2d-appearance-hint" },
+                      "体型与装扮持续保留，不随休息、说话或动作切换。",
+                    )
+                  : null,
+                ...Object.entries(expressionChoices(model))
+                  .filter(([name]) => matches(name))
+                  .map(([name, label]) =>
+                    h(
+                      "button",
+                      {
+                        "aria-pressed": current.expressions.includes(name),
+                        onClick: () =>
+                          changeModel({
+                            expressions: toggleAppearance(prefs, model, name),
+                          }),
+                      },
+                      label,
+                    ),
+                  ),
                 h(
                   "button",
                   {
-                    "aria-pressed": current.expressions.includes(name),
                     onClick: () =>
                       changeModel({
-                        expressions: toggleAppearance(prefs, model, name),
+                        expressions: current.expressions.filter(
+                          (name) => !matches(name),
+                        ),
                       }),
                   },
-                  label,
+                  appearance ? "恢复默认形象" : "恢复默认姿势与表情",
                 ),
-              ),
-              h(
-                "button",
-                { onClick: () => changeModel({ expressions: [] }) },
-                "恢复默认形象",
-              ),
-            ]),
+              ]);
+            }),
             field(
               "画质",
               select(

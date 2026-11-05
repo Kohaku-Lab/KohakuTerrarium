@@ -130,9 +130,15 @@ heartbeat; it does not start another agent or drive per-frame model inference.
 Consecutive questions keep the waiting pose. Fast completion finishes the entry
 and exit transition before playing the completion gesture. Work poses are
 transient and restore chosen appearance. Manual sleep/pause take precedence.
-The dragon can auto-sleep after 60 idle seconds; active work prevents it.
+The dragon can auto-sleep after 60 idle seconds; active work prevents it. Sleep
+preserves the selected adult or juvenile form and restores hand poses on waking.
 DeepSeek has no sleep asset. A completion cue reports KT's settlement event,
 not independent verification that a task succeeded.
+
+Appearance states are separate from actions: the dragon's adult/juvenile form and
+DeepSeek's body type, clothing and accessories persist until the user changes them.
+Settings and the context menu group them under **形象状态**. Sleep, speech, agent
+actions and resetting poses/expressions preserve these choices in all three modes.
 
 ### Three layers
 

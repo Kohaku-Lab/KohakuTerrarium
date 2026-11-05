@@ -264,6 +264,53 @@ describe.skipIf(!ready)("interaction with the original Cubism model", () => {
     expect(readSelection(sessionStorage).motion).toBe("Idle")
   })
 
+  it("keeps the chosen body form through every sleep and wake frame while resting hand poses", () => {
+    model.initializeEffects()
+    const mini = controller(true)
+    mini.expression("变")
+    mini.expression("抬手2")
+    mini.expression("扇面")
+    const core = model.getModel()
+    const ids = core.getModel().parameters.ids
+    const value = (name) => core.getParameterValueByIndex(ids.indexOf(name))
+    const frames = (count, form) => {
+      for (let i = 0; i < count; i++) {
+        model.update(1 / 60, { x: 0, y: 0 }, false, {}, { state: "idle" })
+        if (form != null) expect(value("Param31")).toBeCloseTo(form)
+      }
+    }
+    frames(120)
+    expect(value("Param31")).toBeCloseTo(30)
+    const chosen = { motion: "Idle", expressions: ["变", "抬手2", "扇面"] }
+    for (const wake of [() => mini.cycle(), () => mini.tick({ working: true })]) {
+      now += SLEEP_AFTER_MS
+      mini.tick()
+      expect(mini.autoSleeping).toBe(true)
+      expect([...model.activeExpressions]).toEqual(["变"])
+      frames(180, 30)
+      expect(value("Param78")).toBeCloseTo(0)
+      expect(value("ParamEyeLOpen")).toBeLessThan(0.1)
+      expect(readSelection(sessionStorage)).toEqual(chosen)
+      wake()
+      expect(mini.autoSleeping).toBe(false)
+      expect(model.currentMotion).toBe("Idle")
+      expect([...model.activeExpressions]).toEqual(chosen.expressions)
+      frames(120, 30)
+      expect(value("Param78")).toBeCloseTo(1)
+    }
+    mini.motion("Sleep")
+    frames(180, 30)
+    mini.cycle()
+    frames(120, 30)
+    mini.expression("变")
+    frames(120)
+    now += SLEEP_AFTER_MS
+    mini.tick()
+    frames(180, 0)
+    mini.activity()
+    frames(120, 0)
+  })
+
   it("does not auto-sleep previews, paused frames, hidden documents, or open menus", () => {
     const preview = controller(false)
     preview.tick()

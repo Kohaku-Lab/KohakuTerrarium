@@ -135,6 +135,10 @@ it("provides production settings without a renderer, synchronizes live changes, 
     expect(preview.find("iframe").exists()).toBe(false)
     expect(companion.find("iframe").exists()).toBe(false)
     expect(settings.find('select[aria-label="交互模式"]').element.value).toBe("pet")
+    const appearance = () =>
+      settings.findAll("fieldset").find((f) => f.find("legend").text() === "形象状态")
+    expect(appearance().text()).toContain("幼年态")
+    expect(appearance().text()).not.toContain("持扇掩面")
     await settings.find('select[aria-label="交互模式"]').setValue("agent")
     expect(settings.text()).toContain("创建 / 打开龙娘对话")
     await settings.find('select[aria-label="交互模式"]').setValue("pet")
@@ -157,6 +161,9 @@ it("provides production settings without a renderer, synchronizes live changes, 
     await flushPromises()
     expect(settingsFor(host.kt).state.value.models.dragon.actionSet.label).toBe("My gestures")
     await settings.find('select[aria-label="Live2D 角色"]').setValue("deepseek")
+    expect(appearance().text()).toContain("体型1")
+    expect(appearance().text()).toContain("裙子切换")
+    expect(appearance().text()).not.toContain("脸红")
     await settings.find('input[aria-label="宠物大小"]').setValue("125")
     await settings
       .findAll("button")

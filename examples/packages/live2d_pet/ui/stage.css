@@ -342,6 +342,12 @@ body.mini canvas {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.pet-menu-actions h3 {
+  grid-column: 1 / -1;
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+}
 #pet-menu p {
   font-size: 10px;
   margin: 10px 0 0;

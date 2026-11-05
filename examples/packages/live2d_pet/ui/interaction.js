@@ -69,9 +69,16 @@ export class PetInteraction {
 
   restore() {
     this.model.motion(this.selection.motion);
-    this.model.expression("");
-    for (const name of this.selection.expressions) this.model.expression(name);
+    this.applyExpressions(this.selection.expressions);
     this.changed();
+  }
+
+  applyExpressions(names) {
+    for (const name of [...this.model.activeExpressions])
+      if (!names.includes(name) && this.model.activeExpressions.has(name))
+        this.model.expression(name);
+    for (const name of names)
+      if (!this.model.activeExpressions.has(name)) this.model.expression(name);
   }
 
   save() {
@@ -110,8 +117,15 @@ export class PetInteraction {
   expression(name) {
     this.activity();
     this.model.workActions?.suspend();
-    this.model.expression(name);
+    if (name) this.model.expression(name);
+    else this.applyExpressions(this.appearanceStates());
     this.save();
+  }
+
+  appearanceStates() {
+    return this.selection.expressions.filter((name) =>
+      this.model.adapter.appearanceStates?.includes(name),
+    );
   }
 
   cycle() {
@@ -160,7 +174,7 @@ export class PetInteraction {
     )
       return;
     this.autoSleeping = true;
-    this.model.expression("");
+    this.applyExpressions(this.appearanceStates());
     this.model.motion("Sleep");
     this.changed();
   }

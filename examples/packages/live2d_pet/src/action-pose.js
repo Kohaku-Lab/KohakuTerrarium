@@ -4,8 +4,14 @@ export function validateCapabilities(catalog, owner) {
     const valid =
       p.type === "preset" ||
       (p.type === "pose" &&
-        Object.keys(p.parameters).every((name) => ids.includes(name))) ||
-      (p.type === "expression" && owner.expressionDefinitions.has(p.name)) ||
+        Object.keys(p.parameters).every(
+          (name) =>
+            ids.includes(name) &&
+            !owner.appearanceParameters.has(ids.indexOf(name)),
+        )) ||
+      (p.type === "expression" &&
+        owner.expressionDefinitions.has(p.name) &&
+        !owner.adapter.appearanceStates?.includes(p.name)) ||
       (p.type === "motion" && owner.workActions.clips.has(p.name));
     if (!valid) throw new Error(`模型不支持动作 ${id} 的参数、表情或动画。`);
   }

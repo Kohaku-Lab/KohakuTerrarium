@@ -12242,6 +12242,7 @@ var dragon = {
 		sleep: "闭眼打盹"
 	},
 	expressions: DRAGON_EXPRESSIONS,
+	appearanceStates: ["变"],
 	expressionGroups: [["抬手", "抬手2"]],
 	interaction: {
 		key: "kt-live2d-dragon-interaction-v1",
@@ -12428,6 +12429,19 @@ var models = {
 		releaseDuration: 600,
 		idleChoices: { natural: "自然待机" },
 		expressions: Object.fromEntries(fishExpressions.map((name) => [name, name])),
+		appearanceStates: [
+			"兔牙",
+			"单片眼镜",
+			"黑框眼镜",
+			"钢盆",
+			"体型1",
+			"体型2",
+			"默认体型",
+			"尾巴开关",
+			"裙子切换",
+			"脱鞋",
+			"胸口衣服"
+		],
 		expressionGroups: fishGroups,
 		interaction: fishInteraction,
 		aliases: {},
@@ -12649,7 +12663,7 @@ var WorkActions = class {
 // examples/packages/live2d_pet/src/action-pose.js
 function validateCapabilities(catalog, owner) {
 	const ids = owner.getModel().getModel().parameters.ids;
-	for (const [id, { playback: p }] of Object.entries(catalog.actions)) if (!(p.type === "preset" || p.type === "pose" && Object.keys(p.parameters).every((name) => ids.includes(name)) || p.type === "expression" && owner.expressionDefinitions.has(p.name) || p.type === "motion" && owner.workActions.clips.has(p.name))) throw new Error(`模型不支持动作 ${id} 的参数、表情或动画。`);
+	for (const [id, { playback: p }] of Object.entries(catalog.actions)) if (!(p.type === "preset" || p.type === "pose" && Object.keys(p.parameters).every((name) => ids.includes(name) && !owner.appearanceParameters.has(ids.indexOf(name))) || p.type === "expression" && owner.expressionDefinitions.has(p.name) && !owner.adapter.appearanceStates?.includes(p.name) || p.type === "motion" && owner.workActions.clips.has(p.name))) throw new Error(`模型不支持动作 ${id} 的参数、表情或动画。`);
 }
 var ActionPose = class {
 	constructor(owner) {
@@ -12900,6 +12914,7 @@ var DragonModel = class extends CubismUserModel {
 		this.motions = /* @__PURE__ */ new Map();
 		this.expressions = /* @__PURE__ */ new Map();
 		this.expressionDefinitions = /* @__PURE__ */ new Map();
+		this.appearanceParameters = /* @__PURE__ */ new Set();
 		this.activeExpressions = /* @__PURE__ */ new Set();
 		this.currentMotion = "Idle";
 	}
@@ -12928,6 +12943,13 @@ var DragonModel = class extends CubismUserModel {
 	loadExpression(buffer, size, name) {
 		const definition = JSON.parse(new TextDecoder().decode(buffer));
 		this.expressionDefinitions.set(name, definition);
+		if (this.adapter.appearanceStates?.includes(name)) {
+			const ids = this._model.getModel().parameters.ids;
+			for (const { Id } of definition.Parameters) {
+				const index = ids.indexOf(Id);
+				if (index >= 0) this.appearanceParameters.add(index);
+			}
+		}
 		return super.loadExpression(buffer, size, name);
 	}
 	motion(name) {
@@ -12964,8 +12986,10 @@ var DragonModel = class extends CubismUserModel {
 		const model = this._model;
 		model.loadParameters();
 		this._motionManager.updateMotion(model, dt);
+		for (const index of this.appearanceParameters) model.setParameterValueByIndex(index, model.getParameterDefaultValue(index));
 		model.saveParameters();
 		this._expressionManager.updateMotion(model, dt);
+		const appearance = [...this.appearanceParameters].map((index) => [index, model.getParameterValueByIndex(index)]);
 		if (this.currentMotion !== "Sleep") {
 			this._eyeBlink.updateParameters(model, dt);
 			this._dragManager.set(gaze.x, gaze.y);
@@ -12990,6 +13014,7 @@ var DragonModel = class extends CubismUserModel {
 		if (this.currentMotion !== "Sleep") applyReaction(model, reaction, new Set([...this.activeExpressions].flatMap((name) => this.expressionDefinitions.get(name).Parameters.map((parameter) => parameter.Id))), this.adapter.aliases);
 		this.actionPose.apply(model, dt, action, this.currentMotion === "Sleep");
 		this.applySpeech(this.currentMotion === "Sleep" ? null : mouth);
+		for (const [index, value] of appearance) model.setParameterValueByIndex(index, value);
 		model.update();
 	}
 	applySpeech(value) {
@@ -13014,6 +13039,7 @@ var DragonModel = class extends CubismUserModel {
 		this.motions.clear();
 		this.expressions.clear();
 		this.expressionDefinitions.clear();
+		this.appearanceParameters.clear();
 		this.activeExpressions.clear();
 		super.release();
 	}

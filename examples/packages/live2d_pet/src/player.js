@@ -33,6 +33,7 @@ export class DragonModel extends CubismUserModel {
     this.motions = new Map();
     this.expressions = new Map();
     this.expressionDefinitions = new Map();
+    this.appearanceParameters = new Set();
     this.activeExpressions = new Set();
     this.currentMotion = "Idle";
   }
@@ -84,6 +85,13 @@ export class DragonModel extends CubismUserModel {
   loadExpression(buffer, size, name) {
     const definition = JSON.parse(new TextDecoder().decode(buffer));
     this.expressionDefinitions.set(name, definition);
+    if (this.adapter.appearanceStates?.includes(name)) {
+      const ids = this._model.getModel().parameters.ids;
+      for (const { Id } of definition.Parameters) {
+        const index = ids.indexOf(Id);
+        if (index >= 0) this.appearanceParameters.add(index);
+      }
+    }
     return super.loadExpression(buffer, size, name);
   }
 
@@ -138,8 +146,17 @@ export class DragonModel extends CubismUserModel {
     const model = this._model;
     model.loadParameters();
     this._motionManager.updateMotion(model, dt);
+    for (const index of this.appearanceParameters)
+      model.setParameterValueByIndex(
+        index,
+        model.getParameterDefaultValue(index),
+      );
     model.saveParameters();
     this._expressionManager.updateMotion(model, dt);
+    const appearance = [...this.appearanceParameters].map((index) => [
+      index,
+      model.getParameterValueByIndex(index),
+    ]);
     if (this.currentMotion !== "Sleep") {
       this._eyeBlink.updateParameters(model, dt);
       this._dragManager.set(gaze.x, gaze.y);
@@ -183,6 +200,8 @@ export class DragonModel extends CubismUserModel {
     }
     this.actionPose.apply(model, dt, action, this.currentMotion === "Sleep");
     this.applySpeech(this.currentMotion === "Sleep" ? null : mouth);
+    for (const [index, value] of appearance)
+      model.setParameterValueByIndex(index, value);
     model.update();
   }
 
@@ -214,6 +233,7 @@ export class DragonModel extends CubismUserModel {
     this.motions.clear();
     this.expressions.clear();
     this.expressionDefinitions.clear();
+    this.appearanceParameters.clear();
     this.activeExpressions.clear();
     super.release();
   }

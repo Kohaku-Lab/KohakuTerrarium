@@ -171,6 +171,30 @@ function openMenu(x, y) {
   });
 }
 
+const appearanceStates =
+  modelAdapter(comparison.view.model).appearanceStates || [];
+const expressionButtons = document.querySelector("#controls .expressions");
+const appearanceSection = document.createElement("section");
+const appearanceHeading = document.createElement("h3");
+appearanceHeading.textContent = "形象状态";
+const appearanceButtons = document.createElement("div");
+appearanceButtons.className = "buttons";
+appearanceSection.append(appearanceHeading, appearanceButtons);
+expressionButtons.parentElement.before(appearanceSection);
+expressionButtons.parentElement.querySelector("h3").textContent = "姿势与表情";
+for (const button of expressionButtons.querySelectorAll("[data-expression]")) {
+  if (appearanceStates.includes(button.dataset.expression))
+    appearanceButtons.append(button);
+  else if (!button.dataset.expression) button.textContent = "恢复姿势与表情";
+}
+const menuActions = menu.querySelector(".pet-menu-actions");
+const menuHeading = (label) => {
+  const heading = document.createElement("h3");
+  heading.textContent = label;
+  menuActions.append(heading);
+};
+menuHeading("动作与表情");
+const appearanceClones = [];
 for (const source of document.querySelectorAll(
   "#controls [data-motion], #controls [data-expression], #controls [data-demo-state]",
 )) {
@@ -178,8 +202,12 @@ for (const source of document.querySelectorAll(
   if (source.hasAttribute("data-demo-state"))
     button.classList.add("debug-only");
   button.removeAttribute("title");
-  menu.querySelector(".pet-menu-actions").append(button);
+  if (appearanceStates.includes(source.dataset.expression))
+    appearanceClones.push(button);
+  else menuActions.append(button);
 }
+menuHeading("形象状态");
+menuActions.append(...appearanceClones);
 
 try {
   if (!globalThis.Live2DCubismCore)
