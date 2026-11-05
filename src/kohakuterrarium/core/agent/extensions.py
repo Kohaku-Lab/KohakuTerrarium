@@ -83,16 +83,21 @@ class AgentExtensionsMixin:
             subagent=getattr(config, "name", "?"),
         )
 
-    def refresh_system_prompt(self) -> None:
-        """Recompute the aggregated system prompt from current state.
+    def set_system_prompt_section(self, owner: str, content: str) -> None:
+        """Set an owner-managed prompt suffix retained across runtime refreshes."""
+        sections = getattr(self, "_managed_prompt_sections", {})
+        if content:
+            sections[owner] = content
+        else:
+            sections.pop(owner, None)
+        self._managed_prompt_sections = sections
+        self.refresh_system_prompt()
 
-        Re-runs the same aggregation as construction (tool list,
-        sub-agent section, hints) and swaps it into the live
-        conversation's system message.  Engine-managed prompt blocks
-        (the runtime-graph section) are re-applied by their owners on
-        the next engine event.
-        """
+    def refresh_system_prompt(self) -> None:
+        """Recompute the prompt, retaining current owner-managed sections."""
         system_prompt = self._build_aggregated_prompt()
+        for section in getattr(self, "_managed_prompt_sections", {}).values():
+            system_prompt = system_prompt.rstrip() + "\n\n" + section
         self._controller_config.system_prompt = system_prompt
         self._prompt_refresh_pending = False
         self._prompt_tool_key = self._visible_tool_key()

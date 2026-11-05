@@ -46,6 +46,7 @@ class Binding(BaseModel):
     sessionId: str = ""
     creatureId: str = ""
     enabled: bool = False
+    renew: bool = False
     model: str = Field(default="dragon", max_length=64)
     waiting: bool = False
     mode: Literal["expression", "agent"] = "expression"
@@ -77,6 +78,12 @@ async def bind(req: Binding, service=Depends(current_service)):
         raise HTTPException(400, str(exc)) from exc
     cid = await resolve_creature_id(service, req.creatureId, req.sessionId)
     agent = engine.get_creature(cid).agent
+    current = bindings.get(engine)
+    owns = current and current.agent is agent and current.tool.lease == req.lease
+    if (current and not owns) or (req.renew and not owns):
+        raise HTTPException(
+            409, "Pet is controlled by another page or the lease expired."
+        )
     try:
         attachment = attach(engine, agent, req.lease, req.mode)
     except ValueError as exc:

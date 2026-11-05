@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from fastapi import HTTPException
 
 from examples.packages.live2d_pet.kt_live2d.api import Binding, bind, events
 from examples.packages.live2d_pet.kt_live2d.bindings import (
@@ -51,6 +52,7 @@ async def test_configured_tool_and_skill_survive_binding_and_expiry():
         old_poll = asyncio.create_task(events("first", service))
         await asyncio.sleep(0)
         old_queue = tool.events
+        remove_binding(engine)
         await bind(req.model_copy(update={"lease": "second"}), service)
         assert old_queue is not tool.events
         assert agent.registry.get_tool("l2d") is tool
@@ -74,5 +76,53 @@ async def test_configured_tool_and_skill_survive_binding_and_expiry():
             old_poll.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await old_poll
+        remove_binding(engine)
+        await engine.shutdown()
+
+
+async def test_binding_cycle_preserves_graph_context_and_rejects_foreign_renewals():
+    engine = Terrarium()
+    try:
+        a = await engine.add_creature(
+            AgentConfig(name="a"), llm=ScriptedLLM([]), start=False, is_privileged=True
+        )
+        b = await engine.add_creature(
+            AgentConfig(name="b"), llm=ScriptedLLM([]), start=False
+        )
+        await engine.connect(a, b, channel="tasks")
+        await engine.wire_output(a, b.creature_id)
+        await engine._runtime_prompt.refresh_creature(a)
+        before = a.agent.controller.conversation.get_system_message().content
+        graph = before[before.index("<!-- runtime-graph -->") :]
+        service = LocalTerrariumService(engine)
+        request = Binding(
+            lease="a", enabled=True, sessionId=a.graph_id, creatureId=a.creature_id
+        )
+        await bind(request, service)
+        assert graph in a.agent.controller.conversation.get_system_message().content
+        other = Binding(
+            lease="b", enabled=True, sessionId=b.graph_id, creatureId=b.creature_id
+        )
+        with pytest.raises(HTTPException, match="controlled"):
+            await bind(other, service)
+        assert b.agent.registry.get_tool("l2d") is None
+        tool = a.agent.registry.get_tool("l2d")
+        await bind(request.model_copy(update={"renew": True}), service)
+        assert a.agent.registry.get_tool("l2d") is tool
+        remove_binding(engine)
+        assert graph in a.agent.controller.conversation.get_system_message().content
+        await bind(other, service)
+        with pytest.raises(HTTPException, match="controlled"):
+            await bind(request, service)
+        assert a.agent.registry.get_tool("l2d") is None
+        remove_binding(engine)
+        await bind(request, service)
+        timer = bindings[engine].expiry
+        timer._callback(*timer._args)
+        assert engine not in bindings
+        with pytest.raises(HTTPException, match="expired"):
+            await bind(request.model_copy(update={"renew": True}), service)
+        assert graph in a.agent.controller.conversation.get_system_message().content
+    finally:
         remove_binding(engine)
         await engine.shutdown()

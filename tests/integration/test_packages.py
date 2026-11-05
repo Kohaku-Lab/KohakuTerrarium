@@ -553,6 +553,19 @@ class TestPackagesIntegration:
                 creature.agent.config.agent_path
                 == (installed / "creatures" / "swe").resolve()
             )
+            peer = await engine.add_creature(
+                "@alpha/creatures/swe",
+                name="pet-peer",
+                start=False,
+                llm=ScriptedLLM([]),
+            )
+            await engine.connect(creature, peer, channel="pet-tasks")
+            await engine.wire_output(creature, peer.creature_id)
+            await engine._runtime_prompt.refresh_creature(creature)
+            graph_prompt = (
+                creature.agent.controller.conversation.get_system_message().content
+            )
+            graph_section = graph_prompt[graph_prompt.index("<!-- runtime-graph -->") :]
             service = LocalTerrariumService(engine)
             assert (await companions(service))["companions"] == []
             request = Binding(
@@ -574,6 +587,10 @@ class TestPackagesIntegration:
             skill_args = {"name": "live2d-expression"}
             assert (await skill_tool.execute(skill_args, context)).error
             assert (await bind(request, service))["enabled"]
+            assert (
+                graph_section
+                in creature.agent.controller.conversation.get_system_message().content
+            )
             prompt = creature.agent._controller_config.system_prompt
             assert "`live2d-expression`" in prompt
             assert "Automatic work-state animation already covers" not in prompt
@@ -603,6 +620,10 @@ class TestPackagesIntegration:
             await bind(Binding(lease="another-ui", enabled=False), service)
             assert creature.agent.registry.get_tool("l2d") is tool
             await bind(Binding(lease="test-ui", enabled=False), service)
+            assert (
+                graph_section
+                in creature.agent.controller.conversation.get_system_message().content
+            )
             assert creature.agent.registry.get_tool("l2d") is None
             assert (await skill_tool.execute(skill_args, context)).error
             assert (
