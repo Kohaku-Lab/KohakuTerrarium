@@ -231,3 +231,42 @@
   gap: 12px;
   margin-bottom: 10px;
 }
+
+.l2d-action-settings {
+  display: block;
+  min-width: 0;
+  margin: 20px 0;
+  padding: 16px;
+}
+.l2d-action-summary {
+  display: grid;
+  gap: 6px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.l2d-action-summary p {
+  margin: 0;
+}
+.l2d-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.l2d-action-buttons button,
+.l2d-action-buttons .l2d-import-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 36px;
+  max-width: 100%;
+  padding: 7px 12px;
+  line-height: 20px;
+  background: var(--el-bg-color, white);
+}
+.l2d-action-settings .l2d-action-status {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+}

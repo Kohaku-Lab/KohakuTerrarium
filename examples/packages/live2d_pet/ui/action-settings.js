@@ -49,34 +49,42 @@ export const ActionSettings = defineComponent({
     }
     return () => {
       const { model, models } = store.state.value;
-      return h("fieldset", { class: "l2d-appearance" }, [
+      return h("fieldset", { class: "l2d-appearance l2d-action-settings" }, [
         h("legend", "动作集"),
-        h("p", models[model].actionSet?.label || "内置动作集"),
-        h(
-          "p",
-          "自动状态和主动表达共用动作集。可导出后调整，再导入保存到当前角色。",
-        ),
-        h("label", [
-          "导入动作集",
-          h("input", {
-            type: "file",
-            accept: ".json,application/json",
-            "aria-label": "导入动作集",
-            onChange: importFile,
-          }),
+        h("div", { class: "l2d-action-summary" }, [
+          h("strong", models[model].actionSet?.label || "内置动作集"),
+          h("p", "自动状态和主动表达共用。可导出调整后，再导入当前角色。"),
         ]),
-        h("button", { onClick: exportFile }, "导出动作集"),
-        h(
-          "button",
-          {
-            onClick: () => {
-              store.update({ models: { [model]: { actionSet: null } } });
-              message.value = "已恢复内置动作集。";
+        h("div", { class: "l2d-action-buttons" }, [
+          h("label", { class: "l2d-import-button" }, [
+            h("span", "导入动作集"),
+            h("input", {
+              type: "file",
+              accept: ".json,application/json",
+              "aria-label": "导入动作集",
+              onChange: importFile,
+            }),
+          ]),
+          h("button", { type: "button", onClick: exportFile }, "导出动作集"),
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: () => {
+                store.update({ models: { [model]: { actionSet: null } } });
+                message.value = "已恢复内置动作集。";
+              },
             },
-          },
-          "恢复内置动作集",
-        ),
-        message.value ? h("p", { role: "status" }, message.value) : null,
+            "恢复内置动作集",
+          ),
+        ]),
+        message.value
+          ? h(
+              "p",
+              { class: "l2d-action-status", role: "status" },
+              message.value,
+            )
+          : null,
       ]);
     };
   },
