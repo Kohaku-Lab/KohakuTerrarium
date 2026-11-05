@@ -5,10 +5,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import aiofiles
 from fastapi import HTTPException
 
-from kohakuterrarium.laboratory.file_transfer import stream_write_file
+from kohakuterrarium.laboratory.file_transfer import (
+    FileTransferSourceError,
+    stream_write_path,
+)
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 
 
@@ -29,19 +31,13 @@ async def push_and_resume_member(
         except Exception:  # pragma: no cover - defensive
             pass
 
-    try:
-        async with aiofiles.open(path, "rb") as stream:
-            data = await stream.read()
-    except OSError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
     rel = f"resume/{path.name}"
     worker_path = ""
     resume_token = uuid4().hex
     transferred = False
     resumed_sid = ""
     try:
-        await stream_write_file(host, on_node, "config://", rel, data)
+        await stream_write_path(host, on_node, "config://", rel, path)
         transferred = True
         target_path_resp = await host.request(
             to_node=on_node,
@@ -180,6 +176,8 @@ async def push_and_resume_member(
                 pass
         if isinstance(exc, asyncio.CancelledError):
             raise
+        if isinstance(exc, FileTransferSourceError):
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         if isinstance(exc, HTTPException):
             raise
         if not isinstance(exc, Exception):

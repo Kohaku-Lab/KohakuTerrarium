@@ -11,6 +11,7 @@ failure, push detection down into a unit test FIRST, then fix.
 """
 
 import asyncio
+import hashlib
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -47,6 +48,7 @@ from kohakuterrarium.laboratory.adapters import (
 )
 from kohakuterrarium.laboratory.adapters._worker_session import WorkerSessionAttacher
 from kohakuterrarium.laboratory.identity_cache import IdentityCache
+from kohakuterrarium.laboratory.file_transfer import stream_write_path
 from kohakuterrarium.llm.profiles.api_keys import (
     clear_api_key_resolver,
     register_api_key_resolver,
@@ -298,6 +300,35 @@ class TestLaboratoryMultiNodeService:
         service.add_remote("w2")
 
         try:
+            source = tmp_path / "stream-source.bin"
+            for payload in (b"", bytes(range(256)) * 3200):
+                source.write_bytes(payload)
+                checksum = hashlib.sha256(payload).hexdigest()
+                written = await stream_write_path(
+                    host_engine_lab,
+                    "w1",
+                    "config://",
+                    "resume/stream-probe.bin",
+                    source,
+                )
+                assert written == {"written": len(payload), "sha256": checksum}
+                remote_stat = await host_engine_lab.request(
+                    to_node="w1",
+                    namespace="terrarium.files",
+                    type="stat",
+                    body={"scope": "config://", "path": "resume/stream-probe.bin"},
+                    timeout=5,
+                )
+                assert remote_stat["stat"]["sha256"] == checksum
+                assert remote_stat["stat"]["size"] == len(payload)
+                deleted = await host_engine_lab.request(
+                    to_node="w1",
+                    namespace="terrarium.files",
+                    type="delete",
+                    body={"scope": "config://", "path": "resume/stream-probe.bin"},
+                    timeout=5,
+                )
+                assert deleted == {}
             with monkeypatch.context() as usage_patch:
                 grok_home = install_grok_home(tmp_path, usage_patch)
                 patch_cli_version_probe(usage_patch)

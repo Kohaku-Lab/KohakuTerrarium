@@ -2768,7 +2768,11 @@ async def test_resume_happy_path_on_worker(tmp_path, monkeypatch):
     """
     monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "host-sessions"))
     install_scripted_llm(
-        monkeypatch, script=[ScriptEntry("remembered turn", match="remember this")]
+        monkeypatch,
+        script=[
+            ScriptEntry("remembered turn", match="remember this"),
+            ScriptEntry("resumed turn confirmed", match="continue after resume"),
+        ],
     )
     cfg_dir = _write_creature_config(tmp_path, "phoenix", "You rise again.")
 
@@ -2831,6 +2835,24 @@ async def test_resume_happy_path_on_worker(tmp_path, monkeypatch):
                 lambda: bool(worker.engine.list_creatures()),
                 "resumed creature back on worker engine",
             )
+            resumed_sid = resumed["instance_id"]
+            resumed_cid = resumed["session"]["creatures"][0]["creature_id"]
+            history = await asyncio.wait_for(
+                host.http.get(
+                    f"/api/sessions/{resumed_sid}/creatures/{resumed_cid}/history"
+                ),
+                timeout=OP_TIMEOUT,
+            )
+            assert history.status_code == 200, history.text
+            assert "remember this" in json.dumps(history.json())
+            assert "remembered turn" in json.dumps(history.json())
+            async with host.api_ws(
+                f"/ws/sessions/{resumed_sid}/creatures/{resumed_cid}/chat"
+            ) as ws:
+                reply = await asyncio.wait_for(
+                    _drain_chat_ws(ws, "continue after resume"), timeout=OP_TIMEOUT
+                )
+            assert "resumed turn confirmed" in reply
 
 
 # ===========================================================================

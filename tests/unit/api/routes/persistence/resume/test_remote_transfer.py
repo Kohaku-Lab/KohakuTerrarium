@@ -4,6 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
+from aiofiles.base import AiofilesContextManager
 
 from kohakuterrarium.api.routes.persistence.resume import (
     remote_transfer as transfer_mod,
@@ -69,7 +71,7 @@ async def test_cancel_after_transfer_deletes_staged_store(monkeypatch, tmp_path)
                 raise asyncio.CancelledError
             return {}
 
-    monkeypatch.setattr(transfer_mod, "stream_write_file", write)
+    monkeypatch.setattr(transfer_mod, "stream_write_path", write)
     host = Host()
 
     with pytest.raises(asyncio.CancelledError):
@@ -80,7 +82,7 @@ async def test_cancel_after_transfer_deletes_staged_store(monkeypatch, tmp_path)
             on_node="w1",
         )
 
-    assert transferred
+    assert transferred == [(host, "w1", "config://", "resume/saved.kohakutr", path)]
     assert host.calls == [
         (
             "terrarium.files",
@@ -125,7 +127,7 @@ async def test_cancel_after_resume_rolls_back_adopted_graph(monkeypatch, tmp_pat
                 return {"ok": True}
             return {}
 
-    monkeypatch.setattr(transfer_mod, "stream_write_file", write)
+    monkeypatch.setattr(transfer_mod, "stream_write_path", write)
     host = Host()
 
     with pytest.raises(asyncio.CancelledError):
@@ -141,3 +143,76 @@ async def test_cancel_after_resume_rolls_back_adopted_graph(monkeypatch, tmp_pat
         "rollback_resume",
         {"graph_id": "new-sid"},
     ) in host.calls
+
+
+async def test_missing_source_is_404_without_starting_worker_transfer(tmp_path):
+    class Host:
+        async def request(self, **kwargs):
+            raise AssertionError("missing source must not reach worker")
+
+    with pytest.raises(HTTPException) as error:
+        await transfer_mod.push_and_resume_member(
+            host=Host(),
+            request=_request_without_mirror(),
+            path=tmp_path / "missing.kohakutr",
+            on_node="w1",
+        )
+    assert error.value.status_code == 404
+
+
+async def test_source_close_error_is_404_and_aborts_before_commit(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "close-error.kohakutr"
+    source.write_bytes(b"archive")
+    original_exit = AiofilesContextManager.__aexit__
+
+    async def close_error(manager, *args):
+        await original_exit(manager, *args)
+        raise OSError("source close failed")
+
+    class Host:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, *, type, **kwargs):
+            self.calls.append(type)
+            if type == "write_begin":
+                return {"transfer_id": "close-error"}
+            if type == "write_commit":
+                raise AssertionError("source must close before commit")
+            return {}
+
+    monkeypatch.setattr(AiofilesContextManager, "__aexit__", close_error)
+    host = Host()
+    with pytest.raises(HTTPException) as error:
+        await transfer_mod.push_and_resume_member(
+            host=host,
+            request=_request_without_mirror(),
+            path=source,
+            on_node="w1",
+        )
+    assert error.value.status_code == 404
+    assert "source close failed" in error.value.detail
+    assert host.calls == ["write_begin", "write_chunk", "write_abort"]
+    source.unlink()
+
+
+async def test_transport_os_error_is_502_and_source_handle_is_closed(tmp_path):
+    source = tmp_path / "source.kohakutr"
+    source.write_bytes(b"archive")
+
+    class Host:
+        async def request(self, **kwargs):
+            raise OSError("transport disconnected")
+
+    with pytest.raises(HTTPException) as error:
+        await transfer_mod.push_and_resume_member(
+            host=Host(),
+            request=_request_without_mirror(),
+            path=source,
+            on_node="w1",
+        )
+    assert error.value.status_code == 502
+    assert "transport disconnected" in error.value.detail
+    source.unlink()
