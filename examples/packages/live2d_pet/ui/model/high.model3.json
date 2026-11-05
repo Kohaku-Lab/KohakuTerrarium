@@ -1,0 +1,88 @@
+{
+  "Version": 3,
+  "FileReferences": {
+    "Moc": "kohaku.moc3",
+    "Textures": [
+      "high/texture_0.webp",
+      "high/texture_1.webp",
+      "high/texture_2.webp"
+    ],
+    "Physics": "kohaku.physics3.json",
+    "DisplayInfo": "kohaku.cdi3.json",
+    "Motions": {
+      "Idle": [
+        {
+          "File": "idle.motion3.json",
+          "FadeInTime": 0.5,
+          "FadeOutTime": 0.5
+        }
+      ],
+      "Sleep": [
+        {
+          "File": "sleep2.motion3.json",
+          "FadeInTime": 0.7,
+          "FadeOutTime": 0.5
+        }
+      ]
+    },
+    "Expressions": [
+      {
+        "Name": "抬手",
+        "File": "抬手.exp3.json"
+      },
+      {
+        "Name": "抬手2",
+        "File": "抬手2.exp3.json"
+      },
+      {
+        "Name": "开扇",
+        "File": "开扇.exp3.json"
+      },
+      {
+        "Name": "扇面",
+        "File": "扇面.exp3.json"
+      },
+      {
+        "Name": "变",
+        "File": "变.exp3.json"
+      }
+    ]
+  },
+  "Groups": [
+    {
+      "Target": "Parameter",
+      "Name": "LipSync",
+      "Ids": []
+    },
+    {
+      "Target": "Parameter",
+      "Name": "EyeBlink",
+      "Ids": [
+        "ParamEyeLOpen",
+        "ParamEyeROpen"
+      ]
+    }
+  ],
+  "Demo": {
+    "profile": "dragon",
+    "quality": "high",
+    "textures": [
+      {
+        "file": "high/texture_0.webp",
+        "width": 4096,
+        "height": 4096
+      },
+      {
+        "file": "high/texture_1.webp",
+        "width": 4096,
+        "height": 4096
+      },
+      {
+        "file": "high/texture_2.webp",
+        "width": 4096,
+        "height": 4096
+      }
+    ],
+    "textureBytes": 201326592
+  }
+}

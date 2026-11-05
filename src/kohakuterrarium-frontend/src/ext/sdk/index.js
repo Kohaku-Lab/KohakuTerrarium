@@ -9,11 +9,12 @@
  * from inside contribution components.
  */
 
-import { computed, getCurrentInstance, inject, onUnmounted } from "vue"
+import { computed, getCurrentInstance, inject, onUnmounted, ref } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import {
   beginDrag,
+  setOverlayInteractionRegions,
   hideOverlay,
   isOverlayVisible,
   moveOverlay,
@@ -39,14 +40,22 @@ import { injectScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
 import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { useLocaleStore } from "@/stores/locale"
 import { useTabsStore } from "@/stores/tabs"
 import { useThemeStore } from "@/stores/theme"
-import { closeOverlayWindow, setOverlayBounds, startOverlayDrag } from "@/utils/hostBridge"
+import {
+  closeOverlayWindow,
+  setOverlayBounds,
+  getOverlayBounds,
+  resizeOverlayWindow,
+  startOverlayDrag,
+} from "@/utils/hostBridge"
 
 export { default as ActionButton } from "@/components/common/ActionButton.vue"
 export { default as SettingsGroup } from "@/components/settings/ui/SettingsGroup.vue"
 export { default as SettingsRow } from "@/components/settings/ui/SettingsRow.vue"
+export { default as NewSessionDialog } from "@/components/shell/newSession/NewSessionDialog.vue"
 export { OwnerCallError } from "@/ext/ownerClient"
 export { useWidget } from "@/components/chat/widgets/useWidget"
 export { useWorkContext } from "@/ext/workContext"
@@ -101,18 +110,34 @@ export function useOwner() {
 /** `useOverlay()` inside a native overlay window: the window is the overlay, positions are screen pixels. */
 function useWindowOverlay(key) {
   const size = () => ({ width: window.innerWidth, height: window.innerHeight })
+  const bounds = ref({ left: 0, top: 0, ...size() })
+  let disposed = false
+  const update = (box) => {
+    if (!disposed && box)
+      bounds.value = { left: box[0], top: box[1], width: box[2], height: box[3] }
+  }
+  const changed = (event) => update(event.detail)
+  window.addEventListener("kt-overlay-native-bounds", changed)
+  void getOverlayBounds().then(update)
+  onUnmounted(() => {
+    disposed = true
+    window.removeEventListener("kt-overlay-native-bounds", changed)
+  })
   const hide = async () => {
     hideOverlay(key)
     await closeOverlayWindow(windowLabel(key))
   }
   return {
+    mode: "window",
+    setHitRegions: (regions) =>
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: regions })),
     visible: computed(() => true),
-    bounds: computed(() => ({ left: window.screenX, top: window.screenY, ...size() })),
+    bounds,
     show: () => {},
     hide,
     toggle: hide,
     move: (left, top) => setOverlayBounds(left, top, size().width, size().height),
-    resize: (width, height) => setOverlayBounds(window.screenX, window.screenY, width, height),
+    resize: (width, height) => resizeOverlayWindow(width, height),
     startDrag: (event) => {
       event?.preventDefault?.()
       return startOverlayDrag()
@@ -131,6 +156,8 @@ export function useOverlay() {
   if (!key) throw new Error("useOverlay() must be called inside an overlay contribution")
   if (inject(OVERLAY_MODE_INJECT_KEY, "app") === "window") return useWindowOverlay(key)
   return {
+    mode: "app",
+    setHitRegions: (regions) => setOverlayInteractionRegions(key, regions),
     visible: computed(() => isOverlayVisible(key)),
     bounds: computed(() => overlayBounds(key)),
     show: () => showOverlay(key),
@@ -261,4 +288,28 @@ export async function confirm(message, title = "", options = {}) {
 export function openTab(target) {
   if (typeof target === "string") return openExtensionTab(target)
   return useTabsStore().openTab(target)
+}
+
+/** Open a live chat and focus a creature by ID, source name or the privileged `root` alias. */
+export async function openChat({ sessionId, creatureId } = {}, { signal } = {}) {
+  if (!sessionId || signal?.aborted) return false
+  const scope = getRuntimeScope()
+  const instance = await useInstancesStore().fetchOne(sessionId)
+  if (scope !== getRuntimeScope() || signal?.aborted) return false
+  const creatures = instance?.creatures || []
+  const creature =
+    creatureId &&
+    (creatures.find((item) => item.creature_id === creatureId) ||
+      creatures.find((item) => (creatureId === "root" ? item.is_root : item.name === creatureId)))
+  if (!instance || (creatureId && !creature)) throw new Error("Conversation is no longer available")
+  const initialTab = creature ? (creature.is_root ? "root" : creature.name) : null
+  useTabsStore().openTab({
+    kind: "attach",
+    id: `attach:${sessionId}`,
+    target: sessionId,
+    initialTab,
+    config_name: instance.config_name,
+  })
+  if (initialTab) useChatStore(sessionId).openTab(initialTab)
+  return true
 }

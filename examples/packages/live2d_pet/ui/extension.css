@@ -1,0 +1,233 @@
+.kt-dragon-demo {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.kt-dragon-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  gap: 16px;
+  background: #fcf9f7;
+  color: #73596c;
+  font-size: 12px;
+  border-bottom: 1px solid #e9dfe6;
+}
+.kt-dragon-toolbar button {
+  border: 1px solid #dac7d5;
+  border-radius: 8px;
+  background: white;
+  padding: 6px 12px;
+  color: #73596c;
+  cursor: pointer;
+}
+.kt-dragon-frame {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: transparent;
+}
+.kt-dragon-placeholder {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  padding: 30px;
+  color: #967d90;
+  background: #fcf9f7;
+}
+.kt-dragon-companion {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+.kt-dragon-handle {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 20px;
+  padding: 3px 10px 3px 16px;
+  background: #fcf6f9df;
+  border: 1px solid #e9dbe4;
+  color: #916a85;
+  cursor: grab;
+  font-size: 11px;
+}
+.kt-dragon-handle button {
+  font-size: 18px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.kt-pet-frame-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.l2d-settings-page {
+  height: 100%;
+  overflow: auto;
+  padding: 24px;
+}
+.l2d-settings {
+  color: inherit;
+  font-size: 13px;
+  padding: 12px 0;
+  max-width: 680px;
+}
+.l2d-settings p {
+  opacity: 0.75;
+  line-height: 1.6;
+}
+.l2d-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--el-border-color, #e9dfe6);
+}
+.l2d-setting-row small {
+  display: block;
+  opacity: 0.65;
+  font-size: 11px;
+  margin-top: 4px;
+  max-width: 320px;
+}
+.l2d-settings select,
+.l2d-settings button {
+  color: inherit;
+  background: var(--el-bg-color, white);
+  border: 1px solid var(--el-border-color, #dac7d5);
+  border-radius: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.l2d-settings button[aria-pressed="true"] {
+  background: #876b86;
+  color: white;
+}
+.l2d-settings-actions,
+.l2d-appearance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.l2d-appearance {
+  border: 1px solid var(--el-border-color, #dac7d5);
+  border-radius: 8px;
+  padding: 12px;
+}
+.l2d-appearance legend {
+  padding: 0 6px;
+}
+.l2d-size-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.l2d-size-control input {
+  width: 120px;
+}
+.l2d-size-control output {
+  min-width: 36px;
+}
+.l2d-mode-guide {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  margin: 14px 0;
+  line-height: 1.6;
+}
+.l2d-mode-guide dt {
+  font-weight: 600;
+}
+.l2d-mode-guide dd {
+  margin: 0;
+  opacity: 0.75;
+}
+.l2d-control-hint {
+  font-size: 12px;
+}
+.l2d-settings button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.l2d-control-settings [role="status"] {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 500px) {
+  .l2d-mode-guide {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .l2d-mode-guide dd {
+    margin-bottom: 8px;
+  }
+  .l2d-setting-row {
+    flex-wrap: wrap;
+  }
+  .l2d-settings-page {
+    padding: 12px;
+  }
+}
+
+.l2d-model-resources {
+  display: block;
+}
+.l2d-model-resources small {
+  display: block;
+  opacity: 0.7;
+  line-height: 1.6;
+}
+.l2d-import-button {
+  display: inline-block;
+  position: relative;
+  padding: 8px 12px;
+  border: 1px solid var(--el-border-color, #dac7d5);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.l2d-import-button input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.l2d-import-button:focus-within {
+  outline: 2px solid #876b86;
+  outline-offset: 2px;
+}
+
+.l2d-adapters {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 16px;
+}
+.l2d-adapters li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 0;
+}
+.l2d-resource-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 10px;
+}

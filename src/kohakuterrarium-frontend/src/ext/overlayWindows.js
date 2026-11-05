@@ -14,6 +14,7 @@ import {
   isWindowAllowed,
   overlays,
   reloadPlacements,
+  setWindowAllowed,
 } from "@/ext/overlays"
 import { closeOverlayWindow, openOverlayWindow, overlayWindowsSupported } from "@/utils/hostBridge"
 import { makeWindowLabel } from "@/utils/windowLabel"
@@ -66,6 +67,20 @@ export function syncOverlayWindows() {
     if (!open.has(label)) {
       open.add(label)
       openOverlayWindow(spec(overlay))
+        .then((ok) => {
+          if (!open.has(label)) {
+            if (ok) closeOverlayWindow(label)
+            return
+          }
+          if (!ok) {
+            open.delete(label)
+            setWindowAllowed(overlay.key, false)
+          }
+        })
+        .catch(() => {
+          open.delete(label)
+          setWindowAllowed(overlay.key, false)
+        })
     }
   }
   for (const label of [...open]) {

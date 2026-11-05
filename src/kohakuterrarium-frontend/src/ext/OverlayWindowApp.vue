@@ -16,6 +16,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, provide } from "vue"
 
+import { trackWindowPlacement } from "@/ext/windowPlacement"
 import { hideOverlay, overlays } from "@/ext/overlays"
 import { windowLabel } from "@/ext/overlayWindows"
 import { OVERLAY_INJECT_KEY, OVERLAY_MODE_INJECT_KEY } from "@/ext/sdk/keys"
@@ -49,11 +50,20 @@ function hitRegions() {
   })
 }
 
+let explicitRegions = null
+function updateRegions(event) {
+  const regions = event.detail
+  if (regions === null || (Array.isArray(regions) && regions.length <= 16 && regions.every((r) => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite) && r[2] > 0 && r[3] > 0))) {
+    explicitRegions = regions
+    reportHitRegions()
+  }
+}
+let stopPlacement
 let timer = null
 let lastReport = ""
 function reportHitRegions() {
   if (!through.value) return
-  const regions = hitRegions()
+  const regions = explicitRegions ?? hitRegions()
   const encoded = JSON.stringify(regions)
   if (encoded === lastReport) return
   lastReport = encoded
@@ -62,10 +72,16 @@ function reportHitRegions() {
 
 onMounted(() => {
   document.documentElement.classList.add("kt-overlay-window-page")
+  window.addEventListener("kt-overlay-regions", updateRegions)
+  stopPlacement = trackWindowPlacement(props.overlayKey)
   ackOverlayWindow()
   timer = setInterval(reportHitRegions, HIT_REPORT_MS)
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => {
+  stopPlacement?.()
+  clearInterval(timer)
+  window.removeEventListener("kt-overlay-regions", updateRegions)
+})
 </script>
 
 <style>

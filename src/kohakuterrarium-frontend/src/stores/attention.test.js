@@ -396,7 +396,12 @@ describe("chat attention", () => {
     root = drive("root", root, { type: "processing_end" })
     expect(workForScope("graph-a").status).toBe("ready")
     removeAttentionScope("graph-a")
-    expect(workForScope("graph-a")).toEqual({ status: "idle", busy: false, started: 0 })
+    expect(workForScope("graph-a")).toEqual({
+      status: "idle",
+      busy: false,
+      started: 0,
+      completed: 0,
+    })
     expect(totalAttention()).toEqual({ pending: 0, completed: 1 })
   })
 
@@ -410,29 +415,29 @@ describe("chat attention", () => {
     }
     root = drive("root", root, { type: "processing_start" })
     root = drive("root", root, { type: "processing_error" })
-    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 1 })
+    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 1, completed: 0 })
     publishAttention("g", "root", root)
     expect(workForScope("g").status).toBe("failed")
     root = { ...root, processing: true }
     publishAttention("g", "root", root)
     publishAttention("g", "root", root)
-    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 1 })
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 1, completed: 0 })
     root = drive("root", root, { type: "processing_end" })
-    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 1 })
+    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 1, completed: 1 })
 
     root = drive("root", root, { type: "processing_start" })
     worker = drive("worker", worker, { type: "processing_start" })
     worker = drive("worker", worker, { type: "processing_error" })
     publishAttention("g", "root", root)
-    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 2 })
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 2, completed: 1 })
     root = drive("root", root, { type: "processing_end" })
-    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 2 })
+    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 2, completed: 1 })
 
     worker = { ...worker, background: true }
     publishAttention("g", "worker", worker)
-    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 2 })
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 2, completed: 1 })
     publishAttention("g", "worker", { ...worker, background: false }, { type: "tool_done" })
-    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 2 })
+    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 2, completed: 2 })
   })
 
   it("retains a failed period through its background yield and settlement", () => {
@@ -445,14 +450,37 @@ describe("chat attention", () => {
     drive({ type: "processing_error" })
     drive({ type: "processing_end", awaiting_background: true })
     drive({ type: "idle" })
-    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 1 })
+    expect(workForScope("g")).toEqual({ status: "running", busy: true, started: 1, completed: 0 })
     state = { ...state, background: false }
     drive({ type: "tool_done" })
-    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 1 })
+    expect(workForScope("g")).toEqual({ status: "failed", busy: false, started: 1, completed: 0 })
     expect(state.completed).toBe(0)
     drive({ type: "processing_start" })
     drive({ type: "processing_end" })
-    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 2 })
+    expect(workForScope("g")).toEqual({ status: "ready", busy: false, started: 2, completed: 1 })
+  })
+
+  it("counts only fresh settled work without pending questions, never acknowledgements or history", () => {
+    let state = createAttentionState()
+    const drive = (event) => {
+      state = reduceAttention(state, event)
+      publishAttention("g", "root", state, event)
+    }
+    drive({ type: "processing_start" })
+    drive({ type: "confirm", event_id: "one", interactive: true })
+    drive({ type: "processing_end" })
+    expect(workForScope("g")).toMatchObject({ status: "waiting", completed: 0 })
+    drive({ type: "ui_reply_ack", event_id: "one", status: "rejected" })
+    expect(workForScope("g").status).toBe("waiting")
+    drive({ type: "ui_reply_ack", event_id: "one", status: "accepted" })
+    expect(workForScope("g")).toMatchObject({ status: "ready", completed: 0 })
+    drive({ type: "processing_start" })
+    drive({ type: "processing_end" })
+    expect(workForScope("g").completed).toBe(1)
+    drive({ type: "processing_end" })
+    publishAttention("g", "root", state)
+    drive({ type: "processing_end", history: true })
+    expect(workForScope("g").completed).toBe(1)
   })
 
   it("counts a failed turn once, stops it running, and clears the count when read", () => {

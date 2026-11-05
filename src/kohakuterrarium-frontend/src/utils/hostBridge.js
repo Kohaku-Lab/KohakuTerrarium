@@ -426,6 +426,22 @@ export function setOverlayBounds(x, y, width, height) {
   return callBoolean("overlay_set_bounds", x, y, width, height)
 }
 
+/** Resize in place; WebView screen coordinates are not authoritative. */
+export function resizeOverlayWindow(width, height) {
+  return callBoolean("overlay_resize", width, height)
+}
+
+export async function getOverlayBounds() {
+  try {
+    const bounds = await call("overlay_get_bounds")
+    return Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)
+      ? bounds
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** Report the `[x, y, width, height]` rectangles of the calling overlay that catch the mouse. */
 export function setOverlayHitRegions(regions) {
   return callBoolean("overlay_set_hit_regions", regions)

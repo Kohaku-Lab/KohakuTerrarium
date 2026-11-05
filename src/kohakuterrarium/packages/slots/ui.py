@@ -498,7 +498,15 @@ def _parse_keywords(raw: dict, kind: str, where: str) -> str:
 
 def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
     """Placement options of an ``overlay`` contribution; empty for other kinds."""
-    keys = ("anchor", "surface", "width", "height", *OVERLAY_FLAGS)
+    keys = (
+        "anchor",
+        "surface",
+        "width",
+        "height",
+        "startupGroup",
+        "startupFallback",
+        *OVERLAY_FLAGS,
+    )
     if kind != "overlay":
         stray = [k for k in keys if k in raw]
         if stray:
@@ -511,6 +519,16 @@ def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
     if surface not in OVERLAY_SURFACES:
         raise _SlotError(f"{where}.surface must be one of {list(OVERLAY_SURFACES)}")
     out: dict = {"anchor": anchor, "surface": surface}
+    group = raw.get("startupGroup", "")
+    fallback = raw.get("startupFallback", False)
+    if not isinstance(group, str) or (group and not _ID_RE.fullmatch(group)):
+        raise _SlotError(f"{where}.startupGroup must be a local id")
+    if not isinstance(fallback, bool) or (fallback and not group):
+        raise _SlotError(
+            f"{where}.startupFallback requires a startupGroup and a boolean"
+        )
+    if group:
+        out.update(startupGroup=group, startupFallback=fallback)
     for name in ("width", "height"):
         value = raw.get(name, 320 if name == "width" else 240)
         if (

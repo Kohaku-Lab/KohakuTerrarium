@@ -21,9 +21,9 @@ import {
   registerPackageContributions,
   unregisterAllContributions,
 } from "@/ext/registry"
-import { useOverlay } from "@/ext/sdk"
+import { useOverlay, useExtension } from "@/ext/sdk"
 import { OVERLAY_INJECT_KEY, OVERLAY_MODE_INJECT_KEY } from "@/ext/sdk/keys"
-import { extState } from "@/ext/state"
+import { extState, runtime } from "@/ext/state"
 
 const Pet = { template: '<div class="pet kt-overlay-hit">pet</div>' }
 const KEY = "ext:pets/cat"
@@ -102,6 +102,46 @@ describe("native overlay windows", () => {
     const layer = mount(OverlayLayer, { global: { stubs: { ExtensionContribution: true } } })
     expect(layer.findAll('[data-test="overlay-frame"]')).toHaveLength(1)
     layer.unmount()
+  })
+
+  it("keeps a package controller mounted when its renderer is native or hidden", async () => {
+    declare()
+    extState.packages[0].handle = { package: "pets" }
+    const Controller = defineComponent({
+      setup() {
+        const kt = useExtension()
+        return () => h("span", { "data-controller": "" }, kt.package)
+      },
+    })
+    provideContributionComponent("pets", "overlay", "cat", Pet, { controller: Controller })
+    tauri()
+    setWindowAllowed(KEY, true)
+    const layer = mount(OverlayLayer)
+    try {
+      expect(layer.find("[data-controller]").text()).toBe("pets")
+      expect(layer.findAll('[data-test="overlay-frame"]')).toHaveLength(0)
+      hideOverlay(KEY)
+      await nextTick()
+      expect(layer.find("[data-controller]").exists()).toBe(true)
+    } finally {
+      layer.unmount()
+    }
+  })
+
+  it("loads a visible native overlay's package in the main window for its controller", async () => {
+    declare()
+    tauri()
+    setWindowAllowed(KEY, true)
+    const original = runtime.ensureLoaded
+    runtime.ensureLoaded = vi.fn(async () => {})
+    const layer = mount(OverlayLayer)
+    try {
+      await nextTick()
+      expect(runtime.ensureLoaded).toHaveBeenCalledWith("pets")
+    } finally {
+      layer.unmount()
+      runtime.ensureLoaded = original
+    }
   })
 
   it("opens the window once, closes it when hidden, and leaves the in-app layer empty", async () => {
@@ -207,9 +247,14 @@ describe("OverlayWindowApp", () => {
       vi.advanceTimersByTime(250)
       const call = invoke.mock.calls.find(([name]) => name === "overlay_set_hit_regions")
       expect(call[1].args[0]).toHaveLength(1)
-      const before = invoke.mock.calls.length
+      const hitCalls = () =>
+        invoke.mock.calls.filter(([name]) => name === "overlay_set_hit_regions")
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: [[50, 40, 100, 200]] }))
+      expect(hitCalls().at(-1)[1].args[0]).toEqual([[50, 40, 100, 200]])
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: [null] }))
+      const before = hitCalls().length
       vi.advanceTimersByTime(1000)
-      expect(invoke.mock.calls.length).toBe(before)
+      expect(hitCalls().length).toBe(before)
       page.unmount()
     } finally {
       vi.useRealTimers()
@@ -246,8 +291,8 @@ describe("OverlayWindowApp", () => {
       args: [10, 20, window.innerWidth, window.innerHeight],
     })
     await control.resize(300, 200)
-    expect(invoke).toHaveBeenLastCalledWith("overlay_set_bounds", {
-      args: [window.screenX, window.screenY, 300, 200],
+    expect(invoke).toHaveBeenLastCalledWith("overlay_resize", {
+      args: [300, 200],
     })
     let prevented = false
     await control.startDrag({ preventDefault: () => (prevented = true) })

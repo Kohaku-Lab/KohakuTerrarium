@@ -49,6 +49,13 @@ export const SettingsRow = {
   template: `<div><div>{{ title }}</div><p v-if="hint">{{ hint }}</p><slot name="detail" /><p v-if="status" data-row-status>{{ status }}</p><slot /></div>`,
 }
 
+export const NewSessionDialog = {
+  name: "NewSessionDialog",
+  props: ["initialConfig", "initialName", "initialAttachMode"],
+  emits: ["close", "started"],
+  template: `<div role="dialog"><button @click="$emit('close')">Cancel</button></div>`,
+}
+
 let _current = null
 
 export class OwnerCallError extends Error {
@@ -155,11 +162,18 @@ export function createMockHost(options = {}) {
     registerFileView: provide("file-view"),
     registerGraphBadge: provide("graph-badge"),
     registerGraphPanel: provide("graph-panel"),
+    scopeKey: crypto.randomUUID(),
     storage: {
       get: (key, fallback = null) => (storageData.has(key) ? storageData.get(key) : fallback),
       set: (key, value) => storageData.set(key, value),
       remove: (key) => storageData.delete(key),
     },
+    preferences: {
+      get: async (key, fallback = null) => storageData.get(`preference:${key}`) ?? fallback,
+      set: (key, value) => storageData.set(`preference:${key}`, value),
+      remove: (key) => storageData.delete(`preference:${key}`),
+    },
+    isOverlayVisible: (id) => overlayVisible[id] ?? false,
     showOverlay: (id) => (overlayVisible[id] = true),
     hideOverlay: (id) => (overlayVisible[id] = false),
     toggleOverlay: (id) => (overlayVisible[id] = !(overlayVisible[id] ?? true)),
@@ -187,6 +201,7 @@ export function createMockHost(options = {}) {
       return text == null ? key : interpolate(text, params)
     },
     assetUrl: (path) => `/mock-assets/${pkg}/${String(path).replace(/^\/+/, "")}`,
+    freshAssetUrl: async (path) => `/mock-assets/${pkg}/${String(path).replace(/^\/+/, "")}`,
     openTab: (id) => openedTabs.push(`${pkg}/${id}`),
   }
 
@@ -224,6 +239,7 @@ export function createMockHost(options = {}) {
     requests,
     notifications,
     openedTabs,
+    openedChats: [],
     openedExternal: [],
     owner,
     ownerCalls,
@@ -310,6 +326,8 @@ export function useOverlay() {
   const id = host.overlayId
   const bounds = ref({ left: 0, top: 0, width: 320, height: 240 })
   return {
+    mode: "app",
+    setHitRegions: () => {},
     visible: computed(() => host.overlayVisible[id] ?? true),
     bounds: computed(() => bounds.value),
     show: () => host.kt.showOverlay(id),
@@ -383,4 +401,10 @@ export async function confirm(message) {
 
 export function openTab(target) {
   current().openedTabs.push(target)
+}
+
+export async function openChat(target = {}) {
+  if (!target.sessionId) return false
+  current().openedChats.push(target)
+  return true
 }

@@ -7,6 +7,7 @@
  */
 
 import { markRaw, reactive } from "vue"
+import { setHybridPref } from "@/utils/uiPrefs"
 
 export const OVERLAY_MARGIN = 16
 const MIN_SIZE = 48
@@ -14,6 +15,19 @@ const STORAGE_PREFIX = "kt.overlays."
 
 export const overlays = reactive(new Map())
 export const placements = reactive({})
+export const interactionRegions = reactive(new Map())
+
+export function setOverlayInteractionRegions(key, regions) {
+  if (regions === null) interactionRegions.delete(key)
+  else if (
+    Array.isArray(regions) &&
+    regions.length <= 16 &&
+    regions.every(
+      (r) => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite) && r[2] > 0 && r[3] > 0,
+    )
+  )
+    interactionRegions.set(key, regions)
+}
 
 /** Size of the window the overlays live in; the layer keeps it current. */
 export const viewport = reactive({
@@ -24,6 +38,11 @@ export const viewport = reactive({
 export function syncViewport() {
   viewport.width = window.innerWidth
   viewport.height = window.innerHeight
+  for (const key of interactionRegions.keys()) {
+    const saved = placement(key)
+    if (Number.isFinite(saved.left) && Number.isFinite(saved.top))
+      moveOverlay(key, saved.left, saved.top)
+  }
 }
 
 let _storageKey = ""
@@ -85,10 +104,14 @@ export function registerOverlay({ key, pkg, id, label, component, options }) {
 }
 
 export function unregisterOverlays(keys) {
-  for (const key of keys) overlays.delete(key)
+  for (const key of keys) {
+    overlays.delete(key)
+    interactionRegions.delete(key)
+  }
 }
 
 export function clearOverlays() {
+  interactionRegions.clear()
   overlays.clear()
 }
 
@@ -106,6 +129,31 @@ export function isOverlayVisible(key) {
 function patch(key, fields) {
   placements[key] = { ...placement(key), ...fields }
   writeStorage()
+  if (
+    typeof fields.visible === "boolean" &&
+    overlays.get(key)?.options.startupGroup &&
+    _storageKey
+  ) {
+    const visibility = Object.fromEntries(
+      Object.entries(placements)
+        .filter(([, p]) => typeof p.visible === "boolean")
+        .map(([id, p]) => [id, p.visible]),
+    )
+    try {
+      setHybridPref(
+        `kt.overlayVisibility.${_storageKey.slice(STORAGE_PREFIX.length)}`,
+        visibility,
+        { json: true },
+      )
+    } catch {
+      /* local placement remains available */
+    }
+  }
+}
+
+export function restoreVisibility(key, visible) {
+  placements[key] = { ...placement(key), visible }
+  writeStorage()
 }
 
 export function showOverlay(key) {
@@ -121,14 +169,19 @@ export function toggleOverlay(key) {
 }
 
 /** Keep a box inside the viewport. */
-function clampBox(box, viewport) {
+export function clampBox(box, viewport, regions) {
   const width = Math.min(Math.max(box.width, MIN_SIZE), viewport.width)
   const height = Math.min(Math.max(box.height, MIN_SIZE), viewport.height)
+  const valid = regions?.length ? regions : [[0, 0, width, height]]
+  const left = Math.min(...valid.map((r) => r[0]))
+  const top = Math.min(...valid.map((r) => r[1]))
+  const right = Math.max(...valid.map((r) => r[0] + r[2]))
+  const bottom = Math.max(...valid.map((r) => r[1] + r[3]))
   return {
     width,
     height,
-    left: Math.min(Math.max(box.left, 0), Math.max(viewport.width - width, 0)),
-    top: Math.min(Math.max(box.top, 0), Math.max(viewport.height - height, 0)),
+    left: Math.min(Math.max(box.left, -left), Math.max(viewport.width - right, -left)) + 0,
+    top: Math.min(Math.max(box.top, -top), Math.max(viewport.height - bottom, -top)) + 0,
   }
 }
 
@@ -162,18 +215,30 @@ export function resolveBounds(options, saved, viewport) {
 
 export function overlayBounds(key, vp = viewport) {
   const overlay = overlays.get(key)
-  return resolveBounds(overlay?.options || {}, placement(key), vp)
+  const saved = placement(key)
+  const resolved = resolveBounds(overlay?.options || {}, saved, vp)
+  return interactionRegions.has(key) && Number.isFinite(saved.left) && Number.isFinite(saved.top)
+    ? { ...resolved, left: saved.left, top: saved.top }
+    : resolved
 }
 
 export function moveOverlay(key, left, top, vp = viewport) {
   const box = overlayBounds(key, vp)
-  const next = clampBox({ ...box, left, top }, vp)
+  const next = clampBox({ ...box, left, top }, vp, interactionRegions.get(key))
   patch(key, { left: next.left, top: next.top })
 }
 
 export function resizeOverlay(key, width, height, vp = viewport) {
   const box = overlayBounds(key, vp)
-  const next = clampBox({ ...box, width, height }, vp)
+  const regions = interactionRegions
+    .get(key)
+    ?.map(([x, y, w, h]) => [
+      (x * width) / box.width,
+      (y * height) / box.height,
+      (w * width) / box.width,
+      (h * height) / box.height,
+    ])
+  const next = clampBox({ ...box, width, height }, vp, regions)
   patch(key, { width: next.width, height: next.height, left: next.left, top: next.top })
 }
 
@@ -202,6 +267,13 @@ export function beginDrag(key, event, mode = "move") {
 
 /** Forget the saved position and size of one overlay. */
 export function resetOverlay(key) {
+  interactionRegions.delete(key)
+  try {
+    localStorage.removeItem(`kt.overlay.window.${key}`)
+    localStorage.setItem(`kt.overlay.reset.${key}`, String(Date.now()))
+  } catch {
+    /* Optional placement persistence. */
+  }
   const { visible, windowAllowed } = placement(key)
   const kept = {}
   if (typeof visible === "boolean") kept.visible = visible

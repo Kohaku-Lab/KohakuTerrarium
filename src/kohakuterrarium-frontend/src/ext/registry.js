@@ -7,8 +7,9 @@
  * host renders the real component once the entry has called ``kt.register*``.
  */
 
-import { defineComponent, h, markRaw } from "vue"
+import { defineComponent, h, markRaw, provide } from "vue"
 
+import { EXTENSION_INJECT_KEY } from "@/ext/sdk/keys"
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { clearActions, registerAction } from "@/ext/actions"
 import { clearDecorators, registerDecorator } from "@/ext/decorators"
@@ -125,12 +126,19 @@ const OVERLAY_OPTION_NAMES = [
   "resizable",
   "clickThrough",
   "defaultVisible",
+  "startupGroup",
+  "startupFallback",
 ]
 
 function overlayOptions(source) {
   const out = {}
   for (const name of OVERLAY_OPTION_NAMES)
     if (source?.[name] !== undefined) out[name] = source[name]
+  if (
+    typeof source?.settingsSection === "string" &&
+    /^[a-z0-9][a-z0-9._-]{0,63}$/.test(source.settingsSection)
+  )
+    out.settingsSection = source.settingsSection
   return out
 }
 
@@ -419,7 +427,18 @@ export function provideContributionComponent(pkg, kind, id, component, options =
   if (kind === "message-renderer") updateMessageRendererEntry(contributionKey(pkg, id), options)
   if (kind === "overlay") {
     const entry = overlays.get(contributionKey(pkg, id))
-    if (entry) entry.options = { ...entry.options, ...overlayOptions(options) }
+    if (entry) {
+      entry.options = { ...entry.options, ...overlayOptions(options) }
+      if (options.controller)
+        entry.controller = markRaw(
+          defineComponent({
+            setup() {
+              provide(EXTENSION_INJECT_KEY, findPackage(pkg)?.handle)
+              return () => h(options.controller)
+            },
+          }),
+        )
+    }
   }
 }
 

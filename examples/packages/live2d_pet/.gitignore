@@ -1,0 +1,25 @@
+vendor/
+# Only the bundled dragon model belongs in the package.
+ui/model/*
+!ui/model/high/
+!ui/model/standard/
+ui/model/high/*
+ui/model/standard/*
+!ui/model/high.model3.json
+!ui/model/high/texture_0.webp
+!ui/model/high/texture_1.webp
+!ui/model/high/texture_2.webp
+!ui/model/idle.motion3.json
+!ui/model/kohaku.cdi3.json
+!ui/model/kohaku.moc3
+!ui/model/kohaku.physics3.json
+!ui/model/sleep2.motion3.json
+!ui/model/standard.model3.json
+!ui/model/standard/texture_0.webp
+!ui/model/standard/texture_1.webp
+!ui/model/standard/texture_2.webp
+!ui/model/变.exp3.json
+!ui/model/开扇.exp3.json
+!ui/model/扇面.exp3.json
+!ui/model/抬手.exp3.json
+!ui/model/抬手2.exp3.json
