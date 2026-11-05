@@ -19,6 +19,7 @@ from kohakutui import App, Event
 from kohakutui.ui import Button, Component, Composer, Footer, Node
 
 from kohakuterrarium.builtins.ktui.board import Board
+from kohakuterrarium.builtins.ktui.chrome import Chrome
 from kohakuterrarium.builtins.ktui.commands import command_list, run_command
 from kohakuterrarium.builtins.ktui.config import KtuiConfig
 from kohakuterrarium.builtins.ktui.format import tokens
@@ -39,6 +40,12 @@ BINDINGS = {
     "alt+j": "next_approval",
     "ctrl+k": "approve",
     "ctrl+x": "unqueue",
+    # full screen: show or hide the rail and the aux pane, step through or pick the tabs
+    "alt+r": "toggle_rail",
+    "alt+a": "toggle_aux",
+    "ctrl+pagedown": "next_tab",
+    "ctrl+pageup": "prev_tab",
+    **{f"alt+{n}": f"tab_{n}" for n in range(1, 10)},
 }
 
 
@@ -65,7 +72,9 @@ class KtuiShell:
         self.engine = engine
         self.config = config
         mode = "fullscreen" if config.renderer == "fullscreen" else "inline"
-        self.app = app or App(mode=mode, interrupt="event", theme=config.theme)
+        self.app = app or App(
+            mode=mode, interrupt="event", theme=config.theme, links=config.links
+        )
         self.mode = mode
         self.entries: dict[str, Entry] = {}
         self.focus_id = focus_id
@@ -73,6 +82,7 @@ class KtuiShell:
         self.ui_host = UiHost()
         self.tool_widgets = ToolWidgets(self.app)
         self.board = Board(self)
+        self.chrome = Chrome(self)
         self.settings = Settings(self)
         self.composer: Node | None = None
         self.footer: Node | None = None
@@ -98,8 +108,8 @@ class KtuiShell:
             collapse_tools=self.config.verbosity != "high",
             batch_size=0 if self.config.verbosity == "high" else BATCH_SIZE,
             ui=self._ui_context(creature),
+            focused=cid == self.focus_id,
         )
-        view.focused = cid == self.focus_id
         view.usage.model = model_id(creature.agent)
         router = creature.agent.output_router
         entry = Entry(creature, view, KtuiOutput(self, view), router.default_output)
@@ -147,12 +157,24 @@ class KtuiShell:
                 )
         for cid in [c for c in self.entries if c not in alive]:
             entry = self.entries.pop(cid)
+            entry.view.doc.remove()
             self.app.notify(f"{entry.creature.name} left", "info")
         if self.focus_id not in self.entries and self.entries:
+            # the focus left: the next creature's document, a shown channel tab closes over
+            self.chrome.leave_channel()
             self.focus_id = next(iter(self.entries))
-            self.focused.view.set_focused(True)
+            view = self.focused.view
+            view.focused = False
+            view.set_focused(True, f"── {view.name} ──")
         self._update_commands()
         self.refresh()
+
+    async def _tick(self) -> None:
+        """Full screen: the chrome's clocks and log tail move once a second."""
+        while True:
+            await asyncio.sleep(1.0)
+            if self.mode == "fullscreen":
+                self.chrome.refresh()
 
     async def _watch_engine(self) -> None:
         """Re-syncs the creatures on every structural change of the engine."""
@@ -179,17 +201,29 @@ class KtuiShell:
         return len(self.entries) > 1
 
     def focus(self, cid: str) -> None:
-        if cid == self.focus_id or cid not in self.entries:
+        """Shows creature ``cid`` (``""``: the focused one, also back from a channel tab)."""
+        cid = cid or self.focus_id
+        if cid not in self.entries:
+            return
+        if self.chrome.leave_channel() and cid == self.focus_id:
+            view = self.focused.view
+            view.set_focused(True, f"── {view.name} ──")
+            self._update_commands()
+            self.refresh()
+            return
+        if cid == self.focus_id:
             return
         self.focused.view.set_focused(False)
         self.focus_id = cid
-        self.focused.view.set_focused(True)
+        view = self.focused.view
+        view.set_focused(True, f"── {view.name} ──")
         self._update_commands()
         self.refresh()
 
     def turn_finished(self, view: CreatureView) -> None:
         if not view.focused:
-            self.app.notify(f"{view.name} finished · ↓ to switch", "info")
+            where = "its tab" if self.mode == "fullscreen" else "↓"
+            self.app.notify(f"{view.name} finished · {where} to switch", "info")
 
     # -- lifecycle ------------------------------------------------------
 
@@ -202,9 +236,11 @@ class KtuiShell:
                 await self.focused.output.on_resume(resume_events)
             consumer = asyncio.create_task(self._consume())
             watcher = asyncio.create_task(self._watch_engine())
+            ticker = asyncio.create_task(self._tick())
             await self._done.wait()
             consumer.cancel()
             watcher.cancel()
+            ticker.cancel()
         finally:
             for entry in self.entries.values():
                 if self.is_busy(entry):
@@ -212,6 +248,7 @@ class KtuiShell:
             for task in list(self._tasks - self._turns):
                 task.cancel()
             self.interactions.hide()
+            self.chrome.close()
             self.tool_widgets.close_all()
             self.detach_all()
             self.app.stop()
@@ -231,6 +268,7 @@ class KtuiShell:
         self.footer = app.bottom.add(Footer())
         for chord, action in BINDINGS.items():
             app.bind(chord, action)
+        self.chrome.build()
         self._update_commands()
         self.refresh()
         self.composer.focus()
@@ -261,6 +299,8 @@ class KtuiShell:
     async def _handle(self, ev: Event) -> None:
         if self.ui_host.handle(ev):
             return
+        if self.chrome.handle(ev):
+            return
         match ev.kind:
             case "submit" if self.composer is not None and ev.id == self.composer.id:
                 await self._submit(ev.value)
@@ -274,6 +314,8 @@ class KtuiShell:
                 self.mode = ev.data.get("mode", self.mode)
                 for entry in self.entries.values():
                     entry.view.mode_changed(self.mode == "inline")
+                # the chrome is kept up to date only while drawn
+                self.refresh()
             case "error":
                 logger.debug("ktui engine error", message=ev.data.get("message"))
 
@@ -295,6 +337,10 @@ class KtuiShell:
                 self.interactions.approve_oldest()
             case "unqueue":
                 self._unqueue()
+            case "toggle_rail" | "toggle_aux" | "next_tab" | "prev_tab":
+                self.chrome.action(name)
+            case _ if name.startswith("tab_"):
+                self.chrome.action(name)
 
     def _ctrl_c(self, count: int) -> None:
         if self.is_busy(self.focused):
@@ -323,6 +369,8 @@ class KtuiShell:
             return
         if text.startswith("/"):
             self.spawn(self.command(text))
+            return
+        if await self.chrome.submit(text):
             return
 
         target = self.focused
@@ -412,12 +460,16 @@ class KtuiShell:
     # -- footer and active row ------------------------------------------
 
     def refresh(self) -> None:
-        """Redraws the footer and the active-items row when their text changed."""
+        """Redraws the footer, the active-items row and the full-screen chrome when changed."""
         if self.footer is None or not self.entries:
             return
+        self.chrome.refresh()
         view = self.focused.view
         usage = view.usage
         left = f"{view.name} · {usage.model}" if usage.model else view.name
+        channel = self.chrome.channel
+        if channel is not None:
+            left = f"#{channel.name} · you send as human"
         pct = usage.context_pct()
         right = " · ".join(
             part

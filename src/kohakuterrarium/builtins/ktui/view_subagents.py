@@ -1,8 +1,8 @@
 """Sub-agent cells of a ``CreatureView``: a foreground sub-agent is a ◆ cell whose tool calls
 nest under it (batched like the creature's own); a background one is a notice line. Mixed into
 ``CreatureView``, whose ``render`` dispatches ``subagent_start`` / ``subagent_tool`` /
-``subagent_end`` here; the state (``_cells``, ``_children``, ``_sub_batch``, ``_closed``,
-``_away``) belongs to the view."""
+``subagent_end`` here; the state (``_cells``, ``_children``, ``_sub_batch``, ``_closed``)
+belongs to the view."""
 
 from typing import Any
 
@@ -13,13 +13,13 @@ from kohakuterrarium.builtins.ktui.format import BATCH_TITLE, one_line
 
 class SubagentCells:
     app: Any
+    doc: Any
     collapse_tools: bool
     batch_size: int
     _cells: dict[str, Node]
     _children: dict[str, list]
     _sub_batch: dict[str, Node]
     _closed: set[str]
-    _away: set[str]
 
     def _subagent_start(
         self, job_id: str, name: str, task: str, background: bool
@@ -39,7 +39,7 @@ class SubagentCells:
             tone="agent",
             collapsed=self.collapse_tools or None,
         )
-        self._cells[job_id] = self.app.transcript.add(spec)
+        self._cells[job_id] = self.doc.add(spec)
         self._children[job_id] = []
 
     def _subagent_tool(
@@ -97,7 +97,6 @@ class SubagentCells:
                 detail=summary,
             )
             self._seal(spec)
-            self._away.discard(job_id)
             return
         if error:
             cell.add(Text(error, tone="danger"))

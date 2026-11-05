@@ -534,7 +534,11 @@ class TestKtuiWorkflow:
 
     @pytest.mark.timeout(120)
     async def test_second_creature_buffers_until_focused(self, monkeypatch, tmp_path):
-        """``@name`` talks to another creature; its reply waits off-screen until /focus."""
+        """``@name`` talks to another creature; its reply waits off-screen until /focus.
+        Then full screen: rail, tabs, a channel tab that sends, aux tabs, sizes saved.
+        """
+        saved = tmp_path / "ktui.json"
+        monkeypatch.setattr(KtuiConfig, "default_path", staticmethod(lambda: saved))
         root = _creature(monkeypatch, tmp_path, ["root here"], "root")
         helper = _creature(
             monkeypatch, tmp_path, [ScriptEntry("helper reply", match="hi")], "helper"
@@ -587,6 +591,36 @@ class TestKtuiWorkflow:
             # and one that leaves the engine is let go
             await engine.remove_creature(late)
             await _until(lambda: "late" not in shell.entries, "the late creature gone")
+
+            # full screen: the rail lists the graph's channels, a click opens its tab
+            await engine.add_channel(helper.graph_id, "review", "review requests")
+            app.inject({"key": "ctrl+t"})
+            await _until(lambda: "#review" in "\n".join(app.screen()), "the rail")
+            rows = app.screen()
+            assert "helper" in rows[0] and "Jobs" in rows[0], "tab strip and aux tabs"
+            y = next(i for i, line in enumerate(rows) if "#review" in line[:30])
+            app.inject({"click": (rows[y].index("#review"), y)})
+            await _until(lambda: "#review ×" in app.screen()[0], "the channel tab")
+            await _type(app, "please look")
+            channel = engine.channel(helper.graph_id, "review")
+            await _until(
+                lambda: any(m.content == "please look" for m in channel.history),
+                "the message on the channel",
+            )
+            assert helper.agent.controller.conversation.get_last_assistant_message()
+            await _until(
+                lambda: "please look" in "\n".join(app.screen()), "it in the tab"
+            )
+            # closing the tab shows the creature again; the composer talks to it
+            app.inject({"middle": (app.screen()[0].index("#review"), 0)})
+            await _until(lambda: "helper reply" in "\n".join(app.screen()), "back")
+            # the rail divider dragged: the width is remembered
+            divider = app.screen()[1].index("│")
+            app.inject({"drag": (divider, 4, divider + 6)})
+            await _until(
+                lambda: saved.exists() and '"rail"' in saved.read_text(), "saved panes"
+            )
+            assert KtuiConfig.load(saved).panes["rail"]["width"] == divider + 6
 
             await _type(app, "/exit")
             await asyncio.wait_for(run, 10)

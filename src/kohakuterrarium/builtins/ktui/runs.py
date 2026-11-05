@@ -1,13 +1,12 @@
 """Runs of consecutive tool calls, grouped into batch cells like the web's tool batch.
 
 The view asks :meth:`ToolRuns.parent` where each call goes: the open run's batch cell (made on
-demand) or, with batching off (``size`` 0, verbosity high), the transcript. The engine shows a
+demand) or, with batching off (``size`` 0, verbosity high), the creature's document. The engine shows a
 batch as its calls below ``size`` and folds it into "N tool calls" from there on. Anything that is
 not a tool call closes the run (:meth:`end`); a closed run seals once its last call is done,
 because an unsealed cell holds back every transcript line after it.
 """
 
-from kohakutui import App
 from kohakutui.ui import Cell, Code, Node, Scroll
 
 from kohakuterrarium.builtins.ktui.format import BATCH_TITLE
@@ -21,8 +20,8 @@ OUTPUT_LINES = 400
 class ToolRuns:
     """The open run and every unsealed batch with the number of its calls still running."""
 
-    def __init__(self, app: App, size: int = BATCH_SIZE):
-        self.app = app
+    def __init__(self, doc: Node, size: int = BATCH_SIZE):
+        self.doc = doc
         self.size = size
         self._open: Node | None = None
         self._batches: dict[int, tuple[Node, int]] = {}
@@ -31,9 +30,9 @@ class ToolRuns:
     def parent(self, job_id: str) -> Node:
         """Where the call ``job_id`` goes; it counts as running until :meth:`done`."""
         if self.size <= 0:
-            return self.app.transcript
+            return self.doc
         if self._open is None:
-            self._open = self.app.transcript.add(
+            self._open = self.doc.add(
                 Cell(role="tool", batch=self.size, title=BATCH_TITLE)
             )
             self._batches[self._open.id] = (self._open, 0)

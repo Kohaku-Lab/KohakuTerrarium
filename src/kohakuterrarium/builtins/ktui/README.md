@@ -16,7 +16,11 @@ every creature of a running engine, rendered inline (scrollback), hybrid or full
 | `runs.py` | `ToolRuns`: consecutive tool calls grouped into batch cells; tool output in scroll boxes |
 | `models.py` | `/model` picker items from KT presets, answers back to selectors |
 | `output.py` | `KtuiOutput`: a creature's default output; maps every KT output event to the view or the shell; reports the `kt.ui` renderer (not `kt.app`); `on_widget` takes kt.ui widgets and turns the legacy kinds back into their events |
-| `view.py` | `CreatureView`: one creature's transcript; buffers while unfocused and replays on focus |
+| `view.py` | `CreatureView`: one creature's document (a kohakutui document of its own), drawn focused or not; only the focused creature uses the live region |
+| `chrome.py` | `Chrome`: full screen's rail (creatures, channels), the tab strip over the chat and the aux pane; pane sizes saved in `ktui.json`; alt+r / alt+a, alt+1…9, ctrl+pgup / ctrl+pgdn |
+| `channels.py` | `ChannelView`: a channel tab, its history and live traffic in a document; the composer sends to it as `human` while shown |
+| `aux_tabs.py` | `Aux`: the aux pane's tabs (Jobs, Agents, Status, Graph, Pad, Drives, Widgets, Files, Logs) |
+| `aux_files.py` | `FileTree`: the Files tab, directories loaded when opened, a docked preview |
 | `view_subagents.py` | `SubagentCells`: foreground sub-agents as ◆ cells with their tool calls nested (mixed into the view) |
 | `inline_ui.py` | `ReplyStream`: a streamed reply cut into Markdown and `<ui>` blocks (`kt_ui.markup_lex.split_message`); lines that may open a block are held back until decided |
 | `ui_block.py` | `BlockView`: one `<ui>` block or tool widget: state, `let` values, redraws, live → frozen, where state is saved (inline state or the widget service) |
@@ -29,7 +33,7 @@ every creature of a running engine, rendered inline (scrollback), hybrid or full
 | `interactions.py` | `Interactions`: approvals and questions from all creatures; hide (esc / Later), alt+j, ctrl+k, replies |
 | `replay.py` | Session resume through the view (live branch only) |
 | `input.py` | `KtuiInput`: placeholder input so nothing else reads the terminal |
-| `config.py` | `KtuiConfig`: renderer, theme, verbosity remembered in `ktui.json` |
+| `config.py` | `KtuiConfig`: renderer, theme, verbosity, links, pane sizes and the aux tab remembered in `ktui.json` |
 | `format.py` | Short display strings: tool arguments, results, durations, token counts |
 
 The engine launcher is `terrarium/engine/cli/ktui.py`.
@@ -41,10 +45,19 @@ The engine launcher is `terrarium/engine/cli/ktui.py`.
 - **Busy input**: Enter while the agent works queues the message with a `pending_id`
   (shown greyed until KT claims it, ctrl+x cancels the newest); ctrl+enter or ctrl+s (for
   terminals that send ctrl+enter as a plain enter) interrupts first.
-- **Several creatures**: one creature owns the inline transcript; the others buffer and
-  count unread. `@name msg` sends one message, `/focus name` or the board switches; the
-  switched-to creature's backlog replays under a divider. Creatures that join the focus
-  creature's graph while ktui runs are attached; ones removed from the engine are let go.
+- **Several creatures**: every creature draws into its own document; the focused one is
+  shown, the others count unread. `@name msg` sends one message, `/focus name`, the board, a
+  tab or the rail switches; inline, the switched-to document's lines not yet in scrollback
+  are written under a `── name ──` divider. Creatures that join the focus creature's graph
+  while ktui runs are attached; ones removed from the engine are let go.
+- **Full screen** (ctrl+t, or `renderer: fullscreen`): a rail on the left (creatures with a
+  status dot and unread count, the graph's channels), a tab strip over the chat (one tab per
+  creature, closable channel tabs), and an aux pane on the right (see `aux_tabs.py`). Drag a
+  divider to resize, double-click it to collapse, click a strip to open; alt+r / alt+a toggle
+  the rail / aux pane, alt+1…9 pick a tab, ctrl+pgup / ctrl+pgdn step through the tabs, F6 moves the keys
+  between the chat, the tabs, the panes and the input. Sizes and the aux tab are remembered.
+  A channel tab replays the channel's history and follows it; typing there sends to the
+  channel as `human`.
 - **Active row** (↓ from the input): one segment per kind (creatures, sub-agents, jobs,
   queued, waiting); ←/→ choose, enter opens the board on that section (an approval directly).
 - **Docked dialogs**: pickers, the board, traces and approval cards open where the input box

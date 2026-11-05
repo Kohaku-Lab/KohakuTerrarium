@@ -6,7 +6,7 @@ override the file for one run without writing it.
 
 import os
 import json
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from kohakutui import THEMES
@@ -18,6 +18,8 @@ logger = get_logger(__name__)
 
 RENDERERS = ("inline", "hybrid", "fullscreen")
 VERBOSITY = ("low", "medium", "high")
+# auto: OSC 8 hyperlinks on a terminal; text writes "name (url)" for terminals that drop OSC 8
+LINKS = ("auto", "osc8", "text")
 
 
 @dataclass
@@ -27,6 +29,10 @@ class KtuiConfig:
     renderer: str = "hybrid"
     theme: str = "kohaku-dark"
     verbosity: str = "medium"
+    links: str = "auto"
+    # full-screen panes ("rail", "aux"): {"width": int, "collapsed": bool}, and the aux tab
+    panes: dict = field(default_factory=dict)
+    aux_tab: str = "jobs"
 
     @staticmethod
     def default_path() -> Path:
@@ -57,6 +63,22 @@ class KtuiConfig:
             self.theme = "kohaku-dark"
         if self.verbosity not in VERBOSITY:
             self.verbosity = "medium"
+        if self.links not in LINKS:
+            self.links = "auto"
+        if not isinstance(self.panes, dict):
+            self.panes = {}
+        self.panes = {
+            name: {
+                "width": (
+                    int(p.get("width", 0)) if str(p.get("width", "")).isdigit() else 0
+                ),
+                "collapsed": bool(p.get("collapsed", False)),
+            }
+            for name, p in self.panes.items()
+            if isinstance(p, dict)
+        }
+        if not isinstance(self.aux_tab, str):
+            self.aux_tab = "jobs"
         return self
 
     def save(self, path: Path | None = None) -> None:

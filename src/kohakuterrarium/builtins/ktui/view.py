@@ -1,9 +1,10 @@
-"""One creature's transcript in ktui: KT activity rendered as kohakutui cells.
+"""One creature's view: its own kohakutui document (a transcript of its own) and its live rows.
 
-Rendering goes through :meth:`CreatureView.render`. While another creature holds the inline
-view, calls are kept in a bounded backlog (consecutive text chunks merged) and replayed when
-this creature gets the focus again, so scrollback never interleaves creatures. Cells still
-open when the focus leaves are sealed as ``away``; their later results print as one line.
+Rendering goes through :meth:`CreatureView.render` and always draws into the creature's
+document, focused or not, so open tool cells and live ``<ui>`` blocks keep updating while another
+creature is shown. Only the shown document is drawn (and, inline, reaches scrollback); switching
+shows the other document, whose lines not yet in scrollback are written then. The live region
+(spinner, progress, queued messages) is shared: only the focused creature puts rows there.
 State that is not drawing (usage, jobs, traces, processing) is updated directly by the output
 module.
 
@@ -12,7 +13,6 @@ calls are batched inside its cell the same way.
 """
 
 import time
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -39,7 +39,6 @@ from kohakuterrarium.builtins.ktui.view_subagents import SubagentCells
 from kohakuterrarium.builtins.ktui.runs import BATCH_SIZE, ToolRuns, output_box
 from kohakuterrarium.builtins.ktui.trace import Traces
 
-BACKLOG_LIMIT = 4000
 UNREAD_KINDS = {
     "user_message",
     "assistant_end",
@@ -47,7 +46,8 @@ UNREAD_KINDS = {
     "subagent_start",
     "notice",
 }
-STATUS_ONLY = {"status_on", "status_off"}
+# rows in the shared live region: only the focused creature shows them
+LIVE_ONLY = {"status_on", "compact_start"}
 # a new transcript entry (or turn) freezes the live <ui> blocks above it, inline (D26)
 FREEZE_ON = {
     "divider", "user_message", "text", "notice", "markdown_notice", "error", "card",
@@ -85,7 +85,7 @@ class Job:
 
 
 class CreatureView(SubagentCells):
-    """Draws one creature into the app's transcript and live regions."""
+    """Draws one creature into its own document and, while focused, the live region."""
 
     def __init__(
         self,
@@ -96,6 +96,7 @@ class CreatureView(SubagentCells):
         collapse_tools: bool = True,
         batch_size: int = BATCH_SIZE,
         ui: UiContext | None = None,
+        focused: bool = True,
     ):
         self.app = app
         self.creature_id = creature_id
@@ -107,10 +108,13 @@ class CreatureView(SubagentCells):
         self.jobs: dict[str, Job] = {}
         self.traces = Traces()
         self.processing = False
-        self.focused = True
+        self.focused = focused
         self.unread = 0
 
-        self._backlog: deque[tuple[str, tuple]] = deque(maxlen=BACKLOG_LIMIT)
+        # this creature's transcript; shown while it has the focus
+        self.doc = app.add_document()
+        if focused:
+            app.show_document(self.doc)
         self._assistant: Node | None = None
         self._reply: ReplyStream | None = None
         self.ui = ui
@@ -119,40 +123,33 @@ class CreatureView(SubagentCells):
         self._next_turn: tuple[int, int] | None = None  # a replayed reply's own turn
         self._cells: dict[str, Node] = {}
         self._children: dict[str, list[tuple[str, Node]]] = {}
-        self._away: set[str] = set()
         # calls already closed (cancelled, interrupted): their late end events are dropped
         self._closed: set[str] = set()
         self._status: Node | None = None
         self._compacting: Node | None = None
         self._progress: dict[str, Node] = {}
         self._queued: dict[str, tuple[str, Node | None]] = {}
-        self._runs = ToolRuns(app, batch_size)
+        self._runs = ToolRuns(self.doc, batch_size)
         self._held = ""
         self._sub_batch: dict[str, Node] = {}
 
     # -- dispatch -------------------------------------------------------
 
     def render(self, method: str, *args: Any) -> None:
-        """Draws now when focused, otherwise keeps the call for later."""
-        if self.focused:
-            if method in FREEZE_ON and self._lingering and self._inline():
-                self.freeze_blocks()
-            getattr(self, "_" + method)(*args)
-            return
-        if method in STATUS_ONLY:
-            return
+        """Draws into this creature's document, shown or not; counts unread while not."""
+        if not self.focused:
+            if method in LIVE_ONLY:
+                return
+            if method in UNREAD_KINDS:
+                self.unread += 1
+                self.on_change()
+        if method in FREEZE_ON and self._lingering and self._inline():
+            self.freeze_blocks()
+        getattr(self, "_" + method)(*args)
 
-        last = self._backlog[-1] if self._backlog else None
-        if method == "text" and last is not None and last[0] == "text":
-            self._backlog[-1] = ("text", (last[1][0] + args[0],))
-        else:
-            self._backlog.append((method, args))
-        if method in UNREAD_KINDS:
-            self.unread += 1
-            self.on_change()
-
-    def set_focused(self, focused: bool) -> None:
-        """Gives this creature the inline view (replaying its backlog) or takes it away."""
+    def set_focused(self, focused: bool, note: str | None = None) -> None:
+        """Shows this creature's document (``note``: inline, the divider written before it) or
+        takes its rows out of the shared live region."""
         if focused == self.focused:
             return
         if not focused:
@@ -161,12 +158,8 @@ class CreatureView(SubagentCells):
             return
 
         self.focused = True
-        backlog = list(self._backlog)
-        self._backlog.clear()
         self.unread = 0
-        self._divider(f"{self.name}")
-        for method, args in backlog:
-            getattr(self, "_" + method)(*args)
+        self.app.show_document(self.doc, note)
         for pending_id, (text, _) in list(self._queued.items()):
             self._queue_add(pending_id, text)
         if self.processing:
@@ -197,18 +190,7 @@ class CreatureView(SubagentCells):
         self._lingering.clear()
 
     def _leave(self) -> None:
-        self._assistant_end()
-        self.freeze_blocks()
-        for job_id, cell in self._cells.items():
-            cell.update(
-                status="away", summary="continues in the background of this view"
-            )
-            cell.seal()
-            self._away.add(job_id)
-        self._cells.clear()
-        self._children.clear()
-        self._runs.seal_all()
-        self._sub_batch.clear()
+        # the document keeps everything, open cells included; only the live rows go
         for node in (self._status, self._compacting, *self._progress.values()):
             if node is not None:
                 node.remove()
@@ -222,7 +204,7 @@ class CreatureView(SubagentCells):
     # -- messages -------------------------------------------------------
 
     def _seal(self, spec: Any) -> None:
-        self.app.transcript.add(spec).seal()
+        self.doc.add(spec).seal()
 
     def _divider(self, label: str) -> None:
         # closes an open run first, so later calls never join a batch above the divider
@@ -247,9 +229,7 @@ class CreatureView(SubagentCells):
                 return
             chunk, self._held = self._held.lstrip("\n"), ""
             self._runs.end()
-            self._assistant = self.app.transcript.add(
-                Cell(role="assistant", stream_flush=True)
-            )
+            self._assistant = self.doc.add(Cell(role="assistant", stream_flush=True))
             self._reply = ReplyStream(
                 self.app, self._assistant, self.ui, self._next_turn
             )
@@ -295,7 +275,7 @@ class CreatureView(SubagentCells):
     # -- turn status ----------------------------------------------------
 
     def _status_on(self) -> None:
-        if self._status is None:
+        if self._status is None and self.focused:
             label = "kohakUwUing · esc to interrupt"
             self._status = self.app.live.add(
                 Status(label=label, tone="running"), index=0
@@ -336,6 +316,8 @@ class CreatureView(SubagentCells):
             self._notice(f"✓ {label}", tone="ok")
             return
         if node is None:
+            if not self.focused:
+                return
             node = self.app.live.add(Progress(label=label, total=total))
             self._progress[key] = node
         if value is not None:
@@ -352,7 +334,8 @@ class CreatureView(SubagentCells):
         row = Text(
             f"  queued · {one_line(text, 70)}  (ctrl+x cancels the last)", tone="faint"
         )
-        self._queued[pending_id] = (text, self.app.live.add(row))
+        node = self.app.live.add(row) if self.focused else None
+        self._queued[pending_id] = (text, node)
 
     def _queue_remove(self, pending_id: str) -> None:
         _, node = self._queued.pop(pending_id, ("", None))
@@ -404,13 +387,12 @@ class CreatureView(SubagentCells):
         if cell is None:
             self._runs.done(job_id)
         if cell is None:
-            # backgrounded, or opened while this creature had the view elsewhere
+            # backgrounded: the call's cell was never opened
             self._assistant_end()
             spec = Cell(
                 role="tool", title=name, status=status, tone="tool", detail=summary
             )
             self._seal(spec)
-            self._away.discard(job_id)
             return
 
         if error:

@@ -27,9 +27,11 @@ KINDS = frozenset({"widget", "widget_state", "widget_close"})
 
 
 class _Open:
-    def __init__(self, holder: Node, block: BlockView):
+    def __init__(self, holder: Node, block: BlockView, view: Any = None):
         self.holder = holder
         self.block = block
+        # the creature view whose tool opened it: the final widget joins its document
+        self.view = view
 
 
 class ToolWidgets:
@@ -85,7 +87,7 @@ class ToolWidgets:
             block.show(validate_spec(spec), dict(payload.get("state") or {}))
         except SpecError as error:
             holder.add(Text(f"widget could not be shown: {error}", tone="danger"))
-        self.open[widget_id] = _Open(holder, block)
+        self.open[widget_id] = _Open(holder, block, getattr(source, "view", None))
 
     def _update(self, widget_id: str, patch: dict) -> None:
         shown = self.open[widget_id]
@@ -108,7 +110,8 @@ class ToolWidgets:
             return
         shown.block.freeze()
         # the final widget joins the conversation where the tool left it
-        shown.holder.move(self.app.transcript)
+        doc = getattr(shown.view, "doc", None) or self.app.transcript
+        shown.holder.move(doc)
         shown.holder.seal()
 
     def close_all(self) -> None:

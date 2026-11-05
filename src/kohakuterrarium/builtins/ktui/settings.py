@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from kohakutui import THEMES
 from kohakutui.ui import Picker, Prompt
 
-from kohakuterrarium.builtins.ktui.config import RENDERERS, VERBOSITY
+from kohakuterrarium.builtins.ktui.config import LINKS, RENDERERS, VERBOSITY
 from kohakuterrarium.builtins.ktui.models import model_id, model_items, selector_of
 from kohakuterrarium.llm.profiles.api_keys import (
     PROVIDER_KEY_MAP,
@@ -68,6 +68,13 @@ class Settings:
                 VERBOSITY,
                 config.verbosity,
                 "high lists every call open, without batching (new sessions)",
+            ),
+            _choice(
+                "Links",
+                "links",
+                LINKS,
+                config.links,
+                "osc8 clickable · text writes name (url) · applies on next start",
             ),
         ]
         items += self._model_items()
@@ -197,6 +204,10 @@ class Settings:
                 shell.app.notify(
                     f"tool calls: {option} · applies to new sessions", "success"
                 )
+            case "links" if option in LINKS:
+                shell.config.links = option
+                shell.config.save()
+                shell.app.notify(f"links: {option} · applies on next start", "success")
 
     async def _default_model(self) -> None:
         shell = self.shell
