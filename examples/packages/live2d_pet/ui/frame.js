@@ -7,7 +7,7 @@ import { models, modelAdapter } from "./models/index.js";
 import { settingsFor } from "./settings-state.js";
 
 export const PetFrame = defineComponent({
-  props: { mini: Boolean },
+  props: { mini: Boolean, getViewport: Function },
   emits: ["model", "drag", "layout", "regions", "close"],
   setup(props, { emit }) {
     const kt = useExtension();
@@ -201,6 +201,49 @@ export const PetFrame = defineComponent({
       )
         return;
       const data = event.data;
+      if (data?.type === "kt-live2d-menu-viewport") {
+        if (
+          !props.mini ||
+          data.channel !== channel ||
+          !Number.isSafeInteger(data.request) ||
+          !Array.isArray(data.point) ||
+          data.point.length !== 2 ||
+          !data.point.every(Number.isFinite)
+        )
+          return;
+        const source = event.source;
+        const activeChannel = channel;
+        const box = frame.value.getBoundingClientRect();
+        const parentBox = frame.value
+          .closest(".kt-dragon-companion")
+          ?.getBoundingClientRect();
+        const dx = box.left - (parentBox?.left || 0);
+        const dy = box.top - (parentBox?.top || 0);
+        Promise.resolve(
+          props.getViewport?.(data.point[0] + dx, data.point[1] + dy),
+        )
+          .catch(() => null)
+          .then((rect) => {
+            if (
+              disposed ||
+              channel !== activeChannel ||
+              frame.value?.contentWindow !== source
+            )
+              return;
+            source.postMessage(
+              {
+                type: "kt-live2d-menu-viewport",
+                channel,
+                request: data.request,
+                viewport: rect
+                  ? [rect[0] - dx, rect[1] - dy, rect[2], rect[3]]
+                  : null,
+              },
+              event.origin,
+            );
+          });
+        return;
+      }
       if (data?.type === "kt-live2d-resource") {
         if (resourceContext) void serveResource(kt, event, resourceContext);
         return;

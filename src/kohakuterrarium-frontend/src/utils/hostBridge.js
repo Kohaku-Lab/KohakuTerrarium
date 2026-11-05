@@ -442,6 +442,22 @@ export async function getOverlayBounds() {
   }
 }
 
+/** Visible monitor work area in overlay-relative CSS pixels. */
+export async function getOverlayViewport(x, y) {
+  try {
+    const rect = await call("overlay_get_viewport", x, y)
+    return Array.isArray(rect) &&
+      rect.length === 4 &&
+      rect.every(Number.isFinite) &&
+      rect[2] >= 0 &&
+      rect[3] >= 0
+      ? rect
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** Report the `[x, y, width, height]` rectangles of the calling overlay that catch the mouse. */
 export function setOverlayHitRegions(regions) {
   return callBoolean("overlay_set_hit_regions", regions)

@@ -22,6 +22,7 @@ import {
   resizeOverlay,
   showOverlay,
   toggleOverlay,
+  viewport,
 } from "@/ext/overlays"
 import { windowLabel } from "@/ext/overlayWindows"
 import { openExtensionTab } from "@/ext/registry"
@@ -48,6 +49,7 @@ import {
   closeOverlayWindow,
   setOverlayBounds,
   getOverlayBounds,
+  getOverlayViewport,
   resizeOverlayWindow,
   startOverlayDrag,
 } from "@/utils/hostBridge"
@@ -133,6 +135,7 @@ function useWindowOverlay(key) {
       window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: regions })),
     visible: computed(() => true),
     bounds,
+    getViewport: getOverlayViewport,
     show: () => {},
     hide,
     toggle: hide,
@@ -160,6 +163,17 @@ export function useOverlay() {
     setHitRegions: (regions) => setOverlayInteractionRegions(key, regions),
     visible: computed(() => isOverlayVisible(key)),
     bounds: computed(() => overlayBounds(key)),
+    getViewport: async () => {
+      const box = overlayBounds(key)
+      const left = Math.max(0, -box.left)
+      const top = Math.max(0, -box.top)
+      return [
+        left,
+        top,
+        Math.max(0, Math.min(box.width, viewport.width - box.left) - left),
+        Math.max(0, Math.min(box.height, viewport.height - box.top) - top),
+      ]
+    },
     show: () => showOverlay(key),
     hide: () => hideOverlay(key),
     toggle: () => toggleOverlay(key),

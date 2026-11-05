@@ -305,6 +305,12 @@ than its visible content. In-app movement then clamps the content, allowing
 transparent margins outside the viewport. Native windows use the same regions
 for mouse pass-through.
 
+`await getViewport(x, y)` returns the visible `[left, top, width, height]` in
+overlay-local CSS pixels. Use it to keep menus inside the host viewport, or
+the monitor work area at `(x, y)` for native windows. A transparent overlay
+can extend beyond that area. Older desktop shells return `null`; fall back to
+the overlay's own dimensions in that case.
+
 An optional `controller` component in `registerOverlay` options is mounted once
 in the main window while the package is loaded, including when the overlay is
 hidden or rendered in its own window. It receives `useExtension()` but no

@@ -213,7 +213,9 @@ it("moves the renderer between preview and companion and releases hidden frames"
   await register(host.kt)
   host.kt.hideOverlay("dragon")
   const preview = mount(host.registered.tab.get("preview").component)
-  const companion = mount(host.registered.overlay.get("dragon").component)
+  const companion = mount(host.registered.overlay.get("dragon").component, {
+    attachTo: document.body,
+  })
   try {
     await flushPromises()
     expect(preview.find("iframe").attributes("src")).toContain("stage.html")
@@ -236,6 +238,30 @@ it("moves the renderer between preview and companion and releases hidden frames"
           data: { type: "kt-live2d-close", channel },
         }),
       )
+    const posted = vi.spyOn(frame.contentWindow, "postMessage")
+    const requestViewport = (channel, source = frame.contentWindow) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source,
+          origin: url.origin,
+          data: { type: "kt-live2d-menu-viewport", channel, request: 7, point: [200, 100] },
+        }),
+      )
+    requestViewport("old")
+    requestViewport(url.searchParams.get("channel"), window)
+    await flushPromises()
+    expect(
+      posted.mock.calls.filter(([data]) => data.type === "kt-live2d-menu-viewport"),
+    ).toHaveLength(0)
+    requestViewport(url.searchParams.get("channel"))
+    await flushPromises()
+    const viewportReply = posted.mock.calls.find(
+      ([data]) => data.type === "kt-live2d-menu-viewport",
+    )[0]
+    expect(viewportReply.request).toBe(7)
+    expect(viewportReply.viewport.slice(0, 2)).toEqual([0, 0])
+    expect(viewportReply.viewport[2]).toBeGreaterThan(0)
+    expect(viewportReply.viewport[3]).toBeGreaterThan(0)
     close("old")
     close(url.searchParams.get("channel"), window)
     await nextTick()

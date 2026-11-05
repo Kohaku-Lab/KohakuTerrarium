@@ -17,6 +17,7 @@ mod notify;
 mod opens;
 mod os;
 mod overlay;
+mod overlay_viewport;
 mod popout;
 mod runtime;
 mod settings;
@@ -108,6 +109,7 @@ pub fn run() {
             overlay::overlay_set_bounds,
             overlay::overlay_resize,
             overlay::overlay_get_bounds,
+            overlay_viewport::overlay_get_viewport,
             overlay::overlay_set_hit_regions,
             overlay::overlay_ack,
             hud::focus_session,

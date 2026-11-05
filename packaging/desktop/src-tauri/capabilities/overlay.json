@@ -15,6 +15,7 @@
     "allow-overlay-set-bounds",
     "allow-overlay-resize",
     "allow-overlay-get-bounds",
+    "allow-overlay-get-viewport",
     "allow-overlay-set-hit-regions",
     "allow-overlay-ack",
     "allow-focus-session"

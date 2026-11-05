@@ -330,6 +330,7 @@ export function useOverlay() {
     setHitRegions: () => {},
     visible: computed(() => host.overlayVisible[id] ?? true),
     bounds: computed(() => bounds.value),
+    getViewport: async () => [0, 0, bounds.value.width, bounds.value.height],
     show: () => host.kt.showOverlay(id),
     hide: () => host.kt.hideOverlay(id),
     toggle: () => host.kt.toggleOverlay(id),

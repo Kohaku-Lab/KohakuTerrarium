@@ -7,6 +7,7 @@ import { setupComparison } from "./comparison.js?v=desktop-actions-1";
 import { manifestPath } from "./profiles.js";
 import { modelAdapter } from "./models/index.js";
 import { importedResources } from "./resource-loader.js";
+import { connectMenuPosition } from "./menu-position.js";
 
 import { PetBehavior } from "./behavior.js?v=desktop-actions-1";
 import { connectWork } from "./work.js?v=desktop-actions-1";
@@ -33,6 +34,10 @@ const behavior = new PetBehavior(
 document.body.classList.toggle("mini", mini);
 document.documentElement.classList.toggle("mini", mini);
 const menu = document.querySelector("#pet-menu");
+const menuPosition = connectMenuPosition(menu);
+window.addEventListener("pagehide", () => menuPosition.dispose(), {
+  once: true,
+});
 const menuButton = document.querySelector("#pet-menu-button");
 const closeButton = document.querySelector("#pet-close");
 const hostChannel = new URL(location.href).searchParams.get("channel");
@@ -148,6 +153,7 @@ const report = (message, data = {}) => {
 };
 
 function closeMenu() {
+  menuPosition.cancel();
   menu.hidden = true;
   menuButton.setAttribute("aria-expanded", "false");
 }
@@ -156,21 +162,14 @@ document.querySelector("#pet-menu-close").addEventListener("click", closeMenu);
 function openMenu(x, y) {
   if (!interaction || player.dead) return;
   interaction.activity();
+  menu.style.visibility = "hidden";
   menu.hidden = false;
   menuButton.setAttribute("aria-expanded", "true");
-  positionMenu(x, y);
-  menu.querySelector("button").focus();
+  void menuPosition.position(x, y).then(() => {
+    if (!menu.hidden)
+      menu.querySelector("button").focus({ preventScroll: true });
+  });
 }
-
-function positionMenu(
-  x = Number.parseFloat(menu.style.left) || 6,
-  y = Number.parseFloat(menu.style.top) || 6,
-) {
-  if (menu.hidden) return;
-  menu.style.left = `${Math.max(6, Math.min(x, innerWidth - menu.offsetWidth - 6))}px`;
-  menu.style.top = `${Math.max(6, Math.min(y, innerHeight - menu.offsetHeight - 6))}px`;
-}
-window.addEventListener("resize", () => positionMenu());
 
 for (const source of document.querySelectorAll(
   "#controls [data-motion], #controls [data-expression], #controls [data-demo-state]",

@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import OverlayLayer from "@/ext/OverlayLayer.vue"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
 import { toggleHud } from "@/ext/hud"
-import { hideOverlay, isOverlayVisible, loadPlacements, setWindowAllowed } from "@/ext/overlays"
+import {
+  hideOverlay,
+  isOverlayVisible,
+  loadPlacements,
+  setWindowAllowed,
+  viewport,
+} from "@/ext/overlays"
 import {
   OVERLAY_PARAM,
   WINDOW_LABEL_PREFIX,
@@ -294,9 +300,40 @@ describe("OverlayWindowApp", () => {
     expect(invoke).toHaveBeenLastCalledWith("overlay_resize", {
       args: [300, 200],
     })
+    invoke.mockResolvedValueOnce([80, 20, 300, 500])
+    expect(await control.getViewport(200, 100)).toEqual([80, 20, 300, 500])
+    expect(invoke).toHaveBeenLastCalledWith("overlay_get_viewport", { args: [200, 100] })
+    invoke.mockRejectedValueOnce(new Error("old shell"))
+    expect(await control.getViewport(200, 100)).toBeNull()
+    invoke.mockResolvedValueOnce([0, 0, -1, 500])
+    expect(await control.getViewport(200, 100)).toBeNull()
     let prevented = false
     await control.startDrag({ preventDefault: () => (prevented = true) })
     expect(prevented).toBe(true)
     expect(invoke).toHaveBeenLastCalledWith("overlay_start_drag", {})
+  })
+
+  it("clips app-mode menu space when transparent overlay margins are offscreen", async () => {
+    declare({ width: 600, height: 500 })
+    const original = { ...viewport }
+    Object.assign(viewport, { width: 800, height: 600 })
+    let control
+    const Probe = defineComponent({
+      setup() {
+        control = useOverlay()
+        return () => h("div")
+      },
+    })
+    const page = mount(Probe, { global: { provide: { [OVERLAY_INJECT_KEY]: KEY } } })
+    try {
+      control.setHitRegions([[100, 50, 100, 200]])
+      control.move(-100, 500)
+      expect(await control.getViewport()).toEqual([100, 0, 500, 250])
+      control.move(700, -50)
+      expect(await control.getViewport()).toEqual([0, 50, 200, 450])
+    } finally {
+      page.unmount()
+      Object.assign(viewport, original)
+    }
   })
 })

@@ -168,6 +168,7 @@ const Companion = defineComponent({
         overlay.visible.value
           ? h(PetFrame, {
               mini: true,
+              getViewport: overlay.getViewport,
               onClose: overlay.hide,
               onLayout: (offset) => {
                 headerOffset.value = offset;
