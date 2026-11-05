@@ -63,7 +63,8 @@ class TestDeferredBuiltinCatalog:
             tool_catalog._ensure_default_tools_loaded()
         tool_catalog._ensure_default_tools_loaded()
 
-        assert len(calls) == 2
+        assert calls[0] == calls[1]
+        assert len(calls) == 1 + len(tool_catalog.TOOL_MODULES)
 
     def test_concurrent_default_import_waits_for_completion(self, monkeypatch):
         entered = threading.Event()

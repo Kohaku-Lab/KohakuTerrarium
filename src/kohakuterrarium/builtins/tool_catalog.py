@@ -1,25 +1,14 @@
-"""
-Builtin tool catalog: pure lookup and registration.
+"""Register and locate tools, loading default implementations on demand.
 
-This is a leaf module with zero side effects. It holds the global
-registry dict and provides lookup/factory functions. Individual tool
-modules use ``@register_builtin`` to register themselves at import
-time, but this module never imports any tool module itself.
-
-Supports **deferred loaders**: callables registered via
-``register_deferred_loader`` that are invoked on first cache miss.
-This lets the terrarium layer register its tools lazily without
-the catalog knowing anything about terrarium internals.
-
-Internal code (core, terrarium) should import from here, not from
-``builtins.tools``, to avoid pulling in all tool modules and their
-transitive dependencies.
+Deferred loaders register extension tools on a catalog miss. Full discovery
+loads every default tool; individual queries load only their implementation.
 """
 
 import importlib
 import threading
 from typing import TYPE_CHECKING, Callable, TypeVar
 
+from kohakuterrarium.builtins.tool_manifest import TOOL_MODULES
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import is_mobile_profile
 
@@ -77,6 +66,9 @@ def register_builtin(name: str) -> Callable[[type[T]], type[T]]:
     """
 
     def decorator(cls: type[T]) -> type[T]:
+        target = TOOL_MODULES.get(name)
+        if target is not None and cls.__module__ != "kohakuterrarium." + target[0]:
+            _load_default_tool(name)
         _BUILTIN_TOOLS[name] = cls
         logger.debug("Registered builtin tool", tool_name=name)
         return cls
@@ -105,13 +97,32 @@ def _ensure_default_tools_loaded() -> None:
     with _DEFAULT_TOOLS_LOCK:
         if _DEFAULT_TOOLS_LOADED:
             return
-        importlib.import_module("kohakuterrarium.builtins.tools")
+        for name in TOOL_MODULES:
+            _load_default_tool(name)
         _DEFAULT_TOOLS_LOADED = True
+
+
+def _load_default_tool(name: str) -> None:
+    target = TOOL_MODULES.get(name)
+    if target is not None:
+        module, exported = target
+        tool_cls = getattr(
+            importlib.import_module("kohakuterrarium." + module), exported
+        )
+        _BUILTIN_TOOLS.setdefault(name, tool_cls)
+
+
+def _lookup_tool(name: str) -> type["BaseTool"] | None:
+    tool_cls = _BUILTIN_TOOLS.get(name)
+    if tool_cls is None:
+        _load_default_tool(name)
+        _run_deferred_loaders()
+        tool_cls = _BUILTIN_TOOLS.get(name)
+    return tool_cls
 
 
 def _run_deferred_loaders() -> None:
     """Invoke and clear all deferred loaders."""
-    _ensure_default_tools_loaded()
     if not _DEFERRED_LOADERS:
         return
     # Copy + clear before calling to avoid re-entrance
@@ -137,10 +148,7 @@ def get_builtin_tool(
     """
     if _is_hidden_under_mobile_profile(name):
         return None
-    tool_cls = _BUILTIN_TOOLS.get(name)
-    if tool_cls is None:
-        _run_deferred_loaders()
-        tool_cls = _BUILTIN_TOOLS.get(name)
+    tool_cls = _lookup_tool(name)
     if tool_cls:
         return tool_cls(config=config)
     return None
@@ -154,6 +162,7 @@ def list_builtin_tools() -> list[str]:
     aggregator, `kt config tools list`, the frontend's Tools panel)
     see only the catalog that actually works on the device.
     """
+    _ensure_default_tools_loaded()
     _run_deferred_loaders()
     if is_mobile_profile() and _MOBILE_HIDDEN_TOOLS:
         return [n for n in _BUILTIN_TOOLS if n not in _MOBILE_HIDDEN_TOOLS]
@@ -168,9 +177,7 @@ def is_builtin_tool(name: str) -> bool:
     """
     if _is_hidden_under_mobile_profile(name):
         return False
-    if name not in _BUILTIN_TOOLS:
-        _run_deferred_loaders()
-    return name in _BUILTIN_TOOLS
+    return _lookup_tool(name) is not None
 
 
 def list_provider_native_tools() -> list[dict[str, object]]:
@@ -185,6 +192,7 @@ def list_provider_native_tools() -> list[dict[str, object]]:
     Fires deferred loaders first so terrarium-registered tools (and any
     other lazy additions) show up too.
     """
+    _ensure_default_tools_loaded()
     _run_deferred_loaders()
     out: list[dict[str, object]] = []
     for name, tool_cls in _BUILTIN_TOOLS.items():
@@ -215,6 +223,7 @@ def list_provider_native_tools() -> list[dict[str, object]]:
 
 def list_configurable_tools() -> list[dict]:
     """Return schemas and initial values for configurable built-in tools."""
+    _ensure_default_tools_loaded()
     _run_deferred_loaders()
     out = []
     for name, cls in sorted(_BUILTIN_TOOLS.items()):
@@ -250,10 +259,7 @@ def get_provider_native_option_schema(name: str) -> dict[str, dict[str, object]]
     Used by the bootstrap merge step and the slash-command/CLI/TUI
     flows when they need to validate or render a single tool's form.
     """
-    tool_cls = _BUILTIN_TOOLS.get(name)
-    if tool_cls is None and _DEFERRED_LOADERS:
-        _run_deferred_loaders()
-        tool_cls = _BUILTIN_TOOLS.get(name)
+    tool_cls = _lookup_tool(name)
     if tool_cls is None or not getattr(tool_cls, "is_provider_native", False):
         return {}
     schema_fn = getattr(tool_cls, "provider_native_option_schema", None)

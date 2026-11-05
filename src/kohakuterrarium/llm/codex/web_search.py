@@ -8,6 +8,8 @@ uses cached ``kt login codex`` credentials for the hosted search request.
 
 import asyncio
 import hashlib
+import importlib
+import importlib.util
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -16,15 +18,10 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 import httpx
 
 from kohakuterrarium.llm.codex.auth import CodexTokens, refresh_tokens
-from kohakuterrarium.llm.codex.provider import CODEX_BASE_URL
+from kohakuterrarium.llm.codex.image.budget import CODEX_BASE_URL
 
-try:
-    from openai import AsyncOpenAI
-
-    HAS_OPENAI = True
-except ImportError:  # pragma: no cover - optional dependency boundary
-    AsyncOpenAI = None  # type: ignore[misc, assignment]
-    HAS_OPENAI = False
+AsyncOpenAI = None
+HAS_OPENAI = importlib.util.find_spec("openai") is not None
 
 
 DEFAULT_CODEX_SEARCH_MODEL = "gpt-5.6-luna"
@@ -85,7 +82,13 @@ class CodexSubscriptionSearchBackend:
         cache_key = hashlib.sha256(
             f"kt-codex-search:{self.model}".encode()
         ).hexdigest()[:32]
-        client = AsyncOpenAI(
+        try:
+            client_class = AsyncOpenAI or importlib.import_module("openai").AsyncOpenAI
+        except ImportError as exc:
+            raise CodexSearchUnavailable(
+                "Codex search requires the openai package"
+            ) from exc
+        client = client_class(
             api_key=tokens.access_token,
             base_url=CODEX_BASE_URL,
             timeout=60.0,

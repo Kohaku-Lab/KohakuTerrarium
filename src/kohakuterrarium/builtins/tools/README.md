@@ -2,6 +2,9 @@
 
 Built-in tool implementations. Each tool extends `BaseTool` and uses the
 `@register_builtin` decorator for automatic registration in the tool catalog.
+Add default tools to `builtins/tool_manifest.py`; lookup imports only the selected
+implementation. Package-level class exports load lazily, while catalog listing
+loads all default implementations and deferred extensions.
 The `__init__.py` imports every module to trigger registration and re-exports
 the public API from `builtins.tool_catalog`.
 
