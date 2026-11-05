@@ -485,6 +485,7 @@ class SessionOutput(
                 )
                 and not agent.executor.job_store.get_running_jobs()
                 and not agent.executor.job_store.get_pending_jobs()
+                and not agent.has_pending_mid_turn_inputs
                 and branch_tag is not None
                 and saved_compact_state is not None
                 and messages is not None

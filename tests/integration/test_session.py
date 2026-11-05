@@ -149,6 +149,22 @@ class _EchoTool(BaseTool):
         return ToolResult(output=f"echoed: {args.get('content', '')}")
 
 
+class _GatedBackgroundEcho(_EchoTool):
+    """Hold a background echo until the test releases its result."""
+
+    def __init__(self):
+        super().__init__()
+        self.release = asyncio.Event()
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.BACKGROUND
+
+    async def _execute(self, args, **kwargs) -> ToolResult:
+        await self.release.wait()
+        return await super()._execute(args, **kwargs)
+
+
 class _NativeEchoLLM(ScriptedLLM):
     """Emit one settled native echo call before the final response."""
 
@@ -1465,6 +1481,76 @@ class TestSessionIntegration:
                 )
             finally:
                 verified.close(update_status=False)
+
+        background_config = _write_agent_config(tmp_path / "undelivered", name="plain")
+        background_path = tmp_path / "undelivered.kohakutr"
+        background = _GatedBackgroundEcho()
+        background_agent = await Agent.build(
+            background_config,
+            io="headless",
+            tools=[background],
+            llm=ScriptedLLM(["[/echo]late-checkpoint-result[echo/]", "later reply"]),
+        )
+        background_store = _new_store(
+            background_path, config_path=background_config, agents=["plain"]
+        )
+        background_agent.attach_session_store(background_store)
+        await background_agent.start()
+        completed = asyncio.Event()
+        on_complete = background_agent.executor._on_complete
+        finalize = background_agent._finalize_processing
+
+        def record_completion(event):
+            on_complete(event)
+            completed.set()
+
+        async def finish_with_undelivered_result(*args):
+            background.release.set()
+            await asyncio.wait_for(completed.wait(), 5)
+            assert not background_agent.executor.job_store.get_running_jobs()
+            assert not background_agent.executor.job_store.get_pending_jobs()
+            assert background_agent.has_pending_mid_turn_inputs
+            await finalize(*args)
+            background_agent.pause()
+
+        try:
+            await background_agent.run("start background echo")
+            with monkeypatch.context() as late_result:
+                late_result.setattr(
+                    background_agent.executor, "_on_complete", record_completion
+                )
+                late_result.setattr(
+                    background_agent,
+                    "_finalize_processing",
+                    finish_with_undelivered_result,
+                )
+                await background_agent.run("finish this turn before delivering echo")
+            assert "echoed: late-checkpoint-result" not in str(
+                background_agent.controller.conversation.snapshot_messages()
+            )
+        finally:
+            background.release.set()
+            await background_agent.stop()
+            background_store.close(update_status=False)
+        resumed_llm = ScriptedLLM(["continued after late completion"])
+        resumed, reopened = await resume_agent_async(
+            background_path,
+            llm=resumed_llm,
+            input_module=NoneInput(),
+            output_module=NoneOutput(),
+        )
+        try:
+            restored = resumed.controller.conversation.snapshot_messages()
+            assert "echoed: late-checkpoint-result" in str(restored)
+            assert reopened._resume_point is None
+            resumed.add_tool(_EchoTool())
+            await resumed.start()
+            await resumed.run("continue after late completion")
+            assert "echoed: late-checkpoint-result" in str(resumed_llm.last_messages)
+            assert (resumed._turn_index, resumed._branch_id) == (3, 1)
+        finally:
+            await resumed.stop()
+            reopened.close(update_status=False)
 
     async def test_memory_index_and_search_finds_exact_turn(
         self, patched_llm, tmp_path

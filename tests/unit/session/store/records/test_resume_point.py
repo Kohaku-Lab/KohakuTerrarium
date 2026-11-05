@@ -72,6 +72,7 @@ def test_snapshot_publication_requires_success(tmp_path, monkeypatch, operation)
                 config=AgentConfig(name="plain"),
                 plugins=PluginManager(),
                 executor=Executor(),
+                has_pending_mid_turn_inputs=False,
             ),
         )
 
@@ -94,7 +95,9 @@ def test_snapshot_publication_requires_success(tmp_path, monkeypatch, operation)
         assert (check.state.get(POINT_KEY) is not None) == (operation is None)
 
 
-@pytest.mark.parametrize("runtime", ["plugin", "running_job", "pending_job"])
+@pytest.mark.parametrize(
+    "runtime", ["plugin", "running_job", "pending_job", "undelivered_result"]
+)
 def test_unsupported_runtime_does_not_publish(tmp_path, runtime):
     store = staged_store(tmp_path / "runtime.kohakutr")
     plugins = PluginManager()
@@ -107,13 +110,18 @@ def test_unsupported_runtime_does_not_publish(tmp_path, runtime):
                 job_id="unfinished",
                 type_name="background",
                 job_type=JobType.TOOL,
-                state=(
-                    JobState.RUNNING if runtime == "running_job" else JobState.PENDING
-                ),
+                state={
+                    "running_job": JobState.RUNNING,
+                    "pending_job": JobState.PENDING,
+                    "undelivered_result": JobState.DONE,
+                }[runtime],
             )
         )
     agent = SimpleNamespace(
-        config=AgentConfig(name="plain"), plugins=plugins, executor=executor
+        config=AgentConfig(name="plain"),
+        plugins=plugins,
+        executor=executor,
+        has_pending_mid_turn_inputs=runtime == "undelivered_result",
     )
     output = SessionOutput("plain", store, agent)
     try:
@@ -135,6 +143,7 @@ async def test_failed_or_interrupted_turn_cannot_be_certified(
         config=AgentConfig(name="plain"),
         plugins=PluginManager(),
         executor=Executor(),
+        has_pending_mid_turn_inputs=False,
         _turn_index=1,
         _branch_id=1,
         _parent_branch_path=[],
