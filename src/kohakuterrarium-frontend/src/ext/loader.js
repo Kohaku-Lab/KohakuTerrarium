@@ -183,6 +183,20 @@ async function loadBundles(record, locales, token) {
 function createHandle(record) {
   const pkg = record.package
   const hostKey = extState.hostKey
+  const disposers = new Set()
+  let disposed = false
+  record.dispose = () => {
+    if (disposed) return
+    disposed = true
+    for (const dispose of disposers) {
+      try {
+        dispose()
+      } catch (error) {
+        console.warn(`[ui-extensions] ${pkg}: cleanup failed`, error)
+      }
+    }
+    disposers.clear()
+  }
   const join = (path) => `/ext/${encodeURIComponent(pkg)}/${String(path || "").replace(/^\/+/, "")}`
   const provide = (kind) => (id, component, options) =>
     provideContributionComponent(pkg, kind, id, component, options)
@@ -190,6 +204,11 @@ function createHandle(record) {
     package: pkg,
     scopeKey: hostKey,
     sdkVersion: SDK_VERSION,
+    onDispose(callback) {
+      if (disposed) callback()
+      else disposers.add(callback)
+      return () => disposers.delete(callback)
+    },
     registerTab: provide("tab"),
     registerPanel: provide("panel"),
     registerRailGroup: provide("rail"),
@@ -281,14 +300,19 @@ async function loadPackage(pkg) {
         mod = await deps.importModule(entryUrl(token))
       }
     }
-    if (extState.hostKey !== hostKey) return
+    if (extState.hostKey !== hostKey || findPackage(pkg) !== record) return
     const register = typeof mod?.default === "function" ? mod.default : mod?.register
     if (typeof register !== "function")
       throw new Error(`${pkg}: entry exports no register(kt) function`)
     record.handle = markRaw(createHandle(record))
     await register(record.handle)
+    if (extState.hostKey !== hostKey || findPackage(pkg) !== record) {
+      record.dispose?.()
+      return
+    }
     record.status = "loaded"
   } catch (err) {
+    record.dispose?.()
     record.status = "error"
     record.loadError = err?.message || String(err)
     throw err
@@ -310,6 +334,7 @@ export function ensurePackageLoaded(pkg) {
 
 /** Drop every contribution, style and cached load of the current host. */
 export function unloadUiExtensions() {
+  for (const record of extState.packages) record.dispose?.()
   unregisterAllContributions()
   closeOwnerSocket({ forget: true })
   removeStyles()

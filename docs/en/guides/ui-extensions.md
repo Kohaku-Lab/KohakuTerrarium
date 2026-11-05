@@ -135,6 +135,7 @@ export default defineExtension((kt) => {
 | Member | Purpose |
 |---|---|
 | `kt.package`, `kt.sdkVersion` | identity |
+| `kt.onDispose(callback)` | Register synchronous cleanup for package unload, reload, host switch or failed registration. Returns a function that unregisters the callback. Callbacks registered after disposal run immediately. |
 | `registerTab / registerPanel / registerRailGroup / registerSettingsSection / registerToolRenderer / registerTriggerRenderer / registerWidgetRenderer (id, component, options?)` | provide the component for a declared contribution. An undeclared id is added on the fly; runtime-owned kinds then need `options.owner`, and an undeclared widget needs `options.renderer`. `registerWidgetRenderer` also takes `version` and `surfaces` (`chat`, `canvas`, `side-panel`, `modal`). |
 | `kt.t(key, params)` | message from the package's i18n bundles (`{name}` interpolation) |
 | `kt.assetUrl(path)` | URL of a file under the UI root, with a currently valid token (tokens are renewed before they expire) |

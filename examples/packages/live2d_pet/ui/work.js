@@ -21,10 +21,12 @@ export function connectWork(
   const display = (work) => {
     behavior.setWork(work);
     if (behavior.working) interaction.activity();
-    badge.textContent = !work
+    const text = !work
       ? "未绑定会话 · 先打开一个聊天"
       : `${work.label} · ${work.connected ? WORK_LABELS[behavior.status] : "连接中，状态暂不可用"}`;
-    badge.dataset.status = work?.connected ? behavior.status : "idle";
+    const state = work?.connected ? behavior.status : "idle";
+    if (badge.textContent !== text) badge.textContent = text;
+    if (badge.dataset.status !== state) badge.dataset.status = state;
   };
   const receive = (event) => {
     const data = event.data;

@@ -1,3 +1,4 @@
+import { randomId } from "./id.js";
 // The trusted host fetches private resources using its existing credentials.
 // The renderer receives bytes only, bound to its exact navigation channel.
 export function importedResources(base, channel, origin, host = window.parent) {
@@ -23,7 +24,7 @@ export function importedResources(base, channel, origin, host = window.parent) {
       if (!target.href.startsWith(base) || target.search || target.hash)
         return Promise.reject(new Error("资源路径不合法。"));
       return new Promise((resolve, reject) => {
-        const id = crypto.randomUUID();
+        const id = randomId();
         const abort = () => finish(new Error("资源加载已取消。"));
         const timer = setTimeout(
           () => finish(new Error("资源读取超时，请重试。")),

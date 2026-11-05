@@ -130,14 +130,18 @@ export function connectCrop(getPlayer) {
   const history = new CropHistory();
   let last = -Infinity,
     previous = "",
-    sequence = 0;
-  function update(force = false) {
+    sequence = 0,
+    cachedModel = null;
+  function update(force = false, uiOnly = false) {
     const now = performance.now();
     if (document.hidden) return;
     const player = getPlayer();
-    if (!force && now - last < cropInterval(player)) return;
-    last = now;
-    const model = modelRectangle(player);
+    if (!uiOnly) {
+      if (!force && now - last < cropInterval(player)) return;
+      last = now;
+      cachedModel = modelRectangle(player);
+    }
+    const model = cachedModel;
     const visual = model?.visible;
     let headerOffset = 0;
     if (visual && document.body.classList.contains("debug")) {
@@ -195,7 +199,14 @@ export function connectCrop(getPlayer) {
     history.samples = [];
     update(true);
   };
-  const observer = new MutationObserver(refresh);
+  let uiRefresh = null;
+  const observer = new MutationObserver(() => {
+    if (uiRefresh !== null) return;
+    uiRefresh = requestAnimationFrame(() => {
+      uiRefresh = null;
+      update(false, true);
+    });
+  });
   for (const id of ["pet-menu", "work-status", "mini-hint", "status"]) {
     const element = document.getElementById(id);
     if (element)
@@ -216,6 +227,7 @@ export function connectCrop(getPlayer) {
     update,
     dispose() {
       observer.disconnect();
+      if (uiRefresh !== null) cancelAnimationFrame(uiRefresh);
       window.removeEventListener("resize", refresh);
     },
   };

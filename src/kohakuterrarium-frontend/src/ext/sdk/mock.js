@@ -122,6 +122,7 @@ export function createMockHost(options = {}) {
   const openedTabs = []
   const messages = options.messages || {}
   const routes = options.routes || {}
+  const disposers = new Set()
 
   async function call(method, path, data, config) {
     const clean = `/${String(path || "").replace(/^\/+/, "")}`
@@ -142,6 +143,10 @@ export function createMockHost(options = {}) {
     (id, component, opts = {}) =>
       registered[kind].set(id, { component, options: opts })
   const kt = {
+    onDispose(callback) {
+      disposers.add(callback)
+      return () => disposers.delete(callback)
+    },
     package: pkg,
     sdkVersion: SDK_VERSION,
     registerTab: provide("tab"),
@@ -262,6 +267,10 @@ export function createMockHost(options = {}) {
       const fn = typeof entry === "function" ? entry : entry?.default || entry?.register
       await fn(kt)
       return registered
+    },
+    dispose() {
+      for (const dispose of disposers) dispose()
+      disposers.clear()
     },
   }
   _current = host

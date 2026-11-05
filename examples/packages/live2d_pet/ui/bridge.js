@@ -1,3 +1,4 @@
+import { randomId } from "./id.js";
 import { defineComponent, ref, watch, onUnmounted } from "vue";
 import { useExtension, useWorkContext } from "@kohakuterrarium/ui-sdk";
 import { settingsFor } from "./settings-state.js";
@@ -14,15 +15,19 @@ export function bridgeFor(kt) {
     connection = ref(null),
     renderError = ref(""),
     status = ref("自动动作");
-  const peer = crypto.randomUUID();
+  const peer = randomId();
   const channel =
     typeof BroadcastChannel === "function"
       ? new BroadcastChannel(`kt.live2d.${key}`)
       : null;
   let applying = false,
+    closed = false,
     rendererAt = 0,
-    snapshotAt = 0;
+    snapshotAt = 0,
+    workPeer = null;
+  const retired = new Set();
   const send = (type, data) =>
+    !closed &&
     channel?.postMessage(JSON.parse(JSON.stringify({ type, data, peer })));
   const snapshot = () =>
     send("snapshot", { work: work.value, settings: settings.state.value });
@@ -35,8 +40,18 @@ export function bridgeFor(kt) {
   );
   if (channel)
     channel.onmessage = ({ data: packet }) => {
-      if (!packet || packet.peer === peer) return;
+      if (closed || !packet || packet.peer === peer || retired.has(packet.peer))
+        return;
       const { type, data } = packet;
+      if (type === "goodbye") {
+        retired.add(packet.peer);
+        if (retired.size > 256) retired.delete(retired.values().next().value);
+        if (desktop && workPeer === packet.peer) {
+          work.value = null;
+          command.value = { operation: "release", id: randomId() };
+        }
+        return;
+      }
       if (type === "hello" && !desktop) snapshot();
       if (type === "settings" || (type === "snapshot" && desktop)) {
         applying = true;
@@ -46,6 +61,7 @@ export function bridgeFor(kt) {
       if ((type === "snapshot" || type === "work") && desktop) {
         work.value = type === "snapshot" ? data.work : data;
         snapshotAt = Date.now();
+        workPeer = packet.peer;
       }
       if (type === "action") command.value = data;
       if (type === "renderer") {
@@ -58,7 +74,7 @@ export function bridgeFor(kt) {
     if (!desktop) snapshot();
     else if (Date.now() - snapshotAt > 15000) {
       work.value = null;
-      command.value = { operation: "release", id: crypto.randomUUID() };
+      command.value = { operation: "release", id: randomId() };
     }
     if (Date.now() - rendererAt > 12000) rendering.value = false;
   }, 5000);
@@ -73,27 +89,38 @@ export function bridgeFor(kt) {
     snapshot,
     sendWork: () => send("work", work.value),
     renderer(value, error = "") {
+      if (closed) return;
       rendering.value = value;
       renderError.value = error;
       rendererAt = Date.now();
       send("renderer", { ready: value, error });
     },
     perform(value) {
+      if (closed) return;
       command.value = value;
       send("action", value);
     },
     close() {
+      if (closed) return;
+      send("goodbye", null);
+      closed = true;
       stop();
       clearInterval(tick);
       channel?.close();
-      bridges.delete(key);
+      window.removeEventListener("pagehide", result.close);
+      work.value = null;
+      connection.value = null;
+      rendering.value = false;
+      command.value = null;
+      if (bridges.get(key) === result) bridges.delete(key);
     },
   };
   bridges.set(key, result);
   // A package on a newly selected host has a separate transport and no old state.
   for (const [old, bridge] of bridges) if (old !== key) bridge.close();
   send("hello");
-  window.addEventListener("pagehide", () => result.close(), { once: true });
+  window.addEventListener("pagehide", result.close, { once: true });
+  kt.onDispose?.(result.close);
   return result;
 }
 
@@ -103,18 +130,19 @@ export const PetBridge = defineComponent({
     const bridge = bridgeFor(kt);
     const settings = settingsFor(kt);
     const work = useWorkContext({ retainLast: true, includeSpeech: true });
-    let lease = crypto.randomUUID(),
+    let lease = randomId(),
       ownedLease = null;
     let disposed = false,
+      blocked = false,
       revision = 0,
       pending = Promise.resolve(),
       polling,
       pollAbort;
     const release = () => {
       bridge.connection.value = null;
-      bridge.perform({ operation: "release", id: crypto.randomUUID() });
+      bridge.perform({ operation: "release", id: randomId() });
     };
-    watch(
+    const stopWork = watch(
       work,
       (value) => {
         bridge.work.value = value;
@@ -140,10 +168,14 @@ export const PetBridge = defineComponent({
           const action = response.data.command;
           if (action && (!action.expiresAt || action.expiresAt > Date.now()))
             bridge.perform(action);
-        } catch {
-          if (generation === revision) {
+        } catch (error) {
+          if (generation === revision && !disposed) {
             bridge.status.value = "动作连接待恢复";
-            release();
+            if (error.response?.status === 409) {
+              blocked = true;
+              ownedLease = null;
+              bridge.connection.value = null;
+            } else release();
           }
           return;
         }
@@ -151,10 +183,11 @@ export const PetBridge = defineComponent({
     }
     function sync(changed = false) {
       if (changed) {
+        blocked = false;
         revision++;
-        lease = crypto.randomUUID();
+        lease = randomId();
         pollAbort?.abort();
-        release();
+        if (ownedLease) release();
         bridge.status.value = "正在连接…";
       }
       const generation = revision;
@@ -195,7 +228,11 @@ export const PetBridge = defineComponent({
                 : "自动动作";
               return;
             }
-            const response = await kt.api.post("binding", body);
+            if (blocked) return;
+            const response = await kt.api.post("binding", {
+              ...body,
+              renew: ownedLease === body.lease,
+            });
             ownedLease = body.lease;
             if (generation !== revision || disposed) return;
             bridge.connection.value = {
@@ -217,11 +254,15 @@ export const PetBridge = defineComponent({
             }
           } catch (error) {
             if (generation === revision) {
+              blocked = error.response?.status === 409;
               bridge.status.value =
                 body.mode === "agent" && error.response?.status === 409
-                  ? "请创建或打开龙娘对话。"
-                  : "动作连接不可用";
-              release();
+                  ? "请创建或打开龙娘对话，或关闭其他页面的主动表达。"
+                  : blocked
+                    ? "其他页面正在控制，或租约已过期；请重新启用主动表达。"
+                    : "动作连接不可用";
+              bridge.connection.value = null;
+              ownedLease = null;
             }
           }
         });
@@ -245,20 +286,24 @@ export const PetBridge = defineComponent({
     );
     // Work settlement must not truncate a gesture the agent just requested.
     // Real waiting still wins in the player and gates new backend requests.
-    watch(
+    const stopStatus = watch(
       () => work.value?.status,
       () => sync(),
     );
     const heartbeat = setInterval(() => {
       if (settings.state.value.agentControl) sync();
     }, 5000);
-    onUnmounted(() => {
+    const dispose = () => {
+      if (disposed) return;
       disposed = true;
       revision++;
       unwatch();
+      stopWork();
+      stopStatus();
       clearInterval(heartbeat);
       pollAbort?.abort();
-      release();
+      if (ownedLease) release();
+      bridge.close();
       void pending.finally(() =>
         ownedLease
           ? kt.api
@@ -266,7 +311,9 @@ export const PetBridge = defineComponent({
               .catch(() => {})
           : undefined,
       );
-    });
+    };
+    onUnmounted(dispose);
+    kt.onDispose?.(dispose);
     return () => null;
   },
 });

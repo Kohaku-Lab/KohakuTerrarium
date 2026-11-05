@@ -1,3 +1,4 @@
+import { connectRendererHealth } from "./renderer-health.js";
 import { connectAgentActions } from "./agent-actions.js";
 import { validateActionSet, configureActionCatalog } from "./action-catalog.js";
 import { connectSettings } from "./stage-settings.js?v=desktop-actions-1";
@@ -57,6 +58,7 @@ closeButton.addEventListener("click", () => {
   );
 });
 let player, interaction, idleTimer, defaultCatalog, resources;
+const health = connectRendererHealth(() => player);
 const crop = mini ? connectCrop(() => player) : null;
 
 function applySettings(settings) {
@@ -79,7 +81,12 @@ function applySettings(settings) {
     const channel = new URL(location.href).searchParams.get("channel");
     if (channel && document.referrer && parent !== window)
       parent.postMessage(
-        { type: "kt-live2d-actions-ready", channel, catalogKey: key, error },
+        {
+          type: "kt-live2d-actions-ready",
+          channel,
+          catalogKey: key,
+          error,
+        },
         new URL(document.referrer).origin,
       );
   }
@@ -127,6 +134,7 @@ const report = (message, data = {}) => {
   status.textContent = message;
   status.classList.toggle("error", Boolean(data.error));
   if (data.error) {
+    health.fail(message);
     controls.disabled = true;
     menuButton.disabled = true;
     closeMenu();
@@ -418,6 +426,7 @@ canvas.addEventListener("webglcontextlost", (event) => {
   }
 });
 window.addEventListener("pagehide", () => {
+  health.dispose();
   preferences.dispose();
   resources?.dispose();
   crop?.dispose();

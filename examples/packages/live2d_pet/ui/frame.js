@@ -1,3 +1,4 @@
+import { randomId } from "./id.js";
 import { defineComponent, h, ref, watch, onMounted, onUnmounted } from "vue";
 import { useExtension, useWorkContext } from "@kohakuterrarium/ui-sdk";
 import { validRegions, regionsClip } from "./crop.js";
@@ -13,7 +14,10 @@ export const PetFrame = defineComponent({
     const kt = useExtension();
     const preferences = settingsFor(kt);
     const bridge = bridgeFor(kt);
-    const localWork = useWorkContext({ retainLast: true, includeSpeech: true });
+    const localWork = useWorkContext({
+      retainLast: true,
+      includeSpeech: true,
+    });
     const work = bridge.desktop ? bridge.work : localWork;
     const frame = ref(null);
     const src = ref("");
@@ -31,7 +35,7 @@ export const PetFrame = defineComponent({
       actionError = "";
     let channel = "";
     let sequence = 0;
-    const instance = crypto.randomUUID();
+    const instance = randomId();
     function sendWork() {
       if (!ready || !src.value || !frame.value) return;
       const current = work.value;
@@ -106,7 +110,17 @@ export const PetFrame = defineComponent({
       },
       { flush: "sync" },
     );
-    let heartbeat;
+    let heartbeat,
+      lastAlive = 0;
+    function failRenderer(message) {
+      ready = false;
+      actionReady = false;
+      clearInterval(heartbeat);
+      resourceAbort.abort();
+      error.value = message;
+      src.value = "";
+      if (props.mini) bridge.renderer(false, message);
+    }
     function reportRegions() {
       const box = frame.value?.getBoundingClientRect();
       const parentBox = frame.value
@@ -201,6 +215,12 @@ export const PetFrame = defineComponent({
       )
         return;
       const data = event.data;
+      if (data?.type === "kt-live2d-health" && data.channel === channel) {
+        if (typeof data.error !== "string") return;
+        if (data.error) failRenderer(data.error);
+        else lastAlive = Date.now();
+        return;
+      }
       if (data?.type === "kt-live2d-menu-viewport") {
         if (
           !props.mini ||
@@ -293,13 +313,15 @@ export const PetFrame = defineComponent({
         if (Object.hasOwn(models, data.model))
           emit("model", { model: data.model, aspect: data.aspect });
         ready = true;
+        lastAlive = Date.now();
         if (props.mini) {
           bridge.renderer(actionReady, actionError);
           clearInterval(heartbeat);
-          heartbeat = setInterval(
-            () => bridge.renderer(actionReady, actionError),
-            4000,
-          );
+          heartbeat = setInterval(() => {
+            if (Date.now() - lastAlive > 10000)
+              failRenderer("渲染器连接已中断，请重试。");
+            else bridge.renderer(actionReady, actionError);
+          }, 4000);
         }
         sendSettings();
         sendWork();

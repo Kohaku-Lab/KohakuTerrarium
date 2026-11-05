@@ -126,3 +126,68 @@ it("places debug chrome around visible geometry without retaining the expanded m
   expect(rect.visible.top).toBeCloseTo(56)
   expect(rect.visible.bottom).toBeCloseTo(144)
 })
+
+it("keeps mesh scans throttled while speech and badge DOM updates stream", async () => {
+  vi.useFakeTimers()
+  history.replaceState(null, "", "/stage.html?channel=speech")
+  vi.spyOn(document, "referrer", "get").mockReturnValue("http://localhost/")
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false)
+  const parent = { postMessage: vi.fn() }
+  vi.stubGlobal("parent", parent)
+  document.body.innerHTML = '<span id="work-status"></span>'
+  const scan = vi.fn(() => [-0.3, -0.4, 0.3, 0.4])
+  const player = {
+    bounds: { left: -1, right: 1, top: 1, bottom: -1 },
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+    canvas: {
+      width: 100,
+      height: 100,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }),
+    },
+    model: {
+      getModel: () => ({
+        getDrawableCount: () => 1,
+        getDrawableOpacity: () => 1,
+        getDrawableVertices: scan,
+      }),
+    },
+  }
+  const { connectWork } = await import("../../../../examples/packages/live2d_pet/ui/work.js")
+  const behavior = { setWork() {}, status: "running" }
+  const disconnect = connectWork(behavior, { activity() {} }, "dragon", { followWork: false })
+  const crop = connectCrop(() => player)
+  try {
+    for (let i = 1; i <= 50; i++) {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: parent,
+          origin: "http://localhost",
+          data: {
+            type: "kt-live2d-work",
+            channel: "speech",
+            sequence: i,
+            work: {
+              connected: true,
+              status: "running",
+              label: "Agent",
+              speech: { text: String(i) },
+            },
+          },
+        }),
+      )
+      document.querySelector("#work-status").dataset.test = String(i)
+      await vi.advanceTimersByTimeAsync(10)
+      crop.update()
+    }
+    expect(scan.mock.calls.length).toBeLessThanOrEqual(3)
+  } finally {
+    crop.dispose()
+    disconnect()
+    document.body.innerHTML = ""
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    history.replaceState(null, "", "/")
+  }
+})

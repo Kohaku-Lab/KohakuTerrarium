@@ -97,6 +97,28 @@ describe("ui extension loader", () => {
     expect(api.post).toHaveBeenCalledTimes(1)
   })
 
+  it("disposes extension resources once on unload, including late registrations", async () => {
+    listing([pkg("alpha")])
+    await reloadUiExtensions()
+    let handle
+    const dispose = vi.fn()
+    setLoaderDeps({
+      importModule: async () => ({
+        default: (kt) => {
+          handle = kt
+          kt.onDispose(dispose)
+        },
+      }),
+    })
+    await ensurePackageLoaded("alpha")
+    unloadUiExtensions()
+    unloadUiExtensions()
+    expect(dispose).toHaveBeenCalledTimes(1)
+    const late = vi.fn()
+    handle.onDispose(late)
+    expect(late).toHaveBeenCalledTimes(1)
+  })
+
   it("never loads disabled, broken or incompatible packages", async () => {
     listing([
       pkg("off", { enabled: false }),

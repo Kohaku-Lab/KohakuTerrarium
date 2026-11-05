@@ -89,13 +89,19 @@ space outside them passes clicks and scrolling through. CPU mesh checks normally
 run at most five times per second, rising during pose transitions and wing beats
 to preserve moving edges. The current visible mesh rectangle replaces the old
 maximum-wing envelope; it expands immediately and holds shrinking edges for up
-to 200 ms. Space inside the rectangle, including between wings, still receives
+to 200 ms. DOM-only changes reuse cached geometry, and unchanged work badges
+are not rewritten for speech chunks. Space inside the rectangle, including between wings, still receives
 input. The same rectangles drive iframe clipping and native window hit testing.
 Transparent canvas margins may extend past the app edge; the desktop window can
 leave KT entirely. This is rectangular input cropping, not per-pixel clipping.
 Native resizing preserves the window's bottom center using native coordinates;
 model changes do not push the character sideways by the change in canvas width.
 Use Settings → Overlays → Reset position to bring a misplaced window back.
+Placement recovery uses native monitor coordinates (physical pixels on Windows,
+desktop points on macOS), never Chromium screen origins. Legacy unversioned
+placements are ignored. Older shells retain their previous resize path; native
+placement recovery requires a shell advertising `overlayPlacementV1`.
+
 
 ## Work and interaction
 
@@ -218,6 +224,14 @@ loads through KT's standard skill mechanism when needed; its body is not
 injected into every prompt. The UI does not select an LLM provider or preset.
 
 Authenticated routes bind one selected local creature to one visible renderer.
+Only one main page may own the control lease at a time. Other pages receive a
+conflict status; neither an initial background request nor a renewal steals an
+active lease. Disable control on the owning page before enabling it elsewhere.
+Renewals cannot recreate an expired lease. The renderer sends a real health
+heartbeat; failure or ten seconds without a heartbeat clears readiness and
+provides Retry. Extension disposal stops its watchers, timers and channels.
+Tool/skill updates retain the engine-managed graph context.
+
 A 20-second lease expires after the UI disappears. Switching models, catalogs,
 conversations or modes revokes old delivery; command IDs and deadlines reject
 replays. A new lease has a fresh queue so an old long poll cannot consume its
