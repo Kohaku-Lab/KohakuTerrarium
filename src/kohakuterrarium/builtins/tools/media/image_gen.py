@@ -42,7 +42,7 @@ class ImageGenTool(BaseTool):
 
     def __init__(self, config=None, *, client: CodexImageClient | None = None):
         super().__init__(config=config)
-        self.client = client or CodexImageClient()
+        self._client = client
         self.gif = False
         self.refresh_runtime_options(dict(self.config.extra))
 
@@ -128,10 +128,11 @@ class ImageGenTool(BaseTool):
         prompt = str(args.get("prompt") or "")
         try:
             images = await self._input_images(args, context)
+            client = self._client or _client_for(context)
             if images:
-                parts = await self.client.edit(prompt, images, **options)
+                parts = await client.edit(prompt, images, **options)
             else:
-                parts = await self.client.generate(prompt, **options)
+                parts = await client.generate(prompt, **options)
         except (
             ImageInputError,
             ValueError,
@@ -182,3 +183,13 @@ class ImageGenTool(BaseTool):
                 raise ImageInputError("the conversation is not available to this tool")
             return recent_image_urls(conversation.get_messages(), last)
         return []
+
+
+def _client_for(context: ToolContext | None) -> CodexImageClient:
+    """A client for the agent's own Codex backend (custom URL, API key), else the login."""
+    llm = getattr(getattr(context, "agent", None), "llm", None)
+    endpoint = getattr(llm, "image_endpoint", None)
+    if isinstance(endpoint, tuple):
+        base_url, api_key = endpoint
+        return CodexImageClient(base_url=base_url, api_key=api_key)
+    return CodexImageClient()

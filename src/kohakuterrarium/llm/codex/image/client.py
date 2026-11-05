@@ -82,11 +82,14 @@ class CodexImageClient:
     def __init__(
         self,
         *,
-        base_url: str = CODEX_BASE_URL,
+        base_url: str | None = None,
+        api_key: str | None = None,
         timeout: float = 600.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        """Use the ChatGPT login, or ``api_key`` against a custom ``base_url``."""
+        self.base_url = (base_url or CODEX_BASE_URL).rstrip("/")
+        self.api_key = api_key
         self.timeout = timeout
         self.transport = transport
 
@@ -127,12 +130,12 @@ class CodexImageClient:
     async def _post(
         self, path: str, body: dict[str, Any], operation: str
     ) -> list[ImagePart]:
-        tokens = await _valid_tokens()
+        tokens = None if self.api_key else await _valid_tokens()
         async with httpx.AsyncClient(
             timeout=self.timeout, transport=self.transport, follow_redirects=False
         ) as client:
             response = await self._send(client, path, body, tokens)
-            if response.status_code == 401:
+            if response.status_code == 401 and tokens is not None:
                 tokens = await _refreshed_tokens(tokens)
                 response = await self._send(client, path, body, tokens)
         if response.status_code >= 400:
@@ -144,10 +147,10 @@ class CodexImageClient:
         client: httpx.AsyncClient,
         path: str,
         body: dict[str, Any],
-        tokens: CodexTokens,
+        tokens: CodexTokens | None,
     ) -> httpx.Response:
-        headers = {"Authorization": f"Bearer {tokens.access_token}"}
-        if tokens.account_id:
+        headers = {"Authorization": f"Bearer {self.api_key or tokens.access_token}"}
+        if tokens is not None and tokens.account_id:
             headers["chatgpt-account-id"] = tokens.account_id
         try:
             return await client.post(

@@ -169,3 +169,33 @@ class TestRequests:
     async def test_no_login_names_the_command_to_run(self):
         with pytest.raises(LLMNotConfiguredError, match="kt login codex"):
             await _client(lambda request: httpx.Response(200, json=OK)).generate("x")
+
+
+class TestCustomBackend:
+    @pytest.mark.asyncio
+    async def test_an_api_key_and_base_url_replace_the_chatgpt_login(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request)
+            return httpx.Response(200, json=OK)
+
+        client = CodexImageClient(
+            base_url="https://corp.example/codex/",
+            api_key="sk-private",
+            transport=httpx.MockTransport(handler),
+        )
+        await client.generate("x")
+
+        assert str(seen[0].url) == "https://corp.example/codex/images/generations"
+        assert seen[0].headers["authorization"] == "Bearer sk-private"
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_api_key_is_reported_without_a_refresh(self):
+        client = CodexImageClient(
+            base_url="https://corp.example/codex",
+            api_key="bad",
+            transport=httpx.MockTransport(lambda request: httpx.Response(401, json={})),
+        )
+        with pytest.raises(CodexImageError, match="HTTP 401"):
+            await client.generate("x")

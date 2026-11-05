@@ -6,7 +6,7 @@ import io
 import pytest
 from PIL import Image
 
-from kohakuterrarium.builtins.tools.media.image_gen import ImageGenTool
+from kohakuterrarium.builtins.tools.media.image_gen import ImageGenTool, _client_for
 from kohakuterrarium.builtins.tools.media.image_inputs import (
     ImageInputError,
     file_data_url,
@@ -155,3 +155,23 @@ class TestInputs:
             Message(role="tool", content=[ImagePart(url=new)], tool_call_id="t"),
         ]
         assert recent_image_urls(messages, 2) == [new, old]
+
+
+class TestBackendSelection:
+    def test_a_custom_codex_backend_supplies_the_endpoint_and_key(self, tmp_path):
+        llm = type(
+            "L", (), {"image_endpoint": ("https://corp.example/codex", "sk-1")}
+        )()
+        context = _context(tmp_path)
+        context.agent.llm = llm
+        client = _client_for(context)
+        assert (client.base_url, client.api_key) == (
+            "https://corp.example/codex",
+            "sk-1",
+        )
+
+    def test_other_providers_use_the_chatgpt_login(self, tmp_path):
+        context = _context(tmp_path)
+        context.agent.llm = object()
+        client = _client_for(context)
+        assert client.api_key is None and client.base_url.endswith("/backend-api/codex")

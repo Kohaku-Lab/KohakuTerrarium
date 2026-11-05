@@ -133,6 +133,9 @@ the generated file into the session artifacts dir.
   `num_last_images_to_include` (1-5 recent conversation images); `gif`
   (`frame_count`, `frame_duration_ms`) when the tool option `gif: true` is set.
 - Size, quality and the still-image format are chosen by the backend.
+- A Codex backend with its own `base_url` / `api_key` (a private or enterprise
+  deployment) receives the requests at `{base_url}/images/generations` and
+  `/images/edits` with that key; it must serve those Codex Images endpoints.
 
 ### Interactive and memory
 

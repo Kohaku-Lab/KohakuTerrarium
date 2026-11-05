@@ -112,6 +112,11 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         self._reasoning = ResponsesReasoningCollector()
         self.prompt_cache_key: str | None = None
 
+    @property
+    def image_endpoint(self) -> tuple[str | None, str | None]:
+        """``(base_url, api_key)`` for image requests; both ``None`` on the ChatGPT login."""
+        return self._base_url, self._api_key
+
     async def ensure_authenticated(self) -> None:
         """Build the client from an API key or a valid OAuth token set."""
         if self._api_key:
