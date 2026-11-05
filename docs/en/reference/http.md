@@ -461,7 +461,7 @@ Serve a binary artifact stored under the session's sibling
 - Response is a `FileResponse` with MIME type guessed from the filename.
 
 This is the HTTP surface used to read generated images persisted by
-provider-native tools such as `image_gen`.
+tools such as `image_gen`.
 
 ---
 

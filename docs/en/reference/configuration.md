@@ -300,15 +300,14 @@ An implementation can set the `BaseTool.request_replay` class attribute to
 
 ```yaml
 tools:
-  - name: image_gen
-    type: builtin
+  - name: my_provider_tool
+    type: custom
     options:
       request_replay: forbid
 ```
 
-Programmatic construction uses `ImageGenTool(config=ToolConfig(request_replay="forbid"))`.
-Both classes are available from `kohakuterrarium.builtins.tools.media.image_gen` and
-`kohakuterrarium.modules.tool.base`, respectively. Custom and package tool
+Programmatic construction uses `MyTool(config=ToolConfig(request_replay="forbid"))`,
+with `ToolConfig` from `kohakuterrarium.modules.tool.base`. Custom and package tool
 configuration accepts the same reserved option without forwarding it to the
 tool constructor. There is no Studio control for this field.
 
@@ -318,9 +317,8 @@ removes this field from outgoing HTTP and WebSocket tool specifications;
 invalid declarations are rejected. The selected policy is fixed for the
 request's WebSocket attempts; edits apply to subsequent requests.
 
-The default `image_gen` policy accepts possible duplicate generation, additional
-cost, and different output on replay. Images from failed WebSocket attempts are
-discarded, and image results are published only after the successful attempt.
+Images from failed WebSocket attempts are discarded, and image results are
+published only after the successful attempt.
 Merely supporting the Responses background API does not enable background mode.
 Only an actual top-level `background: true` request activates that separate guard.
 
@@ -397,7 +395,8 @@ Tool types:
 Provider-native tools are auto-injected from the active backend's
 `provider_native_tools` declaration. The creature does not need to list
 such a tool under `tools:` unless it wants to override per-tool knobs.
-The shipped example is `image_gen` for Codex-backed creatures.
+The shipped example is `image_gen` for Codex-backed creatures (an ordinary tool
+the Codex backend offers).
 
 Shorthand:
 

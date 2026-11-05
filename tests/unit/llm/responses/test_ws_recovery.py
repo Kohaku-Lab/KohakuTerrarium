@@ -8,11 +8,11 @@ import httpx
 from openai import APIConnectionError
 
 from kohakuterrarium.bootstrap.tools import create_tool
-from kohakuterrarium.builtins.tools.media.image_gen import ImageGenTool
 from kohakuterrarium.core.config.types import ToolConfigItem
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.recovery.status import observe_model_recovery
 from kohakuterrarium.llm.responses.ws import ResponsesWSError
+from tests.helpers.native_image_gen import NativeImageGenTool
 from tests.unit.llm.codex.test_provider import _FakeWSClient
 from tests.unit.llm.openai.test_ws import MESSAGES, make_provider
 from tests.unit.llm.responses.test_ws import (
@@ -24,7 +24,10 @@ from tests.unit.llm.responses.test_ws import (
     completed,
 )
 
-pytestmark = pytest.mark.real_llm_provider
+pytestmark = [
+    pytest.mark.real_llm_provider,
+    pytest.mark.usefixtures("native_image_gen"),
+]
 
 
 @pytest.mark.parametrize("shape", ["dict", "object", "flat", "mixed"])
@@ -253,7 +256,10 @@ async def test_image_results_are_private_until_successful_attempt(provider):
     # The registered native list wins over raw extra_body tools on this path.
     provider.extra_body["tools"] = [{"type": "mcp", "request_replay": "forbid"}]
     assert [
-        x async for x in provider.chat(MESSAGES, provider_native_tools=[ImageGenTool()])
+        x
+        async for x in provider.chat(
+            MESSAGES, provider_native_tools=[NativeImageGenTool()]
+        )
     ] == []
     assert observed == [[]]
     assert [part.source_name for part in provider.last_assistant_content_parts] == [

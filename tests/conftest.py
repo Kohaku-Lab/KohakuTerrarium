@@ -351,3 +351,26 @@ def _block_network(request):
     _NETWORK_GUARD["blocked"] = request.node.get_closest_marker("allow_network") is None
     yield
     _NETWORK_GUARD["blocked"] = False
+
+
+@pytest.fixture
+def native_image_gen(monkeypatch):
+    """Make ``image_gen`` provider-native (catalog and Codex translation).
+
+    The shipped tool runs locally, so tests of the native-tool machinery opt in.
+    """
+    from kohakuterrarium.builtins import tool_catalog
+    from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
+    from tests.helpers.native_image_gen import (
+        NativeImageGenTool,
+        translate_image_gen_tool,
+    )
+
+    tool_catalog.get_builtin_tool("bash")
+    monkeypatch.setitem(tool_catalog._BUILTIN_TOOLS, "image_gen", NativeImageGenTool)
+    monkeypatch.setattr(
+        CodexOAuthProvider,
+        "translate_provider_native_tool",
+        lambda self, tool: translate_image_gen_tool(tool),
+    )
+    return NativeImageGenTool

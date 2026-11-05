@@ -75,7 +75,6 @@ class TestCreateToolBuiltin:
         tool = create_tool(cfg, None, strict=True)
         assert tool.config.request_replay == "forbid"
         assert "request_replay" not in tool.config.extra
-        assert "request_replay" not in tool.provider_native_options()
 
     def test_invalid_replay_override_is_rejected(self):
         cfg = ToolConfigItem(name="image_gen", options={"request_replay": "maybe"})

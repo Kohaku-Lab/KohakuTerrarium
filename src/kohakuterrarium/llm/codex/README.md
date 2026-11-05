@@ -16,7 +16,7 @@ codex/
 ├── presets.py         model presets (pure data)
 └── image/
     ├── budget.py      outbound image limits, image-count rejection recognition
-    └── gen.py         image-generation request/response translation
+    └── client.py      standalone Images endpoints (generate / edit) with the Codex login
 ```
 
 Shared Responses-API transport (`responses_ws.py`, `responses_reasoning.py`,

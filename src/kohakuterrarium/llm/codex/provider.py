@@ -34,9 +34,6 @@ from kohakuterrarium.llm.codex.image.budget import (
     limit_codex_images,
     reported_image_limit,
 )
-from kohakuterrarium.llm.codex.image.gen import (
-    translate_image_gen_tool,
-)
 from kohakuterrarium.llm.codex.rate_limits import (
     capture_rate_limit_headers as _capture_rate_limit_headers,
 )
@@ -231,10 +228,6 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         """Return generated images and other structured parts from the last turn."""
         return self._last_assistant_parts or None
 
-    def translate_provider_native_tool(self, tool: Any) -> dict | None:
-        """Translate supported native tools into Codex Responses schemas."""
-        return translate_image_gen_tool(tool)
-
     def with_model(self, name: str) -> "CodexOAuthProvider":
         """Return a sibling Codex provider preserving tokens/client."""
         if not name or name == self.model:
@@ -426,8 +419,6 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                 for t in tools
             ]
 
-        # The requested format determines the data URL media extension on output.
-        self._image_gen_output_format: str = "png"
         if provider_native_tools:
             for native in provider_native_tools:
                 spec = self.translate_provider_native_tool(native)
@@ -435,8 +426,6 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                     continue
                 spec = {**spec, "request_replay": tool_request_replay(native)}
                 api_tools = (api_tools or []) + [spec]
-                if spec.get("type") == "image_generation":
-                    self._image_gen_output_format = spec.get("output_format", "png")
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(

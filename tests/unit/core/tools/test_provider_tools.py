@@ -1,3 +1,5 @@
+import pytest
+
 """Unit tests for live provider-tool synchronization."""
 
 from types import SimpleNamespace
@@ -7,6 +9,8 @@ from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.tools.provider_tools import sync_provider_tools
 from kohakuterrarium.core.registry import Registry
+
+pytestmark = pytest.mark.usefixtures("native_image_gen")
 
 
 def _agent(*, provider="", offered=(), configured=()):

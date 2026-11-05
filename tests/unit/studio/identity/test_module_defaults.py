@@ -12,6 +12,8 @@ from kohakuterrarium.studio.identity.module_defaults import (
 )
 from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 
+pytestmark = pytest.mark.usefixtures("native_image_gen")
+
 
 def test_catalog_and_partial_saves_preserve_other_defaults():
     assert load_defaults() == {}

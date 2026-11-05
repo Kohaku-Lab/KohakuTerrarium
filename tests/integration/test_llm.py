@@ -2561,11 +2561,10 @@ class TestLlmIntegration:
                         )
                         assert creature.agent.scratchpad.get("discarded") is None
                         assert creature.agent.scratchpad.get("once") == "kept"
-                        if provider_type is CodexOAuthProvider:
-                            assert any(
-                                tool["type"] == "image_generation"
-                                for tool in submissions[0]["tools"]
-                            )
+                        assert not any(
+                            tool["type"] == "image_generation"
+                            for tool in submissions[0].get("tools", [])
+                        )
                         assert all(
                             "request_replay" not in tool
                             for tool in submissions[0].get("tools", [])

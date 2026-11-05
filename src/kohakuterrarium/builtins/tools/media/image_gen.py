@@ -1,118 +1,50 @@
-"""Describe Codex-native image generation to the provider layer.
+"""Generate and edit images through the Codex subscription's Images endpoints."""
 
-The provider executes this opt-out tool directly; the ordinary tool runner
-never invokes it. Explicit configuration overrides provider defaults.
-"""
+import asyncio
+from typing import Any, ClassVar
 
-from typing import Any
-
+from kohakuterrarium.builtins.tools.media.image_inputs import (
+    ImageInputError,
+    file_data_url,
+    recent_image_urls,
+)
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.core.tools.native_validation import validate_native_tool_options
-from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.errors import LLMNotConfiguredError
+from kohakuterrarium.llm.codex.image.client import (
+    GIF_FRAME_MS,
+    GIF_FRAMES,
+    MAX_EDIT_IMAGES,
+    CodexImageClient,
+    CodexImageError,
+)
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ToolContext,
+    ToolResult,
+    resolve_tool_path,
+)
+
+_GUIDANCE = (
+    "image_gen needs a minute or more per image. Generate directly, without asking "
+    "to confirm. Always edit existing images with image_gen, never with python or "
+    "bash. For an edit, list the target files in referenced_image_paths; use "
+    "num_last_images_to_include only for images that have no file. If you have not "
+    "seen a local image yet, read it first."
+)
 
 
 @register_builtin("image_gen")
 class ImageGenTool(BaseTool):
-    """Codex-native image generation (text-to-image + image edit)."""
+    """Text-to-image and image editing with the model Codex uses."""
 
-    is_provider_native = True
-    provider_support = frozenset({"codex"})
+    needs_context = True
+    path_arguments: ClassVar[dict[str, str]] = {"referenced_image_paths": "read"}
 
-    @classmethod
-    def provider_native_option_schema(cls) -> dict[str, dict[str, Any]]:
-        return {
-            "output_format": {
-                "type": "enum",
-                "values": ["png", "webp", "jpeg"],
-                "default": "png",
-                "label": "Output format",
-                "description": "Image file format the provider returns.",
-            },
-            "size": {
-                # Suggestions are non-exhaustive; runtime validation permits future
-                # dimensions while retaining bounded WIDTHxHEIGHT syntax.
-                "type": "string",
-                "suggestions": [
-                    "auto",
-                    "1024x1024",
-                    "1024x1536",
-                    "1536x1024",
-                    "2048x2048",
-                ],
-                "default": "auto",
-                "placeholder": "auto or WIDTHxHEIGHT",
-                "label": "Size",
-                "max_length": 32,
-                "description": "Output dimensions; auto lets the provider choose.",
-            },
-            "quality": {
-                "type": "enum",
-                "values": ["auto", "low", "medium", "high"],
-                "default": "auto",
-                "label": "Quality",
-                "description": "Render quality; higher costs more.",
-            },
-            "background": {
-                "type": "enum",
-                "values": ["auto", "transparent", "opaque"],
-                "default": "auto",
-                "label": "Background",
-                "description": "Transparent only applies to PNG/WebP.",
-            },
-            "action": {
-                "type": "enum",
-                "values": ["auto", "generate", "edit"],
-                "default": "auto",
-                "label": "Action",
-                "description": "Force generate vs edit; auto routes by attached input image.",
-            },
-        }
-
-    def __init__(
-        self,
-        *,
-        output_format: str | None = None,
-        action: str | None = None,
-        size: str | None = None,
-        quality: str | None = None,
-        background: str | None = None,
-        config: Any = None,
-    ) -> None:
+    def __init__(self, config=None, *, client: CodexImageClient | None = None):
         super().__init__(config=config)
-        # Explicit constructor values must remain highest priority after profile
-        # options are merged into ``ToolConfig.extra``.
-        self._explicit_kwargs: dict[str, Any] = {
-            "output_format": output_format,
-            "action": action,
-            "size": size,
-            "quality": quality,
-            "background": background,
-        }
-        self.refresh_native_options()
-
-    def refresh_native_options(self) -> None:
-        """Resolve validated native options using configuration precedence."""
-        extra = getattr(self.config, "extra", {}) or {}
-        kwargs = self._explicit_kwargs
-
-        def _pick(key: str) -> Any:
-            if kwargs.get(key) is not None:
-                return kwargs[key]
-            return extra.get(key)
-
-        raw_options: dict[str, Any] = {"output_format": _pick("output_format") or "png"}
-        for key in ("action", "size", "quality", "background"):
-            value = _pick(key)
-            if value not in (None, ""):
-                raw_options[key] = value
-        validated = validate_native_tool_options(
-            "image_gen", raw_options, self.provider_native_option_schema()
-        )
-        self.output_format = validated.get("output_format") or "png"
-        self.action = validated.get("action")
-        self.size = validated.get("size")
-        self.quality = validated.get("quality")
-        self.background = validated.get("background")
+        self.client = client or CodexImageClient()
+        self.gif = False
+        self.refresh_runtime_options(dict(self.config.extra))
 
     @property
     def tool_name(self) -> str:
@@ -126,30 +58,127 @@ class ImageGenTool(BaseTool):
             "source."
         )
 
-    @property
-    def execution_mode(self) -> ExecutionMode:
-        # A defensive dispatch must remain synchronous rather than becoming a job.
-        return ExecutionMode.DIRECT
+    def prompt_contribution(self) -> str | None:
+        return _GUIDANCE
 
-    async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
-        """Report an invariant violation if provider-native dispatch leaks here."""
+    def runtime_option_schema(self) -> dict[str, dict[str, Any]]:
+        return {
+            "gif": {
+                "type": "bool",
+                "default": False,
+                "doc": "Offer animated GIF output (needs a backend with GIF enabled).",
+            }
+        }
+
+    def refresh_runtime_options(self, options: dict[str, Any]) -> None:
+        self.gif = bool(options.get("gif", False))
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        properties: dict[str, Any] = {
+            "prompt": {
+                "type": "string",
+                "description": "Image instructions: a scene to create, or the changes to make",
+            },
+            "transparent_background": {
+                "type": "boolean",
+                "description": "Transparent background, for cutouts and stickers (default false)",
+            },
+            "referenced_image_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": MAX_EDIT_IMAGES,
+                "description": "Local images to edit",
+            },
+            "num_last_images_to_include": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": MAX_EDIT_IMAGES,
+                "description": "Edit the most recent conversation images instead of files",
+            },
+        }
+        if self.gif:
+            properties["gif"] = {
+                "type": "object",
+                "description": "Make a looping GIF; {} keeps the defaults",
+                "properties": {
+                    "frame_count": {
+                        "type": "integer",
+                        "minimum": GIF_FRAMES[0],
+                        "maximum": GIF_FRAMES[1],
+                    },
+                    "frame_duration_ms": {
+                        "type": "integer",
+                        "minimum": GIF_FRAME_MS[0],
+                        "maximum": GIF_FRAME_MS[1],
+                    },
+                },
+            }
+        return {"type": "object", "properties": properties, "required": ["prompt"]}
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None, **kwargs: Any
+    ) -> ToolResult:
+        gif = args.get("gif")
+        if gif is not None and not self.gif:
+            return ToolResult(error="GIF output is not enabled for image_gen")
+        options = {
+            "transparent_background": bool(args.get("transparent_background", False)),
+            "gif": gif,
+        }
+        prompt = str(args.get("prompt") or "")
+        try:
+            images = await self._input_images(args, context)
+            if images:
+                parts = await self.client.edit(prompt, images, **options)
+            else:
+                parts = await self.client.generate(prompt, **options)
+        except (
+            ImageInputError,
+            ValueError,
+            CodexImageError,
+            LLMNotConfiguredError,
+        ) as exc:
+            return ToolResult(error=str(exc))
         return ToolResult(
-            error=(
-                "image_gen is provider-native; if you see this error the "
-                "tool runner dispatched it by accident. Filter provider-"
-                "native tools before execution."
-            )
+            output=parts,
+            metadata={
+                "image_count": len(parts),
+                "edited_images": len(images),
+                "_image_artifact_subdir": "generated_images",
+            },
         )
 
-    def provider_native_options(self) -> dict[str, Any]:
-        """Return configured wire options while preserving provider defaults."""
-        opts: dict[str, Any] = {"output_format": self.output_format}
-        if self.action:
-            opts["action"] = self.action
-        if self.size:
-            opts["size"] = self.size
-        if self.quality:
-            opts["quality"] = self.quality
-        if self.background:
-            opts["background"] = self.background
-        return opts
+    async def _input_images(
+        self, args: dict[str, Any], context: ToolContext | None
+    ) -> list[str]:
+        paths = args.get("referenced_image_paths") or []
+        last = args.get("num_last_images_to_include")
+        if paths and last is not None:
+            raise ImageInputError(
+                "provide only one of referenced_image_paths or num_last_images_to_include"
+            )
+        if paths:
+            if len(paths) > MAX_EDIT_IMAGES:
+                raise ImageInputError(
+                    f"referenced_image_paths takes at most {MAX_EDIT_IMAGES} paths"
+                )
+            resolved = [resolve_tool_path(str(path), context) for path in paths]
+            return [await asyncio.to_thread(file_data_url, path) for path in resolved]
+        if last is not None:
+            if isinstance(last, bool) or not isinstance(last, int):
+                raise ImageInputError(
+                    "num_last_images_to_include must be a whole number"
+                )
+            if not 1 <= last <= MAX_EDIT_IMAGES:
+                raise ImageInputError(
+                    f"num_last_images_to_include must be from 1 to {MAX_EDIT_IMAGES}"
+                )
+            conversation = getattr(
+                getattr(getattr(context, "agent", None), "controller", None),
+                "conversation",
+                None,
+            )
+            if conversation is None:
+                raise ImageInputError("the conversation is not available to this tool")
+            return recent_image_urls(conversation.get_messages(), last)
+        return []

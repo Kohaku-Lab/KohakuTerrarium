@@ -228,7 +228,7 @@ tools:
 
 See [Custom Modules](custom-modules.md) for the protocol.
 
-Provider-native tools can also appear automatically. For example, a
+Provider-offered tools can also appear automatically. For example, a
 Codex-backed creature gets `image_gen` injected unless you opt out:
 
 ```yaml
@@ -236,7 +236,7 @@ disable_provider_tools:
   - image_gen
 ```
 
-If you want to keep the provider-native tool but override its knobs, wire it
+If you want to keep the tool but override its knobs, wire it
 explicitly under `tools:`; the explicit entry wins over auto-injection.
 
 ## How do I add a sub-agent?

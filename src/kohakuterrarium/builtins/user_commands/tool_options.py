@@ -18,7 +18,7 @@ class ToolOptionsCommand(BaseUserCommand):
     aliases = ["tool-options", "tooloptions"]
     description = (
         "View or override provider-native tool options for this session "
-        "(e.g. /tool_options image_gen size=2048x2048 quality=high)"
+        "(e.g. /tool_options <tool> <option>=<value>)"
     )
     layer = CommandLayer.AGENT
 

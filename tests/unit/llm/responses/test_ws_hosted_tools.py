@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from kohakuterrarium.builtins.tools.media.image_gen import ImageGenTool
+from tests.helpers.native_image_gen import NativeImageGenTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.responses import ws as responses_ws
@@ -31,7 +31,10 @@ from tests.unit.llm.responses.test_ws import (
     completed,
 )
 
-pytestmark = pytest.mark.real_llm_provider
+pytestmark = [
+    pytest.mark.real_llm_provider,
+    pytest.mark.usefixtures("native_image_gen"),
+]
 
 FUNC = {"type": "function", "name": "read", "parameters": {}}
 IMAGE = {"type": "image_generation"}
@@ -349,7 +352,10 @@ async def test_shared_codex_provider_worker_then_controller():
     pool = provider._client.responses
     _ = [x async for x in provider.chat(MESSAGES)]
     _ = [
-        x async for x in provider.chat(MESSAGES, provider_native_tools=[ImageGenTool()])
+        x
+        async for x in provider.chat(
+            MESSAGES, provider_native_tools=[NativeImageGenTool()]
+        )
     ]
     worker, controller = pool.connections
     assert worker.closed and len(worker.sent) == 1
@@ -378,7 +384,9 @@ async def test_inherited_subagent_runs_on_its_own_connection():
     async def controller_turn():
         return [
             x
-            async for x in parent.chat(MESSAGES, provider_native_tools=[ImageGenTool()])
+            async for x in parent.chat(
+                MESSAGES, provider_native_tools=[NativeImageGenTool()]
+            )
         ]
 
     async def worker_turn():

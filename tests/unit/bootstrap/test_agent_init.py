@@ -26,6 +26,8 @@ from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT
 from kohakuterrarium.testing.output import OutputRecorder
 
+pytestmark = pytest.mark.usefixtures("native_image_gen")
+
 
 class _FakeLLM:
     """Minimal LLM stand-in carrying the provider-identity attributes

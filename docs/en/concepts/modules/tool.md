@@ -55,8 +55,9 @@ There are now two broad tool families:
 - **Provider-native tools**: the provider performs the capability itself.
   The tool still appears in the registry and prompt, but the executor must
   not run it. Instead the LLM provider translates it into its own wire-format
-  tool declaration and returns structured content back. `image_gen` on Codex
-  is the shipped example.
+  tool declaration and returns structured content back. Codex's hosted
+  tools and `web_search` on Codex are the typical cases; no built-in tool
+  is provider-native today.
 
 Execution modes:
 
@@ -97,7 +98,7 @@ Built-in tools include shell (`bash`), Python (`python`), file ops
 `tree`), JSON (`json_read`, `json_write`), web (`web_fetch`,
 `web_search`), communication (`send_message`), memory (`scratchpad`,
 `search_memory`), introspection (`info`, `stop_task`), provider-native
-media (`image_gen` on supported providers), and graph management
+media (`image_gen` with a Codex login), and graph management
 (`group_add_node`, `group_channel`, `group_wire`, …; registered on
 privileged nodes only).
 
@@ -120,9 +121,10 @@ privileged nodes only).
   hints are aggregated deterministically between the tool list and the
   framework hints.
 - **Tools that are provider capabilities.** A tool can be real to the
-  model but virtual to the runtime: `image_gen` is registered like a tool,
-  yet Codex performs image generation itself and the framework persists the
-  returned artifact into the session.
+  model but virtual to the runtime: a provider-native tool is registered
+  like any tool, yet the provider performs it and the framework persists
+  the returned artifact into the session. `image_gen` is an ordinary tool
+  that calls the Codex Images endpoints, so it also works on other models.
 - **Tools that wrap sub-agents.** Any sub-agent invocation is itself
   tool-shaped, because the LLM calls it by name with args.
 - **Tools that run agents.** Because tools are plain Python, a tool can

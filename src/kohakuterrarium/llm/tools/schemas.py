@@ -530,16 +530,6 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["path"],
     },
-    "image_gen": {
-        "type": "object",
-        "properties": {
-            "prompt": {
-                "type": "string",
-                "description": "Text prompt describing the image to generate.",
-            },
-        },
-        "required": ["prompt"],
-    },
     "group_status": {
         "type": "object",
         "properties": {

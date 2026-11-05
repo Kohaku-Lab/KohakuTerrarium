@@ -1,40 +1,9 @@
-"""Unit tests for ``llm/codex/image/gen.py`` — image-gen translation.
-
-Behavior-first: assert the exact wire-format spec produced for an
-image_gen tool, the None return for non-image-gen tools, the minimal
-fallback path, and the ImagePart built from a Codex
+"""Unit tests for ``llm/codex/image/gen.py``: the ImagePart built from a Codex
 ``image_generation_call`` item (including the no-result → None rule).
 """
 
-from kohakuterrarium.llm.codex.image.gen import (
-    build_image_part,
-    translate_image_gen_tool,
-)
+from kohakuterrarium.llm.codex.image.gen import build_image_part
 from kohakuterrarium.llm.message import ImagePart
-
-
-class _ToolWithOptions:
-    tool_name = "image_gen"
-
-    @staticmethod
-    def provider_native_option_schema():
-        return {
-            "output_format": {"type": "string"},
-            "size": {"type": "string"},
-        }
-
-    def provider_native_options(self):
-        return {"output_format": "webp", "size": "1024x1024"}
-
-
-class _BareTool:
-    """An image_gen tool subclassed without the options helper."""
-
-    tool_name = "image_gen"
-
-
-class _OtherTool:
-    tool_name = "bash"
 
 
 class _ImageItem:
@@ -42,27 +11,6 @@ class _ImageItem:
         self.result = result
         self.id = item_id
         self.revised_prompt = revised_prompt
-
-
-class TestTranslateImageGenTool:
-    def test_non_image_gen_tool_returns_none(self):
-        assert translate_image_gen_tool(_OtherTool()) is None
-
-    def test_image_gen_tool_options_merged_into_spec(self):
-        spec = translate_image_gen_tool(_ToolWithOptions())
-        assert spec["type"] == "image_generation"
-        assert spec["output_format"] == "webp"
-        assert spec["size"] == "1024x1024"
-
-    def test_bare_tool_falls_back_to_png(self):
-        spec = translate_image_gen_tool(_BareTool())
-        assert spec == {"type": "image_generation", "output_format": "png"}
-
-    def test_tool_without_tool_name_attr_uses_name_attr(self):
-        class _NameOnly:
-            name = "bash"
-
-        assert translate_image_gen_tool(_NameOnly()) is None
 
 
 class TestBuildImagePart:

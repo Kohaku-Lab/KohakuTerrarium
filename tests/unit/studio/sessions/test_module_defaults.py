@@ -11,6 +11,8 @@ from kohakuterrarium.studio.sessions.module_defaults import initialize_modules
 from kohakuterrarium.terrarium import Terrarium, LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 
+pytestmark = pytest.mark.usefixtures("native_image_gen")
+
 
 @pytest.mark.parametrize("turn_budget", [{"hard": 40}, [20, 40]])
 async def test_defaults_respect_creature_options_and_do_not_add_tools(

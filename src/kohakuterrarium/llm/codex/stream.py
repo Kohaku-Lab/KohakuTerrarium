@@ -3,12 +3,12 @@
 from contextlib import aclosing
 from typing import Any, AsyncIterator
 
+from kohakuterrarium.llm.codex.image.gen import build_image_part
 from kohakuterrarium.llm.codex.format import (
     fix_tool_call_pairing,
     maybe_capture_stream_rate_limit,
 )
 from kohakuterrarium.llm.base import NativeToolCall
-from kohakuterrarium.llm.codex.image.gen import build_image_part
 from kohakuterrarium.llm.codex.rate_limits import (
     parse_rate_limit_event,
     UsageSnapshot,
@@ -105,7 +105,9 @@ def process_codex_event(
                 )
             elif itype == "image_generation_call":
                 # Image bytes are available before the item status completes.
-                part = build_image_part(item, provider._image_gen_output_format)
+                part = build_image_part(
+                    item, getattr(item, "output_format", None) or "png"
+                )
                 if part is not None:
                     target = (
                         provider._last_assistant_parts

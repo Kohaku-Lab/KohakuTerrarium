@@ -1654,9 +1654,8 @@ class TestStudioIntegration:
             # carries a ``name`` selector.
             all_models = studio.identity.llm.list_models()
             assert all_models and all("name" in m for m in all_models)
-            # Native-tool descriptors are a fixed catalog.
-            native_tools = studio.identity.llm.list_native_tools()
-            assert native_tools and all("name" in t for t in native_tools)
+            # No shipped tool is provider-native (image_gen runs locally).
+            assert studio.identity.llm.list_native_tools() == []
 
             # --- identity.llm: delete the user backend ------------------
             assert studio.identity.llm.delete_backend("acme") is True
