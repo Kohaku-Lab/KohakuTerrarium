@@ -229,7 +229,7 @@ kt install ./examples/packages/live2d_pet -e --no-deps
 The dragon is bundled at 2K and 4K and works immediately. DeepSeek's adapter
 is included, but its model files must be imported separately.
 
-In **Settings → Extensions → Live2D**:
+In **Settings → Extensions → Live2D 宠物**:
 
 1. Check **已有适配器** (available adapters). Every registered adapter appears,
    including models whose resources have not been imported. The status shows
@@ -252,8 +252,8 @@ unpacked and 512 entries. Missing resources show an import hint; a failed
 validation/conversion leaves the previously imported version selected.
 
 Resources are scoped to the current KT host and user. A failed replacement leaves
-installed resources unchanged. No account credentials or model files enter the
-repository. Runtime and import responsibilities are described in
+installed resources unchanged. Imported model files and account credentials are
+not added to the repository. Runtime and import responsibilities are described in
 [Adding a model adapter](ADAPTERS.md).
 
 The distributable extension occupies approximately **44.4 MiB** uncompressed,
