@@ -9,6 +9,87 @@ import { settingsFor } from "../../../../examples/packages/live2d_pet/ui/setting
 
 afterEach(() => vi.useRealTimers())
 
+it("recovers an unclaimed controller after reload or expiry without making observers owners", async () => {
+  const routes = controllerRoutes()
+  const old = createOwnership(createMockHost({ routes }).kt, "old-page", false, () => {})
+  const recovered = vi.fn()
+  const reloaded = createOwnership(createMockHost({ routes }).kt, "reloaded", false, recovered)
+  const observerHost = createMockHost({ routes })
+  const observer = createOwnership(observerHost.kt, "native-overlay", true, () => {})
+  const contender = createOwnership(createMockHost({ routes }).kt, "other-page", false, () => {})
+  const expire = () =>
+    routes["POST /controller"]({
+      data: { ...routes["GET /controller"]().controller, operation: "release" },
+    })
+  try {
+    await old.start()
+    await reloaded.start()
+    await reloaded.tick()
+    expect(reloaded.owned.value).toBe(false)
+    old.dispose()
+    await flushPromises()
+    await observer.start()
+    await observer.tick()
+    expect(observer.owned.value).toBe(false)
+    expect(observerHost.requests.every((r) => r.method === "GET")).toBe(true)
+    await Promise.all([reloaded.tick(), reloaded.tick()])
+    expect(reloaded.owned.value).toBe(true)
+    expect(recovered).toHaveBeenCalledTimes(1)
+    const token = reloaded.current.value.token
+    await reloaded.tick()
+    expect(reloaded.current.value.token).toBe(token)
+    expect(recovered).toHaveBeenCalledTimes(1)
+    expire()
+    await reloaded.tick()
+    expect(reloaded.owned.value).toBe(true)
+    expect(reloaded.current.value.token).not.toBe(token)
+    expect(recovered).toHaveBeenCalledTimes(2)
+    await contender.start()
+    expire()
+    await Promise.all([reloaded.tick(), contender.tick()])
+    expect(Number(reloaded.owned.value) + Number(contender.owned.value)).toBe(1)
+    const owner = routes["GET /controller"]().controller
+    await reloaded.tick()
+    await contender.tick()
+    expect(routes["GET /controller"]().controller).toEqual(owner)
+  } finally {
+    old.dispose()
+    reloaded.dispose()
+    contender.dispose()
+    observer.dispose()
+  }
+})
+
+it("does not claim after a failed ownership check or disposal during a check", async () => {
+  const routes = controllerRoutes()
+  const old = createOwnership(createMockHost({ routes }).kt, "old", false, () => {})
+  let read = () => {
+    throw new Error("offline")
+  }
+  const host = createMockHost({ routes: { ...routes, "GET /controller": () => read() } })
+  const reloaded = createOwnership(host.kt, "reloaded", false, () => {})
+  try {
+    await old.start()
+    await reloaded.start()
+    old.dispose()
+    await flushPromises()
+    await reloaded.tick()
+    expect(reloaded.status.value).toBe("offline")
+    expect(reloaded.owned.value).toBe(false)
+    let finish
+    read = () => new Promise((resolve) => (finish = resolve))
+    const pending = reloaded.tick()
+    reloaded.dispose()
+    finish({ controller: null })
+    await pending
+    expect(reloaded.status.value).toBe("disposed")
+    expect(host.requests.filter((r) => r.data?.operation === "claim")).toHaveLength(1)
+  } finally {
+    old.dispose()
+    reloaded.dispose()
+  }
+})
+
 it("requires explicit takeover and late renew/release cannot steal the new controller", async () => {
   const routes = controllerRoutes()
   const a = createOwnership(createMockHost({ routes }).kt, "a", false, () => {})

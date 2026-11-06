@@ -37,7 +37,14 @@ export function createOwnership(kt, client, observer, changed) {
     })();
     return pending;
   }
-  const tick = () => refresh(owned.value ? "renew" : undefined);
+  const tick = async () => {
+    if (disposed || pending) return pending;
+    await refresh(owned.value ? "renew" : undefined);
+    if (!disposed && !observer && status.value === "other" && !current.value) {
+      await refresh("claim");
+      if (owned.value) changed();
+    }
+  };
   return {
     current,
     status,
