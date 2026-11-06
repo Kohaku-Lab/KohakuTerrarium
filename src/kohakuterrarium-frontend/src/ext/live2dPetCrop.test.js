@@ -22,8 +22,46 @@ it("clamps crop rectangles to the frame and excludes empty or invalid bounds", (
     expect(normalizedRect(rect, 100, 100)).toBeNull()
   }
   expect(normalizedRect({ left: 0, top: 0, right: 100, bottom: 100 }, 0, 100)).toBeNull()
-  expect(validRegions(Array(9).fill({ x: 0, y: 0, width: 1, height: 1 }))).toBe(false)
+  expect(validRegions(Array(14).fill({ x: 0, y: 0, width: 1, height: 1 }))).toBe(true)
+  expect(validRegions(Array(15).fill({ x: 0, y: 0, width: 1, height: 1 }))).toBe(false)
   expect(validRegions([{ x: 0, y: 0, width: 0, height: 1 }])).toBe(false)
+})
+
+it("leaves blank space beside the head and feet outside the model crop without rescanning meshes", () => {
+  const meshes = [
+    [-0.1, 0.4, 0.1, 0.9],
+    ...Array.from({ length: 12 }, (_, i) => [-0.9 + i * 0.15, -0.2, -0.74 + i * 0.15, 0.3]),
+    [-0.15, -0.9, 0.15, 0.4],
+    [-10, -10, 10, 10],
+  ]
+  const scan = vi.fn((i) => meshes[i])
+  const rect = modelRectangle({
+    bounds: { left: -1, right: 1, top: 1, bottom: -1 },
+    zoom: 1,
+    pan: { x: 0, y: 0 },
+    canvas: {
+      width: 400,
+      height: 400,
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 400 }),
+    },
+    model: {
+      getModel: () => ({
+        getDrawableCount: () => meshes.length,
+        getDrawableOpacity: (i) => (i === meshes.length - 1 ? 0 : 1),
+        getDrawableVertices: scan,
+      }),
+    },
+  })
+  const regions = rect.regions || [rect]
+  const inside = (x, y) =>
+    regions.some((r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom)
+  expect(inside(200, 60)).toBe(true)
+  expect(inside(50, 200)).toBe(true)
+  expect(inside(200, 350)).toBe(true)
+  expect(inside(50, 60)).toBe(false)
+  expect(inside(350, 350)).toBe(false)
+  expect(regions.length).toBeLessThanOrEqual(8)
+  expect(scan).toHaveBeenCalledTimes(meshes.length - 1)
 })
 
 it("keeps disjoint rectangles and overlapping controls in a nonzero polygon", () => {
@@ -74,10 +112,10 @@ it("throttles geometry checks, deduplicates messages, and releases resize listen
   const crop = connectCrop(getPlayer)
   try {
     expect(postMessage).toHaveBeenCalledTimes(1)
-    now = 199
+    now = 99
     crop.update()
     expect(geometry).toHaveBeenCalledTimes(1)
-    now = 200
+    now = 100
     crop.update()
     expect(geometry).toHaveBeenCalledTimes(2)
     expect(postMessage).toHaveBeenCalledTimes(1)
@@ -180,7 +218,7 @@ it("keeps mesh scans throttled while speech and badge DOM updates stream", async
       await vi.advanceTimersByTimeAsync(10)
       crop.update()
     }
-    expect(scan.mock.calls.length).toBeLessThanOrEqual(3)
+    expect(scan.mock.calls.length).toBeLessThanOrEqual(6)
   } finally {
     crop.dispose()
     disconnect()

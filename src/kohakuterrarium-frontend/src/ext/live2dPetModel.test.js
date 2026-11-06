@@ -179,7 +179,7 @@ it.skipIf(!ready)(
             core.getParameterMaximumValue(axis),
             2,
           )
-          expect(cropInterval({ model: pet })).toBe(200)
+          expect(cropInterval({ model: pet })).toBe(100)
           // Speaking owns only mouth opening, after the action/physics layers.
           const form = ids.indexOf("ParamMouthForm")
           core.setParameterValueByIndex(form, 0.35)
@@ -341,13 +341,12 @@ it.skipIf(!ready)(
                   const x = 20 + ((vertices[j] - (b.left + b.right) / 2) * scale + 1) * 400
                   const y = 30 + (1 - (vertices[j + 1] - (b.top + b.bottom) / 2) * scale) * 400
                   if (
-                    x < rectangle.left ||
-                    x > rectangle.right ||
-                    y < rectangle.top ||
-                    y > rectangle.bottom
+                    !rectangle.regions.some(
+                      (r) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom,
+                    )
                   )
                     throw new Error(
-                      `${profile} ${state} frame ${i}: mesh escaped the throttled crop`,
+                      `${profile} ${state} frame ${i}: mesh ${mesh} at ${x},${y} escaped the throttled crop ${JSON.stringify(rectangle.regions)}`,
                     )
                 }
               }
@@ -411,7 +410,7 @@ it.skipIf(!ready)(
           pet.workActions.refreshBounds()
           pet.currentMotion = "Sleep"
           pet.update(1 / 60, { x: 0, y: 0 }, true, {}, { state: "waiting" })
-          expect(cropInterval(player)).toBe(200)
+          expect(cropInterval(player)).toBe(100)
           pet.currentMotion = "Idle"
           check("idle", 30)
           expect([...core.getModel().parameters.values].every(Number.isFinite)).toBe(true)
@@ -480,7 +479,9 @@ it.skipIf(!ready)(
                 const vy =
                   30 + (1 - (vertices[j + 1] - (b.top + b.bottom) / 2) * scale - player.pan.y) * 400
                 expect(
-                  vx >= crop.left && vx <= crop.right && vy >= crop.top && vy <= crop.bottom,
+                  crop.regions.some(
+                    (r) => vx >= r.left && vx <= r.right && vy >= r.top && vy <= r.bottom,
+                  ),
                 ).toBe(true)
               }
             }

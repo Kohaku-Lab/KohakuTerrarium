@@ -1,4 +1,50 @@
-// Rectangular app-overlay cropping. No texture reads or GPU readbacks.
+// Bounded mesh-based cropping. No texture reads or GPU readbacks.
+const MODEL_REGIONS = 8;
+const area = (r) => (r.right - r.left) * (r.bottom - r.top);
+const union = (a, b) => ({
+  left: Math.min(a.left, b.left),
+  right: Math.max(a.right, b.right),
+  top: Math.min(a.top, b.top),
+  bottom: Math.max(a.bottom, b.bottom),
+});
+
+function includeRegion(regions, rect) {
+  const contains = (a, b) =>
+    a.left <= b.left &&
+    a.right >= b.right &&
+    a.top <= b.top &&
+    a.bottom >= b.bottom;
+  if (regions.some((r) => contains(r, rect))) return;
+  for (let i = regions.length - 1; i >= 0; i--)
+    if (contains(rect, regions[i])) regions.splice(i, 1);
+  regions.push(rect);
+  if (regions.length <= MODEL_REGIONS) return;
+  // Merge the pair that introduces the least empty area.
+  let best = Infinity,
+    first = 0,
+    second = 1;
+  for (let i = 0; i < regions.length; i++) {
+    for (let j = i + 1; j < regions.length; j++) {
+      const a = regions[i],
+        b = regions[j];
+      const overlap =
+        Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
+        Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      const combined =
+        (Math.max(a.right, b.right) - Math.min(a.left, b.left)) *
+        (Math.max(a.bottom, b.bottom) - Math.min(a.top, b.top));
+      const cost = combined - area(a) - area(b) + overlap;
+      if (cost < best) {
+        best = cost;
+        first = i;
+        second = j;
+      }
+    }
+  }
+  regions[first] = union(regions[first], regions[second]);
+  regions.splice(second, 1);
+}
+
 export function modelRectangle(player) {
   if (!player?.bounds || player.dead) return null;
   const rect = player.canvas.getBoundingClientRect();
@@ -10,16 +56,29 @@ export function modelRectangle(player) {
     bottom: Infinity,
     top: -Infinity,
   };
+  const parts = [];
   const model = player.model.getModel();
   for (let i = 0; i < model.getDrawableCount(); i++) {
     if (model.getDrawableOpacity(i) < 0.05) continue;
     const vertices = model.getDrawableVertices(i);
+    const part = {
+      left: Infinity,
+      right: -Infinity,
+      bottom: Infinity,
+      top: -Infinity,
+    };
     for (let j = 0; j < vertices.length; j += 2) {
-      visible.left = Math.min(visible.left, vertices[j]);
-      visible.right = Math.max(visible.right, vertices[j]);
-      visible.bottom = Math.min(visible.bottom, vertices[j + 1]);
-      visible.top = Math.max(visible.top, vertices[j + 1]);
+      part.left = Math.min(part.left, vertices[j]);
+      part.right = Math.max(part.right, vertices[j]);
+      part.bottom = Math.min(part.bottom, vertices[j + 1]);
+      part.top = Math.max(part.top, vertices[j + 1]);
     }
+    if (!Number.isFinite(part.left)) continue;
+    parts.push(part);
+    visible.left = Math.min(visible.left, part.left);
+    visible.right = Math.max(visible.right, part.right);
+    visible.bottom = Math.min(visible.bottom, part.bottom);
+    visible.top = Math.max(visible.top, part.top);
   }
   const aspect = player.canvas.width / player.canvas.height;
   const scale =
@@ -34,14 +93,31 @@ export function modelRectangle(player) {
     rect.top +
     ((1 - (value - (b.top + b.bottom) / 2) * scale - player.pan.y) / 2) *
       rect.height;
-  const project = (value) => ({
-    left: x(value.left) - 8,
-    right: x(value.right) + 8,
-    top: y(value.top) - 8,
-    bottom: y(value.bottom) + 8,
+  const project = (value, margin = 8) => ({
+    left: x(value.left) - margin,
+    right: x(value.right) + margin,
+    top: y(value.top) - margin,
+    bottom: y(value.bottom) + margin,
   });
   const current = Number.isFinite(visible.left) ? project(visible) : null;
-  return current ? { ...current, visible: current } : null;
+  if (!current) return null;
+  // Allow local movement between idle samples; scale the margin with the pet.
+  const margin = Math.max(8, (current.bottom - current.top) * 0.03);
+  const regions = [];
+  for (const part of parts) {
+    const r = project(part, margin);
+    includeRegion(regions, {
+      left: Math.max(current.left, r.left),
+      right: Math.min(current.right, r.right),
+      top: Math.max(current.top, r.top),
+      bottom: Math.min(current.bottom, r.bottom),
+    });
+  }
+  return {
+    ...current,
+    visible: current,
+    regions,
+  };
 }
 
 export function normalizedRect(rect, width, height) {
@@ -60,7 +136,7 @@ export function normalizedRect(rect, width, height) {
 export function validRegions(regions) {
   return (
     Array.isArray(regions) &&
-    regions.length <= 8 &&
+    regions.length <= MODEL_REGIONS + 6 &&
     regions.every(
       (r) =>
         r &&
@@ -99,7 +175,7 @@ export function cropInterval(player) {
     actions?.state === "running" ||
     actions?.idleStyle === "wings"
     ? 0
-    : 200;
+    : 100;
 }
 
 export class CropHistory {
@@ -113,11 +189,15 @@ export class CropHistory {
       return null;
     }
     this.samples.push({ ...rect, time: now });
+    const regions = [];
+    for (const sample of this.samples)
+      for (const region of sample.regions || []) includeRegion(regions, region);
     return {
       left: Math.min(...this.samples.map((s) => s.left)),
       top: Math.min(...this.samples.map((s) => s.top)),
       right: Math.max(...this.samples.map((s) => s.right)),
       bottom: Math.max(...this.samples.map((s) => s.bottom)),
+      regions,
     };
   }
 }
@@ -165,7 +245,8 @@ export function connectCrop(getPlayer) {
         }
       }
     }
-    const rectangles = [history.update(model, now)];
+    const envelope = history.update(model, now);
+    const rectangles = envelope?.regions || [];
     for (const id of [
       "pet-menu-button",
       "pet-menu",

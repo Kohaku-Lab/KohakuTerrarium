@@ -57,12 +57,23 @@ it.each(["dragon", "deepseek"])(
 
 it("expands immediately and releases old crop space after the short hold", () => {
   const history = new CropHistory()
-  const wide = { left: 10, right: 90, top: 20, bottom: 80 }
-  const narrow = { ...wide, left: 30, right: 70 }
+  const head = { left: 40, right: 60, top: 20, bottom: 40 }
+  const wings = { left: 10, right: 90, top: 40, bottom: 80 }
+  const wide = { left: 10, right: 90, top: 20, bottom: 80, regions: [head, wings] }
+  const narrow = {
+    ...wide,
+    left: 30,
+    right: 70,
+    regions: [head, { ...wings, left: 30, right: 70 }],
+  }
   expect(history.update(wide, 0)).toEqual(wide)
   expect(history.update(narrow, 100)).toEqual(wide)
   expect(history.update(narrow, 200)).toEqual(narrow)
   expect(history.update(wide, 220)).toEqual(wide)
+  const reordered = history.update({ ...wide, regions: [wings, head] }, 225)
+  expect(
+    reordered.regions.some((r) => 15 >= r.left && 15 <= r.right && 25 >= r.top && 25 <= r.bottom),
+  ).toBe(false)
   expect(history.update(null, 230)).toBeNull()
 })
 
