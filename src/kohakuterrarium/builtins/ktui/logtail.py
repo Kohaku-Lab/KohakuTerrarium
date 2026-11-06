@@ -28,7 +28,8 @@ FORMAT = _Short("%(asctime)s %(levelname).1s %(short)s: %(message)s", "%H:%M:%S"
 
 
 class LogTail(logging.Handler):
-    """The newest lines, and how many warnings arrived since the tab was last looked at."""
+    """The newest lines, and how many errors arrived since the page was last looked at (the
+    badge: warnings are kept but not counted, a session can log them by the dozen)."""
 
     def __init__(self, on_line: Callable[[], None] = lambda: None):
         super().__init__(logging.INFO)
@@ -46,15 +47,15 @@ class LogTail(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self.add(self.format(record), record.levelno >= logging.WARNING)
+            self.add(self.format(record), record.levelno >= logging.ERROR)
         except Exception:  # never raise out of logging
             pass
 
-    def add(self, line: str, warning: bool = False) -> None:
+    def add(self, line: str, alarm: bool = False) -> None:
         with self.guard:
             self.lines.extend(line.splitlines() or [""])
             self.count += 1
-            if warning:
+            if alarm:
                 self.unseen += 1
         self.on_line()
 
@@ -108,7 +109,7 @@ class _Root(logging.Handler):
         ):
             return
         try:
-            self.tail.add(self.format(record), True)
+            self.tail.add(self.format(record), record.levelno >= logging.ERROR)
         except Exception:
             pass
 
