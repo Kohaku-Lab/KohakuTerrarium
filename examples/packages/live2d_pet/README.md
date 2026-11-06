@@ -91,14 +91,15 @@ CPU update/draw-submission cost; they do not measure asynchronous GPU execution.
 The frame fits the model envelope inside its recommended width and height,
 plus 80 CSS pixels of chrome only in Debug (minimum control width 200 px).
 Debug labels follow visible mesh bounds in 8 px steps, using the existing
-geometry pass rather than reading texture pixels. The host clips input to model/control rectangles; empty
-space outside them passes clicks and scrolling through. CPU mesh checks normally
-run at most five times per second, rising during pose transitions and wing beats
-to preserve moving edges. The current visible mesh rectangle replaces the old
-maximum-wing envelope; it expands immediately and holds shrinking edges for up
-to 200 ms. DOM-only changes reuse cached geometry, and unchanged work badges
-are not rewritten for speech chunks. Space inside the rectangle, including between wings, still receives
-input. The same rectangles drive iframe clipping and native window hit testing.
+geometry pass rather than reading texture pixels. The host clips input to at most
+eight merged model-part rectangles, plus separate controls; empty space outside
+them passes clicks and scrolling through. One mesh scan supplies all rectangles.
+CPU mesh checks normally run at most ten times per second, rising during pose
+transitions and wing beats to preserve moving edges. Small motion margins and a
+bounded 200 ms history preserve moving edges while allowing bounds to shrink.
+DOM-only changes reuse cached geometry, and unchanged work badges are not
+rewritten for speech chunks. Gaps inside a merged rectangle still receive input.
+The same rectangles drive iframe clipping and native window hit testing.
 Transparent canvas margins may extend past the app edge; the desktop window can
 leave KT entirely. This is rectangular input cropping, not per-pixel clipping.
 Native resizing preserves the window's bottom center using native coordinates;
@@ -119,9 +120,10 @@ dragon chat** button finds loaded companions by their configured tool, including
 inherited configurations. One match opens directly; multiple matches offer a
 choice. A saved companion is reopened by default; **Change conversation**
 selects a different one. No match opens the normal
-KT new-session dialog with the companion configuration, a readable name, and
-chat opening preselected. Creation still requires submitting that dialog.
-The entry also shows the pet. Conversation models remain managed by KT.
+KT new-session dialog with the companion configuration and a readable name.
+After submission, the extension resolves the new companion, opens its chat,
+and saves the binding. The entry also shows the pet. Conversation models remain
+managed by KT.
 
 The connection label appears only after binding succeeds. Pending, rejected,
 hidden-renderer and released bindings show no connected conversation. Changing
@@ -248,8 +250,12 @@ injected into every prompt. The UI does not select an LLM provider or preset.
 Authenticated routes bind one selected local creature to one visible renderer.
 Only one main page may own the control lease at a time. Other pages receive a
 conflict status; neither an initial background request nor a renewal steals an
-active lease. Explicit takeover changes the controller generation and revokes
-the preceding action binding. Ordinary Pet also participates in UI ownership,
+active lease. The existing five-second heartbeat attempts an ordinary claim only
+when no controller remains. Refreshing a page therefore restores control after
+the old page releases its lease or its 20-second lease expires. A live controller
+on another page still requires explicit takeover; desktop observers never claim
+control. Explicit takeover changes the controller generation and revokes the
+preceding action binding. Ordinary Pet also participates in UI ownership,
 but does not inject tools, poll actions or start an LLM call.
 Renewals cannot recreate an expired lease. The renderer sends a real health
 heartbeat; failure or ten seconds without a heartbeat clears readiness and
