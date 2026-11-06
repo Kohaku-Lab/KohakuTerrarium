@@ -4,6 +4,7 @@ use tauri::WebviewWindow;
 
 use crate::commands::{number_arg, Args};
 use crate::overlay::{is_overlay_label, Rect};
+use crate::overlay_coordinates::DesktopSpace;
 
 /// Visible work area in window-relative CSS pixels, including off-screen origins and HiDPI.
 fn visible_viewport(window: Rect, work: Rect, scale: f64) -> [f64; 4] {
@@ -17,18 +18,6 @@ fn visible_viewport(window: Rect, work: Rect, scale: f64) -> [f64; 4] {
     ]
 }
 
-use crate::overlay_placement::desktop_divisor as desktop_scale;
-
-fn desktop_rect(rect: Rect, scale: f64) -> Rect {
-    let divisor = desktop_scale(scale);
-    Rect {
-        x: rect.x / divisor,
-        y: rect.y / divisor,
-        w: rect.w / divisor,
-        h: rect.h / divisor,
-    }
-}
-
 /// Work area of the monitor at a window-relative point, clipped to this overlay.
 #[tauri::command]
 pub fn overlay_get_viewport(window: WebviewWindow, args: Args) -> Option<[f64; 4]> {
@@ -40,18 +29,16 @@ pub fn overlay_get_viewport(window: WebviewWindow, args: Args) -> Option<[f64; 4
     let size = window.inner_size().ok()?;
     let x = number_arg(&args, 0).unwrap_or(size.width as f64 / scale / 2.0);
     let y = number_arg(&args, 1).unwrap_or(size.height as f64 / scale / 2.0);
-    let divisor = desktop_scale(scale);
+    let space = DesktopSpace::CURRENT;
+    let point = space.point((origin.x as f64, origin.y as f64), (x, y), scale);
     let monitor = window
-        .monitor_from_point(
-            (origin.x as f64 + x * scale) / divisor,
-            (origin.y as f64 + y * scale) / divisor,
-        )
+        .monitor_from_point(point.0, point.1)
         .ok()
         .flatten()
         .or_else(|| window.current_monitor().ok().flatten())?;
     let work = monitor.work_area();
     Some(visible_viewport(
-        desktop_rect(
+        space.rect(
             Rect {
                 x: origin.x as f64,
                 y: origin.y as f64,
@@ -60,7 +47,7 @@ pub fn overlay_get_viewport(window: WebviewWindow, args: Args) -> Option<[f64; 4
             },
             scale,
         ),
-        desktop_rect(
+        space.rect(
             Rect {
                 x: work.position.x as f64,
                 y: work.position.y as f64,
@@ -69,7 +56,7 @@ pub fn overlay_get_viewport(window: WebviewWindow, args: Args) -> Option<[f64; 4
             },
             monitor.scale_factor(),
         ),
-        scale / divisor,
+        scale / space.divisor(scale),
     ))
 }
 
@@ -77,10 +64,50 @@ pub fn overlay_get_viewport(window: WebviewWindow, args: Args) -> Option<[f64; 4
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test]
-    fn mixed_density_monitors_share_desktop_points() {
-        let window = desktop_rect(
+    fn gtk_two_hidpi_monitors_lookup_and_clip_in_the_same_space() {
+        let space = DesktopSpace::Logical;
+        let origin = (2200.0, 200.0);
+        let point = space.point(origin, (100.0, 100.0), 2.0);
+        assert_eq!(point, (1200.0, 200.0));
+        let monitors = [
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 3840.0,
+                h: 2160.0,
+            },
+            Rect {
+                x: 3840.0,
+                y: 0.0,
+                w: 3840.0,
+                h: 2160.0,
+            },
+        ];
+        let work = monitors
+            .into_iter()
+            .map(|rect| space.rect(rect, 2.0))
+            .find(|work| point.0 >= work.x && point.0 < work.x + work.w)
+            .unwrap();
+        let window = space.rect(
+            Rect {
+                x: origin.0,
+                y: origin.1,
+                w: 1200.0,
+                h: 1600.0,
+            },
+            2.0,
+        );
+        assert_eq!(
+            visible_viewport(window, work, 2.0 / space.divisor(2.0)),
+            [0.0, 0.0, 600.0, 800.0]
+        );
+    }
+
+    #[test]
+    fn cocoa_and_gtk_mixed_density_monitors_share_desktop_points() {
+        let space = DesktopSpace::Logical;
+        let window = space.rect(
             Rect {
                 x: -600.0,
                 y: 100.0,
@@ -89,7 +116,7 @@ mod tests {
             },
             2.0,
         );
-        let work = desktop_rect(
+        let work = space.rect(
             Rect {
                 x: -1920.0,
                 y: 24.0,
@@ -101,6 +128,10 @@ mod tests {
         assert_eq!(
             visible_viewport(window, work, 1.0),
             [0.0, 0.0, 300.0, 800.0]
+        );
+        assert_eq!(
+            space.point((-600.0, 100.0), (100.0, 100.0), 2.0),
+            (-200.0, 150.0)
         );
     }
 

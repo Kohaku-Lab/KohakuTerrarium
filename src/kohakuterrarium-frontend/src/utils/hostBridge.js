@@ -63,7 +63,11 @@ export async function desktopCapabilities() {
   if (capabilitiesBridge !== bridge) {
     capabilitiesBridge = bridge
     nativeCapabilities.value = null
-    capabilitiesPromise = (async () => {
+    capabilitiesPromise = null
+  }
+  if (!hostSupports("get_desktop_capabilities")) return null
+  if (!capabilitiesPromise) {
+    const pending = (async () => {
       try {
         const value = await call("get_desktop_capabilities")
         const result =
@@ -74,6 +78,10 @@ export async function desktopCapabilities() {
         return null
       }
     })()
+    capabilitiesPromise = pending
+    void pending.then((result) => {
+      if (!result && capabilitiesPromise === pending) capabilitiesPromise = null
+    })
   }
   return capabilitiesPromise
 }

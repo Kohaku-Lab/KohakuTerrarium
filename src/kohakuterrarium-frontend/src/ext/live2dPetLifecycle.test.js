@@ -139,16 +139,26 @@ it.each(["fatal", "timeout"])("revokes readiness on renderer %s and allows retry
       error: "",
     })
     expect(bridge.rendering.value).toBe(true)
+    frame.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 800 })
+    frame.closest = () => ({ getBoundingClientRect: () => ({ left: 0, top: 0 }) })
+    send({
+      type: "kt-live2d-crop",
+      sequence: 1,
+      regions: [{ x: 0.2, y: 0.25, width: 0.4, height: 0.2 }],
+    })
+    expect(wrapper.emitted("regions").at(-1)).toEqual([[[100, 200, 200, 160]]])
     if (kind === "fatal") send({ type: "kt-live2d-health", error: "GPU lost" })
     await vi.advanceTimersByTimeAsync(30000)
     expect(bridge.rendering.value).toBe(false)
     expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    expect(wrapper.emitted("regions").at(-1)).toEqual([null])
     await wrapper.find('[role="alert"] button').trigger("click")
     await flushPromises()
     expect(new URL(wrapper.find("iframe").element.src).searchParams.get("channel")).not.toBe(
       channel,
     )
     expect(bridge.rendering.value).toBe(false)
+    expect(wrapper.emitted("regions").at(-1)).toEqual([null])
   } finally {
     wrapper.unmount()
     host.dispose()

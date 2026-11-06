@@ -1,6 +1,45 @@
 import { afterEach, expect, it, vi } from "vitest"
 import { trackWindowPlacement } from "./windowPlacement"
 import { resizeOverlayWindow } from "@/utils/hostBridge"
+import { resetOverlay, showOverlay, hideOverlay, isOverlayVisible } from "./overlays"
+
+it("consumes a reset requested while the native overlay was closed on its next open", async () => {
+  vi.useFakeTimers()
+  let native = { version: 1, x: 2200, y: 200, width: 600, height: 800 }
+  const invoke = vi.fn(async (command, { args } = {}) => {
+    if (command === "get_desktop_capabilities")
+      return {
+        surface: "desktop",
+        protocol: 1,
+        overlayPlacementV1: true,
+        overlayPlacementNative: true,
+      }
+    if (command === "overlay_placement" && args[0] === "reset")
+      native = { ...native, x: 400, y: 100 }
+    if (command === "overlay_get_bounds") return [native.x, native.y, native.width, native.height]
+    return native
+  })
+  window.__TAURI_INTERNALS__ = { invoke }
+  hideOverlay("closed-pet")
+  resetOverlay("closed-pet")
+  expect(isOverlayVisible("closed-pet")).toBe(false)
+  showOverlay("closed-pet")
+  const stop = trackWindowPlacement("closed-pet")
+  await vi.advanceTimersByTimeAsync(50)
+  expect(native.x).toBe(400)
+  expect(localStorage.getItem("kt.overlay.reset.closed-pet")).toBeNull()
+  stop()
+  native.x = 700
+  const stopAgain = trackWindowPlacement("closed-pet")
+  await vi.advanceTimersByTimeAsync(50)
+  expect(native.x).toBe(700)
+  expect(
+    invoke.mock.calls.filter(
+      ([command, payload]) => command === "overlay_placement" && payload.args[0] === "reset",
+    ),
+  ).toHaveLength(1)
+  stopAgain()
+})
 
 afterEach(() => {
   vi.useRealTimers()

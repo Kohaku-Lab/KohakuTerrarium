@@ -176,7 +176,7 @@ const Companion = defineComponent({
                 headerOffset.value = offset;
               },
               onRegions: (regions) => {
-                if (preferences.state.value.debug) {
+                if (regions && preferences.state.value.debug) {
                   const width = overlay.bounds.value.width;
                   regions.push([
                     Math.max(0, (width - 280) / 2),

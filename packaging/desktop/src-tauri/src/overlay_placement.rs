@@ -2,10 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::WebviewWindow;
 
 use crate::commands::{string_arg, Args};
 use crate::overlay::is_overlay_label;
+use crate::overlay_coordinates::DesktopSpace;
+
+const PLACEMENT_VERSION: u8 = if cfg!(target_os = "linux") { 2 } else { 1 };
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 struct Placement {
@@ -16,17 +19,9 @@ struct Placement {
     height: f64,
 }
 
-pub(crate) fn desktop_divisor(scale: f64) -> f64 {
-    if cfg!(target_os = "macos") {
-        scale
-    } else {
-        1.0
-    }
-}
-
 impl Placement {
     fn valid(self) -> bool {
-        self.version == 1
+        self.version == PLACEMENT_VERSION
             && [self.x, self.y, self.width, self.height]
                 .iter()
                 .all(|n| n.is_finite())
@@ -49,18 +44,19 @@ impl Placement {
     }
 }
 
-/// Positions use Windows physical desktop pixels or macOS desktop points.
+/// Positions use Windows physical pixels or macOS/GTK logical desktop coordinates.
 #[tauri::command]
 pub fn overlay_placement(window: WebviewWindow, args: Args) -> Option<Value> {
     if !is_overlay_label(window.label()) {
         return None;
     }
     let scale = window.scale_factor().ok()?;
-    let divisor = desktop_divisor(scale);
+    let space = DesktopSpace::CURRENT;
+    let divisor = space.divisor(scale);
     let position = window.outer_position().ok()?;
     let size = window.inner_size().ok()?;
     let current = Placement {
-        version: 1,
+        version: PLACEMENT_VERSION,
         x: position.x as f64 / divisor,
         y: position.y as f64 / divisor,
         width: size.width as f64 / divisor,
@@ -92,43 +88,34 @@ pub fn overlay_placement(window: WebviewWindow, args: Args) -> Option<Value> {
         .iter()
         .map(|monitor| {
             let work = monitor.work_area();
-            let divisor = desktop_divisor(monitor.scale_factor());
-            (
-                Placement {
-                    version: 1,
-                    x: work.position.x as f64 / divisor,
-                    y: work.position.y as f64 / divisor,
-                    width: work.size.width as f64 / divisor,
-                    height: work.size.height as f64 / divisor,
-                },
-                divisor,
-            )
+            let divisor = space.divisor(monitor.scale_factor());
+            Placement {
+                version: PLACEMENT_VERSION,
+                x: work.position.x as f64 / divisor,
+                y: work.position.y as f64 / divisor,
+                width: work.size.width as f64 / divisor,
+                height: work.size.height as f64 / divisor,
+            }
         })
         .collect();
-    let reachable = areas.iter().find(|(work, _)| saved.reachable(*work));
-    let (target, divisor) = if operation != "reset" && reachable.is_some() {
-        (saved, reachable?.1)
+    let reachable = areas.iter().find(|work| saved.reachable(**work));
+    let target = if operation != "reset" && reachable.is_some() {
+        saved
     } else {
-        let (work, divisor) = areas
+        let work = areas
             .iter()
-            .find(|(work, _)| current.reachable(*work))
+            .find(|work| current.reachable(**work))
             .or(areas.first())?;
-        (saved.centered(*work), *divisor)
+        saved.centered(*work)
     };
     if operation == "validate" && reachable.is_some() {
         return serde_json::to_value(current).ok();
     }
     window
-        .set_position(PhysicalPosition::new(
-            target.x * divisor,
-            target.y * divisor,
-        ))
+        .set_position(space.position(target.x, target.y))
         .ok()?;
     window
-        .set_size(PhysicalSize::new(
-            (target.width * divisor).round() as u32,
-            (target.height * divisor).round() as u32,
-        ))
+        .set_size(space.size(target.width, target.height))
         .ok()?;
     serde_json::to_value(target).ok()
 }
@@ -140,14 +127,14 @@ mod tests {
     #[test]
     fn mixed_dpi_restore_uses_one_native_coordinate_space() {
         let secondary = Placement {
-            version: 1,
+            version: PLACEMENT_VERSION,
             x: 1920.0,
             y: 0.0,
             width: 2560.0,
             height: 1440.0,
         };
         let visible = Placement {
-            version: 1,
+            version: PLACEMENT_VERSION,
             x: 2200.0,
             y: 200.0,
             width: 600.0,
@@ -162,6 +149,17 @@ mod tests {
         let reset = removed.centered(secondary);
         assert_eq!((reset.x, reset.y), (2900.0, 320.0));
         assert!(reset.reachable(secondary));
+        assert!(!Placement {
+            version: 0,
+            ..visible
+        }
+        .valid());
+        #[cfg(target_os = "linux")]
+        assert!(!Placement {
+            version: 1,
+            ..visible
+        }
+        .valid());
         assert!(!Placement {
             width: f64::NAN,
             ..visible

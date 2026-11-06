@@ -126,6 +126,7 @@ export const PetFrame = defineComponent({
       resourceAbort.abort();
       error.value = message;
       src.value = "";
+      emit("regions", null);
       if (props.mini) bridge.renderer(false, message);
     }
     function reportRegions() {
@@ -149,8 +150,11 @@ export const PetFrame = defineComponent({
       ready = false;
       actionReady = false;
       clearInterval(heartbeat);
+      regions.value = [];
+      emit("regions", null);
       if (props.mini) bridge.renderer(false);
       const current = ++generation;
+      channel = `${instance}:${current}`;
       error.value = "";
       resourceAbort.abort();
       resourceAbort = new AbortController();
@@ -179,7 +183,6 @@ export const PetFrame = defineComponent({
         regions.value = [];
         cropSequence = 0;
         settingsSequence = 0;
-        channel = `${instance}:${current}`;
         if (props.mini) url.searchParams.set("mini", "1");
         url.searchParams.set("v", "desktop-actions-1");
         url.searchParams.set(
@@ -384,6 +387,7 @@ export const PetFrame = defineComponent({
       disposed = true;
       resourceAbort.abort();
       clearInterval(heartbeat);
+      emit("regions", null);
       if (props.mini) bridge.renderer(false);
       window.removeEventListener("message", receive);
     });

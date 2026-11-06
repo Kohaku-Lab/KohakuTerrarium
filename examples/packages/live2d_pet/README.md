@@ -105,8 +105,10 @@ Native resizing preserves the window's bottom center using native coordinates;
 model changes do not push the character sideways by the change in canvas width.
 Use Settings → Overlays → Reset position to bring a misplaced window back.
 Placement recovery uses native monitor coordinates (physical pixels on Windows,
-desktop points on macOS), never Chromium screen origins. Legacy unversioned
-placements are ignored. The shell owns persistence and confirms geometry through native events.
+desktop points on macOS and logical coordinates on Linux/GTK), never Chromium screen origins.
+Legacy unversioned placements and Linux's old physical-coordinate placements are ignored.
+The shell owns persistence and confirms geometry through native events. A reset requested
+while the window is closed is consumed on its next open; later manual moves are retained.
 Native overlays require `overlayWindows`, `overlayResize` and
 `overlayPlacementNative`; older shells use the in-app overlay.
 

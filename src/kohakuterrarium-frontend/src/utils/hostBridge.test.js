@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { flushPromises } from "@vue/test-utils"
 
 import {
   DESKTOP_PROTOCOL,
@@ -55,6 +56,41 @@ it("preserves unavailable autostart for development shells", async () => {
 })
 
 describe("hostBridge", () => {
+  it("rechecks capabilities when pywebview fills its existing API object on ready", async () => {
+    const api = {}
+    window.pywebview = { api }
+    const seen = []
+    const off = onHostReady(async () => seen.push(await desktopCapabilities()))
+    try {
+      await flushPromises()
+      expect(seen).toEqual([null])
+      api.get_desktop_capabilities = vi.fn(async () => ({
+        surface: "desktop",
+        protocol: 1,
+        nativeAttention: true,
+      }))
+      window.dispatchEvent(new Event("pywebviewready"))
+      await flushPromises()
+      expect(seen.at(-1)?.nativeAttention).toBe(true)
+      expect((await desktopCapabilities()).nativeAttention).toBe(true)
+      expect(api.get_desktop_capabilities).toHaveBeenCalledTimes(1)
+    } finally {
+      off()
+    }
+  })
+
+  it("retries failed capability queries and coalesces concurrent requests", async () => {
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("not ready"))
+      .mockResolvedValue({ surface: "desktop", protocol: 1, overlayWindows: true })
+    window.__TAURI_INTERNALS__ = { invoke }
+    expect(await desktopCapabilities()).toBeNull()
+    const values = await Promise.all([desktopCapabilities(), desktopCapabilities()])
+    expect(values[0]?.overlayWindows).toBe(true)
+    expect(values[1]).toEqual(values[0])
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
   it("reports no host in a plain browser and degrades every operation", async () => {
     expect(hostKind()).toBeNull()
     expect(hasDesktopHost()).toBe(false)

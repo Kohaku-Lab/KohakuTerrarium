@@ -615,6 +615,22 @@ describe("OverlayWindowApp", () => {
       const before = invoke.mock.calls.length
       await vi.advanceTimersByTimeAsync(1000)
       expect(invoke.mock.calls.length).toBe(before)
+      const hitCalls = () =>
+        invoke.mock.calls.filter(([name]) => name === "overlay_set_hit_regions")
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: [[50, 40, 100, 200]] }))
+      expect(hitCalls().at(-1)[1].args[0]).toEqual([[50, 40, 100, 200]])
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: [null] }))
+      const before = hitCalls().length
+      vi.advanceTimersByTime(1000)
+      expect(hitCalls().length).toBe(before)
+      page.get(".pet").element.getBoundingClientRect = () => ({
+        left: 15,
+        top: 10,
+        width: 250,
+        height: 60,
+      })
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: null }))
+      expect(hitCalls().at(-1)[1].args[0]).toEqual([[15, 10, 250, 60]])
       page.unmount()
     } finally {
       vi.useRealTimers()

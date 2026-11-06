@@ -17,6 +17,7 @@ mod notify;
 mod opens;
 mod os;
 mod overlay;
+mod overlay_coordinates;
 mod overlay_placement;
 mod overlay_store;
 mod overlay_viewport;
