@@ -135,7 +135,7 @@ ON_DEMAND = (
 
 EXAMPLES = {
     "section": '<section title="Details">\n  <text>Background the reader may skip.</text>\n</section>',
-    "accordion": '<accordion title="Why it works">\n  <text>Each step halves the range.</text>\n</accordion>',
+    "accordion": '<accordion title="Why it works"><text>Each step halves the range.</text></accordion>',
     "quote": '<quote cite="PEP 20">Readability counts.</quote>',
     "timeline": '<timeline items={[{title: "v1.0", date: "2024-03", detail: "First release"}, {title: "v2.0", date: "2025-01", tone: "success"}]}/>',
     "progress": '<progress label="Migrated" value={34} max={50}/>\n<progress label="Coverage" value={0.82} max={1} style="ring" tone="success"/>',

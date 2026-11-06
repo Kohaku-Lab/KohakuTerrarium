@@ -12,10 +12,10 @@ import hashlib
 import re
 from typing import Any
 
-from kohakuterrarium.builtins.kt_ui.markup import MarkupError, check_block
-from kohakuterrarium.builtins.kt_ui.markup_lex import split_message
-from kohakuterrarium.builtins.kt_ui.spec import SpecError
 from kohakuterrarium.builtins.kt_ui.components import COMPONENTS
+from kohakuterrarium.builtins.kt_ui.markup import MarkupError, convert_block
+from kohakuterrarium.builtins.kt_ui.markup_lex import split_message
+from kohakuterrarium.builtins.kt_ui.spec import SpecError, validate_spec
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
     EXAMPLES,
     component_doc,
@@ -33,6 +33,40 @@ NOTED_STATE_KEY = "noted"
 MAX_REASON_CHARS = 300
 MAX_NOTE_COMPONENTS = 3
 _TAG_RE = re.compile(r"<([a-z_]+)[\s>]")
+_CHILD_PATH_RE = re.compile(r"\.children\[(\d+)\]|\.child(?=\.|$)")
+
+
+def _error_component(spec: dict, path: str, message: str) -> str | None:
+    """The component owning a validation error, following only component children."""
+    if message.startswith("unknown prop for "):
+        name = message.removeprefix("unknown prop for ")
+        return name if name in COMPONENTS else None
+    if message == "tabs may only contain 'tab' nodes":
+        path = path.rsplit(".children[", 1)[0]
+    if path != "root" and not path.startswith("root."):
+        return None
+    node = spec.get("root")
+    tail = path[4:]
+    while isinstance(node, dict) and (step := _CHILD_PATH_RE.match(tail)):
+        name = node.get("type")
+        component = COMPONENTS.get(name) if isinstance(name, str) else None
+        if component is None:
+            return None
+        index = step[1]
+        key = "children" if index is not None else "child"
+        prop = component.props.get(key)
+        if prop is None or prop.kind not in ("children", "tabs", "child"):
+            break
+        if message == "is required" and step.end() == len(tail):
+            return name
+        node = node.get(key)
+        if index is not None:
+            if not isinstance(node, list) or int(index) >= len(node):
+                return None
+            node = node[int(index)]
+        tail = tail[step.end() :]
+    name = node.get("type") if isinstance(node, dict) else None
+    return name if isinstance(name, str) and name in COMPONENTS else None
 
 
 def _text_of(content: Any) -> str:
@@ -55,13 +89,27 @@ def block_failures(text: str) -> list[tuple[int, str]]:
         if segment["kind"] != "ui":
             continue
         number += 1
+        spec = None
         try:
-            check_block(segment["source"])
+            spec = convert_block(segment["source"])
+            validate_spec(spec)
         except (MarkupError, SpecError) as exc:
+            if isinstance(exc, SpecError):
+                named = list(
+                    dict.fromkeys(
+                        name
+                        for path, message in exc.errors
+                        if (name := _error_component(spec, path, message)) is not None
+                    )
+                )[:MAX_NOTE_COMPONENTS]
+                prefix = "Validation" + "".join(f" <{name}>" for name in named) + ": "
+            else:
+                prefix = ""
             reason = str(exc)
-            if len(reason) > MAX_REASON_CHARS:
-                reason = reason[: MAX_REASON_CHARS - 1] + "…"
-            failures.append((number, reason))
+            limit = MAX_REASON_CHARS - len(prefix)
+            if len(reason) > limit:
+                reason = reason[: limit - 1] + "…"
+            failures.append((number, prefix + reason))
     return failures
 
 
@@ -72,7 +120,11 @@ def failure_note(failures: list[tuple[int, str]]) -> str:
     named = [
         name
         for name in dict.fromkeys(
-            m for _, reason in failures for m in _TAG_RE.findall(reason)
+            name
+            for _, reason in failures
+            for name in _TAG_RE.findall(
+                reason.split(": ", 1)[0] if reason.startswith("Validation") else reason
+            )
         )
         if name in COMPONENTS
     ][:MAX_NOTE_COMPONENTS]

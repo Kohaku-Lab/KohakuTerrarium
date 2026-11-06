@@ -39,6 +39,7 @@ from PIL import Image
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
+from kohakuterrarium.builtins.kt_ui.markup import check_block
 from kohakuterrarium.builtins.plugins.apps.plugin import AppsPlugin
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
@@ -2725,8 +2726,9 @@ class TestModulesIntegration:
         says hello → the inline part of ``## Presenting your answer`` appears
         (with the ``show_app`` part once ``ui.apps`` is on and the client
         draws ``kt.app``) → the
-        model replies with one valid and one broken block → the next request
-        carries one note about the broken block, the one after does not →
+        model replies with valid and broken blocks → the next request
+        carries repair guidance → corrected accordions validate without
+        another note →
         the client leaves and the section is gone → a Rich CLI output brings
         it back without the ``show_app`` pointer. Only the LLM is scripted."""
         good = (
@@ -2736,11 +2738,22 @@ class TestModulesIntegration:
             '<stat label="Each">{fmt(each, 2)}</stat>\n</ui>'
         )
         broken = '<ui><stat label="Each"/><slider bind="ghost"/></ui>'
-        reply = f"Here you go:\n\n{good}\n\nAnd a second view:\n{broken}\n"
+        accordion = (
+            '<ui title="Example"><accordion items={[{title:"One",content:"First"},'
+            '{title:"Two",content:"Second"}]}/></ui>'
+        )
+        corrected = (
+            '<ui><accordion title="One"><text>First</text></accordion>'
+            '<accordion title="Two"><text>Second</text></accordion></ui>'
+        )
+        reply = (
+            f"Here you go:\n\n{good}\n\nAnd a second view:\n{broken}\n"
+            f"\nDetails:\n{accordion}\n"
+        )
         agent = make_agent(
             script=[
                 ScriptEntry(reply, match="split the bill"),
-                ScriptEntry("fixed it", match="and now"),
+                ScriptEntry(corrected, match="and now"),
                 ScriptEntry("plain answer", match="thanks"),
             ]
         )
@@ -2783,7 +2796,21 @@ class TestModulesIntegration:
             assert "[inline UI]" in request and "- block 2:" in request
             assert "root.children[0].value: is required" in request
             assert "'ghost' is not a key of 'state'" in request
+            assert "- block 3:" in request
+            assert "root.items: unknown prop for accordion" in request
+            assert "root.title: is required" in request
+            repair = request.split("[inline UI]", 1)[1]
+            assert "- `accordion`: title*: text; open: bool; children" in repair
+            assert "<text>" in repair and "</accordion>" in repair
+            assert "- `chart`" not in repair and "- `number`" not in repair
             assert "- block 1:" not in request
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert last.get_text_content() == corrected
+            root = check_block(last.get_text_content()).spec["root"]
+            assert [
+                (node["title"], node["children"][0]["value"])
+                for node in root["children"]
+            ] == [("One", "First"), ("Two", "Second")]
             stored = " ".join(
                 m.get_text_content()
                 for m in agent.controller.conversation.get_messages()
