@@ -118,6 +118,28 @@ class TestConstructorInjection:
 
 
 class TestRuntimeAdds:
+    async def test_public_prompt_edits_survive_managed_refreshes(self, tmp_path):
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM([]))
+        agent.set_system_prompt_section("graph", "GRAPH-A")
+        agent.update_system_prompt("PUBLIC-A")
+        agent.update_system_prompt("PUBLIC-B")
+        agent.set_system_prompt_section("graph", "GRAPH-B")
+        prompt = agent.get_system_prompt()
+        assert "GRAPH-A" not in prompt
+        for part in ("GRAPH-B", "PUBLIC-A", "PUBLIC-B"):
+            assert prompt.count(part) == 1
+        assert agent._controller_config.system_prompt == prompt
+        agent.update_system_prompt("REPLACEMENT", replace=True)
+        assert agent.get_system_prompt() == "REPLACEMENT"
+        agent.set_system_prompt_section("graph", "GRAPH-C")
+        agent.update_system_prompt("PUBLIC-C")
+        agent.refresh_system_prompt()
+        assert agent.get_system_prompt() == "REPLACEMENT\n\nGRAPH-C\n\nPUBLIC-C"
+        assert (
+            agent._create_controller().conversation.get_system_message().content
+            == agent.get_system_prompt()
+        )
+
     async def test_add_tool_refreshes_live_prompt(self, tmp_path):
         agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
         await agent.start()

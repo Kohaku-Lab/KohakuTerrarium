@@ -95,9 +95,13 @@ class AgentExtensionsMixin:
 
     def refresh_system_prompt(self) -> None:
         """Recompute the prompt, retaining current owner-managed sections."""
-        system_prompt = self._build_aggregated_prompt()
+        system_prompt = getattr(self, "_system_prompt_override", None)
+        if system_prompt is None:
+            system_prompt = self._build_aggregated_prompt()
         for section in getattr(self, "_managed_prompt_sections", {}).values():
             system_prompt = system_prompt.rstrip() + "\n\n" + section
+        for content in getattr(self, "_system_prompt_appends", []):
+            system_prompt += "\n\n" + content
         self._controller_config.system_prompt = system_prompt
         self._prompt_refresh_pending = False
         self._prompt_tool_key = self._visible_tool_key()

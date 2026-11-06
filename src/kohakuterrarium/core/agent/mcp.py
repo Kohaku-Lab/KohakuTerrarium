@@ -66,10 +66,11 @@ async def init_mcp(agent: Any) -> None:
 
 def inject_mcp_tools_into_prompt(agent: Any) -> None:
     """Inject available MCP tool descriptions into the system prompt."""
-    if not agent._mcp_manager:
-        return
-    servers = agent._mcp_manager.list_servers()
+    servers = agent._mcp_manager.list_servers() if agent._mcp_manager else []
+    servers = [server for server in servers if server["status"] == "connected"]
     if not servers:
+        if "mcp" in getattr(agent, "_managed_prompt_sections", {}):
+            agent.set_system_prompt_section("mcp", "")
         return
 
     lines = ["\n## Available MCP Tools\n"]
@@ -78,8 +79,6 @@ def inject_mcp_tools_into_prompt(agent: Any) -> None:
     )
 
     for srv in servers:
-        if srv["status"] != "connected":
-            continue
         lines.append(f"### Server: {srv['name']}")
         for tool in srv["tools"]:
             desc = f" — {tool['description']}" if tool.get("description") else ""
@@ -97,11 +96,8 @@ def inject_mcp_tools_into_prompt(agent: Any) -> None:
                 lines.append(param_line)
         lines.append("")
 
-    if len(lines) <= 2:
-        return
-
     mcp_section = "\n".join(lines)
-    agent.update_system_prompt(mcp_section)
+    agent.set_system_prompt_section("mcp", mcp_section)
     logger.info(
         "MCP tools injected into prompt",
         servers=len(servers),
