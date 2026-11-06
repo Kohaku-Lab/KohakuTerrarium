@@ -1,11 +1,12 @@
 import { randomId } from "./id.js";
 import { defineComponent, h, ref, watch, onMounted, onUnmounted } from "vue";
-import { useExtension, useWorkContext } from "@kohakuterrarium/ui-sdk";
+import { useExtension } from "@kohakuterrarium/ui-sdk";
 import { validRegions, regionsClip } from "./crop.js";
 import { bridgeFor } from "./bridge.js";
 import { serveResource } from "./resource-loader.js";
 import { models, modelAdapter } from "./models/index.js";
 import { settingsFor } from "./settings-state.js";
+import { targetView } from "./target.js";
 
 export const PetFrame = defineComponent({
   props: { mini: Boolean, getViewport: Function },
@@ -14,11 +15,7 @@ export const PetFrame = defineComponent({
     const kt = useExtension();
     const preferences = settingsFor(kt);
     const bridge = bridgeFor(kt);
-    const localWork = useWorkContext({
-      retainLast: true,
-      includeSpeech: true,
-    });
-    const work = bridge.desktop ? bridge.work : localWork;
+    const work = bridge.work;
     const frame = ref(null);
     const src = ref("");
     const error = ref("");
@@ -44,11 +41,13 @@ export const PetFrame = defineComponent({
           type: "kt-live2d-work",
           channel,
           sequence: ++sequence,
+          target: targetView(bridge, preferences.state.value),
           work: current
             ? {
                 hostId: current.hostId,
                 sessionId: current.sessionId,
                 creatureId: current.creatureId,
+                creatureLabel: current.creatureLabel,
                 speech: current.speech ? { ...current.speech } : null,
                 label: current.label,
                 connected: current.connected,
@@ -95,6 +94,14 @@ export const PetFrame = defineComponent({
       { flush: "sync" },
     );
     watch(work, sendWork, { flush: "sync" });
+    watch(
+      () => [
+        preferences.state.value.controlMode,
+        preferences.state.value.companion,
+        bridge.targetMissing.value,
+      ],
+      sendWork,
+    );
     watch(
       bridge.command,
       (command) => {
@@ -215,6 +222,10 @@ export const PetFrame = defineComponent({
       )
         return;
       const data = event.data;
+      if (data?.type === "kt-live2d-open-target" && data.channel === channel) {
+        void bridge.openTarget();
+        return;
+      }
       if (data?.type === "kt-live2d-health" && data.channel === channel) {
         if (typeof data.error !== "string") return;
         if (data.error) failRenderer(data.error);

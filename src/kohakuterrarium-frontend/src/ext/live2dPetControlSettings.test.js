@@ -1,9 +1,11 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { expect, it } from "vitest"
-import { createMockHost, NewSessionDialog } from "@/ext/sdk/mock"
+import { NewSessionDialog } from "@/ext/sdk/mock"
+import { createMockHost } from "./live2dTestHost"
 import { ControlSettings } from "../../../../examples/packages/live2d_pet/ui/control-settings.js"
 import { settingsFor } from "../../../../examples/packages/live2d_pet/ui/settings-state.js"
-import { bridgeFor, PetBridge } from "../../../../examples/packages/live2d_pet/ui/bridge.js"
+import { bridgeFor } from "../../../../examples/packages/live2d_pet/ui/bridge.js"
+import { PetBridge } from "../../../../examples/packages/live2d_pet/ui/runtime.js"
 
 const button = (wrapper, text) => wrapper.findAll("button").find((item) => item.text() === text)
 const launch = (wrapper) => button(wrapper, "创建 / 打开龙娘对话").trigger("click")
@@ -53,7 +55,7 @@ it("explains modes and opens an existing companion or a prefilled creation dialo
     expect(wrapper.findComponent(NewSessionDialog).exists()).toBe(false)
 
     rows.push({ sessionId: "solo", creatureId: "second", label: "Other dragon" })
-    await launch(wrapper)
+    await button(wrapper, "更换对话").trigger("click")
     await flushPromises()
     expect(host.openedChats).toHaveLength(1)
     await wrapper.find('select[aria-label="龙娘对话"]').setValue("solo/second")
@@ -106,7 +108,7 @@ it("never presents a pending, stale or rejected binding as a connected conversat
       "GET /events": () => new Promise(() => {}),
     },
   })
-  settingsFor(host.kt).update({ controlMode: "agent" })
+  settingsFor(host.kt).update({ controlMode: "expression" })
   const bridge = bridgeFor(host.kt)
   bridge.renderer(true)
   const controller = mount(PetBridge)
@@ -121,7 +123,7 @@ it("never presents a pending, stale or rejected binding as a connected conversat
     await flushPromises()
     expect(bridge.connection.value).toBeNull()
     expect(settings.text()).not.toContain("当前连接")
-    expect(settings.text()).toContain("请创建或打开龙娘对话")
+    expect(settings.text()).toContain("其他页面")
   } finally {
     settings.unmount()
     controller.unmount()

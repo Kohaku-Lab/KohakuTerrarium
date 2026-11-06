@@ -243,6 +243,10 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
         return false;
     };
     if let Some(existing) = app.get_webview_window(&spec.label) {
+        let _ = crate::overlay_placement::overlay_placement(
+            existing.clone(),
+            Some(vec![serde_json::json!("validate")]),
+        );
         return existing.show().is_ok();
     }
     let Some(mut url) = app
@@ -284,6 +288,12 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
             }
         })
         .build()
+        .map(|window| {
+            let _ = crate::overlay_placement::overlay_placement(
+                window,
+                Some(vec![serde_json::json!("restore")]),
+            );
+        })
         .is_ok();
     if !opened {
         app.state::<OverlayWindows>()

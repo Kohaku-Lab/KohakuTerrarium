@@ -17,14 +17,7 @@ fn visible_viewport(window: Rect, work: Rect, scale: f64) -> [f64; 4] {
     ]
 }
 
-// macOS monitor lookup uses desktop points, while Tauri positions are scaled per monitor.
-fn desktop_scale(scale: f64) -> f64 {
-    if cfg!(target_os = "macos") {
-        scale
-    } else {
-        1.0
-    }
-}
+use crate::overlay_placement::desktop_divisor as desktop_scale;
 
 fn desktop_rect(rect: Rect, scale: f64) -> Rect {
     let divisor = desktop_scale(scale);

@@ -1,7 +1,9 @@
 import { randomId } from "./id.js";
-import { defineComponent, ref, watch, onUnmounted } from "vue";
-import { useExtension, useWorkContext } from "@kohakuterrarium/ui-sdk";
+import { computed, ref, watch } from "vue";
+import { openChat } from "@kohakuterrarium/ui-sdk";
 import { settingsFor } from "./settings-state.js";
+import { createOwnership } from "./ownership.js";
+import { targetView } from "./target.js";
 
 const bridges = new Map();
 export function bridgeFor(kt) {
@@ -13,6 +15,7 @@ export function bridgeFor(kt) {
     command = ref(null),
     rendering = ref(false),
     connection = ref(null),
+    targetMissing = ref(false),
     renderError = ref(""),
     status = ref("自动动作");
   const peer = randomId();
@@ -26,11 +29,28 @@ export function bridgeFor(kt) {
     snapshotAt = 0,
     workPeer = null;
   const retired = new Set();
+  const ownership = createOwnership(kt, peer, desktop, () =>
+    send("owner", null),
+  );
   const send = (type, data) =>
     !closed &&
-    channel?.postMessage(JSON.parse(JSON.stringify({ type, data, peer })));
+    channel?.postMessage(
+      JSON.parse(
+        JSON.stringify({
+          type,
+          data,
+          peer,
+          token: ownership.current.value?.token,
+        }),
+      ),
+    );
   const snapshot = () =>
-    send("snapshot", { work: work.value, settings: settings.state.value });
+    ownership.owned.value &&
+    send("snapshot", {
+      work: work.value,
+      settings: settings.state.value,
+      targetMissing: targetMissing.value,
+    });
   const stop = watch(
     settings.state,
     (value) => {
@@ -43,6 +63,20 @@ export function bridgeFor(kt) {
       if (closed || !packet || packet.peer === peer || retired.has(packet.peer))
         return;
       const { type, data } = packet;
+      if (type === "owner") {
+        void ownership.refresh();
+        return;
+      }
+      if (
+        ["snapshot", "work", "action", "renderer"].includes(type) &&
+        (!packet.token || packet.token !== ownership.current.value?.token)
+      )
+        return;
+      if (
+        ["snapshot", "work", "action"].includes(type) &&
+        packet.peer !== ownership.current.value?.client
+      )
+        return;
       if (type === "goodbye") {
         retired.add(packet.peer);
         if (retired.size > 256) retired.delete(retired.values().next().value);
@@ -60,6 +94,7 @@ export function bridgeFor(kt) {
       }
       if ((type === "snapshot" || type === "work") && desktop) {
         work.value = type === "snapshot" ? data.work : data;
+        if (type === "snapshot") targetMissing.value = !!data.targetMissing;
         snapshotAt = Date.now();
         workPeer = packet.peer;
       }
@@ -70,7 +105,20 @@ export function bridgeFor(kt) {
         rendererAt = Date.now();
       }
     };
+  const stopOwner = watch(
+    () => ownership.current.value?.token,
+    (_, previous) => {
+      if (desktop) work.value = null;
+      command.value = { operation: "release", id: randomId() };
+      if (previous) rendering.value = false;
+      connection.value = null;
+      if (ownership.owned.value) snapshot();
+      else if (desktop) send("hello");
+    },
+    { flush: "sync" },
+  );
   const tick = setInterval(() => {
+    if (ownership.status.value !== "unmanaged") void ownership.tick();
     if (!desktop) snapshot();
     else if (Date.now() - snapshotAt > 15000) {
       work.value = null;
@@ -86,8 +134,19 @@ export function bridgeFor(kt) {
     renderError,
     status,
     desktop,
+    ownership,
+    targetMissing,
+    canRender: computed(
+      () =>
+        ownership.status.value === "unmanaged" ||
+        (desktop ? !!ownership.current.value : ownership.owned.value),
+    ),
     snapshot,
-    sendWork: () => send("work", work.value),
+    openTarget() {
+      const target = targetView(result, settings.state.value).target;
+      if (target) return openChat(target);
+    },
+    sendWork: () => ownership.owned.value && send("work", work.value),
     renderer(value, error = "") {
       if (closed) return;
       rendering.value = value;
@@ -98,13 +157,15 @@ export function bridgeFor(kt) {
     perform(value) {
       if (closed) return;
       command.value = value;
-      send("action", value);
+      if (ownership.owned.value) send("action", value);
     },
     close() {
       if (closed) return;
       send("goodbye", null);
       closed = true;
+      ownership.dispose();
       stop();
+      stopOwner();
       clearInterval(tick);
       channel?.close();
       window.removeEventListener("pagehide", result.close);
@@ -116,6 +177,7 @@ export function bridgeFor(kt) {
     },
   };
   bridges.set(key, result);
+  if (desktop) void ownership.start();
   // A package on a newly selected host has a separate transport and no old state.
   for (const [old, bridge] of bridges) if (old !== key) bridge.close();
   send("hello");
@@ -123,197 +185,3 @@ export function bridgeFor(kt) {
   kt.onDispose?.(result.close);
   return result;
 }
-
-export const PetBridge = defineComponent({
-  setup() {
-    const kt = useExtension();
-    const bridge = bridgeFor(kt);
-    const settings = settingsFor(kt);
-    const work = useWorkContext({ retainLast: true, includeSpeech: true });
-    let lease = randomId(),
-      ownedLease = null;
-    let disposed = false,
-      blocked = false,
-      revision = 0,
-      pending = Promise.resolve(),
-      polling,
-      pollAbort;
-    const release = () => {
-      bridge.connection.value = null;
-      bridge.perform({ operation: "release", id: randomId() });
-    };
-    const stopWork = watch(
-      work,
-      (value) => {
-        bridge.work.value = value;
-        bridge.sendWork();
-      },
-      { immediate: true, flush: "sync" },
-    );
-    async function poll(generation, bindingLease) {
-      while (
-        !disposed &&
-        generation === revision &&
-        settings.state.value.agentControl &&
-        bridge.rendering.value
-      ) {
-        try {
-          pollAbort = new AbortController();
-          const response = await kt.api.get("events", {
-            params: { lease: bindingLease },
-            signal: pollAbort.signal,
-            timeout: 20000,
-          });
-          if (generation !== revision || disposed) return;
-          const action = response.data.command;
-          if (action && (!action.expiresAt || action.expiresAt > Date.now()))
-            bridge.perform(action);
-        } catch (error) {
-          if (generation === revision && !disposed) {
-            bridge.status.value = "动作连接待恢复";
-            if (error.response?.status === 409) {
-              blocked = true;
-              ownedLease = null;
-              bridge.connection.value = null;
-            } else release();
-          }
-          return;
-        }
-      }
-    }
-    function sync(changed = false) {
-      if (changed) {
-        blocked = false;
-        revision++;
-        lease = randomId();
-        pollAbort?.abort();
-        if (ownedLease) release();
-        bridge.status.value = "正在连接…";
-      }
-      const generation = revision;
-      const current = work.value;
-      const enabled =
-        settings.state.value.agentControl &&
-        bridge.rendering.value &&
-        current?.connected &&
-        !!current.creatureId;
-      const body = {
-        lease,
-        enabled: !!enabled,
-        model: settings.state.value.model,
-        sessionId: current?.sessionId || "",
-        creatureId: current?.creatureId || "",
-        waiting: current?.status === "waiting",
-        mode:
-          settings.state.value.controlMode === "agent" ? "agent" : "expression",
-        actionSet:
-          settings.state.value.models[settings.state.value.model].actionSet,
-      };
-      pending = pending
-        .catch(() => {})
-        .then(async () => {
-          if (disposed || generation !== revision) return;
-          try {
-            if (ownedLease && (ownedLease !== body.lease || !enabled)) {
-              await kt.api.post("binding", {
-                lease: ownedLease,
-                enabled: false,
-              });
-              ownedLease = null;
-            }
-            if (disposed || generation !== revision) return;
-            if (!enabled) {
-              bridge.status.value = settings.state.value.agentControl
-                ? "等待宠物和会话"
-                : "自动动作";
-              return;
-            }
-            if (blocked) return;
-            const response = await kt.api.post("binding", {
-              ...body,
-              renew: ownedLease === body.lease,
-            });
-            ownedLease = body.lease;
-            if (generation !== revision || disposed) return;
-            bridge.connection.value = {
-              sessionId: body.sessionId,
-              creatureId: response.data.creatureId || body.creatureId,
-              label: current.label || body.creatureId,
-              mode: body.mode,
-            };
-            bridge.status.value = enabled
-              ? "Agent 动作已连接"
-              : settings.state.value.agentControl
-                ? "等待宠物和会话"
-                : "自动动作";
-            if (enabled && polling !== generation) {
-              polling = generation;
-              void poll(generation, body.lease).finally(() => {
-                if (polling === generation) polling = undefined;
-              });
-            }
-          } catch (error) {
-            if (generation === revision) {
-              blocked = error.response?.status === 409;
-              bridge.status.value =
-                body.mode === "agent" && error.response?.status === 409
-                  ? "请创建或打开龙娘对话，或关闭其他页面的主动表达。"
-                  : blocked
-                    ? "其他页面正在控制，或租约已过期；请重新启用主动表达。"
-                    : "动作连接不可用";
-              bridge.connection.value = null;
-              ownedLease = null;
-            }
-          }
-        });
-    }
-    const unwatch = watch(
-      [
-        () => settings.state.value.agentControl,
-        () => settings.state.value.controlMode,
-        () =>
-          JSON.stringify(
-            settings.state.value.models[settings.state.value.model].actionSet,
-          ),
-        () => settings.state.value.model,
-        () => bridge.rendering.value,
-        () => work.value?.sessionId,
-        () => work.value?.creatureId,
-        () => work.value?.connected,
-      ],
-      () => sync(true),
-      { immediate: true },
-    );
-    // Work settlement must not truncate a gesture the agent just requested.
-    // Real waiting still wins in the player and gates new backend requests.
-    const stopStatus = watch(
-      () => work.value?.status,
-      () => sync(),
-    );
-    const heartbeat = setInterval(() => {
-      if (settings.state.value.agentControl) sync();
-    }, 5000);
-    const dispose = () => {
-      if (disposed) return;
-      disposed = true;
-      revision++;
-      unwatch();
-      stopWork();
-      stopStatus();
-      clearInterval(heartbeat);
-      pollAbort?.abort();
-      if (ownedLease) release();
-      bridge.close();
-      void pending.finally(() =>
-        ownedLease
-          ? kt.api
-              .post("binding", { lease: ownedLease, enabled: false })
-              .catch(() => {})
-          : undefined,
-      );
-    };
-    onUnmounted(dispose);
-    kt.onDispose?.(dispose);
-    return () => null;
-  },
-});

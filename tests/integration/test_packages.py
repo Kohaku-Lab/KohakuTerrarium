@@ -42,9 +42,11 @@ from fastapi import HTTPException
 from examples.packages.live2d_pet.kt_live2d.api import (
     companions,
     Binding,
+    ControllerRequest,
     bind,
     events,
     remove_binding,
+    update_controller,
 )
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 
@@ -668,13 +670,19 @@ class TestPackagesIntegration:
                 {
                     "sessionId": companion.graph_id,
                     "creatureId": companion.creature_id,
-                    "label": companion.config_name or companion.name,
+                    "label": companion.name or companion.config_name,
                 }
             ]
             assert configured_tool.purpose == "companion"
             assert (await configured_tool.execute({"operation": "actions"})).error
+            owner = (
+                await update_controller(
+                    ControllerRequest(client="page-one", operation="claim"), service
+                )
+            )["controller"]
             dedicated = request.model_copy(
                 update={
+                    "controller": owner["token"],
                     "lease": "companion-ui",
                     "mode": "agent",
                     "sessionId": companion.graph_id,
@@ -687,6 +695,27 @@ class TestPackagesIntegration:
             result = await companion.run("greet visually", timeout=10)
             assert result.ok
             assert (await events("companion-ui", service))["command"]["action"] == "nod"
+            with pytest.raises(HTTPException):
+                await update_controller(
+                    ControllerRequest(client="page-two", operation="claim"), service
+                )
+            calls = companion_llm.call_count
+            replacement = (
+                await update_controller(
+                    ControllerRequest(
+                        client="page-two", operation="takeover", token=owner["token"]
+                    ),
+                    service,
+                )
+            )["controller"]
+            assert (await configured_tool.execute({"operation": "actions"})).error
+            with pytest.raises(HTTPException, match="Controller changed"):
+                await bind(dedicated, service)
+            dedicated = dedicated.model_copy(
+                update={"controller": replacement["token"]}
+            )
+            await bind(dedicated, service)
+            assert companion_llm.call_count == calls
             catalog = deepcopy(ACTION_SETS["dragon"])
             catalog["label"] = "My companion"
             catalog["actions"]["acknowledge"] = catalog["actions"].pop("nod")
@@ -716,6 +745,12 @@ class TestPackagesIntegration:
             assert companion.agent.llm is companion_llm
             await engine.remove_creature(companion)
             assert (await companions(service))["companions"] == []
+            await update_controller(
+                ControllerRequest(
+                    client="page-two", operation="release", token=replacement["token"]
+                ),
+                service,
+            )
             assert studio_packages.uninstall_package_op("live2d-pet-demo")
             other_skill = Skill(
                 "live2d-expression", "User skill", "Keep user instructions"

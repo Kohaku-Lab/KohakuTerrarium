@@ -348,6 +348,19 @@ body.mini canvas {
   font-size: 12px;
   font-weight: 600;
 }
+.pet-menu-target {
+  border-bottom: 1px solid #e6dce5;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+.pet-menu-target #pet-target {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+.pet-menu-target button {
+  padding: 8px 12px;
+  font-size: 12px;
+}
 #pet-menu p {
   font-size: 10px;
   margin: 10px 0 0;

@@ -1,9 +1,10 @@
 import { mount, flushPromises } from "@vue/test-utils"
 import { nextTick } from "vue"
 import { expect, it, vi } from "vitest"
-import { createMockHost as makeHost } from "@/ext/sdk/mock"
+import { createMockHost as makeHost } from "./live2dTestHost"
 import register from "../../../../examples/packages/live2d_pet/ui/index.js"
-import { bridgeFor, PetBridge } from "../../../../examples/packages/live2d_pet/ui/bridge.js"
+import { bridgeFor } from "../../../../examples/packages/live2d_pet/ui/bridge.js"
+import { PetBridge } from "../../../../examples/packages/live2d_pet/ui/runtime.js"
 import { settingsFor } from "../../../../examples/packages/live2d_pet/ui/settings-state.js"
 
 function createMockHost(options) {
@@ -33,6 +34,7 @@ it("forwards live speech to the desktop renderer without resending settings on e
     speech: { stream: 1, sequence: 2, active: true, text: "实时正文。", at: Date.now() },
   }
   try {
+    await bridge.ownership.start()
     bridge.work.value = work
     bridge.sendWork()
     await vi.waitFor(() => expect(packets.some((p) => p.type === "work")).toBe(true))
@@ -43,6 +45,8 @@ it("forwards live speech to the desktop renderer without resending settings on e
     history.replaceState(null, "", "/?kt_overlay=speech-test")
     bridge = bridgeFor(host.kt)
     expect(bridge.desktop).toBe(true)
+    await flushPromises()
+    bridge.ownership.current.value = { client: packet.peer, token: packet.token }
     peer.postMessage(packet)
     await vi.waitFor(() => expect(bridge.work.value?.speech.text).toBe("实时正文。"))
     peer.postMessage({ ...packet, data: null })
@@ -94,7 +98,7 @@ it("makes no control requests in Pet mode and revokes ownership when returning t
     )
     settingsFor(host.kt).update({ controlMode: "pet" })
     await flushPromises()
-    expect(post.mock.calls.at(-1)[1]).toEqual({ lease: second.lease, enabled: false })
+    expect(post.mock.calls.at(-1)[1]).toMatchObject({ lease: second.lease, enabled: false })
     expect(bridge.connection.value).toBeNull()
     const count = post.mock.calls.length
     host.state.work = { ...host.state.work, status: "ready" }

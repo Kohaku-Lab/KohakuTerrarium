@@ -10,7 +10,7 @@ tools:
     class: Live2DControl
 ui:
   api: kt_live2d.api:router
-  sdk: ">=1.1,<2"
+  sdk: ">=1.2,<2"
   entry: ui/index.js
   styles: [ui/extension.css]
   contributes:

@@ -49,6 +49,7 @@ import { useTabsStore } from "@/stores/tabs"
 import { useAuthStore } from "@/stores/auth"
 import { useThemeStore } from "@/stores/theme"
 import {
+  navigateMain,
   closeOverlayWindow,
   openOverlaySettings,
   setOverlayBounds,
@@ -317,9 +318,8 @@ export async function confirm(message, title = "", options = {}) {
  * an object is a core tab spec such as ``{ kind: "settings", id: "settings" }``.
  */
 export function openTab(target) {
-  if (new URLSearchParams(window.location.search).has("kt_overlay")) {
-    return target?.kind === "settings" ? openOverlaySettings(target.section) : false
-  }
+  if (new URLSearchParams(location.search).has("kt_overlay"))
+    return navigateMain(typeof target === "string" ? { kind: "extension", id: target } : target)
   if (typeof target === "string") return openExtensionTab(target)
   return useTabsStore().openTab(target)
 }
@@ -327,6 +327,8 @@ export function openTab(target) {
 /** Open a live chat and focus a creature by ID, source name or the privileged `root` alias. */
 export async function openChat({ sessionId, creatureId } = {}, { signal } = {}) {
   if (!sessionId || signal?.aborted) return false
+  if (new URLSearchParams(location.search).has("kt_overlay"))
+    return navigateMain({ kind: "attach", sessionId, creatureId })
   const scope = getRuntimeScope()
   const instance = await useInstancesStore().fetchOne(sessionId)
   if (scope !== getRuntimeScope() || signal?.aborted) return false

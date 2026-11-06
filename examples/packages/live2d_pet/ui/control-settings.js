@@ -6,6 +6,7 @@ import {
 } from "@kohakuterrarium/ui-sdk";
 import { bridgeFor } from "./bridge.js";
 import { settingsFor } from "./settings-state.js";
+import { targetView } from "./target.js";
 
 export const ControlSettings = defineComponent({
   name: "Live2DControlSettings",
@@ -22,8 +23,11 @@ export const ControlSettings = defineComponent({
     let navigation = new AbortController();
     const key = (row) => `${row.sessionId}/${row.creatureId}`;
     const open = async (row) => {
-      if (await openChat(row, { signal: navigation.signal }))
+      if (await openChat(row, { signal: navigation.signal })) {
+        store.update({ companion: row });
         kt.showOverlay("dragon");
+        choices.value = [];
+      }
     };
     const run = async (action) => {
       if (busy.value) return;
@@ -38,20 +42,18 @@ export const ControlSettings = defineComponent({
         if (request === generation) busy.value = false;
       }
     };
-    const launch = () =>
+    const launch = (replace = false) =>
       run(async (current) => {
         const response = await kt.api.get("companions");
         if (!current()) return;
         const rows = response.data.companions;
-        const connected = bridge.connection.value;
+        const connected = store.state.value.companion;
         const existing =
-          connected?.mode === "agent" &&
-          rows.find(
-            (row) =>
-              row.sessionId === connected.sessionId &&
-              row.creatureId === connected.creatureId,
-          );
-        if (existing || rows.length === 1) await open(existing || rows[0]);
+          !replace &&
+          connected &&
+          rows.find((row) => row.creatureId === connected.creatureId);
+        if (existing || (!replace && rows.length === 1 && !connected))
+          await open(existing || rows[0]);
         else if (!rows.length) {
           kt.showOverlay("dragon");
           creating.value = true;
@@ -78,6 +80,7 @@ export const ControlSettings = defineComponent({
     });
     return () => {
       const mode = store.state.value.controlMode;
+      const view = targetView(bridge, store.state.value);
       const connected = bridge.connection.value;
       const work = bridge.work.value;
       const label =
@@ -92,8 +95,38 @@ export const ControlSettings = defineComponent({
           h("dt", "可选主动表达"),
           h("dd", "当前对话的 Agent 自选动作，沿用原模型；增加动作工具调用。"),
           h("dt", "专用 L2D Agent"),
-          h("dd", "在龙娘对话里聊天，由同一个 Agent 回复并控制动作。"),
+          h(
+            "dd",
+            "固定龙娘对话，由同一个 Agent 回复并控制动作；切换页面不改变绑定。",
+          ),
         ]),
+        h("p", { class: "l2d-target-status" }, view.text),
+        view.target
+          ? h(
+              "button",
+              {
+                type: "button",
+                disabled: busy.value,
+                onClick: () => run(() => bridge.openTarget()),
+              },
+              "打开此对话",
+            )
+          : null,
+        view.controlledElsewhere || view.controllerUnavailable
+          ? h("div", [
+              h(
+                "p",
+                view.controllerUnavailable
+                  ? "当前页面尚未连接宠物，可以在此页面接管。"
+                  : "由另一页面控制，当前页面的会话选择不会影响宠物。",
+              ),
+              h(
+                "button",
+                { type: "button", onClick: () => bridge.ownership.takeover() },
+                "在此页面接管",
+              ),
+            ])
+          : null,
         mode !== "pet"
           ? h(
               "p",
@@ -107,14 +140,29 @@ export const ControlSettings = defineComponent({
           ? h("div", [
               h(
                 "button",
-                { type: "button", disabled: busy.value, onClick: launch },
+                {
+                  type: "button",
+                  disabled: busy.value,
+                  onClick: () => launch(),
+                },
                 busy.value ? "正在打开…" : "创建 / 打开龙娘对话",
               ),
               h(
                 "p",
                 { class: "l2d-control-hint" },
-                "优先打开运行中的龙娘对话，没有则新建。切换模式不会启动 Agent，也没有额外的后台 Agent；切到普通对话会断开动作连接。",
+                "选择后持续跟随这位龙娘；关闭聊天标签仍保留绑定。切换模式不会启动 Agent，也没有额外的后台 Agent。",
               ),
+              store.state.value.companion
+                ? h(
+                    "button",
+                    {
+                      type: "button",
+                      disabled: busy.value,
+                      onClick: () => launch(true),
+                    },
+                    "更换对话",
+                  )
+                : null,
               choices.value.length
                 ? h("div", { class: "l2d-settings-actions" }, [
                     h(
@@ -168,7 +216,16 @@ export const ControlSettings = defineComponent({
                 initialName: "龙娘对话",
                 initialAttachMode: "chat",
                 onClose: () => (creating.value = false),
-                onStarted: () => kt.showOverlay("dragon"),
+                onStarted: ({ id }) =>
+                  run(async (current) => {
+                    const { data } = await kt.api.get("companions");
+                    if (!current()) return;
+                    const row = data.companions.find(
+                      (row) => row.sessionId === id || row.creatureId === id,
+                    );
+                    if (row) store.update({ companion: row });
+                    kt.showOverlay("dragon");
+                  }),
               }),
             )
           : null,

@@ -9,6 +9,7 @@
   "permissions": [
     "core:event:default",
     "allow-get-desktop-capabilities",
+    "allow-navigate-main",
     "allow-open-external",
     "allow-close-overlay-window",
     "allow-overlay-start-drag",

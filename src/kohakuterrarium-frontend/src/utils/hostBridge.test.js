@@ -263,8 +263,19 @@ describe("hostBridge", () => {
   })
 
   it("drives native overlay windows through Tauri only", async () => {
-    const invoke = vi.fn(async () => true)
+    const invoke = vi.fn(async (command) =>
+      command === "get_desktop_capabilities"
+        ? {
+            surface: "desktop",
+            protocol: 1,
+            overlayWindows: true,
+            overlayResize: true,
+            overlayPlacementNative: true,
+          }
+        : true,
+    )
     window.__TAURI_INTERNALS__ = { invoke }
+    await desktopCapabilities()
     expect(overlayWindowsSupported()).toBe(true)
     const spec = { label: "overlay-a", key: "ext:p/o", width: 100, height: 80 }
     expect(await openOverlayWindow(spec)).toBe(true)

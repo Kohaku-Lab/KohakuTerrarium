@@ -16,7 +16,7 @@ struct Placement {
     height: f64,
 }
 
-fn desktop_divisor(scale: f64) -> f64 {
+pub(crate) fn desktop_divisor(scale: f64) -> f64 {
     if cfg!(target_os = "macos") {
         scale
     } else {
@@ -71,7 +71,16 @@ pub fn overlay_placement(window: WebviewWindow, args: Args) -> Option<Value> {
         return serde_json::to_value(current).ok();
     }
     let saved = match operation {
-        "restore" => serde_json::from_value::<Placement>(args.as_ref()?.get(1)?.clone()).ok()?,
+        "restore" => args
+            .as_ref()
+            .and_then(|args| args.get(1))
+            .filter(|v| !v.is_null())
+            .cloned()
+            .or_else(|| crate::overlay_store::load(&window))
+            .and_then(|v| serde_json::from_value::<Placement>(v).ok())
+            .filter(|p| p.valid())
+            .unwrap_or(current),
+        "validate" => current,
         "reset" => current,
         _ => return None,
     };
@@ -97,7 +106,7 @@ pub fn overlay_placement(window: WebviewWindow, args: Args) -> Option<Value> {
         })
         .collect();
     let reachable = areas.iter().find(|(work, _)| saved.reachable(*work));
-    let (target, divisor) = if operation == "restore" && reachable.is_some() {
+    let (target, divisor) = if operation != "reset" && reachable.is_some() {
         (saved, reachable?.1)
     } else {
         let (work, divisor) = areas
@@ -106,6 +115,9 @@ pub fn overlay_placement(window: WebviewWindow, args: Args) -> Option<Value> {
             .or(areas.first())?;
         (saved.centered(*work), *divisor)
     };
+    if operation == "validate" && reachable.is_some() {
+        return serde_json::to_value(current).ok();
+    }
     window
         .set_position(PhysicalPosition::new(
             target.x * divisor,

@@ -1,13 +1,20 @@
-import { onUnmounted, shallowRef, watch } from "vue"
+import { onScopeDispose, shallowRef, watch } from "vue"
 
 /** Opt-in, ephemeral output: no transcript scan, replay, or additional connection. */
-export function useWorkSpeech(binding) {
+export function useWorkSpeech(binding, selectedSource = null) {
   const speech = shallowRef(null)
   let generation = 0
   const stop = watch(
     () => {
       const chat = binding.value
-      return [chat, chat?.terrariumTarget, chat?.wsStatus, chat?.viewingRunningBranch]
+      const source = selectedSource ? selectedSource.value : chat?.terrariumTarget
+      return [
+        chat,
+        source,
+        chat?.wsStatus,
+        chat?.processingByTab[source],
+        chat?.branchViewByTab[source],
+      ]
     },
     ([chat, source, connection], _, cleanup) => {
       const stream = ++generation
@@ -54,6 +61,6 @@ export function useWorkSpeech(binding) {
     },
     { immediate: true, flush: "sync" },
   )
-  onUnmounted(stop)
+  onScopeDispose(stop)
   return speech
 }

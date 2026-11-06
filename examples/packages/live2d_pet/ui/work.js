@@ -7,6 +7,8 @@ export function connectWork(
   options = {},
 ) {
   const badge = document.querySelector("#work-status");
+  const targetLabel = document.querySelector("#pet-target");
+  const openTarget = document.querySelector("#pet-open-target");
   const channel = new URL(location.href).searchParams.get("channel");
   const origin = document.referrer ? new URL(document.referrer).origin : null;
   let sequence = 0;
@@ -41,6 +43,12 @@ export function connectWork(
     )
       return;
     sequence = data.sequence;
+    if (targetLabel)
+      targetLabel.textContent =
+        typeof data.target?.text === "string"
+          ? data.target.text
+          : "尚未选择会话";
+    if (openTarget) openTarget.hidden = !data.target?.target;
     latest = data.work;
     speech?.observe(latest, options.onSpeech || (() => interaction.activity()));
     behavior.waitingForInput = Boolean(
@@ -49,6 +57,9 @@ export function connectWork(
     if (!previewing) display(followWork ? latest : null);
   };
   window.addEventListener("message", receive);
+  const open = () =>
+    parent.postMessage({ type: "kt-live2d-open-target", channel }, origin);
+  openTarget?.addEventListener("click", open);
   if (channel && origin && parent !== window)
     parent.postMessage(
       {
@@ -61,6 +72,7 @@ export function connectWork(
     );
   const dispose = () => {
     window.removeEventListener("message", receive);
+    openTarget?.removeEventListener("click", open);
     speech?.reset();
   };
   dispose.configure = (options) => {

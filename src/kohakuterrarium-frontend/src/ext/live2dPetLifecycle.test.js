@@ -1,11 +1,12 @@
 import { mount, flushPromises } from "@vue/test-utils"
 import { afterEach, expect, it, vi } from "vitest"
 import register from "../../../../examples/packages/live2d_pet/ui/index.js"
-import { bridgeFor, PetBridge } from "../../../../examples/packages/live2d_pet/ui/bridge.js"
+import { bridgeFor } from "../../../../examples/packages/live2d_pet/ui/bridge.js"
+import { PetBridge } from "../../../../examples/packages/live2d_pet/ui/runtime.js"
 import { PetFrame } from "../../../../examples/packages/live2d_pet/ui/frame.js"
 import { settingsFor } from "../../../../examples/packages/live2d_pet/ui/settings-state.js"
 import { connectRendererHealth } from "../../../../examples/packages/live2d_pet/ui/renderer-health.js"
-import { createMockHost } from "@/ext/sdk/mock"
+import { createMockHost } from "./live2dTestHost"
 
 afterEach(() => {
   vi.useRealTimers()
@@ -44,7 +45,7 @@ it("registers, loads a frame and binds with random IDs on an insecure LAN host",
   }
 })
 
-it("closes the transport on controller teardown and on extension disposal", async () => {
+it("keeps the runtime across UI teardown and closes it on extension disposal", async () => {
   vi.useFakeTimers()
   const sent = [],
     channels = []
@@ -67,6 +68,8 @@ it("closes the transport on controller teardown and on extension disposal", asyn
   const controller = mount(PetBridge)
   await flushPromises()
   controller.unmount()
+  expect(channels[0].close).not.toHaveBeenCalled()
+  host.dispose()
   const count = sent.length
   settingsFor(host.kt).update({ tracking: false })
   await vi.advanceTimersByTimeAsync(20000)
@@ -74,10 +77,7 @@ it("closes the transport on controller teardown and on extension disposal", asyn
   expect(channels[0].close).toHaveBeenCalledTimes(1)
   expect(bridge.work.value).toBeNull()
   expect(bridge.connection.value).toBeNull()
-  const replacement = bridgeFor(host.kt)
-  expect(replacement).not.toBe(bridge)
-  host.dispose()
-  expect(channels[1].close).toHaveBeenCalledTimes(1)
+  expect(bridge.ownership.status.value).toBe("disposed")
 })
 
 it("does not reacquire a rejected lease on background heartbeats", async () => {
@@ -190,10 +190,18 @@ it("ignores retired bridge generations without clearing the replacement snapshot
   const bridge = bridgeFor(host.kt)
   const send = (peer, type, work) =>
     channels[0].onmessage({
-      data: { peer, type, data: { work, settings: settingsFor(host.kt).state.value } },
+      data: {
+        peer,
+        type,
+        token: peer + "-token",
+        data: { work, settings: settingsFor(host.kt).state.value },
+      },
     })
   try {
+    await flushPromises()
+    bridge.ownership.current.value = { client: "old", token: "old-token" }
     send("old", "snapshot", { sessionId: "old" })
+    bridge.ownership.current.value = { client: "new", token: "new-token" }
     send("new", "snapshot", { sessionId: "new" })
     send("old", "goodbye")
     expect(bridge.work.value.sessionId).toBe("new")

@@ -189,10 +189,12 @@ function createHandle(record) {
   const pkg = record.package
   const hostKey = extState.hostKey
   const disposers = new Set()
+  const abort = new AbortController()
   let disposed = false
   record.dispose = () => {
     if (disposed) return
     disposed = true
+    abort.abort()
     for (const dispose of disposers) {
       try {
         dispose()
@@ -203,12 +205,15 @@ function createHandle(record) {
     disposers.clear()
   }
   const join = (path) => `/ext/${encodeURIComponent(pkg)}/${String(path || "").replace(/^\/+/, "")}`
-  const provide = (kind) => (id, component, options) =>
-    provideContributionComponent(pkg, kind, id, component, options)
+  const provide = (kind) => (id, component, options) => {
+    if (disposed || findPackage(pkg) !== record || extState.hostKey !== hostKey) return
+    return provideContributionComponent(pkg, kind, id, component, options)
+  }
   return {
     package: pkg,
     scopeKey: hostKey,
     sdkVersion: SDK_VERSION,
+    signal: abort.signal,
     onDispose(callback) {
       if (disposed) callback()
       else disposers.add(callback)

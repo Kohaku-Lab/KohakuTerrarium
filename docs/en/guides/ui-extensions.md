@@ -135,6 +135,7 @@ export default defineExtension((kt) => {
 | Member | Purpose |
 |---|---|
 | `kt.package`, `kt.sdkVersion` | identity |
+| `kt.signal` | AbortSignal canceled at disposal; use it for asynchronous initialization. Late contribution registration is ignored. |
 | `kt.onDispose(callback)` | Register synchronous cleanup for package unload, reload, host switch or failed registration. Returns a function that unregisters the callback. Callbacks registered after disposal run immediately. |
 | `registerTab / registerPanel / registerRailGroup / registerSettingsSection / registerToolRenderer / registerTriggerRenderer / registerWidgetRenderer (id, component, options?)` | provide the component for a declared contribution. An undeclared id is added on the fly; runtime-owned kinds then need `options.owner`, and an undeclared widget needs `options.renderer`. `registerWidgetRenderer` also takes `version` and `surfaces` (`chat`, `canvas`, `side-panel`, `modal`). |
 | `kt.t(key, params)` | message from the package's i18n bundles (`{name}` interpolation) |
@@ -154,6 +155,9 @@ export default defineExtension((kt) => {
 | `kt.registerOverlay(id, component, options?)`, `kt.showOverlay / hideOverlay / toggleOverlay(id)` | provide and control a floating [overlay](#overlays) |
 
 ### SDK exports (`@kohakuterrarium/ui-sdk` v1)
+
+SDK 1.2 adds `kt.signal` and explicit `useWorkContext({ target, enabled })`
+observation. Packages requiring those APIs declare `ui.sdk: ">=1.2,<2"`.
 
 SDK 1.1 adds `NewSessionDialog` and `openChat`; packages using them must declare
 `ui.sdk: ">=1.1,<2"`.
@@ -198,6 +202,19 @@ last focused live-session tab while visiting a preview or Settings. Tracking
 starts with the extension host, before the companion mounts. Focusing another
 live session changes the binding; closing its tab or switching hosts clears it.
 This observes the existing chat connection and does not open a background monitor.
+
+An explicit `target` ref/getter contains `{sessionId, creatureId?, label?}`.
+The observer retains a scoped chat connection without opening or focusing a tab;
+its selected speaker does not change when the visible chat selects another Agent.
+`enabled` may be a boolean, ref or getter. Disabling or disposing the effect scope
+releases that connection. This can read a conversation while its UI tab is closed,
+but never starts a creature or a model turn. The caller owns target validity and
+must update its session ID after graph changes. A failed resolution returns null.
+
+On supported desktop shells, retained observations accept explicit selection
+from focused chat popouts. Background events and settings/overlay focus do not
+change the selected conversation. `openTab` and `openChat` called from an overlay
+route navigation to the main window.
 
 `includeSpeech: true` additionally exposes `speech`, an ephemeral snapshot of the
 selected creature's live reply output: `{ stream, sequence, text, active, at }`.

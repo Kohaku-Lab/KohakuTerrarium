@@ -8,6 +8,7 @@ import OverlayLayer from "@/ext/OverlayLayer.vue"
 import { desktopContextConnected } from "@/ext/desktopContext"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
 import overlayWindowSource from "@/ext/OverlayWindowApp.vue?raw"
+import { desktopCapabilities } from "@/utils/hostBridge"
 import { toggleHud } from "@/ext/hud"
 import {
   hideOverlay,
@@ -42,6 +43,7 @@ import { useOverlay } from "@/ext/sdk"
 import { OVERLAY_INJECT_KEY, OVERLAY_MODE_INJECT_KEY } from "@/ext/sdk/keys"
 import { extState } from "@/ext/state"
 
+const providedLoader = async () => {}
 const Pet = { template: '<div class="pet kt-overlay-hit">pet</div>' }
 const KEY = "ext:pets/cat"
 
@@ -49,7 +51,7 @@ function declare(overlay = {}) {
   const rec = {
     package: "pets",
     enabled: true,
-    status: "idle",
+    status: "loaded",
     contributes: [
       {
         kind: "overlay",
@@ -61,6 +63,7 @@ function declare(overlay = {}) {
     ],
   }
   extState.packages = [rec]
+  runtime.ensureLoaded = providedLoader
   registerPackageContributions(rec)
   provideContributionComponent("pets", "overlay", "cat", Pet)
 }
@@ -85,7 +88,17 @@ function viewportContent(key) {
 }
 
 function tauri() {
-  const invoke = vi.fn(async () => true)
+  const invoke = vi.fn(async (name) =>
+    name === "get_desktop_capabilities"
+      ? {
+          surface: "desktop",
+          protocol: 1,
+          overlayWindows: true,
+          overlayResize: true,
+          overlayPlacementNative: true,
+        }
+      : true,
+  )
   window.__TAURI_INTERNALS__ = { invoke }
   return invoke
 }
@@ -127,22 +140,66 @@ describe("native overlay windows", () => {
     expect(windowActive(KEY)).toBe(false)
 
     const invoke = tauri()
+    await desktopCapabilities()
     expect(windowActive(KEY)).toBe(false)
     setWindowAllowed(KEY, true)
     expect(windowActive(KEY)).toBe(true)
 
     delete window.__TAURI_INTERNALS__
     expect(windowActive(KEY)).toBe(false)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.every(([name]) => name === "get_desktop_capabilities")).toBe(true)
 
     const layer = mount(OverlayLayer, { global: { stubs: { ExtensionContribution: true } } })
     expect(layer.findAll('[data-test="overlay-frame"]')).toHaveLength(1)
     layer.unmount()
   })
 
+  it("keeps a package controller mounted when its renderer is native or hidden", async () => {
+    declare()
+    extState.packages[0].handle = { package: "pets" }
+    const Controller = defineComponent({
+      setup() {
+        const kt = useExtension()
+        return () => h("span", { "data-controller": "" }, kt.package)
+      },
+    })
+    provideContributionComponent("pets", "overlay", "cat", Pet, { controller: Controller })
+    tauri()
+    await desktopCapabilities()
+    setWindowAllowed(KEY, true)
+    const layer = mount(OverlayLayer)
+    try {
+      expect(layer.find("[data-controller]").text()).toBe("pets")
+      expect(layer.findAll('[data-test="overlay-frame"]')).toHaveLength(0)
+      hideOverlay(KEY)
+      await nextTick()
+      expect(layer.find("[data-controller]").exists()).toBe(true)
+    } finally {
+      layer.unmount()
+    }
+  })
+
+  it("loads a visible native overlay's package in the main window for its controller", async () => {
+    declare()
+    tauri()
+    await desktopCapabilities()
+    setWindowAllowed(KEY, true)
+    const original = runtime.ensureLoaded
+    runtime.ensureLoaded = vi.fn(async () => {})
+    const layer = mount(OverlayLayer)
+    try {
+      await nextTick()
+      expect(runtime.ensureLoaded).toHaveBeenCalledWith("pets")
+    } finally {
+      layer.unmount()
+      runtime.ensureLoaded = original
+    }
+  })
+
   it("opens the window once, closes it when hidden, and leaves the in-app layer empty", async () => {
     declare({ width: 120, height: 90, anchor: "top-left", alwaysOnTop: false })
     const invoke = tauri()
+    await desktopCapabilities()
     setWindowAllowed(KEY, true)
 
     syncOverlayWindows()
@@ -186,6 +243,7 @@ describe("native overlay windows", () => {
     expect(windowActive("hud")).toBe(false)
 
     const invoke = tauri()
+    await desktopCapabilities()
     expect(windowActive("hud")).toBe(true)
     expect(isOverlayVisible("hud")).toBe(false)
 
@@ -475,6 +533,7 @@ describe("native overlay windows", () => {
   it("follows visibility and consent changes while running", async () => {
     declare()
     const invoke = tauri()
+    await desktopCapabilities()
     startOverlayWindows()
     setWindowAllowed(KEY, true)
     await nextTick()
@@ -521,8 +580,9 @@ describe("OverlayWindowApp", () => {
   it("acknowledges itself, draws the overlay with chrome and hides through the shell", async () => {
     declare()
     const invoke = tauri()
+    await desktopCapabilities()
     const page = mount(OverlayWindowApp, { props: { overlayKey: KEY } })
-    await nextTick()
+    await flushPromises()
     expect(invoke).toHaveBeenCalledWith("overlay_ack", {})
     expect(page.find(".pet").exists()).toBe(true)
 
@@ -546,6 +606,7 @@ describe("OverlayWindowApp", () => {
       })
       declare({ clickThrough: true })
       const invoke = tauri()
+      await desktopCapabilities()
       const page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
       expect(page.find('[data-test="overlay-window-bar"]').exists()).toBe(false)
       await vi.advanceTimersByTimeAsync(250)
@@ -585,8 +646,9 @@ describe("OverlayWindowApp", () => {
     window.history.replaceState({}, "", "/")
   })
 
-  it("says so when the overlay is not provided by any extension", () => {
+  it("says so when the overlay is not provided by any extension", async () => {
     tauri()
+    await desktopCapabilities()
     const page = mount(OverlayWindowApp, { props: { overlayKey: "ext:none/x" } })
     expect(page.find('[data-test="overlay-window-missing"]').text()).toContain("not available")
     page.unmount()
@@ -594,6 +656,7 @@ describe("OverlayWindowApp", () => {
 
   it("gives the SDK a window-mode useOverlay", async () => {
     const invoke = tauri()
+    await desktopCapabilities()
     let control
     const Probe = defineComponent({
       setup() {

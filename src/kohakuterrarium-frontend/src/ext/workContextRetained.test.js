@@ -79,3 +79,48 @@ it("retains work before the consumer mounts, follows live events, and clears clo
     clearAttentionRegistry()
   }
 })
+
+it("only accepts selected popouts on the same host and keeps them while main shows settings", () => {
+  setActivePinia(createPinia())
+  const tabs = useTabsStore(),
+    hosts = useHostsStore()
+  const tracker = startWorkContextTracking()
+  tabs.byId = { a: { kind: "attach", target: "main" }, settings: { kind: "settings" } }
+  tabs.activeId = "a"
+  let work
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        work = useWorkContext({ retainLast: true })
+        return () => null
+      },
+    }),
+  )
+  const relay = (detail) =>
+    window.dispatchEvent(
+      new CustomEvent("kt:work-context", {
+        detail: { host: `${hosts.activeHostId || ""}|`, window: "popout-one", ...detail },
+      }),
+    )
+  try {
+    relay({ work: { sessionId: "background" } })
+    expect(work.value.sessionId).toBe("main")
+    relay({ selected: true, host: "foreign|", work: { sessionId: "wrong-host" } })
+    expect(work.value.sessionId).toBe("main")
+    relay({ selected: true, work: { sessionId: "popout" } })
+    expect(work.value.sessionId).toBe("popout")
+    tabs.activeId = "settings"
+    window.dispatchEvent(new Event("focus"))
+    expect(work.value.sessionId).toBe("popout")
+    relay({ window: "popout-two", work: { sessionId: "background" } })
+    expect(work.value.sessionId).toBe("popout")
+    tabs.activeId = "a"
+    window.dispatchEvent(new Event("focus"))
+    relay({ work: { sessionId: "stale" } })
+    expect(work.value.sessionId).toBe("main")
+  } finally {
+    wrapper.unmount()
+    tracker.stop()
+    useChatStore("main")._cleanup()
+  }
+})

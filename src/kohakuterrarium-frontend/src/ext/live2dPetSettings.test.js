@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest"
 import { mount, flushPromises } from "@vue/test-utils"
-import { createMockHost } from "@/ext/sdk/mock"
+import { createMockHost } from "./live2dTestHost"
 import {
   normalizePreferences,
   updatePreferences,

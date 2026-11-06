@@ -8,6 +8,8 @@
  * Callers test capabilities, never the shell kind.
  */
 
+import { shallowRef } from "vue"
+
 export const DESKTOP_PROTOCOL = 1
 
 const KIND_PYWEBVIEW = "pywebview"
@@ -51,18 +53,29 @@ export function hostSupports(name) {
   }
 }
 
-/** Shell capabilities for this protocol version, or ``null`` when unavailable. */
+let capabilitiesBridge, capabilitiesPromise
+const nativeCapabilities = shallowRef(null)
+
+/** Shell capabilities cached for the current native bridge. Missing fields mean unsupported. */
 export async function desktopCapabilities() {
-  if (!hostSupports("get_desktop_capabilities")) return null
-  try {
-    const capabilities = await call("get_desktop_capabilities")
-    if (capabilities?.surface === "desktop" && capabilities.protocol === DESKTOP_PROTOCOL) {
-      return capabilities
-    }
-  } catch {
-    // A shell that cannot answer is treated as having no native features.
+  const bridge = window.pywebview?.api || window.__TAURI_INTERNALS__?.invoke
+  if (!bridge) return null
+  if (capabilitiesBridge !== bridge) {
+    capabilitiesBridge = bridge
+    nativeCapabilities.value = null
+    capabilitiesPromise = (async () => {
+      try {
+        const value = await call("get_desktop_capabilities")
+        const result =
+          value?.surface === "desktop" && value.protocol === DESKTOP_PROTOCOL ? value : null
+        if (capabilitiesBridge === bridge) nativeCapabilities.value = result
+        return result
+      } catch {
+        return null
+      }
+    })()
   }
-  return null
+  return capabilitiesPromise
 }
 
 /** Ask the shell to flash or bounce its window. Resolves ``false`` when it cannot. */
@@ -369,7 +382,12 @@ export async function installShellUpdate() {
 
 /** Whether the shell can draw an extension overlay in its own native window. */
 export function overlayWindowsSupported() {
-  return hostKind() === KIND_TAURI && hostSupports("open_overlay_window")
+  const caps = nativeCapabilities.value
+  return (
+    hostKind() === KIND_TAURI &&
+    capabilitiesBridge === window.__TAURI_INTERNALS__?.invoke &&
+    !!(caps?.overlayWindows && caps?.overlayResize && caps?.overlayPlacementNative)
+  )
 }
 
 async function callBoolean(name, ...args) {
@@ -384,6 +402,16 @@ async function callBoolean(name, ...args) {
 /** Bring the main window forward showing the running session `scope`; called by the HUD window. */
 export function focusSession(scope) {
   return callBoolean("focus_session", String(scope))
+}
+
+export async function relayWorkContext(context) {
+  if (!(await desktopCapabilities())?.workContextRelay) return false
+  return callBoolean("relay_work_context", context)
+}
+
+export async function navigateMain(target) {
+  if (!(await desktopCapabilities())?.mainNavigation) return false
+  return callBoolean("navigate_main", target)
 }
 
 /** Open (or show) a native overlay window: `{ label, key, width, height, anchor, alwaysOnTop }`. */

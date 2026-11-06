@@ -14,9 +14,37 @@ from .actions import ACTION_SETS, validate_action_set
 from .bindings import attach, bindings, remove_binding, renew
 from .control import is_live2d_tool
 from .model_api import router as model_router
+from .ownership import claim_controller, controller_view
 
 router = APIRouter(dependencies=[Depends(require_user)])
 router.include_router(model_router)
+
+
+class ControllerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client: str = Field(min_length=1, max_length=80)
+    operation: Literal["claim", "renew", "release", "takeover"]
+    token: str = Field(default="", max_length=80)
+
+
+@router.get("/controller")
+async def controller(service=Depends(current_service)):
+    if not isinstance(service, LocalTerrariumService):
+        raise HTTPException(409, "Local creature required.")
+    return {"controller": controller_view(service.engine)}
+
+
+@router.post("/controller")
+async def update_controller(req: ControllerRequest, service=Depends(current_service)):
+    if not isinstance(service, LocalTerrariumService):
+        raise HTTPException(409, "Local creature required.")
+    try:
+        value = claim_controller(service.engine, req.client, req.operation, req.token)
+    except ValueError as exc:
+        raise HTTPException(
+            409, {"message": str(exc), "controller": controller_view(service.engine)}
+        ) from exc
+    return {"controller": value}
 
 
 @router.get("/companions")
@@ -29,12 +57,16 @@ async def companions(service=Depends(current_service)):
     rows = []
     for creature in service.engine.list_creatures():
         tool = creature.agent.registry.get_tool("l2d")
-        if is_live2d_tool(tool) and tool.purpose == "companion":
+        if (
+            is_live2d_tool(tool)
+            and tool.purpose == "companion"
+            and creature.status not in {"stopped", "killed"}
+        ):
             rows.append(
                 {
                     "sessionId": creature.graph_id,
                     "creatureId": creature.creature_id,
-                    "label": creature.config_name or creature.name,
+                    "label": creature.name or creature.config_name,
                 }
             )
     return {"companions": rows}
@@ -51,6 +83,7 @@ class Binding(BaseModel):
     waiting: bool = False
     mode: Literal["expression", "agent"] = "expression"
     actionSet: dict | None = None
+    controller: str = Field(default="", max_length=80)
 
 
 @router.post("/binding")
@@ -60,6 +93,9 @@ async def bind(req: Binding, service=Depends(current_service)):
             409, "Live2D control requires a local creature on this host."
         )
     engine = service.engine
+    owner = controller_view(engine)
+    if (req.controller and not owner) or (owner and owner["token"] != req.controller):
+        raise HTTPException(409, "Controller changed.")
     current = bindings.get(engine)
     if not req.enabled:
         if current and current.tool.lease == req.lease:
@@ -77,6 +113,8 @@ async def bind(req: Binding, service=Depends(current_service)):
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     cid = await resolve_creature_id(service, req.creatureId, req.sessionId)
+    if controller_view(engine) != owner:
+        raise HTTPException(409, "Controller changed.")
     agent = engine.get_creature(cid).agent
     current = bindings.get(engine)
     owns = current and current.agent is agent and current.tool.lease == req.lease

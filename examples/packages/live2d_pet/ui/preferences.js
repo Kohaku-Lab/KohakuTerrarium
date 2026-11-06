@@ -59,6 +59,16 @@ export function normalizePreferences(input) {
     quality: data.quality === "standard" ? "standard" : "high",
     debug: data.debug === true,
     controlMode,
+    companion:
+      data.companion &&
+      typeof data.companion.creatureId === "string" &&
+      typeof data.companion.sessionId === "string"
+        ? {
+            creatureId: data.companion.creatureId.slice(0, 200),
+            sessionId: data.companion.sessionId.slice(0, 200),
+            label: String(data.companion.label || "龙娘对话").slice(0, 200),
+          }
+        : null,
     agentControl: controlMode !== "pet",
     tracking: data.tracking !== false,
     physics: data.physics !== false,

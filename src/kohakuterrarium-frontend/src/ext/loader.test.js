@@ -118,6 +118,9 @@ describe("ui extension loader", () => {
     const late = vi.fn()
     handle.onDispose(late)
     expect(late).toHaveBeenCalledTimes(1)
+    expect(handle.signal.aborted).toBe(true)
+    handle.registerTab("too-late", { template: "<div />" })
+    expect(contributionComponents.has("ext:alpha/too-late")).toBe(false)
   })
 
   it("never loads disabled, broken or incompatible packages", async () => {

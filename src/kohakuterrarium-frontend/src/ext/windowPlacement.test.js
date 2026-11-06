@@ -8,13 +8,13 @@ afterEach(() => {
   localStorage.clear()
 })
 
-it("restores native physical placement without consulting Chromium DIP screen bounds", async () => {
+it("uses native persistence and bounds events without frontend placement writes", async () => {
   vi.useFakeTimers()
   const placement = { version: 1, x: 2200, y: 200, width: 600, height: 800 }
   localStorage.setItem("kt.overlay.window.pet", JSON.stringify(placement))
   const invoke = vi.fn(async (command) =>
     command === "get_desktop_capabilities"
-      ? { surface: "desktop", protocol: 1, overlayPlacementV1: true }
+      ? { surface: "desktop", protocol: 1, overlayPlacementV1: true, overlayPlacementNative: true }
       : command === "overlay_get_bounds"
         ? [1100, 100, 300, 400]
         : placement,
@@ -23,7 +23,7 @@ it("restores native physical placement without consulting Chromium DIP screen bo
   const stop = trackWindowPlacement("pet")
   try {
     await vi.advanceTimersByTimeAsync(1000)
-    expect(invoke).toHaveBeenCalledWith("overlay_placement", { args: ["restore", placement] })
+    expect(invoke).toHaveBeenCalledWith("overlay_placement", { args: ["validate", null] })
     expect(JSON.parse(localStorage.getItem("kt.overlay.window.pet"))).toEqual(placement)
     expect(invoke.mock.calls.some(([c]) => c === "overlay_set_bounds")).toBe(false)
   } finally {

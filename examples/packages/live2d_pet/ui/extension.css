@@ -369,3 +369,17 @@
     margin-bottom: 12px;
   }
 }
+
+.l2d-control-settings > p {
+  margin: 12px 0;
+}
+.l2d-control-settings > div {
+  margin-top: 12px;
+}
+.l2d-control-settings button {
+  margin: 0 8px 8px 0;
+}
+.l2d-target-status {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}

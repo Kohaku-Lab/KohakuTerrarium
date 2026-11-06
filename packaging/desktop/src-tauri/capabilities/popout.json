@@ -9,6 +9,7 @@
   "permissions": [
     "core:event:default",
     "allow-get-desktop-capabilities",
+    "allow-relay-work-context",
     "allow-open-external",
     "allow-set-desktop-theme",
     "allow-set-window-chrome",

@@ -55,6 +55,13 @@ When persistence is unavailable, controls continue with local/in-memory state.
 
 ## Architecture and resource budgets
 
+One extension-owned runtime serves settings, preview and companion; mounting or
+closing a settings component does not start or stop the controller. Its disposal
+aborts pending action reads, releases subscriptions and invalidates late callbacks.
+UI ownership and temporary creature-action bindings have separate leases. The
+backend grants only one controller; renderer health is reported by the actual
+model frame before an action binding can become connected.
+
 One settings store serves the settings panel, preview and companion. A host/user
 scoped BroadcastChannel forwards settings, observed work and transient actions
 between the main window and desktop companion. The main window owns the
@@ -99,16 +106,17 @@ model changes do not push the character sideways by the change in canvas width.
 Use Settings → Overlays → Reset position to bring a misplaced window back.
 Placement recovery uses native monitor coordinates (physical pixels on Windows,
 desktop points on macOS), never Chromium screen origins. Legacy unversioned
-placements are ignored. Older shells retain their previous resize path; native
-placement recovery requires a shell advertising `overlayPlacementV1`.
-
+placements are ignored. The shell owns persistence and confirms geometry through native events.
+Native overlays require `overlayWindows`, `overlayResize` and
+`overlayPlacementNative`; older shells use the in-app overlay.
 
 ## Work and interaction
 
 Settings describe all three modes together. Dedicated mode's **Create / open
 dragon chat** button finds loaded companions by their configured tool, including
 inherited configurations. One match opens directly; multiple matches offer a
-choice, preferring the currently connected companion. No match opens the normal
+choice. A saved companion is reopened by default; **Change conversation**
+selects a different one. No match opens the normal
 KT new-session dialog with the companion configuration, a readable name, and
 chat opening preselected. Creation still requires submitting that dialog.
 The entry also shows the pet. Conversation models remain managed by KT.
@@ -118,7 +126,18 @@ hidden-renderer and released bindings show no connected conversation. Changing
 the mode alone does not start an agent; dedicated conversation and action
 control belong to the same agent, with no additional background agent.
 
-The companion follows the last focused live conversation in the selected host.
+Ordinary Pet and optional expression follow the conversation **selected by the
+user**. Settings/files and switching to other apps retain the last selection;
+background events never select a conversation. Session work state is aggregated,
+while speech and action tools belong only to the selected creature. A channel
+view has no creature speaker or action permission. The settings and pet menu show
+**Following** or **Pinned** and offer **Open this conversation**.
+
+Desktop chat popouts report an explicit focused selection to the main window;
+the pet/menu does not change it. A browser has one controller page per local
+engine. Other pages show **Take over on this page**; focusing a tab or a heartbeat
+cannot steal control. Dedicated mode pins the explicitly chosen companion,
+independently of the currently viewed chat.
 Initial snapshots, reconnects and historical completions do not replay gestures.
 Automatic work following does not create extra LLM requests. Optional agent
 control uses one bounded long-poll connection and a five-second binding
@@ -154,13 +173,14 @@ actions and resetting poses/expressions preserve these choices in all three mode
 | Optional expression | A visible pet temporarily lends the selected creature an action tool and an on-demand skill. | Uses that creature's existing model; tool selection, context and continuation may add cost. |
 | Dedicated L2D Agent | The packaged `companion` creature has its own role and explicitly configured action tool. | Its conversation uses the selected LLM; no automatic background agent or per-frame inference. |
 
-After installing the package, create a conversation from
-`@live2d-pet-demo/creatures/companion` (display name `live2d_companion`), select
-that live conversation and choose **专用 L2D Agent** with the pet visible.
-The mode rejects ordinary creatures instead of silently converting them. Moving
-to another conversation releases control; return to the companion's conversation
-to reconnect. The example also loads through `kt run
-@live2d-pet-demo/creatures/companion`, but visual control needs a visible UI
+Choose **专用 L2D Agent**, then **创建 / 打开龙娘对话** to select a running
+companion or open KT's normal creation dialog using
+`@live2d-pet-demo/creatures/companion` (display name `live2d_companion`).
+The mode rejects ordinary creatures instead of silently converting them.
+Switching pages or closing its chat tab preserves the pin; stopping or removing
+the creature invalidates it and offers a replacement. Changing modes never
+starts an LLM turn. The example also loads through
+`kt run @live2d-pet-demo/creatures/companion`, but visual control needs a visible UI
 attached to the same local engine. A separate CLI process cannot control an
 unrelated desktop engine.
 
@@ -226,10 +246,14 @@ injected into every prompt. The UI does not select an LLM provider or preset.
 Authenticated routes bind one selected local creature to one visible renderer.
 Only one main page may own the control lease at a time. Other pages receive a
 conflict status; neither an initial background request nor a renewal steals an
-active lease. Disable control on the owning page before enabling it elsewhere.
+active lease. Explicit takeover changes the controller generation and revokes
+the preceding action binding. Ordinary Pet also participates in UI ownership,
+but does not inject tools, poll actions or start an LLM call.
 Renewals cannot recreate an expired lease. The renderer sends a real health
 heartbeat; failure or ten seconds without a heartbeat clears readiness and
-provides Retry. Extension disposal stops its watchers, timers and channels.
+provides Retry. One package runtime outlives settings/preview components. Closing the pet drops
+its renderer and action binding; disabling/reloading the extension, changing
+hosts/users or exiting disposes its subscriptions, watchers, timers and channels.
 Tool/skill updates retain the engine-managed graph context.
 
 A 20-second lease expires after the UI disappears. Switching models, catalogs,

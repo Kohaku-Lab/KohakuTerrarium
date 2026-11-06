@@ -1,6 +1,6 @@
 import { mount, flushPromises } from "@vue/test-utils"
 import { expect, it, vi } from "vitest"
-import { createMockHost } from "@/ext/sdk/mock"
+import { createMockHost } from "./live2dTestHost"
 import register from "../../../../examples/packages/live2d_pet/ui/index.js"
 import { PetFrame } from "../../../../examples/packages/live2d_pet/ui/frame.js"
 import { ModelResources } from "../../../../examples/packages/live2d_pet/ui/model-resources.js"
@@ -67,9 +67,11 @@ it("keeps the current model after rejected imports and switches/reloads only aft
     await flushPromises()
     expect(settingsFor(host.kt).state.value.model).toBe("dragon")
     expect(wrapper.get('[aria-label="已有模型适配器"]').text()).toContain("龙娘已导入")
-    expect(host.requests.find((r) => r.method === "POST").config.headers["Content-Type"]).toBe(
-      "application/zip",
-    )
+    expect(
+      host.requests.find((r) => r.method === "POST" && r.path !== "/controller").config.headers[
+        "Content-Type"
+      ],
+    ).toBe("application/zip")
   } finally {
     wrapper.unmount()
   }

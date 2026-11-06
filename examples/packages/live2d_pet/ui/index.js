@@ -1,4 +1,5 @@
-import { bridgeFor, PetBridge } from "./bridge.js";
+import { bridgeFor } from "./bridge.js";
+import { PetBridge, runtimeFor } from "./runtime.js";
 import { fittedSize } from "./preferences.js";
 import { settingsFor, initializeSettings } from "./settings-state.js";
 import { PetSettings } from "./settings.js";
@@ -45,7 +46,7 @@ const Preview = defineComponent({
                 visible.value ? "收起小宠物，回到预览" : "放到 KT 角落",
               ),
             ]),
-            visible.value || bridge.rendering.value
+            visible.value || bridge.rendering.value || !bridge.canRender.value
               ? h(
                   "div",
                   { class: "kt-dragon-placeholder" },
@@ -61,6 +62,7 @@ const Companion = defineComponent({
     const kt = useExtension();
     const overlay = useOverlay();
     const preferences = settingsFor(kt);
+    const bridge = bridgeFor(kt);
     const aspect = ref(null);
     const headerOffset = ref(0);
     watch(
@@ -165,7 +167,7 @@ const Companion = defineComponent({
               ],
             )
           : null,
-        overlay.visible.value
+        overlay.visible.value && bridge.canRender.value
           ? h(PetFrame, {
               mini: true,
               getViewport: overlay.getViewport,
@@ -215,9 +217,12 @@ const Companion = defineComponent({
 
 export default defineExtension(async (kt) => {
   const settings = await initializeSettings(kt);
+  if (kt.signal?.aborted) return;
   if (kt.consumeStartupFallback?.("dragon"))
     settings.update({ model: "dragon" });
-  bridgeFor(kt);
+  const params = new URLSearchParams(location.search);
+  if (!params.has("kt_overlay") && !params.has("kt_popout")) runtimeFor(kt);
+  else bridgeFor(kt);
   kt.registerTab("preview", Preview);
   kt.registerSettingsSection("preferences", PetSettings);
   kt.registerOverlay("dragon", Companion, {
