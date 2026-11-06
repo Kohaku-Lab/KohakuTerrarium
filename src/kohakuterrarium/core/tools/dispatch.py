@@ -131,10 +131,22 @@ async def start_tool_task(executor, tool_call):
 def tool_background_handle(
     task, job_id, executor_direct, run_background, on_complete=None
 ):
-    """Use one completion owner for declared-background and promoted jobs."""
+    """Deliver promoted tool outcomes through one completion owner."""
+
+    async def deliver_result(completed_id, result):
+        if isinstance(result, asyncio.CancelledError):
+            result = JobResult(
+                job_id=completed_id,
+                error="User manually interrupted this job.",
+                cancelled=True,
+            )
+        await on_complete(completed_id, result)
+
     return backgroundify(
         task,
         job_id,
-        on_bg_complete=on_complete if executor_direct else None,
+        on_bg_complete=(
+            deliver_result if executor_direct and on_complete is not None else None
+        ),
         background_init=not executor_direct or bool(run_background),
     )

@@ -191,6 +191,12 @@ class TestJobStatusContextString:
 
 
 class TestJobResult:
+    def test_cancelled_result_is_not_successful_without_error_text(self):
+        result = JobResult(job_id="j", cancelled=True)
+        assert result.cancelled is True
+        assert result.success is False
+        assert JobResult(job_id="normal").cancelled is False
+
     def test_success_no_error_no_exit_code(self):
         assert JobResult(job_id="j", output="ok").success is True
 

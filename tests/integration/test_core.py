@@ -37,6 +37,7 @@ import pytest
 from PIL import Image
 
 import kohakuterrarium.core.agent.history.message_history as branch_history
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
@@ -236,8 +237,11 @@ class _SlowBackgroundTool(BaseTool):
     """BACKGROUND tool: yields after a short sleep so the controller
     must promote it and pick the result up on a later turn."""
 
-    def __init__(self, *, gated=False, output=None, error=None):
+    def __init__(
+        self, *, gated=False, output=None, error=None, mode=ExecutionMode.BACKGROUND
+    ):
         super().__init__()
+        self.mode = mode
         self.calls = 0
         self.output = output
         self.error = error
@@ -255,7 +259,7 @@ class _SlowBackgroundTool(BaseTool):
 
     @property
     def execution_mode(self) -> ExecutionMode:
-        return ExecutionMode.BACKGROUND
+        return self.mode
 
     async def _execute(self, args, **kwargs):
         self.calls += 1
@@ -2299,7 +2303,7 @@ class TestCoreIntegration:
             assert b_agent.is_running is False
         assert budget_creature.is_running is False
 
-    async def test_interrupt_mid_turn(self, make_creature):
+    async def test_interrupt_mid_turn(self, make_creature, tmp_path):
         """A turn dispatches a blocking DIRECT tool; ``interrupt()`` is
         called while the controller is waiting on it; the processing
         task is cancelled cleanly and the agent stays alive for the
@@ -2481,6 +2485,104 @@ class TestCoreIntegration:
                 if not owner.done():
                     owner.cancel()
                 await asyncio.gather(owner, return_exceptions=True)
+
+        for launch in ("declared", "requested"):
+            background_arg = (
+                "@@run_in_background=true\n" if launch == "requested" else ""
+            )
+            cancelled_llm = ScriptedLLM(
+                [
+                    "seed answer",
+                    "rerun answer",
+                    f"launched [/slowbg]{background_arg}[slowbg/]",
+                    "cancellation observed",
+                    "switched answer",
+                ],
+            )
+            gated = _SlowBackgroundTool(
+                gated=True,
+                mode=(
+                    ExecutionMode.BACKGROUND
+                    if launch == "declared"
+                    else ExecutionMode.DIRECT
+                ),
+            )
+            async with Terrarium(session_dir=tmp_path / launch) as engine:
+                cancelled_creature = await engine.add_creature(
+                    AgentConfig(
+                        name=f"cancel_{launch}",
+                        system_prompt="plain",
+                        tool_format="bracket",
+                    ),
+                    llm=cancelled_llm,
+                    tools=[gated],
+                    io="headless",
+                    start=True,
+                )
+                cancelled_agent = cancelled_creature.agent
+                service = LocalTerrariumService(engine)
+                await cancelled_creature.run("seed", timeout=5)
+                await cancelled_agent.regenerate_last_response()
+                assert live_branch_path(cancelled_agent)[1] == 2
+                await cancelled_creature.run("launch background", timeout=5)
+                await asyncio.wait_for(gated.started.wait(), 3)
+                job_id = cancelled_agent.executor.get_running_jobs()[0].job_id
+                task = cancelled_agent.executor.get_task(job_id)
+                assert await service.stop_job(cancelled_creature.creature_id, job_id)
+                assert not task.done()
+                assert [
+                    job["job_id"]
+                    for job in await service.list_jobs(cancelled_creature.creature_id)
+                ] == [job_id]
+                with pytest.raises(ConflictError):
+                    await cancelled_agent.inject_input(
+                        "premature switch", branch_view={1: 1}
+                    )
+                assert live_branch_path(cancelled_agent)[1] == 2
+                await cancelled_agent.inject_input(
+                    "observe cancellation",
+                    branch_view=live_branch_path(cancelled_agent),
+                )
+                assert cancelled_agent.executor.get_result(job_id).cancelled is True
+                assert await service.list_jobs(cancelled_creature.creature_id) == []
+                results = [
+                    event
+                    for event in cancelled_agent.session_store.get_events(
+                        cancelled_agent.config.name
+                    )
+                    if event["type"] == "tool_result" and event.get("call_id") == job_id
+                ]
+                assert len(results) == 1
+                assert results[0]["final_state"] == "cancelled"
+                assert results[0]["cancelled"] is True
+                feedback = f"[Tool {job_id} cancelled]"
+                assert (
+                    sum(
+                        str(message.get("content", "")).count(feedback)
+                        for message in cancelled_agent.llm.call_log[-1]
+                    )
+                    == 1
+                )
+                await cancelled_agent.inject_input("settled switch", branch_view={1: 1})
+                assert live_branch_path(cancelled_agent)[1] == 1
+                assert job_id not in str(cancelled_agent.llm.call_log[-1])
+                session_path = cancelled_agent.session_store.path
+                selected = selected_branch_view(cancelled_agent)
+
+            resumed_llm = ScriptedLLM(["resumed original"])
+            resumed, store = resume_agent(
+                session_path, io_mode="plain", llm=resumed_llm
+            )
+            try:
+                assert selected_branch_view(resumed) == selected
+                await resumed.start()
+                await resumed.inject_input("after cancelled-branch resume")
+                assert job_id not in str(resumed_llm.call_log[-1])
+                assert "rerun answer" not in str(resumed_llm.call_log[-1])
+                assert "seed answer" in str(resumed_llm.call_log[-1])
+            finally:
+                await resumed.stop()
+                store.close()
 
     @pytest.mark.timeout(120)
     async def test_history_ops(self, make_creature, tmp_path, monkeypatch):

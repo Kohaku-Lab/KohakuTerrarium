@@ -127,6 +127,26 @@ class _SlowTool(BaseTool):
         return ToolResult(output="done")
 
 
+class _CancellationTool(_SlowTool):
+    def __init__(self, *, suppress=False):
+        super().__init__()
+        self.suppress = suppress
+        self.started = asyncio.Event()
+        self.cancelling = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def _execute(self, args, **kwargs):
+        self.started.set()
+        try:
+            await self.release.wait()
+        except asyncio.CancelledError:
+            self.cancelling.set()
+            await self.release.wait()
+            if not self.suppress:
+                raise
+        return ToolResult(output="settled")
+
+
 class _BashFileTool(BaseTool):
     """Return Bash-shaped output metadata without spawning a subprocess."""
 
@@ -488,6 +508,71 @@ class TestOnCompleteCallback:
 
 
 class TestCancel:
+    @pytest.mark.parametrize("started", [False, True])
+    @pytest.mark.parametrize("direct", [False, True])
+    async def test_request_keeps_job_running_until_execution_settles(
+        self, started, direct
+    ):
+        seen = []
+        ex = Executor(on_complete=seen.append)
+        tool = _CancellationTool()
+        ex.register_tool(tool)
+        jid = await ex.submit("slow", {}, is_direct=direct)
+        task = ex.get_task(jid)
+        try:
+            if started:
+                await asyncio.wait_for(tool.started.wait(), 3)
+            assert await ex.cancel(jid)
+            status = ex.get_status(jid)
+            assert status.state == JobState.RUNNING
+            assert status.end_time is None
+            assert ex.get_running_jobs() == [status]
+            assert ex.get_pending_count() == 1
+            assert not task.done()
+            assert ex.get_result(jid) is None
+            assert seen == []
+            if started:
+                await asyncio.wait_for(tool.cancelling.wait(), 3)
+                assert status.state == JobState.RUNNING
+                assert ex.get_result(jid) is None
+            tool.release.set()
+            result = await ex.wait_for(jid, timeout=3)
+            assert status.state == JobState.CANCELLED
+            assert result.cancelled is True
+            assert result.success is False
+            assert len(seen) == (0 if direct else 1)
+            if seen:
+                assert seen[0].context["cancelled"] is True
+                assert seen[0].context["final_state"] == "cancelled"
+            assert await ex.cancel(jid) is False
+        finally:
+            tool.release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_suppressed_cancellation_keeps_the_actual_outcome(self):
+        ex = Executor()
+        tool = _CancellationTool(suppress=True)
+        ex.register_tool(tool)
+        jid = await ex.submit("slow", {})
+        task = ex.get_task(jid)
+        try:
+            await asyncio.wait_for(tool.started.wait(), 3)
+            assert await ex.cancel(jid)
+            await asyncio.wait_for(tool.cancelling.wait(), 3)
+            assert ex.get_status(jid).state == JobState.RUNNING
+            tool.release.set()
+            result = await ex.wait_for(jid, timeout=3)
+            assert result.output == "settled"
+            assert result.cancelled is False
+            assert result.success is True
+            assert ex.get_status(jid).state == JobState.DONE
+            event = ex.get_next_event_nowait()
+            assert event.context.get("cancelled", False) is False
+            assert ex.get_next_event_nowait() is None
+        finally:
+            tool.release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_cancel_running_job(self):
         ex = Executor()
         ex.register_tool(_SlowTool())

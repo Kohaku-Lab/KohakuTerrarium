@@ -72,6 +72,42 @@ start in the same turn. Tools marked concurrency-safe run fully in parallel;
 tools marked unsafe are serialized behind one shared lock so destructive file
 or shell operations do not race each other.
 
+### Cancellation and settlement
+
+For executor-owned tools, `await executor.cancel(job_id)` returns whether a
+cancellation request was issued. It does not wait for the tool to exit or for
+its result to reach the controller. Unknown or already-finished tasks return
+`False`.
+
+Three boundaries are distinct:
+
+1. **Cancellation requested.** The task has been asked to stop. Its job remains
+   `RUNNING` while it executes or performs asynchronous cleanup; it still
+   appears in running-job queries and blocks branch switching, edits, and
+   regeneration.
+2. **Execution settled.** The tool has returned or unwound cancellation. The
+   executor records its terminal outcome and result. Effective cancellation
+   produces `CANCELLED` and `JobResult.cancelled=True`, including cancellation
+   before the task first runs. A tool that suppresses cancellation instead
+   retains its actual success or error outcome.
+3. **Completion handoff settled.** A deliverable result has passed through its
+   completion owner and the agent's pending or active input processing has
+   finished. Switching historical branches, editing, and regeneration remain
+   unavailable during this handoff. Ordinary input on the current branch is
+   still allowed under the normal input-admission rules.
+
+Declared-background tools and direct tools promoted to background retain the
+same cancellation outcome. The executor owns completion delivery for the
+former; the promotion handle owns it for the latter. These are alternative
+owners, not two independent notifications for the same result. Tools with
+controller notification disabled do not require a feedback turn.
+
+`executor.wait_for(job_id)` waits for execution, not controller consumption.
+Cancellation is cooperative and does not undo external side effects. A tool
+that does not return or finish cancellation can therefore continue to block
+those history operations. This contract does not promise crash-safe execution or
+exactly-once external side effects.
+
 ## How we implement it
 
 Tools are registered in the `Registry` (`core/registry.py`). The

@@ -524,7 +524,10 @@ async def test_resume_uses_saved_original_branch_not_latest(tmp_path):
 
 
 @pytest.mark.parametrize("launch", ["declared", "requested", "promoted"])
-async def test_running_job_keeps_same_view_and_rejects_history_change(tmp_path, launch):
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_running_job_keeps_same_view_and_rejects_history_change(
+    tmp_path, launch, cancelled
+):
     engine, creature, agent, provider, tool = await _started_with_bg(
         tmp_path,
         [
@@ -563,6 +566,21 @@ async def test_running_job_keeps_same_view_and_rejects_history_change(tmp_path, 
             await agent.inject_input("switch", branch_view=original)
         assert live_branch_path(agent)[1] == live[1]
         assert provider.call_count >= calls_before
+        job_id = agent.executor.get_running_jobs()[0].job_id
+        if cancelled:
+            task = agent.executor.get_task(job_id)
+            before = _snapshot(agent, provider)
+            assert await agent.executor.cancel(job_id)
+            with pytest.raises(ConflictError, match="running"):
+                await agent.inject_input(
+                    "switch after cancel request", branch_view=original
+                )
+            with pytest.raises(ConflictError, match="running"):
+                await agent.regenerate_last_response()
+            with pytest.raises(ConflictError, match="running"):
+                await agent.edit_and_rerun(1, "edit after cancel request")
+            assert not task.done()
+            assert _snapshot(agent, provider) == before
 
         async def change_during_handoff():
             assert agent.executor.get_running_jobs() == []
@@ -585,14 +603,23 @@ async def test_running_job_keeps_same_view_and_rejects_history_change(tmp_path, 
         completion = next(
             content
             for role, content in _non_system_prefix(provider.call_log[-1])
-            if role == "user" and "RESULT_reviewbg" in str(content)
+            if role == "user" and f"[Tool {job_id} " in str(content)
         )
-        job_id = next(
-            event["call_id"]
+        results = [
+            event
             for event in agent.session_store.get_events("alice")
-            if event["type"] == "tool_result"
+            if event["type"] == "tool_result" and event.get("call_id") == job_id
+        ]
+        assert len(results) == 1
+        if cancelled:
+            assert results[0]["cancelled"] is True
+            assert results[0]["final_state"] == "cancelled"
+            assert agent.executor.get_result(job_id).cancelled is True
+        feedback = (
+            f"[Tool {job_id} cancelled]"
+            if cancelled
+            else f"[Tool {job_id} completed]\nRESULT_reviewbg"
         )
-        feedback = f"[Tool {job_id} completed]\nRESULT_reviewbg"
         assert completion == (
             f"{feedback}\n\nsame view after completion"
             if launch == "declared"
