@@ -10,28 +10,30 @@
   font-size: var(--kt-fs-body);
 }
 .vp-controls {
+  order: 0;
   align-self: flex-end;
   flex-shrink: 0;
   margin: 8px 8px 4px;
-  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
   display: flex;
   gap: 4px;
 }
-.vp-companion:hover .vp-controls,
-.vp-companion:focus-within .vp-controls {
-  opacity: 1;
+.vp-controls-open .vp-controls {
+  visibility: visible;
+  pointer-events: auto;
 }
 @media (hover: none) {
-  .vp-controls {
-    opacity: 1;
+  .vp-companion:not(.vp-controls-dismissed) .vp-controls {
+    visibility: visible;
+    pointer-events: auto;
   }
 }
 .vp-drag {
+  order: 2;
   flex: 1;
   min-height: 0;
   width: 100%;
-  cursor: grab;
-  touch-action: none;
 }
 .vp-controls button,
 .vp-dismiss,
@@ -44,7 +46,18 @@
   padding: 5px 8px;
   cursor: pointer;
 }
+.vp-feedback {
+  order: 1;
+  flex-shrink: 0;
+  height: calc(2.6em + 14px);
+  font-size: var(--kt-fs-caption);
+  display: flex;
+  align-items: center;
+}
 .vp-bubble {
+  box-sizing: border-box;
+  width: 100%;
+  line-height: 1.3;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -177,6 +190,13 @@
   border: 0;
   background-color: transparent;
   background-repeat: no-repeat;
+  pointer-events: none;
+}
+.vp-hit {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
 }
 .vp-pet-card:disabled {
   opacity: 0.5;
@@ -184,7 +204,8 @@
 }
 .vp-settings button:focus-visible,
 .vp-settings summary:focus-visible,
-.vp-companion button:focus-visible {
+.vp-companion button:focus-visible,
+.vp-hit:focus-visible {
   outline: 2px solid var(--color-text);
   outline-offset: 3px;
 }

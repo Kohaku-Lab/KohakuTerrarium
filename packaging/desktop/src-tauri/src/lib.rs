@@ -57,7 +57,14 @@ pub fn run() {
                 let targets = opens::from_arguments(args.get(1..).unwrap_or_default(), &directory);
                 opens::deliver(app, targets);
             }))
-            .plugin(tauri_plugin_window_state::Builder::default().build());
+            .plugin(
+                tauri_plugin_window_state::Builder::default()
+                    .with_state_flags(
+                        tauri_plugin_window_state::StateFlags::all()
+                            & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                    )
+                    .build(),
+            );
     }
     if !headless || smoke::summon_probe_requested() {
         builder = builder.plugin(
@@ -83,6 +90,7 @@ pub fn run() {
         .manage(Backend::default())
         .manage(DeepLinks::default())
         .manage(overlay::HitRegions::default())
+        .manage(overlay::Presentations::default())
         .manage(opens::PendingOpens::default())
         .manage(ShellSettings::default())
         .manage(tray::TrayState::default())
@@ -108,6 +116,10 @@ pub fn run() {
             overlay::overlay_set_bounds,
             overlay::overlay_set_hit_regions,
             overlay::overlay_ack,
+            overlay::overlay_present,
+            overlay::show_overlay_window,
+            overlay::overlay_open_settings,
+            overlay::reset_overlay_window,
             hud::focus_session,
             tray::get_close_to_tray,
             tray::set_close_to_tray,
@@ -145,6 +157,11 @@ pub fn run() {
             },
         )
         .on_window_event(|window, event| {
+            if overlay::is_overlay_label(window.label())
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
+                overlay::forget(window.app_handle(), window.label());
+            }
             if popout::is_popout_label(window.label()) {
                 if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
                     window

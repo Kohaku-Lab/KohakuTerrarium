@@ -11,7 +11,7 @@ ui:
       id: pet
       label: Virtual pet
       icon: i-carbon-face-wink
-      surface: app
+      surface: window
       anchor: bottom-right
       width: 224
       height: 280

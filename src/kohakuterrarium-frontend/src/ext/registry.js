@@ -316,8 +316,19 @@ export function registerContribution(pkg, contribution) {
 
 /** Register every declared contribution of a listed package. */
 export function registerPackageContributions(record) {
-  for (const contribution of record.contributes || [])
+  for (const contribution of record.contributes || []) {
     registerContribution(record.package, contribution)
+    if (
+      record.desktop_pet === true &&
+      !record.dev_url &&
+      record.package === "virtual-pet" &&
+      contribution.kind === "overlay" &&
+      contribution.id === "pet"
+    ) {
+      const overlay = overlays.get(contributionKey(record.package, contribution.id))
+      if (overlay) overlay.options = { ...overlay.options, desktopPet: true }
+    }
+  }
 }
 
 /** Remove every contribution registered through this module. */

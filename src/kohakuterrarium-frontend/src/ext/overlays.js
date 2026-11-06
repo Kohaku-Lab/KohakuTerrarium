@@ -65,7 +65,12 @@ export function isPlacementStorageKey(key) {
 
 /** Whether the user allowed the overlay to open a native window of its own. */
 export function isWindowAllowed(key) {
-  return placement(key).windowAllowed === true
+  return windowPreference(key) === true
+}
+
+/** Explicit desktop choice; undefined preserves the host's default policy. */
+export function windowPreference(key) {
+  return placement(key).windowAllowed
 }
 
 export function setWindowAllowed(key, allowed) {
@@ -205,7 +210,7 @@ export function resetOverlay(key) {
   const { visible, windowAllowed } = placement(key)
   const kept = {}
   if (typeof visible === "boolean") kept.visible = visible
-  if (windowAllowed === true) kept.windowAllowed = true
+  if (typeof windowAllowed === "boolean") kept.windowAllowed = windowAllowed
   placements[key] = kept
   writeStorage()
 }

@@ -22,6 +22,36 @@ afterEach(() => {
   gesture?.dispose()
   vi.restoreAllMocks()
 })
+it.each([false, true])(
+  "cancels a subthreshold release outside the target (native=%s)",
+  (native) => {
+    const player = new PetPlayer({ frames: { idle: 6, running: 6 }, interactions: { waving: 4 } })
+    const target = document.createElement("div")
+    vi.spyOn(target, "getBoundingClientRect").mockReturnValue({
+      left: 40,
+      top: 60,
+      width: 100,
+      height: 120,
+    })
+    gesture = new PetGestures(
+      () => player,
+      () => {},
+      () => {},
+      () => {},
+      () => native,
+    )
+    const down = event("pointerdown", 41, 100)
+    Object.defineProperty(down, "currentTarget", { value: target })
+    gesture.down(down)
+    window.dispatchEvent(event("pointerup", 38, 100))
+    expect(player.tick(performance.now()).action).toBe("idle")
+    expect(player.pressed).toBe(false)
+    gesture.down(down)
+    window.dispatchEvent(event("pointerup", 43, 100))
+    expect(player.tick(performance.now()).action).toBe("waving")
+  },
+)
+
 it("owns one pointer through cancel/blur/dispose without leaving an independent movement loop", () => {
   const player = new PetPlayer({
     frames: { idle: 6, running: 6 },
@@ -67,6 +97,48 @@ it("owns one pointer through cancel/blur/dispose without leaving an independent 
   window.dispatchEvent(event("pointermove", 20, 0, 1, 0))
   window.dispatchEvent(event("pointermove", 30, 0))
   expect(positions).toHaveLength(beforeLostUp)
+})
+
+it("uses native screen displacement rather than moving-window client coordinates and captures until release", () => {
+  const player = new PetPlayer({
+    frames: { idle: 6, running: 6 },
+    interactions: { waving: 4, "running-right": 8, "running-left": 8 },
+  })
+  const start = vi.fn()
+  const move = vi.fn()
+  gesture = new PetGestures(
+    () => player,
+    () => {},
+    start,
+    move,
+    () => true,
+  )
+  const target = document.createElement("div")
+  target.setPointerCapture = vi.fn()
+  target.hasPointerCapture = () => true
+  target.releasePointerCapture = vi.fn()
+  const down = event("pointerdown", 100, 100)
+  Object.defineProperty(down, "currentTarget", { value: target })
+  gesture.down(down)
+  expect(target.setPointerCapture).toHaveBeenCalledWith(1)
+  window.dispatchEvent(event("pointermove", 500, 100))
+  expect(start).not.toHaveBeenCalled()
+  gesture.nativeMove({ dragX: 5, dragY: 0 })
+  expect(start).not.toHaveBeenCalled()
+  gesture.nativeMove({ dragX: 6, dragY: 0 })
+  expect(start).toHaveBeenCalledTimes(1)
+  gesture.nativeMove({ dragX: 20, dragY: 0 })
+  window.dispatchEvent(event("pointermove", 40, 20))
+  expect(move.mock.calls.at(-1)[0]).toEqual({ x: 20, y: 0 })
+  gesture.nativeMove({ dragX: 14, dragY: 0 })
+  expect(player.tick(performance.now()).action).toBe("running-left")
+  window.dispatchEvent(event("pointerup", 40, 20))
+  expect(player.tick(performance.now()).action).toBe("idle")
+  expect(target.releasePointerCapture).toHaveBeenCalledWith(1)
+  gesture.down(down)
+  target.dispatchEvent(event("lostpointercapture"))
+  expect(gesture.pointer).toBeNull()
+  expect(player.pressed).toBe(false)
 })
 
 it("confirms directional segments from extrema, independent of intermediate samples and clamped host movement", () => {

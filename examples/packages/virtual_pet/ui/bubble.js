@@ -24,6 +24,7 @@ export function useBubble(work, scope) {
         work.value?.hostId,
         work.value?.sessionId,
         work.value?.started,
+        work.value?.baseline,
         work.value?.status,
       ]),
     () => {
@@ -34,6 +35,7 @@ export function useBubble(work, scope) {
         previous.scope === scope.value &&
         previous.hostId === current.hostId &&
         previous.sessionId === current.sessionId &&
+        previous.baseline === current.baseline &&
         current.started >= previous.started;
       const changed =
         !same ||

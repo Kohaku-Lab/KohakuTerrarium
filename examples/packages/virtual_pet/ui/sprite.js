@@ -2,22 +2,28 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { PetPlayer } from "./player.js";
 import { PetGestures } from "./gestures.js";
+import { DEFAULT_HIT_BOUNDS } from "./image.js";
 
 export const PetSprite = {
   name: "VirtualPetSprite",
   props: {
     atlas: { type: Object, required: true },
     source: { type: String, required: true },
+    hitBounds: { type: Object, default: () => DEFAULT_HIT_BOUNDS },
     work: { type: Object, default: null },
     scale: { type: Number, default: 1 },
     paused: { type: Boolean, default: false },
     fit: { type: Boolean, default: false },
     interactive: { type: Boolean, default: false },
     greet: { type: Boolean, default: false },
+    pointer: { type: Object, default: null },
+    native: { type: Boolean, default: false },
+    gazeEnabled: { type: Boolean, default: true },
   },
-  emits: ["drag-start", "drag-move"],
+  emits: ["drag-start", "drag-move", "hover"],
   setup(props, { emit }) {
     const stage = ref(null);
+    const sprite = ref(null);
     const stageWidth = ref(320);
     const stageHeight = ref(0);
     const cell = ref({ row: 0, column: 0, action: "idle" });
@@ -50,6 +56,12 @@ export const PetSprite = {
       left: "50%",
       transform: "translateX(-50%)",
     }));
+    const hitStyle = computed(() => ({
+      left: `${props.hitBounds.x * props.atlas.cellWidth * factor.value}px`,
+      top: `${props.hitBounds.y * props.atlas.cellHeight * factor.value}px`,
+      width: `${props.hitBounds.width * props.atlas.cellWidth * factor.value}px`,
+      height: `${props.hitBounds.height * props.atlas.cellHeight * factor.value}px`,
+    }));
     const stageStyle = computed(() =>
       props.fit
         ? { height: "100%", minHeight: "0" }
@@ -61,12 +73,22 @@ export const PetSprite = {
       refresh,
       (event) => emit("drag-start", event),
       (delta) => emit("drag-move", delta),
+      () => props.native,
     );
     function enter(event) {
-      if (props.interactive) gestures.enter(event);
+      if (props.interactive) {
+        emit("hover", true);
+        gestures.enter(event);
+      }
     }
     function down(event) {
       if (props.interactive) gestures.down(event);
+    }
+    function activate(event) {
+      if (props.interactive && event.detail === 0) {
+        player.cue("waving", performance.now());
+        refresh();
+      }
     }
     function keydown(event) {
       if (
@@ -92,7 +114,17 @@ export const PetSprite = {
     }
     function draw(now) {
       animation = null;
-      cell.value = player.tick(now, props.paused || reduced.value);
+      const r = sprite.value?.getBoundingClientRect();
+      const pointer =
+        props.interactive && props.gazeEnabled && r && props.pointer
+          ? {
+              ...props.pointer,
+              dx: props.pointer.x - r.left - r.width / 2,
+              dy: props.pointer.y - r.top - r.height / 2,
+              size: Math.max(r.width, r.height),
+            }
+          : null;
+      cell.value = player.tick(now, props.paused || reduced.value, pointer);
       if (mounted && !props.paused && !reduced.value && !document.hidden) {
         animation = requestAnimationFrame(draw);
       }
@@ -122,6 +154,16 @@ export const PetSprite = {
       { immediate: true },
     );
     watch(() => props.paused, refresh);
+    watch(
+      () => props.pointer,
+      (point) => {
+        if (props.native && gestures.pointer && point?.captured)
+          gestures.nativeMove(point);
+        if (!point?.valid) player.gaze.reset();
+        refresh();
+      },
+    );
+    watch(() => props.gazeEnabled, refresh);
 
     onMounted(() => {
       mounted = true;
@@ -147,11 +189,25 @@ export const PetSprite = {
       media?.removeEventListener("change", motionChanged);
       document.removeEventListener("visibilitychange", visibilityChanged);
     });
-    return { stage, cell, spriteStyle, stageStyle, enter, down, keydown };
+    return {
+      stage,
+      sprite,
+      cell,
+      spriteStyle,
+      hitStyle,
+      stageStyle,
+      enter,
+      down,
+      keydown,
+      activate,
+    };
   },
   template: `
     <div ref="stage" class="vp-stage" :style="stageStyle">
-      <div class="vp-sprite kt-overlay-hit" :style="spriteStyle" :role="interactive ? 'button' : 'img'" :tabindex="interactive ? 0 : undefined"
-        :aria-label="atlas.displayName" :data-action="cell.action" @pointerenter="enter" @pointerdown="down" @keydown="keydown"></div>
+      <div ref="sprite" class="vp-sprite" :style="spriteStyle" :role="interactive ? undefined : 'img'"
+        :aria-label="interactive ? undefined : atlas.displayName" :data-action="cell.action">
+        <div v-if="interactive" class="vp-hit kt-overlay-hit" :style="hitStyle" role="button" tabindex="0" :aria-label="atlas.displayName"
+          @pointerenter="enter" @pointerleave="$emit('hover', false)" @pointerdown="down" @keydown="keydown" @click="activate"></div>
+      </div>
     </div>`,
 };

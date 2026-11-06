@@ -25,6 +25,8 @@ import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import AttachTab from "@/components/shell/tabs/AttachTab.vue"
 import { useWindowChrome } from "@/composables/useWindowChrome"
 import { useInstancesStore } from "@/stores/instances"
+import { useDesktopPublisher } from "@/ext/desktopContext"
+import { useWorkContext } from "@/ext/workContext"
 import { ackPopoutWindow, returnPopoutWindow } from "@/utils/hostBridge"
 import { useI18n } from "@/utils/i18n"
 
@@ -33,6 +35,7 @@ const props = defineProps({
   scope: { type: String, required: true },
 })
 
+useDesktopPublisher(() => useWorkContext(props.scope))
 useWindowChrome()
 const { t } = useI18n()
 const tab = computed(() => ({ id: `popout:${props.scope}`, kind: "attach", target: props.scope }))

@@ -40,6 +40,8 @@ import DesktopOpenHost from "@/components/shell/DesktopOpenHost.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
 import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
 import OverlayLayer from "@/ext/OverlayLayer.vue"
+import { useDesktopPublisher } from "@/ext/desktopContext"
+import { useWorkContext } from "@/ext/workContext"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
@@ -66,6 +68,14 @@ import { useThemeStore } from "@/stores/theme"
 import { useTabsStore } from "@/stores/tabs"
 import { installDeepLinks } from "@/utils/deepLink"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
+
+useDesktopPublisher(() => useWorkContext())
+const openOverlaySettings = (event) => {
+  const section = event.detail?.section
+  if (section === "ext:virtual-pet/pets" || section === "overlays") useTabsStore().openTab({ kind: "settings", id: "settings", section })
+}
+window.addEventListener("kt:overlay-settings", openOverlaySettings)
+onBeforeUnmount(() => window.removeEventListener("kt:overlay-settings", openOverlaySettings))
 
 const theme = useThemeStore()
 const locale = useLocaleStore()

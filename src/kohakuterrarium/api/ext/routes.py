@@ -7,7 +7,12 @@ from kohakuterrarium.api._io_executor import run_in_io_executor
 from kohakuterrarium.api.auth.asset_token import mint_asset_token
 from kohakuterrarium.api.auth.dependencies import get_auth_config
 from kohakuterrarium.api.ext import require_admin, require_user
-from kohakuterrarium.api.ext.policy import default_enabled, dev_overrides, slot_enabled
+from kohakuterrarium.api.ext.policy import (
+    default_enabled,
+    desktop_pet,
+    dev_overrides,
+    slot_enabled,
+)
 from kohakuterrarium.packages.slots.ui import get_package_ui, list_package_ui
 from kohakuterrarium.studio.identity import ui_extensions
 
@@ -32,6 +37,7 @@ def _listing(auth_config) -> dict:
         record["enabled_by_default"] = default_enabled(auth_config)
         record["choice"] = choices.get(slot.package)
         record["dev_url"] = dev.get(slot.package, "")
+        record["desktop_pet"] = slot.package not in dev and desktop_pet(slot)
         packages.append(record)
     return {"packages": packages}
 

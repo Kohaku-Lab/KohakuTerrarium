@@ -47,6 +47,11 @@ export const messages = {
     overlayHint:
       "Choosing a pet does not unhide its overlay. Visibility and position are saved on this device by the host.",
     overlayControls: "Open overlay settings",
+    gaze: "Look toward the mouse",
+    gazeHint:
+      "Turn toward a nearby mouse. Respects reduced motion; saved on this device.",
+    gazeUnavailable:
+      "This pet does not contain all sixteen V2 direction poses.",
   },
   "zh-CN": {
     pets: "虚拟宠物",
@@ -90,6 +95,9 @@ export const messages = {
     overlayHint:
       "选择宠物不会自动显示已隐藏的浮层。显示与位置由宿主保存在当前设备。",
     overlayControls: "打开浮层设置",
+    gaze: "看向鼠标",
+    gazeHint: "鼠标靠近时转头。遵循减少动态效果设置，仅保存在当前设备。",
+    gazeUnavailable: "此宠物缺少完整的 V2 十六方向姿态。",
   },
   "zh-TW": {
     pets: "虛擬寵物",
@@ -134,6 +142,9 @@ export const messages = {
     overlayHint:
       "選擇寵物不會自動顯示已隱藏的浮層。顯示與位置由宿主儲存在目前裝置。",
     overlayControls: "開啟浮層設定",
+    gaze: "看向滑鼠",
+    gazeHint: "滑鼠靠近時轉頭。遵循減少動態效果設定，僅儲存在目前裝置。",
+    gazeUnavailable: "此寵物缺少完整的 V2 十六方向姿態。",
   },
   ja: {
     pets: "バーチャルペット",
@@ -181,6 +192,10 @@ export const messages = {
     overlayHint:
       "ペットを選んでも非表示のオーバーレイは再表示されません。表示と位置はこの端末に保存されます。",
     overlayControls: "オーバーレイ設定を開く",
+    gaze: "マウスの方を向く",
+    gazeHint:
+      "近くのマウスに顔を向けます。視差効果の低減に従い、この端末に保存します。",
+    gazeUnavailable: "このペットには V2 の16方向の姿勢が揃っていません。",
   },
   de: {
     pets: "Virtuelle Haustiere",
@@ -227,6 +242,11 @@ export const messages = {
     overlayHint:
       "Eine Auswahl zeigt ein ausgeblendetes Overlay nicht erneut an. Sichtbarkeit und Position werden auf diesem Gerät gespeichert.",
     overlayControls: "Overlay-Einstellungen öffnen",
+    gaze: "Zur Maus schauen",
+    gazeHint:
+      "Zur nahen Maus schauen. Beachtet reduzierte Bewegung; auf diesem Gerät gespeichert.",
+    gazeUnavailable:
+      "Diesem Haustier fehlen vollständige V2-Posen für alle 16 Richtungen.",
   },
   ko: {
     pets: "가상 반려동물",
@@ -273,6 +293,11 @@ export const messages = {
     overlayHint:
       "반려동물을 선택해도 숨겨진 오버레이는 표시되지 않습니다. 표시와 위치는 이 기기에 저장됩니다.",
     overlayControls: "오버레이 설정 열기",
+    gaze: "마우스 바라보기",
+    gazeHint:
+      "가까운 마우스를 바라봅니다. 동작 줄이기 설정을 따르며 이 기기에 저장됩니다.",
+    gazeUnavailable:
+      "이 반려동물에는 V2의 16방향 자세가 모두 포함되어 있지 않습니다.",
   },
 };
 

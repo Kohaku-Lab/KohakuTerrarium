@@ -1,5 +1,6 @@
 import { createApp } from "vue"
 import { createPinia } from "pinia"
+import { startDesktopContext } from "@/ext/desktopContext"
 import { createRouter, createWebHistory } from "vue-router"
 import { routes } from "vue-router/auto-routes"
 import App from "./App.vue"
@@ -96,6 +97,7 @@ async function bootstrap() {
     useLocaleStore().init()
     installExternalLinkGuard()
   }
+  await startDesktopContext(overlayKey ? "overlay" : popoutScope ? "popout" : "main")
   app.mount("#app")
   startUiExtensions()
   if (!secondary) startOverlayWindows()
