@@ -40,10 +40,10 @@ export function usePetTarget(kt, bridge) {
     }
   }
   const stop = watch(
-    () => [
-      fixed.value,
-      active.value,
-      settings.state.value.companion?.creatureId,
+    [
+      () => fixed.value,
+      () => active.value,
+      () => settings.state.value.companion?.creatureId,
     ],
     () => {
       generation++;

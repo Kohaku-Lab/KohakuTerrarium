@@ -90,6 +90,18 @@ it("retains explicit conversation ownership after closing its UI and only stream
     expect(work.value.creatureId).toBe("a-id")
     releaseScope(sessionId) // Close the chat tab; the observer still owns its subscription.
     expect(socket.close).not.toHaveBeenCalled()
+    target.value = { ...target.value }
+    await flushPromises()
+    expect(socket.close).not.toHaveBeenCalled()
+    expect(useChatStore(sessionId)).toBe(chat)
+    target.value = { ...target.value, creatureId: "b-id" }
+    await flushPromises()
+    expect(socket.close).not.toHaveBeenCalled()
+    expect(chat.activeTab).toBe("bob")
+    expect(work.value.creatureId).toBe("b-id")
+    target.value = { ...target.value, creatureId: "a-id" }
+    await flushPromises()
+    expect(sessionAPI.getActive).toHaveBeenCalledTimes(1)
     tabs.activeId = "settings"
     chat._onMessage({ type: "processing_start", source: "alice" })
     chat._onMessage({ type: "text", source: "alice", content: "Hello" })

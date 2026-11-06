@@ -157,14 +157,13 @@ function observeTarget(target, enabled) {
   const hosts = useHostsStore()
   const instances = useInstancesStore()
   const stop = watch(
-    () => [
-      toValue(enabled),
-      toValue(target)?.sessionId,
-      toValue(target)?.creatureId,
-      hosts.activeHostId,
-      hosts.activeHost?.currentUser?.id,
+    [
+      () => toValue(enabled),
+      () => toValue(target)?.sessionId,
+      () => hosts.activeHostId,
+      () => hosts.activeHost?.currentUser?.id,
     ],
-    ([active, sessionId, creatureId], _, cleanup) => {
+    ([active, sessionId], _, cleanup) => {
       current.value = null
       if (!active || !sessionId) return
       let disposed = false
@@ -179,19 +178,9 @@ function observeTarget(target, enabled) {
         try {
           const instance = await instances.fetchOne(sessionId)
           if (disposed || !instance) return
-          const creature = instance.creatures?.find(
-            (item) =>
-              item.creature_id === creatureId ||
-              item.name === creatureId ||
-              (creatureId === "root" && item.is_root),
-          )
-          if (creatureId && !creature) return
           const chat = useChatStore(sessionId)
           chat.initForInstance(instance)
-          current.value = {
-            chat,
-            source: creature ? (creature.is_root ? "root" : creature.name) : null,
-          }
+          current.value = { chat, instance }
         } catch {
           // A transient fetch failure must not require reselecting the target.
         } finally {
@@ -205,6 +194,21 @@ function observeTarget(target, enabled) {
   onScopeDispose(stop)
   return computed(() => {
     const value = current.value
-    return value && { ...value, source: value.source || value.chat.terrariumTarget }
+    if (!value) return null
+    const { sessionId, creatureId } = toValue(target) || {}
+    const instance =
+      instances.list.find((item) => item.id === sessionId || item.graph_id === sessionId) ||
+      value.instance
+    const creature = instance.creatures?.find(
+      (item) =>
+        item.creature_id === creatureId ||
+        item.name === creatureId ||
+        (creatureId === "root" && item.is_root),
+    )
+    if (creatureId && !creature) return null
+    return {
+      chat: value.chat,
+      source: creature ? (creature.is_root ? "root" : creature.name) : value.chat.terrariumTarget,
+    }
   })
 }

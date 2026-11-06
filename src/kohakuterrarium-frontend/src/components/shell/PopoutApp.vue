@@ -18,7 +18,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from "vue"
+import { computed, onMounted, onScopeDispose } from "vue"
 
 import AuthGate from "@/components/auth/AuthGate.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
@@ -35,9 +35,10 @@ import { useI18n } from "@/utils/i18n"
 const props = defineProps({
   scope: { type: String, required: true },
 })
+const sessionScope = props.scope
+acquireScope(sessionScope)
+onScopeDispose(() => releaseScope(sessionScope))
 
-acquireScope(props.scope)
-onUnmounted(() => releaseScope(props.scope))
 useDesktopPublisher(() => useWorkContext(props.scope))
 useWindowChrome()
 const { t } = useI18n()
