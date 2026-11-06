@@ -40,12 +40,23 @@ it("explains modes and opens an existing companion or a prefilled creation dialo
     expect(dialog.props()).toMatchObject({
       initialConfig: "@live2d-pet-demo/creatures/companion",
       initialName: "龙娘对话",
-      initialAttachMode: "chat",
     })
     expect(host.openedChats).toEqual([])
     dialog.vm.$emit("close")
     await flushPromises()
     expect(wrapper.findComponent(NewSessionDialog).exists()).toBe(false)
+
+    await launch(wrapper)
+    await flushPromises()
+    rows = [{ sessionId: "created", creatureId: "created-dragon", label: "New dragon" }]
+    wrapper.findComponent(NewSessionDialog).vm.$emit("started", { id: "created", opened: false })
+    wrapper.findComponent(NewSessionDialog).vm.$emit("close")
+    await flushPromises()
+    expect(store.state.value.companion).toEqual(rows[0])
+    expect(host.openedChats).toEqual(rows)
+    expect(dialog.props().silent).toBe(true)
+    host.openedChats.length = 0
+    store.update({ companion: null })
 
     rows = [{ sessionId: "solo", creatureId: "dragon", label: "My dragon" }]
     await launch(wrapper)
@@ -62,6 +73,32 @@ it("explains modes and opens an existing companion or a prefilled creation dialo
     await button(wrapper, "打开对话").trigger("click")
     await flushPromises()
     expect(host.openedChats.at(-1)).toEqual(rows[1])
+
+    await button(wrapper, "更换对话").trigger("click")
+    await flushPromises()
+    await button(wrapper, "新建对话").trigger("click")
+    const created = { sessionId: "new-graph", creatureId: "new-dragon", label: "Replacement" }
+    rows.push(created)
+    wrapper
+      .findComponent(NewSessionDialog)
+      .vm.$emit("started", { id: created.sessionId, opened: false })
+    wrapper.findComponent(NewSessionDialog).vm.$emit("close")
+    await flushPromises()
+    expect(store.state.value.companion).toEqual(created)
+    expect(host.openedChats.at(-1)).toEqual(created)
+
+    await button(wrapper, "更换对话").trigger("click")
+    await flushPromises()
+    await button(wrapper, "新建对话").trigger("click")
+    wrapper
+      .findComponent(NewSessionDialog)
+      .vm.$emit("started", { id: "not-a-companion", opened: false })
+    wrapper.findComponent(NewSessionDialog).vm.$emit("close")
+    await flushPromises()
+    expect(store.state.value.companion).toEqual(created)
+    expect(host.openedChats.at(-1)).toEqual(created)
+    expect(wrapper.find('[role="alert"]').text()).toContain("会话已创建")
+    store.update({ companion: rows[1] })
     bridge.connection.value = { ...rows[1], mode: "agent" }
     await flushPromises()
     expect(wrapper.find('[role="status"]').text()).toBe("当前连接：Other dragon")
@@ -87,6 +124,24 @@ it("explains modes and opens an existing companion or a prefilled creation dialo
     await flushPromises()
     expect(wrapper.findComponent(NewSessionDialog).exists()).toBe(false)
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    pending = null
+    store.update({ controlMode: "agent" })
+    await flushPromises()
+    await button(wrapper, "更换对话").trigger("click")
+    await flushPromises()
+    await button(wrapper, "新建对话").trigger("click")
+    pending = new Promise((resolve) => (finish = resolve))
+    const opened = host.openedChats.length
+    wrapper
+      .findComponent(NewSessionDialog)
+      .vm.$emit("started", { id: created.sessionId, opened: false })
+    wrapper.findComponent(NewSessionDialog).vm.$emit("close")
+    store.update({ controlMode: "pet" })
+    await flushPromises()
+    finish({ companions: rows })
+    await flushPromises()
+    expect(host.openedChats).toHaveLength(opened)
+    expect(store.state.value.companion).toEqual(rows[1])
   } finally {
     wrapper.unmount()
     bridge.close()

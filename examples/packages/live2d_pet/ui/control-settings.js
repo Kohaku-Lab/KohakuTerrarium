@@ -29,7 +29,7 @@ export const ControlSettings = defineComponent({
         choices.value = [];
       }
     };
-    const run = async (action) => {
+    const run = async (action, failure = "无法打开对话，请重试。") => {
       if (busy.value) return;
       busy.value = true;
       error.value = "";
@@ -37,7 +37,7 @@ export const ControlSettings = defineComponent({
       try {
         await action(() => request === generation);
       } catch {
-        if (request === generation) error.value = "无法打开对话，请重试。";
+        if (request === generation) error.value = failure;
       } finally {
         if (request === generation) busy.value = false;
       }
@@ -214,7 +214,7 @@ export const ControlSettings = defineComponent({
               h(NewSessionDialog, {
                 initialConfig: `@${kt.package}/creatures/companion`,
                 initialName: "龙娘对话",
-                initialAttachMode: "chat",
+                silent: true,
                 onClose: () => (creating.value = false),
                 onStarted: ({ id }) =>
                   run(async (current) => {
@@ -223,9 +223,9 @@ export const ControlSettings = defineComponent({
                     const row = data.companions.find(
                       (row) => row.sessionId === id || row.creatureId === id,
                     );
-                    if (row) store.update({ companion: row });
-                    kt.showOverlay("dragon");
-                  }),
+                    if (!row) throw new Error("Created companion unavailable");
+                    await open(row);
+                  }, "会话已创建，但连接失败，请重新打开对话。"),
               }),
             )
           : null,

@@ -51,7 +51,7 @@ export const SettingsRow = {
 
 export const NewSessionDialog = {
   name: "NewSessionDialog",
-  props: ["initialConfig", "initialName", "initialAttachMode"],
+  props: ["initialConfig", "initialName", "initialAttachMode", "silent"],
   emits: ["close", "started"],
   template: `<div role="dialog"><button @click="$emit('close')">Cancel</button></div>`,
 }
