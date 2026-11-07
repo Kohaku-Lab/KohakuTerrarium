@@ -1,11 +1,18 @@
 """Idle-branch continuation: identity, admission, and persist/resume."""
 
 import asyncio
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
 from kohakuterrarium import Terrarium
+from kohakuterrarium.errors import AgentNotRunningError, ConflictError
+from kohakuterrarium.core.events import EventType, TriggerEvent
+from kohakuterrarium.llm.base import NativeToolCall
+from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.core.compact.manager import CompactManager
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.conversation.continuation import (
     continue_on_branch,
     live_branch_path,
@@ -13,14 +20,19 @@ from kohakuterrarium.core.conversation.continuation import (
     persist_branch_view,
     selected_branch_view,
 )
-from kohakuterrarium.core.config.types import AgentConfig
-from kohakuterrarium.core.events import EventType, TriggerEvent
-from kohakuterrarium.errors import AgentNotRunningError, ConflictError
-from kohakuterrarium.llm.base import NativeToolCall
+from kohakuterrarium.core.jobs.executor import Executor
+from kohakuterrarium.core.jobs.job import JobState
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.session.history.raw import append_user_event_pair
 from kohakuterrarium.session.resume.resume import resume_agent
-from kohakuterrarium.testing.llm import ScriptedLLM
+
+import tests.helpers.history_protocol as history_protocol
+from tests.helpers.history_protocol import (
+    HistoryState,
+    exercise_history_trace,
+    successors,
+    transition_cover,
+)
 
 
 def _non_system(agent):
@@ -105,6 +117,183 @@ class _ToolLLM(ScriptedLLM):
             yield ""
             return
         yield step if isinstance(step, str) else str(step)
+
+
+@pytest.mark.parametrize("launch", ["declared", "requested", "promoted"])
+def test_history_model_graph_has_complete_transition_witnesses(launch):
+    states, edges, traces = transition_cover(launch)
+    visited, exercised = {HistoryState()}, set()
+    for trace in traces:
+        state = HistoryState()
+        for action in trace:
+            target = successors(state, launch)[action]
+            exercised.add((state, action, target))
+            visited.add(target)
+            state = target
+    assert visited == states
+    assert exercised == edges
+    assert {state.compact for state in states} == {
+        "idle",
+        "summarizing",
+        "flushing",
+        "complete",
+        "skipped",
+    }
+    assert {state.job for state in states} == {
+        "running",
+        "cancelling",
+        "queued",
+        "consuming",
+        "settled",
+    } | ({"handoff"} if launch != "declared" else set())
+    assert any(state.may_switch for state in states)
+    assert any(
+        state.compact == "flushing" and state.job == "settled" and not state.may_switch
+        for state in states
+    )
+    assert transition_cover(launch)[2] == traces
+
+
+@pytest.mark.parametrize(
+    "launch,trace",
+    [
+        pytest.param(launch, trace, id=f"{launch}-{'-'.join(trace)}")
+        for launch in ("declared", "requested", "promoted")
+        for trace in transition_cover(launch)[2]
+    ],
+)
+async def test_history_model_transition_conformance(
+    tmp_path, monkeypatch, launch, trace
+):
+    await exercise_history_trace(tmp_path, monkeypatch, launch, trace)
+
+
+@pytest.mark.parametrize("launch", ["declared", "requested", "promoted"])
+async def test_history_model_suppressed_cancellation(tmp_path, monkeypatch, launch):
+    trace = (
+        "start_compact",
+        "cancel_job",
+        "finish_job",
+        *(("deliver_job",) if launch != "declared" else ()),
+        "begin_consumption",
+        "apply_summary",
+        "cancel_compact",
+        "end_consumption",
+    )
+    await exercise_history_trace(
+        tmp_path, monkeypatch, launch, trace, suppress_cancel=True
+    )
+
+
+@pytest.mark.parametrize(
+    "fault,trace,diagnostic",
+    [
+        ("early_job_terminal", ("cancel_job",), "job execution outcome"),
+        (
+            "missing_compact_terminal",
+            ("cancel_before_entry",),
+            "compact terminal stream",
+        ),
+        (
+            "duplicate_compact_terminal",
+            ("start_compact", "apply_summary", "cancel_compact"),
+            "compact terminal stream",
+        ),
+    ],
+)
+async def test_history_model_detects_historical_faults(
+    tmp_path, monkeypatch, fault, trace, diagnostic
+):
+    original_cancel_job, original_cancel_compact = (
+        Executor.cancel,
+        CompactManager.cancel,
+    )
+
+    async def early_job_terminal(self, job_id):
+        accepted = await original_cancel_job(self, job_id)
+        if accepted:
+            self.job_store.update_status(job_id, state=JobState.CANCELLED)
+        return accepted
+
+    def missing_compact_terminal(self, task, lease):
+        if task.cancelled() and self._active_lease is lease:
+            self._dispatch.release(lease)
+            self._active_lease = None
+            if self._compact_task is task:
+                self._compact_task = None
+
+    async def duplicate_compact_terminal(self):
+        await original_cancel_compact(self)
+        if self._compact_count:
+            self._emit_compact_skipped("cancelled", "Compaction cancelled")
+
+    match fault:
+        case "early_job_terminal":
+            monkeypatch.setattr(Executor, "cancel", early_job_terminal)
+        case "missing_compact_terminal":
+            monkeypatch.setattr(
+                CompactManager, "_finalize_cancelled_task", missing_compact_terminal
+            )
+        case "duplicate_compact_terminal":
+            monkeypatch.setattr(CompactManager, "cancel", duplicate_compact_terminal)
+    with pytest.raises(AssertionError, match="divergent prefix") as caught:
+        await exercise_history_trace(tmp_path, monkeypatch, "requested", trace)
+    assert " -> ".join(trace) in str(caught.value)
+    assert isinstance(caught.value.__cause__, AssertionError)
+    assert diagnostic in str(caught.value.__cause__)
+
+
+@pytest.mark.parametrize("fault", ["extra_request", "leaked_tail", "cleanup_error"])
+async def test_history_model_oracle_regressions(tmp_path, monkeypatch, fault):
+    original_act = history_protocol._Runtime.act
+    original_release = history_protocol._Runtime.release
+    original_chat = history_protocol._Provider.chat
+
+    async def extra_request(self, action):
+        await original_act(self, action)
+        if action == "end_consumption":
+            async for _ in self.provider.chat(
+                self.agent.controller.conversation.to_messages()
+            ):
+                pass
+
+    async def leaked_tail(self, messages, **kwargs):
+        if messages[-1].get("content") == "allowed branch switch":
+            messages = deepcopy(messages)
+            messages.insert(-1, {"role": "user", "content": "B_TAIL"})
+        async for chunk in original_chat(self, messages, **kwargs):
+            yield chunk
+
+    async def broken_delivery(self, action):
+        if action == "deliver_job":
+            raise TimeoutError("delivery never arrived")
+        await original_act(self, action)
+
+    async def broken_cleanup(self):
+        await original_release(self)
+        raise TimeoutError("cleanup delivery missing")
+
+    trace = ("finish_job", "deliver_job", "begin_consumption", "end_consumption")
+    match fault:
+        case "extra_request":
+            monkeypatch.setattr(history_protocol._Runtime, "act", extra_request)
+            diagnostic = "divergent prefix"
+        case "leaked_tail":
+            monkeypatch.setattr(history_protocol._Provider, "chat", leaked_tail)
+            diagnostic = "branch isolation"
+        case "cleanup_error":
+            monkeypatch.setattr(history_protocol._Runtime, "act", broken_delivery)
+            monkeypatch.setattr(history_protocol._Runtime, "release", broken_cleanup)
+            diagnostic = "divergent prefix"
+    with pytest.raises(AssertionError, match=diagnostic) as caught:
+        await exercise_history_trace(tmp_path, monkeypatch, "requested", trace)
+    if fault == "extra_request":
+        assert "completion provider request count" in str(caught.value.__cause__)
+    if fault == "cleanup_error":
+        assert "finish_job -> deliver_job" in str(caught.value)
+        assert isinstance(caught.value.__cause__, TimeoutError)
+        assert str(caught.value.__cause__) == "delivery never arrived"
+        assert "cleanup delivery missing" in str(caught.value)
 
 
 async def _started_with_bg(tmp_path, plan, mode=ExecutionMode.BACKGROUND):

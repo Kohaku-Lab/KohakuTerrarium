@@ -98,6 +98,7 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
+from tests.helpers.history_protocol import exercise_history_trace
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
 # ---------------------------------------------------------------------------
@@ -3629,6 +3630,24 @@ class TestCoreIntegration:
         await _exercise_direct_media_history(tmp_path, monkeypatch)
         await _exercise_assistant_media_history(tmp_path)
         await _exercise_settled_media_history(tmp_path)
+        for launch in ("declared", "requested", "promoted"):
+            await exercise_history_trace(
+                tmp_path / f"model-{launch}",
+                monkeypatch,
+                launch,
+                (
+                    "start_compact",
+                    "cancel_job",
+                    "finish_job",
+                    *(("deliver_job",) if launch != "declared" else ()),
+                    "begin_consumption",
+                    "apply_summary",
+                    "cancel_compact",
+                    "end_consumption",
+                ),
+                suppress_cancel=True,
+                resume=True,
+            )
 
     async def _exercise_compact_tail(
         self, tmp_path, monkeypatch, compact_origin, prefix

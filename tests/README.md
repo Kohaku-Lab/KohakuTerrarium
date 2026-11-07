@@ -231,6 +231,117 @@ public tree; `temp/` is gitignored). It records every bug the suite
 surfaced, its fix, the regression guard, and the per-tier coverage
 audit with each sub-95% file's justification.
 
+## Bounded async-history conformance model
+
+`tests/helpers/history_protocol.py` contains a finite specification and a
+real-runtime adapter. The continuation unit module executes the generated
+transition witnesses. The existing `test_history_ops` integration workflow
+also carries one overlap trace per launch mode through branch return,
+stop/close, cold resume, and another request.
+
+### Bound and invariants
+
+The fixed setup creates sibling branch views A/B, starts one tool on B, and
+accepts one same-view input while it is running. The generated suffix has at
+most one job cancellation and one compaction. Tools are tested as declared
+background, caller-requested background, and promoted direct executions.
+
+The independent model distinguishes:
+
+- Job execution: running -> cancellation cleanup (optional) -> completed.
+- Delivery: completed but handoff parked -> queued -> consuming -> settled.
+  Declared background execution enqueues synchronously from its completion
+  callback; it has no separate asynchronous handoff edge in this model.
+- Compaction: idle -> summarizing -> complete-but-flushing -> settled.
+  Cancellation before task entry or during summary emits `skipped`;
+  cancellation during flush retains the already emitted `complete`.
+
+Expected transitions are constructed from immutable specification state,
+not inferred from runtime fields. After every transition the adapter checks:
+
+1. Cancellation requests do not publish terminal job state before execution
+   and cleanup settle. Suppressed cancellation can finish successfully.
+2. A final result is persisted once, queued once, and consumed by one provider
+   request; completion feedback is not fabricated twice.
+3. Every started compaction has at most one terminal, with the same round.
+   Applying a summary closes its event stream before checkpoint flush ends.
+4. History changes are rejected while execution, handoff, queued input,
+   consumption, or compaction is active. Rejection leaves conversation,
+   selected/live branch views, persisted events, provider calls, and inbox
+   count unchanged.
+5. Once all fences settle, the public branch continuation succeeds and its
+   provider request contains A, not B's inputs, result, or summary.
+
+The single compact attempt always uses round 1. This does **not** redefine
+round as a unique attempt ID; unsuccessful attempts can reuse a round in the
+real implementation.
+
+### Coverage and replay
+
+Breadth-first traversal finds a shortest prefix to each model state, then
+adds each outgoing edge. A witness that is a strict prefix of another is
+removed; replaying the remaining traces still covers every model edge.
+
+| Launch mode | Reachable states | Edges | Runtime witnesses | Longest generated suffix |
+|---|---:|---:|---:|---:|
+| Declared background | 40 | 83 | 48 | 7 |
+| Requested background | 50 | 105 | 60 | 8 |
+| Promoted direct | 50 | 105 | 60 | 8 |
+
+Counts are per launch mode, not 140 distinct unlabelled shapes. Graph tests
+verify that the generated witnesses cover its states and edges. Three
+additional traces exercise suppressed cancellation. Three sensitivity
+tests inject historical fault classes in memory: premature cancelled job
+state, a missing pre-entry compact terminal, and a duplicate post-complete
+terminal. Each must fail with the expected invariant diagnostic, not a
+timeout or unrelated assertion. These are targeted mutations, not runs of
+entire old revisions, and normal conformance tests do not apply them.
+Three adapter regressions additionally require detection of an extra provider
+request and a leaked B-only tail, and preservation of the primary divergence
+when cleanup also fails. These were red on the initial adapter before its
+oracles and failure handling were corrected. The cleanup injection raises
+only after real cleanup succeeds; it checks diagnostic preservation, not
+resource recovery from a genuinely stuck cleanup.
+
+```bash
+python -m pytest tests/unit/core/conversation/test_continuation.py -k history_model -n 0
+python -m pytest tests/integration/test_core.py -k history_ops -n 0
+```
+
+Each generated case includes its launch/action sequence in the pytest ID.
+Generated-step failures report the first divergent prefix for that witness
+and retain the underlying assertion or runtime exception as the cause.
+A second cleanup failure is appended to the diagnostic without replacing
+the primary failure. Replay one case with its full node ID. This is not a
+global counterexample minimizer.
+
+### Runtime seams and limits
+
+The adapter uses `asyncio.Event` barriers around real operations: tool
+execution/cleanup, the promoted-result callback, inbox wake-up, a scripted
+provider response, summarizer output, and the session call after compact
+completion. Each wrapper eventually delegates to the original method. It
+installs the inbox wrapper before agent start so the single consumer cannot
+race its first wait. Setup and cleanup are not included in graph counts.
+There are no sleeps, external model checkers, new dependencies, production
+hooks, or CI changes.
+
+This is **finite-model transition conformance**, not exhaustive runtime
+model checking. Different histories that reach the same abstract state can
+have different concrete data; only the generated witnesses are executed,
+not every path through the graph or every asyncio interleaving. Private
+runtime fields are observed and used as barriers, not replaced as behavior
+in the passing runs. A guard probe is non-mutating at admitted intermediate
+states; the actual public branch switch is exercised after orderly release.
+
+Out of this slice: tool cancellation before its first instruction, multiple
+jobs or compactions, stale-cancel successor leases, repeated branch
+mutations, summary provenance variations, merge/split remapping, checkpoint
+eviction, crash durability, error outcomes other than cancellation, and
+fairness/unbounded liveness. Existing targeted tests still cover several of
+these, but this model does not claim that coverage. Orderly cold restore is
+not a crash-recovery proof.
+
 ## Out-of-scope (deterministic test is impractical)
 
 Excluded from coverage targets; covered by e2e where possible, manual
