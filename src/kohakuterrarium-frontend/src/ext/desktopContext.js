@@ -9,6 +9,7 @@ export const desktopWork = shallowRef(null)
 export const desktopContextConnected = shallowRef(false)
 const CHANNEL = "kt:desktop-context:v2"
 const MAX_AGE = 10000
+const POPOUT_BOOTSTRAP_TIMEOUT = 30000
 let connection = null
 
 export function contextRealm() {
@@ -190,14 +191,22 @@ export function createContextRelay({
   }
 }
 
-/** Start before extension loading so a secondary renderer adopts the main host/user identity. */
+/** Bind desktop identity before mounting; return false if a popout cannot obtain a main context. */
 export async function startDesktopContext(mode, invalidate = () => {}) {
   if (hostKind() !== "tauri" || typeof BroadcastChannel !== "function" || connection) return
+  if (mode === "main") {
+    const auth = useAuthStore()
+    await auth.fetch()
+    await auth.fetchMe()
+  }
   let resolve
   let readyTimer
   const ready = new Promise((done) => {
     resolve = done
-    readyTimer = setTimeout(done, MAX_AGE)
+    readyTimer = setTimeout(
+      () => done(false),
+      mode === "popout" ? POPOUT_BOOTSTRAP_TIMEOUT : MAX_AGE,
+    )
   })
   const port = new BroadcastChannel(CHANNEL)
   let baseline = 0
@@ -230,7 +239,7 @@ export async function startDesktopContext(mode, invalidate = () => {}) {
       desktopWork.value = work
         ? Object.freeze({ ...work, baseline: `${info.version}:${baseline}` })
         : null
-      resolve()
+      resolve(true)
       clearTimeout(readyTimer)
     },
   })
@@ -239,20 +248,25 @@ export async function startDesktopContext(mode, invalidate = () => {}) {
     mode === "main"
       ? watch([contextRealm, getRuntimeScope], () => connection?.reset(), { flush: "sync" })
       : () => {}
-  window.addEventListener(
-    "pagehide",
-    () => {
-      clearInterval(timer)
-      clearTimeout(readyTimer)
-      stopRealm()
-      connection?.close()
-      connection = null
-    },
-    { once: true },
-  )
-  if (mode !== "main") await ready
-  else clearTimeout(readyTimer)
+  const stop = () => {
+    clearInterval(timer)
+    clearTimeout(readyTimer)
+    stopRealm()
+    connection?.close()
+    connection = null
+    resolve(false)
+    window.removeEventListener("pagehide", stop)
+  }
+  window.addEventListener("pagehide", stop, { once: true })
+  if (mode !== "main") {
+    const received = await ready
+    if (mode === "popout" && !received) {
+      stop()
+      return false
+    }
+  } else clearTimeout(readyTimer)
   bootstrapped = true
+  return true
 }
 
 export function useDesktopPublisher(getWork) {

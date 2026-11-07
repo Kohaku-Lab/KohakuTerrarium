@@ -98,10 +98,17 @@ async function bootstrap() {
     useLocaleStore().init()
     installExternalLinkGuard()
   }
-  await startDesktopContext(overlayKey ? "overlay" : popoutScope ? "popout" : "main", () => {
-    app.unmount()
+  const contextReady = await startDesktopContext(
+    overlayKey ? "overlay" : popoutScope ? "popout" : "main",
+    () => {
+      app.unmount()
+      void returnPopoutWindow()
+    },
+  )
+  if (contextReady === false) {
     void returnPopoutWindow()
-  })
+    return
+  }
   app.mount("#app")
   startUiExtensions()
   if (!secondary) startOverlayWindows()

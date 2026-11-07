@@ -1,3 +1,5 @@
+import axios from "axios"
+import { flushPromises } from "@vue/test-utils"
 import { expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 import { useAuthStore } from "@/stores/auth"
@@ -95,10 +97,26 @@ it.each(["host", "token", "user"])(
   },
 )
 
-it("shares the user's role without credentials when bootstrapping secondary windows", async () => {
+it("resolves initial cookie auth before publishing identity and never relays credentials", async () => {
   vi.useFakeTimers()
   setActivePinia(createPinia())
-  useAuthStore().sameOriginUser = { id: 7, username: "alice", role: "admin", token: "never-relay" }
+  useHostsStore().setActive(null)
+  const user = { id: 7, username: "alice", role: "admin", token: "never-relay" }
+  let capabilities, identity
+  const get = vi
+    .spyOn(axios, "get")
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          capabilities = resolve
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          identity = resolve
+        }),
+    )
   const net = network()
   vi.stubGlobal(
     "BroadcastChannel",
@@ -111,7 +129,21 @@ it("shares the user's role without credentials when bootstrapping secondary wind
   window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => true) }
   const requester = net.port()
   try {
-    await startDesktopContext("main")
+    const starting = startDesktopContext("main")
+    requester.postMessage({ type: "request" })
+    expect(net.traffic.filter((m) => m.type === "context")).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(6000)
+    capabilities({ data: { auth: { multi_user: { enabled: true } } } })
+    await flushPromises()
+    expect(get).toHaveBeenLastCalledWith(
+      "/api/auth/me",
+      expect.objectContaining({ withCredentials: true }),
+    )
+    requester.postMessage({ type: "request" })
+    await vi.advanceTimersByTimeAsync(6000)
+    expect(net.traffic.filter((m) => m.type === "context")).toHaveLength(0)
+    identity({ data: user })
+    await starting
     requester.postMessage({ type: "request" })
     expect(net.traffic.at(-1).host.user).toEqual({ id: 7, username: "alice", role: "admin" })
     expect(JSON.stringify(net.traffic)).not.toContain("never-relay")
@@ -152,6 +184,75 @@ it("shares the user's role without credentials when bootstrapping secondary wind
   } finally {
     window.dispatchEvent(new Event("pagehide"))
     requester.close()
+    get.mockRestore()
+    delete window.__TAURI_INTERNALS__
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
+})
+
+it("waits beyond heartbeat expiry for initial popout identity and rejects a missing main", async () => {
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  useHostsStore().setActive(null)
+  const net = network()
+  let port
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      constructor() {
+        port = net.port()
+        return port
+      }
+    },
+  )
+  window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => true) }
+  const invalidated = vi.fn()
+  try {
+    let settled = false
+    const starting = startDesktopContext("popout", invalidated).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(12000)
+    expect(settled).toBe(false)
+    const message = {
+      type: "context",
+      source: "main",
+      sequence: 1,
+      epoch: 10,
+      realm: JSON.stringify([null, "", 7]),
+      host: { hostId: null, user: { id: 7, username: "alice", role: "admin" } },
+      version: 1,
+      sent: Date.now(),
+      work: work("restored"),
+    }
+    port.deliver(message)
+    expect(await starting).toBe(true)
+    expect(useAuthStore().sameOriginUser.username).toBe("alice")
+    expect(invalidated).not.toHaveBeenCalled()
+    port.deliver({ ...message, sequence: 2 })
+    expect(invalidated).not.toHaveBeenCalled()
+    port.deliver({
+      ...message,
+      sequence: 3,
+      epoch: 11,
+      realm: JSON.stringify([null, "", 8]),
+      host: { hostId: null, user: { id: 8 } },
+    })
+    expect(invalidated).toHaveBeenCalledOnce()
+    expect(useAuthStore().sameOriginUser.username).toBe("alice")
+    window.dispatchEvent(new Event("pagehide"))
+    const missing = startDesktopContext("popout", invalidated)
+    await vi.advanceTimersByTimeAsync(30001)
+    expect(await missing).toBe(false)
+    const sent = net.traffic.length
+    await vi.advanceTimersByTimeAsync(10001)
+    port.deliver({ ...message, sent: Date.now() })
+    expect(net.traffic).toHaveLength(sent)
+    expect(invalidated).toHaveBeenCalledOnce()
+  } finally {
+    window.dispatchEvent(new Event("pagehide"))
     delete window.__TAURI_INTERNALS__
     vi.unstubAllGlobals()
     vi.useRealTimers()
