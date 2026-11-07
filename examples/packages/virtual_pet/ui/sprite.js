@@ -19,6 +19,8 @@ export const PetSprite = {
     pointer: { type: Object, default: null },
     native: { type: Boolean, default: false },
     gazeEnabled: { type: Boolean, default: true },
+    menuEnabled: { type: Boolean, default: false },
+    menuOpen: { type: Boolean, default: false },
   },
   emits: ["drag-start", "drag-move", "hover"],
   setup(props, { emit }) {
@@ -77,7 +79,7 @@ export const PetSprite = {
       () => props.native,
     );
     function enter(event) {
-      if (props.interactive) {
+      if (props.interactive && !props.menuOpen) {
         emit("hover", true);
         gestures.enter(event);
       }
@@ -174,6 +176,13 @@ export const PetSprite = {
       },
     );
     watch(() => props.gazeEnabled, refresh);
+    watch(
+      () => props.menuOpen,
+      (open) => {
+        if (open) gestures.dispose();
+        refresh();
+      },
+    );
 
     onMounted(() => {
       mounted = true;
@@ -218,6 +227,7 @@ export const PetSprite = {
       <div ref="sprite" class="vp-sprite" :style="spriteStyle" :role="interactive ? undefined : 'img'"
         :aria-label="interactive ? undefined : atlas.displayName" :data-action="cell.action">
         <div v-if="interactive" ref="hit" class="vp-hit kt-overlay-hit" :style="hitStyle" role="button" tabindex="0" :aria-label="atlas.displayName"
+          :aria-haspopup="menuEnabled ? 'menu' : undefined" :aria-expanded="menuEnabled ? menuOpen : undefined" :aria-keyshortcuts="menuEnabled ? 'Shift+F10' : undefined"
           @pointerenter="enter" @pointerleave="$emit('hover', false)" @pointerdown="down" @keydown="keydown" @click="activate"></div>
       </div>
     </div>`,

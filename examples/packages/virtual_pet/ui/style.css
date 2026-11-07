@@ -9,25 +9,39 @@
   color: var(--color-text);
   font-size: var(--kt-fs-body);
 }
-.vp-controls {
-  order: 0;
-  align-self: flex-end;
-  flex-shrink: 0;
-  margin: 8px 8px 4px;
-  visibility: hidden;
-  pointer-events: none;
-  display: flex;
-  gap: 4px;
-}
-.vp-controls-open .vp-controls {
-  visibility: visible;
+.vp-menu {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
   pointer-events: auto;
 }
-@media (hover: none) {
-  .vp-companion:not(.vp-controls-dismissed) .vp-controls {
-    visibility: visible;
-    pointer-events: auto;
-  }
+.vp-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.vp-menu button:hover,
+.vp-menu button:focus {
+  background: var(--color-surface-alt);
+}
+.vp-companion .vp-menu button:focus-visible {
+  outline-offset: -2px;
 }
 .vp-drag {
   order: 2;
@@ -35,7 +49,6 @@
   min-height: 0;
   width: 100%;
 }
-.vp-controls button,
 .vp-dismiss,
 .vp-choose {
   border: 1px solid var(--color-border);

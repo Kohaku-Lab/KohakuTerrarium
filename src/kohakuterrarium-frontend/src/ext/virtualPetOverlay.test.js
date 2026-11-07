@@ -71,13 +71,14 @@ beforeEach(() => {
     class {
       constructor(callback) {
         this.callback = callback
+        this.elements = new Set()
       }
       observe(element) {
-        this.element = element
+        this.elements.add(element)
         resizeObservers.set(element, this.callback)
       }
       disconnect() {
-        resizeObservers.delete(this.element)
+        this.elements.forEach((element) => resizeObservers.delete(element))
       }
     },
   )
@@ -224,72 +225,163 @@ it("uses stable idle-artwork bounds for hover and native input without cropping 
   expect(preview.find(".vp-sprite").attributes("role")).toBe("img")
 })
 
-it("keeps revealed controls reachable across transparent gaps and independent hover/focus reasons", async () => {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+it.each(["app", "window"])(
+  "keeps hover and focus quiet; opens only the body menu with bounded hit regions (%s)",
+  async (overlayMode) => {
+    const host = createMockHost({
+      host: { id: `menu-${overlayMode}` },
+      overlayMode,
+      owner: {
+        state: state({ ...atlas, interactions: { waving: 4, jumping: 5 } }),
+        actions: { sprite: () => image },
+      },
+    })
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      if (this.classList.contains("vp-hit")) return { left: 50, top: 160, width: 120, height: 90 }
+      if (this.classList.contains("vp-menu")) return { left: 16, top: 180, width: 200, height: 80 }
+      return { left: 0, top: 0, width: 224, height: 280 }
+    })
+    const w = render(PetCompanion, { attachTo: document.body })
+    await flushPromises()
+    const hit = w.find(".vp-hit")
+    const menu = () => w.find('[role="menu"]')
+    expect(w.find(".vp-controls").exists()).toBe(false)
+    for (const pointerType of ["mouse", "touch"]) {
+      await hit.trigger("pointerenter", { pointerType })
+      hit.element.focus()
+      await flushPromises()
+      expect(menu().isVisible()).toBe(false)
+      await hit.trigger("pointerleave")
+    }
+    await frame(3000)
+    const hitStyle = hit.attributes("style")
+    expect(overlayHitRegions(w.element)).toEqual([[50, 160, 120, 90]])
+    const padding = new MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+    w.find(".vp-drag").element.dispatchEvent(padding)
+    expect(padding.defaultPrevented).toBe(false)
+    expect(menu().isVisible()).toBe(false)
+    hit.element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 2 }))
+    hit.element.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 2 }))
+    await flushPromises()
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      clientX: 210,
+      clientY: 275,
+    })
+    hit.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(true)
+    expect(menu().isVisible()).toBe(true)
+    expect(hit.attributes("aria-haspopup")).toBe("menu")
+    expect(hit.attributes("aria-expanded")).toBe("true")
+    expect(
+      menu()
+        .findAll('[role="menuitem"]')
+        .map((i) => i.text()),
+    ).toEqual(["Pet settings", "Hide pet"])
+    expect(document.activeElement).toBe(menu().find('[role="menuitem"]').element)
+    expect(getComputedStyle(menu().element).position).toBe("absolute")
+    expect(parseFloat(menu().element.style.left)).toBeCloseTo((16 / 224) * 100)
+    expect(parseFloat(menu().element.style.top)).toBeCloseTo((192 / 280) * 100)
+    expect(overlayHitRegions(w.element)).toEqual([
+      [50, 160, 120, 90],
+      [16, 180, 200, 80],
+    ])
+    expect(hit.attributes("style")).toBe(hitStyle)
+    expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+    expect(w.findComponent(PetSprite).emitted("drag-start")).toBeUndefined()
+    await menu().trigger("keydown", { key: "Escape" })
+    expect(menu().isVisible()).toBe(false)
+    expect(hit.attributes("aria-expanded")).toBe("false")
+    expect(document.activeElement).toBe(hit.element)
+    expect(overlayHitRegions(w.element)).toEqual([[50, 160, 120, 90]])
+    expect(host.overlayVisible[host.overlayId]).not.toBe(false)
+  },
+)
+
+it("supports menu keys, arrow navigation, existing actions, and dismissal without a backdrop", async () => {
   const host = createMockHost({
-    host: { id: "control-contract" },
+    host: { id: "keyboard-menu" },
+    overlayMode: "window",
     owner: { state: state(), actions: { sprite: () => image } },
-    pointer: { valid: true, pointerType: "mouse", x: 100, y: 170 },
   })
   const w = render(PetCompanion, { attachTo: document.body })
   await flushPromises()
-  vi.spyOn(w.element, "getBoundingClientRect").mockReturnValue({
-    left: 0,
-    top: 0,
-    width: 224,
-    height: 280,
-  })
   const hit = w.find(".vp-hit")
-  const toolbar = w.find(".vp-controls")
-  const open = () => getComputedStyle(toolbar.element).visibility === "visible"
-  expect(open()).toBe(false)
-  await hit.trigger("pointerenter", { pointerType: "mouse" })
-  expect(open()).toBe(true)
-  await hit.trigger("focusin")
-  await hit.trigger("focusout", { relatedTarget: document.body })
-  vi.advanceTimersByTime(400)
+  const menu = () => w.find('[role="menu"]')
+  const open = async (key = "ContextMenu") => {
+    hit.element.focus()
+    await hit.trigger("keydown", { key, shiftKey: key === "F10" })
+    await flushPromises()
+    expect(menu().isVisible()).toBe(true)
+  }
+  await open("F10")
+  const items = menu().findAll('[role="menuitem"]')
+  const focusLast = vi.spyOn(items[1].element, "focus")
+  expect(document.activeElement).toBe(items[0].element)
+  for (const [key, index] of [
+    ["ArrowDown", 1],
+    ["ArrowDown", 0],
+    ["ArrowUp", 1],
+    ["Home", 0],
+    ["End", 1],
+  ]) {
+    await menu().trigger("keydown", { key })
+    expect(document.activeElement).toBe(items[index].element)
+  }
+  expect(focusLast).toHaveBeenCalledWith()
+  menu().element.scrollTop = 120
+  await menu().trigger("keydown", { key: "Tab" })
+  expect(menu().isVisible()).toBe(false)
+  expect(document.activeElement).toBe(hit.element)
+  await open()
+  expect(menu().element.scrollTop).toBe(0)
+  const outside = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 })
+  document.body.dispatchEvent(outside)
   await flushPromises()
-  expect(open()).toBe(true)
-  await hit.trigger("pointerleave")
-  host.state.pointer = { valid: true, pointerType: "mouse", x: 150, y: 80 }
+  expect(outside.defaultPrevented).toBe(false)
+  expect(menu().isVisible()).toBe(false)
+  await open()
+  window.dispatchEvent(new Event("blur"))
   await flushPromises()
-  vi.advanceTimersByTime(2000)
-  await flushPromises()
-  expect(open()).toBe(true)
-  await toolbar.trigger("pointerenter")
-  host.state.pointer = null
-  await toolbar.trigger("pointerleave")
-  vi.advanceTimersByTime(350)
-  await flushPromises()
-  expect(open()).toBe(false)
+  expect(menu().isVisible()).toBe(false)
+  await open()
   hit.element.focus()
   await flushPromises()
-  expect(open()).toBe(true)
-  const settings = w.find('[aria-label="Pet settings"]')
-  expect(
-    hit.element.compareDocumentPosition(settings.element) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy()
-  settings.element.focus()
+  expect(menu().isVisible()).toBe(false)
+  await open()
+  vi.spyOn(document, "hidden", "get").mockReturnValue(true)
+  document.dispatchEvent(new Event("visibilitychange"))
   await flushPromises()
-  vi.advanceTimersByTime(350)
-  expect(open()).toBe(true)
-  await settings.trigger("keydown", { key: "Escape" })
-  expect(open()).toBe(false)
-  expect(document.activeElement).toBe(hit.element)
-  expect(getComputedStyle(toolbar.element).visibility).toBe("hidden")
-  expect(host.overlayVisible[host.overlayId]).not.toBe(false)
-  host.state.pointer = { valid: true, pointerType: "mouse", x: 150, y: 80 }
+  expect(menu().isVisible()).toBe(false)
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false)
+  await open()
+  host.state.host = { id: "new-menu-realm" }
   await flushPromises()
-  expect(open()).toBe(false)
-  await hit.trigger("pointerenter", { pointerType: "mouse" })
-  expect(open()).toBe(true)
-  await hit.trigger("focusout", { relatedTarget: document.body })
-  await hit.trigger("pointerleave")
-  host.state.pointer = { valid: true, pointerType: "mouse", x: 230, y: 80 }
+  expect(menu().isVisible()).toBe(false)
+  await w.find(".vp-hit").trigger("contextmenu")
   await flushPromises()
-  vi.advanceTimersByTime(350)
+  await menu().find('[aria-label="Pet settings"]').trigger("click")
+  expect(menu().isVisible()).toBe(false)
+  expect(host.openedTabs[0].section).toBe("ext:test-pkg/pets")
+  await w.find(".vp-hit").trigger("contextmenu")
   await flushPromises()
-  expect(open()).toBe(false)
+  await menu().find('[aria-label="Hide pet"]').trigger("click")
+  expect(menu().isVisible()).toBe(false)
+  expect(host.overlayVisible[host.overlayId]).toBe(false)
+  const opening = w.vm.openMenu({
+    type: "contextmenu",
+    target: w.find(".vp-hit").element,
+    clientX: 100,
+    clientY: 200,
+    preventDefault() {},
+    stopPropagation() {},
+  })
+  w.unmount()
+  await expect(opening).resolves.toBeUndefined()
+  expect(resizeObservers.size).toBe(0)
 })
 
 it("accepts assistive activation without turning a post-drag pointer click into a wave", async () => {
@@ -307,26 +399,23 @@ it("accepts assistive activation without turning a post-drag pointer click into 
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
 })
 
-it("lets explicit dismissal override the no-hover default until a new interaction", async () => {
-  const media = [...stylesheet.sheet.cssRules].find(
+it("does not auto-show management controls on no-hover devices", async () => {
+  for (const media of [...stylesheet.sheet.cssRules].filter(
     (rule) => rule.conditionText === "(hover: none)",
-  )
-  stylesheet.textContent += [...media.cssRules].map((rule) => rule.cssText).join("\n")
+  ))
+    stylesheet.textContent += [...media.cssRules].map((rule) => rule.cssText).join("\n")
   createMockHost({
-    host: { id: "touch-controls" },
+    host: { id: "touch-menu" },
     owner: { state: state(), actions: { sprite: () => image } },
   })
   const w = render(PetCompanion, { attachTo: document.body })
   await flushPromises()
-  const toolbar = w.find(".vp-controls")
-  expect(getComputedStyle(toolbar.element).visibility).toBe("visible")
-  w.find('[aria-label="Pet settings"]').element.focus()
-  await flushPromises()
-  await w.find('[aria-label="Pet settings"]').trigger("keydown", { key: "Escape" })
-  expect(getComputedStyle(toolbar.element).visibility).toBe("hidden")
   await w.find(".vp-hit").trigger("pointerenter", { pointerType: "touch" })
-  expect(getComputedStyle(toolbar.element).visibility).toBe("visible")
-  expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  w.find(".vp-hit").element.focus()
+  await flushPromises()
+  expect(w.find(".vp-controls").exists()).toBe(false)
+  expect(w.find('[aria-label="Pet settings"]').isVisible()).toBe(false)
+  expect(w.find('[aria-label="Hide pet"]').isVisible()).toBe(false)
 })
 
 it("reconciles focus when feedback is removed even without a browser focusout", async () => {
@@ -349,7 +438,8 @@ it("reconciles focus when feedback is removed even without a browser focusout", 
   w.element.removeEventListener("focusout", lost, true)
   vi.advanceTimersByTime(350)
   await flushPromises()
-  expect(getComputedStyle(w.find(".vp-controls").element).visibility).toBe("hidden")
+  expect(w.find('[role="menu"]').isVisible()).toBe(false)
+  expect(w.findComponent(PetSprite).props("gazeEnabled")).toBe(true)
   host.state.work = work(1, "running")
   await flushPromises()
   host.state.work = work(1, "failed")
@@ -408,9 +498,11 @@ it("renders proximity gaze without changing work bubbles and suppresses it in se
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("gaze")
   expect(w.find(".vp-sprite").element.style.backgroundPosition).toContain("-")
   expect(w.find(".vp-bubble").text()).toContain("Processing")
-  await w.find(".vp-controls").trigger("pointerenter")
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
-  await w.find(".vp-controls").trigger("pointerleave")
+  window.dispatchEvent(new Event("blur"))
+  await flushPromises()
   now = 160
   await frame(now)
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("gaze")
@@ -542,7 +634,7 @@ it("registers an overlay, follows session facts and keeps work bubble after the 
   expect(hiddenStyle.position).toBe("absolute")
   expect(hiddenStyle.top).toBe("0px")
   expect(hiddenStyle.left).toBe("0px")
-  expect(getComputedStyle(w.find(".vp-controls").element).position).not.toBe("absolute")
+  expect(w.find('[role="menu"]').isVisible()).toBe(false)
   expect(w.find(".vp-drag").classes()).not.toContain("kt-overlay-hit")
   expect(w.find(".vp-sprite").classes()).not.toContain("kt-overlay-hit")
   expect(w.find(".vp-hit").classes()).toContain("kt-overlay-hit")
@@ -564,8 +656,12 @@ it("registers an overlay, follows session facts and keeps work bubble after the 
   expect(w.find(".vp-bubble").exists()).toBe(false)
   host.state.locale = "en"
   await flushPromises()
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   await w.find("[aria-label='Hide pet']").trigger("click")
   expect(host.overlayVisible[host.overlayId]).toBe(false)
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   await w.find("[aria-label='Pet settings']").trigger("click")
   expect(host.openedTabs[0].section).toBe("ext:test-pkg/pets")
 })
@@ -682,6 +778,8 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   document.dispatchEvent(new Event("visibilitychange"))
   await flushPromises()
   expect(action()).toBe("idle")
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   await w.find('[aria-label="Pet settings"]').trigger("click")
   expect(action()).toBe("idle")
   w.unmount()
