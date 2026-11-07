@@ -12,13 +12,38 @@ class BranchIndex:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._generation = 0
+        self._invalidation_epoch = 0
         self._agents: dict[str, dict[int, int]] = {}
+        self._upper_turn: dict[str, int] = {}
+
+    @property
+    def invalidation_epoch(self) -> int:
+        """Return the epoch of raw-history resets and failed publications."""
+        with self._lock:
+            return self._invalidation_epoch
 
     def clear(self) -> None:
         """Invalidate derived maxima after bulk copies or counter restoration."""
         with self._lock:
             self._generation += 1
+            self._invalidation_epoch += 1
             self._agents.clear()
+            self._upper_turn.clear()
+
+    def upper_turn(self, agent: str) -> int | None:
+        """Return the last occupied turn when a complete bound is available."""
+        with self._lock:
+            index = self._agents.get(agent)
+            return (
+                max(index, default=0)
+                if index is not None
+                else self._upper_turn.get(agent)
+            )
+
+    def restore_upper_turn(self, agent: str, turn: int) -> None:
+        """Install the last occupied turn from a consumed clean continuation point."""
+        with self._lock:
+            self._upper_turn[agent] = turn
 
     @staticmethod
     def _record(index: dict[int, int], event: dict) -> None:
@@ -33,12 +58,18 @@ class BranchIndex:
                 table[key] = event
             except BaseException:
                 self._generation += 1
+                self._invalidation_epoch += 1
                 self._agents.pop(agent, None)
+                self._upper_turn.pop(agent, None)
                 raise
             self._generation += 1
             index = self._agents.get(agent)
             if index is not None:
                 self._record(index, event)
+            upper = self._upper_turn.get(agent)
+            turn = event.get("turn_index")
+            if upper is not None and type(turn) is int:
+                self._upper_turn[agent] = max(upper, turn)
 
     def maximum(self, table: Any, agent: str, turn: int) -> int:
         """Read a maximum, rebuilding a cold namespace without partial publication."""
@@ -47,6 +78,8 @@ class BranchIndex:
                 index = self._agents.get(agent)
                 if index is not None:
                     return index.get(turn, 0)
+                if turn > self._upper_turn.get(agent, float("inf")):
+                    return 0
                 generation = self._generation
             table.flush_cache()
             built: dict[int, int] = {}

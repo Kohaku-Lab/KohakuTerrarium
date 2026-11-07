@@ -69,6 +69,40 @@ Compaction sends a textual projection to the summarizer, not the original images
 
 A checkpoint can contain already-elided tool output, while raw reconstruction may rehydrate that output before the current elision policy is reapplied. These representations need not be identical dictionaries. Compare effective context under the same summary, retained-user, and elision policy; legitimate rehydration is different from restoring media that the selected summary already consumed. Local-media availability is checked only for the final effective provider input, so excluded media do not block continuation and required missing media still fail explicitly. These rules apply to stable history, not history operations during active compaction or background work.
 
+### Clean text checkpoint continuation
+
+A normally completed, cleanly closed single-creature session can resume directly
+from its current checkpoint when the restored default output is `NoneOutput`,
+no named or secondary sinks are attached, and no configured output wiring needs
+historical events. This path preserves the
+saved text conversation and settled synchronous tool output, then continues
+through the ordinary request and event-writing APIs. It does not execute saved
+tools again.
+
+The initial scope excludes compaction/context cutoffs, pending work, multimodal
+messages, configured plugins, resumable triggers, MCP servers, and terrarium
+sessions. Those cases, older writers, and checkpoints with unsupported or
+inconsistent metadata use the existing restoration path. There is no promise
+that an arbitrary older file's first resume becomes faster.
+
+The writer stages a small continuation record alongside the existing checkpoint
+and publishes it only after clean event-counter persistence on close. The record
+contains no second message copy. It distinguishes the applied conversation
+watermark from the final event position: same-turn plugin-hook timing records
+may follow a checkpoint without changing its conversation. Semantic appends,
+historical snapshot replacement, and event-index invalidation prevent reuse.
+Every writable open consumes the disk record before subsequent mutations;
+read-only inspection preserves it. A writable inspection that does not produce a
+new supported checkpoint therefore makes the next resume use the existing path.
+
+This optimization skips historical event **payload** reads through the first
+ordinary continuation. Store opening may still scan event keys, and the current
+inline checkpoint directory may still decode other checkpoint records. It is
+not a general constant-time resume guarantee or a history-display optimization.
+Old writers do not maintain this new continuation contract; cross-version
+writable workflows are outside the fast-path guarantee. Bulk/raw history edits
+must restore store counters and invalidate derived event indexes before reuse.
+
 ### Older session formats
 
 Some older writers recorded canonical messages with event, turn, and branch IDs

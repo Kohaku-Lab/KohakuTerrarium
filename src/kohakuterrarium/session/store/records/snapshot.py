@@ -129,6 +129,8 @@ def save_branch_snapshot(
     compact_state: dict | None = None,
 ) -> None:
     """Write one coherent checkpoint and maintain the legacy latest mirrors."""
+    store._resume_candidate = None
+    store._resume_point = None
     path = branch_path(branch)
     if path and type(watermark) is int and watermark >= 0:
         records = [

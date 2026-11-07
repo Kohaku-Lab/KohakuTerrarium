@@ -20,6 +20,7 @@ from kohakuterrarium.session.store.records.conversation import (
     ConversationRecordsMixin,
 )
 from kohakuterrarium.session.store.records.jobs import JobRecordsMixin
+from kohakuterrarium.session.store.records.resume_point import open_point
 from kohakuterrarium.session.store.records.subagents import SubagentRecordsMixin
 from kohakuterrarium.session.store.lifecycle.table_policy import TablePolicy
 from kohakuterrarium.utils.logging import get_logger
@@ -73,6 +74,7 @@ class SessionStore(
         try:
             self._open_tables()
             self._restore_counters()
+            open_point(self)
         except BaseException:
             self._discard_failed_open()
             raise

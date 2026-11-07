@@ -28,6 +28,8 @@ class ConversationRecordsMixin:
         Accepts either a list of message dicts (preferred, stored via msgpack)
         or a JSON string (legacy, stored as-is).
         """
+        self._resume_candidate = None
+        self._resume_point = None
         self.state[f"{agent}:branch_snapshots"] = []
         self.conversation[agent] = messages
 
