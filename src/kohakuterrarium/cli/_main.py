@@ -9,6 +9,7 @@ workers.
 """
 
 import argparse
+import sys
 
 import kohakuterrarium.studio  # noqa: F401 — registers terrarium.group_hooks
 from kohakuterrarium.cli._aliases import (
@@ -21,6 +22,9 @@ from kohakuterrarium.cli.admin.admin import add_admin_subparser, admin_cli
 from kohakuterrarium.cli.auth import login_cli
 from kohakuterrarium.cli.config.config import add_config_subparser, config_cli
 from kohakuterrarium.cli.doctor import add_doctor_subparser, dispatch_doctor
+from kohakuterrarium.cli.entry.cli import main as cli_door
+from kohakuterrarium.cli.entry.tui import main as tui_door
+from kohakuterrarium.cli.entry.ui import main as ui_door
 from kohakuterrarium.cli.drive import add_drive_subparser, drive_cli
 from kohakuterrarium.cli.extension.extension import (
     extension_info_cli,
@@ -42,8 +46,14 @@ from kohakuterrarium.cli.packages import (
     update_cli,
 )
 from kohakuterrarium.cli.resume import resume_cli
-from kohakuterrarium.cli.run import resolve_then_run, run_agent_cli
-from kohakuterrarium.cli.select.args import add_run_like_args
+from kohakuterrarium.terrarium.engine.cli.ktui_support import take_next_session
+from kohakuterrarium.cli.run import run_agent_cli
+from kohakuterrarium.cli.select.args import add_attach_args
+from kohakuterrarium.terrarium.engine.cli.ktui_support import ktui_unavailable
+from kohakuterrarium.cli.self_uninstall import (
+    add_self_uninstall_subparser,
+    self_uninstall_cli,
+)
 from kohakuterrarium.cli.self_update import add_self_update_subparser, self_update_cli
 from kohakuterrarium.cli.open_in_app import add_open_subparser, open_dispatch
 from kohakuterrarium.cli.shims import add_shims_subparser, shims_cli
@@ -159,18 +169,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # Keep aliases on the shared argument builder so standalone and ``kt``
-    # entry points expose the same options.
-    cli_parser = subparsers.add_parser(
-        "cli",
-        help="Interactive rich CLI (optional creature; picker when omitted)",
-    )
-    add_run_like_args(cli_parser)
-    tui_parser = subparsers.add_parser(
-        "tui",
-        help="Full-screen Textual TUI (optional creature; picker when omitted)",
-    )
-    add_run_like_args(tui_parser)
+    # The terminal front doors, as ``kt <name>``: their own parsers read the rest
+    for name, about in (
+        ("ui", "ktui: the launcher, or start / resume / attach (same as kt-ui)"),
+        ("cli", "ktui inline or hybrid (same as kt-cli)"),
+        ("tui", "ktui full screen (same as kt-tui)"),
+    ):
+        door = subparsers.add_parser(name, help=about, add_help=False)
+        door.add_argument("argv", nargs=argparse.REMAINDER)
 
     add_shims_subparser(subparsers)
     add_open_subparser(subparsers)
@@ -235,6 +241,18 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     add_doctor_subparser(subparsers)
+
+    attach_parser = subparsers.add_parser(
+        "attach",
+        help="Open a session running in a KT server (kt serve / kt web) in ktui",
+    )
+    add_attach_args(attach_parser)
+    attach_parser.add_argument(
+        "--mode",
+        choices=["inline", "hybrid", "fullscreen"],
+        default=None,
+        help="ktui renderer for this run (default: the remembered one)",
+    )
 
     login_parser = subparsers.add_parser("login", help="Authenticate with a provider")
     login_parser.add_argument(
@@ -454,6 +472,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_admin_subparser(subparsers)
 
     add_self_update_subparser(subparsers)
+    add_self_uninstall_subparser(subparsers)
 
     internal_serve_parser = subparsers.add_parser(
         "__run-server", help=argparse.SUPPRESS
@@ -474,6 +493,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     internal_serve_parser.add_argument("--lab-bind", default=None)
     internal_serve_parser.add_argument("--lab-token", default=None)
+    internal_serve_parser.add_argument("--idle-exit", type=float, default=None)
 
     return parser
 
@@ -488,7 +508,7 @@ def _dispatch_run(args: argparse.Namespace) -> int:
     agent_path = args.agent_path
     session = None if args.no_session else args.session
     extra_creatures = list(getattr(args, "add_creatures", None) or [])
-    return run_agent_cli(
+    code = run_agent_cli(
         agent_path,
         args.log_level,
         session=session,
@@ -498,31 +518,29 @@ def _dispatch_run(args: argparse.Namespace) -> int:
         extra_creatures=extra_creatures,
         extra_channels=list(getattr(args, "add_channels", None) or []),
     )
+    # ktui's /resume picked a session to continue with
+    following = take_next_session()
+    if following:
+        return resume_cli(
+            following,
+            None,
+            args.log_level,
+            io_mode=args.mode,
+            llm=args.llm,
+            log_stderr=args.log_stderr,
+        )
+    return code
 
 
-def _resolve_then_run_from_args(args: argparse.Namespace, io_mode: str) -> int:
-    """Shared dispatch for the ``kt cli`` / ``kt tui`` subcommand aliases."""
-    session = None if args.no_session else args.session
-    return resolve_then_run(
-        args.agent_path,
-        io_mode=io_mode,
-        log_level=args.log_level,
-        session=session,
-        llm=args.llm,
-        log_stderr=args.log_stderr,
-        extra_creatures=list(getattr(args, "add_creatures", None) or []),
-        extra_channels=list(getattr(args, "add_channels", None) or []),
-    )
+def _dispatch_attach(args: argparse.Namespace) -> int:
+    """Handle 'attach': ktui on a session running in a KT server."""
+    if reason := ktui_unavailable():
+        print(reason, file=sys.stderr)
+        return 1
+    # kohakutui is optional: imported only once it is known to be installed
+    from kohakuterrarium.terrarium.engine.cli.ktui_remote import attach_cli
 
-
-def _dispatch_cli_mode(args: argparse.Namespace) -> int:
-    """Handle the 'cli' subcommand alias (rich inline mode)."""
-    return _resolve_then_run_from_args(args, "cli")
-
-
-def _dispatch_tui_mode(args: argparse.Namespace) -> int:
-    """Handle the 'tui' subcommand alias (full-screen mode)."""
-    return _resolve_then_run_from_args(args, "tui")
+    return attach_cli(args.session, args.url, args.creature, args.mode)
 
 
 def _dispatch_resume(args: argparse.Namespace) -> int:
@@ -593,8 +611,10 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
 
 COMMANDS: dict[str, callable] = {
     "run": _dispatch_run,
-    "cli": _dispatch_cli_mode,
-    "tui": _dispatch_tui_mode,
+    # (``kt ui|cli|tui`` normally take the fast path in ``cli/__init__.py``)
+    "ui": lambda args: ui_door(args.argv),
+    "cli": lambda args: cli_door(args.argv),
+    "tui": lambda args: tui_door(args.argv),
     "shims": shims_cli,
     "open": open_dispatch,
     "resume": _dispatch_resume,
@@ -602,6 +622,7 @@ COMMANDS: dict[str, callable] = {
     "list": lambda args: list_cli(args.path),
     "info": lambda args: show_agent_info_cli(args.agent_path),
     "login": lambda args: login_cli(args.provider),
+    "attach": _dispatch_attach,
     "install": lambda args: install_cli(
         args.source, args.editable, args.name, args.no_deps
     ),
@@ -627,6 +648,7 @@ COMMANDS: dict[str, callable] = {
             mode=getattr(args, "mode", "standalone"),
             lab_bind=getattr(args, "lab_bind", None),
             lab_token=getattr(args, "lab_token", None),
+            idle_exit=getattr(args, "idle_exit", None),
         )
     ),
     "lab-client": lab_client_cli,
@@ -634,6 +656,7 @@ COMMANDS: dict[str, callable] = {
     "client": dispatch_client_alias,
     "service": service_cli,
     "self-update": self_update_cli,
+    "self-uninstall": self_uninstall_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
     "mcp-serve": mcp_serve_cli,

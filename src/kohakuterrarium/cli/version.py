@@ -7,10 +7,15 @@ import sys
 from pathlib import Path
 
 from kohakuterrarium import __version__
+from kohakuterrarium.launcher.migration import is_launcher_install
 
 
 def detect_install_source() -> str:
     """Best-effort detection of how KohakuTerrarium is installed."""
+    # a release tree the launcher installed (one-line installer, desktop app): its pip
+    # metadata only says how the tree was built
+    if is_launcher_install():
+        return "launcher-managed release (kt self-update)"
     try:
         dist = importlib.metadata.distribution("KohakuTerrarium")
     except importlib.metadata.PackageNotFoundError:

@@ -151,9 +151,21 @@
   },
   {
     "file": "src/kohakuterrarium/cli/__init__.py",
-    "function": "_dispatch_surface",
-    "target": "kohakuterrarium.cli.run",
-    "reason": "Agent and Terrarium runtime dependencies are loaded only for CLI or TUI execution."
+    "function": "_terminal_door",
+    "target": "kohakuterrarium.cli.entry.cli",
+    "reason": "The terminal front doors are loaded only for kt ui / cli / tui."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_terminal_door",
+    "target": "kohakuterrarium.cli.entry.tui",
+    "reason": "The terminal front doors are loaded only for kt ui / cli / tui."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_terminal_door",
+    "target": "kohakuterrarium.cli.entry.ui",
+    "reason": "The terminal front doors are loaded only for kt ui / cli / tui."
   },
   {
     "file": "src/kohakuterrarium/cli/__init__.py",
@@ -166,6 +178,54 @@
     "function": "main",
     "target": "kohakuterrarium.cli.version",
     "reason": "Version reporting is isolated so kt --version does not import command runtimes."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/_main.py",
+    "function": "_dispatch_attach",
+    "target": "kohakuterrarium.terrarium.engine.cli.ktui_remote",
+    "reason": "kohakutui is loaded only for kt attach, after checking it is installed."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/ui.py",
+    "function": "attach_cli",
+    "target": "kohakuterrarium.terrarium.engine.cli.ktui_remote",
+    "reason": "kohakutui is loaded only after kt-ui checked it is installed."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/ui.py",
+    "function": "launch",
+    "target": "kohakuterrarium.builtins.ktui.launcher",
+    "reason": "kohakutui is loaded only after kt-ui checked it is installed."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/cli.py",
+    "function": "ui_main",
+    "target": "kohakuterrarium.cli.entry.ui",
+    "reason": "kt-cli opens ktui; its run/resume cores load only after the kohakutui check."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/tui.py",
+    "function": "ui_main",
+    "target": "kohakuterrarium.cli.entry.ui",
+    "reason": "kt-tui opens ktui; its run/resume cores load only after the kohakutui check."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/ui.py",
+    "function": "daemon_cli",
+    "target": "kohakuterrarium.cli.entry.daemon",
+    "reason": "The background-server client (httpx, serve) loads only for kt-ui --daemon."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/daemon.py",
+    "function": "attach_cli",
+    "target": "kohakuterrarium.terrarium.engine.cli.ktui_remote",
+    "reason": "kohakutui is loaded only after kt-ui checked it is installed."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry/ui.py",
+    "function": "remembered_renderer",
+    "target": "kohakuterrarium.builtins.ktui.config",
+    "reason": "kohakutui is loaded only after kt-ui checked it is installed."
   },
   {
     "file": "src/kohakuterrarium/cli/entry/cli.py",

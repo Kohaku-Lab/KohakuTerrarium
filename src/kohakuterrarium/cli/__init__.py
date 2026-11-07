@@ -3,7 +3,6 @@
 import argparse
 import sys
 
-from kohakuterrarium.cli.select.args import add_run_like_args
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
@@ -21,11 +20,27 @@ def _version_requested(argv: list[str]) -> bool:
     )
 
 
+# ``kt ui|cli|tui``: the same front doors as ``kt-ui`` / ``kt-cli`` / ``kt-tui``
+TERMINAL_DOORS = ("ui", "cli", "tui")
+
+
+def _terminal_door(name: str, argv: list[str]) -> int:
+    if name == "cli":
+        from kohakuterrarium.cli.entry.cli import main as door
+
+        return door(argv)
+    if name == "tui":
+        from kohakuterrarium.cli.entry.tui import main as door
+
+        return door(argv)
+    from kohakuterrarium.cli.entry.ui import main as ui
+
+    return ui(argv)
+
+
 def _build_surface_parser(command: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=f"kt {command}")
-    if command in {"cli", "tui"}:
-        add_run_like_args(parser)
-    elif command == "web":
+    if command == "web":
         parser.add_argument(
             "--host",
             default="127.0.0.1",
@@ -63,19 +78,6 @@ def _build_surface_parser(command: str) -> argparse.ArgumentParser:
 
 def _dispatch_surface(command: str, args: argparse.Namespace) -> int:
     mark_startup("dispatch_selected", surface=command, command=command)
-    if command in {"cli", "tui"}:
-        from kohakuterrarium.cli.run import resolve_then_run
-
-        return resolve_then_run(
-            args.agent_path,
-            io_mode=command,
-            log_level=args.log_level,
-            session=None if args.no_session else args.session,
-            llm=args.llm,
-            log_stderr=args.log_stderr,
-            extra_creatures=args.add_creatures,
-            extra_channels=args.add_channels,
-        )
     if command == "web":
         from kohakuterrarium.serving.web import run_web_server
 
@@ -110,7 +112,11 @@ def main() -> int:
         mark_startup("dispatch_selected", surface="desktop", command="desktop")
         launch_desktop_app(log_level="INFO")
         return 0
-    if argv[0] in {"cli", "tui", "web", "app"}:
+    if argv[0] in TERMINAL_DOORS:
+        # the terminal front doors parse the rest themselves (their --help included)
+        mark_startup("dispatch_selected", surface=argv[0], command=argv[0])
+        return _terminal_door(argv[0], argv[1:])
+    if argv[0] in {"web", "app"}:
         command = argv[0]
         args = _build_surface_parser(command).parse_args(argv[1:])
         mark_startup("parser_ready", surface=command)

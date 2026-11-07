@@ -56,7 +56,7 @@ def test_status_reports_nothing_installed_before_the_user_opts_in(home):
     assert body["supported"] is True and body["local"] is True
     assert body["mode"] == shims.MODE_RUNTIME
     assert body["installed"] == [] and body["on_path"] is False
-    assert body["commands"] == ["kt", "kt-cli", "kt-tui"]
+    assert body["commands"] == ["kt", "kt-ui", "kt-cli", "kt-tui"]
 
 
 def test_install_writes_the_wrappers_and_adds_the_directory_to_path(home):
@@ -64,7 +64,7 @@ def test_install_writes_the_wrappers_and_adds_the_directory_to_path(home):
 
     body = client.post("/api/app/shims/install", json={"add_to_path": True}).json()
 
-    assert body["installed"] == ["kt", "kt-cli", "kt-tui"]
+    assert body["installed"] == ["kt", "kt-ui", "kt-cli", "kt-tui"]
     assert body["on_path"] is True
     assert [call[0] for call in home["calls"]] == ["add"]
     assert home["calls"][0][1] == shims.build_plan().target_dir
@@ -90,7 +90,7 @@ def test_uninstall_removes_only_our_wrappers_and_the_path_entry(home, tmp_path):
         "/api/app/shims/uninstall", json={"remove_from_path": True}
     ).json()
 
-    assert body["removed"] == ["kt-cli", "kt-tui"]
+    assert body["removed"] == ["kt-ui", "kt-cli", "kt-tui"]
     assert foreign.read_text(encoding="utf-8") == "someone else's kt\n"
     assert body["on_path"] is False
     assert home["calls"][-1][0] == "remove"

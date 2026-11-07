@@ -14,7 +14,7 @@ import pytest
 
 from kohakuterrarium.cli import shims
 
-NAMES = ("kt", "kt-cli", "kt-tui")
+NAMES = ("kt", "kt-ui", "kt-cli", "kt-tui")
 
 
 @pytest.fixture
@@ -63,6 +63,7 @@ def test_runtime_install_wraps_the_launcher_for_every_command(
         assert str(bootstrap) in item.content and sys.executable in item.content
     by_name = {item.name: item.content for item in plan.items}
     assert "launcher cli" in by_name["kt-cli"] and "launcher tui" in by_name["kt-tui"]
+    assert "launcher ui" in by_name["kt-ui"]
     assert "launcher cli" not in by_name["kt"]
 
 

@@ -15,6 +15,7 @@ real resume.
 """
 
 import asyncio
+import os
 import sys
 import types
 
@@ -22,6 +23,8 @@ import pytest
 
 from kohakuterrarium.cli.entry import cli as entry_cli
 from kohakuterrarium.cli.entry import tui as entry_tui
+from kohakuterrarium.cli.entry import ui as entry_ui
+from kohakuterrarium.terrarium.engine.cli.ktui_support import RENDERER_ENV
 from kohakuterrarium.cli import resume as resume_mod
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.studio.identity.drive_settings.settings import save_settings
@@ -155,7 +158,50 @@ def _install_entry_fakes(monkeypatch, module) -> dict:
 
     monkeypatch.setattr(module, "resume_cli", fake_resume)
     monkeypatch.setattr(module, "resolve_then_run", fake_run)
+    # without kohakutui (and as legacy-cli / legacy-tui) they are the previous front ends
+    monkeypatch.setattr(
+        module, "ktui_unavailable", lambda: "kohakutui is not installed"
+    )
     return seen
+
+
+class TestFrontDoorsOpenKtui:
+    """With kohakutui installed, kt-cli and kt-tui are kt-ui opening in their renderer."""
+
+    @pytest.fixture
+    def ui(self, monkeypatch):
+        seen = _install_entry_fakes(monkeypatch, entry_ui)
+        monkeypatch.setattr(entry_ui, "ktui_unavailable", lambda: None)
+        monkeypatch.delenv(RENDERER_ENV, raising=False)
+        for module in (entry_cli, entry_tui):
+            monkeypatch.setattr(module, "ktui_unavailable", lambda: None)
+        return seen
+
+    @pytest.mark.parametrize(
+        ("module", "remembered", "opens"),
+        [
+            (entry_cli, "inline", "inline"),
+            (entry_cli, "hybrid", "hybrid"),
+            (entry_cli, "fullscreen", "hybrid"),
+            (entry_tui, "inline", "fullscreen"),
+        ],
+    )
+    def test_run_and_resume_go_to_ktui_in_the_door_renderer(
+        self, ui, monkeypatch, module, remembered, opens
+    ):
+        monkeypatch.setattr(entry_ui, "remembered_renderer", lambda: remembered)
+        assert module.main(["general"]) == 0
+        assert ui["run"]["agent_path"] == "general"
+        assert ui["run"]["io_mode"] == "ktui"
+        assert os.environ[RENDERER_ENV] == opens
+        assert module.main(["resume", "mysess", "--last"]) == 0
+        assert ui["resume"]["io_mode"] == "ktui"
+        assert ui["resume"]["last"] is True
+
+    def test_a_renderer_flag_wins_over_the_door(self, ui, monkeypatch):
+        monkeypatch.setattr(entry_ui, "remembered_renderer", lambda: "hybrid")
+        assert entry_tui.main(["general", "--inline"]) == 0
+        assert os.environ[RENDERER_ENV] == "inline"
 
 
 class TestFrontDoorResumeVerb:

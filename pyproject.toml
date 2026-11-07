@@ -101,10 +101,15 @@ Issues = "https://github.com/Kohaku-Lab/KohakuTerrarium/issues"
 
 [project.scripts]
 kt = "kohakuterrarium.__main__:main"
-# Standalone interactive front doors (== `kt run <creature> --mode cli|tui`,
-# with an optional creature arg → startup picker).
+# ktui: launcher, start, resume, attach to a session in a server.
+kt-ui = "kohakuterrarium.cli.entry.ui:main"
+# kt-ui opening inline / hybrid and full screen (the rich CLI / Textual TUI when kohakutui is
+# not installed).
 kt-cli = "kohakuterrarium.cli.entry.cli:main"
 kt-tui = "kohakuterrarium.cli.entry.tui:main"
+# The previous front ends (== `kt run <creature> --mode cli|tui`), kept for one release.
+legacy-cli = "kohakuterrarium.cli.entry.cli:legacy_main"
+legacy-tui = "kohakuterrarium.cli.entry.tui:legacy_main"
 # Spawns a lab-host + embedded lab-client in one process (Docker entrypoint /
 # systemd unit).
 kt-aio = "kohakuterrarium.cli._aio_entrypoint:run"
@@ -148,8 +153,14 @@ keychain = [
     "keyring>=25.0.0",
 ]
 
+# ktui, the terminal front end (kt-ui; kt-cli / kt-tui open it too). Release trees and the
+# one-line installers include it.
+ktui = [
+    "kohakutui>=0.2.0",
+]
+
 full = [
-    "KohakuTerrarium[demo,browser,embeddings-heavy,desktop,litellm]",
+    "KohakuTerrarium[demo,browser,embeddings-heavy,desktop,litellm,ktui]",
 ]
 
 # Testing and linting.

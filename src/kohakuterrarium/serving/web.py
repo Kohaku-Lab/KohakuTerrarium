@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import uvicorn
 
 import kohakuterrarium.session.run_state as run_state
@@ -194,8 +195,12 @@ def run_web_server(
     mode: str = "standalone",
     lab_bind: str | None = None,
     lab_token: str | None = None,
+    idle_exit: float | None = None,
 ) -> None:
     """Run the FastAPI service in standalone or authenticated lab-host mode.
+
+    ``idle_exit``: stop once no session has run for that many seconds (a server started on
+    demand by ktui).
 
     Development mode omits static frontend serving. Daemon callers may provide
     ``state_path`` to receive the selected port. Lab-host mode also starts the
@@ -272,4 +277,92 @@ def run_web_server(
         print(f"KohakuTerrarium web UI: http://{host}:{port}")
 
     mark_startup("web_server_run", surface="web", host=host, port=port)
-    uvicorn.run(app, host=host, port=port)
+    if not idle_exit:
+        uvicorn.run(app, host=host, port=port)
+        return
+    # a server started on demand needs a handle to stop itself once unused
+    activity = _Activity(app)
+    server = uvicorn.Server(uvicorn.Config(activity, host=host, port=port))
+    threading.Thread(
+        target=_exit_when_idle,
+        args=(server, activity, _probe_url(host, port), idle_exit),
+        daemon=True,
+        name="kt-idle-exit",
+    ).start()
+    server.run()
+
+
+IDLE_POLL = 15.0
+# the idle check's own requests carry this header and do not count as use
+PROBE_HEADER = "X-KT-Idle-Probe"
+
+
+class _Activity:
+    """The app, noting when it was last used: every request and WebSocket (the web UI open
+    in a browser, a ktui attached) except the idle check's own."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.last = time.monotonic()
+        self.open = 0
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") not in ("http", "websocket") or any(
+            key == PROBE_HEADER.lower().encode() for key, _ in scope.get("headers", [])
+        ):
+            await self.app(scope, receive, send)
+            return
+        self.open += 1
+        self.last = time.monotonic()
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.open -= 1
+            self.last = time.monotonic()
+
+
+def _probe_url(host: str, port: int) -> str:
+    if host in ("0.0.0.0", "", "127.0.0.1"):
+        return f"http://127.0.0.1:{port}"
+    if host == "::":
+        return f"http://[::1]:{port}"
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def _exit_when_idle(
+    server: "uvicorn.Server", activity: _Activity, url: str, idle: float
+) -> None:
+    """Asks ``server`` to stop once, for ``idle`` seconds, it has run no session and nobody
+    has used it (no request, no open socket). A listing it cannot read (refused, needs a
+    token it lacks) counts as busy: then it does not stop by itself."""
+    token = os.environ.get("KT_HOST_TOKEN")
+    headers = {PROBE_HEADER: "1", **({"X-KT-Host-Token": token} if token else {})}
+    quiet_since = time.monotonic()
+    warned = False
+    while not server.should_exit:
+        time.sleep(IDLE_POLL)
+        try:
+            response = httpx.get(
+                f"{url}/api/sessions/active",
+                headers=headers,
+                timeout=10,
+                trust_env=False,
+            )
+            if response.status_code >= 400:
+                raise ValueError(f"HTTP {response.status_code}")
+            sessions = bool(response.json())
+        except (httpx.HTTPError, ValueError) as exc:
+            if not warned:
+                logger.warning(
+                    "idle check cannot list sessions; staying up", error=str(exc)
+                )
+                warned = True
+            sessions = True
+        now = time.monotonic()
+        if sessions or activity.open:
+            quiet_since = now
+            continue
+        quiet = now - max(quiet_since, activity.last)
+        if quiet >= idle:
+            logger.info("unused: stopping (started on demand)", idle_seconds=idle)
+            server.should_exit = True

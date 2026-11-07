@@ -30,7 +30,10 @@ from kohakuterrarium.utils.logging import (
     set_level,
 )
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
-from kohakuterrarium.terrarium.engine.cli.ktui_support import ktui_unavailable
+from kohakuterrarium.terrarium.engine.cli.ktui_support import (
+    ktui_unavailable,
+    resume_command,
+)
 
 logger = get_logger(__name__)
 
@@ -315,7 +318,7 @@ async def _run(
             if store is not None:
                 if session is not None:
                     print(f"\nSession saved. To resume:")
-                    print(f"  kt resume {Path(store.path).stem}")
+                    print(f"  {resume_command(io_mode)} {Path(store.path).stem}")
                 store.close()
         return 0
 

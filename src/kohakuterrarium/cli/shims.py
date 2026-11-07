@@ -1,4 +1,4 @@
-"""``kt shims`` — expose ``kt`` / ``kt-cli`` / ``kt-tui`` on the terminal.
+"""``kt shims`` — expose ``kt`` / ``kt-ui`` / ``kt-cli`` / ``kt-tui`` on the terminal.
 
 Two installation environments require different shim strategies:
 
@@ -26,6 +26,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from kohakuterrarium.launcher.terminal import TERMINAL_ENV
 from kohakuterrarium.utils.interpreter import is_briefcase_runtime
 from kohakuterrarium.utils.logging import get_logger
 
@@ -34,6 +35,7 @@ logger = get_logger(__name__)
 # Bundle wrappers map standalone commands back to the corresponding ``kt`` mode.
 SHIM_SUBCOMMANDS: dict[str, str | None] = {
     "kt": None,
+    "kt-ui": "ui",
     "kt-cli": "cli",
     "kt-tui": "tui",
 }
@@ -138,12 +140,16 @@ def _runtime_wrapper_content(
         return (
             f"@echo off\nrem {KT_SHIM_MARKER}\nsetlocal\n"
             f'set "PYTHONPATH={bootstrap}"\nset "PYTHONNOUSERSITE=1"\n'
+            f'set "KT_PYTHON={python}"\nset "KT_BOOTSTRAP_DIR={bootstrap}"\n'
+            f'set "{TERMINAL_ENV}=1"\n'
             f'"{python}" -m kohakuterrarium.launcher{sub} %*\n'
             "exit /b %ERRORLEVEL%\n"
         )
+    # the runtime is named again so `kt shims` / `kt self-update` from here know it
     return (
         f"#!/bin/sh\n# {KT_SHIM_MARKER}\n"
         f'PYTHONPATH="{bootstrap}" PYTHONNOUSERSITE=1 '
+        f'KT_PYTHON="{python}" KT_BOOTSTRAP_DIR="{bootstrap}" {TERMINAL_ENV}=1 '
         f'exec "{python}" -m kohakuterrarium.launcher{sub} "$@"\n'
     )
 
@@ -189,7 +195,7 @@ def build_plan(
             )
             for name, sub in SHIM_SUBCOMMANDS.items()
         ]
-        note = "Desktop app: wrappers run the app's bundled interpreter."
+        note = "Wrappers run the launcher on its interpreter (desktop app or terminal install)."
         return ShimPlan(MODE_RUNTIME, target_dir, system, items, on_path, note)
 
     if bundle:
@@ -305,7 +311,15 @@ def install_shims() -> int:
     if plan.mode != MODE_DEFER_PIPX and not plan.on_path:
         print()
         print(f"Note: {plan.target_dir} is not on your PATH. Add it, e.g.:")
-        print(f'  export PATH="{plan.target_dir}:$PATH"')
+        if plan.system == "Windows":
+            print(
+                "  [Environment]::SetEnvironmentVariable('Path', "
+                f"[Environment]::GetEnvironmentVariable('Path', 'User') + ';{plan.target_dir}', "
+                "'User')"
+            )
+        else:
+            print("  in your shell's startup file (~/.bashrc, ~/.zshrc, ...):")
+            print(f'  export PATH="{plan.target_dir}:$PATH"')
     return 0
 
 
@@ -396,10 +410,10 @@ def add_shims_subparser(subparsers) -> None:
     """Register the ``shims`` subcommand group on the main parser."""
     p = subparsers.add_parser(
         "shims",
-        help="Install/inspect terminal shims (kt, kt-cli, kt-tui) on PATH",
+        help="Install/inspect terminal shims (kt, kt-ui, kt-cli, kt-tui) on PATH",
     )
     sub = p.add_subparsers(dest="shims_command")
-    sub.add_parser("install", help="Create kt/kt-cli/kt-tui shims in a PATH dir")
+    sub.add_parser("install", help="Create kt/kt-ui/kt-cli/kt-tui shims in a PATH dir")
     sub.add_parser("status", help="Show shim install + PATH status")
     sub.add_parser("uninstall", help="Remove shims we created")
 

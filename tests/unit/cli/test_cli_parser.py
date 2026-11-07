@@ -41,8 +41,41 @@ def test_fast_surface_parsers_match_full_parser_contract():
             for action in surface_parser._actions
         ]
 
-    for command in ("web", "app", "cli", "tui"):
+    for command in ("web", "app"):
         assert signature(_build_surface_parser(command)) == signature(commands[command])
+
+
+def test_terminal_front_doors_take_the_rest_of_the_command_line(monkeypatch):
+    """``kt ui|cli|tui ...`` is ``kt-ui|kt-cli|kt-tui ...``: the door parses the rest, its
+    ``--help`` included."""
+    from kohakuterrarium import cli as fast
+    from kohakuterrarium.cli.entry import (
+        cli as cli_entry,
+        tui as tui_entry,
+        ui as ui_entry,
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        ui_entry, "main", lambda argv: calls.append(("kt-ui", argv)) or 0
+    )
+    monkeypatch.setattr(
+        cli_entry, "main", lambda argv: calls.append(("kt-cli", argv)) or 0
+    )
+    monkeypatch.setattr(
+        tui_entry, "main", lambda argv: calls.append(("kt-tui", argv)) or 0
+    )
+    for argv in (["ui", "--help"], ["cli", "general", "--llm", "x"], ["tui", "resume"]):
+        monkeypatch.setattr("sys.argv", ["kt", *argv])
+        assert fast.main() == 0
+    assert calls == [
+        ("kt-ui", ["--help"]),
+        ("kt-cli", ["general", "--llm", "x"]),
+        ("kt-tui", ["resume"]),
+    ]
+    # the full parser lists them too, taking everything after the name
+    args = cli._build_parser().parse_args(["cli", "general", "--llm", "x"])
+    assert args.argv == ["general", "--llm", "x"]
 
 
 class TestMainStartup:

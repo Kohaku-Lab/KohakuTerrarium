@@ -13,7 +13,7 @@ import pytest
 
 from kohakuterrarium.cli import shims
 
-NAMES = ("kt", "kt-cli", "kt-tui")
+NAMES = ("kt", "kt-ui", "kt-cli", "kt-tui")
 posix_only = pytest.mark.skipif(
     os.name != "posix", reason="POSIX symlink/exec semantics"
 )
@@ -38,6 +38,7 @@ class TestBuildPlan:
         assert plan.on_path is True
         assert {i.name: i.action for i in plan.items} == {
             "kt": "symlink",
+            "kt-ui": "symlink",
             "kt-cli": "symlink",
             "kt-tui": "symlink",
         }
@@ -70,6 +71,7 @@ class TestBuildPlan:
         assert plan.mode == shims.MODE_BUNDLE
         content = {i.name: i.content for i in plan.items}
         assert 'exec "/A/STUB" "$@"' in content["kt"]
+        assert 'exec "/A/STUB" ui "$@"' in content["kt-ui"]
         assert 'exec "/A/STUB" cli "$@"' in content["kt-cli"]
         assert 'exec "/A/STUB" tui "$@"' in content["kt-tui"]
         assert all(shims.KT_SHIM_MARKER in c for c in content.values())
@@ -84,6 +86,7 @@ class TestBuildPlan:
         )
         assert {i.dest.name for i in plan.items} == {
             "kt.cmd",
+            "kt-ui.cmd",
             "kt-cli.cmd",
             "kt-tui.cmd",
         }

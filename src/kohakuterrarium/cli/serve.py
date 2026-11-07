@@ -137,6 +137,7 @@ def _spawn_server_process(
     mode: str = "standalone",
     lab_bind: str = "",
     lab_token: str = "",
+    idle_exit: float | None = None,
 ) -> int:
     """Spawn a detached web-server subprocess and return its PID."""
     RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -162,6 +163,8 @@ def _spawn_server_process(
         cmd.extend(["--lab-bind", lab_bind])
     if lab_token:
         cmd.extend(["--lab-token", lab_token])
+    if idle_exit:
+        cmd.extend(["--idle-exit", str(idle_exit)])
 
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
@@ -290,6 +293,11 @@ def serve_start_cli(args: argparse.Namespace) -> int:
     if runtime["alive"]:
         state = runtime["state"]
         print("KohakuTerrarium web daemon is already running")
+        if state.get("idle_exit"):
+            print(
+                "  (started on demand by kt-ui: it stops by itself once unused; "
+                "`kt serve restart` makes it stay)"
+            )
         print(f"  pid:  {runtime['pid']}")
         print(f"  url:  {state.get('url', '')}")
         print(f"  log:  {state.get('log_path', LOG_PATH)}")
@@ -353,6 +361,7 @@ def serve_stop_cli(args: argparse.Namespace) -> int:
                 ["taskkill", "/F", "/PID", str(pid), "/T"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 check=False,
             )
         else:
@@ -472,6 +481,7 @@ def run_server_internal(args: argparse.Namespace) -> int:
         mode=getattr(args, "mode", "standalone"),
         lab_bind=getattr(args, "lab_bind", None),
         lab_token=getattr(args, "lab_token", None),
+        idle_exit=getattr(args, "idle_exit", None),
     )
     return 0
 

@@ -25,7 +25,11 @@ from kohakuterrarium.utils.logging import (
     enable_stderr_logging,
     set_level,
 )
-from kohakuterrarium.terrarium.engine.cli.ktui_support import ktui_unavailable
+from kohakuterrarium.terrarium.engine.cli.ktui_support import (
+    ktui_unavailable,
+    resume_command,
+    take_next_session,
+)
 
 
 async def run_engine_with_rich_cli(engine, focus, store):
@@ -103,7 +107,13 @@ def resume_cli(
         return 1
     if result == 0 and path.exists():
         print("\nSession saved. To resume:")
-        print(f"  kt resume {path.stem}")
+        print(f"  {resume_command(io_mode)} {path.stem}")
+    # ktui's /resume picked another session: resume it now, in the same surface
+    following = take_next_session()
+    if following:
+        return resume_cli(
+            following, None, log_level, io_mode=io_mode, llm=llm, log_stderr=log_stderr
+        )
     return result
 
 

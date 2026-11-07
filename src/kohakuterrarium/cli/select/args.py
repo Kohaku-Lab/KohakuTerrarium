@@ -131,14 +131,23 @@ def add_resume_like_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def parse_standalone_args(prog: str) -> argparse.Namespace:
+def add_attach_args(parser: argparse.ArgumentParser) -> None:
+    """``kt attach`` / ``kt-ui attach``: a session running in a KT server."""
+    parser.add_argument("session", nargs="?", default=None, help="Running session id")
+    parser.add_argument("--url", default=None, help="KT server (default: kt serve's)")
+    parser.add_argument("--creature", default=None, help="Creature to focus first")
+
+
+def parse_standalone_args(
+    prog: str, argv: list[str] | None = None
+) -> argparse.Namespace:
     """Build + parse args for a standalone ``kt-cli`` / ``kt-tui`` binary.
 
     A leading ``resume`` verb selects the resume surface; the returned
     namespace carries ``resume=True`` and the resume args. Otherwise the
     run-like surface applies and ``resume=False``.
     """
-    argv = sys.argv[1:]
+    argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "resume":
         parser = argparse.ArgumentParser(
             prog=f"{prog} resume",
