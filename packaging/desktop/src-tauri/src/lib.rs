@@ -90,7 +90,7 @@ pub fn run() {
         .manage(Backend::default())
         .manage(DeepLinks::default())
         .manage(overlay::HitRegions::default())
-        .manage(overlay::Presentations::default())
+        .manage(overlay::OverlayWindows::default())
         .manage(opens::PendingOpens::default())
         .manage(ShellSettings::default())
         .manage(tray::TrayState::default())

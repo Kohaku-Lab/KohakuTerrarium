@@ -49,8 +49,41 @@ struct PointerState {
     updated: Instant,
 }
 
+#[derive(Clone)]
+struct OverlayIdentity {
+    key: String,
+    generation: Option<String>,
+}
+
 #[derive(Default)]
-pub struct Presentations(Mutex<HashMap<String, (String, String)>>);
+pub struct OverlayWindows(Mutex<HashMap<String, OverlayIdentity>>);
+
+impl OverlayWindows {
+    fn register(&self, spec: &Spec) {
+        self.0.lock().unwrap().insert(
+            spec.label.clone(),
+            OverlayIdentity {
+                key: spec.key.clone(),
+                generation: spec.generation.clone(),
+            },
+        );
+    }
+
+    fn matches_generation(&self, label: &str, generation: &str) -> bool {
+        self.0
+            .lock()
+            .unwrap()
+            .get(label)
+            .is_some_and(|entry| entry.generation.as_deref() == Some(generation))
+    }
+
+    fn settings_allowed(&self, label: &str, section: &str) -> bool {
+        self.0.lock().unwrap().get(label).is_some_and(|entry| {
+            entry.key == "ext:virtual-pet/pet"
+                && matches!(section, "ext:virtual-pet/pets" | "overlays")
+        })
+    }
+}
 
 pub fn pointer_supported() -> bool {
     !cfg!(target_os = "linux") || std::env::var_os("WAYLAND_DISPLAY").is_none()
@@ -58,8 +91,20 @@ pub fn pointer_supported() -> bool {
 
 pub fn forget(app: &AppHandle, label: &str) {
     app.state::<HitRegions>().0.lock().unwrap().remove(label);
-    let removed = app.state::<Presentations>().0.lock().unwrap().remove(label);
-    if let (Some((key, generation)), Some(main)) = (removed, app.get_webview_window("main")) {
+    let removed = app
+        .state::<OverlayWindows>()
+        .0
+        .lock()
+        .unwrap()
+        .remove(label);
+    if let (
+        Some(OverlayIdentity {
+            key,
+            generation: Some(generation),
+        }),
+        Some(main),
+    ) = (removed, app.get_webview_window("main"))
+    {
         dispatch(
             &main,
             "kt:overlay-closed",
@@ -211,12 +256,8 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
         url.query_pairs_mut()
             .append_pair("kt_overlay_generation", generation)
             .append_pair("kt_overlay_host", &spec.host_key);
-        app.state::<Presentations>()
-            .0
-            .lock()
-            .unwrap()
-            .insert(spec.label.clone(), (spec.key.clone(), generation.clone()));
     }
+    app.state::<OverlayWindows>().register(&spec);
     url.query_pairs_mut()
         .append_pair("kt_overlay_label", &spec.label);
     let (x, y) = spec
@@ -224,7 +265,7 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
         .unwrap_or_else(|| default_position(app, &spec));
     let navigation = app.clone();
     let page_load = app.clone();
-    WebviewWindowBuilder::new(app, &spec.label, WebviewUrl::External(url))
+    let opened = WebviewWindowBuilder::new(app, &spec.label, WebviewUrl::External(url))
         .title("KohakuTerrarium overlay")
         .decorations(false)
         .transparent(true)
@@ -243,7 +284,15 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
             }
         })
         .build()
-        .is_ok()
+        .is_ok();
+    if !opened {
+        app.state::<OverlayWindows>()
+            .0
+            .lock()
+            .unwrap()
+            .remove(&spec.label);
+    }
+    opened
 }
 
 /// Opens an overlay window; called by the main window.
@@ -318,9 +367,13 @@ pub fn reset_overlay_window(app: AppHandle, window: WebviewWindow, args: Args) -
 /// Presents only the renderer matching the current creation generation.
 #[tauri::command]
 pub fn overlay_present(app: AppHandle, window: WebviewWindow, args: Args) -> bool {
-    let state = app.state::<Presentations>();
+    let state = app.state::<OverlayWindows>();
     let presentations = state.0.lock().unwrap();
-    let Some((key, generation)) = presentations.get(window.label()).cloned() else {
+    let Some(OverlayIdentity {
+        key,
+        generation: Some(generation),
+    }) = presentations.get(window.label()).cloned()
+    else {
         return false;
     };
     drop(presentations);
@@ -349,15 +402,12 @@ pub fn show_overlay_window(app: AppHandle, window: WebviewWindow, args: Args) ->
     let (Some(label), Some(generation)) = (string_arg(&args, 0), string_arg(&args, 1)) else {
         return false;
     };
-    let state = app.state::<Presentations>();
-    let presentations = state.0.lock().unwrap();
-    if !presentations
-        .get(label)
-        .is_some_and(|(_, current)| current == generation)
+    if !app
+        .state::<OverlayWindows>()
+        .matches_generation(label, generation)
     {
         return false;
     }
-    drop(presentations);
     app.get_webview_window(label)
         .is_some_and(|overlay| smoke::output_path().is_some() || overlay.show().is_ok())
 }
@@ -365,16 +415,13 @@ pub fn show_overlay_window(app: AppHandle, window: WebviewWindow, args: Args) ->
 /// Open the pet's registered settings section in the main window.
 #[tauri::command]
 pub fn overlay_open_settings(app: AppHandle, window: WebviewWindow, args: Args) -> bool {
-    let state = app.state::<Presentations>();
-    let presentations = state.0.lock().unwrap();
-    let Some((key, _)) = presentations.get(window.label()).cloned() else {
-        return false;
-    };
-    drop(presentations);
     let Some(section) = string_arg(&args, 0) else {
         return false;
     };
-    if key != "ext:virtual-pet/pet" || !matches!(section, "ext:virtual-pet/pets" | "overlays") {
+    if !app
+        .state::<OverlayWindows>()
+        .settings_allowed(window.label(), section)
+    {
         return false;
     }
     let Some(main) = app.get_webview_window("main") else {
@@ -705,6 +752,46 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn pet_settings_follow_registered_window_identity_without_a_generation() {
+        let windows = OverlayWindows::default();
+        for generation in [Some("ready-generation"), None] {
+            let mut spec = parse_spec(&json!({
+                "label": "overlay-pet", "key": "ext:virtual-pet/pet",
+                "width": 224, "height": 280, "generation": generation
+            }))
+            .unwrap();
+            assert!(!windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
+            windows.register(&spec);
+            assert!(windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
+            assert!(windows.settings_allowed(&spec.label, "overlays"));
+            assert_eq!(
+                windows.matches_generation(&spec.label, "ready-generation"),
+                generation.is_some()
+            );
+            assert!(!windows.matches_generation(&spec.label, ""));
+            assert!(!windows.matches_generation(&spec.label, "stale"));
+            assert!(!windows.matches_generation("overlay-unknown", "ready-generation"));
+            for section in [
+                "",
+                "auth",
+                "ext:other/settings",
+                "ext:virtual-pet/pets/extra",
+            ] {
+                assert!(!windows.settings_allowed(&spec.label, section));
+            }
+            assert!(!windows.settings_allowed("main", "ext:virtual-pet/pets"));
+            assert!(!windows.settings_allowed("overlay-unknown", "ext:virtual-pet/pets"));
+            windows.0.lock().unwrap().remove(&spec.label);
+            assert!(!windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
+            assert!(!windows.matches_generation(&spec.label, "ready-generation"));
+            spec.key = "ext:other/pet".into();
+            windows.register(&spec);
+            assert!(!windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
+            windows.0.lock().unwrap().remove(&spec.label);
+        }
+    }
 
     #[test]
     fn capture_releases_and_represses_do_not_share_an_origin() {
