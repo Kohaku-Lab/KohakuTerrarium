@@ -2066,7 +2066,7 @@ class TestCoreIntegration:
             # Turn 4 round (1) + turn 4b round (1) = 2 more parent calls.
             assert agent.llm.call_count == calls_before_veto + 2
 
-    async def test_compaction_and_termination(self, make_creature):
+    async def test_compaction_and_termination(self, make_creature, monkeypatch):
         """One workflow exercising context compaction AND a termination
         condition: a turn pushes token usage past the compact threshold,
         the compact manager splices the conversation, and on the next
@@ -2162,6 +2162,35 @@ class TestCoreIntegration:
             assert agent.is_running is True
             assert "answer four" in _assistant_text(agent)
 
+            manager = agent.compact_manager
+            store = agent.session_store
+            compact_kinds = {"compact_start", "compact_complete", "compact_skipped"}
+
+            def compact_events():
+                return [
+                    event
+                    for event in store.get_events(agent.config.name)
+                    if event["type"] in compact_kinds
+                ]
+
+            await store.run(lambda: None)
+            event_offset = len(compact_events())
+            next_round = manager._compact_count + 1
+            before_cancel = conversation.snapshot_messages()
+            summaries_before = len(summarizer_inputs)
+            assert manager.trigger_compact()
+            await manager.cancel()
+            await store.run(lambda: None)
+            cancelled_events = compact_events()[event_offset:]
+            assert [(e["type"], e["round"]) for e in cancelled_events] == [
+                ("compact_start", next_round),
+                ("compact_skipped", next_round),
+            ]
+            assert cancelled_events[-1]["reason"] == "cancelled"
+            assert conversation.snapshot_messages() == before_cancel
+            assert len(summarizer_inputs) == summaries_before
+            assert not manager.is_compacting
+
             # Force the controller's recorded usage above the 50-token
             # compact threshold, then fire the turn-end hook.
             agent.controller._last_usage = {"prompt_tokens": 5000}
@@ -2187,8 +2216,38 @@ class TestCoreIntegration:
             # proving the compact path is re-entrant within a session.
             agent.controller._last_usage = {"prompt_tokens": 5000}
             count_after_first = agent.compact_manager._compact_count
-            agent._maybe_trigger_compact(agent.controller)
-            await agent.compact_manager.wait_for_current()
+            event_offset = len(compact_events())
+            entered, release = asyncio.Event(), asyncio.Event()
+            real_run = store.run
+
+            async def gated_flush(function, *args, **kwargs):
+                if (
+                    asyncio.current_task() is manager._compact_task
+                    and manager._compact_count == count_after_first + 1
+                ):
+                    entered.set()
+                    await release.wait()
+                return await real_run(function, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(store, "run", gated_flush)
+                agent._maybe_trigger_compact(agent.controller)
+                compact_task = manager._compact_task
+                try:
+                    await asyncio.wait_for(entered.wait(), 3)
+                    assert manager.is_compacting
+                    await manager.cancel()
+                finally:
+                    release.set()
+                    await asyncio.gather(compact_task, return_exceptions=True)
+            await store.run(lambda: None)
+            assert [
+                (e["type"], e["round"]) for e in compact_events()[event_offset:]
+            ] == [
+                ("compact_start", count_after_first + 1),
+                ("compact_complete", count_after_first + 1),
+            ]
+            assert not manager.is_compacting
             assert agent.compact_manager._compact_count == count_after_first + 1
             assert agent.compact_rounds == agent.compact_manager._compact_count
 
@@ -2246,6 +2305,16 @@ class TestCoreIntegration:
             assert "ALL DONE" in (agent._termination_checker.reason or "")
             # After termination the engine reports the creature stopped.
             assert creature.is_running is False
+            await store.run(lambda: None)
+            session_path = store.path
+            expected_compact_events = compact_events()
+
+        with SessionReader(session_path) as reader:
+            assert [
+                event
+                for event in reader.events(agent.config.name)
+                if event["type"] in compact_kinds
+            ] == expected_compact_events
 
         # --- A second creature: max_turns termination -------------------
         # ``max_turns`` is the simplest termination condition — the

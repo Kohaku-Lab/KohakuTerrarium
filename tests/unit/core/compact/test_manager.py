@@ -1174,6 +1174,155 @@ class TestCompactTerminalGuarantee:
             if k in ("compact_complete", "compact_skipped")
         ]
 
+    @staticmethod
+    def _lifecycle(router):
+        return [
+            (kind, metadata["round"])
+            for kind, _message, metadata in router.calls
+            if kind in ("compact_start", "compact_complete", "compact_skipped")
+        ]
+
+    @pytest.mark.parametrize("via_manager", [False, True])
+    async def test_cancel_before_entry_closes_start_and_allows_retry(self, via_manager):
+        conv = _build_conversation(n_user=10)
+        original = conv.get_messages()
+        router, llm = _Router(), _LLM(chunks=["summary"])
+        mgr = _build_mgr(conversation=conv, llm=llm, router=router)
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        if via_manager:
+            await mgr.cancel()
+        else:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert self._lifecycle(router) == [
+            ("compact_start", 1),
+            ("compact_skipped", 1),
+        ]
+        assert self._terminals(router) == [("compact_skipped", "cancelled")]
+        assert conv.get_messages() == original
+        assert llm.calls == []
+        assert not mgr.is_compacting
+        assert mgr._active_lease is None
+        assert mgr._compact_task is None
+        await mgr.cancel()
+        assert len(self._terminals(router)) == 1
+        assert mgr.trigger_compact()
+        await mgr.wait_for_current()
+        assert self._lifecycle(router) == [
+            ("compact_start", 1),
+            ("compact_skipped", 1),
+            ("compact_start", 1),
+            ("compact_complete", 1),
+        ]
+        assert mgr._compact_count == 1
+        assert len(llm.calls) == 1
+        assert not mgr.is_compacting
+
+    @pytest.mark.parametrize("outcome", ["cancel", "error"])
+    async def test_complete_is_terminal_before_flush_settles(self, outcome):
+        entered, release = asyncio.Event(), asyncio.Event()
+        router = _Router()
+
+        class FlushStore(_Store):
+            async def run(self, function, *args, **kwargs):
+                if any(kind == "compact_complete" for kind, _, _ in router.calls):
+                    entered.set()
+                    await release.wait()
+                    if outcome == "error":
+                        raise OSError("flush failed")
+                return function(*args, **kwargs)
+
+        conv = _build_conversation(n_user=10)
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(chunks=["summary"]),
+            router=router,
+            store=FlushStore(),
+        )
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            assert self._lifecycle(router) == [
+                ("compact_start", 1),
+                ("compact_complete", 1),
+            ]
+            assert mgr.is_compacting
+            assert mgr._compact_count == 1
+            if outcome == "cancel":
+                await mgr.cancel()
+            else:
+                release.set()
+                await task
+            assert self._terminals(router) == [("compact_complete", None)]
+            assert self._lifecycle(router) == [
+                ("compact_start", 1),
+                ("compact_complete", 1),
+            ]
+            assert "summary" in str(conv.get_messages()[1].content)
+            assert not mgr.is_compacting
+            assert mgr._active_lease is None
+            assert mgr._compact_task is None
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    @pytest.mark.parametrize("started", [False, True])
+    async def test_cancel_does_not_release_a_successor_started_before_it_resumes(
+        self, started
+    ):
+        entered, release = asyncio.Event(), asyncio.Event()
+        router = _Router()
+
+        class BlockingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                entered.set()
+                await release.wait()
+                yield "summary"
+
+        mgr = _build_mgr(
+            conversation=_build_conversation(n_user=10),
+            llm=BlockingLLM(),
+            router=router,
+        )
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        successors = []
+
+        def start_successor(_task):
+            accepted = mgr.trigger_compact()
+            successors.append((accepted, mgr._compact_task, mgr._active_lease))
+
+        try:
+            if started:
+                await asyncio.wait_for(entered.wait(), 3)
+            task.add_done_callback(start_successor)
+            await mgr.cancel()
+            accepted, successor, lease = successors[0]
+            assert accepted
+            assert mgr.is_compacting
+            assert mgr._compact_task is successor
+            assert mgr._active_lease is lease
+            assert not mgr.trigger_compact()
+            release.set()
+            await successor
+            assert self._lifecycle(router) == [
+                ("compact_start", 1),
+                ("compact_skipped", 1),
+                ("compact_start", 1),
+                ("compact_complete", 1),
+            ]
+            assert not mgr.is_compacting
+            assert mgr._compact_count == 1
+        finally:
+            release.set()
+            await asyncio.gather(
+                task,
+                *(entry[1] for entry in successors if entry[0]),
+                return_exceptions=True,
+            )
+
     async def test_success_emits_single_complete_terminal(self):
         conv = _build_conversation(n_user=10)
         router = _Router()
