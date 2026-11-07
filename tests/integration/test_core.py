@@ -98,6 +98,7 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
+from tests.helpers.compact_protocol import exercise_compact_trace
 from tests.helpers.history_protocol import exercise_history_trace
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
@@ -2316,6 +2317,21 @@ class TestCoreIntegration:
                 for event in reader.events(agent.config.name)
                 if event["type"] in compact_kinds
             ] == expected_compact_events
+
+        for mode, prefix in (
+            ("pre-entry", ("start", "cancel_handoff")),
+            ("summarizing", ("start", "enter", "cancel_handoff")),
+            ("flushing", ("start", "enter", "apply", "cancel_handoff")),
+            ("two-waiters", ("start", "enter", "apply", "cancel_pair_handoff")),
+        ):
+            await exercise_compact_trace(
+                agent.config.agent_path / f"ownership-{mode}",
+                monkeypatch,
+                prefix
+                + (() if mode == "two-waiters" else ("enter",))
+                + ("apply", "flush"),
+                resume=True,
+            )
 
         # --- A second creature: max_turns termination -------------------
         # ``max_turns`` is the simplest termination condition — the

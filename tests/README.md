@@ -342,6 +342,79 @@ fairness/unbounded liveness. Existing targeted tests still cover several of
 these, but this model does not claim that coverage. Orderly cold restore is
 not a crash-recovery proof.
 
+## Two-generation compaction ownership model
+
+`tests/helpers/compact_protocol.py` adds a separate finite specification for
+two compaction attempts. It keeps the job/history model above unchanged;
+these are complementary bounds, not a Cartesian product of both models.
+The compact-manager unit module executes all **64 complete model paths**
+through **25 reachable states and 41 transitions** (at most eight actions).
+The graph check pins these counts and confirms state/edge coverage.
+
+An attempt can be created but unentered, summarizing, complete but flushing,
+settled successfully, or skipped before/after entry. Its position identifies
+the attempt; emitted `round` numbers still count successful compactions.
+Thus two cancelled attempts can both be round 1, and a cancellation after
+`complete(1)` is followed by a new attempt at round 2. Assertions check the
+whole ordered terminal stream, successful count, coroutine/summary-call
+counts, and the complete provider-facing prompt. Its expected system and
+user/assistant tail come from the pre-compaction fixture; summary text and
+round come from the model, not from a post-splice runtime snapshot.
+
+The cancellation operations cover ordinary settlement, two callers that
+cancel the same entered task, and successor creation from an old task's done
+callback. Both cancel callers must retain the successor's task reference,
+lease identity, and single-flight admission. Every active state also rejects
+a busy trigger without changing task/lease, lifecycle events, or prompt.
+The terminal state receives another idle `cancel()` to check idempotence.
+
+### The schedulable handoff window
+
+The runtime wrapper only records coroutine entry before delegating; it does
+not pause a synchronous finalizer. A done callback, registered before the
+old cancellation waiter, starts the successor after the old execution has
+settled and released its lease. On the default cooperative asyncio loop,
+that successor owns the new lease but has **not entered its coroutine** when
+each old waiter returns. The adapter explicitly asserts this entry order.
+A one-caller handoff transition ends at successor-created. The two-caller
+transition additionally joins the other caller and waits for the successor's
+summarizer, ending at successor-summarizing. It makes no claim that the
+successor entered while either old waiter was still suspended.
+
+The adapter delegates real manager, output-router, session-store, and LLM
+operations behind Event barriers. It does not replace task scheduling,
+release leases, clear manager fields, or call finalizers in passing runs.
+There is no eager/custom task-factory coverage. Alternative event-loop
+ordering and pauses inside synchronous cleanup are not implied by these
+paths.
+
+Nine negative cases inject stale cleanup after real cancellation: force
+release, task-reference clearing, and lease-reference clearing, each at the
+old attempt's three cancellation boundaries. Every case must fail at the
+handoff with its specific ownership diagnostic. These mutations reproduce
+fault classes, not complete historical revisions. Six adapter regressions
+corrupt the system message, latest assistant text, or tail order, both after
+applying attempt 1 and after cancelling attempt 2. All six escaped the first
+substring-based oracle; each now fails with the full-prompt diagnostic.
+
+The existing `test_compaction_and_termination` integration workflow extends
+four representative paths through persistence, stop/close, cold resume,
+round/event readback, and another provider request. An ordinary request
+checkpoints the settled history before closing; this is not a crash during
+flush or a new durability guarantee.
+
+```bash
+python -m pytest tests/unit/core/compact/test_manager.py -k compact_model -n 0
+python -m pytest tests/integration/test_core.py -k compaction_and_termination -n 0
+```
+
+Path IDs and first-divergent-prefix diagnostics work as in the first model.
+Enumerating every path **inside this small model** does not enumerate every
+runtime instruction interleaving. More than two attempts, summary failures,
+vetoes, graph changes, concurrent history mutation, provenance-metadata
+variations, arbitrary task factories, and stuck-cleanup recovery remain
+outside this slice.
+
 ## Out-of-scope (deterministic test is impractical)
 
 Excluded from coverage targets; covered by e2e where possible, manual

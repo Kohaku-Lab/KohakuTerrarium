@@ -36,6 +36,14 @@ from kohakuterrarium.core.token_ledger import ledger_for
 from kohakuterrarium.llm.message import create_message
 from kohakuterrarium.session.store import SessionStore
 
+import tests.helpers.compact_protocol as compact_protocol
+from tests.helpers.compact_protocol import (
+    CompactState,
+    compact_successors,
+    compact_traces,
+    exercise_compact_trace,
+)
+
 # ── stubs ────────────────────────────────────────────────────────
 
 
@@ -118,6 +126,116 @@ def _build_mgr(*, conversation=None, llm=None, router=None, store=None, plugins=
     mgr._plugins = plugins
     mgr._agent_name = "alice"
     return mgr
+
+
+def test_compact_model_complete_paths_cover_reachable_graph():
+    pending, reachable, edges = [CompactState()], {CompactState()}, set()
+    while pending:
+        source = pending.pop()
+        for action, target in compact_successors(source).items():
+            edges.add((source, action, target))
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+    seen, exercised = {CompactState()}, set()
+    traces = compact_traces()
+    assert len(traces) == len(set(traces))
+    assert (len(reachable), len(edges), len(traces)) == (25, 41, 64)
+    for trace in traces:
+        state = CompactState()
+        for action in trace:
+            target = compact_successors(state)[action]
+            exercised.add((state, action, target))
+            seen.add(target)
+            state = target
+        assert len(state.attempts) == 2 and not state.active
+        assert not compact_successors(state)
+        assert len(state.lifecycle) == 4
+    assert seen == reachable
+    assert exercised == edges
+    assert any(state.completed == 2 for state in seen)
+    assert any(
+        state.lifecycle
+        == [
+            ("compact_start", 1),
+            ("compact_skipped", 1),
+            ("compact_start", 1),
+            ("compact_complete", 1),
+        ]
+        for state in seen
+    )
+    assert compact_traces() == traces
+
+
+@pytest.mark.parametrize(
+    "trace", [pytest.param(trace, id="-".join(trace)) for trace in compact_traces()]
+)
+async def test_compact_model_conformance(tmp_path, monkeypatch, trace):
+    await exercise_compact_trace(tmp_path, monkeypatch, trace)
+
+
+@pytest.mark.parametrize(
+    "prefix", [("start",), ("start", "enter"), ("start", "enter", "apply")]
+)
+@pytest.mark.parametrize(
+    "fault,diagnostic",
+    [
+        ("release", "active single-flight ownership"),
+        ("task", "active task ownership"),
+        ("lease", "active lease ownership"),
+    ],
+)
+async def test_compact_model_rejects_stale_cleanup(
+    tmp_path, monkeypatch, prefix, fault, diagnostic
+):
+    original = CompactManager.cancel
+
+    async def stale_cleanup(self):
+        await original(self)
+        match fault:
+            case "release":
+                self._dispatch.force_release()
+            case "task":
+                self._compact_task = None
+            case "lease":
+                self._active_lease = None
+
+    monkeypatch.setattr(CompactManager, "cancel", stale_cleanup)
+    trace = prefix + ("cancel_handoff", "enter", "apply", "flush")
+    with pytest.raises(AssertionError, match="compact divergent prefix") as caught:
+        await exercise_compact_trace(tmp_path, monkeypatch, trace)
+    assert " -> ".join(prefix + ("cancel_handoff",)) in str(caught.value)
+    assert isinstance(caught.value.__cause__, AssertionError)
+    assert diagnostic in str(caught.value.__cause__)
+
+
+@pytest.mark.parametrize("fault", ["system", "assistant", "order"])
+@pytest.mark.parametrize("window", ["apply", "cancel_second"])
+async def test_compact_model_prompt_oracle(tmp_path, monkeypatch, fault, window):
+    original = compact_protocol._CompactRuntime.act
+
+    async def corrupt_prompt(self, action):
+        await original(self, action)
+        if (window == "apply" and action == "apply") or (
+            window == "cancel_second" and action == "cancel"
+        ):
+            messages = self.agent.controller.conversation._messages
+            match fault:
+                case "system":
+                    messages[0].content = "wrong system"
+                case "assistant":
+                    messages[-1].content = "wrong assistant"
+                case "order":
+                    messages[-2:] = reversed(messages[-2:])
+
+    monkeypatch.setattr(compact_protocol._CompactRuntime, "act", corrupt_prompt)
+    trace = ("start", "enter", "apply", "flush", "start", "cancel")
+    with pytest.raises(AssertionError, match="compact divergent prefix") as caught:
+        await exercise_compact_trace(tmp_path, monkeypatch, trace)
+    prefix = trace[:3] if window == "apply" else trace
+    assert " -> ".join(prefix) in str(caught.value)
+    assert isinstance(caught.value.__cause__, AssertionError)
+    assert "system/summary/live-tail prompt" in str(caught.value.__cause__)
 
 
 # ── CompactConfig defaults ───────────────────────────────────────
