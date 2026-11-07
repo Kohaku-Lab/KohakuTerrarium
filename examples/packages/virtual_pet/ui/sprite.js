@@ -24,6 +24,7 @@ export const PetSprite = {
   setup(props, { emit }) {
     const stage = ref(null);
     const sprite = ref(null);
+    const hit = ref(null);
     const stageWidth = ref(320);
     const stageHeight = ref(0);
     const cell = ref({ row: 0, column: 0, action: "idle" });
@@ -115,12 +116,21 @@ export const PetSprite = {
     function draw(now) {
       animation = null;
       const r = sprite.value?.getBoundingClientRect();
+      const h = hit.value?.getBoundingClientRect();
+      const point = props.pointer;
+      const overBody =
+        h &&
+        point &&
+        point.x >= h.left &&
+        point.x < h.left + h.width &&
+        point.y >= h.top &&
+        point.y < h.top + h.height;
       const pointer =
-        props.interactive && props.gazeEnabled && r && props.pointer
+        props.interactive && props.gazeEnabled && r && point && !overBody
           ? {
-              ...props.pointer,
-              dx: props.pointer.x - r.left - r.width / 2,
-              dy: props.pointer.y - r.top - r.height / 2,
+              ...point,
+              dx: point.x - r.left - r.width / 2,
+              dy: point.y - r.top - r.height / 2,
               size: Math.max(r.width, r.height),
             }
           : null;
@@ -192,6 +202,7 @@ export const PetSprite = {
     return {
       stage,
       sprite,
+      hit,
       cell,
       spriteStyle,
       hitStyle,
@@ -206,7 +217,7 @@ export const PetSprite = {
     <div ref="stage" class="vp-stage" :style="stageStyle">
       <div ref="sprite" class="vp-sprite" :style="spriteStyle" :role="interactive ? undefined : 'img'"
         :aria-label="interactive ? undefined : atlas.displayName" :data-action="cell.action">
-        <div v-if="interactive" class="vp-hit kt-overlay-hit" :style="hitStyle" role="button" tabindex="0" :aria-label="atlas.displayName"
+        <div v-if="interactive" ref="hit" class="vp-hit kt-overlay-hit" :style="hitStyle" role="button" tabindex="0" :aria-label="atlas.displayName"
           @pointerenter="enter" @pointerleave="$emit('hover', false)" @pointerdown="down" @keydown="keydown" @click="activate"></div>
       </div>
     </div>`,

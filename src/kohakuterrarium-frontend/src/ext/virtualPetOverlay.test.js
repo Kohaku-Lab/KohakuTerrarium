@@ -95,6 +95,71 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+it.each([false, true])(
+  "returns to idle after body-hover cues and reacquires gaze only outside the hit region (native=%s)",
+  async (native) => {
+    let now = 0
+    performance.now.mockImplementation(() => now)
+    let hitRect = { left: 20, top: 30, width: 60, height: 40 }
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      return this.classList.contains("vp-hit")
+        ? hitRect
+        : { left: 0, top: 0, width: 100, height: 100 }
+    })
+    const pointer = (x, y = 50) => ({ valid: true, pointerType: "mouse", x, y })
+    const w = render(PetSprite, {
+      props: {
+        atlas: { ...atlas, gaze: { directions: 16 }, interactions: { jumping: 5, waving: 4 } },
+        source: image,
+        interactive: true,
+        native,
+        pointer: pointer(90),
+      },
+    })
+    const action = () => w.find(".vp-sprite").attributes("data-action")
+    now = 80
+    await frame(now)
+    expect(action()).toBe("gaze")
+    now = 100
+    await w.setProps({ pointer: pointer(65) })
+    expect(action()).toBe("idle")
+    await w.find(".vp-hit").trigger("pointerenter", { pointerType: "mouse" })
+    expect(action()).toBe("jumping")
+    now = 2620
+    await frame(now)
+    expect(action()).toBe("idle")
+    now = 4000
+    await w.find(".vp-hit").trigger("keydown", { key: "Enter" })
+    expect(action()).toBe("waving")
+    now = 6100
+    await frame(now)
+    expect(action()).toBe("idle")
+    for (const [x, y] of [
+      [20, 30],
+      [79.9, 69.9],
+      [50, 50],
+    ]) {
+      await w.setProps({ pointer: pointer(x, y) })
+      now += 500
+      await frame(now)
+      expect(action()).toBe("idle")
+    }
+    now = 8000
+    await w.setProps({ pointer: pointer(90) })
+    expect(action()).toBe("idle")
+    now = 8079
+    await frame(now)
+    expect(action()).toBe("idle")
+    now = 8080
+    await frame(now)
+    expect(action()).toBe("gaze")
+    hitRect = { left: 80, top: 30, width: 60, height: 40 }
+    now = 8090
+    await frame(now)
+    expect(action()).toBe("idle")
+  },
+)
+
 it("uses stable idle-artwork bounds for hover and native input without cropping the sprite", async () => {
   Object.assign(Image.prototype, { naturalWidth: 1536, naturalHeight: 2288 })
   const data = new Uint8ClampedArray(192 * 208 * 4)
