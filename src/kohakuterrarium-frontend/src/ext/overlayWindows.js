@@ -176,12 +176,20 @@ export function retryOverlayWindow(key) {
   if (!entry) syncOverlayWindows()
 }
 
+/** Track decoded viewport content for the current reviewed overlay registration. */
+export function setOverlayContentReady(overlay, available) {
+  if (!overlay?.options.desktopPet || overlays.get(overlay.key) !== overlay) return
+  overlay.contentReady = Boolean(available)
+  syncOverlayWindows()
+}
+
 /** Reconcile singleton native windows, preserving a viewport renderer until readiness. */
 export function syncOverlayWindows() {
   const wanted = new Set()
   for (const overlay of overlays.values()) {
     if (!desired(overlay) || !isOverlayVisible(overlay.key)) continue
     const label = windowLabel(overlay.key)
+    if (overlay.options.desktopPet && !open.has(label) && !overlay.contentReady) continue
     wanted.add(label)
     if (open.has(label) || closing.has(label)) continue
     const request = spec(overlay)
@@ -247,7 +255,7 @@ export function startOverlayWindows() {
     () => [
       extState.hostKey,
       [...overlays.values()]
-        .map((o) => `${o.key}|${desired(o)}|${isOverlayVisible(o.key)}`)
+        .map((o) => `${o.key}|${desired(o)}|${isOverlayVisible(o.key)}|${Boolean(o.contentReady)}`)
         .join(","),
     ],
     syncOverlayWindows,

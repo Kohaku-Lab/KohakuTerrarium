@@ -8,7 +8,7 @@ from kohakuterrarium.packages.slots.ui import UISlot
 from kohakuterrarium.studio.identity import ui_extensions
 
 UI_DEV_ENV = "KT_UI_DEV"
-DESKTOP_PET_DIGEST = "457f22b5b4cd3907cf55beb36f0c997ca2350b7b3f164fb886d6da07aaa73c34"
+DESKTOP_PET_DIGEST = "9dc44753d5e11064bf4517c195ca7de3bf9af27c9973bc61f42c235aee3d0824"
 
 
 def desktop_pet(slot: UISlot) -> bool:

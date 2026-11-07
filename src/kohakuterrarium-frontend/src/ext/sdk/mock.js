@@ -86,6 +86,7 @@ export function createMockHost(options = {}) {
     work: options.work ?? null,
     pointer: options.pointer ?? null,
     overlayMode: options.overlayMode || "app",
+    overlayReady: false,
     locale: options.locale || "en",
     dark: options.dark ?? false,
     confirmAnswer: options.confirmAnswer ?? true,
@@ -314,7 +315,9 @@ export function useOverlay() {
   return {
     mode: host.state.overlayMode,
     pointer: computed(() => host.state.pointer),
-    ready: () => {},
+    ready: (available = true) => {
+      if (host.state.overlayMode === "app" || available) host.state.overlayReady = available
+    },
     visible: computed(() => host.overlayVisible[id] ?? true),
     bounds: computed(() => bounds.value),
     show: () => host.kt.showOverlay(id),

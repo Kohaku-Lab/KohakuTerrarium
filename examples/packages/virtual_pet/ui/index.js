@@ -188,6 +188,7 @@ export const PetCompanion = {
         });
         source.value = "";
         error.value = "";
+        overlay.ready?.(false);
         if (!selected.value) return;
         try {
           const image = await owner.call("sprite", { key: selected.value.key });

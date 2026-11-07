@@ -18,11 +18,12 @@ import {
   isOverlayVisible,
   moveOverlay,
   overlayBounds,
+  overlays,
   resizeOverlay,
   showOverlay,
   toggleOverlay,
 } from "@/ext/overlays"
-import { windowLabel } from "@/ext/overlayWindows"
+import { setOverlayContentReady, windowLabel } from "@/ext/overlayWindows"
 import { beginOverlayMove, useOverlayPointer } from "@/ext/overlayInput"
 import { openExtensionTab } from "@/ext/registry"
 import {
@@ -115,7 +116,10 @@ function useWindowOverlay(key) {
   return {
     mode: "window",
     pointer: useOverlayPointer("window"),
-    ready: () => window.dispatchEvent(new CustomEvent("kt:overlay-content-ready", { detail: key })),
+    ready: (available = true) => {
+      if (available)
+        window.dispatchEvent(new CustomEvent("kt:overlay-content-ready", { detail: key }))
+    },
     visible: computed(() => true),
     bounds: computed(() => ({ left: window.screenX, top: window.screenY, ...size() })),
     show: () => {},
@@ -134,16 +138,19 @@ function useWindowOverlay(key) {
  * Control the overlay the calling component is drawn in: ``visible`` and
  * ``bounds`` are refs; ``startDrag(event)`` moves a click-through overlay
  * from a ``pointerdown`` on any element of its own. In a native window
- * overlay ``move`` and ``resize`` use screen pixels.
+ * overlay ``move`` and ``resize`` use screen pixels. ``ready(false)`` marks
+ * unavailable viewport content; ``ready()`` admits native creation/presentation.
  */
 export function useOverlay() {
   const key = inject(OVERLAY_INJECT_KEY, null)
   if (!key) throw new Error("useOverlay() must be called inside an overlay contribution")
   if (inject(OVERLAY_MODE_INJECT_KEY, "app") === "window") return useWindowOverlay(key)
+  const overlay = overlays.get(key)
+  onUnmounted(() => setOverlayContentReady(overlay, false))
   return {
     mode: "app",
     pointer: useOverlayPointer("app"),
-    ready: () => {},
+    ready: (available = true) => setOverlayContentReady(overlay, available),
     visible: computed(() => isOverlayVisible(key)),
     bounds: computed(() => overlayBounds(key)),
     show: () => showOverlay(key),

@@ -832,18 +832,25 @@ it("waits for browser decoding, retries failure without consuming greeting, and 
   const rich = { ...atlas, key: "decode-first", interactions: { waving: 4 } }
   const host = createMockHost({
     host: { id: "decode-host" },
-    owner: { state: state(rich), actions: { sprite: () => image } },
+    owner: { state: state(null), actions: { sprite: () => image } },
   })
   const w = render(PetCompanion)
   await flushPromises()
+  expect(host.state.overlayReady).toBe(false)
+  expect(decode).not.toHaveBeenCalled()
+  host.emit("state", state(rich))
+  await flushPromises()
   expect(w.find(".vp-sprite").exists()).toBe(false)
+  expect(host.state.overlayReady).toBe(false)
   expect(decode).toHaveBeenCalledWith(image)
   rejectDecode(Error("cannot decode"))
   await flushPromises()
   expect(w.find("[role=alert]").text()).toContain("Couldn't load")
+  expect(host.state.overlayReady).toBe(false)
   await w.find("[role=alert] button").trigger("click")
   await flushPromises()
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  expect(host.state.overlayReady).toBe(true)
   let finishDecode
   decode.mockImplementationOnce(
     () =>
@@ -853,6 +860,7 @@ it("waits for browser decoding, retries failure without consuming greeting, and 
   )
   host.emit("state", state({ ...rich, key: "late-decode" }))
   await flushPromises()
+  expect(host.state.overlayReady).toBe(false)
   expect(w.find(".vp-sprite").exists()).toBe(false)
   host.state.host = { id: "decode-other", url: "https://decode-other" }
   await flushPromises()
@@ -864,6 +872,10 @@ it("waits for browser decoding, retries failure without consuming greeting, and 
   const returned = render(PetCompanion)
   await flushPromises()
   expect(returned.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  expect(host.state.overlayReady).toBe(true)
+  host.emit("state", state(null))
+  await flushPromises()
+  expect(host.state.overlayReady).toBe(false)
 })
 
 it("invalidates confirmations and dispatched mutations when the backend changes", async () => {
