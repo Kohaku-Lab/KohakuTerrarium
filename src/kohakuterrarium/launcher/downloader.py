@@ -16,6 +16,7 @@ from typing import Callable
 
 from kohakuterrarium.launcher.feeds import USER_AGENT
 from kohakuterrarium.launcher.log import get_logger
+from kohakuterrarium.launcher.urls import allowed_url, landed_url
 
 
 class DownloadError(RuntimeError):
@@ -45,7 +46,7 @@ def download_to(
     checksum failures remove the temporary file and raise :class:`DownloadError`.
     """
     log = get_logger()
-    if not url.startswith("https://"):
+    if not allowed_url(url):
         raise DownloadError(f"refusing non-https URL {url!r}")
     progress = progress or _noop_progress
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +60,9 @@ def download_to(
     total = 0
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            landed = landed_url(resp, url)
+            if not allowed_url(landed):
+                raise DownloadError(f"refusing a redirect to {landed!r}")
             cl = resp.headers.get("Content-Length")
             if cl is not None:
                 try:

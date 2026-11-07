@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kohakuterrarium.launcher.log import get_logger
+from kohakuterrarium.launcher.urls import allowed_url, landed_url
 from kohakuterrarium.launcher.paths import manifest_cache_dir
 from kohakuterrarium.launcher.settings import AppSettings
 
@@ -147,6 +148,9 @@ def fetch_manifest(settings: AppSettings, *, force_refresh: bool = False) -> dic
 
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
+            landed = landed_url(resp, url)
+            if not allowed_url(landed):
+                raise FeedError(f"manifest fetch redirected to {landed!r}; refused")
             status = resp.getcode()
             if status == 304 and cached is not None:
                 return cached

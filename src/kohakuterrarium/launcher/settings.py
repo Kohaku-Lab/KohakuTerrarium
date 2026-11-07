@@ -11,6 +11,7 @@ from typing import Any
 
 from kohakuterrarium.launcher.log import get_logger
 from kohakuterrarium.launcher.paths import settings_path
+from kohakuterrarium.launcher.urls import allowed_url
 
 FEED_KINDS = ("github_releases", "custom")
 CHANNELS = ("stable", "beta", "nightly")
@@ -80,8 +81,12 @@ def _coerce_feed(raw: Any, log) -> FeedConfig:
     if url is not None and not isinstance(url, str):
         log.warning("settings: feed.url is not a string; ignoring")
         url = None
-    if url is not None and not url.startswith("https://"):
-        log.warning("settings: feed.url must be https://; ignoring %r", url)
+    if url is not None and not allowed_url(url):
+        log.warning(
+            "settings: feed.url must be https:// (or http:// to this machine); "
+            "ignoring %r",
+            url,
+        )
         url = None
     if kind == "custom" and not url:
         log.warning(

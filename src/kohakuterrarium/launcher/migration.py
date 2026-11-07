@@ -35,13 +35,16 @@ def wipe_legacy_venv() -> Path | None:
 def is_launcher_install() -> bool:
     """Return whether the current process appears to use a managed release.
 
-    Detection requires both an active pointer and an executable located beneath
-    the launcher runtime's versions directory.
+    Detection requires an active pointer, and either this framework or the executable
+    located beneath the launcher runtime's versions directory.
     """
     if not active_pointer_path().is_file():
         return False
+    # this code runs from a release tree (the interpreter lives with the desktop app or the
+    # terminal install, not under versions/), or the interpreter itself sits there
+    here = Path(__file__).resolve()
     exe = Path(sys.executable).resolve()
-    for ancestor in exe.parents:
+    for ancestor in (*here.parents, *exe.parents):
         if ancestor.name == "versions" and ancestor.parent.name == "runtime":
             return True
     return False

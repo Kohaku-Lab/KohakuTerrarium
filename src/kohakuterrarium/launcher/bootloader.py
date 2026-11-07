@@ -34,7 +34,9 @@ from kohakuterrarium.launcher.update_runner import (
     first_install,
     maybe_update,
     reset as runner_reset,
+    run_update,
 )
+from kohakuterrarium.launcher.terminal import TerminalProgress, in_terminal
 
 _IS_WINDOWS = os.name == "nt"
 
@@ -75,6 +77,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--no-exec",
         action="store_true",
         help="Resolve launcher state and exit (don't exec into the version tree).",
+    )
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Install (or update to) the newest release from the feed with text "
+        "progress, then exit (the one-line installers use this).",
+    )
+    parser.add_argument(
+        "--channel",
+        choices=_settings.CHANNELS,
+        default=None,
+        help="With --install: the release channel to follow from now on.",
+    )
+    parser.add_argument(
+        "--feed-url",
+        default=None,
+        help="With --install: a custom feed (a folder or URL holding <channel>.json).",
     )
     parser.add_argument(
         "--splash-demo",
@@ -124,6 +143,13 @@ def prepare(
     _migration.wipe_legacy_venv()
 
     cfg = _settings.load()
+
+    if args.install:
+        return PrepareResult(exit_code=_install(args, cfg, log), done=True)
+
+    if progress is None and in_terminal():
+        # started from a terminal wrapper: text lines instead of a splash window
+        progress = TerminalProgress()
 
     if args.no_exec:
         ptr = read_active_pointer()
@@ -213,6 +239,35 @@ def main(argv: list[str] | None = None) -> int:
     py = str(sys.executable)
     log.info("launcher: exec %s -m kohakuterrarium.cli %s", py, forward)
     return _hand_off([py, "-m", "kohakuterrarium.cli", *forward])
+
+
+def _install(args: argparse.Namespace, cfg, log) -> int:
+    """``--install``: the newest release of the (given) channel, installed and activated
+    with progress on stderr; 0 when it is in place."""
+    if args.channel is not None or args.feed_url is not None:
+        if args.channel is not None:
+            cfg.channel = args.channel
+        if args.feed_url is not None:
+            cfg.feed.kind = "custom"
+            cfg.feed.url = args.feed_url
+        _settings.save(cfg)
+        # a feed the settings refuse would quietly fall back to the default one
+        if args.feed_url is not None and _settings.load().feed.url != args.feed_url:
+            print(
+                f"install failed: not a usable feed: {args.feed_url}", file=sys.stderr
+            )
+            return 2
+    progress = TerminalProgress()
+    if read_active_pointer() is None:
+        result = first_install(progress)
+    else:
+        result = run_update(progress)
+    if not result.ok:
+        log.error("launcher: install failed: %s", result.error)
+        print(f"install failed: {result.error}", file=sys.stderr)
+        return 5
+    print(f"KohakuTerrarium {result.version} is installed", file=sys.stderr)
+    return 0
 
 
 def _hand_off(command: list[str]) -> int:

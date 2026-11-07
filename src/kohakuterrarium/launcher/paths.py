@@ -23,6 +23,13 @@ def runtime_dir() -> Path:
     return config_home() / "runtime"
 
 
+def terminal_dir() -> Path:
+    """The terminal install's own interpreter (``python/``) and launcher (``bootstrap/``),
+    put there by the one-line installers; release trees are shared with the desktop app.
+    """
+    return runtime_dir() / "terminal"
+
+
 def versions_dir() -> Path:
     """Return the parent directory for side-by-side release trees."""
     return runtime_dir() / "versions"
@@ -113,6 +120,7 @@ def python_for(version_root: Path) -> Path:
 
 __all__ = [
     "config_home",
+    "terminal_dir",
     "runtime_dir",
     "versions_dir",
     "version_dir",

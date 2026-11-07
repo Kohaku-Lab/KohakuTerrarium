@@ -77,6 +77,36 @@ class TestPrepare:
         assert again.site_packages == expected_site
         assert again.version == "9.9.9"
 
+    def test_install_mode_installs_with_text_progress_and_exits(
+        self, monkeypatch, headless, capsys
+    ):
+        """``--install`` (the one-line installers): installed with progress lines on stderr
+        and done, no handoff; a feed the settings refuse fails instead of falling back.
+        """
+        bundled = headless / "bundled-release"
+        bundled.mkdir()
+        _make_release_tarball(
+            bundled / "kohakuterrarium-9.9.9-win-x64-py3.13.tar.gz", version="9.9.9"
+        )
+        monkeypatch.setattr(
+            _paths, "_candidate_bundled_release_dirs", lambda: [bundled]
+        )
+
+        result = bootloader.prepare(["--install", "--channel", "nightly"])
+
+        assert result.done is True and result.exit_code == 0
+        assert _tree.read_active_pointer().version == "9.9.9"
+        assert _settings.load().channel == "nightly"
+        err = capsys.readouterr().err
+        assert "100.0%" in err and "9.9.9 is installed" in err
+
+        refused = bootloader.prepare(["--install", "--feed-url", "http://example.com"])
+        assert refused.done is True and refused.exit_code == 2
+        # loopback over http is a local mirror: taken
+        local = bootloader.prepare(["--install", "--feed-url", "http://127.0.0.1:9"])
+        assert _settings.load().feed.url == "http://127.0.0.1:9"
+        assert local.exit_code == 5  # nothing serves it here
+
     def test_first_launch_failure_surfaces_exit_code_5(self, monkeypatch, headless):
         monkeypatch.setattr(_paths, "_candidate_bundled_release_dirs", lambda: [])
 

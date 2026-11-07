@@ -9,6 +9,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 from kohakuterrarium.launcher.paths import config_home
+from kohakuterrarium.launcher.terminal import in_terminal
 
 _LOGGER_NAME = "kt-launcher"
 _FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
@@ -44,6 +45,9 @@ def get_logger() -> logging.Logger:
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
+    if in_terminal():
+        # a command's own output stays clean; the file keeps the details
+        stream_handler.setLevel(logging.WARNING)
     logger.addHandler(stream_handler)
 
     _logger = logger
