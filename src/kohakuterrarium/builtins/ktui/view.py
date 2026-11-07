@@ -12,18 +12,13 @@ Consecutive tool calls are batched like the web's tool batch (see ``runs.py``); 
 calls are batched inside its cell the same way.
 """
 
-import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from typing import Any
 
 from kohakutui import App
 from kohakutui.ui import (
-    Card,
     Cell,
-    Markdown,
     Node,
-    Progress,
     Status,
     Text,
 )
@@ -32,13 +27,25 @@ from kohakuterrarium.builtins.ktui.format import (
     duration,
     one_line,
     result_summary,
+    tokens,
 )
 from kohakuterrarium.builtins.ktui.inline_ui import ReplyStream
 from kohakuterrarium.builtins.ktui.ui_block import UiContext
+from kohakuterrarium.builtins.ktui.view_notices import NoticeCells
 from kohakuterrarium.builtins.ktui.view_subagents import SubagentCells
+from kohakuterrarium.builtins.ktui.view_state import (
+    REPLY_ACTIONS,
+    USER_ACTIONS,
+    VERSION_ACTIONS,
+    Job,
+    Message,
+    Usage,
+)
 from kohakuterrarium.builtins.ktui.runs import BATCH_SIZE, ToolRuns, output_box
 from kohakuterrarium.builtins.ktui.trace import Traces
+from kohakuterrarium.builtins.ktui.tool_bodies import MediaPlace, tool_body
 
+STATUS_LABEL = "kohakUwUing · esc to interrupt"
 UNREAD_KINDS = {
     "user_message",
     "assistant_end",
@@ -47,7 +54,7 @@ UNREAD_KINDS = {
     "notice",
 }
 # rows in the shared live region: only the focused creature shows them
-LIVE_ONLY = {"status_on", "compact_start"}
+LIVE_ONLY = {"status_on", "compact_start", "args_progress"}
 # a new transcript entry (or turn) freezes the live <ui> blocks above it, inline (D26)
 FREEZE_ON = {
     "divider", "user_message", "text", "notice", "markdown_notice", "error", "card",
@@ -55,36 +62,7 @@ FREEZE_ON = {
 }  # fmt: skip
 
 
-@dataclass
-class Usage:
-    """Token and context figures for the footer."""
-
-    model: str = ""
-    tokens_in: int = 0
-    tokens_out: int = 0
-    cached: int = 0
-    last_prompt: int = 0
-    max_context: int = 0
-
-    def context_pct(self) -> int | None:
-        if not self.max_context or not self.last_prompt:
-            return None
-        return min(100, self.last_prompt * 100 // self.max_context)
-
-
-@dataclass
-class Job:
-    """A running tool or sub-agent, foreground or background."""
-
-    job_id: str
-    name: str
-    kind: str
-    detail: str = ""
-    background: bool = False
-    started: float = field(default_factory=time.monotonic)
-
-
-class CreatureView(SubagentCells):
+class CreatureView(SubagentCells, NoticeCells):
     """Draws one creature into its own document and, while focused, the live region."""
 
     def __init__(
@@ -132,6 +110,15 @@ class CreatureView(SubagentCells):
         self._runs = ToolRuns(self.doc, batch_size)
         self._held = ""
         self._sub_batch: dict[str, Node] = {}
+        # node id → message, for the message actions; the turn of the newest user message
+        self.messages: dict[int, Message] = {}
+        # pictures, videos and sounds of the conversation (the side panel's Canvas)
+        self.artifacts: list[tuple[str, str, str]] = []
+        # where its media files are (set by the shell for the creature's session)
+        self.media: MediaPlace | None = None
+        self._turn: int | None = None
+        # turn → (version shown, versions) when a turn has several (edits, retries)
+        self.versions: dict[int, tuple[int, int]] = {}
 
     # -- dispatch -------------------------------------------------------
 
@@ -175,8 +162,9 @@ class CreatureView(SubagentCells):
         """Inline: the live <ui> blocks freeze (scrollback again); full screen: new hints."""
         if inline:
             self.freeze_blocks()
-        for reply, _ in self._lingering:
-            reply.refresh_hints()
+        last = len(self._lingering) - 1
+        for i, (reply, _) in enumerate(self._lingering):
+            reply.refresh_hints(quiet=i < last)
 
     @property
     def has_live_blocks(self) -> bool:
@@ -188,6 +176,25 @@ class CreatureView(SubagentCells):
             reply.freeze()
             cell.seal()
         self._lingering.clear()
+
+    def reset(self) -> None:
+        """A fresh, empty document in place of this one (a branch redrawn from history)."""
+        old = self.doc
+        self.doc = self.app.add_document()
+        if self.focused:
+            self.app.show_document(self.doc)
+        old.remove()
+        self._assistant = self._reply = None
+        self._lingering.clear()
+        self._cells.clear()
+        self._children.clear()
+        self._closed.clear()
+        self._sub_batch.clear()
+        self._held = ""
+        self._runs = ToolRuns(self.doc, self.batch_size)
+        self.messages.clear()
+        self.artifacts.clear()
+        self._turn = None
 
     def _leave(self) -> None:
         # the document keeps everything, open cells included; only the live rows go
@@ -215,11 +222,40 @@ class CreatureView(SubagentCells):
             )
         )
 
-    def _user_message(self, text: str, pending_id: str | None = None) -> None:
+    def _user_message(
+        self, text: str, pending_id: str | None = None, turn: int | None = None
+    ) -> None:
         self._assistant_end()
         if pending_id:
             self._queue_remove(pending_id)
-        self._seal(Cell(role="user", children=[Text(text)]))
+        if turn is not None:
+            self._turn = turn
+        actions = list(USER_ACTIONS) if turn is not None else USER_ACTIONS[:1]
+        trailer = None
+        shown, count = self.versions.get(turn, (0, 0)) if turn is not None else (0, 0)
+        if count > 1:
+            actions += VERSION_ACTIONS
+            trailer = f"version {shown}/{count} · [ ] switch"
+        spec = Cell(
+            role="user", children=[Text(text)], actions=actions, trailer=trailer
+        )
+        node = self.doc.add(spec)
+        node.seal()
+        self.messages[node.id] = Message("user", text, turn, node)
+
+    def adopt_turn(self, turn: int) -> None:
+        """The turn of the last message, learnt after it was drawn (a session in a server
+        names the turn with the frames that follow the message)."""
+        if self._turn == turn:
+            return
+        last = next(
+            (m for m in reversed(self.messages.values()) if m.kind == "user"), None
+        )
+        if last is None or last.turn is not None:
+            return
+        last.turn = turn
+        last.node.update(actions=list(USER_ACTIONS))
+        self._turn = turn
 
     def _text(self, chunk: str) -> None:
         if self._assistant is None:
@@ -240,7 +276,18 @@ class CreatureView(SubagentCells):
         self._held = ""
         if self._assistant is not None:
             self._reply.close()
+            if self._reply.text.strip():
+                self._assistant.update(
+                    actions=(
+                        REPLY_ACTIONS if self._turn is not None else REPLY_ACTIONS[:1]
+                    )
+                )
+                self.messages[self._assistant.id] = Message(
+                    "assistant", self._reply.text.strip(), self._turn, self._assistant
+                )
             if self._reply.interactive:
+                for older, _ in self._lingering:
+                    older.refresh_hints(quiet=True)
                 self._lingering.append((self._reply, self._assistant))
             else:
                 self._assistant.seal()
@@ -248,80 +295,28 @@ class CreatureView(SubagentCells):
         if end_run:
             self._runs.end()
 
-    def _notice(self, text: str, tone: str = "muted", icon: str | None = None) -> None:
-        self._assistant_end()
-        self._seal(Cell(role="system", icon=icon, children=[Text(text, tone=tone)]))
-
-    def _markdown_notice(self, title: str, body: str, collapsed: bool = False) -> None:
-        self._assistant_end()
-        spec = Cell(
-            role="system",
-            title=title,
-            tone="accent",
-            collapsed=collapsed or None,
-            summary=one_line(body, 70) if collapsed else None,
-            children=[Markdown(source=body)],
-        )
-        self._seal(spec)
-
-    def _error(self, text: str) -> None:
-        self._assistant_end()
-        self._seal(Cell(role="error", children=[Text(text)]))
-
-    def _card(self, title: str, body: str) -> None:
-        self._assistant_end()
-        self._seal(Card(title=title or None, body=body))
-
     # -- turn status ----------------------------------------------------
 
     def _status_on(self) -> None:
         if self._status is None and self.focused:
-            label = "kohakUwUing · esc to interrupt"
             self._status = self.app.live.add(
-                Status(label=label, tone="running"), index=0
+                Status(label=STATUS_LABEL, tone="running"), index=0
             )
+
+    def _args_progress(self, name: str, chars: int) -> None:
+        if self._status is not None:
+            label = f"kohakUwUing · writing {name} · {tokens(chars)} chars · esc to interrupt"
+            self._status.update(label=label)
+
+    def _status_label(self) -> None:
+        if self._status is not None:
+            self._status.update(label=STATUS_LABEL)
 
     def _status_off(self) -> None:
         self._assistant_end()
         if self._status is not None:
             self._status.remove()
             self._status = None
-
-    def _compact_start(self, round_num: int) -> None:
-        if self._compacting is None:
-            label = f"compacting context · round {round_num} · you can keep chatting"
-            self._compacting = self.app.live.add(Status(label=label, tone="attention"))
-
-    def _compact_end(self, round_num: int, summary: str, skipped: str) -> None:
-        if self._compacting is not None:
-            self._compacting.remove()
-            self._compacting = None
-        if skipped:
-            self._notice(f"compaction skipped: {skipped}")
-        elif summary:
-            self._markdown_notice(
-                f"context compacted · round {round_num}", summary, True
-            )
-        else:
-            self._notice(f"context compacted · round {round_num}", tone="accent")
-
-    def _progress_update(
-        self, key: str, label: str, value: Any, total: Any, done: bool
-    ) -> None:
-        node = self._progress.get(key)
-        if done:
-            if node is not None:
-                node.remove()
-                self._progress.pop(key, None)
-            self._notice(f"✓ {label}", tone="ok")
-            return
-        if node is None:
-            if not self.focused:
-                return
-            node = self.app.live.add(Progress(label=label, total=total))
-            self._progress[key] = node
-        if value is not None:
-            node.update(label=label, total=total, value=value)
 
     # -- queued input ---------------------------------------------------
 
@@ -360,6 +355,7 @@ class CreatureView(SubagentCells):
         self, job_id: str, name: str, detail: str, background: bool
     ) -> None:
         self._assistant_end(end_run=False)
+        self._status_label()
         if background:
             self._notice(
                 f"⏵ {name}  {detail} · running in background (ctrl+b)", tone="running"
@@ -376,7 +372,13 @@ class CreatureView(SubagentCells):
         self._cells[job_id] = self._runs.parent(job_id).add(spec)
 
     def _tool_end(
-        self, job_id: str, name: str, output: str, error: str, took: float
+        self,
+        job_id: str,
+        name: str,
+        output: str,
+        error: str,
+        took: float,
+        args: Any = None,
     ) -> None:
         if job_id in self._closed:
             self._closed.discard(job_id)
@@ -395,8 +397,11 @@ class CreatureView(SubagentCells):
             self._seal(spec)
             return
 
+        body = None if error else tool_body(name, args, output)
         if error:
             cell.add(Text(error, tone="danger"))
+        elif body is not None:
+            cell.add(body)
         elif output.strip():
             cell.add(output_box(output))
         cell.update(status=status, summary=summary, trailer=duration(took))

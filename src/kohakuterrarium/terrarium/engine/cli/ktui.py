@@ -6,12 +6,18 @@ reads the terminal; other inputs (Discord, webhooks) keep running. Pending resum
 replayed into the focus view, and the session store is flushed on the way out.
 """
 
+import os
+
 from kohakuterrarium.builtins.inputs.cli import CLIInput, NonBlockingCLIInput
 from kohakuterrarium.builtins.ktui.config import KtuiConfig
 from kohakuterrarium.builtins.ktui.input import KtuiInput
 from kohakuterrarium.builtins.ktui.shell import KtuiShell
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.engine.cli.ktui_support import (
+    RENDERER_ENV,
+    request_session,
+)
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
@@ -33,6 +39,7 @@ async def run_engine_with_ktui(
 ) -> None:
     """Runs ktui on the engine until the user leaves; ``renderer`` overrides the saved one."""
     config = KtuiConfig.load()
+    renderer = renderer or os.environ.get(RENDERER_ENV)
     if renderer:
         config.renderer = renderer
         config.normalized()
@@ -71,6 +78,8 @@ async def run_engine_with_ktui(
                 other._pending_resume_events = None
                 await entry.output.on_resume(history)
         await shell.run(resume_events=pending or None)
+        if shell.next_session:
+            request_session(shell.next_session)
     finally:
         shell.chrome.release()
         if swap_input:

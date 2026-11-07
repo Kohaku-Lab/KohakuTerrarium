@@ -6,16 +6,25 @@ real ``Agent`` on a ``ScriptedLLM`` inside a real ``Terrarium``.
 """
 
 import asyncio
+import socket
+import threading
 import time
 from collections.abc import Callable
 
+import httpx
 import pytest
+import uvicorn
 from kohakutui import App
+
+from kohakuterrarium.api.app import create_app
+from kohakuterrarium.api.deps import set_service
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.kt_ui.markup import convert_block
+from kohakuterrarium.builtins.ktui.servers import running_sessions
 from kohakuterrarium.builtins.ktui import KtuiConfig, KtuiShell
+from kohakuterrarium.builtins.ktui.remote import RemoteSession
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
@@ -26,6 +35,7 @@ from kohakuterrarium.modules.tool.base import (
 )
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 
@@ -616,14 +626,18 @@ class TestKtuiWorkflow:
             await _until(
                 lambda: "please look" in "\n".join(app.screen()), "it in the chat"
             )
-            # a page replaces the chat (and its panels); alt+1 is the chat again
+            # a page replaces the chat, its panels and its input; alt+1 is the chat again
             app.inject({"key": "alt+3"})
             await _until(
-                lambda: any(line.startswith("Agents") for line in app.screen()),
+                lambda: any(line.startswith("Session") for line in app.screen()),
                 "the Status page",
+            )
+            await _until(
+                lambda: "/ commands" not in "\n".join(app.screen()), "no chat input"
             )
             app.inject({"key": "alt+1"})
             await _until(lambda: "#review  ◂" in "\n".join(app.screen()), "chat again")
+            assert "/ commands" in "\n".join(app.screen())
             # the creature picked in the rail: its chat; the composer talks to it again
             click("helper")
             await _until(lambda: "helper reply" in "\n".join(app.screen()), "back")
@@ -637,3 +651,136 @@ class TestKtuiWorkflow:
 
             await _type(app, "/exit")
             await asyncio.wait_for(run, 10)
+
+    @pytest.mark.timeout(120)
+    def test_attached_to_a_session_in_a_server(self, monkeypatch, tmp_path):
+        """``kt attach``: a session running in a KT server, over its REST routes and chat
+        socket. A reply, a tool, a remote command, a question answered here, then a dropped
+        connection: reconnected, the transcript is drawn again from history and talk goes on.
+        """
+        script = [
+            ScriptEntry("served answer", match="hello"),
+            ScriptEntry("served again"),
+            ScriptEntry(
+                "[/ask_user]\n@@question=Favourite colour?\n[ask_user/]", match="ask"
+            ),
+            ScriptEntry("you said blue"),
+            ScriptEntry("back again", match="again"),
+        ]
+        llm = ScriptedLLM(script)
+        monkeypatch.setattr(
+            _bootstrap_llm_mod, "create_llm_provider", lambda *a, **k: llm
+        )
+        monkeypatch.setattr(_agent_init_mod, "create_llm_provider", lambda *a, **k: llm)
+        monkeypatch.setattr(
+            KtuiConfig, "default_path", staticmethod(lambda: tmp_path / "ktui.json")
+        )
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        monkeypatch.setenv("KT_SESSION_DIR", str(sessions))
+        creature = tmp_path / "alice"
+        creature.mkdir()
+        (creature / "config.yaml").write_text(
+            "name: alice\nsystem_prompt: test\ntool_format: bracket\n"
+            "input:\n  type: none\noutput:\n  type: stdout\n"
+            "tools:\n  - name: ask_user\n    type: builtin\n",
+            encoding="utf-8",
+        )
+        set_service(LocalTerrariumService(Terrarium(session_dir=str(sessions))))
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        server = uvicorn.Server(
+            uvicorn.Config(
+                create_app(), host="127.0.0.1", port=port, log_level="warning"
+            )
+        )
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        url = f"http://127.0.0.1:{port}"
+        try:
+            for _ in range(200):
+                try:
+                    httpx.get(f"{url}/api/sessions/active", timeout=1)
+                    break
+                except httpx.HTTPError:
+                    time.sleep(0.05)
+            created = httpx.post(
+                f"{url}/api/sessions/active/agents",
+                json={"config_path": str(creature)},
+                timeout=30,
+            ).json()
+            asyncio.run(self._attached(url, created["session_id"]))
+        finally:
+            server.should_exit = True
+            thread.join(10)
+            set_service(None)
+
+    async def _attached(self, url: str, session_id: str) -> None:
+        app = App(backend="test", size=(100, 30), interrupt="event", mode="fullscreen")
+        session = RemoteSession(url, session_id)
+        await session.open()
+        focus = next(iter(session.creatures.values()))
+        shell = KtuiShell(
+            session.engine,
+            focus.creature_id,
+            KtuiConfig(renderer="fullscreen"),
+            app=app,
+        )
+        shell.attach(focus)
+        session.on_state = lambda level, text: app.notify(text, level)
+        redrawn = []
+
+        async def redraw() -> None:
+            redrawn.append(True)
+            entry = shell.focused
+            entry.view.reset()
+            await entry.output.on_resume(await session.history(focus))
+
+        session.on_reconnect = redraw
+        link = asyncio.create_task(session.run())
+        run = asyncio.create_task(shell.run())
+        screen = lambda: "\n".join(app.screen())  # noqa: E731
+        await _until(
+            lambda: shell.composer is not None and session.connected, "the link"
+        )
+
+        await _type(app, "hello")
+        await _until(lambda: "served answer" in screen(), "the served reply")
+
+        # a re-run made in the server: the transcript shows the new version
+        replies = [
+            i for i, m in shell.focused.view.messages.items() if m.kind == "assistant"
+        ]
+        shell.messages.handle("msg:retry", replies[-1])
+        await _until(lambda: "served again" in screen(), "the re-run")
+        await _until(lambda: "version 2/2" in screen(), "the version mark")
+
+        await _type(app, "ask me")
+        await _until(lambda: "Favourite colour?" in screen(), "the question")
+        app.inject({"text": "blue"}, {"key": "enter"})
+        await _until(lambda: "you said blue" in screen(), "the answer taken")
+
+        await _type(app, "/help")
+        await _until(lambda: "TUI shortcuts" in screen(), "a command run in the server")
+
+        await session.drop()
+        await _until(lambda: bool(redrawn) and session.connected, "the reconnect")
+        await _until(
+            lambda: "served answer" in screen() or "ask me" in screen(), "history"
+        )
+        await _type(app, "here again")
+        await _until(lambda: "back again" in screen(), "talk after the reconnect")
+
+        # /stop: confirmed, the session stops in the server (it stays saved), ktui leaves;
+        # /exit would have left it running
+        await _type(app, "/stop")
+        await _until(lambda: "in the server, then leave?" in screen(), "the confirm")
+        app.inject({"key": "y"})
+        await asyncio.wait_for(run, 10)
+        assert not [
+            s for s in await running_sessions(url) if s["session_id"] == session_id
+        ]
+        link.cancel()
+        await session.close()

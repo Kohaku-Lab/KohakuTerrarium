@@ -10,7 +10,6 @@ context for ``needs_engine`` commands.
 """
 
 import asyncio
-import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
@@ -18,15 +17,26 @@ from typing import Any
 from kohakutui import App, Event
 from kohakutui.ui import Button, Component, Composer, Footer, Node
 
+from kohakuterrarium.builtins.ktui.attach import ComposerHelper
 from kohakuterrarium.builtins.ktui.board import Board
 from kohakuterrarium.builtins.ktui.chrome import Chrome
 from kohakuterrarium.builtins.ktui.commands import command_list, run_command
 from kohakuterrarium.builtins.ktui.config import KtuiConfig
 from kohakuterrarium.builtins.ktui.format import tokens
+from kohakuterrarium.builtins.ktui.config_edit import ConfigEdit
+from kohakuterrarium.builtins.ktui.forms import Forms
 from kohakuterrarium.builtins.ktui.interactions import Interactions
 from kohakuterrarium.builtins.ktui.models import model_id
 from kohakuterrarium.builtins.ktui.output import KtuiOutput
+from kohakuterrarium.builtins.ktui.page_settings import estimate
+from kohakuterrarium.builtins.ktui.onboarding import first_run
+from kohakuterrarium.builtins.ktui.updates import notice as update_notice
+from kohakuterrarium.builtins.ktui.sessions import Sessions
+from kohakuterrarium.builtins.ktui.tool_bodies import MediaPlace
 from kohakuterrarium.builtins.ktui.settings import Settings
+from kohakuterrarium.builtins.ktui.shell_input import ShellInput
+from kohakuterrarium.builtins.ktui.shell_extras import Attention
+from kohakuterrarium.builtins.ktui.messages import MessageActions
 from kohakuterrarium.builtins.ktui.runs import BATCH_SIZE
 from kohakuterrarium.builtins.ktui.ui_block import UiContext, UiHost
 from kohakuterrarium.builtins.ktui.tool_widgets import ToolWidgets
@@ -35,11 +45,16 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# a paste longer than this many lines shows as one "[Pasted text …]" token in the input
+FOLD_PASTE_LINES = 12
+
 BINDINGS = {
     "ctrl+b": "jobs",
     "alt+j": "next_approval",
     "ctrl+k": "approve",
     "ctrl+x": "unqueue",
+    "alt+v": "paste_image",
+    "f1": "help",
     # full screen: show or hide the conversation rail and the side panel, pick a page,
     # step through the conversations
     "alt+r": "toggle_rail",
@@ -64,7 +79,13 @@ class Entry:
         return self.creature.agent
 
 
-class KtuiShell:
+def _cost(usage: Any) -> str:
+    """The estimated spend of this conversation (models with a known price)."""
+    cost = estimate(usage.model, usage.tokens_in, usage.cached, usage.tokens_out)
+    return f"~${cost:.3f}" if cost else ""
+
+
+class KtuiShell(ShellInput):
     """Runs until ``/exit``, a double ctrl+c on an idle prompt, or the app stopping."""
 
     def __init__(
@@ -85,6 +106,14 @@ class KtuiShell:
         self.board = Board(self)
         self.chrome = Chrome(self)
         self.settings = Settings(self)
+        self.messages = MessageActions(self)
+        self.composing = ComposerHelper(self)
+        self.sessions = Sessions(self)
+        self.forms = Forms(self)
+        self.config_edit = ConfigEdit(self)
+        # the session /resume chose: the launcher resumes it after this one ends
+        self.next_session: str | None = None
+        self.attention = Attention(self)
         self.composer: Node | None = None
         self.footer: Node | None = None
         self.active: Node | None = None
@@ -112,6 +141,12 @@ class KtuiShell:
             focused=cid == self.focus_id,
         )
         view.usage.model = model_id(creature.agent)
+        store = getattr(creature.agent, "session_store", None)
+        remote = getattr(self.engine, "keeps_running", False)
+        view.media = MediaPlace(
+            session_path=None if remote else getattr(store, "path", None),
+            server=self.engine.session.base_url if remote else None,
+        )
         router = creature.agent.output_router
         entry = Entry(creature, view, KtuiOutput(self, view), router.default_output)
         router.default_output = entry.output
@@ -228,6 +263,7 @@ class KtuiShell:
         self.refresh()
 
     def turn_finished(self, view: CreatureView) -> None:
+        self.attention.turn_done(view.name)
         if not view.focused:
             where = "the rail" if self.mode == "fullscreen" else "↓"
             self.app.notify(f"{view.name} finished · {where} to switch to it", "info")
@@ -243,6 +279,8 @@ class KtuiShell:
             self._mount()
             if resume_events:
                 await self.focused.output.on_resume(resume_events)
+            self.spawn(update_notice(self.app))
+            self.spawn(first_run(self))
             consumer = asyncio.create_task(self._consume())
             watcher = asyncio.create_task(self._watch_engine())
             ticker = asyncio.create_task(self._tick())
@@ -251,14 +289,17 @@ class KtuiShell:
             watcher.cancel()
             ticker.cancel()
         finally:
-            for entry in self.entries.values():
-                if self.is_busy(entry):
-                    entry.agent.interrupt()
+            # a session in a server keeps running when ktui leaves it
+            if not getattr(self.engine, "keeps_running", False):
+                for entry in self.entries.values():
+                    if self.is_busy(entry):
+                        entry.agent.interrupt()
             for task in list(self._tasks - self._turns):
                 task.cancel()
             self.interactions.hide()
             self.tool_widgets.close_all()
             self.detach_all()
+            self.attention.close()
             self.app.stop()
             # last: until the terminal is given back, stray output still goes to the Logs tab
             self.chrome.close()
@@ -270,9 +311,13 @@ class KtuiShell:
         app = self.app
         self.composer = app.bottom.add(
             Composer(
-                placeholder="message · / commands · @name · ↓ agents & jobs · ctrl+s interrupt+send",
+                placeholder="message · / commands · @ files and agents · ? keys",
                 boxed=True,
                 rich_submit=True,
+                triggers=["@"],
+                fold_paste=FOLD_PASTE_LINES,
+                report_draft=True,
+                modes=[{"prefix": "!", "label": "shell command"}],
             )
         )
         self.footer = app.bottom.add(Footer())
@@ -307,17 +352,21 @@ class KtuiShell:
         self.exit()
 
     async def _handle(self, ev: Event) -> None:
-        if self.ui_host.handle(ev):
+        if self.forms.handle(ev) or self.ui_host.handle(ev):
             return
         if self.chrome.handle(ev):
             return
         match ev.kind:
             case "submit" if self.composer is not None and ev.id == self.composer.id:
                 await self._submit(ev.value)
+            case "change" if self.composer is not None and ev.id == self.composer.id:
+                self.composing.handle_change(ev.value)
             case "select" if self.active is not None and ev.id == self.active.id:
                 self.spawn(self.board.open(section=str(ev.value or "") or None))
             case "action":
-                self._action(ev.data.get("name", ""))
+                name = str(ev.data.get("name", ""))
+                if not self.messages.handle(name, ev.data.get("focus")):
+                    self._action(name)
             case "interrupt":
                 self._ctrl_c(int(ev.data.get("count", 1) or 1))
             case "mode_changed":
@@ -329,11 +378,15 @@ class KtuiShell:
                     entry.view.mode_changed(self.mode == "inline")
                 # the chrome is kept up to date only while drawn
                 self.refresh()
+            case "focus":
+                self.attention.focus(bool(ev.data.get("gained", True)))
             case "error":
                 logger.debug("ktui engine error", message=ev.data.get("message"))
 
     def _action(self, name: str) -> None:
         match name:
+            case "escape" if self.messages.cancel_edit():
+                pass
             case "escape":
                 view = self.focused.view
                 if self.is_busy(self.focused):
@@ -350,6 +403,10 @@ class KtuiShell:
                 self.interactions.approve_oldest()
             case "unqueue":
                 self._unqueue()
+            case "paste_image":
+                self.composing.paste_image()
+            case "help":
+                self.spawn(self.show_help())
             case "toggle_rail" | "toggle_side" | "next_chat" | "prev_chat":
                 self.chrome.action(name)
             case _ if name.startswith("page_"):
@@ -362,88 +419,6 @@ class KtuiShell:
             self.exit()
         else:
             self.app.notify("press ctrl+c again to exit", "info")
-
-    # -- input ----------------------------------------------------------
-
-    def is_busy(self, entry: Entry) -> bool:
-        """Working, or a message from here has not finished its turn yet."""
-        task = getattr(entry.agent, "_processing_task", None)
-        if entry.view.processing or self._sending.get(entry.creature.creature_id):
-            return True
-        return bool(task is not None and not task.done())
-
-    async def _submit(self, value: Any) -> None:
-        if isinstance(value, dict):
-            text, now = str(value.get("text", "")), bool(value.get("now"))
-        else:
-            text, now = str(value or ""), False
-        text = text.strip()
-        if not text:
-            return
-        if text.startswith("/"):
-            self.spawn(self.command(text))
-            return
-        if await self.chrome.submit(text):
-            return
-
-        target = self.focused
-        if text.startswith("@") and self.multi:
-            name, _, rest = text[1:].partition(" ")
-            match = self._by_name(name)
-            if match is None:
-                self.app.notify(f"no creature named @{name}", "error")
-                return
-            target, text = match, rest.strip()
-            if not text:
-                self.focus(target.creature.creature_id)
-                return
-        self.send(target, text, now)
-
-    def send(self, target: Entry, text: str, now: bool = False) -> None:
-        """Sends a message; while the agent works it is queued (``now``: interrupt first)."""
-        pending_id = None
-        if self.is_busy(target):
-            if now:
-                target.agent.interrupt()
-            pending_id = uuid.uuid4().hex
-            target.view.queue(pending_id, text)
-        cid = target.creature.creature_id
-        self._sending[cid] = self._sending.get(cid, 0) + 1
-        turn = self.spawn(
-            target.agent.inject_input(text, source="cli", pending_id=pending_id)
-        )
-        self._turns.add(turn)
-
-        def _sent(task: asyncio.Task) -> None:
-            self._turns.discard(task)
-            self._sending[cid] = max(0, self._sending.get(cid, 1) - 1)
-            self.refresh()
-
-        turn.add_done_callback(_sent)
-        self.refresh()
-
-    def _unqueue(self) -> None:
-        entry = self.focused
-        pending_id = entry.view.unqueue_last()
-        if pending_id is None:
-            self.app.notify("nothing queued", "info")
-            return
-        cancel = getattr(entry.agent, "cancel_pending", None)
-        if callable(cancel) and cancel(pending_id):
-            self.app.notify("queued message cancelled", "info")
-        else:
-            self.app.notify("too late: the agent already took it", "warning")
-        self.refresh()
-
-    def _by_name(self, name: str) -> Entry | None:
-        name = name.lower()
-        for entry in self.entries.values():
-            if (
-                entry.creature.name.lower() == name
-                or entry.creature.creature_id == name
-            ):
-                return entry
-        return None
 
     # -- commands -------------------------------------------------------
 
@@ -476,7 +451,9 @@ class KtuiShell:
         """Redraws the footer, the active-items row and the full-screen chrome when changed."""
         if self.footer is None or not self.entries:
             return
+        self.composing.follow_conversation()
         self.chrome.refresh()
+        self.attention.update()
         view = self.focused.view
         usage = view.usage
         left = f"{view.name} · {usage.model}" if usage.model else view.name
@@ -493,6 +470,7 @@ class KtuiShell:
                     if usage.tokens_in or usage.tokens_out
                     else ""
                 ),
+                _cost(usage),
             )
             if part
         )

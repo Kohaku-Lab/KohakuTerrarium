@@ -18,6 +18,13 @@ logger = get_logger(__name__)
 
 RENDERERS = ("inline", "hybrid", "fullscreen")
 VERBOSITY = ("low", "medium", "high")
+# attention switches and their defaults
+ATTENTION = {
+    "title": True,
+    "notify_waiting": True,
+    "notify_done": True,
+    "bell": True,
+}
 # auto: OSC 8 hyperlinks on a terminal; text writes "name (url)" for terminals that drop OSC 8
 LINKS = ("auto", "osc8", "text")
 
@@ -32,6 +39,9 @@ class KtuiConfig:
     links: str = "auto"
     # full-screen panels ("rail", "side"): {"width": int, "collapsed": bool}
     panes: dict = field(default_factory=dict)
+    # attention, as the web's notification settings: the terminal title follows the
+    # session; a notification and a bell while the window is away (waiting / finished)
+    attention: dict = field(default_factory=lambda: dict(ATTENTION))
 
     @staticmethod
     def default_path() -> Path:
@@ -64,6 +74,8 @@ class KtuiConfig:
             self.verbosity = "medium"
         if self.links not in LINKS:
             self.links = "auto"
+        given = self.attention if isinstance(self.attention, dict) else {}
+        self.attention = {k: bool(given.get(k, v)) for k, v in ATTENTION.items()}
         if not isinstance(self.panes, dict):
             self.panes = {}
         self.panes = {

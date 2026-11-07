@@ -106,10 +106,12 @@ class ReplyStream:
         """A block of this reply still takes input."""
         return any(isinstance(v, BlockView) and v.interactive for v in self.views)
 
-    def refresh_hints(self) -> None:
-        """Redraws the blocks' key hints, which name ctrl+t only inline."""
+    def refresh_hints(self, quiet: bool = False) -> None:
+        """Redraws the blocks' key hints, which name ctrl+t only inline (``quiet``: a newer
+        reply is the one hinted in full screen)."""
         for view in self.views:
             if isinstance(view, BlockView):
+                view.quiet = quiet
                 view.refresh_hint()
 
     def freeze(self) -> None:

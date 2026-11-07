@@ -17,7 +17,9 @@ from kohakutui.ui import Card, Node, Pane, TabStrip, Tree
 
 import kohakuterrarium.builtins.ktui.chrome_data as data
 from kohakuterrarium.builtins.ktui.channels import ChannelView
+from kohakuterrarium.builtins.ktui.graph_edit import GraphEdit
 from kohakuterrarium.builtins.ktui.logtail import LogTail
+from kohakuterrarium.builtins.ktui.page_status import status_action
 from kohakuterrarium.builtins.ktui.pages import Pages
 from kohakuterrarium.builtins.ktui.side import Side
 
@@ -41,6 +43,7 @@ class Chrome:
         self.drives = data.Drives(shell)
         self.side = Side(shell, self.drives)
         self.pages = Pages(shell, self.drives, self.logs)
+        self.graph = GraphEdit(shell)
         self.rail: Node | None = None
         self.tree: Node | None = None
         self.tabs: Node | None = None
@@ -131,37 +134,42 @@ class Chrome:
                     "detail": str(entry.view.unread) if entry.view.unread else None,
                 }
             )
+        agents.append(
+            {"label": "+ add", "value": "graph:add_creature", "tone": "muted"}
+        )
         items = [
             {
-                "label": f"agents  {len(agents)}",
+                "label": f"agents  {len(agents) - 1}",
                 "value": "group:agents",
                 "open": True,
                 "children": agents,
             }
         ]
         names = self._channel_names()
-        if names:
-            channels = []
-            for name in names:
-                tab = self.channels.get(name)
-                current = tab is not None and tab is self.channel
-                unread = tab.unread if tab else 0
-                channels.append(
-                    {
-                        "label": f"#{name}" + ("  ◂" if current else ""),
-                        "value": f"channel:{name}",
-                        "tone": "info" if current else None,
-                        "detail": str(unread) if unread else None,
-                    }
-                )
-            items.append(
+        channels: list[dict] = []
+        for name in names:
+            tab = self.channels.get(name)
+            current = tab is not None and tab is self.channel
+            unread = tab.unread if tab else 0
+            channels.append(
                 {
-                    "label": f"channels  {len(channels)}",
-                    "value": "group:channels",
-                    "open": True,
-                    "children": channels,
+                    "label": f"#{name}" + ("  ◂" if current else ""),
+                    "value": f"channel:{name}",
+                    "tone": "info" if current else None,
+                    "detail": str(unread) if unread else None,
                 }
             )
+        channels.append(
+            {"label": "+ add", "value": "graph:add_channel", "tone": "muted"}
+        )
+        items.append(
+            {
+                "label": f"channels  {len(channels) - 1}",
+                "value": "group:channels",
+                "open": True,
+                "children": channels,
+            }
+        )
         return items
 
     def _channel_names(self) -> list[str]:
@@ -199,7 +207,9 @@ class Chrome:
         name = self.pages.fields().get(ev.id)
         if name is not None:
             if ev.kind == "change" and ev.value is not None:
-                self.shell.spawn(self.shell.settings.apply(name, str(ev.value)))
+                value = str(ev.value)
+                if not self.pages.field_changed(name, value):
+                    self.shell.spawn(self.shell.settings.apply(name, value))
             return True
         return False
 
@@ -219,16 +229,40 @@ class Chrome:
         shell = self.shell
         kind, _, rest = value.partition(":")
         match kind:
+            case "job" | "trace" if shell.mode == "fullscreen":
+                cid, _, job_id = rest.partition(":")
+                self.side.open(kind, cid, job_id)
+                self.to_chat()
             case "job":
                 cid, _, job_id = rest.partition(":")
                 shell.spawn(shell.board.job(cid, job_id))
             case "trace":
                 cid, _, job_id = rest.partition(":")
                 shell.spawn(shell.board.trace(cid, job_id))
+            case "art" if shell.mode == "fullscreen":
+                cid, _, index = rest.rpartition(":")
+                self.side.open("art", cid, index)
+                self.to_chat()
+            case "drive" if shell.mode == "fullscreen":
+                self.side.open("drive", rest)
+                self.to_chat()
+            case "side":
+                self.side.act(rest)
+            case "graph":
+                shell.spawn(self.graph.act(rest))
+            case "st":
+                shell.spawn(status_action(shell, rest))
+            case "set":
+                shell.spawn(self._session_setting(rest))
             case "creature" | "channel":
                 self.open(value)
-            case "model" | "key" | "info":
+            case "model" | "key" | "info" | "cfg" | "login":
                 shell.spawn(self._setting(value))
+
+    async def _session_setting(self, what: str) -> None:
+        await self.pages.session.act(what)
+        if self.page == "settings":
+            self.pages.refresh(force=True)
 
     async def _setting(self, value: str) -> None:
         await self.shell.settings.act(value)
@@ -244,6 +278,8 @@ class Chrome:
                 self.shell.focus(rest)
             case "channel":
                 self.show_channel(rest)
+            case "graph":
+                self.shell.spawn(self.graph.act(rest))
         self.refresh()
 
     # -- pages ----------------------------------------------------------
@@ -261,9 +297,8 @@ class Chrome:
             return
         self.page = page
         self._panes(hidden=True)
-        # keys left in a hidden panel come back to the input
-        if shell.composer is not None:
-            shell.composer.focus()
+        # a page has no chat input (as the web's tabs): the input and its row hide
+        self._chat_input(False)
         # a page opens at its top; Debug follows its newest lines like a chat
         shell.app.show_document(self.pages.doc(page), top=page != "debug")
         self.tabs.update(active=values.index(page))
@@ -276,16 +311,36 @@ class Chrome:
         self.page = "chat"
         self.pages.shown = None
         self._panes(hidden=False)
+        self._chat_input(True)
         if self.tabs is not None:
             self.tabs.update(active=0)
         doc = self.channel.doc if self.channel else self.shell.focused.view.doc
         self.shell.app.show_document(doc)
         self.refresh()
 
-    def _panes(self, hidden: bool) -> None:
-        for node in (self.rail, self.side_pane):
+    def restore_document(self) -> None:
+        """Shows what the current page shows again (after a form drawn in its place)."""
+        shell = self.shell
+        if self.page == "chat":
+            doc = self.channel.doc if self.channel else shell.focused.view.doc
+            shell.app.show_document(doc)
+        else:
+            shell.app.show_document(self.pages.doc(self.page))
+
+    def _chat_input(self, shown: bool) -> None:
+        shell = self.shell
+        for node in (shell.composer, shell.active):
             if node is not None:
-                node.update(hidden=hidden)
+                node.update(hidden=not shown)
+        if shown and shell.composer is not None:
+            shell.composer.focus()
+
+    def _panes(self, hidden: bool) -> None:
+        if self.rail is not None:
+            self.rail.update(hidden=hidden)
+        if self.side_pane is not None:
+            # an empty side panel stays hidden on the Chat page too
+            self.side_pane.update(hidden=hidden or bool(self.side.empty))
 
     # -- channels -------------------------------------------------------
 

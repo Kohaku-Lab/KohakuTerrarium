@@ -31,6 +31,7 @@ from kohakuterrarium.builtins.kt_ui.expr import ExprError, evaluate
 from kohakuterrarium.builtins.kt_ui.fallback import format_cell, node_text
 from kohakuterrarium.builtins.kt_ui.values import to_display, truthy
 from kohakuterrarium.builtins.ktui.ui_controls import HANDLERS as CONTROL_HANDLERS
+from kohakuterrarium.builtins.ktui.tool_bodies import image_cell
 from kohakuterrarium.builtins.ktui.ui_charts import chart
 from kohakuterrarium.builtins.ktui.ui_values import items, text, value
 from kohakuterrarium.builtins.ktui.ui_slot import Slot
@@ -399,6 +400,20 @@ def _fallback(parent: Node, node: dict, scope: dict) -> None:
         parent.add(Text(shown))
 
 
+def _image(parent: Node, node: dict, scope: dict) -> None:
+    src = text(node.get("src"), scope)
+    alt = text(node.get("alt"), scope)
+    parent.add(image_cell(src, alt))
+
+
+def _gallery(parent: Node, node: dict, scope: dict) -> None:
+    for item in value(node.get("items"), scope) or []:
+        if isinstance(item, dict):
+            _image(parent, item, scope)
+        elif isinstance(item, str):
+            parent.add(image_cell(item, ""))
+
+
 HANDLERS: dict[str, Callable[[Node, dict, dict], None]] = {
     "stack": _stack,
     "grid": _grid,
@@ -431,10 +446,12 @@ HANDLERS: dict[str, Callable[[Node, dict, dict], None]] = {
     "copy": _copy,
     "compare": _compare,
     "quiz": _quiz,
+    "image": _image,
+    "gallery": _gallery,
     **CONTROL_HANDLERS,
 }
-# drawn as text: media (P4), html (no app frames in a terminal), timer (no ticking widget yet)
-FALLBACK_TYPES = frozenset({"image", "gallery", "html", "timer"})
+# drawn as text: html (no app frames in a terminal)
+FALLBACK_TYPES = frozenset({"html"})
 
 
 def mount(parent: Node, node: Any, scope: dict[str, Any]) -> None:

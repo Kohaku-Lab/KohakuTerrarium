@@ -16,8 +16,10 @@ from kohakuterrarium.builtins.ktui.format import (
     one_line,
     parse_detail,
 )
-from kohakuterrarium.builtins.ktui.replay import replay
-from kohakuterrarium.builtins.ktui.view import CreatureView, Job
+from kohakuterrarium.builtins.ktui.replay import RESUME_TURNS, replay
+from kohakuterrarium.builtins.ktui.tool_bodies import images_of, media_of
+from kohakuterrarium.builtins.ktui.view import CreatureView
+from kohakuterrarium.builtins.ktui.view_state import Job
 from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
@@ -91,23 +93,35 @@ class KtuiOutput(BaseOutputModule):
         self.view.render("user_message", text, None)
 
     async def on_resume(self, events: list[dict]) -> None:
-        replay(self.view, events)
+        replay(self.view, events, last_turns=RESUME_TURNS)
         self.shell.refresh()
 
-    def on_assistant_image(self, url: str, **_: Any) -> None:
-        self.view.render("notice", f"🖼 image · {one_line(url, 90)}", "accent", None)
+    def on_assistant_image(self, url: str, **meta: Any) -> None:
+        name = str(meta.get("source_name") or meta.get("name") or "")
+        self.view.render("image", url, name)
+        self.shell.refresh()
 
     async def emit(self, event: OutputEvent) -> None:
         payload = event.payload or {}
         match event.type:
             case "user_input":
                 text = content_display_text(event.content)
-                self.view.render("user_message", text, payload.get("pending_id"))
+                turn = payload.get("turn_index")
+                self.view.render(
+                    "user_message",
+                    text,
+                    payload.get("pending_id"),
+                    turn if isinstance(turn, int) else None,
+                )
+                for url, name in images_of(event.content):
+                    self.view.render("image", url, name)
                 self.shell.refresh()
             case kind if kind in INTERACTIVE:
                 self.shell.interactions.add(event, self._router, self.view)
+                self.shell.attention.approval(_question(payload))
             case "card" if event.interactive and _replyable(payload):
                 self.shell.interactions.add(event, self._router, self.view)
+                self.shell.attention.approval(_question(payload))
             case "card":
                 self.view.render("card", payload.get("title", ""), _card_body(payload))
             case "progress":
@@ -117,6 +131,13 @@ class KtuiOutput(BaseOutputModule):
                 self.shell.app.notify(
                     one_line(payload.get("text", ""), 120),
                     LEVEL_TONE.get(level, "info"),
+                )
+            case "tool_args_progress":
+                # a long tool call being written: the status line says which and how far
+                self.view.render(
+                    "args_progress",
+                    str(payload.get("name", "") or "tool"),
+                    int(payload.get("chars", 0) or 0),
                 )
             case "ui_supersede":
                 self.shell.interactions.supersede(payload.get("event_id") or event.id)
@@ -154,7 +175,13 @@ class KtuiOutput(BaseOutputModule):
                 error = rest if kind == "tool_error" else ""
                 output = str(md.get("output_preview") or md.get("output") or rest)
                 job = view.jobs.pop(job_id, None)
-                view.render("tool_end", job_id, name, output, error, _took(job))
+                args = job.args if job is not None else None
+                view.render("tool_end", job_id, name, output, error, _took(job), args)
+                for media, url, label in media_of(md.get("result")):
+                    if media == "image":
+                        view.render("image", url, label)
+                    else:
+                        view.render("media", url, label, media)
             case "subagent_start":
                 self._job_start(job_id, name, "subagent", str(md.get("task", rest)), md)
             case "subagent_done" | "subagent_error":
@@ -267,7 +294,9 @@ class KtuiOutput(BaseOutputModule):
         self, job_id: str, name: str, kind: str, detail: str, md: dict
     ) -> None:
         background = bool(md.get("background", False))
-        self.view.jobs[job_id] = Job(job_id, name, kind, detail, background)
+        self.view.jobs[job_id] = Job(
+            job_id, name, kind, detail, background, args=md.get("args")
+        )
         if kind == "subagent":
             self.view.traces.start(job_id, name, detail, background)
         method = "tool_start" if kind == "tool" else "subagent_start"
@@ -295,6 +324,12 @@ class KtuiOutput(BaseOutputModule):
         value = None if payload.get("indeterminate") else payload.get("value")
         label = str(payload.get("label", "progress"))
         self.view.render("progress_update", key, label, value, payload.get("max"), done)
+
+
+def _question(payload: dict) -> str:
+    return str(
+        payload.get("question") or payload.get("title") or payload.get("text") or ""
+    )
 
 
 def _replyable(payload: dict) -> bool:

@@ -3,23 +3,26 @@ panel and the pages draw with.
 
 The panel shows only what has something in it, one section under another: the open
 channel's members, running tools (Jobs), sub-agents, drives, open tool widgets and the
-scratchpad. Enter or a click on an entry opens it (a job's Stop / Background card, a
-sub-agent's trace, a member's chat). Nothing going on: one quiet line.
+scratchpad. Enter or a click on an entry opens its detail in the panel (``side_detail.py``: a
+sub-agent's live trace, a job, a drive; a member opens its chat). With nothing to show the
+panel is hidden, and comes back when something starts.
 """
 
 from typing import TYPE_CHECKING, Any
 
-from kohakutui.ui import KV, Field, Node, Stack, Table, Text, Tree
+from kohakutui.ui import KV, Bars, Field, Node, Stack, Table, Text, Tree
 
 import kohakuterrarium.builtins.ktui.chrome_data as data
+from kohakuterrarium.builtins.ktui.side_detail import SideDetail
 
 if TYPE_CHECKING:
     from kohakuterrarium.builtins.ktui.shell import KtuiShell
 
 EMPTY = "Nothing running."
 
-# (key, title or None, kind: tree | kv | table | text | fields, payload); fields: a list of
-# {"name", "label", "options", "value"} select controls
+# (key, title or None, kind: tree | kv | table | text | fields | spec | bars, payload); fields: a
+# list of {"name", "label", "options", "value"} select controls; spec: (version, component),
+# drawn again when the version changes (only as the last section: it is added at the end)
 Section = tuple[str, str | None, str, Any]
 
 
@@ -32,6 +35,10 @@ def _spec(kind: str, payload: Any) -> Any:
         case "table":
             columns, rows = payload
             return Table(columns=columns, rows=rows)
+        case "spec":
+            return payload[1]
+        case "bars":
+            return Bars(**payload)
     return Text(str(payload), tone="faint")
 
 
@@ -44,6 +51,8 @@ def _update(node: Node, kind: str, payload: Any) -> None:
         case "table":
             columns, rows = payload
             node.update(columns=columns, rows=rows)
+        case "bars":
+            node.update(**payload)
         case _:
             node.update(value=str(payload))
 
@@ -67,6 +76,9 @@ class Sections:
     def trees(self) -> set[int]:
         return {s[3].id for s in self._shown if s[1] == "tree"}
 
+    def field_node(self, name: str) -> Node | None:
+        return self._field_nodes.get(name)
+
     def show(self, sections: list[Section]) -> None:
         layout = [(key, kind, title is None) for key, title, kind, _ in sections]
         if layout != [(s[0], s[1], s[2] is None) for s in self._shown]:
@@ -84,6 +96,10 @@ class Sections:
                     node = self._field_nodes.get(f["name"])
                     if node is not None:
                         node.update(value=f["value"])
+            elif kind == "spec":
+                if payload[0] != shown[4][1][0]:
+                    shown[3].remove()
+                    shown[3] = self.parent.add(payload[1])
             else:
                 _update(shown[3], kind, payload)
             shown[4] = (title, payload)
@@ -130,9 +146,34 @@ class Side:
         self.shell = shell
         self.drives = drives
         self.sections: Sections | None = None
+        self.pane: Node | None = None
+        self.detail: SideDetail | None = None
+        # nothing to show: the pane is hidden (the chrome asks before showing it again);
+        # None until the first refresh decides
+        self.empty: bool | None = None
 
     def build(self, pane: Node) -> None:
+        self.pane = pane
         self.sections = Sections(pane)
+        self.refresh()
+
+    def open(self, kind: str, *ids: str) -> None:
+        """Shows a detail (``trace`` / ``job`` with creature and job id, ``drive`` with its id)."""
+        self.close_detail()
+        self.detail = SideDetail(self.shell, kind, *ids)
+        self.refresh()
+
+    def close_detail(self) -> None:
+        if self.detail is not None:
+            self.detail.close()
+            self.detail = None
+
+    def act(self, what: str) -> None:
+        """``side:<what>``: back to the lists, or the open detail's action."""
+        if what == "back":
+            self.close_detail()
+        elif self.detail is not None:
+            self.detail.act(what)
         self.refresh()
 
     def lists(self) -> set[int]:
@@ -163,20 +204,46 @@ class Side:
         self.drives.poll(self.refresh)
         drives = self.drives.items()
         if drives:
-            out.append(("drives", f"Drives · {len(drives)}", "tree", drives))
+            drives = [
+                *drives,
+                {"label": "+ new goal", "value": "cfg:goal", "tone": "info"},
+            ]
+            out.append(("drives", f"Drives · {len(drives) - 1}", "tree", drives))
+        art = self._canvas()
+        if art:
+            out.append(("canvas", f"Canvas · {len(art)}", "tree", art))
         widgets = data.widgets(shell)
         if widgets:
             out.append(("widgets", f"Widgets · {len(widgets)}", "tree", widgets))
         pad = data.scratchpad(shell)
         if pad:
             out.append(("pad", f"Scratchpad · {len(pad)}", "kv", pad))
-        return out or [("empty", None, "text", EMPTY)]
+        return out
+
+    def _canvas(self) -> list[dict]:
+        """The open conversation's pictures, videos and sounds, newest first."""
+        entry = self.shell.focused
+        icons = {"image": "🖼", "video": "▶", "audio": "♪"}
+        art = entry.view.artifacts
+        return [
+            {
+                "label": name or url.rsplit("/", 1)[-1][:40] or kind,
+                "icon": icons.get(kind, "·"),
+                "value": f"art:{entry.creature.creature_id}:{i}",
+            }
+            for i, (kind, url, name) in reversed(list(enumerate(art)))
+        ][:12]
 
     def refresh(self) -> None:
         if self.sections is None:
             return
         try:
-            content = self._content()
+            content = self.detail.sections() if self.detail else self._content()
         except Exception:  # the panel must never take the UI down
-            content = [("empty", None, "text", EMPTY)]
-        self.sections.show(content)
+            content = []
+        empty = not content
+        self.sections.show(content or [("empty", None, "text", EMPTY)])
+        if empty != self.empty:
+            self.empty = empty
+            if self.pane is not None and self.shell.chrome.page == "chat":
+                self.pane.update(hidden=empty)

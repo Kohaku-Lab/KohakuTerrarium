@@ -6,6 +6,8 @@ write it, ``on_select(node, callback)`` runs a button, ``live`` says whether the
 input (closed and not frozen; a block still streaming or frozen draws its controls static).
 """
 
+import asyncio
+import time
 from typing import Any
 
 from kohakutui.ui import Button, Field, Stack, Text
@@ -156,6 +158,91 @@ def form(slot: Any, node: dict, scope: dict) -> None:
     button(box, submit, scope)
 
 
-HANDLERS = {**{kind: control for kind in CONTROLS}, "button": button, "form": form}
+def _clock(seconds: float) -> str:
+    total = int(seconds)
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02}:{secs:02}" if hours else f"{minutes:02}:{secs:02}"
+
+
+def timer(slot: Any, node: dict, scope: dict) -> None:
+    """A countdown or stopwatch with start / pause and reset, as the web's timer; it ticks
+    once a second while running. Its time survives the block being drawn again."""
+    ui = slot.ui
+    countdown = node.get("mode", "countdown") != "stopwatch"
+    total = float(number(node.get("seconds"), scope) or 0)
+    label = text(node.get("label"), scope)
+    state = ui.remembered(f"timer:{id(node)}", None)
+    if state is None:
+        state = {"before": 0.0, "since": None, "drawn": None}
+        ui.block.view_state[f"timer:{id(node)}"] = state
+        if truthy(value(node.get("autostart", False), scope)) and ui.live:
+            state["since"] = time.monotonic()
+
+    def elapsed() -> float:
+        since = state["since"]
+        return state["before"] + (
+            time.monotonic() - since if since is not None else 0.0
+        )
+
+    def shown() -> tuple[str, bool]:
+        spent = elapsed()
+        if countdown:
+            left = max(0.0, total - spent)
+            return _clock(left + 0.999), left <= 0
+        return _clock(spent), False
+
+    def segments() -> list[dict]:
+        clock, done = shown()
+        head = f"{label}  " if label else ""
+        if done:
+            state["before"], state["since"] = total, None
+            return [{"label": f"{head}{clock} · time is up", "value": "done"},
+                    {"label": "↺ reset", "value": "reset"}]  # fmt: skip
+        verb = "⏸ pause" if state["since"] is not None else "⏵ start"
+        return [
+            {"label": f"{head}{clock}", "value": "toggle"},
+            {"label": verb, "value": "toggle"},
+            {"label": "↺ reset", "value": "reset"},
+        ]
+
+    if not ui.live:
+        clock, _ = shown()
+        slot.add(Text(f"{label + ': ' if label else ''}{clock}", tone="accent"))
+        return
+    drawn = slot.add(Button(segments=segments(), focused_hint="  ←→ · enter"))
+    state["drawn"] = drawn.node
+
+    def tick() -> None:
+        if state["drawn"] is not drawn.node or state["since"] is None:
+            return
+        drawn.node.update(segments=segments())
+        if state["since"] is not None:
+            asyncio.get_running_loop().call_later(1.0, tick)
+
+    def pressed(ev: Any) -> None:
+        if ev.kind != "select":
+            return
+        match ev.value:
+            case "toggle" if state["since"] is None:
+                state["since"] = time.monotonic()
+                asyncio.get_running_loop().call_later(1.0, tick)
+            case "toggle":
+                state["before"], state["since"] = elapsed(), None
+            case "reset":
+                state["before"], state["since"] = 0.0, None
+        drawn.node.update(segments=segments())
+
+    ui.block.listen(drawn.node, pressed)
+    if state["since"] is not None:
+        asyncio.get_running_loop().call_later(1.0, tick)
+
+
+HANDLERS = {
+    **{kind: control for kind in CONTROLS},
+    "button": button,
+    "form": form,
+    "timer": timer,
+}
 
 __all__ = ["CONTROLS", "HANDLERS"]

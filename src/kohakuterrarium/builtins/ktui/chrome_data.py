@@ -10,9 +10,9 @@ from kohakuterrarium.builtins.cli_rich.dialogs.drive.format import (
     status_label,
 )
 from kohakuterrarium.builtins.ktui.format import duration, one_line, tokens
+from kohakuterrarium.builtins.ktui.remote_drives import drive_service
 from kohakuterrarium.builtins.ktui.trace import board_detail, board_label
 from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -294,7 +294,7 @@ class Drives:
     async def _read(self, on_change: Any) -> None:
         # a failure is shown where drives are, never raised (it would land in the transcript)
         try:
-            views = await LocalTerrariumService(self.shell.engine).list_drives(
+            views = await drive_service(self.shell.engine).list_drives(
                 actor=ActorRef("user", "local"),
                 graph_id=self.shell.focused.creature.graph_id,
                 include_terminal=True,

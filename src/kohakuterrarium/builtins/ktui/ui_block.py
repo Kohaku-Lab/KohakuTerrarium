@@ -36,7 +36,7 @@ logger = get_logger(__name__)
 
 SAVE_DELAY = 0.4
 HINT_INLINE = "tab to use · ctrl+t full screen"
-HINT_FULL = "tab to use"
+HINT_FULL = "tab or a click to use"
 
 
 class UiHost:
@@ -146,6 +146,8 @@ class BlockView:
     ):
         self.holder = holder
         self.ctx = ctx
+        # a newer block is the one hinted (full screen)
+        self.quiet = False
         self.turn = turn
         self.link = link
         self.content = holder.add(Stack())
@@ -234,7 +236,9 @@ class BlockView:
         self.slot.finish()
 
     def _hint(self) -> None:
-        wanted = self.live and bool(self._listening)
+        # full screen keeps older blocks usable (as the web does) but hints only the newest
+        quiet = self.quiet and not self.ctx.inline()
+        wanted = self.live and bool(self._listening) and not quiet
         if not wanted:
             if self.hint is not None:
                 self.hint.remove()

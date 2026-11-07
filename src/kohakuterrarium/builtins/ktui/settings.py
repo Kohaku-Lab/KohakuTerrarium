@@ -5,12 +5,12 @@ The same picker as ``/model``, docked at the input with a section column:
     display    layout, colours, tool-call detail: ←/→ changes, enter applies (remembered)
     models     the session's model (opens /model) and the default for new sessions
     keys       API keys per provider: enter asks for the key (typed hidden; empty removes)
-    providers  backends, read only here
-    mcp        MCP servers, read only here
+    providers  backends: enter signs in, edits or deletes; "+ add a provider"
+    your models  presets: default, edit, delete; "+ add a model"
+    mcp        MCP servers: edit, delete; "+ add an MCP server"
 
-Keys and the default model persist through the same functions as ``kt config`` and the web
-settings page. Adding or editing providers and MCP servers is not in this picker yet; those rows
-say where to do it.
+Everything persists through the same functions as ``kt config`` and the web settings page
+(``config_edit.py`` holds the editors).
 """
 
 from typing import TYPE_CHECKING, Any
@@ -19,6 +19,11 @@ from kohakutui import THEMES
 from kohakutui.ui import Picker, Prompt
 
 from kohakuterrarium.builtins.ktui.config import LINKS, RENDERERS, VERBOSITY
+from kohakuterrarium.builtins.ktui.config_edit import (
+    mcp_rows,
+    model_rows,
+    provider_rows,
+)
 from kohakuterrarium.builtins.ktui.models import model_id, model_items, selector_of
 from kohakuterrarium.llm.profiles.api_keys import (
     PROVIDER_KEY_MAP,
@@ -27,8 +32,7 @@ from kohakuterrarium.llm.profiles.api_keys import (
 )
 from kohakuterrarium.llm.profiles.resolve import get_default_model, load_backends
 from kohakuterrarium.llm.profiles.resolve import list_all as list_all_presets
-from kohakuterrarium.llm.profiles.resolve import set_default_model
-from kohakuterrarium.studio.identity.mcp.servers import load_servers
+from kohakuterrarium.studio.identity.llm.default import resolve_and_set_default
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -77,9 +81,25 @@ class Settings:
                 "osc8 clickable · text writes name (url) · applies on next start",
             ),
         ]
+        labels = {
+            "title": (
+                "Window title",
+                "the terminal title follows what the session does",
+            ),
+            "notify_waiting": (
+                "Notify: waiting",
+                "a notification when an approval waits",
+            ),
+            "notify_done": ("Notify: finished", "a notification when a turn ends"),
+            "bell": ("Bell", "a bell with each notification"),
+        }
+        for key, (label, hint) in labels.items():
+            on = "on" if config.attention.get(key, True) else "off"
+            items.append(_choice(label, f"attention.{key}", ["on", "off"], on, hint))
         items += self._model_items()
         items += _safe(self._key_items, "keys")
         items += _safe(self._provider_items, "providers")
+        items += _safe(self._preset_items, "your models")
         items += _safe(self._mcp_items, "mcp")
         return items
 
@@ -103,6 +123,7 @@ class Settings:
             ("Models", "models"),
             ("API keys", "keys"),
             ("Providers", "providers"),
+            ("Your models", "your models"),
             ("MCP servers", "mcp"),
         ):
             rows = [
@@ -142,7 +163,7 @@ class Settings:
         for name in names:
             backend = backends.get(name)
             if backend is not None and backend.backend_type == "codex":
-                detail, value = "OAuth · use /login codex", "info:oauth"
+                detail, value = "OAuth · enter signs in", "login:codex"
             else:
                 env = (backend.api_key_env if backend else "") or PROVIDER_KEY_MAP.get(
                     name, ""
@@ -155,43 +176,13 @@ class Settings:
         return items
 
     def _provider_items(self) -> list[dict]:
-        return [
-            {
-                "label": name,
-                "detail": " · ".join(
-                    p for p in (b.backend_type, b.base_url or "") if p
-                ),
-                "value": "info:providers",
-                "group": "providers",
-            }
-            for name, b in sorted(load_backends().items())
-        ]
+        return [{**row, "group": "providers"} for row in provider_rows()]
+
+    def _preset_items(self) -> list[dict]:
+        return [{**row, "group": "your models"} for row in model_rows()]
 
     def _mcp_items(self) -> list[dict]:
-        rows = [
-            {
-                "label": s.get("name", "?"),
-                "detail": " · ".join(
-                    str(p)
-                    for p in (
-                        s.get("transport", "stdio"),
-                        s.get("command") or s.get("url"),
-                    )
-                    if p
-                ),
-                "value": "info:mcp",
-                "group": "mcp",
-            }
-            for s in load_servers()
-        ]
-        return rows or [
-            {
-                "label": "no MCP servers",
-                "detail": ELSEWHERE,
-                "value": "info:mcp",
-                "group": "mcp",
-            }
-        ]
+        return [{**row, "group": "mcp"} for row in mcp_rows()]
 
     async def open(self) -> None:
         shell = self.shell
@@ -218,14 +209,16 @@ class Settings:
         shell = self.shell
         kind, _, rest = value.partition(":")
         match kind:
+            case "cfg":
+                await shell.config_edit.act(rest)
             case "model" if rest == "session":
                 await self.pick_model(shell.focused)
             case "model":
                 await self._default_model()
             case "key":
                 await self._set_key(rest)
-            case "info" if rest == "oauth":
-                shell.app.notify("codex signs in with /login codex", "info")
+            case "login":
+                await shell.config_edit.login(rest)
             case "info":
                 shell.app.notify(f"{rest}: {ELSEWHERE}", "info")
 
@@ -243,6 +236,12 @@ class Settings:
                 shell.app.notify(
                     f"tool calls: {option} · applies to new sessions", "success"
                 )
+            case attention if attention.startswith("attention."):
+                key = attention.removeprefix("attention.")
+                shell.config.attention[key] = option == "on"
+                shell.config.save()
+                if key == "title":
+                    shell.attention.update(force=True)
             case "links" if option in LINKS:
                 shell.config.links = option
                 shell.config.save()
@@ -256,11 +255,9 @@ class Settings:
         except Exception as exc:
             shell.app.notify(f"could not list models: {exc}", "error")
             return
-        items = model_items(presets, current)
-        for item in items:
-            item["choices"], item["chosen"] = [], {}
+        # the same picker as /model: ←/→ choose the variations stored with the default
         spec = Picker(
-            items=items,
+            items=model_items(presets, current),
             title=f"Default model · now {current or '(none)'}",
             placeholder="type to filter by provider or model",
             sidebar=True,
@@ -270,11 +267,14 @@ class Settings:
         if not selector:
             return
         try:
-            set_default_model(selector)
+            # validates the selector and stores it with its variations, as `kt model default`
+            identifier, error = resolve_and_set_default(selector)
         except Exception as exc:
-            shell.app.notify(f"default model not saved: {exc}", "error")
+            identifier, error = "", str(exc)
+        if error or not identifier:
+            shell.app.notify(f"default model not saved: {error}", "error")
             return
-        shell.app.notify(f"default model: {selector}", "success")
+        shell.app.notify(f"default model: {identifier}", "success")
 
     async def _set_key(self, provider: str) -> None:
         shell = self.shell

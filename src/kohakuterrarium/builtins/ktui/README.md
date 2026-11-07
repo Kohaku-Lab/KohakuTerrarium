@@ -19,26 +19,51 @@ every creature of a running engine, rendered inline (scrollback), hybrid or full
 | `view.py` | `CreatureView`: one creature's document (a kohakutui document of its own), drawn focused or not; only the focused creature uses the live region |
 | `chrome.py` | `Chrome`: full screen after the web's v2 session view: the page tabs on top (Chat, Graph, Status, Debug, Settings), the conversation rail (agents, channels) and the side panel on the Chat page; panel sizes saved in `ktui.json`; alt+1…5, alt+r / alt+s, ctrl+pgup / ctrl+pgdn |
 | `chrome_data.py` | What the chrome shows, read from the shell: jobs, sub-agents, the graph, members, scratchpad, widgets, status rows, drives (read in the background) |
-| `side.py` | `Side`: the Chat page's right panel, only the sections with content (members of the open channel, jobs, sub-agents, drives, widgets, scratchpad); `Sections`, the titled lists it and the pages draw with |
+| `side.py` | `Side`: the Chat page's right panel, only the sections with content (members of the open channel, jobs, sub-agents, drives, canvas, widgets, scratchpad); `Sections`, the titled lists it and the pages draw with |
 | `pages.py` | `Pages`: Graph, Status, Debug and Settings, each a document shown where the chat is |
+| `page_status.py` | The Status page: Session, Usage, context bars, Health; Agents, Channels, Drives and Jobs with their actions |
+| `page_debug.py` | The Debug page: Logs (and an attached local server's log), Events, Prompt and Trace views |
+| `page_modules.py` | The Settings page's Modules: plugins and tools, switch on / off, options in a form (local or in a server) |
+| `page_settings.py` | The Settings page's session sections: model per creature, modules, workspace, triggers, cost, extensions, env |
+| `graph_edit.py` | Graph edits: add a creature or channel, connect, disconnect, remove |
+| `side_detail.py` | Detail views in the side panel: a sub-agent's live trace, a job, a drive and its actions |
+| `forms.py` | `Forms`: several fields at once (a page in full screen, one prompt at a time inline) |
+| `config_edit.py` | Providers, models, MCP servers and goals: add, edit, delete; `/login` |
+| `sessions.py` | `/resume` picker, `/rename`, `/export` |
+| `messages.py` | Message actions: copy, edit, retry, branch versions; loading older turns |
+| `attach.py` | `ComposerHelper`: `@` completion, file and image attachments, the external editor |
+| `shell_input.py` | `ShellInput`: submitting, queueing, `!` shell commands, interrupts |
+| `shell_extras.py` | Key help and `Attention` (terminal title, notification and bell while the window is away) |
+| `tool_bodies.py` | File edits as diffs, images in tool results |
+| `remote.py` | `RemoteSession`: a session in a KT server over REST and the chat socket; frames into `KtuiOutput`; reconnect and redraw |
+| `remote_drives.py` | Drives of a session in a server through its drive routes, shaped like the local drive service; `drive_service` picks one |
+| `remote_frames.py` | `FrameDispatch`: the chat socket's frames as output calls |
+| `remote_parts.py` | Smaller stand-ins: history events, triggers, widget and `<ui>` state, a channel, modules |
+| `remote_proxies.py` | Stand-ins for the engine, creatures, agents and router of a remote session |
+| `servers.py` | Finding a KT server, its running sessions (and stopping one) and its log file |
+| `launcher.py` | The `kt-ui` launcher: running (attach, stop), recent (resume, rename, delete) and installed (start) |
+| `onboarding.py` | First run: no model yet, so sign in, add a provider or pick a model |
+| `updates.py` | A newer release, said once at start (launcher-managed installs) |
 | `channels.py` | `ChannelView`: a channel's conversation (history, live traffic) in a document; the composer sends to it as `human` while it is shown |
 | `logtail.py` | `LogTail`: while ktui runs, `print`, stderr, Python warnings and log records (KT's from INFO, other packages' from WARNING) go to the Logs tab and `/logs` instead of over the UI |
+| `view_notices.py` | `NoticeCells`: notices, errors, cards, the older-turns mark, pictures / videos / sounds (the Canvas list), compaction and progress rows |
 | `view_subagents.py` | `SubagentCells`: foreground sub-agents as ◆ cells with their tool calls nested (mixed into the view) |
 | `inline_ui.py` | `ReplyStream`: a streamed reply cut into Markdown and `<ui>` blocks (`kt_ui.markup_lex.split_message`); lines that may open a block are held back until decided |
 | `ui_block.py` | `BlockView`: one `<ui>` block or tool widget: state, `let` values, redraws, live → frozen, where state is saved (inline state or the widget service) |
 | `ui_slot.py` | `Slot`: redraws a block onto the nodes of the previous pass, so focus and scroll survive a state change |
-| `ui_map.py` | kt.ui spec nodes → kohakutui widgets (`mount`); layout, text, status, lists, tabs, compare, quiz, copy; media, html and timer use the `kt_ui.fallback` text |
-| `ui_controls.py` | Inputs (`Field`), buttons and forms: `message` is said as the user, a tool widget's `send` posts a widget message |
+| `ui_map.py` | kt.ui spec nodes → kohakutui widgets (`mount`); layout, text, status, lists, tabs, compare, quiz, copy, images; html uses the `kt_ui.fallback` text |
+| `ui_controls.py` | Inputs (`Field`), buttons, forms and the timer: `message` is said as the user, a tool widget's `send` posts a widget message |
 | `ui_charts.py` | Charts: line kinds as `Chart`, bar / stacked / radar / pie / gauge as `Bars`, heatmap as a shaded grid |
 | `ui_values.py` | Prop values evaluated in a block's scope (templates, lists, numbers) |
 | `tool_widgets.py` | `ToolWidgets`: kt.ui widgets tools open (`widget` / `widget_state` / `widget_close`), drawn in the live region, frozen into the transcript on close |
 | `interactions.py` | `Interactions`: approvals and questions from all creatures; hide (esc / Later), alt+j, ctrl+k, replies |
+| `view_state.py` | The plain state beside a creature's document: usage, jobs, messages |
 | `replay.py` | Session resume through the view (live branch only) |
 | `input.py` | `KtuiInput`: placeholder input so nothing else reads the terminal |
 | `config.py` | `KtuiConfig`: renderer, theme, verbosity, links and the panel sizes remembered in `ktui.json` |
 | `format.py` | Short display strings: tool arguments, results, durations, token counts |
 
-The engine launcher is `terrarium/engine/cli/ktui.py`.
+The engine launcher is `terrarium/engine/cli/ktui.py`; `kt attach` is `terrarium/engine/cli/ktui_remote.py`; `kt-ui` is `cli/entry/ui.py`.
 
 ## Behaviour
 
