@@ -4,6 +4,7 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 import { createMockHost } from "@/ext/sdk/mock"
+import { overlayHitRegions } from "./overlayInput"
 import register, { PetCompanion } from "../../../../examples/packages/virtual_pet/ui/index.js"
 import { cellFor, PetPlayer } from "../../../../examples/packages/virtual_pet/ui/player.js"
 import { PetSprite } from "../../../../examples/packages/virtual_pet/ui/sprite.js"
@@ -70,13 +71,14 @@ beforeEach(() => {
     class {
       constructor(callback) {
         this.callback = callback
+        this.elements = new Set()
       }
       observe(element) {
-        this.element = element
+        this.elements.add(element)
         resizeObservers.set(element, this.callback)
       }
       disconnect() {
-        resizeObservers.delete(this.element)
+        this.elements.forEach((element) => resizeObservers.delete(element))
       }
     },
   )
@@ -92,6 +94,425 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+})
+
+it.each([false, true])(
+  "returns to idle after body-hover cues and reacquires gaze only outside the hit region (native=%s)",
+  async (native) => {
+    let now = 0
+    performance.now.mockImplementation(() => now)
+    let hitRect = { left: 20, top: 30, width: 60, height: 40 }
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      return this.classList.contains("vp-hit")
+        ? hitRect
+        : { left: 0, top: 0, width: 100, height: 100 }
+    })
+    const pointer = (x, y = 50) => ({ valid: true, pointerType: "mouse", x, y })
+    const w = render(PetSprite, {
+      props: {
+        atlas: { ...atlas, gaze: { directions: 16 }, interactions: { jumping: 5, waving: 4 } },
+        source: image,
+        interactive: true,
+        native,
+        pointer: pointer(90),
+      },
+    })
+    const action = () => w.find(".vp-sprite").attributes("data-action")
+    now = 80
+    await frame(now)
+    expect(action()).toBe("gaze")
+    now = 100
+    await w.setProps({ pointer: pointer(65) })
+    expect(action()).toBe("idle")
+    await w.find(".vp-hit").trigger("pointerenter", { pointerType: "mouse" })
+    expect(action()).toBe("jumping")
+    now = 2620
+    await frame(now)
+    expect(action()).toBe("idle")
+    now = 4000
+    await w.find(".vp-hit").trigger("keydown", { key: "Enter" })
+    expect(action()).toBe("waving")
+    now = 6100
+    await frame(now)
+    expect(action()).toBe("idle")
+    for (const [x, y] of [
+      [20, 30],
+      [79.9, 69.9],
+      [50, 50],
+    ]) {
+      await w.setProps({ pointer: pointer(x, y) })
+      now += 500
+      await frame(now)
+      expect(action()).toBe("idle")
+    }
+    now = 8000
+    await w.setProps({ pointer: pointer(90) })
+    expect(action()).toBe("idle")
+    now = 8079
+    await frame(now)
+    expect(action()).toBe("idle")
+    now = 8080
+    await frame(now)
+    expect(action()).toBe("gaze")
+    hitRect = { left: 80, top: 30, width: 60, height: 40 }
+    now = 8090
+    await frame(now)
+    expect(action()).toBe("idle")
+  },
+)
+
+it("uses stable idle-artwork bounds for hover and native input without cropping the sprite", async () => {
+  Object.assign(Image.prototype, { naturalWidth: 1536, naturalHeight: 2288 })
+  const data = new Uint8ClampedArray(192 * 208 * 4)
+  data[(60 * 192 + 40) * 4 + 3] = 255
+  data[(179 * 192 + 139) * 4 + 3] = 255
+  const ctx = { drawImage: vi.fn(), getImageData: vi.fn(() => ({ data })) }
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx)
+  createMockHost({
+    host: { id: "tight-hit-host" },
+    owner: {
+      state: state({ ...atlas, interactions: { jumping: 5 } }),
+      actions: { sprite: () => image },
+    },
+  })
+  const w = render(PetCompanion, { attachTo: document.body })
+  await flushPromises()
+  const stage = w.find(".vp-stage").element
+  resizeObservers.get(stage)([{ contentRect: { width: 224, height: 280 } }])
+  await flushPromises()
+  const sprite = w.find(".vp-sprite")
+  expect(sprite.element.style.width).toBe("192px")
+  expect(sprite.element.style.height).toBe("208px")
+  expect(sprite.classes()).not.toContain("kt-overlay-hit")
+  expect(getComputedStyle(sprite.element).pointerEvents).toBe("none")
+  await sprite.trigger("pointerenter", { pointerType: "mouse" })
+  sprite.element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }))
+  await flushPromises()
+  expect(sprite.attributes("data-action")).toBe("idle")
+  const hit = w.find(".vp-hit")
+  expect(hit.attributes("role")).toBe("button")
+  expect(hit.attributes("tabindex")).toBe("0")
+  expect(hit.attributes("aria-label")).toBe("Test pet")
+  expect(getComputedStyle(hit.element).pointerEvents).toBe("auto")
+  expect(parseFloat(hit.element.style.left)).toBeCloseTo(40)
+  expect(parseFloat(hit.element.style.top)).toBeCloseTo(60)
+  expect(parseFloat(hit.element.style.width)).toBeCloseTo(100)
+  expect(parseFloat(hit.element.style.height)).toBeCloseTo(120)
+  vi.spyOn(hit.element, "getBoundingClientRect").mockReturnValue({
+    left: 56,
+    top: 100,
+    width: 100,
+    height: 120,
+  })
+  expect(overlayHitRegions(w.element)).toEqual([[56, 100, 100, 120]])
+  const initial = hit.attributes("style")
+  await hit.trigger("pointerenter", { pointerType: "mouse" })
+  expect(sprite.attributes("data-action")).toBe("jumping")
+  await frame(500)
+  expect(hit.attributes("style")).toBe(initial)
+  resizeObservers.get(stage)([{ contentRect: { width: 112, height: 280 } }])
+  await flushPromises()
+  expect(parseFloat(hit.element.style.left)).toBeCloseTo(20)
+  expect(parseFloat(hit.element.style.top)).toBeCloseTo(30)
+  expect(parseFloat(hit.element.style.width)).toBeCloseTo(50)
+  expect(parseFloat(hit.element.style.height)).toBeCloseTo(60)
+  expect(ctx.drawImage).toHaveBeenCalledTimes(1)
+  const preview = render(PetSprite, { props: { atlas, source: image } })
+  expect(preview.find(".vp-hit").exists()).toBe(false)
+  expect(preview.find(".vp-sprite").attributes("role")).toBe("img")
+})
+
+it.each(["app", "window"])(
+  "keeps hover and focus quiet; opens only the body menu with bounded hit regions (%s)",
+  async (overlayMode) => {
+    const host = createMockHost({
+      host: { id: `menu-${overlayMode}` },
+      overlayMode,
+      owner: {
+        state: state({ ...atlas, interactions: { waving: 4, jumping: 5 } }),
+        actions: { sprite: () => image },
+      },
+    })
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      if (this.classList.contains("vp-hit")) return { left: 50, top: 160, width: 120, height: 90 }
+      if (this.classList.contains("vp-menu")) return { left: 16, top: 180, width: 200, height: 80 }
+      return { left: 0, top: 0, width: 224, height: 280 }
+    })
+    const w = render(PetCompanion, { attachTo: document.body })
+    await flushPromises()
+    const hit = w.find(".vp-hit")
+    const menu = () => w.find('[role="menu"]')
+    expect(w.find(".vp-controls").exists()).toBe(false)
+    for (const pointerType of ["mouse", "touch"]) {
+      await hit.trigger("pointerenter", { pointerType })
+      hit.element.focus()
+      await flushPromises()
+      expect(menu().isVisible()).toBe(false)
+      await hit.trigger("pointerleave")
+    }
+    await frame(3000)
+    const hitStyle = hit.attributes("style")
+    expect(overlayHitRegions(w.element)).toEqual([[50, 160, 120, 90]])
+    const padding = new MouseEvent("contextmenu", { bubbles: true, cancelable: true })
+    w.find(".vp-drag").element.dispatchEvent(padding)
+    expect(padding.defaultPrevented).toBe(false)
+    expect(menu().isVisible()).toBe(false)
+    hit.element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 2 }))
+    hit.element.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, button: 2 }))
+    await flushPromises()
+    const event = new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+      clientX: 210,
+      clientY: 275,
+    })
+    hit.element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(true)
+    expect(menu().isVisible()).toBe(true)
+    expect(hit.attributes("aria-haspopup")).toBe("menu")
+    expect(hit.attributes("aria-expanded")).toBe("true")
+    expect(
+      menu()
+        .findAll('[role="menuitem"]')
+        .map((i) => i.text()),
+    ).toEqual(["Pet settings", "Hide pet"])
+    expect(document.activeElement).toBe(menu().find('[role="menuitem"]').element)
+    expect(getComputedStyle(menu().element).position).toBe("absolute")
+    expect(parseFloat(menu().element.style.left)).toBeCloseTo((16 / 224) * 100)
+    expect(parseFloat(menu().element.style.top)).toBeCloseTo((192 / 280) * 100)
+    expect(overlayHitRegions(w.element)).toEqual([
+      [50, 160, 120, 90],
+      [16, 180, 200, 80],
+    ])
+    expect(hit.attributes("style")).toBe(hitStyle)
+    expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+    expect(w.findComponent(PetSprite).emitted("drag-start")).toBeUndefined()
+    await menu().trigger("keydown", { key: "Escape" })
+    expect(menu().isVisible()).toBe(false)
+    expect(hit.attributes("aria-expanded")).toBe("false")
+    expect(document.activeElement).toBe(hit.element)
+    expect(overlayHitRegions(w.element)).toEqual([[50, 160, 120, 90]])
+    expect(host.overlayVisible[host.overlayId]).not.toBe(false)
+  },
+)
+
+it("supports menu keys, arrow navigation, existing actions, and dismissal without a backdrop", async () => {
+  const host = createMockHost({
+    host: { id: "keyboard-menu" },
+    overlayMode: "window",
+    owner: { state: state(), actions: { sprite: () => image } },
+  })
+  const w = render(PetCompanion, { attachTo: document.body })
+  await flushPromises()
+  const hit = w.find(".vp-hit")
+  const menu = () => w.find('[role="menu"]')
+  const open = async (key = "ContextMenu") => {
+    hit.element.focus()
+    await hit.trigger("keydown", { key, shiftKey: key === "F10" })
+    await flushPromises()
+    expect(menu().isVisible()).toBe(true)
+  }
+  await open("F10")
+  const items = menu().findAll('[role="menuitem"]')
+  const focusLast = vi.spyOn(items[1].element, "focus")
+  expect(document.activeElement).toBe(items[0].element)
+  for (const [key, index] of [
+    ["ArrowDown", 1],
+    ["ArrowDown", 0],
+    ["ArrowUp", 1],
+    ["Home", 0],
+    ["End", 1],
+  ]) {
+    await menu().trigger("keydown", { key })
+    expect(document.activeElement).toBe(items[index].element)
+  }
+  expect(focusLast.mock.calls.at(-1)[0]?.preventScroll).not.toBe(true)
+  menu().element.scrollTop = 120
+  await menu().trigger("keydown", { key: "Tab" })
+  expect(menu().isVisible()).toBe(false)
+  expect(document.activeElement).toBe(hit.element)
+  await open()
+  expect(menu().element.scrollTop).toBe(0)
+  const outside = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 })
+  document.body.dispatchEvent(outside)
+  await flushPromises()
+  expect(outside.defaultPrevented).toBe(false)
+  expect(menu().isVisible()).toBe(false)
+  await open()
+  window.dispatchEvent(new Event("blur"))
+  await flushPromises()
+  expect(menu().isVisible()).toBe(false)
+  await open()
+  hit.element.focus()
+  await flushPromises()
+  expect(menu().isVisible()).toBe(false)
+  await open()
+  vi.spyOn(document, "hidden", "get").mockReturnValue(true)
+  document.dispatchEvent(new Event("visibilitychange"))
+  await flushPromises()
+  expect(menu().isVisible()).toBe(false)
+  vi.spyOn(document, "hidden", "get").mockReturnValue(false)
+  await open()
+  host.state.host = { id: "new-menu-realm" }
+  await flushPromises()
+  expect(menu().isVisible()).toBe(false)
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
+  await menu().find('[aria-label="Pet settings"]').trigger("click")
+  expect(menu().isVisible()).toBe(false)
+  expect(host.openedTabs[0].section).toBe("ext:test-pkg/pets")
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
+  await menu().find('[aria-label="Hide pet"]').trigger("click")
+  expect(menu().isVisible()).toBe(false)
+  expect(host.overlayVisible[host.overlayId]).toBe(false)
+  const opening = w.vm.openMenu({
+    type: "contextmenu",
+    target: w.find(".vp-hit").element,
+    clientX: 100,
+    clientY: 200,
+    preventDefault() {},
+    stopPropagation() {},
+  })
+  w.unmount()
+  await expect(opening).resolves.toBeUndefined()
+  expect(resizeObservers.size).toBe(0)
+})
+
+it("accepts assistive activation without turning a post-drag pointer click into a wave", async () => {
+  const w = render(PetSprite, {
+    props: { atlas: { ...atlas, interactions: { waving: 4 } }, source: image, interactive: true },
+  })
+  const hit = w.find(".vp-hit")
+  hit.element.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }))
+  await flushPromises()
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  hit.element.dispatchEvent(new MouseEvent("click", { detail: 0, bubbles: true }))
+  await flushPromises()
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  await frame(2100)
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+})
+
+it("reconciles focus when feedback is removed even without a browser focusout", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+  const host = createMockHost({
+    host: { id: "removed-feedback" },
+    owner: { state: state(), actions: { sprite: () => image } },
+    work: work(0, "running"),
+  })
+  const w = render(PetCompanion, { attachTo: document.body })
+  await flushPromises()
+  host.state.work = work(0, "failed")
+  await flushPromises()
+  w.find(".vp-dismiss").element.focus()
+  await flushPromises()
+  const lost = (e) => e.stopImmediatePropagation()
+  w.element.addEventListener("focusout", lost, true)
+  host.state.work = work(0, "idle")
+  await flushPromises()
+  w.element.removeEventListener("focusout", lost, true)
+  vi.advanceTimersByTime(350)
+  await flushPromises()
+  expect(w.find('[role="menu"]').isVisible()).toBe(false)
+  expect(w.findComponent(PetSprite).props("gazeEnabled")).toBe(true)
+  host.state.work = work(1, "running")
+  await flushPromises()
+  host.state.work = work(1, "failed")
+  await flushPromises()
+  w.find(".vp-dismiss").element.focus()
+  await w.find(".vp-dismiss").trigger("click")
+  expect(document.activeElement).toBe(w.find(".vp-hit").element)
+})
+
+it("reserves the same feedback space for every work status", async () => {
+  const host = createMockHost({
+    host: { id: "stable-feedback" },
+    owner: { state: state(), actions: { sprite: () => image } },
+    work: work(),
+  })
+  const w = render(PetCompanion, { attachTo: document.body })
+  await flushPromises()
+  const slot = w.find(".vp-feedback").element
+  const initial = getComputedStyle(slot)
+  expect(initial.flexShrink).toBe("0")
+  expect(initial.height).not.toBe("auto")
+  const height = initial.height
+  for (const status of ["running", "waiting", "ready", "failed", "idle"]) {
+    host.state.work = work(1, status)
+    await flushPromises()
+    expect(w.find(".vp-feedback").element).toBe(slot)
+    expect(getComputedStyle(slot).height).toBe(height)
+  }
+  expect(w.find(".vp-bubble").exists()).toBe(false)
+  expect(w.find(".vp-sprite").exists()).toBe(true)
+})
+
+it("renders proximity gaze without changing work bubbles and suppresses it in settings or on controls", async () => {
+  let now = 0
+  performance.now.mockImplementation(() => now)
+  const rich = { ...atlas, gaze: { directions: 16 } }
+  const host = createMockHost({
+    host: { id: "gaze-host", userId: 1 },
+    owner: { state: state(rich), actions: { sprite: () => image } },
+    work: work(0, "running"),
+    pointer: { valid: true, pointerType: "mouse", x: 140, y: 50 },
+  })
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
+  })
+  const w = render(PetCompanion)
+  await flushPromises()
+  for (const callback of resizeObservers.values())
+    callback([{ contentRect: { width: 224, height: 200 } }])
+  await flushPromises()
+  now = 80
+  await frame(now)
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("gaze")
+  expect(w.find(".vp-sprite").element.style.backgroundPosition).toContain("-")
+  expect(w.find(".vp-bubble").text()).toContain("Processing")
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  window.dispatchEvent(new Event("blur"))
+  await flushPromises()
+  now = 160
+  await frame(now)
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("gaze")
+  host.state.pointer = { ...host.state.pointer, pointerType: "touch" }
+  await flushPromises()
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  const settings = render(PetSettings)
+  await flushPromises()
+  const toggle = settings.find('input[aria-label="Look toward the mouse"]')
+  await toggle.setValue(false)
+  const store = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new Error("Storage denied")
+  })
+  await toggle.setValue(true)
+  expect(toggle.element.checked).toBe(false)
+  expect(settings.find('[role="alert"]').text()).toContain("unchanged")
+  expect(w.findComponent(PetSprite).props("gazeEnabled")).toBe(false)
+  store.mockRestore()
+  await toggle.setValue(true)
+  expect(settings.find('[role="alert"]').exists()).toBe(false)
+  expect(w.findComponent(PetSprite).props("gazeEnabled")).toBe(true)
+  await toggle.setValue(false)
+  host.state.pointer = { valid: true, pointerType: "mouse", x: 140, y: 50 }
+  now = 1000
+  await frame(now)
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  host.state.host = { id: "gaze-host", userId: 2 }
+  await flushPromises()
+  now = 1080
+  await frame(now)
+  expect(w.find(".vp-sprite").attributes("data-action")).toBe("gaze")
+  expect(settings.find(".vp-sprite").attributes("data-action")).toBe("idle")
 })
 
 it("uses six-frame holds and a bounded session-start cue without replaying baselines", () => {
@@ -203,9 +624,10 @@ it("registers an overlay, follows session facts and keeps work bubble after the 
   expect(hiddenStyle.position).toBe("absolute")
   expect(hiddenStyle.top).toBe("0px")
   expect(hiddenStyle.left).toBe("0px")
-  expect(getComputedStyle(w.find(".vp-controls").element).position).not.toBe("absolute")
+  expect(w.find('[role="menu"]').isVisible()).toBe(false)
   expect(w.find(".vp-drag").classes()).not.toContain("kt-overlay-hit")
-  expect(w.find(".vp-sprite").classes()).toContain("kt-overlay-hit")
+  expect(w.find(".vp-sprite").classes()).not.toContain("kt-overlay-hit")
+  expect(w.find(".vp-hit").classes()).toContain("kt-overlay-hit")
   host.state.work = work(10, "running")
   await flushPromises()
   host.state.work = work(10, "ready")
@@ -224,8 +646,12 @@ it("registers an overlay, follows session facts and keeps work bubble after the 
   expect(w.find(".vp-bubble").exists()).toBe(false)
   host.state.locale = "en"
   await flushPromises()
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   await w.find("[aria-label='Hide pet']").trigger("click")
   expect(host.overlayVisible[host.overlayId]).toBe(false)
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   await w.find("[aria-label='Pet settings']").trigger("click")
   expect(host.openedTabs[0].section).toBe("ext:test-pkg/pets")
 })
@@ -263,17 +689,20 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   const action = () => w.find(".vp-sprite").attributes("data-action")
   const sprite = w.findComponent(PetSprite)
   expect(action()).toBe("waving")
-  expect(w.find(".vp-sprite").attributes("role")).toBe("button")
+  expect(w.find(".vp-hit").attributes("role")).toBe("button")
   now = 2100
   await frame(now)
   expect(action()).toBe("idle")
-  const hit = w.find(".vp-sprite").element
+  const hit = w.find(".vp-hit").element
+  vi.spyOn(hit, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 100,
+    height: 100,
+  })
   pointer(hit, "pointerenter")
   await flushPromises()
   expect(action()).toBe("jumping")
-  now = 2200
-  pointer(hit, "pointerenter")
-  await flushPromises()
   now = 4620
   await frame(now)
   expect(action()).toBe("idle")
@@ -289,26 +718,10 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   await flushPromises()
   expect(sprite.emitted("drag-start")).toHaveLength(1)
   expect(action()).toBe("running-right")
-  now = 4900
-  pointer(window, "pointermove", 63, 50)
-  await flushPromises()
-  expect(action()).toBe("running-right")
   pointer(window, "pointermove", 54, 50)
   await flushPromises()
   expect(action()).toBe("running-left")
-  now = 8080
-  await frame(now)
-  expect(action()).toBe("idle")
-  now = 8200
-  pointer(window, "pointermove", 45, 50)
-  await flushPromises()
-  expect(action()).toBe("idle")
-  now = 8300
-  pointer(window, "pointermove", 51, 50)
-  await flushPromises()
-  expect(action()).toBe("running-right")
-  expect(w.findComponent(PetSprite).vm.cell).toMatchObject({ row: 1, column: 0 })
-  pointer(window, "pointerup", 51, 50)
+  pointer(window, "pointerup", 54, 50)
   await flushPromises()
   expect(action()).toBe("idle")
   now = 8400
@@ -326,7 +739,7 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   pointer(hit, "pointerenter", 50, 50, 1, "touch")
   await flushPromises()
   expect(action()).toBe("idle")
-  await w.find(".vp-sprite").trigger("keydown", { key: "Enter" })
+  await w.find(".vp-hit").trigger("keydown", { key: "Enter" })
   expect(action()).toBe("waving")
   vi.spyOn(document, "hidden", "get").mockReturnValue(true)
   document.dispatchEvent(new Event("visibilitychange"))
@@ -336,6 +749,8 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   document.dispatchEvent(new Event("visibilitychange"))
   await flushPromises()
   expect(action()).toBe("idle")
+  await w.find(".vp-hit").trigger("contextmenu")
+  await flushPromises()
   await w.find('[aria-label="Pet settings"]').trigger("click")
   expect(action()).toBe("idle")
   w.unmount()
@@ -349,11 +764,26 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   await flushPromises()
   expect(reopened.find(".vp-sprite").attributes("data-action")).toBe("waving")
   const reSprite = reopened.findComponent(PetSprite)
-  pointer(reopened.find(".vp-sprite").element, "pointerdown")
+  pointer(reopened.find(".vp-hit").element, "pointerdown")
   reopened.unmount()
   pointer(window, "pointermove", 100, 50)
   pointer(window, "pointerup", 100, 50)
   expect(reSprite.emitted("drag-start")).toBeUndefined()
+  const desktopHost = createMockHost({
+    host: { id: "native-selection" },
+    overlayMode: "window",
+    owner: { state: state(rich), actions: { sprite: () => image } },
+  })
+  const desktop = render(PetCompanion)
+  await flushPromises()
+  expect(desktop.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  desktopHost.emit("state", state({ ...rich, key: "fresh-selection" }))
+  await flushPromises()
+  expect(desktop.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  desktop.unmount()
+  const resumed = render(PetCompanion)
+  await flushPromises()
+  expect(resumed.find(".vp-sprite").attributes("data-action")).toBe("idle")
 })
 
 it("drops old artwork after backend/selection changes and retries a failed image", async () => {
@@ -388,7 +818,7 @@ it("drops old artwork after backend/selection changes and retries a failed image
   await w.find("[role=alert] button").trigger("click")
   await flushPromises()
   expect(w.find(".vp-sprite").exists()).toBe(true)
-  expect(w.find(".vp-sprite").attributes("aria-label")).toBe("Test pet")
+  expect(w.find(".vp-hit").attributes("aria-label")).toBe("Test pet")
 })
 
 it("waits for browser decoding, retries failure without consuming greeting, and drops stale decode completions", async () => {
@@ -402,18 +832,25 @@ it("waits for browser decoding, retries failure without consuming greeting, and 
   const rich = { ...atlas, key: "decode-first", interactions: { waving: 4 } }
   const host = createMockHost({
     host: { id: "decode-host" },
-    owner: { state: state(rich), actions: { sprite: () => image } },
+    owner: { state: state(null), actions: { sprite: () => image } },
   })
   const w = render(PetCompanion)
   await flushPromises()
+  expect(host.state.overlayReady).toBe(false)
+  expect(decode).not.toHaveBeenCalled()
+  host.emit("state", state(rich))
+  await flushPromises()
   expect(w.find(".vp-sprite").exists()).toBe(false)
+  expect(host.state.overlayReady).toBe(false)
   expect(decode).toHaveBeenCalledWith(image)
   rejectDecode(Error("cannot decode"))
   await flushPromises()
   expect(w.find("[role=alert]").text()).toContain("Couldn't load")
+  expect(host.state.overlayReady).toBe(false)
   await w.find("[role=alert] button").trigger("click")
   await flushPromises()
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  expect(host.state.overlayReady).toBe(true)
   let finishDecode
   decode.mockImplementationOnce(
     () =>
@@ -423,6 +860,7 @@ it("waits for browser decoding, retries failure without consuming greeting, and 
   )
   host.emit("state", state({ ...rich, key: "late-decode" }))
   await flushPromises()
+  expect(host.state.overlayReady).toBe(false)
   expect(w.find(".vp-sprite").exists()).toBe(false)
   host.state.host = { id: "decode-other", url: "https://decode-other" }
   await flushPromises()
@@ -434,6 +872,10 @@ it("waits for browser decoding, retries failure without consuming greeting, and 
   const returned = render(PetCompanion)
   await flushPromises()
   expect(returned.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  expect(host.state.overlayReady).toBe(true)
+  host.emit("state", state(null))
+  await flushPromises()
+  expect(host.state.overlayReady).toBe(false)
 })
 
 it("invalidates confirmations and dispatched mutations when the backend changes", async () => {

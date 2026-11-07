@@ -33,6 +33,7 @@ import {
 import { useClusterStore } from "@/stores/cluster"
 import { useInstancesStore } from "@/stores/instances"
 import { useHostsStore } from "@/stores/hosts"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { useLocaleStore } from "@/stores/locale"
 import { useMessagesStore } from "@/stores/messages"
 import { useNotificationsStore } from "@/stores/notifications"
@@ -2220,6 +2221,7 @@ const _chatStoreOptions = {
     _instanceId: null,
     /** Saved-host identity of the current live binding; null denotes same-origin. */
     _instanceHostId: null,
+    _instanceRuntimeScope: getRuntimeScope(),
     /** Canonical graph id for the active instance. For terrarium-typed
      *  instances this is the routing key for ``terrariumAPI`` and the
      *  ``/ws/sessions/{gid}/creatures/{target}/chat`` URL. For solo
@@ -2502,7 +2504,9 @@ const _chatStoreOptions = {
     initForInstance(instance, options = {}) {
       const { initialTab = null, autoReconnect = true } = options
       const hostId = useHostsStore().activeHostId
-      const hostChanged = this._instanceHostId !== hostId
+      const runtimeScope = getRuntimeScope()
+      const hostChanged =
+        this._instanceHostId !== hostId || this._instanceRuntimeScope !== runtimeScope
       // A solo creature that grew via group_add_node is reported by
       // the backend as ``terrarium`` after the second creature joins.
       // Without this type-change check the chat store stays in
@@ -2540,6 +2544,7 @@ const _chatStoreOptions = {
       const generation = ++this._instanceGeneration
       this._instanceId = instance.id
       this._instanceHostId = hostId
+      this._instanceRuntimeScope = runtimeScope
       this._instanceGraphId = instance.graph_id || instance.id
       this._instanceType = instance.type
       this._autoReconnect = autoReconnect
@@ -6378,6 +6383,7 @@ const _chatStoreOptions = {
       this._instanceGeneration++
       this._instanceId = null
       this._instanceHostId = null
+      this._instanceRuntimeScope = null
       this._instanceGraphId = null
       this._instanceType = null
       this.tabs = []

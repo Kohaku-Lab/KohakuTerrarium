@@ -131,6 +131,7 @@ def parse_pet(archive: bytes) -> Pet:
             json.dumps(metadata, sort_keys=True).encode() + image
         ).hexdigest()
         metadata["interactions"] = interaction_frames(image)
+        metadata["gaze"] = gaze_frames(image)
         return Pet(digest, metadata, image, mime)
     except PetFormatError:
         raise
@@ -177,6 +178,28 @@ def interaction_frames(image: bytes) -> dict[str, int]:
             if occupied and occupied == list(range(len(occupied))):
                 result[action] = len(occupied)
     return result
+
+
+def gaze_frames(image: bytes) -> dict[str, int]:
+    """Detect a complete V2 set of sixteen directional poses."""
+    with Image.open(io.BytesIO(image)) as im:
+        if im.size != (1536, 2288):
+            return {}
+        visible = (
+            im.convert("RGBA").getchannel("A").point(lambda a: 255 if a >= 16 else 0)
+        )
+        for row in (9, 10):
+            for col in range(8):
+                if not visible.crop(
+                    (
+                        col * CELL_WIDTH,
+                        row * CELL_HEIGHT,
+                        (col + 1) * CELL_WIDTH,
+                        (row + 1) * CELL_HEIGHT,
+                    )
+                ).getbbox():
+                    return {}
+    return {"directions": 16}
 
 
 def _image_layout(image: bytes, version: int) -> tuple[dict, str]:

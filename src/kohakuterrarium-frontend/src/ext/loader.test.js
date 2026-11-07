@@ -26,6 +26,7 @@ import { registeredContributionKeys } from "@/ext/registry"
 import { toolRenderers } from "@/ext/renderers"
 import { contributionComponents, extState, findPackage } from "@/ext/state"
 import { useHostsStore } from "@/stores/hosts"
+import { useAuthStore } from "@/stores/auth"
 import { useLayoutStore } from "@/stores/layout"
 import { settingsSections } from "@/stores/settingsSectionRegistry"
 import { tabKinds } from "@/stores/tabKindRegistry"
@@ -175,6 +176,13 @@ describe("ui extension loader", () => {
     listing([pkg("alpha")])
     await reloadUiExtensions()
     expect(settingsSections.has("ext:alpha/s")).toBe(true)
+    const auth = useAuthStore()
+    const anonymous = currentHostKey()
+    auth.sameOriginUser = { id: 7 }
+    expect(currentHostKey()).not.toBe(anonymous)
+    const alice = currentHostKey()
+    auth.sameOriginUser = { id: 8 }
+    expect(currentHostKey()).not.toBe(alice)
     const hosts = useHostsStore()
     const id = hosts.addHost({ name: "remote", url: "https://remote.example" })
     hosts.setActive(id)

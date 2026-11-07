@@ -1568,6 +1568,13 @@ class TestApiIntegration:
 
         pet_source = Path(__file__).parents[2] / "examples/packages/virtual_pet"
         _catalog_packages_ops.install_package_op(str(pet_source), editable=True)
+        pet_listing = next(
+            p
+            for p in client.get("/api/extensions/ui").json()["packages"]
+            if p["package"] == "virtual-pet"
+        )
+        assert pet_listing["desktop_pet"] is True
+        assert pet_listing["contributes"][0]["overlay"]["surface"] == "window"
         ref = {"owner": "package:virtual-pet"}
         assert (
             client.post("/api/extensions/owner/state", json=ref).json()["state"]["pets"]
@@ -1592,10 +1599,12 @@ class TestApiIntegration:
             key = imported.json()["result"]["selected"]
             actions = {"running-right": 8, "running-left": 8, "waving": 4, "jumping": 5}
             assert imported.json()["result"]["pets"][0]["interactions"] == actions
+            assert imported.json()["result"]["pets"][0]["gaze"] == {"directions": 16}
             for socket in (settings_ws, overlay_ws):
                 published = socket.receive_json()["data"]
                 assert published["selected"] == key
                 assert published["pets"][0]["interactions"] == actions
+                assert published["pets"][0]["gaze"] == {"directions": 16}
             duplicate = client.post(
                 "/api/extensions/owner/call",
                 json={

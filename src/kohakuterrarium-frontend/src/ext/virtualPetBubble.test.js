@@ -132,6 +132,17 @@ it("establishes baselines on mount/focus/scope/reset and expires hidden time wit
   await nextTick()
   work.value = episode("ready", 1, "other")
   await nextTick()
+  work.value = { ...episode("ready", 10, "other"), baseline: "new-renderer" }
+  await nextTick()
+  expect(wrapper.text()).toBe("")
+  work.value = { ...episode("running", 11, "other"), baseline: "new-renderer" }
+  await nextTick()
+  work.value = { ...episode("ready", 11, "other"), baseline: "new-renderer" }
+  await nextTick()
+  expect(wrapper.text()).toBe("ready")
+  work.value = { ...work.value, baseline: "new-source-same-session" }
+  await nextTick()
+  expect(wrapper.text()).toBe("")
   wrapper.unmount()
   expect(vi.getTimerCount()).toBe(0)
 })

@@ -1,5 +1,6 @@
 import { createApp } from "vue"
 import { createPinia } from "pinia"
+import { startDesktopContext } from "@/ext/desktopContext"
 import { createRouter, createWebHistory } from "vue-router"
 import { routes } from "vue-router/auto-routes"
 import App from "./App.vue"
@@ -16,6 +17,7 @@ import { useThemeStore } from "@/stores/theme"
 import PopoutApp from "@/components/shell/PopoutApp.vue"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
 import { popoutScopeFromSearch } from "@/utils/popout"
+import { returnPopoutWindow } from "@/utils/hostBridge"
 import { ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
 import "element-plus/es/components/message/style/css"
@@ -95,6 +97,17 @@ async function bootstrap() {
     useThemeStore().init()
     useLocaleStore().init()
     installExternalLinkGuard()
+  }
+  const contextReady = await startDesktopContext(
+    overlayKey ? "overlay" : popoutScope ? "popout" : "main",
+    () => {
+      app.unmount()
+      void returnPopoutWindow()
+    },
+  )
+  if (contextReady === false) {
+    void returnPopoutWindow()
+    return
   }
   app.mount("#app")
   startUiExtensions()

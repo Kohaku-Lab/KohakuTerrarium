@@ -177,6 +177,15 @@ export const useHostsStore = defineStore("hosts", {
   },
 
   actions: {
+    /** Adopt credentials already persisted by another window without writing them back. */
+    reloadFromStorage() {
+      const state = _loadPersisted()
+      if (
+        JSON.stringify(state) !==
+        JSON.stringify({ hosts: this.hosts, activeHostId: this.activeHostId })
+      )
+        this.$patch(state)
+    },
     /** Add a host.  Returns the new host's id.  Duplicates (same
      *  normalised URL) replace the existing entry's name/token but
      *  keep the same id, so a re-add via QR doesn't accumulate.

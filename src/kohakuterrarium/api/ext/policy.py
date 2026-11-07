@@ -1,5 +1,6 @@
 """Which package UI is live on this host, and where its entry loads from."""
 
+import hashlib
 import os
 
 from kohakuterrarium.api.auth.config import AuthConfig
@@ -7,6 +8,35 @@ from kohakuterrarium.packages.slots.ui import UISlot
 from kohakuterrarium.studio.identity import ui_extensions
 
 UI_DEV_ENV = "KT_UI_DEV"
+DESKTOP_PET_DIGEST = "9dc44753d5e11064bf4517c195ca7de3bf9af27c9973bc61f42c235aee3d0824"
+
+
+def desktop_pet(slot: UISlot) -> bool:
+    """Identify the host-reviewed pet UI eligible for automatic desktop presentation."""
+    if (
+        slot.package != "virtual-pet"
+        or slot.ui_root != "ui"
+        or slot.entry != "index.js"
+    ):
+        return False
+    try:
+        paths = [
+            slot.package_root / "kohaku.yaml",
+            *sorted((slot.package_root / "ui").rglob("*")),
+        ]
+        digest = hashlib.sha256()
+        for path in paths:
+            if path.is_dir():
+                continue
+            if path.is_symlink() or path.stat().st_size > 512 * 1024:
+                return False
+            digest.update(path.relative_to(slot.package_root).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+            digest.update(b"\0")
+        return digest.hexdigest() == DESKTOP_PET_DIGEST
+    except OSError:
+        return False
 
 
 def default_enabled(auth_config: AuthConfig) -> bool:

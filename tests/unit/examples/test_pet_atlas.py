@@ -32,6 +32,7 @@ def test_atlas_layout_and_content_identity(version, rows, image_format):
     assert pet.metadata["rows"] == rows
     assert pet.metadata["frames"] == {"idle": 6, "running": 6}
     assert pet.metadata["interactions"] == {}
+    assert pet.metadata["gaze"] == {}
     rich = parse_pet(pet_archive(version=version, image_format=image_format))
     assert rich.metadata["interactions"] == {
         "running-right": 8,
@@ -39,8 +40,11 @@ def test_atlas_layout_and_content_identity(version, rows, image_format):
         "waving": 4,
         "jumping": 5,
     }
+    assert rich.metadata["gaze"] == ({"directions": 16} if version == 2 else {})
     legacy = {
-        key: value for key, value in rich.metadata.items() if key != "interactions"
+        key: value
+        for key, value in rich.metadata.items()
+        if key not in ("interactions", "gaze")
     }
     assert (
         rich.key
@@ -60,6 +64,14 @@ def test_atlas_layout_and_content_identity(version, rows, image_format):
         parse_pet(pet_archive(version=version, metadata={"displayName": "Other"})).key
         != pet.key
     )
+
+
+@pytest.mark.parametrize("directions", [(8, 7), (0, 8), (8, [0, 2, 3, 4, 5, 6, 7])])
+def test_incomplete_direction_rows_disable_only_gaze(directions):
+    pet = parse_pet(pet_archive(cells=[7, 8, 8, 4, 5, 8, 6, 6, 6, *directions]))
+    assert pet.metadata["gaze"] == {}
+    assert pet.metadata["frames"]["idle"] == 7
+    assert pet.metadata["interactions"]["jumping"] == 5
 
 
 @pytest.mark.parametrize(

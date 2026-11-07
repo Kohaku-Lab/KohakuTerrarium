@@ -1,3 +1,5 @@
+import { PetGaze } from "./gaze.js";
+
 const ACTIONS = {
   idle: { row: 0, holds: [1680, 660, 660, 840, 840, 1920] },
   running: { row: 7, holds: [120, 120, 120, 120, 120, 220] },
@@ -40,6 +42,7 @@ export function cellFor(atlas, action, elapsed, still = false) {
 export class PetPlayer {
   constructor(atlas) {
     this.atlas = atlas;
+    this.gaze = new PetGaze();
     this.work = null;
     this.feedbackStarted = null;
     this.feedbackDuration = periodFor(atlas, "running") * 3;
@@ -98,6 +101,7 @@ export class PetPlayer {
     if (click) this.cue("waving", now);
   }
   cancel() {
+    this.gaze.reset();
     this.interaction = null;
     this.pressed = false;
     this.dragStarted = null;
@@ -110,7 +114,8 @@ export class PetPlayer {
       work &&
       this.work &&
       work.sessionId === this.work.sessionId &&
-      work.hostId === this.work.hostId;
+      work.hostId === this.work.hostId &&
+      work.baseline === this.work.baseline;
     if (!sameSession || !work.busy || work.started < this.work.started)
       this.feedbackStarted = null;
     else if (
@@ -121,7 +126,11 @@ export class PetPlayer {
       this.feedbackStarted = now;
     this.work = work;
   }
-  tick(now, still = false) {
+  tick(now, still = false, pointer = null) {
+    const look = this.gaze.tick(
+      now,
+      !still && this.atlas.gaze?.directions === 16 ? pointer : null,
+    );
     if (still) {
       this.interaction = null;
       this.feedbackStarted = null;
@@ -143,12 +152,15 @@ export class PetPlayer {
         ? cue.action
         : running
           ? "running"
-          : "idle";
+          : look && !this.pressed
+            ? "gaze"
+            : "idle";
     if (action !== this.action) {
       this.started =
         this.feedbackStarted !== null && now >= deadline ? deadline : now;
       this.action = action;
     }
+    if (action === "gaze") return { ...look, action };
     return {
       ...cellFor(
         this.atlas,

@@ -14,13 +14,16 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, provide } from "vue"
+import { computed, onBeforeUnmount, onMounted, provide, watch } from "vue"
 
 import { hideOverlay, overlays } from "@/ext/overlays"
 import { windowLabel } from "@/ext/overlayWindows"
+import { installOverlayInput } from "@/ext/overlayInput"
+import { desktopContextConnected, relayedWork } from "@/ext/desktopContext"
+import { WORK_CONTEXT_KEY } from "@/ext/workContext"
 import { OVERLAY_INJECT_KEY, OVERLAY_MODE_INJECT_KEY } from "@/ext/sdk/keys"
 import { extState } from "@/ext/state"
-import { ackOverlayWindow, closeOverlayWindow, setOverlayHitRegions, startOverlayDrag } from "@/utils/hostBridge"
+import { ackOverlayWindow, closeOverlayWindow, presentOverlayWindow, startOverlayDrag } from "@/utils/hostBridge"
 
 const props = defineProps({
   overlayKey: { type: String, required: true },
@@ -28,44 +31,50 @@ const props = defineProps({
 
 provide(OVERLAY_INJECT_KEY, props.overlayKey)
 provide(OVERLAY_MODE_INJECT_KEY, "window")
+provide(WORK_CONTEXT_KEY, relayedWork)
 
-const overlay = computed(() => overlays.get(props.overlayKey) || null)
+const params = new URLSearchParams(window.location.search)
+const generation = params.get("kt_overlay_generation")
+const expectedHost = params.get("kt_overlay_host")
+const label = windowLabel(props.overlayKey)
+const bound = computed(() => !generation || (desktopContextConnected.value && expectedHost === extState.hostKey))
+const overlay = computed(() => (bound.value ? overlays.get(props.overlayKey) || null : null))
 const through = computed(() => overlay.value?.options.clickThrough === true)
-const HIT_REPORT_MS = 200
+watch(
+  () => [desktopContextConnected.value, extState.hostKey],
+  () => {
+    if (generation && (!desktopContextConnected.value || (extState.hostKey && expectedHost !== extState.hostKey))) void closeOverlayWindow(label)
+  },
+)
 
 function hideWindow() {
   hideOverlay(props.overlayKey)
-  return closeOverlayWindow(windowLabel(props.overlayKey))
+  return closeOverlayWindow(label)
 }
 
 function onBarDown(event) {
   if (event.button === 0) startOverlayDrag()
 }
 
-function hitRegions() {
-  return [...document.querySelectorAll(".kt-overlay-hit")].map((el) => {
-    const r = el.getBoundingClientRect()
-    return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]
-  })
+let disposeInput = () => {}
+function ready(event) {
+  if (generation && event.detail === props.overlayKey) void presentOverlayWindow(generation)
 }
-
-let timer = null
-let lastReport = ""
-function reportHitRegions() {
-  if (!through.value) return
-  const regions = hitRegions()
-  const encoded = JSON.stringify(regions)
-  if (encoded === lastReport) return
-  lastReport = encoded
-  setOverlayHitRegions(regions)
-}
+window.addEventListener("kt:overlay-content-ready", ready)
 
 onMounted(() => {
   document.documentElement.classList.add("kt-overlay-window-page")
   ackOverlayWindow()
-  timer = setInterval(reportHitRegions, HIT_REPORT_MS)
+  disposeInput = installOverlayInput(
+    () => through.value,
+    () => overlay.value?.options.desktopPet === true,
+  )
 })
-onBeforeUnmount(() => clearInterval(timer))
+onBeforeUnmount(() => {
+  disposeInput()
+  window.removeEventListener("kt:overlay-content-ready", ready)
+  document.documentElement.classList.remove("kt-overlay-window-page")
+})
 </script>
 
 <style>
@@ -80,8 +89,8 @@ html.kt-overlay-window-page #app {
 .kt-overlay-window {
   display: flex;
   flex-direction: column;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   color: var(--color-text, inherit);
 }

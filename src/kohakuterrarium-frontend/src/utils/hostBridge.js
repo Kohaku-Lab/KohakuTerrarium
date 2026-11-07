@@ -427,8 +427,27 @@ export function setOverlayBounds(x, y, width, height) {
 }
 
 /** Report the `[x, y, width, height]` rectangles of the calling overlay that catch the mouse. */
-export function setOverlayHitRegions(regions) {
-  return callBoolean("overlay_set_hit_regions", regions)
+export function setOverlayHitRegions(regions, input) {
+  return input === undefined
+    ? callBoolean("overlay_set_hit_regions", regions)
+    : callBoolean("overlay_set_hit_regions", regions, input)
+}
+
+/** Reveal decoded overlay content and acknowledge its current creation generation. */
+export function presentOverlayWindow(generation) {
+  return callBoolean("overlay_present", String(generation))
+}
+
+export function openOverlaySettings(section) {
+  return callBoolean("overlay_open_settings", String(section || ""))
+}
+
+export function resetOverlayWindow(spec) {
+  return callBoolean("reset_overlay_window", spec)
+}
+
+export function showOverlayWindow(label, generation) {
+  return callBoolean("show_overlay_window", String(label), String(generation))
 }
 
 /** Tell the shell the overlay page is running and could call a native command. */

@@ -57,6 +57,11 @@ async def test_shared_mutation_reopen_and_failure_atomicity(tmp_path):
     assert (tmp_path / f"{first.key}.png").read_bytes() == first.image
     legacy = json.loads((tmp_path / "index.json").read_text())
     for record in legacy["pets"].values():
+        record["metadata"].pop("gaze", None)
+    (tmp_path / "index.json").write_text(json.dumps(legacy))
+    gaze_upgraded = await PetLibrary(tmp_path).load()
+    assert gaze_upgraded.snapshot() == initial
+    for record in legacy["pets"].values():
         record["metadata"].pop("interactions", None)
     (tmp_path / "index.json").write_text(json.dumps(legacy))
     upgraded = await PetLibrary(tmp_path).load()
@@ -72,6 +77,10 @@ async def test_shared_mutation_reopen_and_failure_atomicity(tmp_path):
         next(p for p in damaged.snapshot()["pets"] if p["key"] == second.key)[
             "interactions"
         ]
+        == {}
+    )
+    assert (
+        next(p for p in damaged.snapshot()["pets"] if p["key"] == second.key)["gaze"]
         == {}
     )
     foreign = await PetLibrary(tmp_path / "other-user").load()

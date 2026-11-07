@@ -1,12 +1,23 @@
-import { mount } from "@vue/test-utils"
+import { parse } from "@vue/compiler-sfc"
+import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { nextTick, provide, defineComponent, h } from "vue"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import OverlayLayer from "@/ext/OverlayLayer.vue"
+import { desktopContextConnected } from "@/ext/desktopContext"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
+import overlayWindowSource from "@/ext/OverlayWindowApp.vue?raw"
 import { toggleHud } from "@/ext/hud"
-import { hideOverlay, isOverlayVisible, loadPlacements, setWindowAllowed } from "@/ext/overlays"
+import {
+  hideOverlay,
+  isOverlayVisible,
+  loadPlacements,
+  setWindowAllowed,
+  resetOverlay,
+  showOverlay,
+  windowPreference,
+} from "@/ext/overlays"
 import {
   OVERLAY_PARAM,
   WINDOW_LABEL_PREFIX,
@@ -15,6 +26,12 @@ import {
   syncOverlayWindows,
   windowActive,
   windowLabel,
+  refreshOverlayCapabilities,
+  receiveOverlayReady,
+  resetNativeOverlay,
+  retryOverlayWindow,
+  windowStates,
+  windowFailure,
 } from "@/ext/overlayWindows"
 import {
   provideContributionComponent,
@@ -46,6 +63,25 @@ function declare(overlay = {}) {
   extState.packages = [rec]
   registerPackageContributions(rec)
   provideContributionComponent("pets", "overlay", "cat", Pet)
+}
+
+function viewportContent(key) {
+  let surface
+  const Content = defineComponent({
+    setup() {
+      surface = useOverlay()
+      return () => null
+    },
+  })
+  const wrapper = mount(
+    defineComponent({
+      setup() {
+        provide(OVERLAY_INJECT_KEY, key)
+        return () => h(Content)
+      },
+    }),
+  )
+  return { surface, dispose: () => wrapper.unmount() }
 }
 
 function tauri() {
@@ -129,10 +165,24 @@ describe("native overlay windows", () => {
 
     hideOverlay(KEY)
     syncOverlayWindows()
+    await flushPromises()
     expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [label] })
+    invoke.mockClear()
+    expect(resetNativeOverlay(KEY)).toBe(true)
+    expect(invoke).not.toHaveBeenCalled()
+    showOverlay(KEY)
+    syncOverlayWindows()
+    await flushPromises()
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual([
+      "open_overlay_window",
+      "reset_overlay_window",
+    ])
+    hideOverlay(KEY)
+    syncOverlayWindows()
+    await flushPromises()
   })
 
-  it("opens the built-in HUD in a window without asking, and lists it in the app when there is no shell", () => {
+  it("opens the built-in HUD in a window without asking, and lists it in the app when there is no shell", async () => {
     expect(windowActive("hud")).toBe(false)
 
     const invoke = tauri()
@@ -151,7 +201,275 @@ describe("native overlay windows", () => {
 
     toggleHud()
     syncOverlayWindows()
+    await flushPromises()
     expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [windowLabel("hud")] })
+  })
+
+  it("defaults only the host-verified pet to desktop and waits for matching readiness", async () => {
+    const key = "ext:virtual-pet/pet"
+    const record = {
+      package: "virtual-pet",
+      desktop_pet: true,
+      contributes: [
+        {
+          kind: "overlay",
+          id: "pet",
+          owner: "package:virtual-pet",
+          overlay: { surface: "window" },
+        },
+      ],
+    }
+    const invoke = tauri()
+    invoke.mockImplementation(async (name) =>
+      name === "get_desktop_capabilities"
+        ? {
+            surface: "desktop",
+            protocol: 1,
+            overlayWindows: true,
+            overlayPointer: true,
+            overlayPresentation: 1,
+          }
+        : true,
+    )
+    extState.hostKey = "realm-a"
+    registerPackageContributions({ ...record, desktop_pet: false })
+    provideContributionComponent("virtual-pet", "overlay", "pet", Pet, {
+      desktopPet: true,
+      firstParty: true,
+    })
+    await refreshOverlayCapabilities()
+    expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
+    registerPackageContributions(record)
+    const viewport = viewportContent(key)
+    let request
+    vi.useFakeTimers()
+    try {
+      syncOverlayWindows()
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
+      expect(windowFailure(key)).toBe("")
+      let finishOpen
+      invoke.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOpen = resolve
+          }),
+      )
+      viewport.surface.ready()
+      const cancelled = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1]
+        .args[0]
+      expect(windowStates.get(key).phase).toBe("opening")
+      viewport.surface.ready(false)
+      expect(windowStates.has(key)).toBe(false)
+      await receiveOverlayReady({ detail: { key, generation: cancelled.generation } })
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(windowFailure(key)).toBe("")
+      expect(invoke.mock.calls.some(([name]) => name === "show_overlay_window")).toBe(false)
+      expect(invoke.mock.calls.some(([name]) => name === "close_overlay_window")).toBe(false)
+      viewport.surface.ready()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(1)
+      let finishClose
+      invoke.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishClose = resolve
+          }),
+      )
+      finishOpen(true)
+      await flushPromises()
+      expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [cancelled.label] })
+      syncOverlayWindows()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(1)
+      finishClose(true)
+      await flushPromises()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(2)
+      request = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+        .args[0]
+      expect(request.generation).not.toBe(cancelled.generation)
+      expect(windowActive(key)).toBe(false)
+      await receiveOverlayReady({ detail: { key, generation: cancelled.generation } })
+      expect(windowActive(key)).toBe(false)
+      expect(invoke.mock.calls.some(([name]) => name === "show_overlay_window")).toBe(false)
+      await receiveOverlayReady({ detail: { key, generation: request.generation } })
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(windowActive(key)).toBe(true)
+      expect(windowFailure(key)).toBe("")
+      expect(invoke).toHaveBeenCalledWith("show_overlay_window", {
+        args: [request.label, request.generation],
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    retryOverlayWindow(key)
+    await flushPromises()
+    const again = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+      .args[0]
+    let showed
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          showed = resolve
+        }),
+    )
+    const presenting = receiveOverlayReady({ detail: { key, generation: again.generation } })
+    await nextTick()
+    startOverlayWindows()
+    window.dispatchEvent(
+      new CustomEvent("kt:overlay-closed", { detail: { key, generation: again.generation } }),
+    )
+    showed(true)
+    await presenting
+    expect(windowActive(key)).toBe(false)
+    expect(windowStates.get(key).phase).toBe("failed")
+    setWindowAllowed(key, false)
+    resetOverlay(key)
+    expect(windowPreference(key)).toBe(false)
+    syncOverlayWindows()
+    await flushPromises()
+    expect(windowActive(key)).toBe(false)
+    expect(invoke).toHaveBeenCalledWith("close_overlay_window", { args: [request.label] })
+    setWindowAllowed(key, true)
+    syncOverlayWindows()
+    await flushPromises()
+    hideOverlay(key)
+    syncOverlayWindows()
+    const late = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+      .args[0]
+    await receiveOverlayReady({ detail: { key, generation: late.generation } })
+    expect(windowActive(key)).toBe(false)
+    await flushPromises()
+    resetNativeOverlay(key)
+    expect(isOverlayVisible(key)).toBe(false)
+    expect(windowPreference(key)).toBe(true)
+    loadPlacements("win-host")
+    showOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    const next = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+      .args[0]
+    const callStart = invoke.mock.calls.length
+    let finishReset
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishReset = resolve
+        }),
+    )
+    const resetting = receiveOverlayReady({ detail: { key, generation: next.generation } })
+    await flushPromises()
+    loadPlacements("win-host")
+    finishReset(true)
+    await resetting
+    expect(invoke.mock.calls.slice(callStart).map(([name]) => name)).toEqual([
+      "reset_overlay_window",
+      "show_overlay_window",
+    ])
+    expect(windowActive(key)).toBe(true)
+    hideOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    showOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    const restored = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+      .args[0]
+    const restoreStart = invoke.mock.calls.length
+    const restoring = receiveOverlayReady({ detail: { key, generation: restored.generation } })
+    expect(windowStates.get(key).phase).toBe("presenting")
+    viewport.dispose()
+    await restoring
+    expect(invoke.mock.calls.slice(restoreStart).map(([name]) => name)).toEqual([
+      "show_overlay_window",
+    ])
+    syncOverlayWindows()
+    expect(windowActive(key)).toBe(true)
+    hideOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    const opened = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").length
+    showOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(
+      opened,
+    )
+    const empty = viewportContent(key)
+    empty.surface.ready(false)
+    syncOverlayWindows()
+    expect(windowFailure(key)).toBe("")
+    expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(
+      opened,
+    )
+    hideOverlay(key)
+    empty.dispose()
+  })
+
+  it("falls back on timeout or open failure without endless retry and rejects late readiness", async () => {
+    vi.useFakeTimers()
+    const key = "ext:virtual-pet/pet"
+    try {
+      const invoke = tauri()
+      invoke.mockImplementation(async (name) =>
+        name === "get_desktop_capabilities"
+          ? {
+              surface: "desktop",
+              protocol: 1,
+              overlayWindows: true,
+              overlayPointer: true,
+              overlayPresentation: 1,
+            }
+          : true,
+      )
+      registerPackageContributions({
+        package: "virtual-pet",
+        desktop_pet: true,
+        contributes: [
+          {
+            kind: "overlay",
+            id: "pet",
+            owner: "package:virtual-pet",
+            overlay: { surface: "window" },
+          },
+        ],
+      })
+      const viewport = viewportContent(key)
+      viewport.surface.ready()
+      await refreshOverlayCapabilities()
+      const request = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1].args[0]
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(windowStates.get(key).phase).toBe("failed")
+      expect(windowFailure(key)).toContain("ready")
+      await receiveOverlayReady({ detail: { key, generation: request.generation } })
+      expect(windowActive(key)).toBe(false)
+      syncOverlayWindows()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(1)
+      invoke.mockImplementation(async (name) => name !== "open_overlay_window")
+      retryOverlayWindow(key)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(windowFailure(key)).toContain("Could not open")
+      viewport.surface.ready(false)
+      expect(windowFailure(key)).toContain("Could not open")
+      viewport.surface.ready()
+      syncOverlayWindows()
+      expect(windowFailure(key)).toContain("Could not open")
+      viewport.dispose()
+      hideOverlay(key)
+      syncOverlayWindows()
+      await vi.advanceTimersByTimeAsync(1)
+      showOverlay(key)
+      invoke.mockImplementation(async (name) =>
+        name === "get_desktop_capabilities"
+          ? { surface: "desktop", protocol: 1, overlayWindows: true }
+          : true,
+      )
+      await refreshOverlayCapabilities()
+      expect(windowActive(key)).toBe(false)
+      expect(windowFailure(key)).toContain("unavailable")
+      hideOverlay(key)
+      syncOverlayWindows()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("follows visibility and consent changes while running", async () => {
@@ -180,6 +498,26 @@ describe("OverlayWindowApp", () => {
     delete window.__TAURI_INTERNALS__
   })
 
+  it("fills its zoom-adjusted parent rather than viewport units", () => {
+    const style = document.createElement("style")
+    style.textContent = parse(overlayWindowSource)
+      .descriptor.styles.map((part) => part.content)
+      .join("\n")
+    let page
+    try {
+      document.head.append(style)
+      declare({ clickThrough: true })
+      tauri()
+      page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
+      const rootStyle = getComputedStyle(page.element)
+      expect(rootStyle.width).toBe("100%")
+      expect(rootStyle.height).toBe("100%")
+    } finally {
+      page?.unmount()
+      style.remove()
+    }
+  })
+
   it("acknowledges itself, draws the overlay with chrome and hides through the shell", async () => {
     declare()
     const invoke = tauri()
@@ -200,20 +538,51 @@ describe("OverlayWindowApp", () => {
   it("draws no chrome for a click-through overlay and reports its hit regions", async () => {
     vi.useFakeTimers()
     try {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        left: 10,
+        top: 20,
+        width: 30,
+        height: 40,
+      })
       declare({ clickThrough: true })
       const invoke = tauri()
       const page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
       expect(page.find('[data-test="overlay-window-bar"]').exists()).toBe(false)
-      vi.advanceTimersByTime(250)
+      await vi.advanceTimersByTimeAsync(250)
       const call = invoke.mock.calls.find(([name]) => name === "overlay_set_hit_regions")
       expect(call[1].args[0]).toHaveLength(1)
       const before = invoke.mock.calls.length
-      vi.advanceTimersByTime(1000)
+      await vi.advanceTimersByTimeAsync(1000)
       expect(invoke.mock.calls.length).toBe(before)
       page.unmount()
     } finally {
       vi.useRealTimers()
+      vi.restoreAllMocks()
     }
+  })
+
+  it("retires its original window on host rebinding or authority loss without showing the new user's pet", async () => {
+    const invoke = tauri()
+    declare()
+    desktopContextConnected.value = true
+    extState.hostKey = "alice"
+    window.history.replaceState(
+      {},
+      "",
+      `/?kt_overlay=${encodeURIComponent(KEY)}&kt_overlay_label=overlay-original&kt_overlay_generation=test&kt_overlay_host=alice`,
+    )
+    const page = mount(OverlayWindowApp, { props: { overlayKey: KEY } })
+    await nextTick()
+    expect(page.find(".pet").exists()).toBe(true)
+    extState.hostKey = "bob"
+    await nextTick()
+    expect(page.find(".pet").exists()).toBe(false)
+    expect(invoke).toHaveBeenCalledWith("close_overlay_window", { args: ["overlay-original"] })
+    desktopContextConnected.value = false
+    await nextTick()
+    expect(page.find(".pet").exists()).toBe(false)
+    page.unmount()
+    window.history.replaceState({}, "", "/")
   })
 
   it("says so when the overlay is not provided by any extension", () => {

@@ -26,6 +26,7 @@ import { hideOverlay, loadPlacements, showOverlay, toggleOverlay } from "@/ext/o
 import { registerOverlaySettings } from "@/ext/overlaySettings"
 import { contributionKey, extState, findPackage, runtime } from "@/ext/state"
 import { useHostsStore } from "@/stores/hosts"
+import { useAuthStore } from "@/stores/auth"
 import { useLocaleStore } from "@/stores/locale"
 import api from "@/utils/api"
 import { wsUrl } from "@/utils/wsUrl"
@@ -68,7 +69,11 @@ function hostBase() {
 /** Identity of the backend + user the current extension set belongs to. */
 export function currentHostKey() {
   const active = useHostsStore().activeHost
-  if (!active) return "same-origin"
+  if (!active) {
+    const user = useAuthStore().sameOriginUser
+    const identity = user?.id ?? user?.username
+    return identity ? `same-origin|${identity}` : "same-origin"
+  }
   return `${active.id}|${active.currentUser?.id ?? ""}`
 }
 

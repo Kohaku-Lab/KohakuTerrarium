@@ -7,7 +7,7 @@ export function getRuntimeScope() {
   const hosts = useHostsStore()
   const user = hosts.activeUser
   const auth = useAuthStore()
-  const sameOriginUser = auth.sameOriginUser
+  const sameOriginUser = hosts.activeHostId ? null : auth.sameOriginUser
   const userScope =
     user?.id ||
     user?.username ||
