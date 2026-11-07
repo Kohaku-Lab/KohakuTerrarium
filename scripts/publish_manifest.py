@@ -73,6 +73,8 @@ def _load_sidecars(artifacts_dir: Path) -> list[dict]:
         except (OSError, ValueError) as e:
             print(f"[publish] skipping {sidecar}: {e}", file=sys.stderr)
             continue
+        # the archive the sidecar sits beside (``<archive>.manifest.json``)
+        data.setdefault("_archive", sidecar.name.removesuffix(".manifest.json"))
         out.append(data)
     return out
 
@@ -119,8 +121,10 @@ def _artifact_url(prefix: str, sidecar: dict) -> str:
         f"kohakuterrarium-{sidecar['version']}-{sidecar['platform']}-py"
         f"{_py_minor(sidecar['py_abi'])}"
     )
-    # Published matrix artifacts use zstd; sidecars omit the archive suffix.
-    return f"{prefix.rstrip('/')}/{name}.tar.zst"
+    # the archive beside the sidecar decides the suffix (CI publishes zstd)
+    archive = sidecar.get("_archive") or ""
+    suffix = ".tar.gz" if archive.endswith(".tar.gz") else ".tar.zst"
+    return f"{prefix.rstrip('/')}/{name}{suffix}"
 
 
 def _py_minor(abi: str) -> str:

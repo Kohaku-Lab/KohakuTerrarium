@@ -14,7 +14,9 @@ verb is a thin client over :mod:`launcher.update_runner`:
 
 import argparse
 import importlib.metadata
+import shutil
 import sys
+from pathlib import Path
 
 from kohakuterrarium.launcher import settings as _launcher_settings
 from kohakuterrarium.launcher.feeds import (
@@ -22,6 +24,7 @@ from kohakuterrarium.launcher.feeds import (
     resolve_feed,
 )
 from kohakuterrarium.launcher.migration import is_launcher_install
+from kohakuterrarium.launcher.paths import site_packages_dir, terminal_dir, version_dir
 from kohakuterrarium.launcher.tree_ops import read_active_pointer
 from kohakuterrarium.launcher.update_runner import (
     probe_only,
@@ -131,8 +134,48 @@ def self_update_cli(args: argparse.Namespace) -> int:
     if result.skipped_reason == "up-to-date":
         _print(f"kt self-update: already on {result.version}; no change")
         return 0
+    refreshed = refresh_terminal_launcher()
+    if refreshed:
+        _print(f"kt self-update: launcher refreshed in {refreshed}")
     _print(f"kt self-update: updated to {result.version}; restart the app to use it")
     return 0
+
+
+def refresh_terminal_launcher() -> Path | None:
+    """The terminal install's launcher copy brought up to the new active release (the
+    desktop app's own copy is updated with the app); its directory, or None."""
+    bootstrap = terminal_dir() / "bootstrap"
+    ptr = read_active_pointer()
+    if ptr is None or not (bootstrap / "kohakuterrarium" / "launcher").is_dir():
+        return None
+    source = (
+        site_packages_dir(version_dir(ptr.version)) / "kohakuterrarium" / "launcher"
+    )
+    if not source.is_dir():
+        return None
+    target = bootstrap / "kohakuterrarium" / "launcher"
+    staged = target.with_name("launcher.new")
+    old = target.with_name("launcher.old")
+    try:
+        shutil.rmtree(staged, ignore_errors=True)
+        shutil.copytree(
+            source, staged, ignore=shutil.ignore_patterns("__pycache__", "android.py")
+        )
+        shutil.rmtree(old, ignore_errors=True)
+        target.rename(old)
+        try:
+            staged.rename(target)
+        except OSError:
+            old.rename(target)  # the previous launcher stays in place
+            raise
+    except OSError as exc:
+        shutil.rmtree(staged, ignore_errors=True)
+        _print(
+            f"kt self-update: the launcher copy was not refreshed ({exc}); it still works"
+        )
+        return None
+    shutil.rmtree(old, ignore_errors=True)
+    return bootstrap
 
 
 def add_self_update_subparser(subparsers) -> None:

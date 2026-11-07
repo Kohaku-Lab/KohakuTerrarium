@@ -267,7 +267,7 @@ jobs:
             --platform "${{ matrix.plat }}" \
             --py-abi "${{ matrix.abi }}" \
             --channel "${{ needs.meta.outputs.channel }}" \
-            --extras keychain \
+            --extras keychain,ktui \
             --out dist/release-trees/
 
       - uses: actions/upload-artifact@v4
@@ -275,10 +275,42 @@ jobs:
           name: release-tree-${{ matrix.plat }}-${{ matrix.abi }}
           path: dist/release-trees/
 
+  # ── Terminal runtime: the interpreter + launcher the one-line installers fetch ─
+  # Built on each platform: the launcher's dependencies are installed with the staged
+  # interpreter. Published next to the channel manifest with install.sh / install.ps1.
+  build-terminal-runtime:
+    needs: [meta]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, plat: linux-x64 }
+          - { os: ubuntu-22.04-arm, plat: linux-arm64 }
+          - { os: macos-latest, plat: macos-arm64 }
+          - { os: windows-latest, plat: win-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build terminal runtime
+        shell: bash
+        run: python packaging/terminal/build_runtime.py --platform "${{ matrix.plat }}" --out dist/terminal/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: terminal-runtime-${{ matrix.plat }}
+          path: dist/terminal/
+
   # ── Aggregate sidecars into channel manifests ─────────────────────
   publish-channel-manifests:
     if: ${{ !inputs.dry_run }}
-    needs: [meta, build-release-tree]
+    needs: [meta, build-release-tree, build-terminal-runtime]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -357,6 +389,26 @@ jobs:
               -R "${GITHUB_REPOSITORY}"
           fi
           gh release upload "${tag}" "${channel}.json" \
+            --clobber \
+            -R "${GITHUB_REPOSITORY}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: terminal-runtime
+          pattern: terminal-runtime-*
+          merge-multiple: true
+
+      - name: Publish the one-line installers and terminal runtimes
+        # Fixed URLs: .../releases/download/manifests-<channel>/install.sh (or .ps1) and the
+        # kt-runtime-<platform> archives they fetch, overwritten by every release.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag="manifests-${{ needs.meta.outputs.channel }}"
+          gh release upload "${tag}" \
+            packaging/terminal/install.sh packaging/terminal/install.ps1 \
+            terminal-runtime/kt-runtime-* \
             --clobber \
             -R "${GITHUB_REPOSITORY}"
 

@@ -12,6 +12,7 @@ def _write_sidecar(
     *,
     platform: str,
     commit_sha: str | None = "abcdef0123456789abcdef0123456789abcdef01",
+    suffix: str = ".tar.zst",
 ):
     payload = {
         "schema": 1,
@@ -26,7 +27,7 @@ def _write_sidecar(
     }
     if commit_sha is not None:
         payload["commit_sha"] = commit_sha
-    path = artifacts_dir / f"kohakuterrarium-{platform}.tar.zst.manifest.json"
+    path = artifacts_dir / f"kohakuterrarium-{platform}{suffix}.manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -60,6 +61,22 @@ def test_preserves_common_commit_sha(tmp_path):
 
     release = json.loads(out.read_text(encoding="utf-8"))["releases"][0]
     assert release["commit_sha"] == "abcdef0123456789abcdef0123456789abcdef01"
+
+
+def test_artifact_urls_follow_the_archive_beside_each_sidecar(tmp_path):
+    """CI publishes zstd; a .tar.gz mirror (or a local staging) gets .tar.gz URLs."""
+    artifacts_dir, out, cmd = _publish(tmp_path)
+    _write_sidecar(artifacts_dir, platform="linux-x64")
+    _write_sidecar(artifacts_dir, platform="win-x64", suffix=".tar.gz")
+
+    subprocess.run(cmd, cwd=REPO_ROOT, check=True, capture_output=True, text=True)
+
+    urls = {
+        a["platform"]: a["url"]
+        for a in json.loads(out.read_text(encoding="utf-8"))["releases"][0]["artifacts"]
+    }
+    assert urls["linux-x64"].endswith("-linux-x64-py3.13.tar.zst")
+    assert urls["win-x64"].endswith("-win-x64-py3.13.tar.gz")
 
 
 def test_missing_commit_sha_remains_compatible(tmp_path):
