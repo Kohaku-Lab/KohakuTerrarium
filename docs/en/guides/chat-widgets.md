@@ -97,12 +97,25 @@ one conformance file, `tests/fixtures/kt_ui_markup.json`.
 
 | Group | Types |
 |---|---|
-| Layout | `stack`, `grid`, `card`, `section`, `tabs` / `tab`, `divider` |
+| Layout | `stack`, `grid`, `card`, `section`, `tabs` / `tab`, `accordion`, `divider` |
 | Content | `text` (Markdown), `heading`, `badge`, `stat`, `kv`, `list`, `table`, `image`, `code` |
 | Data | `chart` (`bar`, `line`, `area`, `pie`, `scatter`), `diagram` (Mermaid source) |
 | Input | `number`, `slider`, `text_input`, `select`, `radio`, `toggle`, `checkbox`, `date` |
 | Action | `button` (`set` changes state, `send` posts a message), `form` (`send` with the values its inputs bind) |
 | Repeat | `each` (`items` expression, `as` name; adds `index`) |
+
+Each `accordion` is one collapsible panel with a required `title` and child
+components. Write several panels as siblings:
+
+```
+<ui>
+  <accordion title="One"><text>First</text></accordion>
+  <accordion title="Two"><text>Second</text></accordion>
+</ui>
+```
+
+An `items` attribute is not supported on `accordion`; entries such as
+`{title, content}` do not replace its title and children.
 
 Images accept only `data:image/...` URLs and same-origin paths, so a block
 cannot load a remote tracking pixel.
@@ -121,8 +134,11 @@ num`. Limits: 2 KB per expression, 10 000 evaluation steps, ranges of at most
 A block that does not convert or validate shows as an error box with its
 source; the rest of the reply is unaffected. On its next request the model
 gets one short note naming each failed block and its errors, for example
-`- block 2: root.children[0].value: is required`, so it can do better next
-time without an extra turn.
+`root.children[0].value: is required`. The note includes the props and,
+where available, a short example for up to three affected components.
+Validation paths identify the affected component even when it is nested or
+the error only names a missing property. Invalid attributes remain invalid;
+the model receives guidance for its next reply, not an automatic rewrite.
 
 ### In the terminal
 
