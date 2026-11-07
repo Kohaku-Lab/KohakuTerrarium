@@ -17,6 +17,7 @@ import { useThemeStore } from "@/stores/theme"
 import PopoutApp from "@/components/shell/PopoutApp.vue"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
 import { popoutScopeFromSearch } from "@/utils/popout"
+import { returnPopoutWindow } from "@/utils/hostBridge"
 import { ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
 import "element-plus/es/components/message/style/css"
@@ -97,7 +98,10 @@ async function bootstrap() {
     useLocaleStore().init()
     installExternalLinkGuard()
   }
-  await startDesktopContext(overlayKey ? "overlay" : popoutScope ? "popout" : "main")
+  await startDesktopContext(overlayKey ? "overlay" : popoutScope ? "popout" : "main", () => {
+    app.unmount()
+    void returnPopoutWindow()
+  })
   app.mount("#app")
   startUiExtensions()
   if (!secondary) startOverlayWindows()

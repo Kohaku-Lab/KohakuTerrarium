@@ -84,6 +84,7 @@ const loadedInstance = ref(null)
 const loading = ref(true)
 const confirmStop = ref(false)
 let refreshTimer = null
+let disposed = false
 
 // Lenient instance lookup: a tab opened pre-upgrade was keyed by
 // ``creature_id``, but after the graph grows past one member the
@@ -119,10 +120,11 @@ provide("panelProps", panelProps)
 
 async function loadInstance() {
   const id = target.value
-  if (!id) return
+  if (!id || disposed) return
   loading.value = true
   try {
     const loaded = await instances.fetchOne(id)
+    if (disposed) return
     if (!loaded) {
       loadedInstance.value = null
       return
@@ -200,6 +202,7 @@ onMounted(async () => {
   window.addEventListener("focus", markVisibleConversationRead)
   document.addEventListener("visibilitychange", markVisibleConversationRead)
   await loadInstance()
+  if (disposed) return
   refreshTimer = createVisibilityInterval(() => {
     // Return the promise so the interval skips ticks while a slow
     // refresh is still in flight instead of stacking requests.
@@ -209,6 +212,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  disposed = true
   window.removeEventListener("focus", markVisibleConversationRead)
   document.removeEventListener("visibilitychange", markVisibleConversationRead)
   if (refreshTimer) {

@@ -14,6 +14,87 @@ it("does not borrow the same-origin user for an anonymous remote backend", () =>
   expect(JSON.parse(contextRealm())).toEqual([id, "https://remote.test", ""])
 })
 
+it.each(["host", "token", "user"])(
+  "pins live popouts and closes them before %s rebinding",
+  async (change) => {
+    vi.useFakeTimers()
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const hosts = useHostsStore()
+    const a = hosts.addHost({ name: "A", url: "https://a.test", userToken: "token-a" })
+    const b = hosts.addHost({ name: "B", url: "https://b.test" })
+    hosts.setActive(a)
+    const initialRealm = contextRealm()
+    const net = network()
+    let port
+    vi.stubGlobal(
+      "BroadcastChannel",
+      class {
+        constructor() {
+          port = net.port()
+          return port
+        }
+      },
+    )
+    window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => true) }
+    const invalidated = vi.fn(() => expect(hosts.activeHostId).toBe(a))
+    try {
+      const starting = startDesktopContext("popout", invalidated)
+      const message = {
+        type: "context",
+        source: "main",
+        sequence: 1,
+        epoch: 10,
+        realm: initialRealm,
+        host: { hostId: a, user: null },
+        version: 1,
+        sent: Date.now(),
+        work: work("session-a"),
+      }
+      port.deliver(message)
+      await starting
+      expect(hosts.activeHostId).toBe(a)
+      expect(invalidated).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(10001)
+      port.deliver({ ...message, sequence: 2, sent: Date.now() })
+      expect(invalidated).not.toHaveBeenCalled()
+      const other = createPinia()
+      setActivePinia(other)
+      const mainHosts = useHostsStore()
+      if (change === "host") mainHosts.setActive(b)
+      else
+        mainHosts.setUserSession(a, {
+          userToken: "token-new",
+          user: change === "user" ? { id: 8, username: "bob" } : null,
+        })
+      const nextRealm = contextRealm()
+      const hostId = mainHosts.activeHostId
+      setActivePinia(pinia)
+      port.deliver({
+        ...message,
+        sequence: 3,
+        epoch: 11,
+        sent: Date.now(),
+        realm: nextRealm,
+        host: { hostId, user: null },
+      })
+      expect(invalidated).toHaveBeenCalledOnce()
+      expect(hosts.activeHostId).toBe(a)
+      expect(hosts.activeUserToken).toBe("token-a")
+      const traffic = net.traffic.length
+      await vi.advanceTimersByTimeAsync(2001)
+      port.deliver({ ...message, sequence: 4, epoch: 12, sent: Date.now() })
+      expect(net.traffic).toHaveLength(traffic)
+      expect(invalidated).toHaveBeenCalledOnce()
+    } finally {
+      window.dispatchEvent(new Event("pagehide"))
+      delete window.__TAURI_INTERNALS__
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  },
+)
+
 it("shares the user's role without credentials when bootstrapping secondary windows", async () => {
   vi.useFakeTimers()
   setActivePinia(createPinia())

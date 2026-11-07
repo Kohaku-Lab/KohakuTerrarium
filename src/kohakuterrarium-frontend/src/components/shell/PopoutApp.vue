@@ -18,11 +18,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from "vue"
+import { computed, onMounted, onUnmounted } from "vue"
 
 import AuthGate from "@/components/auth/AuthGate.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import AttachTab from "@/components/shell/tabs/AttachTab.vue"
+import { acquireScope, releaseScope } from "@/composables/useScope"
 import { useWindowChrome } from "@/composables/useWindowChrome"
 import { useInstancesStore } from "@/stores/instances"
 import { useDesktopPublisher } from "@/ext/desktopContext"
@@ -35,6 +36,8 @@ const props = defineProps({
   scope: { type: String, required: true },
 })
 
+acquireScope(props.scope)
+onUnmounted(() => releaseScope(props.scope))
 useDesktopPublisher(() => useWorkContext(props.scope))
 useWindowChrome()
 const { t } = useI18n()

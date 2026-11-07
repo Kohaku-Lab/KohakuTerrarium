@@ -49,6 +49,7 @@ export function createContextRelay({
   let seen = 0
   let epoch = 0
   let connected = mode === "main"
+  let closed = false
   const orders = new Map()
   function expireSource() {
     if (selected !== id && current && now() - selectedSeen > MAX_AGE) {
@@ -72,7 +73,7 @@ export function createContextRelay({
     })
   }
   function message({ data: m }) {
-    if (!m || typeof m !== "object") return
+    if (closed || !m || typeof m !== "object") return
     if (mode === "main") {
       expireSource()
       if (m.type === "request") {
@@ -111,18 +112,14 @@ export function createContextRelay({
       if (authority && authority !== m.source && m.epoch < epoch) return
       const before = realm()
       const epochChanged = epoch !== m.epoch
-      const baseline =
-        !connected ||
-        now() - selectedSeen > MAX_AGE ||
-        authority !== m.source ||
-        epochChanged ||
-        m.realm !== realm()
+      const identityChanged = authority !== m.source || epochChanged || m.realm !== before
+      const baseline = !connected || now() - selectedSeen > MAX_AGE || identityChanged
+      if (bind(m.host, { identityChanged }) === false) return
       authority = m.source
       epoch = m.epoch
       seen = m.sequence
       selectedSeen = now()
       connected = true
-      bind(m.host)
       const rebound = epochChanged || before !== realm() || m.realm !== before
       if (rebound && mode === "popout")
         window.dispatchEvent(new Event("kt:desktop-context-rebound"))
@@ -139,7 +136,7 @@ export function createContextRelay({
   if (mode !== "main") request()
   return {
     publish(work, claim = false) {
-      if (mode === "overlay") return
+      if (closed || mode === "overlay") return
       if (mode === "main") {
         if (claim) {
           if (selected !== id) version++
@@ -173,6 +170,7 @@ export function createContextRelay({
       if (mode === "main") broadcast()
     },
     tick() {
+      if (closed) return
       if (mode === "main") {
         expireSource()
         broadcast()
@@ -185,6 +183,7 @@ export function createContextRelay({
       }
     },
     close() {
+      closed = true
       port.removeEventListener("message", message)
       port.close()
     },
@@ -192,7 +191,7 @@ export function createContextRelay({
 }
 
 /** Start before extension loading so a secondary renderer adopts the main host/user identity. */
-export async function startDesktopContext(mode) {
+export async function startDesktopContext(mode, invalidate = () => {}) {
   if (hostKind() !== "tauri" || typeof BroadcastChannel !== "function" || connection) return
   let resolve
   let readyTimer
@@ -202,6 +201,7 @@ export async function startDesktopContext(mode) {
   })
   const port = new BroadcastChannel(CHANNEL)
   let baseline = 0
+  let bootstrapped = false
   connection = createContextRelay({
     mode,
     port,
@@ -213,7 +213,17 @@ export async function startDesktopContext(mode) {
         user: user ? { id: user.id, username: user.username, role: user.role } : null,
       }
     },
-    bind: bindHost,
+    bind: (message, info) => {
+      if (mode === "popout" && bootstrapped) {
+        if (info.identityChanged) {
+          connection?.close()
+          invalidate()
+          return false
+        }
+        return
+      }
+      bindHost(message)
+    },
     receive: (work, info) => {
       desktopContextConnected.value = info.connected !== false
       if (info.baseline) baseline++
@@ -242,6 +252,7 @@ export async function startDesktopContext(mode) {
   )
   if (mode !== "main") await ready
   else clearTimeout(readyTimer)
+  bootstrapped = true
 }
 
 export function useDesktopPublisher(getWork) {
