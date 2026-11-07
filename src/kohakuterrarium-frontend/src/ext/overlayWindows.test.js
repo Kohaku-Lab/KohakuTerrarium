@@ -1,3 +1,4 @@
+import { parse } from "@vue/compiler-sfc"
 import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { nextTick, provide, defineComponent, h } from "vue"
@@ -6,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import OverlayLayer from "@/ext/OverlayLayer.vue"
 import { desktopContextConnected } from "@/ext/desktopContext"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
+import overlayWindowSource from "@/ext/OverlayWindowApp.vue?raw"
 import { toggleHud } from "@/ext/hud"
 import {
   hideOverlay,
@@ -341,6 +343,29 @@ describe("OverlayWindowApp", () => {
   afterEach(() => {
     delete window.__TAURI_INTERNALS__
   })
+
+  it.each([false, true])(
+    "fills its zoom-adjusted parent rather than viewport units (through=%s)",
+    (clickThrough) => {
+      const style = document.createElement("style")
+      style.textContent = parse(overlayWindowSource)
+        .descriptor.styles.map((part) => part.content)
+        .join("\n")
+      let page
+      try {
+        document.head.append(style)
+        declare({ clickThrough })
+        tauri()
+        page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
+        const rootStyle = getComputedStyle(page.element)
+        expect(rootStyle.width).toBe("100%")
+        expect(rootStyle.height).toBe("100%")
+      } finally {
+        page?.unmount()
+        style.remove()
+      }
+    },
+  )
 
   it("acknowledges itself, draws the overlay with chrome and hides through the shell", async () => {
     declare()
