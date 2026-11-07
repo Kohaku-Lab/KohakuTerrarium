@@ -30,7 +30,7 @@ from kohakuterrarium.llm.codex.format import (
 )
 from kohakuterrarium.llm.codex.image.budget import (
     CODEX_BASE_URL,
-    initial_image_limit,
+    global_image_count,
     limit_codex_images,
     reported_image_limit,
 )
@@ -89,9 +89,7 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         self._retry_policy = RetryPolicy.from_value(retry_policy)
         self._api_key = api_key
         self._base_url = base_url
-        self._request_image_limit = initial_image_limit(
-            api_key, base_url or CODEX_BASE_URL
-        )
+        self._request_image_limit: int | None = None
         self.extra_body = dict(extra_body or {})
         self._ws_connection_options = ws_options.build_websocket_connection_options(
             self.extra_body.get("websocket_connection_options"), timeout=timeout
@@ -253,6 +251,7 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
             websocket_mode=self._websocket_mode,
         )
         clone._tokens = self._tokens
+        clone._request_image_limit = self._request_image_limit
         self.share_request_ceiling(clone)
         clone.extra_body = dict(self.extra_body)
         clone._token_lock = self._token_lock
@@ -402,10 +401,12 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
             else:
                 input_messages.append(msg)
 
+        requested = await asyncio.to_thread(global_image_count)
+        image_limit = min(requested, self._request_image_limit or requested)
         echo_options = dict(model=self.model, extra_body=deepcopy(self.extra_body))
         api_input = await asyncio.to_thread(
             to_responses_input,
-            limit_codex_images(input_messages, self._request_image_limit),
+            limit_codex_images(input_messages, image_limit),
             model=self.model,
             replay_reasoning=self.extra_body.get("responses_reasoning_replay"),
         )
