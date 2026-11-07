@@ -201,7 +201,7 @@ export const PetCompanion = {
               host.value.userId,
             ]);
             greet.value =
-              overlay.mode !== "window" &&
+              (overlay.mode !== "window" || appearances.has(realm)) &&
               appearances.get(realm) !== selected.value.key;
             appearances.set(realm, selected.value.key);
             source.value = image;

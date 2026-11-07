@@ -34,6 +34,40 @@ it("shares the user's role without credentials when bootstrapping secondary wind
     requester.postMessage({ type: "request" })
     expect(net.traffic.at(-1).host.user).toEqual({ id: 7, username: "alice", role: "admin" })
     expect(JSON.stringify(net.traffic)).not.toContain("never-relay")
+    const hosts = useHostsStore()
+    const id = hosts.addHost({
+      name: "Token host",
+      url: "https://token.test",
+      userToken: "private-old",
+    })
+    hosts.setActive(id)
+    const before = net.traffic.at(-1)
+    const queued = {
+      type: "work",
+      source: "pop",
+      sequence: 1,
+      authority: before.source,
+      epoch: before.epoch,
+      realm: contextRealm(),
+      claim: true,
+      sent: Date.now(),
+      work: work("old-token-session"),
+    }
+    requester.postMessage(queued)
+    expect(net.traffic.at(-1).work.sessionId).toBe("old-token-session")
+    hosts.setUserSession(id, { userToken: "private-new", user: null })
+    expect(net.traffic.at(-1).work).toBeNull()
+    requester.postMessage({ ...queued, sequence: 2 })
+    expect(net.traffic.filter((m) => m.type === "context").at(-1).work).toBeNull()
+    const fresh = net.traffic.filter((m) => m.type === "context").at(-1)
+    requester.postMessage({
+      ...queued,
+      sequence: 3,
+      epoch: fresh.epoch,
+      work: work("new-token-session"),
+    })
+    expect(net.traffic.at(-1).work.sessionId).toBe("new-token-session")
+    expect(JSON.stringify(net.traffic)).not.toMatch(/private-old|private-new/)
   } finally {
     window.dispatchEvent(new Event("pagehide"))
     requester.close()
@@ -124,11 +158,13 @@ it("reasserts focus when binding observes newer storage than a queued snapshot",
     sent: 100,
     work: work("old-user"),
   }
-  persisted = "new"
   port.deliver(message)
+  rebound.mockClear()
+  persisted = "new"
+  port.deliver({ ...message, sequence: 2 })
   expect(rebound).toHaveBeenCalledOnce()
   expect(received.mock.calls.at(-1)[0]).toBeNull()
-  port.deliver({ ...message, sequence: 2, realm: "new", work: work("new-user") })
+  port.deliver({ ...message, sequence: 3, realm: "new", work: work("new-user") })
   expect(received.mock.calls.at(-1)[0].sessionId).toBe("new-user")
   window.removeEventListener("kt:desktop-context-rebound", rebound)
   pop.close()
@@ -208,6 +244,8 @@ it("rejects stale or wrong-realm producers and baselines after source loss and r
   mainPort.deliver({
     type: "work",
     source: "wrong",
+    authority: stale.source,
+    epoch: stale.epoch,
     sequence: 4,
     realm: "realm-b",
     claim: true,

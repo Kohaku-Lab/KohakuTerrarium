@@ -34,8 +34,7 @@ import { overlayWindowsSupported } from "@/utils/hostBridge"
 const list = computed(() => [...overlays.values()])
 
 function reset(key) {
-  resetOverlay(key)
-  resetNativeOverlay(key)
+  if (!resetNativeOverlay(key)) resetOverlay(key)
 }
 
 function canUseWindow(overlay) {

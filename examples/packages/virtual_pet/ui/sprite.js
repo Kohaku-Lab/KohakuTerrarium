@@ -22,7 +22,7 @@ export const PetSprite = {
     menuEnabled: { type: Boolean, default: false },
     menuOpen: { type: Boolean, default: false },
   },
-  emits: ["drag-start", "drag-move", "hover"],
+  emits: ["drag-start", "drag-move"],
   setup(props, { emit }) {
     const stage = ref(null);
     const sprite = ref(null);
@@ -79,10 +79,7 @@ export const PetSprite = {
       () => props.native,
     );
     function enter(event) {
-      if (props.interactive && !props.menuOpen) {
-        emit("hover", true);
-        gestures.enter(event);
-      }
+      if (props.interactive && !props.menuOpen) gestures.enter(event);
     }
     function down(event) {
       if (props.interactive) gestures.down(event);
@@ -171,7 +168,6 @@ export const PetSprite = {
       (point) => {
         if (props.native && gestures.pointer && point?.captured)
           gestures.nativeMove(point);
-        if (!point?.valid) player.gaze.reset();
         refresh();
       },
     );
@@ -228,7 +224,7 @@ export const PetSprite = {
         :aria-label="interactive ? undefined : atlas.displayName" :data-action="cell.action">
         <div v-if="interactive" ref="hit" class="vp-hit kt-overlay-hit" :style="hitStyle" role="button" tabindex="0" :aria-label="atlas.displayName"
           :aria-haspopup="menuEnabled ? 'menu' : undefined" :aria-expanded="menuEnabled ? menuOpen : undefined" :aria-keyshortcuts="menuEnabled ? 'Shift+F10' : undefined"
-          @pointerenter="enter" @pointerleave="$emit('hover', false)" @pointerdown="down" @keydown="keydown" @click="activate"></div>
+          @pointerenter="enter" @pointerdown="down" @keydown="keydown" @click="activate"></div>
       </div>
     </div>`,
 };

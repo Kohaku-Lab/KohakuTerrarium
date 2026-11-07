@@ -48,6 +48,7 @@ export const messages = {
       "Choosing a pet does not unhide its overlay. Visibility and position are saved on this device by the host.",
     overlayControls: "Open overlay settings",
     gaze: "Look toward the mouse",
+    gazeSaveFailed: "Couldn't save this setting. Your preference is unchanged.",
     gazeHint:
       "Turn toward a nearby mouse. Respects reduced motion; saved on this device.",
     gazeUnavailable:
@@ -96,6 +97,7 @@ export const messages = {
       "选择宠物不会自动显示已隐藏的浮层。显示与位置由宿主保存在当前设备。",
     overlayControls: "打开浮层设置",
     gaze: "看向鼠标",
+    gazeSaveFailed: "无法保存此设置，原设置未改变。",
     gazeHint: "鼠标靠近时转头。遵循减少动态效果设置，仅保存在当前设备。",
     gazeUnavailable: "此宠物缺少完整的 V2 十六方向姿态。",
   },
@@ -143,6 +145,7 @@ export const messages = {
       "選擇寵物不會自動顯示已隱藏的浮層。顯示與位置由宿主儲存在目前裝置。",
     overlayControls: "開啟浮層設定",
     gaze: "看向滑鼠",
+    gazeSaveFailed: "無法儲存此設定，原設定未變更。",
     gazeHint: "滑鼠靠近時轉頭。遵循減少動態效果設定，僅儲存在目前裝置。",
     gazeUnavailable: "此寵物缺少完整的 V2 十六方向姿態。",
   },
@@ -193,6 +196,7 @@ export const messages = {
       "ペットを選んでも非表示のオーバーレイは再表示されません。表示と位置はこの端末に保存されます。",
     overlayControls: "オーバーレイ設定を開く",
     gaze: "マウスの方を向く",
+    gazeSaveFailed: "設定を保存できませんでした。以前の設定を維持します。",
     gazeHint:
       "近くのマウスに顔を向けます。視差効果の低減に従い、この端末に保存します。",
     gazeUnavailable: "このペットには V2 の16方向の姿勢が揃っていません。",
@@ -243,6 +247,8 @@ export const messages = {
       "Eine Auswahl zeigt ein ausgeblendetes Overlay nicht erneut an. Sichtbarkeit und Position werden auf diesem Gerät gespeichert.",
     overlayControls: "Overlay-Einstellungen öffnen",
     gaze: "Zur Maus schauen",
+    gazeSaveFailed:
+      "Die Einstellung konnte nicht gespeichert werden und bleibt unverändert.",
     gazeHint:
       "Zur nahen Maus schauen. Beachtet reduzierte Bewegung; auf diesem Gerät gespeichert.",
     gazeUnavailable:
@@ -294,6 +300,7 @@ export const messages = {
       "반려동물을 선택해도 숨겨진 오버레이는 표시되지 않습니다. 표시와 위치는 이 기기에 저장됩니다.",
     overlayControls: "오버레이 설정 열기",
     gaze: "마우스 바라보기",
+    gazeSaveFailed: "설정을 저장하지 못했습니다. 이전 설정이 유지됩니다.",
     gazeHint:
       "가까운 마우스를 바라봅니다. 동작 줄이기 설정을 따르며 이 기기에 저장됩니다.",
     gazeUnavailable:

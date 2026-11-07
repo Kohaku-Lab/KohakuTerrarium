@@ -2,11 +2,12 @@ import { computed, onUnmounted, readonly, shallowRef, watch } from "vue"
 
 import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { hostKind } from "@/utils/hostBridge"
 
 export const desktopWork = shallowRef(null)
 export const desktopContextConnected = shallowRef(false)
-const CHANNEL = "kt:desktop-context:v1"
+const CHANNEL = "kt:desktop-context:v2"
 const MAX_AGE = 10000
 let connection = null
 
@@ -81,6 +82,8 @@ export function createContextRelay({
       if (
         m.type !== "work" ||
         m.realm !== realm() ||
+        m.authority !== id ||
+        m.epoch !== epoch ||
         typeof m.source !== "string" ||
         !Number.isSafeInteger(m.sequence)
       )
@@ -107,10 +110,12 @@ export function createContextRelay({
       if (now() - m.sent > MAX_AGE || m.sent > now() + MAX_AGE) return
       if (authority && authority !== m.source && m.epoch < epoch) return
       const before = realm()
+      const epochChanged = epoch !== m.epoch
       const baseline =
         !connected ||
         now() - selectedSeen > MAX_AGE ||
         authority !== m.source ||
+        epochChanged ||
         m.realm !== realm()
       authority = m.source
       epoch = m.epoch
@@ -118,7 +123,7 @@ export function createContextRelay({
       selectedSeen = now()
       connected = true
       bind(m.host)
-      const rebound = before !== realm() || m.realm !== before
+      const rebound = epochChanged || before !== realm() || m.realm !== before
       if (rebound && mode === "popout")
         window.dispatchEvent(new Event("kt:desktop-context-rebound"))
       receive(m.realm === realm() ? m.work : null, {
@@ -150,6 +155,8 @@ export function createContextRelay({
         port.postMessage({
           type: "work",
           source: id,
+          authority,
+          epoch,
           sequence: ++sequence,
           realm: realm(),
           work,
@@ -158,6 +165,7 @@ export function createContextRelay({
         })
     },
     reset() {
+      epoch = Math.max(now(), epoch + 1)
       selected = id
       orders.clear()
       current = null
@@ -218,7 +226,9 @@ export async function startDesktopContext(mode) {
   })
   const timer = setInterval(() => connection?.tick(), 2000)
   const stopRealm =
-    mode === "main" ? watch(contextRealm, () => connection?.reset(), { flush: "sync" }) : () => {}
+    mode === "main"
+      ? watch([contextRealm, getRuntimeScope], () => connection?.reset(), { flush: "sync" })
+      : () => {}
   window.addEventListener(
     "pagehide",
     () => {

@@ -153,15 +153,78 @@ it("keeps separate capture identities across a coalesced release and repress", a
   dispose()
 })
 
-it("does not enable selective hit-testing in ordinary overlays on release or blur", async () => {
+it("serializes disabling and re-enabling unchanged hit regions without enabling ordinary overlays", async () => {
+  vi.useFakeTimers()
   const invoke = vi.fn(async () => true)
   window.__TAURI_INTERNALS__ = { invoke }
-  const dispose = installOverlayInput(() => false)
-  document.dispatchEvent(event("pointerup"))
-  window.dispatchEvent(event("blur"))
-  await flushPromises()
-  dispose()
-  expect(invoke).not.toHaveBeenCalled()
+  document.body.innerHTML = '<div class="kt-overlay-hit">pet</div>'
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(rect)
+  let through = false
+  const dispose = installOverlayInput(
+    () => through,
+    () => true,
+  )
+  try {
+    document.dispatchEvent(event("pointerup"))
+    window.dispatchEvent(event("blur"))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke).not.toHaveBeenCalled()
+    through = true
+    await vi.advanceTimersByTimeAsync(200)
+    const enabled = invoke.mock.calls.at(-1)[1].args
+    through = false
+    window.dispatchEvent(new Event("blur"))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke.mock.calls.at(-1)[1].args[1].enabled).toBe(false)
+    through = true
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke.mock.calls.at(-1)[1].args).toEqual(enabled)
+    let complete
+    const hold = () =>
+      invoke.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            complete = resolve
+          }),
+      )
+    hold()
+    document.body.firstElementChild.dispatchEvent(
+      event("pointerdown", { button: 0, clientX: 15, clientY: 25 }),
+    )
+    const before = invoke.mock.calls.length
+    through = false
+    document.dispatchEvent(event("pointerup"))
+    expect(invoke.mock.calls.length).toBe(before)
+    complete(true)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke.mock.calls.at(-1)[1].args[1].enabled).toBe(false)
+    through = true
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke.mock.calls.at(-1)[1].args).toEqual(enabled)
+    hold()
+    through = false
+    window.dispatchEvent(new Event("blur"))
+    const disabling = invoke.mock.calls.length
+    through = true
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke.mock.calls.length).toBe(disabling)
+    complete(true)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(invoke.mock.calls.at(-1)[1].args).toEqual(enabled)
+    hold()
+    document.body.firstElementChild.dispatchEvent(
+      event("pointerdown", { button: 0, clientX: 15, clientY: 25 }),
+    )
+    const disposing = invoke.mock.calls.length
+    dispose()
+    expect(invoke.mock.calls.length).toBe(disposing)
+    complete(true)
+    await flushPromises()
+    expect(invoke.mock.calls.at(-1)[1].args[1].enabled).toBe(false)
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    dispose()
+  }
 })
 
 it("releases native input if the captured sprite is removed", async () => {

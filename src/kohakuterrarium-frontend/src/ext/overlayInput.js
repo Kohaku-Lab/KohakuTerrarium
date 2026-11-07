@@ -78,16 +78,6 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
   let capturedTarget = null
   let press = null
   let reported = false
-  function resetNative() {
-    if (!reported) return
-    reported = false
-    void setOverlayHitRegions([], {
-      captured: false,
-      dragging: false,
-      pointer: false,
-      enabled: false,
-    })
-  }
   const received = (event) => {
     lastPointer = performance.now()
     desktopPointer.value = event.detail?.valid
@@ -100,27 +90,35 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
       : null
   }
   async function flush() {
-    if (!through()) {
-      resetNative()
-      return
-    }
     dirty = true
-    if (busy || disposed) return
+    if (busy) return
     busy = true
     try {
-      while (dirty && !disposed) {
+      while (dirty) {
         dirty = false
-        const regions = overlayHitRegions()
-        input.pointer = pointerEnabled() && !document.hidden
-        const state = { ...input, press, width: window.innerWidth, height: window.innerHeight }
+        const enabled = !disposed && through()
+        if (!enabled) {
+          capturedTarget = null
+          press = null
+          Object.assign(input, { captured: false, dragging: false, pointer: false })
+          desktopPointer.value = null
+          if (!reported) continue
+        }
+        const regions = enabled ? overlayHitRegions() : []
+        input.pointer = enabled && pointerEnabled() && !document.hidden
+        const state = enabled
+          ? { ...input, press, width: window.innerWidth, height: window.innerHeight }
+          : { ...input, enabled: false }
         const encoded = JSON.stringify([regions, state])
         if (last === encoded && !input.captured) continue
-        reported = true
-        if (await setOverlayHitRegions(regions, state)) last = encoded
+        if (enabled) reported = true
+        if (await setOverlayHitRegions(regions, state)) {
+          last = encoded
+          reported = enabled
+        }
       }
     } finally {
       busy = false
-      if (disposed) resetNative()
     }
   }
   const release = () => {
@@ -156,7 +154,7 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
   const tick = () => {
     if (capturedTarget && !capturedTarget.isConnected) release()
     if (desktopPointer.value && performance.now() - lastPointer > 1000) desktopPointer.value = null
-    if (through()) void flush()
+    void flush()
   }
   report = () => {
     void flush()
@@ -191,6 +189,6 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
     Object.assign(input, { captured: false, dragging: false, pointer: false })
     desktopPointer.value = null
     report = () => {}
-    if (!busy) resetNative()
+    void flush()
   }
 }

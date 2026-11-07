@@ -206,13 +206,19 @@ export function beginDrag(key, event, mode = "move") {
 }
 
 /** Forget the saved position and size of one overlay. */
-export function resetOverlay(key) {
-  const { visible, windowAllowed } = placement(key)
+export function resetOverlay(key, native = false) {
+  const { visible, windowAllowed, nativeReset } = placement(key)
   const kept = {}
   if (typeof visible === "boolean") kept.visible = visible
   if (typeof windowAllowed === "boolean") kept.windowAllowed = windowAllowed
+  if (native || nativeReset) kept.nativeReset = native ? crypto.randomUUID() : nativeReset
   placements[key] = kept
   writeStorage()
+}
+
+/** Acknowledge a native reset only if its placement request is still current. */
+export function completeNativeReset(key, requested) {
+  if (placements[key]?.nativeReset === requested) patch(key, { nativeReset: false })
 }
 
 export function resetAllOverlays() {

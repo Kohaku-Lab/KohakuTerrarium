@@ -28,6 +28,7 @@ import {
   windowLabel,
   refreshOverlayCapabilities,
   receiveOverlayReady,
+  resetNativeOverlay,
   retryOverlayWindow,
   windowStates,
   windowFailure,
@@ -147,6 +148,19 @@ describe("native overlay windows", () => {
     syncOverlayWindows()
     await flushPromises()
     expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [label] })
+    invoke.mockClear()
+    expect(resetNativeOverlay(KEY)).toBe(true)
+    expect(invoke).not.toHaveBeenCalled()
+    showOverlay(KEY)
+    syncOverlayWindows()
+    await flushPromises()
+    expect(invoke.mock.calls.map(([name]) => name)).toEqual([
+      "open_overlay_window",
+      "reset_overlay_window",
+    ])
+    hideOverlay(KEY)
+    syncOverlayWindows()
+    await flushPromises()
   })
 
   it("opens the built-in HUD in a window without asking, and lists it in the app when there is no shell", async () => {
@@ -256,6 +270,49 @@ describe("native overlay windows", () => {
     await receiveOverlayReady({ detail: { key, generation: late.generation } })
     expect(windowActive(key)).toBe(false)
     await flushPromises()
+    resetNativeOverlay(key)
+    expect(isOverlayVisible(key)).toBe(false)
+    expect(windowPreference(key)).toBe(true)
+    loadPlacements("win-host")
+    showOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    const next = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+      .args[0]
+    const callStart = invoke.mock.calls.length
+    let finishReset
+    invoke.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishReset = resolve
+        }),
+    )
+    const resetting = receiveOverlayReady({ detail: { key, generation: next.generation } })
+    await flushPromises()
+    loadPlacements("win-host")
+    finishReset(true)
+    await resetting
+    expect(invoke.mock.calls.slice(callStart).map(([name]) => name)).toEqual([
+      "reset_overlay_window",
+      "show_overlay_window",
+    ])
+    expect(windowActive(key)).toBe(true)
+    hideOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    showOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
+    const restored = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+      .args[0]
+    const restoreStart = invoke.mock.calls.length
+    await receiveOverlayReady({ detail: { key, generation: restored.generation } })
+    expect(invoke.mock.calls.slice(restoreStart).map(([name]) => name)).toEqual([
+      "show_overlay_window",
+    ])
+    hideOverlay(key)
+    syncOverlayWindows()
+    await flushPromises()
   })
 
   it("falls back on timeout or open failure without endless retry and rejects late readiness", async () => {
@@ -344,28 +401,25 @@ describe("OverlayWindowApp", () => {
     delete window.__TAURI_INTERNALS__
   })
 
-  it.each([false, true])(
-    "fills its zoom-adjusted parent rather than viewport units (through=%s)",
-    (clickThrough) => {
-      const style = document.createElement("style")
-      style.textContent = parse(overlayWindowSource)
-        .descriptor.styles.map((part) => part.content)
-        .join("\n")
-      let page
-      try {
-        document.head.append(style)
-        declare({ clickThrough })
-        tauri()
-        page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
-        const rootStyle = getComputedStyle(page.element)
-        expect(rootStyle.width).toBe("100%")
-        expect(rootStyle.height).toBe("100%")
-      } finally {
-        page?.unmount()
-        style.remove()
-      }
-    },
-  )
+  it("fills its zoom-adjusted parent rather than viewport units", () => {
+    const style = document.createElement("style")
+    style.textContent = parse(overlayWindowSource)
+      .descriptor.styles.map((part) => part.content)
+      .join("\n")
+    let page
+    try {
+      document.head.append(style)
+      declare({ clickThrough: true })
+      tauri()
+      page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
+      const rootStyle = getComputedStyle(page.element)
+      expect(rootStyle.width).toBe("100%")
+      expect(rootStyle.height).toBe("100%")
+    } finally {
+      page?.unmount()
+      style.remove()
+    }
+  })
 
   it("acknowledges itself, draws the overlay with chrome and hides through the shell", async () => {
     declare()

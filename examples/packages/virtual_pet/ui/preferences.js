@@ -23,13 +23,14 @@ export function usePetPreferences() {
     }
   }
   function setGaze(enabled) {
-    gazeEnabled.value = Boolean(enabled);
     try {
-      localStorage.setItem(key.value, String(gazeEnabled.value));
+      localStorage.setItem(key.value, String(Boolean(enabled)));
     } catch {
-      return;
+      return false;
     }
+    gazeEnabled.value = Boolean(enabled);
     window.dispatchEvent(new Event(EVENT));
+    return true;
   }
   watch(key, reload, { immediate: true });
   window.addEventListener("storage", reload);

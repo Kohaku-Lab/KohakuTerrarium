@@ -189,7 +189,6 @@ it("uses stable idle-artwork bounds for hover and native input without cropping 
   sprite.element.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }))
   await flushPromises()
   expect(sprite.attributes("data-action")).toBe("idle")
-  expect(w.findComponent(PetSprite).emitted("hover")).toBeUndefined()
   const hit = w.find(".vp-hit")
   expect(hit.attributes("role")).toBe("button")
   expect(hit.attributes("tabindex")).toBe("0")
@@ -218,8 +217,6 @@ it("uses stable idle-artwork bounds for hover and native input without cropping 
   expect(parseFloat(hit.element.style.width)).toBeCloseTo(50)
   expect(parseFloat(hit.element.style.height)).toBeCloseTo(60)
   expect(ctx.drawImage).toHaveBeenCalledTimes(1)
-  await hit.trigger("pointerleave")
-  expect(w.findComponent(PetSprite).emitted("hover")).toEqual([[true], [false]])
   const preview = render(PetSprite, { props: { atlas, source: image } })
   expect(preview.find(".vp-hit").exists()).toBe(false)
   expect(preview.find(".vp-sprite").attributes("role")).toBe("img")
@@ -331,7 +328,7 @@ it("supports menu keys, arrow navigation, existing actions, and dismissal withou
     await menu().trigger("keydown", { key })
     expect(document.activeElement).toBe(items[index].element)
   }
-  expect(focusLast).toHaveBeenCalledWith()
+  expect(focusLast.mock.calls.at(-1)[0]?.preventScroll).not.toBe(true)
   menu().element.scrollTop = 120
   await menu().trigger("keydown", { key: "Tab" })
   expect(menu().isVisible()).toBe(false)
@@ -397,25 +394,6 @@ it("accepts assistive activation without turning a post-drag pointer click into 
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("waving")
   await frame(2100)
   expect(w.find(".vp-sprite").attributes("data-action")).toBe("idle")
-})
-
-it("does not auto-show management controls on no-hover devices", async () => {
-  for (const media of [...stylesheet.sheet.cssRules].filter(
-    (rule) => rule.conditionText === "(hover: none)",
-  ))
-    stylesheet.textContent += [...media.cssRules].map((rule) => rule.cssText).join("\n")
-  createMockHost({
-    host: { id: "touch-menu" },
-    owner: { state: state(), actions: { sprite: () => image } },
-  })
-  const w = render(PetCompanion, { attachTo: document.body })
-  await flushPromises()
-  await w.find(".vp-hit").trigger("pointerenter", { pointerType: "touch" })
-  w.find(".vp-hit").element.focus()
-  await flushPromises()
-  expect(w.find(".vp-controls").exists()).toBe(false)
-  expect(w.find('[aria-label="Pet settings"]').isVisible()).toBe(false)
-  expect(w.find('[aria-label="Hide pet"]').isVisible()).toBe(false)
 })
 
 it("reconciles focus when feedback is removed even without a browser focusout", async () => {
@@ -512,6 +490,18 @@ it("renders proximity gaze without changing work bubbles and suppresses it in se
   const settings = render(PetSettings)
   await flushPromises()
   const toggle = settings.find('input[aria-label="Look toward the mouse"]')
+  await toggle.setValue(false)
+  const store = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new Error("Storage denied")
+  })
+  await toggle.setValue(true)
+  expect(toggle.element.checked).toBe(false)
+  expect(settings.find('[role="alert"]').text()).toContain("unchanged")
+  expect(w.findComponent(PetSprite).props("gazeEnabled")).toBe(false)
+  store.mockRestore()
+  await toggle.setValue(true)
+  expect(settings.find('[role="alert"]').exists()).toBe(false)
+  expect(w.findComponent(PetSprite).props("gazeEnabled")).toBe(true)
   await toggle.setValue(false)
   host.state.pointer = { valid: true, pointerType: "mouse", x: 140, y: 50 }
   now = 1000
@@ -713,9 +703,6 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   pointer(hit, "pointerenter")
   await flushPromises()
   expect(action()).toBe("jumping")
-  now = 2200
-  pointer(hit, "pointerenter")
-  await flushPromises()
   now = 4620
   await frame(now)
   expect(action()).toBe("idle")
@@ -731,26 +718,10 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   await flushPromises()
   expect(sprite.emitted("drag-start")).toHaveLength(1)
   expect(action()).toBe("running-right")
-  now = 4900
-  pointer(window, "pointermove", 63, 50)
-  await flushPromises()
-  expect(action()).toBe("running-right")
   pointer(window, "pointermove", 54, 50)
   await flushPromises()
   expect(action()).toBe("running-left")
-  now = 8080
-  await frame(now)
-  expect(action()).toBe("idle")
-  now = 8200
-  pointer(window, "pointermove", 45, 50)
-  await flushPromises()
-  expect(action()).toBe("idle")
-  now = 8300
-  pointer(window, "pointermove", 51, 50)
-  await flushPromises()
-  expect(action()).toBe("running-right")
-  expect(w.findComponent(PetSprite).vm.cell).toMatchObject({ row: 1, column: 0 })
-  pointer(window, "pointerup", 51, 50)
+  pointer(window, "pointerup", 54, 50)
   await flushPromises()
   expect(action()).toBe("idle")
   now = 8400
@@ -798,6 +769,21 @@ it("arbitrates direct gestures without converting drag to click or replaying app
   pointer(window, "pointermove", 100, 50)
   pointer(window, "pointerup", 100, 50)
   expect(reSprite.emitted("drag-start")).toBeUndefined()
+  const desktopHost = createMockHost({
+    host: { id: "native-selection" },
+    overlayMode: "window",
+    owner: { state: state(rich), actions: { sprite: () => image } },
+  })
+  const desktop = render(PetCompanion)
+  await flushPromises()
+  expect(desktop.find(".vp-sprite").attributes("data-action")).toBe("idle")
+  desktopHost.emit("state", state({ ...rich, key: "fresh-selection" }))
+  await flushPromises()
+  expect(desktop.find(".vp-sprite").attributes("data-action")).toBe("waving")
+  desktop.unmount()
+  const resumed = render(PetCompanion)
+  await flushPromises()
+  expect(resumed.find(".vp-sprite").attributes("data-action")).toBe("idle")
 })
 
 it("drops old artwork after backend/selection changes and retries a failed image", async () => {

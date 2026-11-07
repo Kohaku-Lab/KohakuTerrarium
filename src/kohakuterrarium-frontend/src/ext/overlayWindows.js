@@ -2,10 +2,13 @@
 import { nextTick, reactive, shallowRef, watch } from "vue"
 
 import {
+  completeNativeReset,
   isOverlayVisible,
   isPlacementStorageKey,
   isWindowAllowed,
   overlays,
+  placements,
+  resetOverlay,
   windowPreference,
   reloadPlacements,
 } from "@/ext/overlays"
@@ -126,6 +129,20 @@ export async function receiveOverlayReady(event) {
   windowStates.set(key, { phase: "presenting", generation: id })
   await nextTick()
   if (open.get(label) !== entry || !desired(overlays.get(key)) || !isOverlayVisible(key)) return
+  if (placements[key]?.nativeReset) {
+    const reset = await applyNativeReset(overlays.get(key), label)
+    if (
+      open.get(label) !== entry ||
+      windowStates.get(key)?.phase !== "presenting" ||
+      !desired(overlays.get(key)) ||
+      !isOverlayVisible(key)
+    )
+      return
+    if (!reset) {
+      fail(label, entry, "Desktop position reset failed. Using in-app display; retry desktop.")
+      return
+    }
+  }
   const ok = await showOverlayWindow(label, id)
   if (open.get(label) !== entry || windowStates.get(key)?.phase !== "presenting") return
   if (ok) {
@@ -135,10 +152,20 @@ export async function receiveOverlayReady(event) {
     fail(label, entry, "Desktop presentation failed. Using in-app display; retry or choose in-app.")
 }
 
+async function applyNativeReset(overlay, label) {
+  const requested = placements[overlay.key]?.nativeReset
+  if (!requested) return true
+  const ok = await resetOverlayWindow({ ...spec(overlay), label })
+  if (ok) completeNativeReset(overlay.key, requested)
+  return ok
+}
+
 export function resetNativeOverlay(key) {
   const overlay = overlays.get(key)
-  if (overlay && windowActive(key)) return resetOverlayWindow(spec(overlay))
-  return false
+  if (!overlay || !desired(overlay)) return false
+  resetOverlay(key, true)
+  if (isOverlayVisible(key) && windowActive(key)) void applyNativeReset(overlay, windowLabel(key))
+  return true
 }
 
 export function retryOverlayWindow(key) {
@@ -167,6 +194,10 @@ export function syncOverlayWindows() {
     }
     open.set(label, entry)
     entry.promise = openOverlayWindow(request)
+    if (!entry.generation)
+      entry.promise.then((ok) => {
+        if (ok && open.get(label) === entry) void applyNativeReset(overlay, label)
+      })
     if (entry.generation) {
       entry.timer = setTimeout(
         () =>
