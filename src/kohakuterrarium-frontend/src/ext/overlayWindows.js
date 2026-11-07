@@ -189,7 +189,12 @@ export function syncOverlayWindows() {
   for (const overlay of overlays.values()) {
     if (!desired(overlay) || !isOverlayVisible(overlay.key)) continue
     const label = windowLabel(overlay.key)
-    if (overlay.options.desktopPet && !open.has(label) && !overlay.contentReady) continue
+    if (
+      overlay.options.desktopPet &&
+      !overlay.contentReady &&
+      (!open.has(label) || windowStates.get(overlay.key)?.phase === "opening")
+    )
+      continue
     wanted.add(label)
     if (open.has(label) || closing.has(label)) continue
     const request = spec(overlay)

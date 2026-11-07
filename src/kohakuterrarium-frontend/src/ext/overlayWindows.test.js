@@ -241,27 +241,65 @@ describe("native overlay windows", () => {
     expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
     registerPackageContributions(record)
     const viewport = viewportContent(key)
+    let request
     vi.useFakeTimers()
     try {
       syncOverlayWindows()
       await vi.advanceTimersByTimeAsync(10001)
       expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
       expect(windowFailure(key)).toBe("")
+      let finishOpen
+      invoke.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOpen = resolve
+          }),
+      )
+      viewport.surface.ready()
+      const cancelled = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1]
+        .args[0]
+      expect(windowStates.get(key).phase).toBe("opening")
+      viewport.surface.ready(false)
+      expect(windowStates.has(key)).toBe(false)
+      await receiveOverlayReady({ detail: { key, generation: cancelled.generation } })
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(windowFailure(key)).toBe("")
+      expect(invoke.mock.calls.some(([name]) => name === "show_overlay_window")).toBe(false)
+      expect(invoke.mock.calls.some(([name]) => name === "close_overlay_window")).toBe(false)
+      viewport.surface.ready()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(1)
+      let finishClose
+      invoke.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishClose = resolve
+          }),
+      )
+      finishOpen(true)
+      await flushPromises()
+      expect(invoke).toHaveBeenLastCalledWith("close_overlay_window", { args: [cancelled.label] })
+      syncOverlayWindows()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(1)
+      finishClose(true)
+      await flushPromises()
+      expect(invoke.mock.calls.filter(([name]) => name === "open_overlay_window")).toHaveLength(2)
+      request = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
+        .args[0]
+      expect(request.generation).not.toBe(cancelled.generation)
+      expect(windowActive(key)).toBe(false)
+      await receiveOverlayReady({ detail: { key, generation: cancelled.generation } })
+      expect(windowActive(key)).toBe(false)
+      expect(invoke.mock.calls.some(([name]) => name === "show_overlay_window")).toBe(false)
+      await receiveOverlayReady({ detail: { key, generation: request.generation } })
+      await vi.advanceTimersByTimeAsync(10001)
+      expect(windowActive(key)).toBe(true)
+      expect(windowFailure(key)).toBe("")
+      expect(invoke).toHaveBeenCalledWith("show_overlay_window", {
+        args: [request.label, request.generation],
+      })
     } finally {
       vi.useRealTimers()
     }
-    viewport.surface.ready()
-    syncOverlayWindows()
-    await flushPromises()
-    const request = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1].args[0]
-    expect(windowActive(key)).toBe(false)
-    await receiveOverlayReady({ detail: { key, generation: "stale" } })
-    expect(windowActive(key)).toBe(false)
-    await receiveOverlayReady({ detail: { key, generation: request.generation } })
-    expect(windowActive(key)).toBe(true)
-    expect(invoke).toHaveBeenCalledWith("show_overlay_window", {
-      args: [request.label, request.generation],
-    })
     retryOverlayWindow(key)
     await flushPromises()
     const again = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
@@ -336,11 +374,13 @@ describe("native overlay windows", () => {
     const restored = invoke.mock.calls.filter(([name]) => name === "open_overlay_window").at(-1)[1]
       .args[0]
     const restoreStart = invoke.mock.calls.length
-    await receiveOverlayReady({ detail: { key, generation: restored.generation } })
+    const restoring = receiveOverlayReady({ detail: { key, generation: restored.generation } })
+    expect(windowStates.get(key).phase).toBe("presenting")
+    viewport.dispose()
+    await restoring
     expect(invoke.mock.calls.slice(restoreStart).map(([name]) => name)).toEqual([
       "show_overlay_window",
     ])
-    viewport.dispose()
     syncOverlayWindows()
     expect(windowActive(key)).toBe(true)
     hideOverlay(key)
@@ -406,6 +446,8 @@ describe("native overlay windows", () => {
       invoke.mockImplementation(async (name) => name !== "open_overlay_window")
       retryOverlayWindow(key)
       await vi.advanceTimersByTimeAsync(1)
+      expect(windowFailure(key)).toContain("Could not open")
+      viewport.surface.ready(false)
       expect(windowFailure(key)).toContain("Could not open")
       viewport.surface.ready()
       syncOverlayWindows()
