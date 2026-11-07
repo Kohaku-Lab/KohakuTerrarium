@@ -12,6 +12,7 @@ argparse command catalog.
 | `_main.py`       | Full argparse setup and `COMMANDS` dispatch table for the complete command catalog                                      |
 | `run.py`         | `kt run`: launch a creature or recipe through the Terrarium engine (rich CLI / TUI modes)                               |
 | `resume.py`      | `kt resume`: resume an agent or terrarium from a `.kohakutr` session file                                               |
+| `_main.py` `attach` | `kt attach`: ktui on a session running in a KT server (`terrarium/engine/cli/ktui_remote.py`)                       |
 | `doctor.py`      | `kt doctor`: pre-flight environment + config validation (wraps `kohakuterrarium.validate`)                              |
 | `auth.py`        | `kt login`: API key / Codex OAuth flow for a backend                                                                    |
 | `packages.py`    | `kt list` / `kt info` / `kt install` / `kt uninstall` / `kt update` / `kt edit`                                          |
@@ -19,15 +20,17 @@ argparse command catalog.
 | `model.py`       | `kt model list/default/show`: compatibility wrapper that delegates to `config_cli`                                      |
 | `memory.py`      | `kt embedding` / `kt search`: offline embedding build + session memory search                                           |
 | `serve.py`       | `kt serve start/stop/status`: manage a detached web server process (PID + state files under `~/.kohakuterrarium/run/`)  |
+| `serve_on_demand.py` | The same server started in the background when none runs (`kt-ui --daemon`); it stops itself once unused |
 | `config/`        | `kt config` command group (`config.py`): unified LLM profile / backend / API-key / MCP management (+ interactive `prompts.py`) |
 | `identity/`      | Settings backends behind `kt config`: `llm`, `keys`, `mcp`, `codex`, `antigravity`, `backend`, `drive`, `settings`      |
 | `extension/`     | `kt extension list` / `info` / `new` (`extension.py`): inspect installed package extension modules; `scaffold.py` generates packages |
 | `admin/`         | Auth-layer administration (`admin.py`: admin token, users) (+ `qr.py`)                                                   |
 | `select/`        | Shared selection logic for interactive commands, with CLI and TUI front ends (`cli.py`, `tui.py`, `args.py`)             |
-| `entry/`         | Console-script entry points `kt-cli` and `kt-tui`                                                                        |
+| `entry/`         | Console-script entry points: `kt-ui` (ktui: launcher, start, resume, attach, `--daemon`), `kt-cli` / `kt-tui` (ktui inline / full screen; the old front ends as `legacy-cli` / `legacy-tui` and without kohakutui) |
 | `mcp/`           | `kt mcp serve` / `setup`                                                                                                 |
 | `service.py`     | Multi-node service runner (+ `lab_client.py`)                                                                            |
 | `self_update.py` | Launcher-managed self-update                                                                                             |
+| `self_uninstall.py` | `kt self-uninstall`: remove the commands and the runtime the one-line installer put here |
 | `version.py`     | `kt --version` report (Python, git, platform, install source)                                                            |
 
 The top-level `kt run` entry point invokes `cli/__init__.py:main()` via the
