@@ -67,44 +67,80 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             jid: asyncio.create_task(handle.wait()) for jid, handle in pending.items()
         }
 
-        while waiters:
-            if self._event_inbox.has_event(_is_interactive_user_input):
-                for handle in pending.values():
-                    if not handle.promoted:
-                        handle.promote()
-            arrival = asyncio.create_task(self._event_inbox.wait_put())
-            try:
-                done, _ = await asyncio.wait(
-                    set(waiters.values()) | {arrival},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-            finally:
-                if not arrival.done():
-                    arrival.cancel()
-                    try:
-                        await arrival
-                    except asyncio.CancelledError:
-                        pass
-
-            finished_job_ids = [jid for jid, task in waiters.items() if task in done]
-            for jid in finished_job_ids:
-                future = waiters.pop(jid)
-                pending.pop(jid, None)
+        tracked = set(handles) & self._direct_job_meta.keys()
+        try:
+            while waiters:
+                if self._event_inbox.has_event(_is_interactive_user_input):
+                    for handle in pending.values():
+                        if not handle.promoted:
+                            handle.promote()
+                arrival = asyncio.create_task(self._event_inbox.wait_put())
                 try:
-                    result = future.result()
-                except (asyncio.CancelledError, Exception) as exc:
-                    result = exc
+                    done, _ = await asyncio.wait(
+                        set(waiters.values()) | {arrival},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    if not arrival.done():
+                        arrival.cancel()
+                        try:
+                            await arrival
+                        except asyncio.CancelledError:
+                            pass
 
-                if isinstance(result, PromotionResult):
-                    self._handle_promotion(jid, controller, tool_call_ids, native_mode)
-                    self._direct_job_meta.pop(jid, None)
-                    had_promotions = True
-                else:
-                    results[jid] = result
-                    self._emit_direct_completion_activity(jid, result)
-                    self._clear_direct_job_tracking(jid)
-
+                finished_job_ids = [
+                    jid for jid, task in waiters.items() if task in done
+                ]
+                for jid in finished_job_ids:
+                    future = waiters.pop(jid)
+                    pending.pop(jid, None)
+                    try:
+                        result = future.result()
+                    except (asyncio.CancelledError, Exception) as exc:
+                        result = exc
+                    if isinstance(result, PromotionResult):
+                        self._handle_promotion(
+                            jid, controller, tool_call_ids, native_mode
+                        )
+                        self._direct_job_meta.pop(jid, None)
+                        had_promotions = True
+                    else:
+                        results[jid] = result
+                        if jid not in tracked or jid in self._direct_job_meta:
+                            self._emit_direct_completion_activity(jid, result)
+                            self._clear_direct_job_tracking(jid)
+        except (asyncio.CancelledError, Exception):
+            self._save_direct_results(
+                controller, handle_order, results, tool_call_ids, native_mode
+            )
+            raise
+        finally:
+            for waiter in waiters.values():
+                waiter.cancel()
+            await asyncio.gather(*waiters.values(), return_exceptions=True)
         return results, had_promotions
+
+    def _save_direct_results(
+        self,
+        controller: Controller,
+        handle_order: list[str],
+        results: dict[str, Any],
+        tool_call_ids: dict[str, str],
+        native_mode: bool,
+    ) -> None:
+        """Preserve collected job feedback without starting another model request."""
+        if native_mode:
+            self._add_native_results_to_conversation(
+                controller, handle_order, results, tool_call_ids
+            )
+        elif text := self._format_text_results(handle_order, results):
+            controller.push_event_sync(
+                create_tool_complete_event(
+                    job_id="batch",
+                    content=text,
+                    exit_code=0,
+                )
+            )
 
     def _handle_promotion(
         self,
@@ -544,6 +580,11 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         tool_call_ids: dict[str, str],
     ) -> None:
         """Add completed results as role='tool' messages (native mode)."""
+        existing_ids = {
+            message.tool_call_id
+            for message in controller.conversation.get_messages()
+            if message.role == "tool"
+        }
         for job_id in handle_order:
             if job_id not in results:
                 continue  # Promoted jobs already have a protocol placeholder.
@@ -551,6 +592,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             result = results[job_id]
             tool_name, _ = _make_job_label(job_id)
             tool_call_id = tool_call_ids.get(job_id, job_id)
+            if tool_call_id in existing_ids:
+                continue
 
             if isinstance(result, Exception):
                 interrupted = isinstance(result, asyncio.CancelledError)

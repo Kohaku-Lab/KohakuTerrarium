@@ -223,7 +223,11 @@ asyncio.run(main())
 
 频道依赖 Creature **记得 ** 调用 `send_message`。对于那种确定性的 pipeline 边（「每次 coder 写完，runner 就要跑它写的东西」），框架提供另一条路： ** 输出接线 (output wiring)**。
 
-Creature 在 config 宣告自己回合结束的输出要送去哪。每个回合边界，框架会对每个目标的事件伫列发一个 `creature_output` `TriggerEvent`。不用 `send_message`、不用 `ChannelTrigger`、中间也没频道。
+Creature 在 config 中声明回合结束时把输出送到哪里。回合成功完成后，框架向各目标的事件队列发送 `creature_output` `TriggerEvent`。不需要 `send_message`、`ChannelTrigger` 或中间频道。
+
+失败、结果未确认或被中断的回合不发送带内容的接线。`with_content: false` 仍表示生命周期通知，不代表成功。如果本回合仍有应返回结果的后台任务，接线会延后发送。
+
+响应流失败不会撤销已经派发的工具。回合会收集前台任务的结果，但不会重新提交模型请求；已在后台或已转入后台的任务沿用原有完成路径。中断会取消剩余前台任务，同时保留已收集的结果。
 
 ```yaml
 # terrarium.yaml 的 creature 区块

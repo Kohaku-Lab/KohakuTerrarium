@@ -229,7 +229,11 @@ For management tasks above the runtime engine (packages, active-session handles,
 
 Channels rely on the creature remembering to call `send_message`. For pipeline edges that are deterministic ("every time the coder finishes, the runner should run what it wrote"), the framework offers an alternative: **output wiring**.
 
-A creature declares in its config where its turn-end output should go. At every turn boundary, the framework emits a `creature_output` `TriggerEvent` into each target's event queue. No `send_message`, no `ChannelTrigger`, no channel in between.
+A creature declares in its config where its turn-end output should go. When a turn completes successfully, the framework emits a `creature_output` `TriggerEvent` into each target's event queue. No `send_message`, no `ChannelTrigger`, no channel in between.
+
+Failed, unconfirmed, or interrupted turns do not emit content-bearing wires. Entries with `with_content: false` remain lifecycle notifications, not proof of success. Emission is deferred while the turn still owes a deliverable background result.
+
+A response-stream failure does not undo tools already dispatched. The turn collects their direct results without resubmitting the model request; already-background or promoted work keeps its existing completion path. Interrupting cancels remaining foreground work while preserving results already collected.
 
 ```yaml
 # terrarium.yaml creature block

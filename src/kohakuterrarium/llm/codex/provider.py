@@ -550,7 +550,8 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         except Exception as exc:
             if isinstance(exc.__context__, asyncio.CancelledError):
                 raise asyncio.CancelledError() from exc
-            if isinstance(exc, (httpx.TransportError, TimeoutError)):
+            connection_error = importlib.import_module("openai").APIConnectionError
+            if isinstance(exc, (httpx.TransportError, TimeoutError, connection_error)):
                 raise ResponseStreamError() from exc
             raise
         finally:

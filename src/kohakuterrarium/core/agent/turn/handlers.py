@@ -204,6 +204,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
     ) -> None:
         """Reset state at the start of a new processing cycle."""
         self._interrupt_requested = False
+        self._last_turn_text = []
         controller._interrupted = False
         # Fresh turn — forget the previous turn's backgrounded jobs so the
         # output-wiring guard only defers on work THIS turn spawns.
@@ -225,106 +226,138 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         self, controller: Controller, all_round_text: list[str]
     ) -> None:
         """Inner loop: run LLM → dispatch tools → collect feedback → repeat."""
-        while True:
-            if self._interrupt_requested:
-                self.output_router.notify_activity(
-                    "interrupt", "[system] Processing interrupted"
+        round_result = _TurnResult()
+        try:
+            while True:
+                if self._interrupt_requested:
+                    self.output_router.notify_activity(
+                        "interrupt", "[system] Processing interrupted"
+                    )
+                    break
+
+                self._reset_output_state()
+                round_result = _TurnResult()
+                round_result = await self._run_single_turn(controller)
+                all_round_text.extend(round_result.text_output)
+                self._last_turn_text = list(round_result.text_output)
+                self._emit_token_usage(controller)
+                self._emit_assistant_reasoning(controller)
+
+                if self._interrupt_requested:
+                    self._cancel_handles(round_result.handles)
+                    self.output_router.notify_activity(
+                        "interrupt", "[system] Processing interrupted"
+                    )
+                    break
+
+                if self._check_termination(round_result.text_output):
+                    break
+
+                await self._flush_output()
+                should_continue = await self._collect_and_push_feedback(
+                    controller,
+                    round_result.handles,
+                    round_result.handle_order,
+                    round_result.native_tool_call_ids,
+                    round_result.native_mode,
                 )
-                break
-
-            self._reset_output_state()
-
-            round_result = await self._run_single_turn(controller)
-            all_round_text.extend(round_result.text_output)
-            # Track the final round's text separately for output-wiring
-            # emission (REPLACE each iteration — we want only the last round).
-            self._last_turn_text = list(round_result.text_output)
-
-            # Emit token usage after each LLM turn (real-time update)
-            self._emit_token_usage(controller)
-            # Publish reasoning after each round, not just the final one:
-            # tool-selection rounds have their own assistant messages.
-            self._emit_assistant_reasoning(controller)
-
-            # Check interrupt after LLM turn (before waiting for tools)
-            if self._interrupt_requested:
-                self._cancel_handles(round_result.handles)
-                self.output_router.notify_activity(
-                    "interrupt", "[system] Processing interrupted"
-                )
-                break
-
-            # Termination check
-            if self._check_termination(round_result.text_output):
-                break
-
-            # Flush before collecting results (TUI renders text first)
-            await self._flush_output()
-
-            # Collect feedback and decide whether to continue
-            should_continue = await self._collect_and_push_feedback(
+                if not should_continue:
+                    break
+                self._maybe_trigger_compact(controller)
+        except (asyncio.CancelledError, Exception) as exc:
+            await self._settle_failed_round(
                 controller,
-                round_result.handles,
-                round_result.handle_order,
-                round_result.native_tool_call_ids,
-                round_result.native_mode,
+                round_result,
+                cancelled=isinstance(exc, asyncio.CancelledError),
             )
-            if not should_continue:
-                break
+            raise
 
-            # Mid-turn auto-compact: fire between loop iterations so
-            # summarization can run while the agent continues. The
-            # compact manager's single-flight gate suppresses duplicate
-            # compact jobs while one is already in progress.
-            self._maybe_trigger_compact(controller)
+    async def _settle_failed_round(
+        self,
+        controller: Controller,
+        round_result: "_TurnResult",
+        *,
+        cancelled: bool = False,
+    ) -> None:
+        """Collect outstanding direct results without requesting another response."""
+        handles = {
+            jid: handle
+            for jid, handle in round_result.handles.items()
+            if jid in self._direct_job_meta
+        }
+        if not handles:
+            return
+        if cancelled:
+            self._cancel_handles(handles)
+        results, promoted = await self._wait_handles(
+            handles,
+            round_result.handle_order,
+            controller,
+            round_result.native_tool_call_ids,
+            round_result.native_mode,
+        )
+        if promoted:
+            self._turn_dispatched_bg.update(
+                jid
+                for jid, handle in handles.items()
+                if handle.promoted and self._bg_controller_notify.get(jid, True)
+            )
+        self._save_direct_results(
+            controller,
+            round_result.handle_order,
+            results,
+            round_result.native_tool_call_ids,
+            round_result.native_mode,
+        )
 
     async def _run_single_turn(self, controller: Controller) -> "_TurnResult":
         """Run one LLM turn, dispatching tools and sub-agents as they appear.
 
         Returns a ``_TurnResult`` with collected job info and text output.
         """
-        handles: dict[str, BackgroundifyHandle] = {}
-        handle_order: list[str] = []
-        round_text: list[str] = []
-        native_mode = getattr(controller.config, "tool_format", None) == "native"
-        native_tool_call_ids: dict[str, str] = {}
+        result = _TurnResult()
+        result.native_mode = getattr(controller.config, "tool_format", None) == "native"
+        handles = result.handles
+        handle_order = result.handle_order
+        round_text = result.text_output
+        native_mode = result.native_mode
+        native_tool_call_ids = result.native_tool_call_ids
 
-        async for parse_event in controller.run_once():
-            if self._interrupt_requested:
-                break
+        try:
+            async for parse_event in controller.run_once():
+                if self._interrupt_requested:
+                    break
 
-            if isinstance(parse_event, ToolCallEvent):
-                await self._dispatch_tool_event(
-                    parse_event,
-                    controller,
-                    handles,
-                    handle_order,
-                    native_tool_call_ids,
-                    native_mode,
-                )
-            elif isinstance(parse_event, SubAgentCallEvent):
-                await self._dispatch_subagent_event(
-                    parse_event,
-                    controller,
-                    handles,
-                    handle_order,
-                    native_tool_call_ids,
-                    native_mode,
-                )
-            elif isinstance(parse_event, CommandResultEvent):
-                self._notify_command_result(parse_event)
-            else:
-                if isinstance(parse_event, TextEvent):
-                    round_text.append(parse_event.text)
-                await self.output_router.route(parse_event)
-
-        return _TurnResult(
-            handles=handles,
-            handle_order=handle_order,
-            text_output=round_text,
-            native_mode=native_mode,
-            native_tool_call_ids=native_tool_call_ids,
-        )
+                if isinstance(parse_event, ToolCallEvent):
+                    await self._dispatch_tool_event(
+                        parse_event,
+                        controller,
+                        handles,
+                        handle_order,
+                        native_tool_call_ids,
+                        native_mode,
+                    )
+                elif isinstance(parse_event, SubAgentCallEvent):
+                    await self._dispatch_subagent_event(
+                        parse_event,
+                        controller,
+                        handles,
+                        handle_order,
+                        native_tool_call_ids,
+                        native_mode,
+                    )
+                elif isinstance(parse_event, CommandResultEvent):
+                    self._notify_command_result(parse_event)
+                else:
+                    if isinstance(parse_event, TextEvent):
+                        round_text.append(parse_event.text)
+                    await self.output_router.route(parse_event)
+        except (asyncio.CancelledError, Exception) as exc:
+            await self._settle_failed_round(
+                controller, result, cancelled=isinstance(exc, asyncio.CancelledError)
+            )
+            raise
+        return result
 
     async def _dispatch_tool_event(
         self,
@@ -706,6 +739,8 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         event: TriggerEvent,
         controller: Controller,
         all_round_text: list[str],
+        *,
+        completed: bool = True,
     ) -> None:
         """Finalize: flush output, notify processing end."""
         await self._flush_output()
@@ -713,7 +748,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         # Channel-triggered event notification
         trigger_channel = event.context.get("channel") if event.context else None
         trigger_sender = event.context.get("sender") if event.context else None
-        if trigger_channel and trigger_sender:
+        if completed and trigger_channel and trigger_sender:
             round_output = "".join(all_round_text).strip()
             if round_output:
                 self.output_router.notify_activity(
@@ -761,7 +796,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         # resolver is responsible for never raising back into this path;
         # we still wrap defensively so a buggy resolver can't break the
         # creature's main loop.
-        await self._emit_output_wiring(event)
+        await self._emit_output_wiring(event, completed=completed)
 
     def _maybe_trigger_compact(self, controller: Controller) -> None:
         """Fire auto-compact if the last LLM call hit the threshold.

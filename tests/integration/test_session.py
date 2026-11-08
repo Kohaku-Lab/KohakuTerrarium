@@ -1504,13 +1504,13 @@ class TestSessionIntegration:
             on_complete(event)
             completed.set()
 
-        async def finish_with_undelivered_result(*args):
+        async def finish_with_undelivered_result(*args, **kwargs):
             background.release.set()
             await asyncio.wait_for(completed.wait(), 5)
             assert not background_agent.executor.job_store.get_running_jobs()
             assert not background_agent.executor.job_store.get_pending_jobs()
             assert background_agent.has_pending_mid_turn_inputs
-            await finalize(*args)
+            await finalize(*args, **kwargs)
             background_agent.pause()
 
         try:

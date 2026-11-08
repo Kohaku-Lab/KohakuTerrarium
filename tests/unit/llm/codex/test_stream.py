@@ -5,7 +5,7 @@ import json
 
 import httpx
 import pytest
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI
 
 from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
@@ -14,16 +14,25 @@ pytestmark = pytest.mark.real_llm_provider
 
 
 class _BrokenBody(httpx.AsyncByteStream):
-    def __init__(self, completed, close_error):
+    def __init__(self, completed, close_error, partial, transport_error):
         self.completed = completed
         self.close_error = close_error
+        self.partial = partial
+        self.transport_error = transport_error
 
     async def __aiter__(self):
-        yield b'data: {"type":"response.output_text.delta","delta":"Partial"}\n\n'
+        if self.partial:
+            yield b'data: {"type":"response.output_text.delta","delta":"Partial"}\n\n'
         if self.completed:
             yield b'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'
         if not self.close_error:
-            raise httpx.RemoteProtocolError("incomplete chunked read")
+            request = httpx.Request("POST", "https://test.invalid/v1/responses")
+            error = httpx.RemoteProtocolError("incomplete chunked read")
+            if self.transport_error == "sdk_connection":
+                raise APIConnectionError(request=request) from error
+            if self.transport_error == "sdk_timeout":
+                raise APITimeoutError(request=request) from error
+            raise error
         yield b"data: [DONE]\n\n"
 
     async def aclose(self):
@@ -91,7 +100,11 @@ async def test_cancellation_remains_cancellation(close_error):
 
 @pytest.mark.parametrize("completed", [False, True])
 @pytest.mark.parametrize("close_error", [False, True])
-async def test_transport_and_cleanup_failures_never_resubmit(completed, close_error):
+@pytest.mark.parametrize("partial", [False, True])
+@pytest.mark.parametrize("transport_error", ["raw", "sdk_connection", "sdk_timeout"])
+async def test_transport_and_cleanup_failures_never_resubmit(
+    completed, close_error, partial, transport_error
+):
     requests = []
 
     def respond(request):
@@ -99,7 +112,7 @@ async def test_transport_and_cleanup_failures_never_resubmit(completed, close_er
         return httpx.Response(
             200,
             headers={"content-type": "text/event-stream"},
-            stream=_BrokenBody(completed, close_error),
+            stream=_BrokenBody(completed, close_error, partial, transport_error),
         )
 
     provider = CodexOAuthProvider(
@@ -125,7 +138,7 @@ async def test_transport_and_cleanup_failures_never_resubmit(completed, close_er
                 async for part in provider.chat([{"role": "user", "content": "draw"}]):
                     chunks.append(part)
             assert caught.value.code == "response_unconfirmed"
-        assert chunks == ["Partial"]
+        assert chunks == (["Partial"] if partial else [])
         assert len(requests) == 1
     finally:
         await provider.close()

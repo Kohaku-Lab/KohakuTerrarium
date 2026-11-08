@@ -223,7 +223,11 @@ asyncio.run(main())
 
 頻道靠生物**記得**呼叫 `send_message`。對那種確定性的 pipeline 邊（「每次 coder 寫完，runner 就要跑它寫的東西」），框架提供另一條路：**輸出接線 (output wiring)**。
 
-生物在 config 宣告自己回合結束的輸出要送去哪。每個回合邊界，框架會對每個目標的事件佇列發一個 `creature_output` `TriggerEvent`。不用 `send_message`、不用 `ChannelTrigger`、中間也沒頻道。
+生物在 config 中宣告回合結束時把輸出送到哪裡。回合成功完成後，框架向各目標的事件佇列發送 `creature_output` `TriggerEvent`。不需要 `send_message`、`ChannelTrigger` 或中間頻道。
+
+失敗、結果未確認或被中斷的回合不發送帶內容的接線。`with_content: false` 仍表示生命週期通知，不代表成功。如果本回合仍有應回傳結果的背景工作，接線會延後發送。
+
+回應串流失敗不會撤銷已經派發的工具。回合會收集前景工作的結果，但不會重新提交模型請求；已在背景或已轉入背景的工作沿用原有完成路徑。中斷會取消剩餘前景工作，同時保留已收集的結果。
 
 ```yaml
 # terrarium.yaml 的 creature 區塊

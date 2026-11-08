@@ -25,7 +25,9 @@ class AgentOutputWiringMixin:
         """
         return bool(getattr(self, "_turn_dispatched_bg", None))
 
-    async def _emit_output_wiring(self, trigger_event: TriggerEvent) -> None:
+    async def _emit_output_wiring(
+        self, trigger_event: TriggerEvent, *, completed: bool = True
+    ) -> None:
         """Emit a ``creature_output`` event for each configured wiring entry.
 
         Called at the end of ``_finalize_processing``. No-op when the
@@ -35,6 +37,8 @@ class AgentOutputWiringMixin:
         follow-up turn whose finalization re-emits with the real result.
         """
         entries = getattr(self.config, "output_wiring", None) or []
+        if not completed:
+            entries = [entry for entry in entries if not entry.with_content]
         resolver = getattr(self, "_wiring_resolver", None)
         if not entries or resolver is None:
             return
@@ -47,7 +51,7 @@ class AgentOutputWiringMixin:
             )
             return
 
-        content = "".join(self._last_turn_text).strip()
+        content = "".join(self._last_turn_text).strip() if completed else ""
         # ``_turn_index`` is bumped at user-input arrival inside
         # ``_process_event``; output wiring just reads the current value.
         try:

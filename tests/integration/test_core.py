@@ -2515,6 +2515,15 @@ class TestCoreIntegration:
                 io="headless",
                 start=True,
             )
+            receiver = await engine.add_creature(
+                AgentConfig(name="outcome_receiver", system_prompt="plain"),
+                graph=node.graph_id,
+                llm=ScriptedLLM(["received"]),
+                pwd=tmp_path,
+                io="headless",
+                start=True,
+            )
+            await engine.wire_output(node, {"to": receiver.creature_id})
             assert (await node.run("hello")).text == "First answer"
             failed = await node.run("incomplete response", raise_on_error=False)
             assert failed.status == "error"
@@ -2532,9 +2541,65 @@ class TestCoreIntegration:
                 and e.get("turn_index") == error["turn_index"]
                 for e in events
             )
+            await receiver.agent.output_router.flush()
+            delivered = [
+                event
+                for event in receiver.agent.session_store.get_events("outcome_receiver")
+                if event["type"] == "activity:wire_inbound"
+            ]
+            assert [event["content_preview"] for event in delivered] == ["First answer"]
             path = node.agent.session_store.path
             assert llm.call_count == 2
             assert (await node.run("recover")).text == "Recovered"
+            await receiver.agent.output_router.flush()
+            delivered = [
+                event
+                for event in receiver.agent.session_store.get_events("outcome_receiver")
+                if event["type"] == "activity:wire_inbound"
+            ]
+            assert [event["content_preview"] for event in delivered] == [
+                "First answer",
+                "Recovered",
+            ]
+            dispatched_llm = InterruptedResponseLLM(
+                [
+                    ScriptEntry(
+                        "[/echo]retained result[echo/]", match="incomplete response"
+                    ),
+                    ScriptEntry("Recovered", match="recover"),
+                ]
+            )
+            echo = _EchoTool()
+            dispatched = await engine.add_creature(
+                AgentConfig(
+                    name="dispatched_outcome",
+                    system_prompt="plain",
+                    tool_format="bracket",
+                ),
+                llm=dispatched_llm,
+                tools=[echo],
+                pwd=tmp_path,
+                io="headless",
+                start=True,
+            )
+            assert (
+                await dispatched.run("incomplete response", raise_on_error=False)
+            ).status == "error"
+            assert echo.calls == 1 and dispatched_llm.call_count == 1
+            job_events = dispatched.agent.session_store.get_events("dispatched_outcome")
+            tool_results = [e for e in job_events if e["type"] == "tool_result"]
+            assert len(tool_results) == 1
+            assert "echoed:retained result" in str(tool_results[0]["output"])
+            assert job_events.index(tool_results[0]) < next(
+                i for i, e in enumerate(job_events) if e["type"] == "processing_end"
+            )
+            assert (
+                not dispatched.agent._active_handles
+                and not dispatched.agent._direct_job_meta
+            )
+            assert (await dispatched.run("recover")).text == "Recovered"
+            assert "echoed:retained result" in str(dispatched_llm.last_messages)
+            assert echo.calls == 1
         readonly = SessionStore.open_readonly(path)
         try:
             saved = readonly.get_events("outcome")

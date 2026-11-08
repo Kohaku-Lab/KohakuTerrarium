@@ -196,10 +196,14 @@ class AgentEventLoopMixin:
                         self._reject_run(run, status="rejected")
                         return
                     await self._begin_batch(events)
-                    await self._process_batch_with_controller(events, self.controller)
-                    interrupted = bool(
-                        primary.context.get("interrupted_by_user")
-                    ) or any(env.withdrawn for env in run)
+                    cancelled = await self._process_batch_with_controller(
+                        events, self.controller
+                    )
+                    interrupted = (
+                        cancelled
+                        or bool(primary.context.get("interrupted_by_user"))
+                        or any(env.withdrawn for env in run)
+                    )
                 finally:
                     self._turn_lock_holder = None
                     self._active_turn_stackable = True
@@ -480,7 +484,7 @@ class AgentEventLoopMixin:
             str(exc),
         )
 
-    async def _process_batch_with_controller(self, events: list, controller) -> None:
+    async def _process_batch_with_controller(self, events: list, controller) -> bool:
         """Push the whole stackable run to the controller (one combined
         ``role=user`` message) and drive the controller loop. Cancellable
         via ``interrupt()``."""
@@ -508,9 +512,13 @@ class AgentEventLoopMixin:
             self._run_controller_loop(controller, all_round_text)
         )
         self._processing_task = loop_task
+        completed = False
+        cancelled = False
         try:
             await loop_task
+            completed = not self._interrupt_requested
         except asyncio.CancelledError:
+            cancelled = True
             logger.info("Processing cancelled by interrupt")
             self.output_router.notify_activity(
                 "interrupt", "[system] Processing interrupted"
@@ -535,4 +543,7 @@ class AgentEventLoopMixin:
             env.withdrawn for env in getattr(self, "_active_event_run", None) or []
         ):
             primary.context["interrupted_by_user"] = True
-        await self._finalize_processing(primary, controller, all_round_text)
+        await self._finalize_processing(
+            primary, controller, all_round_text, completed=completed
+        )
+        return cancelled
