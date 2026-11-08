@@ -2,7 +2,12 @@
 
 from copy import deepcopy
 
-from kohakuterrarium.session.history.assistant import project_assistant_rounds
+import pytest
+
+from kohakuterrarium.session.history.assistant import (
+    project_assistant_rounds,
+    replay_assistant_event,
+)
 
 
 def _evt(event_id, etype, **kwargs):
@@ -57,6 +62,35 @@ class _CountId(int):
     def __hash__(self):
         type(self).calls += 1
         return int.__hash__(self)
+
+
+@pytest.mark.parametrize("include_metadata", [False, True])
+def test_incomplete_assistant_replay_keeps_internal_state_off_provider_wire(
+    include_metadata,
+):
+    event = _evt(
+        8,
+        "assistant_message",
+        _assistant_projected=True,
+        message=_message(
+            content="partial",
+            metadata={
+                "incomplete": True,
+                "completion_state": "incomplete",
+                "branch_id": 99,
+            },
+        ),
+    )
+    messages = []
+    replay_assistant_event(messages, event, include_metadata)
+    assert messages[0]["content"] == "partial"
+    if include_metadata:
+        assert messages[0]["metadata"]["incomplete"] is True
+        assert messages[0]["metadata"]["branch_id"] == 1
+        assert messages[0]["metadata"]["event_id"] == 8
+    else:
+        assert "metadata" not in messages[0]
+    assert event["message"]["metadata"]["branch_id"] == 99
 
 
 class TestProjectAssistantRounds:

@@ -514,10 +514,9 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
             extra_params["extra_body"] = prepare_request_tools(wire_extra)[0]
         api_tools = prepare_request_tools({"tools": api_tools})[0]["tools"]
 
-        client = self._client
+        client = self._client.with_options(max_retries=0)
         if recovery is not None:
             recovery.record_submission()
-            client = client.with_options(max_retries=0)
         try:
             stream = await client.responses.create(
                 model=self.model,
@@ -531,7 +530,21 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                 **extra_params,
             )
         except Exception as e:
-            logger.error("Codex API request failed", error=str(e))
+            connection_error = importlib.import_module("openai").APIConnectionError
+            if isinstance(e, (httpx.TransportError, TimeoutError, connection_error)):
+                cause = e
+                seen = set()
+                while cause is not None and id(cause) not in seen:
+                    seen.add(id(cause))
+                    if isinstance(
+                        cause,
+                        (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout),
+                    ):
+                        break
+                    cause = cause.__cause__ or cause.__context__
+                else:
+                    raise ResponseStreamError() from e
+            logger.error("Codex API request failed", error_type=type(e).__name__)
             raise
 
         completed = False

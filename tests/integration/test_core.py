@@ -2616,6 +2616,90 @@ class TestCoreIntegration:
         finally:
             readonly.close(update_status=False)
 
+        for tool_format, response in (
+            ("bracket", "partial [/echo]durable result[echo/] tail"),
+            ("xml", "partial <echo>durable result</echo> tail"),
+            ("bracket", "partial [/echo]durable result[echo/] tail [/echo]unfinished"),
+            ("xml", "partial <echo>durable result</echo> tail <echo>unfinished"),
+            ("native", "partial response"),
+        ):
+            partial_llm = InterruptedResponseLLM(
+                [ScriptEntry(response, match="incomplete response")]
+            )
+            partial_tool = _EchoTool()
+            async with Terrarium(
+                session_dir=tmp_path / f"failed-history-{tool_format}"
+            ) as failure_engine:
+                failure_node = await failure_engine.add_creature(
+                    AgentConfig(
+                        name=f"failure_{tool_format}",
+                        system_prompt="plain",
+                        tool_format=tool_format,
+                    ),
+                    llm=partial_llm,
+                    tools=[partial_tool],
+                    pwd=tmp_path,
+                    io="headless",
+                    start=True,
+                )
+                assert (
+                    await failure_node.run("incomplete response", raise_on_error=False)
+                ).status == "error"
+                assert partial_llm.call_count == 1
+                assert not failure_node.agent.controller.has_pending_events()
+                failure_path = failure_node.agent.session_store.path
+                replayed = replay_conversation(
+                    failure_node.agent.session_store.get_events(
+                        f"failure_{tool_format}"
+                    ),
+                    include_metadata=True,
+                )
+                assistant_replay = [
+                    message for message in replayed if message["role"] == "assistant"
+                ]
+                assert len(assistant_replay) == 1
+                assert assistant_replay[0]["content"] == response
+                assert assistant_replay[0]["metadata"]["incomplete"] is True
+            resumed_llm = ScriptedLLM(
+                [
+                    ScriptEntry("continued", match="continue"),
+                    ScriptEntry("edited", match="changed"),
+                ]
+            )
+            resumed, failure_store = resume_agent(
+                failure_path, io_mode="plain", llm=resumed_llm
+            )
+            try:
+                partials = [
+                    m
+                    for m in resumed.controller.conversation.get_messages()
+                    if m.role == "assistant" and "partial" in m.get_text_content()
+                ]
+                assert len(partials) == 1 and partials[0].metadata["incomplete"] is True
+                feedback = [
+                    m
+                    for m in resumed.controller.conversation.get_messages()
+                    if m.metadata.get("kind") == "tool_results"
+                ]
+                if tool_format != "native":
+                    assert len(feedback) == 1
+                    assert "echoed:durable result" in feedback[0].get_text_content()
+                    assert feedback[0].metadata["job_ids"]
+                await resumed.start()
+                assert (await resumed.run("continue")).text == "continued"
+                assert "partial" in str(resumed_llm.last_messages)
+                if tool_format != "native":
+                    assert "echoed:durable result" in str(resumed_llm.last_messages)
+                    assert partial_tool.calls == 1
+                assert await resumed.edit_and_rerun(0, "changed", turn_index=1)
+                assert resumed_llm.last_user_message == "changed"
+                assert "partial" not in str(resumed_llm.last_messages)
+                assert "echoed:durable result" not in str(resumed_llm.last_messages)
+                assert resumed_llm.call_count == 2
+            finally:
+                await resumed.stop()
+                failure_store.close()
+
         legacy_image = tmp_path / "legacy-image.png"
         Image.new("RGB", (2, 2), "red").save(legacy_image)
         repair_command = RepairImagesCommand()

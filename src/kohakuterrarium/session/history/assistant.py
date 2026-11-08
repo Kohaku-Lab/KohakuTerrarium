@@ -260,8 +260,12 @@ def replay_assistant_event(
             if not event.get("_assistant_projected"):
                 return
             message = deepcopy(event["message"])
+            internal_metadata = message.pop("metadata", {})
             if include_metadata:
                 message["metadata"] = {
+                    **(
+                        internal_metadata if isinstance(internal_metadata, dict) else {}
+                    ),
                     "event_id": event.get(
                         "canonical_source_event_id", event.get("event_id")
                     ),

@@ -9,6 +9,7 @@ from openai import APIConnectionError
 
 from kohakuterrarium.bootstrap.tools import create_tool
 from kohakuterrarium.core.config.types import ToolConfigItem
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.recovery.status import observe_model_recovery
 from kohakuterrarium.llm.responses.ws import ResponsesWSError
@@ -320,7 +321,10 @@ async def test_cache_rejection_and_uncertain_replay_share_budget(provider):
     assert connection.sent[4]["previous_response_id"] == "r2"
 
 
-async def test_http_fallback_keeps_one_budget_and_does_not_return_to_ws(provider):
+@pytest.mark.parametrize("proven_unsubmitted", [False, True])
+async def test_http_fallback_keeps_one_budget_and_does_not_return_to_ws(
+    provider, proven_unsubmitted
+):
     provider.extra_body["tools"] = [
         {"type": "image_generation", "request_replay": "forbid"}
     ]
@@ -340,7 +344,12 @@ async def test_http_fallback_keeps_one_budget_and_does_not_return_to_ws(provider
 
     async def create(**kwargs):
         creates.append(kwargs)
-        raise APIConnectionError(request=httpx.Request("POST", "http://localhost"))
+        request = httpx.Request("POST", "http://localhost")
+        if proven_unsubmitted:
+            raise APIConnectionError(request=request) from httpx.ConnectError(
+                "not submitted", request=request
+            )
+        raise APIConnectionError(request=request)
 
     async def notify(payload):
         statuses.append(payload)
@@ -353,10 +362,14 @@ async def test_http_fallback_keeps_one_budget_and_does_not_return_to_ws(provider
         else client.chat.completions
     )
     target.create = create
-    with observe_model_recovery(notify), pytest.raises(APIConnectionError):
+    ambiguous_codex = (
+        isinstance(provider, CodexOAuthProvider) and not proven_unsubmitted
+    )
+    expected_error = ResponseStreamError if ambiguous_codex else APIConnectionError
+    with observe_model_recovery(notify), pytest.raises(expected_error):
         async for _ in provider.chat(MESSAGES):
             pass
-    assert len(creates) == 4
+    assert len(creates) == (1 if ambiguous_codex else 4)
     assert len(connects) == 2
     assert all(
         call["extra_body"]["tools"] == [{"type": "image_generation"}]

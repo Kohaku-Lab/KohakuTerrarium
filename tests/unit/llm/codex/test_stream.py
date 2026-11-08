@@ -13,6 +13,95 @@ from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 pytestmark = pytest.mark.real_llm_provider
 
 
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "read_error",
+        "read_timeout",
+        "write_error",
+        "write_timeout",
+        "protocol",
+        "unknown_connection",
+    ],
+)
+async def test_ambiguous_submission_before_headers_is_not_retried(fault):
+    requests = []
+
+    async def respond(request):
+        requests.append(await request.aread())
+        errors = {
+            "read_error": httpx.ReadError,
+            "read_timeout": httpx.ReadTimeout,
+            "write_error": httpx.WriteError,
+            "write_timeout": httpx.WriteTimeout,
+            "protocol": httpx.RemoteProtocolError,
+        }
+        if fault == "unknown_connection":
+            raise APIConnectionError(request=request)
+        raise errors[fault]("connection lost", request=request)
+
+    provider = CodexOAuthProvider(
+        model="test",
+        api_key="test",
+        base_url="https://test.invalid/v1",
+        retry_policy={"max_retries": 1, "base_delay": 0, "jitter": 0},
+    )
+    provider._client = AsyncOpenAI(
+        api_key="test",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )
+    try:
+        with pytest.raises(ResponseStreamError) as caught:
+            async for _ in provider.chat([{"role": "user", "content": "draw"}]):
+                pass
+        assert caught.value.code == "response_unconfirmed"
+        assert len(requests) == 1
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize(
+    "fault", ["connect", "connect_timeout", "pool_timeout", "rate_limit"]
+)
+async def test_proven_unsubmitted_or_rejected_request_can_recover(fault):
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if len(requests) == 1:
+            if fault == "rate_limit":
+                return httpx.Response(429, json={"error": {"message": "rate limited"}})
+            error = {
+                "connect": httpx.ConnectError,
+                "connect_timeout": httpx.ConnectTimeout,
+                "pool_timeout": httpx.PoolTimeout,
+            }[fault]
+            raise error("not submitted", request=request)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            text='data: {"type":"response.output_text.delta","delta":"Done"}\n\ndata: {"type":"response.completed","response":{"status":"completed"}}\n\n',
+        )
+
+    provider = CodexOAuthProvider(
+        model="test",
+        api_key="test",
+        base_url="https://test.invalid/v1",
+        retry_policy={"max_retries": 1, "base_delay": 0, "jitter": 0},
+    )
+    provider._client = AsyncOpenAI(
+        api_key="test",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )
+    try:
+        assert [
+            part async for part in provider.chat([{"role": "user", "content": "draw"}])
+        ] == ["Done"]
+        assert len(requests) == 2
+    finally:
+        await provider.close()
+
+
 class _BrokenBody(httpx.AsyncByteStream):
     def __init__(self, completed, close_error, partial, transport_error):
         self.completed = completed

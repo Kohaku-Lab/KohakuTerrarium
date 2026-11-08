@@ -350,6 +350,71 @@ async def test_dispatch_error_settles_native_direct_subagent(tmp_path):
         await agent.stop()
 
 
+@pytest.mark.parametrize(
+    "tool_format,block", [("bracket", "[/owned][owned/]"), ("xml", "<owned></owned>")]
+)
+async def test_cancellation_before_tool_entry_is_never_success(
+    tmp_path, tool_format, block
+):
+    release = asyncio.Event()
+    tool = _OwnedTool(release)
+    llm = _FailingLLM([block, "recovered"], asyncio.CancelledError())
+    agent, trace = await _build(tmp_path, llm, tool_format, [tool])
+    try:
+        result = await agent.run("cancel", raise_on_error=False)
+        assert result.status == "interrupted"
+        assert tool.calls == 0
+        assert not agent._active_handles and not agent._direct_job_meta
+        terminal = [e for e in trace.events if e.type in {"tool_done", "tool_error"}]
+        assert len(terminal) == 1
+        assert terminal[0].type == "tool_error"
+        assert terminal[0].payload["final_state"] == "interrupted"
+        await agent.run("recover")
+        assert "INTERRUPTED" in str(llm.last_messages)
+        assert " - OK" not in str(llm.last_messages)
+    finally:
+        release.set()
+        await agent.stop()
+
+
+@pytest.mark.parametrize(
+    "tool_format,block", [("bracket", "[/owned][owned/]"), ("xml", "<owned></owned>")]
+)
+async def test_settled_feedback_is_in_current_history_not_pending_input(
+    tmp_path, tool_format, block
+):
+    release = asyncio.Event()
+    release.set()
+    tool = _OwnedTool(release)
+    llm = _FailingLLM(
+        [block, "edited reply"], ResponseStreamError(), entered=tool.entered
+    )
+    agent, _ = await _build(tmp_path, llm, tool_format, [tool])
+    try:
+        assert (await agent.run("fail", raise_on_error=False)).status == "error"
+        assert not agent.controller.has_pending_events()
+        messages = agent.controller.conversation.get_messages()
+        feedback = [m for m in messages if m.metadata.get("kind") == "tool_results"]
+        assert len(feedback) == 1
+        assert "owned result" in feedback[0].get_text_content()
+        assert feedback[0].metadata["job_ids"]
+        assert feedback[0].metadata["tool_result_phase"] == "final"
+        assert feedback[0].metadata["turn_index"] == agent._turn_index
+        assert feedback[0].metadata["branch_id"] == agent._branch_id
+        target = next(
+            i
+            for i, msg in enumerate(messages)
+            if msg.role == "user" and msg.get_text_content() == "fail"
+        )
+        assert await agent.edit_and_rerun(target, "edited")
+        assert llm.call_count == 2
+        assert llm.last_user_message == "edited"
+        assert "owned result" not in str(llm.last_messages)
+        assert tool.calls == 1
+    finally:
+        await agent.stop()
+
+
 @pytest.mark.parametrize("done", [False, True])
 async def test_spontaneous_cancellation_settles_direct_job(tmp_path, done):
     release = asyncio.Event()

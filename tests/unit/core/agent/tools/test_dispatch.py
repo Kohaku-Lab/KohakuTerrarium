@@ -80,6 +80,29 @@ def agent():
 # ── _register_direct_job / _clear_direct_job_tracking ────────────
 
 
+@pytest.mark.parametrize("kind", ["tool", "subagent"])
+def test_cancelled_result_has_consistent_activity_text_and_native_feedback(agent, kind):
+    agent._register_direct_job(
+        "owned_1", kind=kind, name="owned", tool_call_id="call_1"
+    )
+    result = asyncio.CancelledError()
+    agent._emit_direct_completion_activity("owned_1", result)
+    activity, detail, metadata = agent.output_router.activity_calls[-1]
+    assert activity == ("tool_error" if kind == "tool" else "subagent_error")
+    assert "INTERRUPTED" in detail and metadata["final_state"] == "interrupted"
+    assert metadata["interrupted"] is True
+    text = agent._format_text_results(["owned_1"], {"owned_1": result})
+    assert "INTERRUPTED" in text and " - OK" not in text
+    agent._add_native_results_to_conversation(
+        agent.controller, ["owned_1"], {"owned_1": result}, {"owned_1": "call_1"}
+    )
+    saved = agent.controller.conversation.get_messages()[-1]
+    assert saved.tool_call_id == "call_1"
+    assert (
+        saved.get_text_content() == "Interrupted: User manually interrupted this job."
+    )
+
+
 class TestRegisterAndClear:
     def test_register_records_metadata(self, agent):
         agent._register_direct_job(

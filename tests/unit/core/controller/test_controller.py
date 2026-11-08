@@ -431,6 +431,44 @@ class TestConversationAccess:
 
 
 class TestErrorRecovery:
+    @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+    @pytest.mark.parametrize(
+        "failure", [ResponseStreamError, RuntimeError, asyncio.CancelledError]
+    )
+    async def test_partial_failure_remains_in_canonical_context(
+        self, tool_format, failure
+    ):
+        class PartialFailure(ScriptedLLM):
+            async def chat(self, messages, **kwargs):
+                async for chunk in super().chat(messages, **kwargs):
+                    yield chunk
+                if self.call_count == 1:
+                    raise failure()
+
+        llm = PartialFailure(["partial answer", "continued"])
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = tool_format
+        await env.controller.push_event(create_user_input_event("first"))
+        with pytest.raises(failure):
+            async for _ in env.controller.run_once():
+                pass
+        partial = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if m.role == "assistant"
+        ]
+        assert len(partial) == 1
+        assert partial[0].get_text_content() == "partial answer"
+        assert partial[0].metadata["incomplete"] is True
+        assert not partial[0].tool_calls
+        await env.controller.push_event(create_user_input_event("continue"))
+        async for _ in env.controller.run_once():
+            pass
+        assert any(
+            m["role"] == "assistant" and "partial answer" in str(m["content"])
+            for m in llm.last_messages
+        )
+
     @pytest.mark.parametrize(
         "text,expected",
         [

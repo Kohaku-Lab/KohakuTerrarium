@@ -14,6 +14,7 @@ from kohakuterrarium.core.agent.tools.metrics import (
 )
 from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle, PromotionResult
 from kohakuterrarium.core.controller.controller import Controller
+from kohakuterrarium.core.controller.context import tool_feedback_metadata
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.jobs.job import JobResult
 from kohakuterrarium.core.tools.dispatch import start_tool_task
@@ -134,12 +135,18 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 controller, handle_order, results, tool_call_ids
             )
         elif text := self._format_text_results(handle_order, results):
-            controller.push_event_sync(
-                create_tool_complete_event(
-                    job_id="batch",
-                    content=text,
-                    exit_code=0,
-                )
+            job_ids = [job_id for job_id in handle_order if job_id in results]
+            events = [
+                create_tool_complete_event(job_id=job_id, content="")
+                for job_id in job_ids
+            ]
+            controller.conversation.append(
+                "user",
+                text,
+                metadata={
+                    **tool_feedback_metadata(events),
+                    **self._message_origin(events),
+                },
             )
 
     def _handle_promotion(
@@ -436,7 +443,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         )
         metric_name = meta.get("name") or job_id.rsplit("_", 1)[0]
 
-        if isinstance(result, Exception):
+        if isinstance(result, (Exception, asyncio.CancelledError)):
             interrupted = isinstance(result, asyncio.CancelledError)
             error_text = (
                 "User manually interrupted this job." if interrupted else str(result)
@@ -595,7 +602,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             if tool_call_id in existing_ids:
                 continue
 
-            if isinstance(result, Exception):
+            if isinstance(result, (Exception, asyncio.CancelledError)):
                 interrupted = isinstance(result, asyncio.CancelledError)
                 error_text = (
                     "User manually interrupted this job."
@@ -643,7 +650,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
             result = results[job_id]
 
-            if isinstance(result, Exception):
+            if isinstance(result, (Exception, asyncio.CancelledError)):
                 interrupted = isinstance(result, asyncio.CancelledError)
                 error_text = (
                     "User manually interrupted this job."

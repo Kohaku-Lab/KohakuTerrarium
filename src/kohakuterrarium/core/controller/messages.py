@@ -1,5 +1,6 @@
 """Capture completed assistant messages and emit round output events."""
 
+import asyncio
 from copy import deepcopy
 from typing import Any
 
@@ -28,15 +29,51 @@ async def begin_assistant(controller: Any) -> None:
         await router.emit(OutputEvent(type="assistant_round_start", payload={}))
 
 
+async def record_incomplete_assistant(
+    controller: Any, content: str, error: BaseException
+) -> None:
+    """Retain received text as an incomplete canonical assistant message."""
+    if not content:
+        return
+    origin = next(
+        (
+            {
+                key: msg.metadata[key]
+                for key in ("turn_index", "branch_id", "origin_known")
+                if key in msg.metadata
+            }
+            for msg in reversed(controller.conversation.get_messages())
+            if "turn_index" in msg.metadata
+        ),
+        {},
+    )
+    metadata = {
+        **origin,
+        "incomplete": True,
+        "completion_state": (
+            "interrupted" if isinstance(error, asyncio.CancelledError) else "incomplete"
+        ),
+    }
+    outcome = getattr(error, "response_outcome", None)
+    if isinstance(outcome, dict):
+        metadata["response_outcome"] = dict(outcome)
+    controller._completed_assistant_message = controller.conversation.append(
+        "assistant",
+        content,
+        metadata=metadata,
+    )
+    await end_assistant(controller)
+
+
 async def end_assistant(controller: Any) -> None:
     """Emit a detached copy of the captured assistant message after post-hooks."""
     captured = controller._completed_assistant_message
     router = controller.output_router
     if captured is None or router is None:
         return
+    message = deepcopy(captured.to_dict())
+    if captured.metadata:
+        message["metadata"] = deepcopy(captured.metadata)
     await router.emit(
-        OutputEvent(
-            type="assistant_message",
-            payload={"message": deepcopy(captured.to_dict())},
-        )
+        OutputEvent(type="assistant_message", payload={"message": message})
     )

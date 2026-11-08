@@ -1029,6 +1029,15 @@ class TestApiCreatureJourney:
         resumed_blob = str(_snapshot_messages(client, resumed_id, "alice"))
         assert "persist this turn" in resumed_blob
         assert _REPLY_GREET in resumed_blob
+        assert "Partial answer" in resumed_blob
+        incomplete_messages = [
+            e["message"]
+            for e in resumed_history["events"]
+            if e["type"] == "assistant_message"
+            and e["message"].get("metadata", {}).get("incomplete")
+        ]
+        assert len(incomplete_messages) == 1
+        assert "Partial answer" in str(incomplete_messages[0]["content"])
         # The inline block's state comes back with the resumed history.
         assert [
             (e["ui_turn"], e["block"], e["state"])

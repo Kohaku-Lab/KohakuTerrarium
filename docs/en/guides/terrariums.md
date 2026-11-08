@@ -233,7 +233,9 @@ A creature declares in its config where its turn-end output should go. When a tu
 
 Failed, unconfirmed, or interrupted turns do not emit content-bearing wires. Entries with `with_content: false` remain lifecycle notifications, not proof of success. Emission is deferred while the turn still owes a deliverable background result.
 
-A response-stream failure does not undo tools already dispatched. The turn collects their direct results without resubmitting the model request; already-background or promoted work keeps its existing completion path. Interrupting cancels remaining foreground work while preserving results already collected.
+A response-stream failure does not undo tools already dispatched. The turn collects their direct results without resubmitting the model request; already-background or promoted work keeps its existing completion path. Interrupting cancels remaining foreground work while preserving results already collected. Partial assistant text is marked incomplete, and settled direct results are saved in the current conversation before the turn snapshot. They survive stop/resume without leaking into a replacement edit branch.
+
+For Codex HTTP, SDK retries are disabled per request. Connection or pool failures proven to occur before submission retain normal recovery; a disconnect with uncertain submission status, including before response headers, is reported as unconfirmed rather than automatically resubmitted.
 
 ```yaml
 # terrarium.yaml creature block

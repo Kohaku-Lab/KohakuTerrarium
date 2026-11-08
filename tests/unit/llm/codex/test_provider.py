@@ -295,6 +295,10 @@ class _FakeClient:
     def __init__(self):
         self.responses = _FakeResponses()
 
+    def with_options(self, *, max_retries):
+        assert max_retries == 0
+        return self
+
 
 class _TokenExpiredError(Exception):
     def __init__(self):
@@ -328,6 +332,10 @@ class _ScriptedResponses:
 class _ScriptedClient:
     def __init__(self, outcomes):
         self.responses = _ScriptedResponses(outcomes)
+
+    def with_options(self, *, max_retries):
+        assert max_retries == 0
+        return self
 
 
 class _FakeWSSession:

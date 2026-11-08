@@ -30,6 +30,7 @@ from kohakuterrarium.core.controller.plugins import (
 from kohakuterrarium.core.controller.messages import (
     begin_assistant,
     end_assistant,
+    record_incomplete_assistant,
     _merge_text_and_parts,
 )
 from kohakuterrarium.core.conversation.conversation import (
@@ -426,21 +427,25 @@ class Controller:
         provider_native_tools = self._get_provider_native_tools()
 
         with time_llm_call(self.llm) as _t:
-            async with aclosing(
-                self._chat_with_recovery(
-                    messages,
-                    stream=True,
-                    tools=tool_schemas or None,
-                    provider_native_tools=provider_native_tools or None,
-                )
-            ) as stream:
-                async for chunk in stream:
-                    if self._interrupted:
-                        _t.status = "interrupted"
-                        break
-                    assistant_content += chunk
-                    if chunk:
-                        yield TextEvent(text=chunk)
+            try:
+                async with aclosing(
+                    self._chat_with_recovery(
+                        messages,
+                        stream=True,
+                        tools=tool_schemas or None,
+                        provider_native_tools=provider_native_tools or None,
+                    )
+                ) as stream:
+                    async for chunk in stream:
+                        if self._interrupted:
+                            _t.status = "interrupted"
+                            break
+                        assistant_content += chunk
+                        if chunk:
+                            yield TextEvent(text=chunk)
+            except (Exception, asyncio.CancelledError) as exc:
+                await record_incomplete_assistant(self, assistant_content, exc)
+                raise
         self._log_token_usage()
 
         # Materialize binary output before recording it so the conversation
@@ -591,10 +596,13 @@ class Controller:
                                 yield result_event
                             else:
                                 yield event
-            except Exception:
-                for event in self._parser.flush():
-                    if isinstance(event, TextEvent):
-                        yield event
+            except (Exception, asyncio.CancelledError) as exc:
+                try:
+                    for event in self._parser.flush():
+                        if isinstance(event, TextEvent):
+                            yield event
+                finally:
+                    await record_incomplete_assistant(self, assistant_content, exc)
                 raise
             # Flush remaining parser state
             for event in self._parser.flush():
