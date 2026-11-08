@@ -28,7 +28,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from kohakuvault import KVault
 
+from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent.history import message_history as _message_history_mod
@@ -38,6 +41,7 @@ from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.core.conversation.pinned import pin_message, unpin_message
 from kohakuterrarium.core.conversation.pinned import state_key as pinned_state_key
 from kohakuterrarium.errors import RendererUnavailable
+from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
 from kohakuterrarium.modules.output.widgets.service import WidgetMessage
@@ -83,6 +87,8 @@ from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.session.resume.resume import detect_session_type, resume_agent
 from kohakuterrarium.session.resume.async_flow import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store.records.resume_point import POINT_KEY
+from kohakuterrarium.session.store.events import branch_index as _branch_index_mod
 from kohakuterrarium.session.store.lifecycle.version import (
     FORMAT_VERSION,
     detect_format_version,
@@ -143,6 +149,39 @@ class _EchoTool(BaseTool):
         return ToolResult(output=f"echoed: {args.get('content', '')}")
 
 
+class _GatedBackgroundEcho(_EchoTool):
+    """Hold a background echo until the test releases its result."""
+
+    def __init__(self):
+        super().__init__()
+        self.release = asyncio.Event()
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.BACKGROUND
+
+    async def _execute(self, args, **kwargs) -> ToolResult:
+        await self.release.wait()
+        return await super()._execute(args, **kwargs)
+
+
+class _NativeEchoLLM(ScriptedLLM):
+    """Emit one settled native echo call before the final response."""
+
+    def __init__(self):
+        super().__init__(["", "tool completed"])
+        self.last_tool_calls = []
+
+    async def chat(self, messages, **kwargs):
+        async for chunk in super().chat(messages, **kwargs):
+            yield chunk
+        self.last_tool_calls = (
+            [NativeToolCall("echo-1", "echo", '{"content":"retained result"}')]
+            if self.call_count == 1
+            else []
+        )
+
+
 # ── shared fixtures ──────────────────────────────────────────────
 
 
@@ -172,13 +211,15 @@ CHILD = "tests.helpers.live_store_stress_child"
 _PIN_PIXEL = "data:image/png;base64,iVBORw0KGgo="
 
 
-def _write_agent_config(config_dir, name: str = "scribe") -> str:
+def _write_agent_config(
+    config_dir, name: str = "scribe", *, tool_format: str = "bracket"
+) -> str:
     """Write a minimal but complete creature config dir. Returns the path."""
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "config.yaml").write_text(
         f"name: {name}\n"
         "controller:\n"
-        "  tool_format: bracket\n"
+        f"  tool_format: {tool_format}\n"
         "  include_tools_in_prompt: false\n"
         "  include_hints_in_prompt: false\n"
         "system_prompt: |\n"
@@ -1267,6 +1308,249 @@ class TestSessionIntegration:
         finally:
             forked_session.store.close()
         host_store.close()
+
+        for tool_format in ("bracket", "native"):
+            clean_config = _write_agent_config(
+                tmp_path / f"checkpoint-{tool_format}",
+                name="plain",
+                tool_format=tool_format,
+            )
+            clean_path = tmp_path / f"checkpoint-{tool_format}.kohakutr"
+            clean_llm = (
+                _NativeEchoLLM()
+                if tool_format == "native"
+                else ScriptedLLM(["[/echo]retained result[echo/]", "tool completed"])
+            )
+            clean_agent = await Agent.build(
+                clean_config, llm=clean_llm, io="headless", tools=[_EchoTool()]
+            )
+            clean_store = _new_store(
+                clean_path, config_path=clean_config, agents=["plain"]
+            )
+            clean_agent.attach_session_store(clean_store)
+            try:
+                await clean_agent.start()
+                assert (await clean_agent.run("use echo once")).text.endswith(
+                    "tool completed"
+                )
+                initial_context = clean_agent.controller.conversation.snapshot_messages(
+                    preserve_pending_tail=True
+                )
+                original_events = await clean_store.run(clean_store.get_events, "plain")
+                assert any(e["type"] == "tool_result" for e in original_events)
+            finally:
+                await clean_agent.stop()
+                clean_store.close(update_status=False)
+
+            native_pair = [
+                m for m in initial_context if m.get("tool_calls") or m["role"] == "tool"
+            ]
+            if tool_format == "native":
+                assert native_pair[0]["tool_calls"] == [
+                    {
+                        "id": "echo-1",
+                        "type": "function",
+                        "function": {
+                            "name": "echo",
+                            "arguments": '{"content":"retained result"}',
+                        },
+                    }
+                ]
+                assert native_pair[0]["content"] in (None, "")
+                assert native_pair[1]["tool_call_id"] == "echo-1"
+                assert "echoed: retained result" in native_pair[1]["content"]
+            expected_context = initial_context
+            historical_keys = {
+                f"plain:e{index:06d}"
+                for index in range(clean_store._event_seq["plain"])
+            }
+            full_reads = []
+            get_events = SessionStore.get_events
+            read_branches = _branch_index_mod.read_prefix
+
+            def observe_full_read(store, *args, **kwargs):
+                full_reads.append("get_events")
+                return get_events(store, *args, **kwargs)
+
+            def observe_branch_read(*args, **kwargs):
+                full_reads.append("branch_index")
+                return read_branches(*args, **kwargs)
+
+            for next_turn in (2, 3, 4, 5):
+                if next_turn >= 4:
+                    editor = SessionStore(clean_path)
+                    try:
+                        point = editor._resume_point
+                        assert point is not None
+                        if next_turn == 4:
+                            point["version"] = 99
+                        else:
+                            editor.state["plain:branch_view"] = {"1": 1}
+                        editor.state[POINT_KEY] = point
+                    finally:
+                        editor.close(update_status=False)
+                full_reads.clear()
+                next_llm = ScriptedLLM([f"continued {next_turn}"])
+                with monkeypatch.context() as checkpoint_reads:
+                    for method in ("get", "__getitem__", "get_many"):
+                        original_read = getattr(KVault, method)
+
+                        def observe_payload(
+                            self, key, *args, _read=original_read, **kwargs
+                        ):
+                            requested = key if isinstance(key, (list, tuple)) else [key]
+                            if any(
+                                (k.decode() if isinstance(k, bytes) else k)
+                                in historical_keys
+                                for k in requested
+                            ):
+                                full_reads.append("historical_payload")
+                            return _read(self, key, *args, **kwargs)
+
+                        checkpoint_reads.setattr(KVault, method, observe_payload)
+                    checkpoint_reads.setattr(
+                        SessionStore, "get_events", observe_full_read
+                    )
+                    checkpoint_reads.setattr(
+                        _branch_index_mod, "read_prefix", observe_branch_read
+                    )
+                    continued, continuation_store = await resume_agent_async(
+                        clean_path,
+                        llm=next_llm,
+                        input_module=NoneInput(),
+                        output_module=NoneOutput(),
+                    )
+                    try:
+                        assert (
+                            continued.controller.conversation.snapshot_messages(
+                                preserve_pending_tail=True
+                            )
+                            == expected_context
+                        )
+                        continued.add_tool(_EchoTool())
+                        await continued.start()
+                        assert (
+                            await continued.run(f"continue {next_turn}")
+                        ).text == f"continued {next_turn}"
+                        assert (continued._turn_index, continued._branch_id) == (
+                            next_turn,
+                            1,
+                        )
+                        assert next_llm.call_count == 1
+                        assert "echoed: retained result" in str(next_llm.last_messages)
+                        if tool_format == "native":
+                            for saved in native_pair:
+                                assert {
+                                    k: v for k, v in saved.items() if k != "metadata"
+                                } in next_llm.last_messages
+                        expected_context = (
+                            continued.controller.conversation.snapshot_messages(
+                                preserve_pending_tail=True
+                            )
+                        )
+                    finally:
+                        await continued.stop()
+                        historical_keys.update(
+                            f"plain:e{index:06d}"
+                            for index in range(continuation_store._event_seq["plain"])
+                        )
+                        continuation_store.close(update_status=False)
+                if next_turn < 4:
+                    assert full_reads == []
+                else:
+                    assert "get_events" in full_reads
+                    assert "historical_payload" in full_reads
+            verified = SessionStore(clean_path)
+            try:
+                continued_events = verified.get_events("plain")
+                assert [e for e in continued_events if e["type"] == "tool_result"] == [
+                    e for e in original_events if e["type"] == "tool_result"
+                ]
+                user_events = [
+                    e for e in continued_events if e["type"] == "user_message"
+                ]
+                assert [(e["turn_index"], e["branch_id"]) for e in user_events] == [
+                    (1, 1),
+                    (2, 1),
+                    (3, 1),
+                    (4, 1),
+                    (5, 1),
+                ]
+                assert len({e["event_id"] for e in continued_events}) == len(
+                    continued_events
+                )
+            finally:
+                verified.close(update_status=False)
+
+        background_config = _write_agent_config(tmp_path / "undelivered", name="plain")
+        background_path = tmp_path / "undelivered.kohakutr"
+        background = _GatedBackgroundEcho()
+        background_agent = await Agent.build(
+            background_config,
+            io="headless",
+            tools=[background],
+            llm=ScriptedLLM(["[/echo]late-checkpoint-result[echo/]", "later reply"]),
+        )
+        background_store = _new_store(
+            background_path, config_path=background_config, agents=["plain"]
+        )
+        background_agent.attach_session_store(background_store)
+        await background_agent.start()
+        completed = asyncio.Event()
+        on_complete = background_agent.executor._on_complete
+        finalize = background_agent._finalize_processing
+
+        def record_completion(event):
+            on_complete(event)
+            completed.set()
+
+        async def finish_with_undelivered_result(*args):
+            background.release.set()
+            await asyncio.wait_for(completed.wait(), 5)
+            assert not background_agent.executor.job_store.get_running_jobs()
+            assert not background_agent.executor.job_store.get_pending_jobs()
+            assert background_agent.has_pending_mid_turn_inputs
+            await finalize(*args)
+            background_agent.pause()
+
+        try:
+            await background_agent.run("start background echo")
+            with monkeypatch.context() as late_result:
+                late_result.setattr(
+                    background_agent.executor, "_on_complete", record_completion
+                )
+                late_result.setattr(
+                    background_agent,
+                    "_finalize_processing",
+                    finish_with_undelivered_result,
+                )
+                await background_agent.run("finish this turn before delivering echo")
+            assert "echoed: late-checkpoint-result" not in str(
+                background_agent.controller.conversation.snapshot_messages()
+            )
+        finally:
+            background.release.set()
+            await background_agent.stop()
+            background_store.close(update_status=False)
+        resumed_llm = ScriptedLLM(["continued after late completion"])
+        resumed, reopened = await resume_agent_async(
+            background_path,
+            llm=resumed_llm,
+            input_module=NoneInput(),
+            output_module=NoneOutput(),
+        )
+        try:
+            restored = resumed.controller.conversation.snapshot_messages()
+            assert "echoed: late-checkpoint-result" in str(restored)
+            assert reopened._resume_point is None
+            resumed.add_tool(_EchoTool())
+            await resumed.start()
+            await resumed.run("continue after late completion")
+            assert "echoed: late-checkpoint-result" in str(resumed_llm.last_messages)
+            assert (resumed._turn_index, resumed._branch_id) == (3, 1)
+        finally:
+            await resumed.stop()
+            reopened.close(update_status=False)
 
     async def test_memory_index_and_search_finds_exact_turn(
         self, patched_llm, tmp_path

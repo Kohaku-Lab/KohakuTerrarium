@@ -9,6 +9,7 @@ from kohakuterrarium.session.store.records.artifacts import (
     write_artifact_bytes,
 )
 from kohakuterrarium.session.store.events.counters import persist_event_counter
+from kohakuterrarium.session.store.records.resume_point import publish_point
 from kohakuterrarium.session.store.events.flush import EventFlushPipeline
 from kohakuterrarium.session.store.lifecycle.tables import open_store_tables
 from kohakuterrarium.session.store.lifecycle.table_policy import (
@@ -157,9 +158,10 @@ class StoreHandleMixin:
                 # The clean-close counter is written only once every row is committed.
                 try:
                     self._flush.close()
-                    persist_event_counter(
+                    if persist_event_counter(
                         self.state, self.global_max_event_id, self._reserved_event_id
-                    )
+                    ):
+                        publish_point(self)
                 except Exception as e:
                     logger.warning(
                         "Failed to commit buffered events on close",

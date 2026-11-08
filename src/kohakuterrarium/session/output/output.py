@@ -21,6 +21,7 @@ from kohakuterrarium.session.output.activity import (
 from kohakuterrarium.session.output.assistant import AssistantOutputMixin
 from kohakuterrarium.session.output.widgets import SessionWidgetsMixin
 from kohakuterrarium.session.run_state import RunTracker
+from kohakuterrarium.session.store.records.resume_point import stage_point
 from kohakuterrarium.session.store.records.snapshot import compact_state
 from kohakuterrarium.session.output.text_buffer import (
     OpenTextSegment,
@@ -82,6 +83,7 @@ class SessionOutput(
         # turn boundaries. Populated before recovery so the constructor can
         # queue without an event loop.
         self._pending_writes: list[Future] = []
+        self._checkpoint_turn_ok = True
         self._run = RunTracker(store, self._event_key_prefix, self._submit_store_write)
         # Recover immediately so read-only resumes expose interrupted text.
         self._recover_open_text()
@@ -113,6 +115,10 @@ class SessionOutput(
         A routed non-text event defines a segment boundary, so buffered text
         must be persisted first to preserve event order.
         """
+        if event_type == "processing_start":
+            self._checkpoint_turn_ok = True
+        elif event_type in {"processing_error", "activity:interrupt"}:
+            self._checkpoint_turn_ok = False
         self._recover_open_text()
         self._flush_text_segment()
         self._append_event(event_type, data)
@@ -165,6 +171,8 @@ class SessionOutput(
                 return future
             result = fn(*args, **kwargs)
         except Exception as e:
+            self._checkpoint_turn_ok = False
+            self._store._resume_candidate = None
             logger.warning("Session record failed", error=str(e), exc_info=True)
             future = Future()
             future.set_exception(e)
@@ -193,6 +201,8 @@ class SessionOutput(
                 self._pending_writes[:0] = [f for f in pending[idx:] if not f.done()]
                 raise
             except Exception as e:
+                self._checkpoint_turn_ok = False
+                self._store._resume_candidate = None
                 logger.warning("Session record failed", error=str(e), exc_info=True)
 
     def _ensure_token_totals_restored(self) -> None:
@@ -296,6 +306,8 @@ class SessionOutput(
             try:
                 future.result()
             except Exception as exc:
+                self._checkpoint_turn_ok = False
+                self._store._resume_candidate = None
                 logger.warning("Session record failed", error=str(exc), exc_info=True)
 
     async def on_processing_start(self, *, request_id: str | None = None) -> None:
@@ -386,6 +398,8 @@ class SessionOutput(
         ``last_event_id`` — the O(N) scan here used to make every turn
         cost linear in total session length).
         """
+        self._store._resume_candidate = None
+        snapshot_saved = False
         try:
             if messages is None:
                 events = self._store.get_events(self._event_key_prefix)
@@ -414,6 +428,7 @@ class SessionOutput(
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (
                     last_event_id
                 )
+                snapshot_saved = True
                 if branch_tag is not None:
                     self._store.state[f"{self._event_key_prefix}:snapshot_branch"] = (
                         branch_tag
@@ -427,6 +442,7 @@ class SessionOutput(
                         f"{self._event_key_prefix}:snapshot_branch", None
                     )
             except Exception as e:
+                snapshot_saved = False
                 logger.warning(
                     "Failed to save snapshot_event_id",
                     error=str(e),
@@ -441,6 +457,7 @@ class SessionOutput(
             if state_kwargs:
                 self._store.save_state(self._event_key_prefix, **state_kwargs)
         except Exception as e:
+            snapshot_saved = False
             logger.warning("State save failed", error=str(e), exc_info=True)
 
         # Keep the on-disk event log consistent with the snapshot for immediate
@@ -449,6 +466,37 @@ class SessionOutput(
             flush = getattr(self._store, "flush", None)
             if callable(flush):
                 flush()
+            agent = self._agent
+            config = getattr(agent, "config", None)
+            if (
+                snapshot_saved
+                and self._checkpoint_turn_ok
+                and config is not None
+                and not config.plugins
+                and not config.default_plugins
+                and not config.triggers
+                and not config.startup_trigger
+                and not config.mcp_servers
+                and not config.output_wiring
+                and not any(
+                    plugin["enabled"]
+                    and plugin["name"] not in agent.plugins.default_on_names()
+                    for plugin in agent.plugins.list_plugins()
+                )
+                and not agent.executor.job_store.get_running_jobs()
+                and not agent.executor.job_store.get_pending_jobs()
+                and not agent.has_pending_mid_turn_inputs
+                and branch_tag is not None
+                and saved_compact_state is not None
+                and messages is not None
+            ):
+                stage_point(
+                    self._store,
+                    self._event_key_prefix,
+                    messages,
+                    branch_tag,
+                    saved_compact_state,
+                )
         except Exception as e:
             logger.warning(
                 "Events flush at turn end failed", error=str(e), exc_info=True

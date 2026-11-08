@@ -12,6 +12,7 @@ from kohakuterrarium.session.store.events.counters import (
     scan_max_event_id,
 )
 from kohakuterrarium.session.store.events.flush import EventFlushPipeline
+from kohakuterrarium.session.store.records.resume_point import appended_to_point
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -187,6 +188,7 @@ class EventAppendMixin:
             data["ts"] = time.time()
         self._branch_maxima.append(self.events, key, agent, data)
         self._event_keys.record(key, event_id)
+        appended_to_point(self, agent, data)
 
         text = data.get("content") or data.get("output") or data.get("text") or ""
         if isinstance(text, str) and len(text) > 10:
