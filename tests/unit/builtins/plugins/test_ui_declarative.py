@@ -9,6 +9,8 @@ import asyncio
 from contextlib import closing
 from types import SimpleNamespace
 
+import pytest
+
 from kohakuterrarium.builtins.kt_ui.components import COMPONENTS
 from kohakuterrarium.builtins.kt_ui.markup import check_block, split_message
 from kohakuterrarium.builtins.plugin_catalog import lookup_plugin
@@ -207,6 +209,150 @@ class TestListAttributes:
 
 
 class TestFailureNote:
+    def test_invalid_accordion_items_get_props_and_a_complete_repair_example(self):
+        source = (
+            '<ui title="Example"><accordion items={[{title:"One",content:"First"},'
+            '{title:"Two",content:"Second"}]}/></ui>'
+        )
+        failures = block_failures(source)
+        assert len(failures) == 1
+        assert "root.items: unknown prop for accordion" in failures[0][1]
+        assert "root.title: is required" in failures[0][1]
+        note = failure_note(failures)
+        assert "- `accordion`: title*: text; open: bool; children" in note
+        example = next(
+            line.split("e.g. ", 1)[1] for line in note.splitlines() if "e.g. " in line
+        )
+        root = check_block(f"<ui>{example}</ui>").spec["root"]
+        assert root["type"] == "accordion" and root["title"]
+        assert root["children"][0]["value"]
+        assert "items" not in root
+
+    @pytest.mark.parametrize(
+        ("source", "path"),
+        [
+            ("<ui><accordion/></ui>", "root.title"),
+            (
+                '<ui><card title="Summary"><text>Unrelated</text>'
+                "<accordion><text>Details</text></accordion></card></ui>",
+                "root.children[1].title",
+            ),
+            (
+                "<ui><each items={[1]}><accordion>"
+                "<text>{item}</text></accordion></each></ui>",
+                "root.child.title",
+            ),
+            (
+                '<ui><accordion title="One"><text>First</text></accordion>'
+                "<accordion><text>Second</text></accordion></ui>",
+                "root.children[1].title",
+            ),
+        ],
+    )
+    def test_missing_required_prop_identifies_the_affected_node(self, source, path):
+        failures = block_failures(source)
+        assert f"{path}: is required" in failures[0][1]
+        note = failure_note(failures)
+        assert "- `accordion`: title*: text; open: bool; children" in note
+        assert note.count("\n- `accordion`") == 1
+        for unrelated in ("card", "text", "each", "stack"):
+            assert f"- `{unrelated}`" not in note
+
+    @pytest.mark.parametrize(
+        ("source", "component", "unrelated"),
+        [
+            (
+                "<ui><code><chart>not a component</chart></code>" "<accordion/></ui>",
+                "accordion",
+                ("code", "chart", "stack"),
+            ),
+            (
+                '<ui><table columns={[{key: "n", format: "<chart>", '
+                'type: "accordion"}]} rows={[]}/></ui>',
+                "table",
+                ("chart", "accordion"),
+            ),
+            (
+                '<ui layout="<accordion>"><text>Valid content</text></ui>',
+                None,
+                ("accordion", "text"),
+            ),
+        ],
+    )
+    def test_validation_guidance_ignores_unrelated_tags_and_data(
+        self, source, component, unrelated
+    ):
+        note = failure_note(block_failures(source))
+        if component is None:
+            assert "How to write them" not in note
+        else:
+            assert f"- `{component}`" in note
+        for name in unrelated:
+            assert f"- `{name}`" not in note
+
+    @pytest.mark.parametrize(
+        ("source", "reason", "owner", "unrelated"),
+        [
+            (
+                "<ui><each items={[1]}/></ui>",
+                "root.child: is required",
+                "each",
+                ("accordion", "text"),
+            ),
+            (
+                '<ui><tabs><accordion title="Fine"><text>Fine</text>'
+                "</accordion></tabs></ui>",
+                "root.children[0]: tabs may only contain 'tab' nodes",
+                "tabs",
+                ("accordion", "text"),
+            ),
+            (
+                '<ui root={{type:"card", "children[0].title":"invalid", '
+                'children:[{type:"text",value:"valid"}]}}/>',
+                "root.children[0].title: unknown prop for card",
+                "card",
+                ("text", "accordion"),
+            ),
+        ],
+    )
+    def test_validation_guidance_names_the_constraint_owner(
+        self, source, reason, owner, unrelated
+    ):
+        failures = block_failures(source)
+        assert reason in failures[0][1]
+        note = failure_note(failures)
+        assert f"- `{owner}`" in note
+        for name in unrelated:
+            assert f"- `{name}`" not in note
+
+    @pytest.mark.parametrize("value", ["[]", "{name: 'accordion'}", "'<accordion>'"])
+    def test_unknown_component_types_report_the_error_without_guessing_docs(
+        self, value
+    ):
+        failures = block_failures(f"<ui><card><text type={{{value}}}/></card></ui>")
+        assert len(failures) == 1
+        assert "root.children[0].type: unknown component" in failures[0][1]
+        note = failure_note(failures)
+        assert "How to write them" not in note
+
+    def test_validation_guidance_survives_a_truncated_reason(self):
+        source = f'<ui><accordion {"x" * 350}="bad"/></ui>'
+        failures = block_failures(source)
+        assert len(failures[0][1]) <= 300 and failures[0][1].endswith("…")
+        note = failure_note(failures)
+        assert "- `accordion`: title*: text; open: bool; children" in note
+        assert len(note) < 800
+
+    def test_validation_guidance_limits_and_deduplicates_affected_components(self):
+        failures = block_failures(
+            "<ui><accordion/><accordion/><steps/><tree/><quiz/></ui>"
+        )
+        note = failure_note(failures)
+        assert note.count("\n- `") == 3
+        for name in ("accordion", "steps", "tree"):
+            assert f"- `{name}`" in note
+        assert "- `quiz`" not in note and "- `stack`" not in note
+
     def test_block_failures_number_every_block(self):
         text = f"a\n{GOOD}\nb\n{BAD}\n{GOOD}"
         failures = block_failures(text)
@@ -294,6 +440,16 @@ class TestFailureNote:
                 {"role": "user", "content": "x"},
             ],
             [{"role": "assistant", "content": GOOD}, {"role": "user", "content": "x"}],
+            [
+                {
+                    "role": "assistant",
+                    "content": (
+                        '<ui><accordion title="One"><text>First</text></accordion>'
+                        '<accordion title="Two"><text>Second</text></accordion></ui>'
+                    ),
+                },
+                {"role": "user", "content": "x"},
+            ],
             [{"role": "assistant", "content": None}, {"role": "user", "content": "x"}],
         ]
         for messages in cases:
