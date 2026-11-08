@@ -1,4 +1,15 @@
 export default {
+  "chat.outcome.response_unconfirmed": "結果未確認",
+  "chat.outcome.response_failed": "回應失敗",
+  "chat.outcome.response_incomplete": "回應不完整",
+  "chat.outcome.response_unconfirmed.summary":
+    "回應串流已結束，但未收到完成確認。這不代表上游任務已經停止。",
+  "chat.outcome.response_failed.summary": "服務方回報本次回應失敗。已經顯示的內容仍保留在上方。",
+  "chat.outcome.response_incomplete.summary":
+    "服務方回報本次回應不完整。請勿將上方輸出視為完整結果。",
+  "chat.outcome.guidance":
+    "再次提交前，請檢查目前連線的模型及工具支援。新請求可能重複執行並產生額外費用；KT 未對本次錯誤自動重試。",
+  "chat.outcome.details": "技術詳情",
   "sessions.filterType": "對話類型",
   "sessions.allTypes": "全部類型",
   "sessions.agentType": "智慧體",

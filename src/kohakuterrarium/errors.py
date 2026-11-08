@@ -89,6 +89,28 @@ class LLMError(KTError):
     """LLM provider construction or call failure."""
 
 
+class ResponseStreamError(LLMError):
+    """A submitted response failed or ended without confirmed completion."""
+
+    _MESSAGES = {
+        "response_unconfirmed": "The response stream ended without a completion confirmation.",
+        "response_failed": "The provider reported that the response failed.",
+        "response_incomplete": "The provider reported that the response is incomplete.",
+    }
+
+    def __init__(self, code: str = "response_unconfirmed") -> None:
+        super().__init__(self._MESSAGES[code])
+        self.code = code
+
+    @property
+    def response_outcome(self) -> dict[str, str]:
+        return {
+            "code": self.code,
+            "outcome": "unknown" if self.code == "response_unconfirmed" else "failed",
+            "retry_safety": "may_duplicate",
+        }
+
+
 class MediaReferenceError(LLMError):
     """Required local media could not be prepared for a provider request."""
 

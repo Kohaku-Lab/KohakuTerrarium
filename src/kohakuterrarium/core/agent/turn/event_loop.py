@@ -9,6 +9,7 @@ per run. The processing lock allows shutdown to join an in-flight turn.
 import asyncio
 from typing import Any
 
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.core.agent.turn.mid_turn import _to_serializable_content
 from kohakuterrarium.core.controller.context import declare_message_origin
 from kohakuterrarium.core.agent.tools.runtime_tools import _make_job_label
@@ -519,10 +520,13 @@ class AgentEventLoopMixin:
             error_msg = str(e)
             self._record_rerun_execution_error(primary, e)
             logger.error("Processing error", error_type=error_type, error=error_msg)
+            metadata = {"error_type": error_type, "error": error_msg}
+            if isinstance(e, ResponseStreamError):
+                metadata["response_outcome"] = e.response_outcome
             self.output_router.notify_activity(
                 "processing_error",
                 f"[{error_type}] {error_msg}",
-                metadata={"error_type": error_type, "error": error_msg},
+                metadata=metadata,
             )
             metrics.observe_error("controller")
         finally:

@@ -1,4 +1,15 @@
 export default {
+  "chat.outcome.response_unconfirmed": "结果未确认",
+  "chat.outcome.response_failed": "响应失败",
+  "chat.outcome.response_incomplete": "响应不完整",
+  "chat.outcome.response_unconfirmed.summary":
+    "响应流已结束，但没有收到完成确认。这不代表上游任务已经停止。",
+  "chat.outcome.response_failed.summary": "服务方报告本次响应失败。已经显示的内容仍保留在上方。",
+  "chat.outcome.response_incomplete.summary":
+    "服务方报告本次响应不完整。请勿将上方输出视为完整结果。",
+  "chat.outcome.guidance":
+    "再次提交前，请检查当前连接的模型及工具支持。新请求可能重复执行并产生额外费用；KT 未对本次错误自动重试。",
+  "chat.outcome.details": "技术详情",
   "sessions.filterType": "会话类型",
   "sessions.allTypes": "全部类型",
   "sessions.agentType": "智能体",

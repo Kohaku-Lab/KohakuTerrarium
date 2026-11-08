@@ -3,6 +3,7 @@
 from contextlib import aclosing
 from typing import Any, AsyncIterator
 
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.codex.image.gen import build_image_part
 from kohakuterrarium.llm.codex.format import (
     fix_tool_call_pairing,
@@ -86,6 +87,10 @@ def process_codex_event(
     provider._reasoning.consume(event)
 
     match getattr(event, "type", ""):
+        case "response.failed" | "error":
+            raise ResponseStreamError("response_failed")
+        case "response.incomplete":
+            raise ResponseStreamError("response_incomplete")
         case "response.output_text.delta":
             piece = strip_surrogates(event.delta)
             provider._reasoning.consume_output_text(piece)
@@ -118,6 +123,11 @@ def process_codex_event(
         case "response.completed":
             resp = getattr(event, "response", None)
             if resp:
+                status = getattr(resp, "status", None)
+                if status in {"failed", "cancelled"}:
+                    raise ResponseStreamError("response_failed")
+                if status == "incomplete":
+                    raise ResponseStreamError("response_incomplete")
                 u = getattr(resp, "usage", None)
                 if u:
                     cached = 0

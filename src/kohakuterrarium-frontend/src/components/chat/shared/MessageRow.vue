@@ -21,14 +21,20 @@
     <div role="button" tabindex="0" :aria-expanded="errorExpanded" class="flex items-center gap-2 py-2 px-3 cursor-pointer select-none hover:bg-coral/12 dark:hover:bg-coral/18" @click="errorExpanded = !errorExpanded" @keydown.enter="errorExpanded = !errorExpanded" @keydown.space.prevent="errorExpanded = !errorExpanded">
       <span class="text-coral font-bold text-sm">&#x2717;</span>
       <span class="text-coral dark:text-coral-light font-semibold text-xs flex-1">
-        {{ message.errorType || "Processing Error" }}
+        {{ responseOutcomeCode ? t(`chat.outcome.${responseOutcomeCode}`) : message.errorType || "Processing Error" }}
       </span>
-      <span v-if="errorFirstLine" class="text-xs text-coral-shadow dark:text-coral-light/70 font-mono truncate max-w-[60%]">
+      <span v-if="errorFirstLine && !responseOutcomeCode" class="text-xs text-coral-shadow dark:text-coral-light/70 font-mono truncate max-w-[60%]">
         {{ errorFirstLine }}
       </span>
+      <span v-if="responseOutcomeCode" class="text-xs text-coral-shadow dark:text-coral-light">{{ t("chat.outcome.details") }}</span>
       <span class="i-carbon-chevron-down text-coral/60 transition-transform text-[10px]" :class="{ 'rotate-180': errorExpanded }" />
     </div>
+    <div v-if="responseOutcomeCode" data-testid="response-outcome" class="px-3 pb-3 text-sm text-coral-shadow dark:text-coral-light break-words">
+      <p>{{ t(`chat.outcome.${responseOutcomeCode}.summary`) }}</p>
+      <p class="mt-2 text-xs">{{ t("chat.outcome.guidance") }}</p>
+    </div>
     <div v-if="errorExpanded" class="px-3 pb-2 text-xs text-coral-shadow dark:text-coral-light/80 font-mono whitespace-pre-wrap border-t border-coral/20">
+      <div v-if="responseOutcomeCode">{{ responseOutcomeCode }}</div>
       {{ message.content }}
     </div>
   </div>
@@ -285,6 +291,10 @@ const props = defineProps({
 
 const expandedTools = reactive({})
 const errorExpanded = ref(false)
+const responseOutcomeCode = computed(() => {
+  const code = props.message.responseOutcome?.code
+  return ["response_unconfirmed", "response_failed", "response_incomplete"].includes(code) ? code : null
+})
 
 const errorFirstLine = computed(() => {
   if (props.message.role !== "error") return ""

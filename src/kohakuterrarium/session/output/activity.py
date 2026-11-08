@@ -416,6 +416,11 @@ class SessionActivityMixin:
             {
                 "error_type": metadata.get("error_type", "Error"),
                 "error": metadata.get("error", detail),
+                **(
+                    {"response_outcome": metadata["response_outcome"]}
+                    if "response_outcome" in metadata
+                    else {}
+                ),
             },
         )
 

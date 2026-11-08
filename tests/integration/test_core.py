@@ -97,6 +97,7 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
+from tests.helpers.response_stream import InterruptedResponseLLM
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
 # ---------------------------------------------------------------------------
@@ -2495,6 +2496,61 @@ class TestCoreIntegration:
         and ``Agent.attach_session_store`` is how the engine wires
         persistence onto a creature.
         """
+        llm = InterruptedResponseLLM(
+            [
+                ScriptEntry(
+                    "First answer", usage={"prompt_tokens": 100, "completion_tokens": 5}
+                ),
+                ScriptEntry("Partial answer", match="incomplete response"),
+                ScriptEntry("Recovered", match="recover"),
+            ]
+        )
+        async with Terrarium(session_dir=tmp_path / "response-outcomes") as engine:
+            node = await engine.add_creature(
+                AgentConfig(
+                    name="outcome", system_prompt="plain", tool_format="native"
+                ),
+                llm=llm,
+                pwd=tmp_path,
+                io="headless",
+                start=True,
+            )
+            assert (await node.run("hello")).text == "First answer"
+            failed = await node.run("incomplete response", raise_on_error=False)
+            assert failed.status == "error"
+            assert failed.text == "Partial answer"
+            assert node.agent.controller._last_usage == {}
+            events = node.agent.session_store.get_events("outcome")
+            error = next(e for e in events if e["type"] == "processing_error")
+            assert error["response_outcome"] == {
+                "code": "response_unconfirmed",
+                "outcome": "unknown",
+                "retry_safety": "may_duplicate",
+            }
+            assert not any(
+                e["type"] == "token_usage"
+                and e.get("turn_index") == error["turn_index"]
+                for e in events
+            )
+            path = node.agent.session_store.path
+            assert llm.call_count == 2
+            assert (await node.run("recover")).text == "Recovered"
+        readonly = SessionStore.open_readonly(path)
+        try:
+            saved = readonly.get_events("outcome")
+            assert (
+                next(e for e in saved if e["type"] == "processing_error")[
+                    "response_outcome"
+                ]
+                == error["response_outcome"]
+            )
+            assert any(
+                e["type"] == "text_chunk" and "Partial answer" in e.get("content", "")
+                for e in saved
+            )
+        finally:
+            readonly.close(update_status=False)
+
         legacy_image = tmp_path / "legacy-image.png"
         Image.new("RGB", (2, 2), "red").save(legacy_image)
         repair_command = RepairImagesCommand()

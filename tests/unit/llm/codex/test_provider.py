@@ -286,8 +286,7 @@ class _FakeResponses:
         self.kwargs = kwargs
 
         async def _empty():
-            if False:  # pragma: no cover - make this an async generator
-                yield
+            yield SimpleNamespace(type="response.completed", response=None)
 
         return _empty()
 
@@ -310,8 +309,7 @@ class _TokenExpiredError(Exception):
 
 
 async def _empty_stream():
-    if False:  # pragma: no cover - make this an async generator
-        yield
+    yield SimpleNamespace(type="response.completed", response=None)
 
 
 class _ScriptedResponses:
@@ -781,8 +779,7 @@ class _FakeWSResponses:
         self.kwargs = kwargs
 
         async def _empty():
-            if False:  # pragma: no cover - async generator shape
-                yield
+            yield SimpleNamespace(type="response.completed", response=None)
 
         return _empty()
 

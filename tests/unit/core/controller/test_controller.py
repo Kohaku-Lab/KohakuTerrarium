@@ -14,7 +14,7 @@ from kohakuterrarium.core.controller.controller import (
     ControllerContext,
     _merge_text_and_parts,
 )
-from kohakuterrarium.errors import InvalidRequestError, LLMError
+from kohakuterrarium.errors import InvalidRequestError, LLMError, ResponseStreamError
 from kohakuterrarium.core.conversation.elide import (
     ELISION_MARKER,
     TOOL_FEEDBACK_KIND,
@@ -33,6 +33,8 @@ from kohakuterrarium.parsing.events import (
 from kohakuterrarium.testing.agent import TestAgentBuilder
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.utils.file.guard import PathBoundaryGuard
+
+from tests.helpers.response_stream import InterruptedResponseLLM
 
 # ── _merge_text_and_parts ────────────────────────────────────────
 
@@ -429,6 +431,29 @@ class TestConversationAccess:
 
 
 class TestErrorRecovery:
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("Partial answer", "Partial answer"),
+            ("Partial answer [/bash]dangerous", "Partial answer [/bash]\ndangerous"),
+        ],
+    )
+    async def test_failed_text_stream_flushes_text_without_dispatch(
+        self, text, expected
+    ):
+        llm = InterruptedResponseLLM([ScriptEntry(text, match="incomplete response")])
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = "bracket"
+        env.controller._last_usage = {"prompt_tokens": 100}
+        await env.controller.push_event(create_user_input_event("incomplete response"))
+        events = []
+        with pytest.raises(ResponseStreamError):
+            async for event in env.controller.run_once():
+                events.append(event)
+        assert all(isinstance(event, TextEvent) for event in events)
+        assert "".join(event.text for event in events) == expected
+        assert env.controller._last_usage == {}
+
     async def test_llm_exception_propagates_event_state(self):
         """When the LLM raises, the controller should not deadlock."""
 
@@ -661,6 +686,9 @@ class TestLogTokenUsage:
         c.llm.last_usage = {"prompt_tokens": 5, "completion_tokens": 7}
         c._log_token_usage()
         assert c._last_usage == {"prompt_tokens": 5, "completion_tokens": 7}
+        c.llm.last_usage = {}
+        c._log_token_usage()
+        assert c._last_usage == {}
 
     def test_no_usage_attr_skips(self):
         env = TestAgentBuilder().with_llm_script(["x"]).build()

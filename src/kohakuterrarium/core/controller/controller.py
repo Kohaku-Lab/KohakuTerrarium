@@ -568,28 +568,34 @@ class Controller:
         provider_native_tools = self._get_provider_native_tools()
 
         with time_llm_call(self.llm) as _t:
-            async with aclosing(
-                self._chat_with_recovery(
-                    messages,
-                    stream=True,
-                    provider_native_tools=provider_native_tools or None,
-                )
-            ) as stream:
-                async for chunk in stream:
-                    if self._interrupted:
-                        _t.status = "interrupted"
-                        break
-                    assistant_content += chunk
+            try:
+                async with aclosing(
+                    self._chat_with_recovery(
+                        messages,
+                        stream=True,
+                        provider_native_tools=provider_native_tools or None,
+                    )
+                ) as stream:
+                    async for chunk in stream:
+                        if self._interrupted:
+                            _t.status = "interrupted"
+                            break
+                        assistant_content += chunk
 
-                    for event in self._parser.feed(chunk):
-                        if isinstance(event, CommandEvent):
-                            text, result_event = await self._execute_command_inline(
-                                event
-                            )
-                            assistant_content += text
-                            yield result_event
-                        else:
-                            yield event
+                        for event in self._parser.feed(chunk):
+                            if isinstance(event, CommandEvent):
+                                text, result_event = await self._execute_command_inline(
+                                    event
+                                )
+                                assistant_content += text
+                                yield result_event
+                            else:
+                                yield event
+            except Exception:
+                for event in self._parser.flush():
+                    if isinstance(event, TextEvent):
+                        yield event
+                raise
             # Flush remaining parser state
             for event in self._parser.flush():
                 if isinstance(event, CommandEvent):
@@ -627,8 +633,8 @@ class Controller:
     def _log_token_usage(self) -> None:
         """Extract and log token usage from the last LLM completion."""
         usage = self.llm.last_usage if hasattr(self.llm, "last_usage") else {}
+        self._last_usage = usage or {}
         if usage:
-            self._last_usage = usage
             logger.info(
                 "Token usage",
                 prompt_tokens=usage.get("prompt_tokens", 0),
@@ -900,6 +906,7 @@ class Controller:
             )
 
         logger.info("Generating response...")
+        self._last_usage = {}
 
         await begin_assistant(self)
 

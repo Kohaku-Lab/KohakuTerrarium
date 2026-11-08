@@ -2028,7 +2028,10 @@ class TestLlmIntegration:
                 return httpx.Response(
                     200,
                     headers={"content-type": "text/event-stream"},
-                    content='data: {"type":"response.output_text.delta","delta":"bounded"}\n\n',
+                    content=(
+                        'data: {"type":"response.output_text.delta","delta":"bounded"}\n\n'
+                        'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'
+                    ),
                 )
 
             previous_client = responses_provider._client
@@ -2180,7 +2183,10 @@ class TestLlmIntegration:
                 return httpx.Response(
                     200,
                     headers={"content-type": "text/event-stream"},
-                    content='data: {"type":"response.output_text.delta","delta":"fits"}\n\n',
+                    content=(
+                        'data: {"type":"response.output_text.delta","delta":"fits"}\n\n'
+                        'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'
+                    ),
                 )
 
             previous_client = responses_provider._client

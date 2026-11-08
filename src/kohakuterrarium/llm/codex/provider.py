@@ -14,6 +14,7 @@ import httpx
 AsyncOpenAI = None
 HAS_OPENAI = importlib.util.find_spec("openai") is not None
 
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.responses import ws_options
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
@@ -304,6 +305,8 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                             if text := replay.feed(chunk):
                                 yield text
                     return
+                except ResponseStreamError:
+                    raise
                 except Exception as exc:
                     limit = reported_image_limit(exc, self._request_image_limit)
                     if (
@@ -531,12 +534,35 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
             logger.error("Codex API request failed", error=str(e))
             raise
 
-        async for event in stream:
-            if recovery is not None:
-                await recovery.status(None)
-            piece = self._process_stream_event(event, collected_tool_calls)
-            if piece is not None:
-                yield piece
+        completed = False
+        try:
+            async for event in stream:
+                if recovery is not None:
+                    await recovery.status(None)
+                piece = self._process_stream_event(event, collected_tool_calls)
+                if piece is not None:
+                    yield piece
+                if getattr(event, "type", "") == "response.completed":
+                    completed = True
+                    break
+            if not completed:
+                raise ResponseStreamError()
+        except Exception as exc:
+            if isinstance(exc.__context__, asyncio.CancelledError):
+                raise asyncio.CancelledError() from exc
+            if isinstance(exc, (httpx.TransportError, TimeoutError)):
+                raise ResponseStreamError() from exc
+            raise
+        finally:
+            close = getattr(stream, "close", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception as exc:
+                    logger.warning(
+                        "Codex response stream cleanup failed",
+                        error_type=type(exc).__name__,
+                    )
 
         self._last_assistant_extra_fields = self._reasoning.fields()
         self._last_tool_calls = collected_tool_calls

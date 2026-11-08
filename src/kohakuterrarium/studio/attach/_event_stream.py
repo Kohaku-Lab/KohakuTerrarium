@@ -430,6 +430,7 @@ _STREAM_METADATA_KEYS = (
     "compact_threshold",
     "error_type",
     "error",
+    "response_outcome",
     "messages_cleared",
     "background",
     "subagent",

@@ -51,6 +51,8 @@ from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.builtins.kt_ui.inline_state import block_ids
 
+from tests.helpers.response_stream import InterruptedResponseLLM
+
 pytestmark = pytest.mark.timeout(60)
 
 # Deterministic assistant replies. ScriptedLLM consumes the next
@@ -100,7 +102,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
     ``bootstrap.agent_init`` imports it by name, so without the second
     patch the agent-init path would still reach a real provider.
     """
-    llm = ScriptedLLM(
+    llm = InterruptedResponseLLM(
         [
             ScriptEntry(_REPLY_GREET, match="hello creature"),
             ScriptEntry(_REPLY_FOLLOWUP, match="second question"),
@@ -114,6 +116,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
             ScriptEntry(_REPLY_RENAMED, match="after rename"),
             ScriptEntry(_REPLY_SECOND_APP, match="second app turn"),
             ScriptEntry(_REPLY_INLINE, match="inline ui turn"),
+            ScriptEntry("Partial answer", match="incomplete response"),
             # Persistence journey + regenerate/edit fall through to the
             # generic tail entry below.
             ScriptEntry(_REPLY_GREET),
@@ -941,6 +944,32 @@ class TestApiCreatureJourney:
         ]
         assert [(e["block"], e["state"]) for e in recorded] == [(block, {"tip": 18})]
 
+        with client.websocket_connect(ws_url) as ws:
+            assert ws.receive_json()["activity_type"] == "session_info"
+            partial, activities = _stream_turn(ws, "incomplete response")
+        assert partial == "Partial answer"
+        live_error = next(
+            frame
+            for frame in activities
+            if frame.get("activity_type") == "processing_error"
+        )
+        expected_outcome = {
+            "code": "response_unconfirmed",
+            "outcome": "unknown",
+            "retry_safety": "may_duplicate",
+        }
+        assert live_error["response_outcome"] == expected_outcome
+        history = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history"
+        ).json()["events"]
+        assert [
+            e["response_outcome"] for e in history if e["type"] == "processing_error"
+        ] == [expected_outcome]
+        assert any(
+            e["type"] == "text_chunk" and "Partial answer" in e.get("content", "")
+            for e in history
+        )
+
         # Stop the live session first — on Windows the SQLite handle
         # must be released before resume re-opens the same file.
         resp = client.delete(f"/api/sessions/active/{session_id}")
@@ -988,6 +1017,15 @@ class TestApiCreatureJourney:
         resp = client.get(f"/api/sessions/{resumed_id}/creatures/alice/history")
         assert resp.status_code == 200
         resumed_history = resp.json()
+        assert [
+            e["response_outcome"]
+            for e in resumed_history["events"]
+            if e["type"] == "processing_error"
+        ] == [expected_outcome]
+        assert any(
+            e["type"] == "text_chunk" and "Partial answer" in e.get("content", "")
+            for e in resumed_history["events"]
+        )
         resumed_blob = str(_snapshot_messages(client, resumed_id, "alice"))
         assert "persist this turn" in resumed_blob
         assert _REPLY_GREET in resumed_blob

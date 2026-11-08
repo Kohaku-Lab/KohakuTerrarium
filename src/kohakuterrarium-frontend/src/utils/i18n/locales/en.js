@@ -1,4 +1,16 @@
 export default {
+  "chat.outcome.response_unconfirmed": "Completion not confirmed",
+  "chat.outcome.response_failed": "Response failed",
+  "chat.outcome.response_incomplete": "Response incomplete",
+  "chat.outcome.response_unconfirmed.summary":
+    "The response ended without a completion confirmation. This does not confirm that upstream work stopped.",
+  "chat.outcome.response_failed.summary":
+    "The provider reported a failed response. Any content already displayed remains visible above.",
+  "chat.outcome.response_incomplete.summary":
+    "The provider reported an incomplete response. Do not treat the output above as a complete result.",
+  "chat.outcome.guidance":
+    "Check the connection's model and tool support before submitting again. A new request may repeat work and incur additional charges; this error was not automatically retried.",
+  "chat.outcome.details": "Technical details",
   "sessions.filterType": "Session type",
   "sessions.allTypes": "All types",
   "sessions.agentType": "Agent",

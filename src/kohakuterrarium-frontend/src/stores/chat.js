@@ -1405,6 +1405,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
             id: stableId("err_"),
             role: "error",
             errorType: evt.error_type || "Error",
+            responseOutcome: evt.response_outcome || null,
             content: evt.error || evt.detail || "Unknown error",
             timestamp: "",
           },
@@ -1719,6 +1720,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           id: stableId("err_"),
           role: "error",
           errorType: evt.error_type || "Error",
+          responseOutcome: evt.response_outcome || null,
           content: evt.error || "",
           timestamp: "",
         },
@@ -4209,14 +4211,15 @@ const _chatStoreOptions = {
       if (at === "processing_error") {
         const errorType = data.error_type || "Error"
         const errorMsg = data.error || data.detail || "Unknown error"
+        this._finishStream(source)
         msgs.push({
           id: "err_" + Date.now(),
           role: "error",
           errorType,
+          responseOutcome: data.response_outcome || null,
           content: errorMsg,
           timestamp: new Date().toISOString(),
         })
-        if (source) this.processingByTab[source] = false
         return
       }
 
