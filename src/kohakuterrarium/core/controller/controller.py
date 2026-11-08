@@ -443,7 +443,7 @@ class Controller:
                         assistant_content += chunk
                         if chunk:
                             yield TextEvent(text=chunk)
-            except (Exception, asyncio.CancelledError) as exc:
+            except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
                 await record_incomplete_assistant(self, assistant_content, exc)
                 raise
         self._log_token_usage()
@@ -451,15 +451,21 @@ class Controller:
         # Materialize binary output before recording it so the conversation
         # remains small and later readers use stable session URLs.
         structured_parts = self._collect_structured_assistant_parts()
-        for part in structured_parts:
-            if isinstance(part, ImagePart):
-                yield AssistantImageEvent(
-                    url=part.url,
-                    detail=part.detail,
-                    source_type=part.source_type,
-                    source_name=part.source_name,
-                    revised_prompt=getattr(part, "revised_prompt", None),
-                )
+        try:
+            for part in structured_parts:
+                if isinstance(part, ImagePart):
+                    yield AssistantImageEvent(
+                        url=part.url,
+                        detail=part.detail,
+                        source_type=part.source_type,
+                        source_name=part.source_name,
+                        revised_prompt=getattr(part, "revised_prompt", None),
+                    )
+        except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
+            await record_incomplete_assistant(
+                self, _merge_text_and_parts(assistant_content, structured_parts), exc
+            )
+            raise
 
         # Extract native tool calls from LLM response
         native_calls = (
@@ -596,22 +602,22 @@ class Controller:
                                 yield result_event
                             else:
                                 yield event
-            except (Exception, asyncio.CancelledError) as exc:
+                for event in self._parser.flush():
+                    if isinstance(event, CommandEvent):
+                        text, result_event = await self._execute_command_inline(event)
+                        assistant_content += text
+                        yield result_event
+                    else:
+                        yield event
+            except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
                 try:
-                    for event in self._parser.flush():
-                        if isinstance(event, TextEvent):
-                            yield event
+                    if not self._interrupted and not isinstance(exc, GeneratorExit):
+                        for event in self._parser.flush():
+                            if isinstance(event, TextEvent):
+                                yield event
                 finally:
                     await record_incomplete_assistant(self, assistant_content, exc)
                 raise
-            # Flush remaining parser state
-            for event in self._parser.flush():
-                if isinstance(event, CommandEvent):
-                    text, result_event = await self._execute_command_inline(event)
-                    assistant_content += text
-                    yield result_event
-                else:
-                    yield event
 
         self._last_assistant_content = assistant_content
 
@@ -920,22 +926,34 @@ class Controller:
 
         if self._is_native_mode:
             tool_schemas = self._get_native_tool_schemas()
-            async for event in self._run_native_completion(messages, tool_schemas):
-                yield event
+            async with aclosing(
+                self._run_native_completion(messages, tool_schemas)
+            ) as stream:
+                async for event in stream:
+                    yield event
         else:
-            async for event in self._run_text_completion(messages):
-                yield event
+            async with aclosing(self._run_text_completion(messages)) as stream:
+                async for event in stream:
+                    yield event
             self._log_token_usage()
             structured = self._collect_structured_assistant_parts()
-            for part in structured:
-                if isinstance(part, ImagePart):
-                    yield AssistantImageEvent(
-                        url=part.url,
-                        detail=part.detail,
-                        source_type=part.source_type,
-                        source_name=part.source_name,
-                        revised_prompt=getattr(part, "revised_prompt", None),
-                    )
+            try:
+                for part in structured:
+                    if isinstance(part, ImagePart):
+                        yield AssistantImageEvent(
+                            url=part.url,
+                            detail=part.detail,
+                            source_type=part.source_type,
+                            source_name=part.source_name,
+                            revised_prompt=getattr(part, "revised_prompt", None),
+                        )
+            except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
+                await record_incomplete_assistant(
+                    self,
+                    _merge_text_and_parts(self._last_assistant_content, structured),
+                    exc,
+                )
+                raise
             self._completed_assistant_message = self.conversation.append(
                 "assistant",
                 _merge_text_and_parts(self._last_assistant_content, structured),

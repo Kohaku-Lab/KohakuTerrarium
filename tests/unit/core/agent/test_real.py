@@ -17,7 +17,6 @@ and using a `OutputRecorder` as the default output module.
 """
 
 import asyncio
-import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -1874,7 +1873,7 @@ class TestDriveInput:
         finally:
             await agent.stop()
 
-    async def test_drive_input_waits_when_generic_input_returns_none(self):
+    async def test_drive_input_waits_when_generic_input_returns_none(self, monkeypatch):
         agent = Agent.__new__(Agent)
         agent._pending_resume_events = None
         agent._pending_resume_triggers = None
@@ -1882,9 +1881,19 @@ class TestDriveInput:
         agent._fire_startup_trigger = AsyncMock()
         agent._running = True
         polls = []
+        waits = []
+        sleep = asyncio.sleep
+
+        async def record_wait(delay):
+            waits.append(delay)
+            await sleep(0)
+
+        monkeypatch.setattr(
+            "kohakuterrarium.core.agent.turn.input.asyncio.sleep", record_wait
+        )
 
         async def get_input():
-            polls.append(time.monotonic())
+            polls.append(len(waits))
             if len(polls) == 3:
                 agent._running = False
             return None
@@ -1894,7 +1903,8 @@ class TestDriveInput:
         await agent._drive_input()
 
         assert len(polls) == 3
-        assert polls[2] - polls[0] >= 0.02, "an input with nothing to give is not spun"
+        assert polls == [0, 1, 2], "every empty input awaits before polling again"
+        assert waits == [0.01, 0.01, 0.01]
 
 
 # ── update_system_prompt edge cases ──────────────────────────────

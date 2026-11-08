@@ -560,13 +560,15 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                     break
             if not completed:
                 raise ResponseStreamError()
+        except ResponseStreamError:
+            raise
         except Exception as exc:
             if isinstance(exc.__context__, asyncio.CancelledError):
                 raise asyncio.CancelledError() from exc
-            connection_error = importlib.import_module("openai").APIConnectionError
-            if isinstance(exc, (httpx.TransportError, TimeoutError, connection_error)):
-                raise ResponseStreamError() from exc
-            raise
+            logger.warning(
+                "Codex accepted response stream failed", error_type=type(exc).__name__
+            )
+            raise ResponseStreamError() from exc
         finally:
             close = getattr(stream, "close", None)
             if close is not None:

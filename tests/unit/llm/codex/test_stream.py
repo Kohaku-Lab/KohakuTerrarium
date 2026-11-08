@@ -102,6 +102,52 @@ async def test_proven_unsubmitted_or_rejected_request_can_recover(fault):
         await provider.close()
 
 
+@pytest.mark.parametrize("partial", [False, True])
+@pytest.mark.parametrize("fault", ["json", "utf8", "decode", "unknown"])
+async def test_accepted_stream_decode_failure_never_resubmits(partial, fault):
+    requests = []
+
+    class BrokenFrames(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            if partial:
+                yield b'data: {"type":"response.output_text.delta","delta":"Partial"}\n\n'
+            if fault == "json":
+                yield b"data: {not valid json}\n\n"
+            elif fault == "utf8":
+                yield b"data: \xff\xfe\n\n"
+            elif fault == "decode":
+                raise httpx.DecodingError("invalid encoding")
+            else:
+                raise ValueError("unknown stream failure")
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, stream=BrokenFrames()
+        )
+
+    provider = CodexOAuthProvider(
+        model="test",
+        api_key="test",
+        base_url="https://test.invalid/v1",
+        retry_policy={"max_retries": 1, "base_delay": 0, "jitter": 0},
+    )
+    provider._client = AsyncOpenAI(
+        api_key="test",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )
+    chunks = []
+    try:
+        with pytest.raises(ResponseStreamError) as caught:
+            async for part in provider.chat([{"role": "user", "content": "draw"}]):
+                chunks.append(part)
+        assert caught.value.code == "response_unconfirmed"
+        assert chunks == (["Partial"] if partial else [])
+        assert len(requests) == 1
+    finally:
+        await provider.close()
+
+
 class _BrokenBody(httpx.AsyncByteStream):
     def __init__(self, completed, close_error, partial, transport_error):
         self.completed = completed

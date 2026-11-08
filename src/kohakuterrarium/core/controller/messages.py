@@ -30,9 +30,9 @@ async def begin_assistant(controller: Any) -> None:
 
 
 async def record_incomplete_assistant(
-    controller: Any, content: str, error: BaseException
+    controller: Any, content: str | list[ContentPart], error: BaseException
 ) -> None:
-    """Retain received text as an incomplete canonical assistant message."""
+    """Retain received content as an incomplete canonical assistant message."""
     if not content:
         return
     origin = next(
@@ -51,7 +51,9 @@ async def record_incomplete_assistant(
         **origin,
         "incomplete": True,
         "completion_state": (
-            "interrupted" if isinstance(error, asyncio.CancelledError) else "incomplete"
+            "interrupted"
+            if isinstance(error, (asyncio.CancelledError, GeneratorExit))
+            else "incomplete"
         ),
     }
     outcome = getattr(error, "response_outcome", None)

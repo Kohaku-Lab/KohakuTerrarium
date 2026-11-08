@@ -1,6 +1,7 @@
 """Turn outcome and dispatched-job ownership regressions with real collaborators."""
 
 import asyncio
+import gc
 
 import pytest
 
@@ -15,6 +16,7 @@ from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM
+from tests.helpers.response_stream import PausedResponseLLM
 
 
 class _FailingLLM(ScriptedLLM):
@@ -33,6 +35,64 @@ class _FailingLLM(ScriptedLLM):
                 await self.entered.wait()
             self.failed.set()
             raise self.failure
+
+
+@pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+@pytest.mark.parametrize("text", ["buffered partial", "partial [/owned]unfinished"])
+@pytest.mark.parametrize("action", ["inspect", "rewind"])
+async def test_user_interrupt_has_no_deferred_history_writes(
+    tmp_path, monkeypatch, tool_format, text, action
+):
+    llm = PausedResponseLLM(text)
+    agent, trace = await _build(tmp_path, llm, tool_format)
+    owned_streams = []
+    for name in ("run_once", "_run_text_completion", "_run_native_completion"):
+        original = getattr(agent.controller, name)
+
+        def track(*args, _original=original, **kwargs):
+            stream = _original(*args, **kwargs)
+            owned_streams.append(stream)
+            return stream
+
+        monkeypatch.setattr(agent.controller, name, track)
+    task = asyncio.create_task(agent.run("first", raise_on_error=False))
+    try:
+        await asyncio.wait_for(llm.waiting.wait(), 5)
+        await agent.interrupt_and_wait()
+        assert (await task).status == "interrupted"
+        assert llm.closed.is_set()
+        messages = agent.controller.conversation.get_messages()
+        partials = [m for m in messages if m.role == "assistant"]
+        if action == "inspect":
+            assert all(stream.ag_frame is None for stream in owned_streams)
+            assert len(partials) == 1
+            assert partials[0].get_text_content() == text
+            assert partials[0].metadata["completion_state"] == "interrupted"
+            endings = [
+                i for i, e in enumerate(trace.events) if e.type == "processing_end"
+            ]
+            canonical = [
+                i for i, e in enumerate(trace.events) if e.type == "assistant_message"
+            ]
+            assert len(canonical) == 1 and canonical[0] < endings[0]
+        else:
+            await agent.rewind_to(0)
+        snapshot = agent.controller.conversation.snapshot_messages()
+        event_count = len(trace.events)
+        for stream in reversed(owned_streams):
+            await stream.aclose()
+        gc.collect()
+        for _ in range(4):
+            await asyncio.sleep(0)
+        assert agent.controller.conversation.snapshot_messages() == snapshot
+        assert len(trace.events) == event_count
+        await agent.run("continue")
+        assert (text in str(llm.last_messages)) == (action == "inspect")
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await agent.stop()
 
 
 class _OwnedTool(BaseTool):
@@ -99,7 +159,8 @@ class _TraceOutput(BaseOutputModule):
 
     async def emit(self, event):
         self.events.append(event)
-        await super().emit(event)
+        if event.type not in {"assistant_message", "assistant_round_start"}:
+            await super().emit(event)
 
 
 class _WireRecorder:

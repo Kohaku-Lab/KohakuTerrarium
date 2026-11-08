@@ -97,7 +97,7 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
-from tests.helpers.response_stream import InterruptedResponseLLM
+from tests.helpers.response_stream import InterruptedResponseLLM, PausedResponseLLM
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
 # ---------------------------------------------------------------------------
@@ -2699,6 +2699,61 @@ class TestCoreIntegration:
             finally:
                 await resumed.stop()
                 failure_store.close()
+
+        for interrupted_format in ("bracket", "xml", "native"):
+            interrupted_llm = PausedResponseLLM("buffered interrupted text")
+            async with Terrarium(
+                session_dir=tmp_path / f"user-interrupt-{interrupted_format}"
+            ) as interrupted_engine:
+                interrupted_node = await interrupted_engine.add_creature(
+                    AgentConfig(
+                        name=f"interrupted_{interrupted_format}",
+                        system_prompt="plain",
+                        tool_format=interrupted_format,
+                    ),
+                    llm=interrupted_llm,
+                    pwd=tmp_path,
+                    io="headless",
+                    start=True,
+                )
+                interrupted_task = asyncio.create_task(
+                    interrupted_node.run("first", raise_on_error=False)
+                )
+                await asyncio.wait_for(interrupted_llm.waiting.wait(), 5)
+                await interrupted_node.agent.interrupt_and_wait()
+                assert (await interrupted_task).status == "interrupted"
+                assert interrupted_llm.closed.is_set()
+                interrupted_path = interrupted_node.agent.session_store.path
+                interrupted_events = interrupted_node.agent.session_store.get_events(
+                    f"interrupted_{interrupted_format}"
+                )
+                canonical = [
+                    e for e in interrupted_events if e["type"] == "assistant_message"
+                ]
+                assert len(canonical) == 1
+                assert (
+                    canonical[0]["message"]["metadata"]["completion_state"]
+                    == "interrupted"
+                )
+                assert interrupted_events.index(canonical[0]) < next(
+                    i
+                    for i, e in enumerate(interrupted_events)
+                    if e["type"] == "processing_end"
+                )
+            continued_llm = ScriptedLLM(["continued"])
+            interrupted_resumed, interrupted_store = resume_agent(
+                interrupted_path, io_mode="plain", llm=continued_llm
+            )
+            try:
+                assert "buffered interrupted text" in str(
+                    interrupted_resumed.controller.conversation.to_messages()
+                )
+                await interrupted_resumed.start()
+                assert (await interrupted_resumed.run("continue")).text == "continued"
+                assert "buffered interrupted text" in str(continued_llm.last_messages)
+            finally:
+                await interrupted_resumed.stop()
+                interrupted_store.close()
 
         legacy_image = tmp_path / "legacy-image.png"
         Image.new("RGB", (2, 2), "red").save(legacy_image)

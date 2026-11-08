@@ -34,7 +34,7 @@ from kohakuterrarium.testing.agent import TestAgentBuilder
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.utils.file.guard import PathBoundaryGuard
 
-from tests.helpers.response_stream import InterruptedResponseLLM
+from tests.helpers.response_stream import InterruptedResponseLLM, PausedResponseLLM
 
 # ── _merge_text_and_parts ────────────────────────────────────────
 
@@ -431,6 +431,82 @@ class TestConversationAccess:
 
 
 class TestErrorRecovery:
+    @pytest.mark.parametrize(
+        "tool_format,text",
+        [
+            ("bracket", "visible [/bash]unfinished"),
+            ("xml", "visible <bash>unfinished"),
+            ("native", "visible partial"),
+        ],
+    )
+    async def test_consumer_close_finishes_child_stream_and_history(
+        self, tool_format, text
+    ):
+        llm = PausedResponseLLM(text)
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = tool_format
+        await env.controller.push_event(create_user_input_event("first"))
+        stream = env.controller.run_once()
+        first = await anext(stream)
+        assert isinstance(first, TextEvent)
+        await stream.aclose()
+        assert llm.closed.is_set()
+        partials = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if m.role == "assistant"
+        ]
+        assert len(partials) == 1
+        assert partials[0].get_text_content() == llm.delivered_text
+        assert text.startswith(llm.delivered_text)
+        assert partials[0].metadata["completion_state"] == "interrupted"
+        assert not partials[0].tool_calls
+
+    @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+    async def test_close_at_structured_tail_retains_received_content(self, tool_format):
+        image = ImagePart(url="https://test.invalid/generated.png")
+        llm = ScriptedLLM(["visible text"])
+        llm.last_assistant_content_parts = [image]
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = tool_format
+        await env.controller.push_event(create_user_input_event("first"))
+        stream = env.controller.run_once()
+        async for event in stream:
+            if getattr(event, "url", None) == image.url:
+                break
+        await stream.aclose()
+        partials = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if m.role == "assistant"
+        ]
+        assert len(partials) == 1
+        assert partials[0].get_text_content() == "visible text"
+        assert any(
+            isinstance(p, ImagePart) and p.url == image.url for p in partials[0].content
+        )
+        assert partials[0].metadata["completion_state"] == "interrupted"
+
+    @pytest.mark.parametrize("tool_format", ["bracket", "xml"])
+    async def test_close_during_successful_parser_flush_retains_received_text(
+        self, tool_format
+    ):
+        env = TestAgentBuilder().with_llm_script(["tail only"]).build()
+        env.controller.config.tool_format = tool_format
+        await env.controller.push_event(create_user_input_event("first"))
+        stream = env.controller.run_once()
+        first = await anext(stream)
+        assert first.text == "tail only"
+        await stream.aclose()
+        partials = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if m.role == "assistant"
+        ]
+        assert len(partials) == 1
+        assert partials[0].get_text_content() == "tail only"
+        assert partials[0].metadata["completion_state"] == "interrupted"
+
     @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
     @pytest.mark.parametrize(
         "failure", [ResponseStreamError, RuntimeError, asyncio.CancelledError]

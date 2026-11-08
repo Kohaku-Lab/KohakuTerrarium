@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+from contextlib import aclosing
 
 from kohakuterrarium.errors import AgentNotRunningError
 from kohakuterrarium.core.agent.turn.mid_turn import AgentMidTurnMixin
@@ -324,34 +325,35 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         native_tool_call_ids = result.native_tool_call_ids
 
         try:
-            async for parse_event in controller.run_once():
-                if self._interrupt_requested:
-                    break
+            async with aclosing(controller.run_once()) as stream:
+                async for parse_event in stream:
+                    if self._interrupt_requested:
+                        break
 
-                if isinstance(parse_event, ToolCallEvent):
-                    await self._dispatch_tool_event(
-                        parse_event,
-                        controller,
-                        handles,
-                        handle_order,
-                        native_tool_call_ids,
-                        native_mode,
-                    )
-                elif isinstance(parse_event, SubAgentCallEvent):
-                    await self._dispatch_subagent_event(
-                        parse_event,
-                        controller,
-                        handles,
-                        handle_order,
-                        native_tool_call_ids,
-                        native_mode,
-                    )
-                elif isinstance(parse_event, CommandResultEvent):
-                    self._notify_command_result(parse_event)
-                else:
-                    if isinstance(parse_event, TextEvent):
-                        round_text.append(parse_event.text)
-                    await self.output_router.route(parse_event)
+                    if isinstance(parse_event, ToolCallEvent):
+                        await self._dispatch_tool_event(
+                            parse_event,
+                            controller,
+                            handles,
+                            handle_order,
+                            native_tool_call_ids,
+                            native_mode,
+                        )
+                    elif isinstance(parse_event, SubAgentCallEvent):
+                        await self._dispatch_subagent_event(
+                            parse_event,
+                            controller,
+                            handles,
+                            handle_order,
+                            native_tool_call_ids,
+                            native_mode,
+                        )
+                    elif isinstance(parse_event, CommandResultEvent):
+                        self._notify_command_result(parse_event)
+                    else:
+                        if isinstance(parse_event, TextEvent):
+                            round_text.append(parse_event.text)
+                        await self.output_router.route(parse_event)
         except (asyncio.CancelledError, Exception) as exc:
             await self._settle_failed_round(
                 controller, result, cancelled=isinstance(exc, asyncio.CancelledError)

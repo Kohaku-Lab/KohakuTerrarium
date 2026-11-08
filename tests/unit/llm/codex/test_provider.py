@@ -498,7 +498,7 @@ class TestUnauthorizedRecovery:
         monkeypatch.setattr(cp, "refresh_tokens", _boom)
 
         chunks: list[str] = []
-        with pytest.raises(_TokenExpiredError):
+        with pytest.raises(cp.ResponseStreamError):
             async for chunk in p._stream_chat([{"role": "user", "content": "hi"}]):
                 chunks.append(chunk)
 
