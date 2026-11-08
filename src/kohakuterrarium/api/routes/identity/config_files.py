@@ -25,6 +25,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,
 )
+from kohakuterrarium.llm.codex.image.budget import valid_image_count
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
@@ -54,6 +55,7 @@ def _known_files() -> dict[str, Path]:
         "app-settings": base / "app-settings.json",
         "ui-prefs": base / "ui-prefs.yaml",
         "default-model": base / "default_model.txt",
+        "image-context": base / "image-context.json",
         "drive-settings": base / "drive-settings.yaml",
     }
 
@@ -165,11 +167,15 @@ def _validate_and_reload(name: str, path: Path, content: str) -> None:
         if kind == "yaml":
             parsed = yaml.safe_load(content)
         elif kind == "json":
-            json.loads(content) if content.strip() else None
+            parsed = json.loads(content) if content.strip() else None
     except yaml.YAMLError as e:
         raise HTTPException(400, f"YAML parse error: {e}") from e
     except json.JSONDecodeError as e:
         raise HTTPException(400, f"JSON parse error: {e}") from e
+
+    if name == "image-context":
+        if not isinstance(parsed, dict) or not valid_image_count(parsed.get("count")):
+            raise HTTPException(422, "count must be a positive safe integer")
 
     # Drive settings require schema validation in addition to YAML parsing.
     # Persistence remains separate from applying the settings to a live runtime.

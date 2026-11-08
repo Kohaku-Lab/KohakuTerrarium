@@ -1,8 +1,10 @@
 """Bound Codex request images without changing persistent conversation history."""
 
+import json
 import re
 from typing import Any
 
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -15,11 +17,16 @@ _LIMIT_ERROR = re.compile(
 )
 
 
-def initial_image_limit(api_key: str | None, base_url: str) -> int | None:
-    """Apply the default cap only to the known Codex OAuth endpoint."""
-    if not api_key and base_url.rstrip("/") == CODEX_BASE_URL:
+def valid_image_count(value: Any) -> bool:
+    return type(value) is int and 1 <= value <= 9_007_199_254_740_991
+
+
+def global_image_count() -> int:
+    try:
+        count = json.loads((config_dir() / "image-context.json").read_bytes())["count"]
+        return count if valid_image_count(count) else CODEX_MAX_IMAGES
+    except (OSError, ValueError, KeyError, TypeError):
         return CODEX_MAX_IMAGES
-    return None
 
 
 def reported_image_limit(

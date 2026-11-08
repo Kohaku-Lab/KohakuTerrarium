@@ -5,6 +5,8 @@ import ElementPlus, { ElMessage } from "element-plus"
 
 vi.mock("@/utils/api", () => {
   const settingsAPI = {
+    readConfigFile: vi.fn(),
+    writeConfigFile: vi.fn(),
     getKeys: vi.fn(),
     saveKey: vi.fn(),
     getAntigravityStatus: vi.fn(),
@@ -61,6 +63,7 @@ function mountSettingsPage(section = "", compact = false) {
         ElTag: false,
         SettingsLayout: compact ? false : { template: "<div><slot /></div>" },
         PhonePage: false,
+        SettingsRow: { template: "<div><slot /></div>" },
         SectionShell: { template: "<section><slot name='aside' /><slot /></section>" },
       },
     },
@@ -101,6 +104,29 @@ describe("SettingsPage model presets", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it("requires a successful image-context load before saving an edited count", async () => {
+    settingsAPI.readConfigFile.mockRejectedValueOnce(new Error("read failed"))
+    vi.spyOn(ElMessage, "error").mockImplementation(() => {})
+    const wrapper = mountSettingsPage("runtime")
+    await flushPromises()
+    wrapper.vm.imageContext.count = 75
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get("[data-test=image-context-save]").element.disabled).toBe(true)
+    await wrapper.vm.updateImageContext({ write: true })
+    expect(settingsAPI.writeConfigFile).not.toHaveBeenCalled()
+    settingsAPI.readConfigFile.mockResolvedValueOnce({ content: "" })
+    await wrapper.vm.updateImageContext()
+    expect(wrapper.vm.imageContext.count).toBe(50)
+    settingsAPI.writeConfigFile.mockRejectedValueOnce(new Error("save failed"))
+    wrapper.vm.imageContext.count = 75
+    await wrapper.vm.updateImageContext({ write: true })
+    expect(wrapper.vm.imageContext.ready).toBe(true)
+    settingsAPI.writeConfigFile.mockResolvedValueOnce({})
+    await wrapper.vm.updateImageContext({ write: true })
+    expect(settingsAPI.writeConfigFile).toHaveBeenCalledWith("image-context", '{"count":75}')
+    wrapper.unmount()
   })
 
   it("separates OAuth identities from API keys without reclassifying a custom Codex endpoint", async () => {
