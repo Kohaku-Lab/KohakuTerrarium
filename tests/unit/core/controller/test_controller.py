@@ -3,11 +3,13 @@
 import asyncio
 import base64
 import copy
+import gc
 import types
 from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.core.controller.controller import (
     Controller,
     ControllerConfig,
@@ -2185,6 +2187,100 @@ class TestResolveFilePartReadToolReturnsList:
 
 
 class TestRunLoopDispatchCallbacks:
+    @pytest.mark.parametrize("failure", ["error", "cancel"])
+    @pytest.mark.parametrize(
+        "tool_format,callback,text",
+        [
+            ("bracket", "tool", "before [/read]x[read/]"),
+            ("xml", "tool", "before <read>x</read>"),
+            ("bracket", "subagent", "before [/worker][worker/]"),
+            ("xml", "subagent", "before <worker></worker>"),
+            ("native", "text", "visible text"),
+        ],
+    )
+    async def test_callback_failure_closes_owned_stream_before_return(
+        self, monkeypatch, tool_format, callback, text, failure
+    ):
+        llm = PausedResponseLLM(text)
+        env = TestAgentBuilder().with_llm(llm).with_tool(ReadTool()).build()
+        controller = env.controller
+        controller.config.tool_format = tool_format
+        if callback == "subagent":
+            controller.registry.register_subagent(
+                "worker", types.SimpleNamespace(description="test")
+            )
+        streams = []
+        original = controller.run_once
+
+        def track():
+            stream = original()
+            streams.append(stream)
+            return stream
+
+        monkeypatch.setattr(controller, "run_once", track)
+
+        async def fail_async(event):
+            if failure == "cancel":
+                raise asyncio.CancelledError()
+            raise ValueError("callback failed")
+
+        def fail_text(text):
+            if failure == "cancel":
+                raise asyncio.CancelledError()
+            raise ValueError("callback failed")
+
+        await controller.push_event(create_user_input_event("first"))
+        kwargs = {"on_" + callback: fail_text if callback == "text" else fail_async}
+        expected = asyncio.CancelledError if failure == "cancel" else ValueError
+        with pytest.raises(expected):
+            await asyncio.wait_for(controller.run_loop(**kwargs), 5)
+        assert streams[0].ag_frame is None
+        assert llm.closed.is_set()
+        assert any(
+            m.role == "assistant" for m in controller.conversation.get_messages()
+        )
+        controller.flush()
+        for stream in streams:
+            await stream.aclose()
+        gc.collect()
+        await asyncio.sleep(0)
+        assert all(m.role == "system" for m in controller.conversation.get_messages())
+
+    @pytest.mark.parametrize("inject_method", ["inject", "inject_event"])
+    async def test_testing_helpers_close_stream_when_route_fails(
+        self, monkeypatch, inject_method
+    ):
+        llm = PausedResponseLLM("visible text")
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = "native"
+        streams = []
+        original = env.controller.run_once
+
+        def track():
+            stream = original()
+            streams.append(stream)
+            return stream
+
+        monkeypatch.setattr(env.controller, "run_once", track)
+
+        async def fail(event):
+            raise ValueError("route failed")
+
+        monkeypatch.setattr(env.router, "route", fail)
+        value = (
+            "first" if inject_method == "inject" else create_user_input_event("first")
+        )
+        with pytest.raises(ValueError, match="route failed"):
+            await getattr(env, inject_method)(value)
+        assert streams[0].ag_frame is None
+        assert llm.closed.is_set()
+        env.controller.flush()
+        for stream in streams:
+            await stream.aclose()
+        assert all(
+            m.role == "system" for m in env.controller.conversation.get_messages()
+        )
+
     async def test_all_three_callbacks_invoked(self):
         from kohakuterrarium.parsing import (
             SubAgentCallEvent,

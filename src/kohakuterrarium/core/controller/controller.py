@@ -1098,10 +1098,11 @@ class Controller:
             on_subagent: Callback for sub-agent call events
         """
         while True:
-            async for event in self.run_once():
-                if isinstance(event, TextEvent) and on_text:
-                    on_text(event.text)
-                elif isinstance(event, ToolCallEvent) and on_tool:
-                    await on_tool(event)
-                elif isinstance(event, SubAgentCallEvent) and on_subagent:
-                    await on_subagent(event)
+            async with aclosing(self.run_once()) as stream:
+                async for event in stream:
+                    if isinstance(event, TextEvent) and on_text:
+                        on_text(event.text)
+                    elif isinstance(event, ToolCallEvent) and on_tool:
+                        await on_tool(event)
+                    elif isinstance(event, SubAgentCallEvent) and on_subagent:
+                        await on_subagent(event)

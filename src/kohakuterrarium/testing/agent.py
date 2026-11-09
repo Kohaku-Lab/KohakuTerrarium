@@ -1,5 +1,6 @@
 """Test agent builder for constructing agents with test doubles."""
 
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 
@@ -174,26 +175,27 @@ class TestAgentEnv:
 
         await self.router.on_processing_start()
 
-        async for parse_event in self.controller.run_once():
-            if isinstance(parse_event, ToolCallEvent):
-                job_id = await self.executor.submit_from_event(parse_event)
-                self.output.on_activity(
-                    "tool_start",
-                    f"[{parse_event.name}] {job_id}",
-                )
-            elif isinstance(parse_event, CommandResultEvent):
-                if parse_event.error:
+        async with aclosing(self.controller.run_once()) as stream:
+            async for parse_event in stream:
+                if isinstance(parse_event, ToolCallEvent):
+                    job_id = await self.executor.submit_from_event(parse_event)
                     self.output.on_activity(
-                        "command_error",
-                        f"[{parse_event.command}] {parse_event.error}",
+                        "tool_start",
+                        f"[{parse_event.name}] {job_id}",
                     )
+                elif isinstance(parse_event, CommandResultEvent):
+                    if parse_event.error:
+                        self.output.on_activity(
+                            "command_error",
+                            f"[{parse_event.command}] {parse_event.error}",
+                        )
+                    else:
+                        self.output.on_activity(
+                            "command_done",
+                            f"[{parse_event.command}] OK",
+                        )
                 else:
-                    self.output.on_activity(
-                        "command_done",
-                        f"[{parse_event.command}] OK",
-                    )
-            else:
-                await self.router.route(parse_event)
+                    await self.router.route(parse_event)
 
         await self.router.flush()
         await self.router.on_processing_end()
@@ -202,7 +204,8 @@ class TestAgentEnv:
         """Run one turn from a prebuilt trigger event."""
         await self.controller.push_event(event)
 
-        async for parse_event in self.controller.run_once():
-            await self.router.route(parse_event)
+        async with aclosing(self.controller.run_once()) as stream:
+            async for parse_event in stream:
+                await self.router.route(parse_event)
 
         await self.router.flush()
