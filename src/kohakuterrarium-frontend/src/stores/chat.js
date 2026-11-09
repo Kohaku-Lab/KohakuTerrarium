@@ -4211,7 +4211,7 @@ const _chatStoreOptions = {
       if (at === "processing_error") {
         const errorType = data.error_type || "Error"
         const errorMsg = data.error || data.detail || "Unknown error"
-        this._finishStream(source)
+        this._freezeStreamText(source)
         msgs.push({
           id: "err_" + Date.now(),
           role: "error",
@@ -6214,6 +6214,10 @@ const _chatStoreOptions = {
         delete this._streamingBranchByTab[source]
       }
       if (source) delete this._pendingBranchPathByTab[source]
+      this._freezeStreamText(source)
+    },
+
+    _freezeStreamText(source) {
       const msgs = this.messagesByTab[source]
       if (msgs) {
         const last = msgs[msgs.length - 1]
