@@ -2,6 +2,7 @@
 
 import asyncio
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 import httpx
@@ -219,6 +220,30 @@ async def test_configured_native_tool_replay_policy(provider, policy):
         ] == []
         assert len(connection.sent) == 2
     assert "request_replay" not in connection.sent[0]["tools"][0]
+
+
+async def test_terminal_failed_image_attempt_retains_received_result(provider):
+    if not isinstance(provider, CodexOAuthProvider):
+        return
+    connection = provider._client.responses.connection
+    connection.scripts = [
+        [
+            Ev(
+                type="response.output_item.done",
+                item=Ev(type="image_generation_call", id="kept", result="aW1hZ2U="),
+            ),
+            Ev(
+                type="response.failed",
+                response=Ev(error=Ev(code="failed", message="failed")),
+            ),
+        ]
+    ]
+    provider._retry_policy = replace(provider._retry_policy, max_retries=0)
+    with pytest.raises(ResponsesWSError):
+        _ = [part async for part in provider.chat(MESSAGES)]
+    assert [part.source_name for part in provider.last_assistant_content_parts] == [
+        "kept"
+    ]
 
 
 async def test_image_results_are_private_until_successful_attempt(provider):

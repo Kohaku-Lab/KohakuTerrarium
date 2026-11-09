@@ -431,6 +431,42 @@ class TestConversationAccess:
 
 
 class TestErrorRecovery:
+    @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+    @pytest.mark.parametrize("text", ["", "partial"])
+    async def test_incomplete_stream_preserves_received_images(self, tool_format, text):
+        image = ImagePart(url="data:image/png;base64,aW1hZ2U=", source_name="generated")
+
+        class ImageFailure(ScriptedLLM):
+            async def chat(self, messages, **kwargs):
+                self.last_assistant_content_parts = [image]
+                if text:
+                    yield text
+                raise ResponseStreamError()
+
+        llm = ImageFailure([])
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = tool_format
+        await env.controller.push_event(create_user_input_event("draw"))
+        emitted = []
+        with pytest.raises(ResponseStreamError):
+            async for event in env.controller.run_once():
+                emitted.append(event)
+        messages = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if m.role == "assistant"
+        ]
+        assert len(messages) == 1
+        assert messages[0].metadata["incomplete"] is True
+        assert messages[0].get_text_content() == text
+        images = [part for part in messages[0].content if isinstance(part, ImagePart)]
+        assert len(images) == 1
+        assert sum(getattr(event, "url", None) == image.url for event in emitted) == 1
+        assert (
+            messages[0].metadata["response_outcome"]["code"] == "response_unconfirmed"
+        )
+        assert not messages[0].tool_calls
+
     @pytest.mark.parametrize(
         "tool_format,text",
         [

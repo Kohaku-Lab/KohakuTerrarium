@@ -70,7 +70,9 @@ async def stream_codex_ws_turn(
         completed = True
     finally:
         if not completed:
+            received = list(image_parts)
             reset_attempt()
+            provider._last_assistant_parts = received
 
 
 def process_codex_event(

@@ -444,7 +444,24 @@ class Controller:
                         if chunk:
                             yield TextEvent(text=chunk)
             except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
-                await record_incomplete_assistant(self, assistant_content, exc)
+                structured = self._collect_structured_assistant_parts()
+                try:
+                    if not self._interrupted and isinstance(exc, Exception):
+                        for part in structured:
+                            if isinstance(part, ImagePart):
+                                yield AssistantImageEvent(
+                                    url=part.url,
+                                    detail=part.detail,
+                                    source_type=part.source_type,
+                                    source_name=part.source_name,
+                                    revised_prompt=getattr(
+                                        part, "revised_prompt", None
+                                    ),
+                                )
+                finally:
+                    await record_incomplete_assistant(
+                        self, _merge_text_and_parts(assistant_content, structured), exc
+                    )
                 raise
         self._log_token_usage()
 
@@ -610,13 +627,27 @@ class Controller:
                     else:
                         yield event
             except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
+                structured = self._collect_structured_assistant_parts()
                 try:
-                    if not self._interrupted and not isinstance(exc, GeneratorExit):
+                    if not self._interrupted and isinstance(exc, Exception):
                         for event in self._parser.flush():
                             if isinstance(event, TextEvent):
                                 yield event
+                        for part in structured:
+                            if isinstance(part, ImagePart):
+                                yield AssistantImageEvent(
+                                    url=part.url,
+                                    detail=part.detail,
+                                    source_type=part.source_type,
+                                    source_name=part.source_name,
+                                    revised_prompt=getattr(
+                                        part, "revised_prompt", None
+                                    ),
+                                )
                 finally:
-                    await record_incomplete_assistant(self, assistant_content, exc)
+                    await record_incomplete_assistant(
+                        self, _merge_text_and_parts(assistant_content, structured), exc
+                    )
                 raise
 
         self._last_assistant_content = assistant_content
