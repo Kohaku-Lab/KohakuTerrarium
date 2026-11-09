@@ -9,31 +9,46 @@
   color: var(--color-text);
   font-size: var(--kt-fs-body);
 }
-.vp-controls {
-  align-self: flex-end;
-  flex-shrink: 0;
-  margin: 8px 8px 4px;
-  opacity: 0;
-  display: flex;
-  gap: 4px;
+.vp-menu {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100% - 16px);
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+  pointer-events: auto;
 }
-.vp-companion:hover .vp-controls,
-.vp-companion:focus-within .vp-controls {
-  opacity: 1;
+.vp-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
 }
-@media (hover: none) {
-  .vp-controls {
-    opacity: 1;
-  }
+.vp-menu button:hover,
+.vp-menu button:focus {
+  background: var(--color-surface-alt);
+}
+.vp-companion .vp-menu button:focus-visible {
+  outline-offset: -2px;
 }
 .vp-drag {
+  order: 2;
   flex: 1;
   min-height: 0;
   width: 100%;
-  cursor: grab;
-  touch-action: none;
 }
-.vp-controls button,
 .vp-dismiss,
 .vp-choose {
   border: 1px solid var(--color-border);
@@ -44,7 +59,18 @@
   padding: 5px 8px;
   cursor: pointer;
 }
+.vp-feedback {
+  order: 1;
+  flex-shrink: 0;
+  height: calc(2.6em + 14px);
+  font-size: var(--kt-fs-caption);
+  display: flex;
+  align-items: center;
+}
 .vp-bubble {
+  box-sizing: border-box;
+  width: 100%;
+  line-height: 1.3;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -177,6 +203,13 @@
   border: 0;
   background-color: transparent;
   background-repeat: no-repeat;
+  pointer-events: none;
+}
+.vp-hit {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
 }
 .vp-pet-card:disabled {
   opacity: 0.5;
@@ -184,7 +217,8 @@
 }
 .vp-settings button:focus-visible,
 .vp-settings summary:focus-visible,
-.vp-companion button:focus-visible {
+.vp-companion button:focus-visible,
+.vp-hit:focus-visible {
   outline: 2px solid var(--color-text);
   outline-offset: 3px;
 }

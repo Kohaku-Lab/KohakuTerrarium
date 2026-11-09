@@ -15,7 +15,7 @@ from PIL import Image
 
 from kohakuterrarium.utils.logging import get_logger
 
-from .atlas import Pet, PetFormatError, interaction_frames, parse_pet
+from .atlas import Pet, PetFormatError, gaze_frames, interaction_frames, parse_pet
 
 logger = get_logger(__name__)
 KEY = re.compile(r"[a-f0-9]{64}")
@@ -52,17 +52,27 @@ class PetLibrary:
         )
         for key, pet in record["pets"].items():
             metadata = pet["metadata"]
-            if "interactions" not in metadata:
-                metadata["interactions"] = {}
+            missing = {
+                name: detect
+                for name, detect in (
+                    ("interactions", interaction_frames),
+                    ("gaze", gaze_frames),
+                )
+                if name not in metadata
+            }
+            if missing:
+                metadata.update({name: {} for name in missing})
                 if not KEY.fullmatch(key) or pet["mime"] not in (
                     "image/png",
                     "image/webp",
                 ):
                     continue
                 try:
-                    metadata["interactions"] = interaction_frames(
-                        (self.root / f"{key}.{pet['mime'].split('/')[1]}").read_bytes()
-                    )
+                    image = (
+                        self.root / f"{key}.{pet['mime'].split('/')[1]}"
+                    ).read_bytes()
+                    for name, detect in missing.items():
+                        metadata[name] = detect(image)
                 except (OSError, ValueError, Image.DecompressionBombError):
                     logger.warning("Pet interaction frames unavailable", exc_info=True)
         return record

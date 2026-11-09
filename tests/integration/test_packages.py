@@ -874,7 +874,7 @@ class TestPackagesIntegration:
         assert overlay.owner == "package:virtual-pet"
         assert overlay.overlay == {
             "anchor": "bottom-right",
-            "surface": "app",
+            "surface": "window",
             "width": 224,
             "height": 280,
             "draggable": True,

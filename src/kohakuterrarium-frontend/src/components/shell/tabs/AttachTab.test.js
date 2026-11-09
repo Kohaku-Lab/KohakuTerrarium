@@ -3,16 +3,21 @@ import { createPinia, setActivePinia } from "pinia"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const INSTANCE = { id: "sid", graph_id: "sid", creatures: [{ name: "alice" }] }
+const pending = vi.hoisted(() => ({ load: null, init: vi.fn(), start: vi.fn() }))
 
 vi.mock("@/stores/instances", () => ({
-  useInstancesStore: () => ({ current: null, list: [], fetchOne: vi.fn(async () => INSTANCE) }),
+  useInstancesStore: () => ({
+    current: null,
+    list: [],
+    fetchOne: vi.fn(async () => pending.load || INSTANCE),
+  }),
 }))
 vi.mock("@/stores/chat", () => ({
   useChatStore: () => ({
     _instanceId: null,
     activeTab: null,
     attentionByTab: {},
-    initForInstance: vi.fn(),
+    initForInstance: pending.init,
     resetForRouteSwitch: vi.fn(),
     markAttentionRead: vi.fn(),
   }),
@@ -33,7 +38,7 @@ vi.mock("@/stores/tabs", () => ({
 }))
 vi.mock("@/composables/useArtifactDetector", () => ({ useArtifactDetector: vi.fn() }))
 vi.mock("@/composables/useVisibilityInterval", () => ({
-  createVisibilityInterval: () => ({ start: vi.fn(), stop: vi.fn() }),
+  createVisibilityInterval: () => ({ start: pending.start, stop: vi.fn() }),
 }))
 vi.mock("@/components/session-v2/SessionShellV2.vue", () => ({
   __esModule: true,
@@ -64,6 +69,9 @@ async function shellShown() {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  pending.load = null
+  pending.init.mockClear()
+  pending.start.mockClear()
   _resetUiVersionForTests()
   _resetDensityForTests()
 })
@@ -73,6 +81,19 @@ afterEach(() => {
 })
 
 describe("AttachTab shell choice", () => {
+  it("does not reattach or start polling after unmount during the initial fetch", async () => {
+    let resolve
+    pending.load = new Promise((done) => {
+      resolve = done
+    })
+    const w = mount(AttachTab, { props: { tab: { id: "attach:sid", target: "sid" } } })
+    w.unmount()
+    resolve(INSTANCE)
+    await flushPromises()
+    expect(pending.init).not.toHaveBeenCalled()
+    expect(pending.start).not.toHaveBeenCalled()
+  })
+
   it("on a phone shows v2 (with its own phone layout), or the classic phone shell under v1", async () => {
     useDensity().setOverride("compact")
     useUiVersion().setUiVersion("v2")

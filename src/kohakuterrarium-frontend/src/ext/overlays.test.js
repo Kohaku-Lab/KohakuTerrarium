@@ -6,6 +6,7 @@ import OverlayLayer from "@/ext/OverlayLayer.vue"
 import {
   OVERLAY_MARGIN,
   beginDrag,
+  completeNativeReset,
   hideOverlay,
   isOverlayVisible,
   loadPlacements,
@@ -99,6 +100,26 @@ describe("overlay state", () => {
 
     resetOverlay(key)
     expect(overlayBounds(key)).toMatchObject({ left: OVERLAY_MARGIN, top: OVERLAY_MARGIN })
+    hideOverlay(key)
+    resetOverlay(key, true)
+    const pending = placements[key].nativeReset
+    loadPlacements("other-host")
+    resetOverlay(key, true)
+    const other = placements[key].nativeReset
+    expect(other).not.toBe(pending)
+    completeNativeReset(key, pending)
+    expect(placements[key].nativeReset).toBe(other)
+    loadPlacements("test-host")
+    expect(placements[key].nativeReset).toBe(pending)
+    expect(isOverlayVisible(key)).toBe(false)
+    resetOverlay(key, true)
+    const newer = placements[key].nativeReset
+    completeNativeReset(key, pending)
+    expect(placements[key].nativeReset).toBe(newer)
+    completeNativeReset(key, newer)
+    loadPlacements("test-host")
+    expect(placements[key].nativeReset).toBe(false)
+    expect(isOverlayVisible(key)).toBe(false)
   })
 
   it("honours defaultVisible and keeps the user's choice over it", () => {

@@ -84,6 +84,9 @@ export function createMockHost(options = {}) {
     creature: options.creature ?? null,
     events: options.events || [],
     work: options.work ?? null,
+    pointer: options.pointer ?? null,
+    overlayMode: options.overlayMode || "app",
+    overlayReady: false,
     locale: options.locale || "en",
     dark: options.dark ?? false,
     confirmAnswer: options.confirmAnswer ?? true,
@@ -310,6 +313,11 @@ export function useOverlay() {
   const id = host.overlayId
   const bounds = ref({ left: 0, top: 0, width: 320, height: 240 })
   return {
+    mode: host.state.overlayMode,
+    pointer: computed(() => host.state.pointer),
+    ready: (available = true) => {
+      if (host.state.overlayMode === "app" || available) host.state.overlayReady = available
+    },
     visible: computed(() => host.overlayVisible[id] ?? true),
     bounds: computed(() => bounds.value),
     show: () => host.kt.showOverlay(id),

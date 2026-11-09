@@ -12,6 +12,7 @@ import {
 import { PetSprite } from "./sprite.js";
 import { decodeImage } from "./image.js";
 import { text, usePetText } from "./strings.js";
+import { usePetPreferences } from "./preferences.js";
 
 export async function archiveBase64(
   file,
@@ -73,10 +74,12 @@ export const PetSettings = {
     const owner = useOwner();
     const host = useHost();
     const t = usePetText();
+    const { gazeEnabled, setGaze } = usePetPreferences();
     const fileInput = ref(null);
     const busy = ref(false);
     const error = ref("");
     const previewError = ref("");
+    const preferenceError = ref(false);
     const source = ref("");
     const revision = ref(0);
     const state = computed(() => owner.state.value || {});
@@ -92,6 +95,7 @@ export const PetSettings = {
       request += 1;
       busy.value = false;
       error.value = "";
+      preferenceError.value = false;
     }
     watch(scope, invalidate, { flush: "sync" });
     onUnmounted(invalidate);
@@ -164,6 +168,12 @@ export const PetSettings = {
     return {
       t,
       fileInput,
+      gazeEnabled,
+      preferenceError,
+      changeGaze: (event) => {
+        preferenceError.value = !setGaze(event.target.checked);
+        event.target.checked = gazeEnabled.value;
+      },
       openOverlaySettings: () =>
         openTab({ kind: "settings", id: "settings", section: "overlays" }),
       owner,
@@ -225,6 +235,7 @@ export const PetSettings = {
           </div>
           <SettingsRow :title="t('removeTitle')"><ActionButton variant="danger" class="vp-remove" :disabled="busy" @click="remove(selected)">{{ t('remove') }}</ActionButton></SettingsRow>
         </SettingsGroup>
+        <SettingsGroup v-if="selected"><SettingsRow :title="t('gaze')" :hint="t(selected.gaze?.directions === 16 ? 'gazeHint' : 'gazeUnavailable')"><input type="checkbox" :aria-label="t('gaze')" :checked="gazeEnabled" :disabled="selected.gaze?.directions !== 16" @change="changeGaze" /><p v-if="preferenceError" role="alert">{{ t('gazeSaveFailed') }}</p></SettingsRow></SettingsGroup>
         <SettingsGroup><SettingsRow :title="t('overlayTitle')" :hint="t('overlayHint')"><ActionButton @click="openOverlaySettings">{{ t('overlayControls') }}</ActionButton></SettingsRow></SettingsGroup>
       </template>
     </section>`,

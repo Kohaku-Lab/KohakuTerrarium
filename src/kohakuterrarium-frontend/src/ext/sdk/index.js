@@ -18,11 +18,13 @@ import {
   isOverlayVisible,
   moveOverlay,
   overlayBounds,
+  overlays,
   resizeOverlay,
   showOverlay,
   toggleOverlay,
 } from "@/ext/overlays"
-import { windowLabel } from "@/ext/overlayWindows"
+import { setOverlayContentReady, windowLabel } from "@/ext/overlayWindows"
+import { beginOverlayMove, useOverlayPointer } from "@/ext/overlayInput"
 import { openExtensionTab } from "@/ext/registry"
 import {
   EXTENSION_INJECT_KEY,
@@ -41,8 +43,14 @@ import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
 import { useTabsStore } from "@/stores/tabs"
+import { useAuthStore } from "@/stores/auth"
 import { useThemeStore } from "@/stores/theme"
-import { closeOverlayWindow, setOverlayBounds, startOverlayDrag } from "@/utils/hostBridge"
+import {
+  closeOverlayWindow,
+  openOverlaySettings,
+  setOverlayBounds,
+  startOverlayDrag,
+} from "@/utils/hostBridge"
 
 export { default as ActionButton } from "@/components/common/ActionButton.vue"
 export { default as SettingsGroup } from "@/components/settings/ui/SettingsGroup.vue"
@@ -106,6 +114,12 @@ function useWindowOverlay(key) {
     await closeOverlayWindow(windowLabel(key))
   }
   return {
+    mode: "window",
+    pointer: useOverlayPointer("window"),
+    ready: (available = true) => {
+      if (available)
+        window.dispatchEvent(new CustomEvent("kt:overlay-content-ready", { detail: key }))
+    },
     visible: computed(() => true),
     bounds: computed(() => ({ left: window.screenX, top: window.screenY, ...size() })),
     show: () => {},
@@ -115,7 +129,7 @@ function useWindowOverlay(key) {
     resize: (width, height) => setOverlayBounds(window.screenX, window.screenY, width, height),
     startDrag: (event) => {
       event?.preventDefault?.()
-      return startOverlayDrag()
+      return beginOverlayMove() || startOverlayDrag()
     },
   }
 }
@@ -124,13 +138,19 @@ function useWindowOverlay(key) {
  * Control the overlay the calling component is drawn in: ``visible`` and
  * ``bounds`` are refs; ``startDrag(event)`` moves a click-through overlay
  * from a ``pointerdown`` on any element of its own. In a native window
- * overlay ``move`` and ``resize`` use screen pixels.
+ * overlay ``move`` and ``resize`` use screen pixels. ``ready(false)`` marks
+ * unavailable viewport content; ``ready()`` admits native creation/presentation.
  */
 export function useOverlay() {
   const key = inject(OVERLAY_INJECT_KEY, null)
   if (!key) throw new Error("useOverlay() must be called inside an overlay contribution")
   if (inject(OVERLAY_MODE_INJECT_KEY, "app") === "window") return useWindowOverlay(key)
+  const overlay = overlays.get(key)
+  onUnmounted(() => setOverlayContentReady(overlay, false))
   return {
+    mode: "app",
+    pointer: useOverlayPointer("app"),
+    ready: (available = true) => setOverlayContentReady(overlay, available),
     visible: computed(() => isOverlayVisible(key)),
     bounds: computed(() => overlayBounds(key)),
     show: () => showOverlay(key),
@@ -179,10 +199,13 @@ export function useGraphNode() {
 /** The backend host this dashboard is talking to. */
 export function useHost() {
   const hosts = useHostsStore()
+  const auth = useAuthStore()
   return computed(() => {
     const active = hosts.activeHost
-    if (!active) return { id: null, name: "", url: "", sameOrigin: true }
-    return { id: active.id, name: active.name, url: active.url, sameOrigin: false }
+    const user = active ? hosts.activeUser : auth.sameOriginUser
+    const userId = user?.id || user?.username || null
+    if (!active) return { id: null, name: "", url: "", sameOrigin: true, userId }
+    return { id: active.id, name: active.name, url: active.url, sameOrigin: false, userId }
   })
 }
 
@@ -259,6 +282,9 @@ export async function confirm(message, title = "", options = {}) {
  * an object is a core tab spec such as ``{ kind: "settings", id: "settings" }``.
  */
 export function openTab(target) {
+  if (new URLSearchParams(window.location.search).has("kt_overlay")) {
+    return target?.kind === "settings" ? openOverlaySettings(target.section) : false
+  }
   if (typeof target === "string") return openExtensionTab(target)
   return useTabsStore().openTab(target)
 }

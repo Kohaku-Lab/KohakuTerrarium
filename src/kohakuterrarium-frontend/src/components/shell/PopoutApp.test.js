@@ -6,6 +6,7 @@ const store = vi.hoisted(() => ({ current: null, list: [], fetchAll: vi.fn(async
 vi.mock("@/stores/instances", () => ({ useInstancesStore: () => store }))
 
 import PopoutApp from "@/components/shell/PopoutApp.vue"
+import { useChatStore } from "@/stores/chat"
 
 const AuthGate = { template: "<div><slot /></div>" }
 const AttachTab = {
@@ -35,6 +36,10 @@ describe("PopoutApp", () => {
     const invoke = vi.fn(async () => true)
     window.__TAURI_INTERNALS__ = { invoke }
     const wrapper = mountApp()
+    const chat = useChatStore("graph-7")
+    chat.wsStatus = "open"
+    const close = vi.fn()
+    chat._ws = { close, onopen: null, onmessage: null, onclose: null, onerror: null }
     await flushPromises()
 
     const attach = wrapper.find('[data-test="attach"]')
@@ -43,6 +48,9 @@ describe("PopoutApp", () => {
     expect(wrapper.find('[data-test="toasts"]').exists()).toBe(true)
     expect(invoke).toHaveBeenCalledWith("popout_ack", {})
     wrapper.unmount()
+    expect(close).toHaveBeenCalledOnce()
+    expect(chat._ws).toBeNull()
+    expect(chat.wsStatus).toBe("closed")
   })
 
   it("titles the bar with the session's name and falls back to the app name", async () => {

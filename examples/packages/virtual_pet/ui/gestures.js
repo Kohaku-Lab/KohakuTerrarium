@@ -1,6 +1,7 @@
 /** Pointer intent for one fixed sprite cell; host movement starts only after intent. */
 export class PetGestures {
-  constructor(player, refresh, dragStart, dragMove) {
+  constructor(player, refresh, dragStart, dragMove, native = () => false) {
+    this.native = native;
     this.player = player;
     this.refresh = refresh;
     this.dragStart = dragStart;
@@ -22,18 +23,33 @@ export class PetGestures {
     event.preventDefault();
     this.pointer = {
       id: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      extremeX: event.clientX,
+      x: this.native() ? 0 : event.clientX,
+      y: this.native() ? 0 : event.clientY,
+      screenX: event.screenX,
+      screenY: event.screenY,
+      target: event.currentTarget,
+      extremeX: this.native() ? 0 : event.clientX,
       direction: 0,
       dragging: false,
     };
+    event.currentTarget?.setPointerCapture?.(event.pointerId);
+    event.currentTarget?.addEventListener?.("lostpointercapture", this.cancel);
     this.player().press(performance.now());
     window.addEventListener("pointermove", this.move);
     window.addEventListener("pointerup", this.up);
     window.addEventListener("pointercancel", this.cancel);
     window.addEventListener("blur", this.blur);
     this.refresh();
+  }
+  nativeMove(point) {
+    if (!this.pointer || !this.native()) return;
+    this.onMove({
+      pointerId: this.pointer.id,
+      buttons: 1,
+      native: true,
+      clientX: point.dragX,
+      clientY: point.dragY,
+    });
   }
   onMove(event) {
     const p = this.pointer;
@@ -42,6 +58,8 @@ export class PetGestures {
       this.finish(event, true);
       return;
     }
+    if (this.native() && !event.native) return;
+    if (![event.clientX, event.clientY].every(Number.isFinite)) return;
     const now = performance.now();
     if (
       !p.dragging &&
@@ -71,14 +89,28 @@ export class PetGestures {
     const p = this.pointer;
     if (!p || (event && event.pointerId !== p.id)) return;
     this.pointer = null;
+    p.target?.removeEventListener?.("lostpointercapture", this.cancel);
+    if (p.target?.hasPointerCapture?.(p.id))
+      p.target.releasePointerCapture(p.id);
     window.removeEventListener("pointermove", this.move);
     window.removeEventListener("pointerup", this.up);
     window.removeEventListener("pointercancel", this.cancel);
     window.removeEventListener("blur", this.blur);
+    const rect = p.target?.getBoundingClientRect?.();
+    const inside =
+      rect &&
+      event &&
+      event.clientX >= rect.left &&
+      event.clientX < rect.left + rect.width &&
+      event.clientY >= rect.top &&
+      event.clientY < rect.top + rect.height;
     const click =
       !cancelled &&
       !p.dragging &&
-      Math.hypot(event.clientX - p.x, event.clientY - p.y) < 6;
+      inside &&
+      (this.native()
+        ? Math.hypot(event.screenX - p.screenX, event.screenY - p.screenY)
+        : Math.hypot(event.clientX - p.x, event.clientY - p.y)) < 6;
     this.player().release(performance.now(), click);
     this.refresh();
   }

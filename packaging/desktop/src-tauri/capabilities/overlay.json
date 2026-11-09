@@ -15,6 +15,8 @@
     "allow-overlay-set-bounds",
     "allow-overlay-set-hit-regions",
     "allow-overlay-ack",
+    "allow-overlay-present",
+    "allow-overlay-open-settings",
     "allow-focus-session"
   ]
 }

@@ -40,6 +40,8 @@ import DesktopOpenHost from "@/components/shell/DesktopOpenHost.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
 import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
 import OverlayLayer from "@/ext/OverlayLayer.vue"
+import { useDesktopPublisher } from "@/ext/desktopContext"
+import { useWorkContext } from "@/ext/workContext"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
@@ -67,6 +69,14 @@ import { useTabsStore } from "@/stores/tabs"
 import { installDeepLinks } from "@/utils/deepLink"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
 
+useDesktopPublisher(() => useWorkContext())
+const openOverlaySettings = (event) => {
+  const section = event.detail?.section
+  if (section === "ext:virtual-pet/pets" || section === "overlays") useTabsStore().openTab({ kind: "settings", id: "settings", section })
+}
+window.addEventListener("kt:overlay-settings", openOverlaySettings)
+onBeforeUnmount(() => window.removeEventListener("kt:overlay-settings", openOverlaySettings))
+
 const theme = useThemeStore()
 const locale = useLocaleStore()
 const { isCompact } = useDensity()
@@ -80,17 +90,9 @@ locale.init()
 // the same density composable the shell does.
 watch(isCompact, (compact) => theme.setMobileMode(compact), { immediate: true })
 
-// Probe the active host's auth capabilities on boot so the AuthGate
-// + interceptor know which layers are enabled before the first
-// /api/* call goes out.  Re-probes happen automatically on host
-// switch via the AuthGate's own watcher.
 const auth = useAuthStore()
 const hostsStoreInstance = useHostsStore()
-// fetchMe runs AFTER fetch resolves so it can read the freshly-probed
-// multi_user flag (it no-ops on single-user hosts).  This populates the
-// logged-in identity (incl. same-origin cookie sessions) so the account
-// surface + admin-portal gate know who the user is on boot.
-auth.fetch().then(() => auth.fetchMe())
+if (!auth.ready) auth.fetch().then(() => auth.fetchMe())
 watch(
   () => hostsStoreInstance.activeHostId,
   () => auth.fetch().then(() => auth.fetchMe()),

@@ -135,6 +135,16 @@ it("never relabels an old binding as work from the newly selected host", async (
   const count = pages.mock.calls.length
   expect((await chat.initHistoryPage("alice")).applied).not.toBe(true)
   expect(pages).toHaveBeenCalledTimes(count)
+  hosts.setActive(remote)
+  hosts.setUserSession(remote, { userToken: "new-user-token", user: { id: 7 } })
+  expect(wrapper.vm.work).toBeNull()
+  const oldSocket = sockets.at(-1)
+  send(oldSocket, { type: "processing_start" })
+  expect(wrapper.vm.work).toBeNull()
+  chat.initForInstance(instance)
+  expect(sockets.at(-1)).not.toBe(oldSocket)
+  expect(oldSocket.readyState).toBe(Socket.CLOSED)
+  expect(wrapper.vm.work).toMatchObject({ status: "idle", started: 0 })
 })
 
 let wrapper, chat, unsubscribeEdges

@@ -301,6 +301,7 @@ class TestAuthIntegration:
                         pushed = operator_ws.receive_json()["data"]
                         assert pushed["selected"] == key_a
                         assert [pet["key"] for pet in pushed["pets"]] == [key_a]
+                        assert pushed["pets"][0]["gaze"] == {"directions": 16}
                         alice_state = client2.post(
                             "/api/extensions/owner/state",
                             json=ref,
@@ -318,6 +319,7 @@ class TestAuthIntegration:
                         alice_push = alice_ws.receive_json()["data"]
                         assert alice_push["selected"] == key_b
                         assert [pet["key"] for pet in alice_push["pets"]] == [key_b]
+                        assert alice_push["pets"][0]["gaze"] == {"directions": 16}
                         removed = owner_call("remove", {"key": key_a}, operator_headers)
                         assert removed.status_code == 200
                         assert operator_ws.receive_json()["data"]["pets"] == []
