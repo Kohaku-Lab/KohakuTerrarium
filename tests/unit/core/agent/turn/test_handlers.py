@@ -95,6 +95,32 @@ async def test_user_interrupt_has_no_deferred_history_writes(
         await agent.stop()
 
 
+@pytest.mark.parametrize("tool_format", ["bracket", "xml"])
+async def test_interrupt_survives_failed_buffered_display(tmp_path, tool_format):
+    llm = PausedResponseLLM("buffered interrupted text")
+    agent, trace = await _build(tmp_path, llm, tool_format)
+
+    async def fail_write(content):
+        raise OSError("display unavailable")
+
+    trace.write_stream = fail_write
+    task = asyncio.create_task(agent.run("first", raise_on_error=False))
+    try:
+        await asyncio.wait_for(llm.waiting.wait(), 5)
+        await agent.interrupt_and_wait()
+        assert (await task).status == "interrupted"
+        assert not [event for event in trace.events if event.type == "processing_error"]
+        assert any(
+            m.get_text_content() == "buffered interrupted text"
+            for m in agent.controller.conversation.get_messages()
+        )
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await agent.stop()
+
+
 class _OwnedTool(BaseTool):
     def __init__(self, release, background=False, name="owned"):
         super().__init__()
@@ -324,6 +350,39 @@ async def test_failed_stream_preserves_background_result_owner(tmp_path, owner):
         await agent.stop()
 
 
+@pytest.mark.parametrize(
+    "tool_format,block", [("bracket", "[/owned][owned/]"), ("xml", "<owned></owned>")]
+)
+async def test_cancel_during_input_drain_preserves_collected_feedback(
+    tmp_path, monkeypatch, tool_format, block
+):
+    release = asyncio.Event()
+    release.set()
+    tool = _OwnedTool(release)
+    llm = ScriptedLLM([block, "recovered"])
+    agent, _ = await _build(tmp_path, llm, tool_format, [tool])
+    draining = asyncio.Event()
+
+    async def wait_drain(controller):
+        draining.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(agent, "_drain_mid_turn_pending_inputs", wait_drain)
+    task = asyncio.create_task(agent.run("first", raise_on_error=False))
+    try:
+        await asyncio.wait_for(draining.wait(), 5)
+        await agent.interrupt_and_wait()
+        assert (await task).status == "interrupted"
+        assert tool.calls == 1
+        messages = agent.controller.conversation.get_messages()
+        assert sum("owned result" in m.get_text_content() for m in messages) == 1
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await agent.stop()
+
+
 async def test_interrupt_during_failure_settlement_keeps_interrupted_result(tmp_path):
     release = asyncio.Event()
     tool = _OwnedTool(release)
@@ -334,6 +393,9 @@ async def test_interrupt_during_failure_settlement_keeps_interrupted_result(tmp_
     task = asyncio.create_task(agent.run("fail", raise_on_error=False))
     try:
         await asyncio.wait_for(llm.failed.wait(), 5)
+        errors = [event for event in trace.events if event.type == "processing_error"]
+        assert len(errors) == 1
+        assert errors[0].payload["response_outcome"]["code"] == "response_unconfirmed"
         agent.interrupt()
         result = await asyncio.wait_for(task, 5)
         assert result.status == "interrupted"

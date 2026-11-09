@@ -531,11 +531,12 @@ class AgentEventLoopMixin:
             metadata = {"error_type": error_type, "error": error_msg}
             if isinstance(e, ResponseStreamError):
                 metadata["response_outcome"] = e.response_outcome
-            self.output_router.notify_activity(
-                "processing_error",
-                f"[{error_type}] {error_msg}",
-                metadata=metadata,
-            )
+            if not getattr(e, "_activity_reported", False):
+                self.output_router.notify_activity(
+                    "processing_error",
+                    f"[{error_type}] {error_msg}",
+                    metadata=metadata,
+                )
             metrics.observe_error("controller")
         finally:
             self._processing_task = None

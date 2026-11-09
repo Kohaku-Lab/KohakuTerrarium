@@ -458,6 +458,20 @@ class Controller:
                                         part, "revised_prompt", None
                                     ),
                                 )
+                    elif self.output_router is not None:
+                        for part in structured:
+                            if isinstance(part, ImagePart):
+                                await self.output_router.route(
+                                    AssistantImageEvent(
+                                        url=part.url,
+                                        detail=part.detail,
+                                        source_type=part.source_type,
+                                        source_name=part.source_name,
+                                        revised_prompt=getattr(
+                                            part, "revised_prompt", None
+                                        ),
+                                    )
+                                )
                 finally:
                     await record_incomplete_assistant(
                         self, _merge_text_and_parts(assistant_content, structured), exc
@@ -643,6 +657,29 @@ class Controller:
                                     revised_prompt=getattr(
                                         part, "revised_prompt", None
                                     ),
+                                )
+                    elif self.output_router is not None:
+                        for event in self._parser.flush():
+                            if isinstance(event, TextEvent):
+                                try:
+                                    await self.output_router.route(event)
+                                except Exception as output_error:
+                                    logger.warning(
+                                        "Interrupted output delivery failed",
+                                        error_type=type(output_error).__name__,
+                                    )
+                        for part in structured:
+                            if isinstance(part, ImagePart):
+                                await self.output_router.route(
+                                    AssistantImageEvent(
+                                        url=part.url,
+                                        detail=part.detail,
+                                        source_type=part.source_type,
+                                        source_name=part.source_name,
+                                        revised_prompt=getattr(
+                                            part, "revised_prompt", None
+                                        ),
+                                    )
                                 )
                 finally:
                     await record_incomplete_assistant(

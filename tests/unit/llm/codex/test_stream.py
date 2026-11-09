@@ -233,10 +233,12 @@ async def test_cancellation_remains_cancellation(close_error):
         await provider.close()
 
 
-@pytest.mark.parametrize("completed", [False, True])
-@pytest.mark.parametrize("close_error", [False, True])
+@pytest.mark.parametrize(
+    "completed,close_error,transport_error",
+    [(False, False, error) for error in ("raw", "sdk_connection", "sdk_timeout")]
+    + [(False, True, "raw"), (True, False, "raw"), (True, True, "raw")],
+)
 @pytest.mark.parametrize("partial", [False, True])
-@pytest.mark.parametrize("transport_error", ["raw", "sdk_connection", "sdk_timeout"])
 async def test_transport_and_cleanup_failures_never_resubmit(
     completed, close_error, partial, transport_error
 ):

@@ -4,7 +4,7 @@ import asyncio
 import importlib
 from contextlib import aclosing
 
-from kohakuterrarium.errors import AgentNotRunningError
+from kohakuterrarium.errors import AgentNotRunningError, ResponseStreamError
 from kohakuterrarium.core.agent.turn.mid_turn import AgentMidTurnMixin
 from kohakuterrarium.core.agent.turn.output_wiring import AgentOutputWiringMixin
 from kohakuterrarium.core.agent.turn.pre_dispatch import (
@@ -355,6 +355,17 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                             round_text.append(parse_event.text)
                         await self.output_router.route(parse_event)
         except (asyncio.CancelledError, Exception) as exc:
+            if isinstance(exc, ResponseStreamError):
+                self.output_router.notify_activity(
+                    "processing_error",
+                    f"[{type(exc).__name__}] {exc}",
+                    metadata={
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "response_outcome": exc.response_outcome,
+                    },
+                )
+                exc._activity_reported = True
             await self._settle_failed_round(
                 controller, result, cancelled=isinstance(exc, asyncio.CancelledError)
             )
@@ -636,6 +647,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         # Wait for handles (direct tools + sub-agents)
         native_results_added = False
         had_promotions = False
+        text_results = {}
         if handles and self._interrupt_requested:
             self._cancel_handles(handles)
             return False
@@ -651,6 +663,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                     )
                     native_results_added = True
                 else:
+                    text_results = results
                     text = self._format_text_results(handle_order, results)
                     if text:
                         feedback_parts.append(text)
@@ -682,7 +695,13 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         # results are appended (so the native assistant.tool_calls →
         # role=tool pairing stays intact) and BEFORE the next LLM round
         # so the model sees the new input.
-        injected_count = await self._drain_mid_turn_pending_inputs(controller)
+        try:
+            injected_count = await self._drain_mid_turn_pending_inputs(controller)
+        except (asyncio.CancelledError, Exception):
+            self._save_direct_results(
+                controller, handle_order, text_results, native_tool_call_ids, False
+            )
+            raise
         if injected_count:
             native_results_added = True
 
@@ -712,7 +731,13 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                 error=None,
             )
             logger.debug("Pushing feedback to controller, continuing")
-            await controller.push_event(feedback_event)
+            try:
+                await controller.push_event(feedback_event)
+            except (asyncio.CancelledError, Exception):
+                self._save_direct_results(
+                    controller, handle_order, text_results, native_tool_call_ids, False
+                )
+                raise
 
         return True
 

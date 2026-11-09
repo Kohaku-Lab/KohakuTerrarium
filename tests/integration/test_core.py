@@ -2731,6 +2731,12 @@ class TestCoreIntegration:
                     e for e in interrupted_events if e["type"] == "assistant_message"
                 ]
                 assert len(canonical) == 1
+                displayed = "".join(
+                    e.get("content", "")
+                    for e in interrupted_events
+                    if e["type"] in ("text", "text_chunk")
+                )
+                assert displayed == "buffered interrupted text"
                 assert (
                     canonical[0]["message"]["metadata"]["completion_state"]
                     == "interrupted"
