@@ -9,7 +9,10 @@ from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.core.config.types import AgentConfig
-from kohakuterrarium.core.events import create_user_input_event
+from kohakuterrarium.core.events import (
+    create_tool_complete_event,
+    create_user_input_event,
+)
 from kohakuterrarium.core.output_wiring import OutputWiringEntry
 from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.modules.output.base import BaseOutputModule
@@ -211,6 +214,32 @@ async def _build(tmp_path, llm, tool_format="bracket", tools=()):
     agent.output_router.default_output = trace
     await agent.start()
     return agent, trace
+
+
+@pytest.mark.parametrize("matches", [False, True])
+async def test_deferred_job_feedback_only_enters_matching_branch(tmp_path, matches):
+    llm = ScriptedLLM(["answer"])
+    agent, _ = await _build(tmp_path, llm)
+    try:
+        event = create_tool_complete_event(
+            job_id="old_job", content="old branch output"
+        )
+        agent._deferred_job_results = [(event, {1: 1})]
+        agent._parent_branch_path = [[1, 1 if matches else 2]]
+        agent._turn_index = 2
+        agent._branch_id = 1
+        agent._prepare_processing_cycle(
+            create_user_input_event("new"), agent.controller
+        )
+        assert agent.controller.has_pending_events() == matches
+        assert len(agent._deferred_job_results) == (0 if matches else 1)
+        if matches:
+            await agent.controller.push_event(create_user_input_event("new"))
+            async for _event in agent.controller.run_once():
+                pass
+            assert "old branch output" in str(llm.last_messages)
+    finally:
+        await agent.stop()
 
 
 @pytest.mark.parametrize(

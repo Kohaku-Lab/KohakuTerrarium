@@ -26,6 +26,7 @@ from kohakuterrarium.core.events import (
     TriggerEvent,
     create_tool_complete_event,
 )
+from kohakuterrarium.core.conversation.continuation import live_branch_path
 from kohakuterrarium.core.pending_input import stamp_pending_id
 from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS
 from kohakuterrarium.modules.output.event import OutputEvent
@@ -205,6 +206,15 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
     ) -> None:
         """Reset state at the start of a new processing cycle."""
         self._interrupt_requested = False
+        self._turn_cancelled_jobs.clear()
+        path = live_branch_path(self)
+        retained = []
+        for result_event, origin in self._deferred_job_results:
+            if all(path.get(turn) == branch for turn, branch in origin.items()):
+                controller.push_event_sync(result_event)
+            else:
+                retained.append((result_event, origin))
+        self._deferred_job_results = retained
         self._last_turn_text = []
         controller._interrupted = False
         # Fresh turn — forget the previous turn's backgrounded jobs so the
@@ -477,10 +487,10 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             direct=is_direct,
         )
 
-        await self._flush_output()
         self._notify_tool_start(
             parse_event, job_id, is_direct, tool_call_id=tool_call_id
         )
+        await self._flush_output()
 
     async def _dispatch_subagent_event(
         self,
@@ -554,7 +564,6 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             if sa_tool_call_id and native_tool_call_ids is not None:
                 native_tool_call_ids[job_id] = sa_tool_call_id
 
-        await self._flush_output()
         _, label = _make_job_label(job_id)
         subagent = self.subagent_manager.get_live_subagent(job_id)
         provider = getattr(subagent, "llm", None)
@@ -570,6 +579,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                 "model": _provider_model(provider),
             },
         )
+        await self._flush_output()
 
     def _check_termination(self, round_text: list[str]) -> bool:
         """Check if termination conditions are met. Returns True to stop.

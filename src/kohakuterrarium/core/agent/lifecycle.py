@@ -209,6 +209,10 @@ class AgentLifecycleMixin:
             if not job_id or job_id in seen:
                 continue
             seen.add(job_id)
+            if (getattr(self, "_direct_job_meta", {}).get(job_id) or {}).get(
+                "cancellation_requested"
+            ):
+                continue
             is_subagent = getattr(status, "job_type", None) == JobType.SUBAGENT
             name = getattr(status, "type_name", "") or job_id
             error = "Agent stopped while this job was still running."

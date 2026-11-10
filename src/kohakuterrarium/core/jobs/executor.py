@@ -321,7 +321,15 @@ class Executor(ExecutorContextMixin):
                 error=error_msg,
             )
 
-            job_result = JobResult(job_id=job_id, error=error_msg)
+            job_result = JobResult(
+                job_id=job_id,
+                error=error_msg,
+                metadata=(
+                    {"interrupted": True, "final_state": "interrupted"}
+                    if is_direct
+                    else {"cancelled": True, "final_state": "cancelled"}
+                ),
+            )
             self.job_store.store_result(job_result)
             if not is_direct:
                 event = create_tool_complete_event(
@@ -375,7 +383,15 @@ class Executor(ExecutorContextMixin):
             state=JobState.CANCELLED,
             error=error_msg,
         )
-        result = JobResult(job_id=job_id, error=error_msg)
+        result = JobResult(
+            job_id=job_id,
+            error=error_msg,
+            metadata=(
+                {"interrupted": True, "final_state": "interrupted"}
+                if is_direct
+                else {"cancelled": True, "final_state": "cancelled"}
+            ),
+        )
         self.job_store.store_result(result)
         if is_direct:
             return

@@ -157,7 +157,10 @@ class AgentRuntimeToolsMixin:
 
     def _on_bg_complete(self, event: TriggerEvent) -> None:
         """Handle background tool/sub-agent completion."""
-        if not self._running:
+        if not self._running and not (
+            (event.context or {}).get("defer_controller")
+            and not getattr(self, "_stopped", False)
+        ):
             return
         job_id = getattr(event, "job_id", "")
         is_subagent = job_id.startswith("agent_")
@@ -262,7 +265,11 @@ class AgentRuntimeToolsMixin:
             )
 
         logger.info("Background job completed", job_id=job_id)
-        if self._should_notify_controller_on_background_complete(job_id):
+        if context.get("defer_controller"):
+            self._deferred_job_results.append(
+                (event, context.get("job_branch_path") or {})
+            )
+        elif self._should_notify_controller_on_background_complete(job_id):
             stamp_pending_id(event)
             self._event_inbox.put(EventEnvelope(event))
             self._flush_trigger_backlog_stash()

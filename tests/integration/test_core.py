@@ -461,6 +461,26 @@ class _BlockingTool(BaseTool):
         return ToolResult(output="never")
 
 
+class _LateCancellationTool(_BlockingTool):
+    """Finish with actual output after acknowledging a cancellation request."""
+
+    def __init__(self):
+        super().__init__()
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def _execute(self, args, **kwargs):
+        self.calls += 1
+        if self.calls > 1:
+            return ToolResult(output="second native result")
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await self.release.wait()
+        return ToolResult(output="first late result")
+
+
 class _BackgroundRaisingTool(BaseTool):
     """BACKGROUND tool whose ``_execute`` raises after a short delay.
 
@@ -2496,6 +2516,81 @@ class TestCoreIntegration:
         and ``Agent.attach_session_store`` is how the engine wires
         persistence onto a creature.
         """
+        late_tool = _LateCancellationTool()
+        reused_llm = _HistoryReplayLLM(
+            True,
+            plan=[
+                [NativeToolCall("reused", "block", "{}")],
+                [NativeToolCall("reused", "block", "{}")],
+                "second finished",
+                "late observed",
+            ],
+        )
+        async with Terrarium(
+            session_dir=tmp_path / "native-call-ownership"
+        ) as native_engine:
+            native_node = await native_engine.add_creature(
+                AgentConfig(
+                    name="native_owner", system_prompt="plain", tool_format="native"
+                ),
+                llm=reused_llm,
+                tools=[late_tool],
+                pwd=tmp_path,
+                io="headless",
+                start=True,
+            )
+            request = asyncio.create_task(
+                native_node.run("first", raise_on_error=False)
+            )
+            await asyncio.wait_for(late_tool.started.wait(), 5)
+            native_node.agent.interrupt()
+            assert (await asyncio.wait_for(request, 5)).status == "interrupted"
+            saved_pending = native_node.agent.session_store.load_conversation(
+                "native_owner"
+            )
+            assert len([m for m in saved_pending if m["role"] == "tool"]) == 1
+            assert [m for m in saved_pending if m["role"] == "tool"][0]["metadata"][
+                "tool_result_phase"
+            ] == "pending"
+            assert (await native_node.run("second")).text == "second finished"
+            late_tool.release.set()
+            await _settle(lambda: not native_node.agent._active_handles)
+            await native_node.agent.output_router.flush()
+            assert reused_llm.call_count == 3
+            native_path = native_node.agent.session_store.path
+            native_events = native_node.agent.session_store.get_events("native_owner")
+            assert len([e for e in native_events if e["type"] == "tool_result"]) == 2
+            edited = await native_node.agent.edit_and_rerun(
+                0, "second edited", turn_index=2
+            )
+            assert edited
+            assert native_node.agent._branch_id == 2
+            selected_origin = branch_history.reload_conversation_under_branch_view(
+                native_node.agent, {1: 1, 2: 2}, apply=False
+            )
+            assert selected_origin["selected"][2] == 2
+            assert "first late result" in str(selected_origin["messages"])
+            assert "second native result" not in str(selected_origin["messages"])
+            native_messages = native_node.agent.controller.conversation.to_messages()
+            assert [m["content"] for m in native_messages if m["role"] == "tool"][
+                0
+            ] == "first late result"
+        resumed_native_llm = ScriptedLLM(["resumed"])
+        resumed_native, native_store = resume_agent(
+            native_path, io_mode="plain", llm=resumed_native_llm
+        )
+        try:
+            await resumed_native.start()
+            assert (await resumed_native.run("inspect")).text == "resumed"
+            assert "first late result" in str(resumed_native_llm.last_messages), repr(
+                native_events
+            )
+            assert "second native result" not in str(resumed_native_llm.last_messages)
+            assert late_tool.calls == 2
+        finally:
+            await resumed_native.stop()
+            native_store.close()
+
         llm = InterruptedResponseLLM(
             [
                 ScriptEntry(

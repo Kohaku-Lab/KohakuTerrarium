@@ -24,6 +24,8 @@ class AgentInterruptMixin:
         self._active_handles: dict[str, Any] = {}
         self._direct_job_meta: dict[str, dict[str, Any]] = {}
         self._bg_controller_notify: dict[str, bool] = {}
+        self._turn_cancelled_jobs: set[str] = set()
+        self._deferred_job_results: list[tuple[Any, dict[int, int]]] = []
         # Deliverable background jobs (notify=True, non-stateful/-interactive)
         # this turn spawned; the output-wiring guard defers only on these.
         self._turn_dispatched_bg: set[str] = set()

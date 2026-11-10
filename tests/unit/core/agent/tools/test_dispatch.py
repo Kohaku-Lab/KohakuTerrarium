@@ -33,6 +33,10 @@ class _Controller:
     def __init__(self):
         self.conversation = Conversation()
         self.conversation.append("system", "sys")
+        self.deferred = []
+
+    def push_event_sync(self, event):
+        self.deferred.append(event)
 
 
 class _SubAgentJob:
@@ -68,6 +72,8 @@ class _FakeAgent(AgentToolsMixin, AgentEventLoopMixin):
         self._direct_job_meta = {}
         self._active_handles = {}
         self._bg_controller_notify = {}
+        self._turn_cancelled_jobs = set()
+        self._deferred_job_results = []
         self._termination_checker = None
         self._running = True
 
@@ -317,42 +323,198 @@ class TestEmitDirectCompletion:
         assert meta["model"] == "gpt-worker"
 
 
-# ── _emit_interrupted_activity ───────────────────────────────────
+# ── cancellation handoff ────────────────────────────────────────
 
 
-class TestEmitInterruptedActivity:
-    def test_tool_interrupt(self, agent):
-        agent._register_direct_job("bash_x", kind="tool", name="bash")
-        result = JobResult(job_id="bash_x", error="User manually interrupted this job.")
-        agent._emit_interrupted_activity("bash_x", result)
-        kinds = [c[0] for c in agent.output_router.activity_calls]
-        assert "tool_error" in kinds
-        meta = next(
-            c[2] for c in agent.output_router.activity_calls if c[0] == "tool_error"
+class TestCancellationHandoff:
+    @pytest.mark.parametrize(
+        "notify,stopping", [(True, False), (False, False), (True, True)]
+    )
+    @pytest.mark.parametrize("native", [False, True])
+    @pytest.mark.parametrize("outcome", ["success", "cancel", "error"])
+    async def test_pending_then_late_result_preserves_new_round(
+        self, agent, native, outcome, notify, stopping, monkeypatch
+    ):
+        metrics_seen = []
+        monkeypatch.setattr(
+            "kohakuterrarium.core.agent.tools.dispatch._emit_completion_metrics",
+            lambda *args: metrics_seen.append(args),
         )
-        assert meta["interrupted"] is True
+        conversation = agent.controller.conversation
+        call = {
+            "id": "same",
+            "type": "function",
+            "function": {"name": "bash", "arguments": "{}"},
+        }
+        conversation.append("assistant", "", tool_calls=[call] if native else None)
+        release = asyncio.Event()
+        entered = asyncio.Event()
 
-    def test_subagent_interrupt(self, agent):
-        agent._register_direct_job("agent_x", kind="subagent", name="explore")
-        result = MagicMock()
-        result.error = "interrupted"
-        result.output = ""
-        result.turns = 1
-        result.duration = 0.5
-        result.total_tokens = 0
-        result.prompt_tokens = 0
-        result.completion_tokens = 0
-        result.cached_tokens = 0
-        result.metadata = {}
-        agent._emit_interrupted_activity("agent_x", result)
-        kinds = [c[0] for c in agent.output_router.activity_calls]
-        assert "subagent_error" in kinds
+        async def slow():
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                if outcome == "cancel":
+                    raise
+                if outcome == "error":
+                    raise ValueError("cleanup failed")
+                return JobResult(job_id="old", output="actual late success")
+
+        task = asyncio.create_task(slow())
+        await entered.wait()
+        agent._register_direct_job(
+            "old",
+            kind="tool",
+            name="bash",
+            tool_call_id="same" if native else None,
+            notify_controller_on_background_complete=notify,
+        )
+        handle = BackgroundifyHandle(task, "old", agent._on_backgroundify_complete)
+        agent._active_handles["old"] = handle
+        agent._interrupt_requested = True
+        assert agent._interrupt_direct_job("old")
+        results, promoted = await agent._wait_handles(
+            {"old": handle},
+            ["old"],
+            agent.controller,
+            {"old": "same"} if native else {},
+            native,
+        )
+        assert results == {} and promoted
+        snapshot = conversation.snapshot_messages()
+        tools = [m for m in snapshot if m["role"] == "tool"]
+        if native:
+            assert len(tools) == 1
+            assert tools[0]["metadata"]["tool_result_phase"] == "pending"
+            assert "outcome is not yet known" in tools[0]["content"]
+        else:
+            assert tools == []
+        conversation.append("user", "next")
+        conversation.append("assistant", "", tool_calls=[call] if native else None)
+        if native:
+            agent._add_native_results_to_conversation(
+                agent.controller,
+                ["new"],
+                {"new": JobResult(job_id="new", output="new result")},
+                {"new": "same"},
+            )
+        before = conversation.snapshot_messages()
+        agent._running = not stopping
+        release.set()
+        await wait_until(lambda: "old" not in agent._active_handles)
+        assert conversation.snapshot_messages() == before
+        assert len(metrics_seen) == 1
+        assert metrics_seen[0][:3] == (
+            False,
+            "bash",
+            (
+                "ok"
+                if outcome == "success"
+                else "interrupted" if outcome == "cancel" else "error"
+            ),
+        )
+        assert metrics_seen[0][3] >= 0
+        assert len(agent._deferred_job_results) == 1
+        event, _origin = agent._deferred_job_results[0]
+        assert event.job_id == "old"
+        assert not len(agent._event_inbox)
+        terminal = [
+            c
+            for c in agent.output_router.activity_calls
+            if c[0] in {"tool_done", "tool_error"}
+        ]
+        assert len(terminal) == 1
+        if outcome == "success":
+            assert terminal[0][0] == "tool_done"
+            assert event.content == "actual late success"
+        else:
+            assert terminal[0][0] == "tool_error"
+            assert event.context["error"]
+            assert bool(event.context.get("interrupted")) == (outcome == "cancel")
+
+    async def test_completed_before_interrupt_is_saved_without_waiter(self, agent):
+        task = asyncio.create_task(
+            asyncio.sleep(
+                0, result=JobResult(job_id="done", output="completed side effect")
+            )
+        )
+        await task
+        handle = BackgroundifyHandle(task, "done", agent._on_backgroundify_complete)
+        agent._register_direct_job(
+            "done", kind="tool", name="bash", tool_call_id="done_call"
+        )
+        agent._active_handles["done"] = handle
+        agent._interrupt_requested = True
+        assert agent._interrupt_direct_job("done")
+        assert "completed side effect" in str(
+            agent.controller.conversation.get_messages()
+        )
+        assert not agent._active_handles
+        results, _ = await agent._wait_handles(
+            {"done": handle}, ["done"], agent.controller, {"done": "done_call"}, True
+        )
+        assert results == {}
+        assert (
+            len([e for e in agent.output_router.activity_calls if e[0] == "tool_done"])
+            == 1
+        )
+
+    async def test_fast_completion_keeps_handoff_owner_before_waiter_runs(self, agent):
+        task = asyncio.create_task(asyncio.Event().wait())
+        await asyncio.sleep(0)
+        handle = BackgroundifyHandle(task, "fast", agent._on_backgroundify_complete)
+        agent._register_direct_job("fast", kind="tool", name="bash")
+        agent._active_handles["fast"] = handle
+        agent._interrupt_requested = True
+        assert agent._interrupt_direct_job("fast")
+        await wait_until(lambda: "fast" not in agent._active_handles)
+        activities = len(agent.output_router.activity_calls)
+        results, promoted = await agent._wait_handles(
+            {"fast": handle}, ["fast"], agent.controller, {}, False
+        )
+        assert results == {} and promoted
+        assert len(agent.output_router.activity_calls) == activities
+        assert len(agent._deferred_job_results) == 1
 
 
 # ── _add_native_results_to_conversation ──────────────────────────
 
 
 class TestAddNativeResults:
+    def test_reused_provider_id_keeps_both_round_results(self, agent):
+        conversation = agent.controller.conversation
+        call = {
+            "id": "same",
+            "type": "function",
+            "function": {"name": "bash", "arguments": "{}"},
+        }
+        for job in ("bash_old", "bash_new"):
+            conversation.append("assistant", "", tool_calls=[call])
+            agent._add_native_results_to_conversation(
+                agent.controller,
+                [job],
+                {job: JobResult(job_id=job, output=job)},
+                {job: "same"},
+            )
+        messages = conversation.to_messages()
+        assert [m["content"] for m in messages if m["role"] == "tool"] == [
+            "bash_old",
+            "bash_new",
+        ]
+        assert (
+            len([m for m in conversation.snapshot_messages() if m["role"] == "tool"])
+            == 2
+        )
+        agent._add_native_results_to_conversation(
+            agent.controller,
+            ["bash_new"],
+            {"bash_new": JobResult(job_id="bash_new", output="duplicate")},
+            {"bash_new": "same"},
+        )
+        assert len([m for m in conversation.get_messages() if m.role == "tool"]) == 2
+
     def test_ok_result_appended(self, agent):
         result = JobResult(job_id="bash_x", output="hello", exit_code=0)
         agent._add_native_results_to_conversation(
@@ -633,155 +795,6 @@ class TestTurnResult:
         b = _TurnResult()
         a.text_output.append("x")
         assert b.text_output == []
-
-
-# ── _finalize_interrupted_direct_job ─────────────────────────────
-
-
-class TestFinalizeInterruptedDirectJob:
-    async def test_no_handle_returns(self, agent):
-        # Not registered → returns silently.
-        await agent._finalize_interrupted_direct_job("ghost")
-
-    async def test_tool_finalisation(self, agent):
-        agent._register_direct_job("bash_x", kind="tool", name="bash")
-
-        async def runner():
-            await asyncio.sleep(0.5)
-            return JobResult(job_id="bash_x", output="late")
-
-        task = asyncio.create_task(runner())
-        h = BackgroundifyHandle(job_id="bash_x", task=task)
-        agent._active_handles["bash_x"] = h
-        task.cancel()
-        try:
-            await asyncio.wait_for(task, timeout=0.2)
-        except (asyncio.CancelledError, Exception):
-            pass
-        await agent._finalize_interrupted_direct_job("bash_x")
-        # Activity emitted.
-        kinds = [c[0] for c in agent.output_router.activity_calls]
-        assert "tool_error" in kinds
-
-    async def test_subagent_finalisation_falls_back_to_manager_result(self, agent):
-        agent._register_direct_job("agent_x", kind="subagent", name="explore")
-        sa_result = MagicMock()
-        sa_result.output = ""
-        sa_result.error = "stopped"
-        sa_result.turns = 0
-        sa_result.duration = 0
-        sa_result.total_tokens = 0
-        sa_result.prompt_tokens = 0
-        sa_result.completion_tokens = 0
-        sa_result.cached_tokens = 0
-        sa_result.metadata = {}
-        agent.subagent_manager._results["agent_x"] = sa_result
-
-        async def runner():
-            raise asyncio.CancelledError()
-
-        task = asyncio.create_task(runner())
-        h = BackgroundifyHandle(job_id="agent_x", task=task)
-        agent._active_handles["agent_x"] = h
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-        await agent._finalize_interrupted_direct_job("agent_x")
-        kinds = [c[0] for c in agent.output_router.activity_calls]
-        assert "subagent_error" in kinds
-
-    async def test_appends_role_tool_message_so_llm_apis_dont_400(self, agent):
-        # Bug 2 regression: when ``agent.interrupt()`` cancels the
-        # controller task mid-tool, the controller loop dies BEFORE
-        # ``_add_native_results_to_conversation`` runs. Without a
-        # synthesised ``role=tool`` message paired to the assistant
-        # turn's ``tool_calls``, the next LLM request ships orphan
-        # tool_calls and most providers (OpenAI / Anthropic-compat)
-        # 400 the call. ``_finalize_interrupted_direct_job`` MUST
-        # therefore append the matching tool message itself.
-        agent.controller.conversation.append(
-            "assistant",
-            "",
-            tool_calls=[
-                {
-                    "id": "call_user_42",
-                    "type": "function",
-                    "function": {"name": "ask_user", "arguments": "{}"},
-                }
-            ],
-        )
-        agent._register_direct_job(
-            "ask_user_42", kind="tool", name="ask_user", tool_call_id="call_user_42"
-        )
-
-        async def runner():
-            raise asyncio.CancelledError()
-
-        task = asyncio.create_task(runner())
-        h = BackgroundifyHandle(job_id="ask_user_42", task=task)
-        agent._active_handles["ask_user_42"] = h
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-        await agent._finalize_interrupted_direct_job("ask_user_42")
-
-        msgs = agent.controller.conversation.get_messages()
-        tool_msg = next(
-            (m for m in msgs if getattr(m, "role", None) == "tool"),
-            None,
-        )
-        assert tool_msg is not None, "interrupt path must emit a paired tool message"
-        assert tool_msg.tool_call_id == "call_user_42"
-        # Content must mention the interruption so the LLM understands.
-        assert (
-            "Interrupted" in tool_msg.content or "interrupt" in tool_msg.content.lower()
-        )
-
-    async def test_synthetic_tool_message_is_idempotent(self, agent):
-        # Defensive: if the controller loop happened to append the
-        # tool message before the interrupt-finalize task ran, we
-        # must NOT append a duplicate (the next LLM call would have
-        # two tool messages for one tool_call id, which most providers
-        # also reject).
-        agent.controller.conversation.append(
-            "assistant",
-            "",
-            tool_calls=[
-                {
-                    "id": "call_double",
-                    "type": "function",
-                    "function": {"name": "bash", "arguments": "{}"},
-                }
-            ],
-        )
-        agent.controller.conversation.append(
-            "tool",
-            "already-here",
-            tool_call_id="call_double",
-            name="bash",
-        )
-        agent._register_direct_job(
-            "bash_double", kind="tool", name="bash", tool_call_id="call_double"
-        )
-
-        async def runner():
-            raise asyncio.CancelledError()
-
-        task = asyncio.create_task(runner())
-        h = BackgroundifyHandle(job_id="bash_double", task=task)
-        agent._active_handles["bash_double"] = h
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-        await agent._finalize_interrupted_direct_job("bash_double")
-
-        msgs = agent.controller.conversation.get_messages()
-        tool_msgs = [m for m in msgs if getattr(m, "role", None) == "tool"]
-        assert len(tool_msgs) == 1
-        assert tool_msgs[0].content == "already-here"
 
 
 # ── _on_backgroundify_complete subagent metadata ─────────────────

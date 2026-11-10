@@ -1169,6 +1169,12 @@ class TestCompletionQueuePolicy:
         assert result is not None
         if outcome.startswith("cancel"):
             assert ex.get_status(job).state == JobState.CANCELLED
+            assert result.metadata["cancelled"]
+            assert (
+                result.metadata["final_state"]
+                == seen[0].context["final_state"]
+                == "cancelled"
+            )
         elif outcome in ("failure", "exception"):
             assert result.error
         else:
