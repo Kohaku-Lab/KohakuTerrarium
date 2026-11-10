@@ -8,14 +8,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
-    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 use url::Url;
 
 use crate::backend::Backend;
 use crate::commands::{number_arg, string_arg, Args};
 use crate::navigation::is_internal;
+use crate::overlay_coordinates::{DesktopSpace, PointerCoordinates};
 use crate::smoke;
 
 pub const LABEL_PREFIX: &str = "overlay-";
@@ -35,7 +36,7 @@ pub struct HitRegions(Mutex<HashMap<String, Arc<Mutex<PointerState>>>>);
 struct Capture {
     id: String,
     cursor: (f64, f64),
-    origin: (i32, i32),
+    origin: (f64, f64),
     scale: (f64, f64),
 }
 
@@ -544,29 +545,35 @@ pub fn overlay_set_hit_regions(
             .and_then(Value::as_bool)
             .unwrap_or(false)
     };
-    let scale = css_scale(&window, viewport);
     let capture = if flag("captured") {
         match (
             window.cursor_position(),
             window.outer_position(),
             window.inner_position(),
+            window.scale_factor(),
+            pointer_cursor_scale(&window),
         ) {
-            (Ok(c), Ok(o), Ok(inner)) => Some(Capture {
-                id: settings
-                    .and_then(|v| v.get("press"))
-                    .and_then(|v| v.get("id"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned(),
-                cursor: press_point(
-                    settings.and_then(|v| v.get("press")),
-                    (inner.x as f64, inner.y as f64),
+            (Ok(c), Ok(o), Ok(inner), Ok(window_scale), Some(cursor_scale)) => {
+                let coordinates =
+                    PointerCoordinates::new(DesktopSpace::CURRENT, cursor_scale, window_scale);
+                let scale = coordinates.css_scale(css_scale(&window, viewport));
+                Some(Capture {
+                    id: settings
+                        .and_then(|v| v.get("press"))
+                        .and_then(|v| v.get("id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    cursor: press_point(
+                        settings.and_then(|v| v.get("press")),
+                        coordinates.origin((inner.x as f64, inner.y as f64)),
+                        scale,
+                    )
+                    .unwrap_or(coordinates.cursor((c.x, c.y))),
+                    origin: coordinates.origin((o.x as f64, o.y as f64)),
                     scale,
-                )
-                .unwrap_or((c.x, c.y)),
-                origin: (o.x, o.y),
-                scale,
-            }),
+                })
+            }
             _ => None,
         }
     } else {
@@ -628,6 +635,17 @@ fn css_scale(window: &WebviewWindow, viewport: Option<(f64, f64)>) -> (f64, f64)
     (scale, scale)
 }
 
+fn pointer_cursor_scale(window: &WebviewWindow) -> Option<f64> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(window.primary_monitor().ok()??.scale_factor())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.scale_factor().ok()
+    }
+}
+
 fn reachable_position(position: (f64, f64), size: (f64, f64), area: Rect) -> (f64, f64) {
     (
         position
@@ -647,21 +665,27 @@ fn reconcile_position(window: &WebviewWindow) {
     ) else {
         return;
     };
-    let position = (origin.x as f64, origin.y as f64);
+    let space = DesktopSpace::CURRENT;
+    let divisor = space.divisor(window.scale_factor().unwrap_or(1.0));
+    let position = (origin.x as f64 / divisor, origin.y as f64 / divisor);
+    let size = (
+        f64::from(size.width) / divisor,
+        f64::from(size.height) / divisor,
+    );
     let mut nearest = None;
     let mut distance = f64::INFINITY;
     for monitor in monitors {
         let area = monitor.work_area();
-        let rect = Rect {
-            x: area.position.x as f64,
-            y: area.position.y as f64,
-            w: area.size.width as f64,
-            h: area.size.height as f64,
-        };
-        let fitted = (
-            f64::from(size.width).min(rect.w),
-            f64::from(size.height).min(rect.h),
+        let rect = space.rect(
+            Rect {
+                x: area.position.x as f64,
+                y: area.position.y as f64,
+                w: area.size.width as f64,
+                h: area.size.height as f64,
+            },
+            monitor.scale_factor(),
         );
+        let fitted = (size.0.min(rect.w), size.1.min(rect.h));
         let next = reachable_position(position, fitted, rect);
         let delta = (next.0 - position.0).hypot(next.1 - position.1);
         if delta < distance {
@@ -670,11 +694,11 @@ fn reconcile_position(window: &WebviewWindow) {
         }
     }
     if let Some((next, fitted)) = nearest {
-        if fitted != (f64::from(size.width), f64::from(size.height)) {
-            let _ = window.set_size(PhysicalSize::new(fitted.0 as u32, fitted.1 as u32));
+        if fitted != size {
+            let _ = window.set_size(space.size(fitted.0, fitted.1));
         }
         if next != position {
-            let _ = window.set_position(PhysicalPosition::new(next.0 as i32, next.1 as i32));
+            let _ = window.set_position(space.position(next.0, next.1));
         }
     }
 }
@@ -692,6 +716,8 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
     let mut previous = Value::Null;
     let mut sent = Instant::now();
     let mut geometry_checked = Instant::now() - Duration::from_secs(1);
+    let mut cursor_checked = geometry_checked;
+    let mut cursor_scale = None;
     loop {
         thread::sleep(HIT_POLL);
         let state = app.state::<HitRegions>();
@@ -715,6 +741,21 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
             }
             state.clone()
         };
+        if !visible {
+            if ignoring != Some(true) && window.set_ignore_cursor_events(true).is_ok() {
+                ignoring = Some(true);
+            }
+            if input.subscribed && previous != json!({"valid": false}) {
+                previous = json!({"valid": false});
+                dispatch(window, "kt:overlay-pointer", &previous);
+            }
+            thread::sleep(Duration::from_millis(220));
+            continue;
+        }
+        if cursor_checked.elapsed() >= Duration::from_secs(1) {
+            cursor_scale = pointer_cursor_scale(window);
+            cursor_checked = Instant::now();
+        }
         if visible
             && input.capture.is_none()
             && geometry_checked.elapsed() >= Duration::from_secs(1)
@@ -736,27 +777,35 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
             }
             geometry_checked = Instant::now();
         }
-        let sample = match (window.cursor_position(), window.inner_position()) {
-            (Ok(cursor), Ok(origin)) if visible => {
-                let scale = css_scale(window, input.viewport);
+        let sample = match (
+            window.cursor_position(),
+            window.inner_position(),
+            window.scale_factor(),
+            cursor_scale,
+        ) {
+            (Ok(cursor), Ok(origin), Ok(window_scale), Some(cursor_scale)) => {
+                let coordinates =
+                    PointerCoordinates::new(DesktopSpace::CURRENT, cursor_scale, window_scale);
+                let cursor = coordinates.cursor((cursor.x, cursor.y));
+                let scale = coordinates.css_scale(css_scale(window, input.viewport));
                 let (mut x, mut y) = local_point(
-                    (cursor.x, cursor.y),
-                    (origin.x as f64, origin.y as f64),
+                    cursor,
+                    coordinates.origin((origin.x as f64, origin.y as f64)),
                     scale,
                 );
                 let (mut dx, mut dy) = (0.0, 0.0);
                 if let Some(capture) = &input.capture {
-                    (dx, dy) = local_point((cursor.x, cursor.y), capture.cursor, capture.scale);
+                    (dx, dy) = local_point(cursor, capture.cursor, capture.scale);
                     if input.dragging {
-                        let _ = window.set_position(PhysicalPosition::new(
-                            capture.origin.0 + (cursor.x - capture.cursor.0).round() as i32,
-                            capture.origin.1 + (cursor.y - capture.cursor.1).round() as i32,
+                        let _ = window.set_position(coordinates.space.position(
+                            capture.origin.0 + cursor.0 - capture.cursor.0,
+                            capture.origin.1 + cursor.1 - capture.cursor.1,
                         ));
                         if let Ok(origin) = window.inner_position() {
                             (x, y) = local_point(
-                                (cursor.x, cursor.y),
-                                (origin.x as f64, origin.y as f64),
-                                css_scale(window, input.viewport),
+                                cursor,
+                                coordinates.origin((origin.x as f64, origin.y as f64)),
+                                coordinates.css_scale(css_scale(window, input.viewport)),
                             );
                         }
                     }
@@ -770,8 +819,9 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
             _ => {
                 input.capture = None;
                 input.dragging = false;
-                let _ = window.set_ignore_cursor_events(true);
-                ignoring = Some(true);
+                if ignoring != Some(true) && window.set_ignore_cursor_events(true).is_ok() {
+                    ignoring = Some(true);
+                }
                 json!({"valid": false})
             }
         };

@@ -46,7 +46,7 @@ fn capture_releases_and_represses_do_not_share_an_origin() {
     let press = |id: &str, x| Capture {
         id: id.into(),
         cursor: (x, 0.0),
-        origin: (0, 0),
+        origin: (0.0, 0.0),
         scale: (1.0, 1.0),
     };
     assert_eq!(
