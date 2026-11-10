@@ -124,6 +124,68 @@ async def test_interrupt_survives_failed_buffered_display(tmp_path, tool_format)
         await agent.stop()
 
 
+@pytest.mark.parametrize(
+    "tool_format,block", [("bracket", "[/owned][owned/]"), ("xml", "<owned></owned>")]
+)
+@pytest.mark.parametrize("phase", ["stream", "settlement"])
+async def test_completed_feedback_follows_interrupted_stream(
+    tmp_path, monkeypatch, tool_format, block, phase
+):
+    release = asyncio.Event()
+    release.set()
+    tool = _OwnedTool(release)
+    llm = (
+        PausedResponseLLM(block + " partial tail")
+        if phase == "stream"
+        else _FailingLLM(
+            [block + " partial tail", "continued"],
+            ResponseStreamError(),
+            entered=tool.entered,
+        )
+    )
+    agent, trace = await _build(tmp_path, llm, tool_format, [tool])
+    settling = asyncio.Event()
+    original_wait = agent._wait_handles
+
+    async def pause_first_wait(*args, **kwargs):
+        if not settling.is_set():
+            settling.set()
+            await asyncio.Event().wait()
+        return await original_wait(*args, **kwargs)
+
+    if phase == "settlement":
+        monkeypatch.setattr(agent, "_wait_handles", pause_first_wait)
+    task = asyncio.create_task(agent.run("first", raise_on_error=False))
+    try:
+        await asyncio.wait_for(
+            (llm.waiting if phase == "stream" else settling).wait(), 5
+        )
+        await asyncio.wait_for(next(iter(agent._active_handles.values())).task, 5)
+        await agent.interrupt_and_wait()
+        assert (await task).status == "interrupted"
+        snapshot = agent.controller.conversation.snapshot_messages()
+        call_index = next(
+            i
+            for i, m in enumerate(snapshot)
+            if m["role"] == "assistant" and block in str(m["content"])
+        )
+        feedback_index = next(
+            i for i, m in enumerate(snapshot) if "owned result" in str(m["content"])
+        )
+        assert call_index < feedback_index
+        assert sum("owned result" in str(m["content"]) for m in snapshot) == 1
+        assert not agent._active_handles
+        assert len([e for e in trace.events if e.type == "tool_done"]) == 1
+        await agent.run("continue")
+        assert block in str(llm.last_messages)
+        assert "owned result" in str(llm.last_messages)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await agent.stop()
+
+
 class _OwnedTool(BaseTool):
     def __init__(self, release, background=False, name="owned"):
         super().__init__()
@@ -216,6 +278,46 @@ async def _build(tmp_path, llm, tool_format="bracket", tools=()):
     return agent, trace
 
 
+@pytest.mark.parametrize("action", ["edit", "regenerate", "input"])
+@pytest.mark.parametrize("batch_stackable", [False, True])
+async def test_deferred_feedback_is_context_not_a_separate_turn(
+    tmp_path, action, batch_stackable
+):
+    llm = ScriptedLLM(["first answer", "second answer", "rerun answer", "next answer"])
+    agent, _ = await _build(tmp_path, llm)
+    agent.controller.config.batch_stackable_events = batch_stackable
+    try:
+        await agent.run("first")
+        await agent.run("original second")
+        agent._deferred_job_results = [
+            (
+                create_tool_complete_event(
+                    job_id="old_job", content="late ancestor output"
+                ),
+                {1: 1},
+            )
+        ]
+        if action == "edit":
+            assert await agent.edit_and_rerun(0, "edited second", turn_index=2)
+            expected = "edited second"
+        elif action == "regenerate":
+            await agent.regenerate_last_response()
+            expected = "original second"
+        else:
+            await agent.run("fresh input")
+            expected = "fresh input"
+        assert llm.call_count == 3
+        assert expected in str(llm.last_messages)
+        assert "late ancestor output" in str(llm.last_messages)
+        assert not agent.controller.has_pending_events()
+        await agent.run("next input")
+        assert llm.call_count == 4
+        assert "next input" in str(llm.last_messages[-1])
+        assert not agent.controller.has_pending_events()
+    finally:
+        await agent.stop()
+
+
 @pytest.mark.parametrize("matches", [False, True])
 async def test_deferred_job_feedback_only_enters_matching_branch(tmp_path, matches):
     llm = ScriptedLLM(["answer"])
@@ -231,7 +333,11 @@ async def test_deferred_job_feedback_only_enters_matching_branch(tmp_path, match
         agent._prepare_processing_cycle(
             create_user_input_event("new"), agent.controller
         )
-        assert agent.controller.has_pending_events() == matches
+        assert not agent.controller.has_pending_events()
+        assert (
+            "old branch output"
+            in str(agent.controller.conversation.snapshot_messages())
+        ) == matches
         assert len(agent._deferred_job_results) == (0 if matches else 1)
         if matches:
             await agent.controller.push_event(create_user_input_event("new"))

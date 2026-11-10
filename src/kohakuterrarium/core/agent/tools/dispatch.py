@@ -212,23 +212,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         if not meta or not handle or handle.promoted:
             return False
         if handle.done:
-            if not getattr(self, "_interrupt_requested", False):
-                return False
-            try:
-                result = handle.task.result()
-            except (asyncio.CancelledError, Exception) as exc:
-                result = exc
-            self._emit_direct_completion_activity(job_id, result)
-            self._save_direct_results(
-                self.controller,
-                [job_id],
-                {job_id: result},
-                {job_id: meta["tool_call_id"]},
-                meta["native_mode"],
-            )
-            self._turn_cancelled_jobs.add(job_id)
-            self._clear_direct_job_tracking(job_id)
-            return True
+            return bool(getattr(self, "_interrupt_requested", False))
         if meta.get("kind") == "subagent":
             job = self.subagent_manager._jobs.get(job_id)
             if job and hasattr(job, "subagent"):

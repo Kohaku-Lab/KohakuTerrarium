@@ -2564,7 +2564,13 @@ class TestCoreIntegration:
                 0, "second edited", turn_index=2
             )
             assert edited
+            assert "second edited" in str(reused_llm.last_messages)
+            assert str(reused_llm.last_messages).count("first late result") == 1
+            assert not native_node.agent.controller.has_pending_events()
             assert native_node.agent._branch_id == 2
+            await native_node.run("after edit")
+            assert "after edit" in str(reused_llm.last_messages[-1])
+            assert not native_node.agent.controller.has_pending_events()
             selected_origin = branch_history.reload_conversation_under_branch_view(
                 native_node.agent, {1: 1, 2: 2}, apply=False
             )
@@ -2794,6 +2800,64 @@ class TestCoreIntegration:
             finally:
                 await resumed.stop()
                 failure_store.close()
+
+        for tool_format, block in (
+            ("bracket", "[/echo]ordered[echo/]"),
+            ("xml", "<echo>ordered</echo>"),
+        ):
+            echo = _EchoTool()
+            paused = PausedResponseLLM(block + " partial tail")
+            async with Terrarium(
+                session_dir=tmp_path / f"ordered-{tool_format}"
+            ) as engine:
+                node = await engine.add_creature(
+                    AgentConfig(
+                        name="ordered", system_prompt="plain", tool_format=tool_format
+                    ),
+                    llm=paused,
+                    tools=[echo],
+                    pwd=tmp_path,
+                    io="headless",
+                    start=True,
+                )
+                request = asyncio.create_task(node.run("first", raise_on_error=False))
+                await asyncio.wait_for(paused.waiting.wait(), 5)
+                await asyncio.wait_for(
+                    next(iter(node.agent._active_handles.values())).task, 5
+                )
+                await node.agent.interrupt_and_wait()
+                assert (await request).status == "interrupted"
+                path = node.agent.session_store.path
+                saved = node.agent.session_store.load_conversation("ordered")
+                call_index = next(
+                    i
+                    for i, m in enumerate(saved)
+                    if m["role"] == "assistant" and block in str(m["content"])
+                )
+                feedback_index = next(
+                    i
+                    for i, m in enumerate(saved)
+                    if "echoed:ordered" in str(m["content"])
+                )
+                assert call_index < feedback_index
+                assert sum("echoed:ordered" in str(m["content"]) for m in saved) == 1
+            continued = ScriptedLLM(["continued"])
+            resumed, store = resume_agent(path, io_mode="plain", llm=continued)
+            try:
+                await resumed.start()
+                await resumed.run("continue")
+                messages = continued.last_messages
+                assert next(
+                    i for i, m in enumerate(messages) if block in str(m["content"])
+                ) < next(
+                    i
+                    for i, m in enumerate(messages)
+                    if "echoed:ordered" in str(m["content"])
+                )
+                assert echo.calls == 1
+            finally:
+                await resumed.stop()
+                store.close()
 
         for interrupted_format in ("bracket", "xml", "native"):
             interrupted_llm = PausedResponseLLM("buffered interrupted text")

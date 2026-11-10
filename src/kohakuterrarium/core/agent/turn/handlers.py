@@ -19,6 +19,10 @@ from kohakuterrarium.core.agent.tools.dispatch import (
 from kohakuterrarium.core.tools.dispatch import tool_background_handle
 from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle, backgroundify
 from kohakuterrarium.core.budget import BudgetExhausted
+from kohakuterrarium.core.controller.context import (
+    format_events_for_context,
+    tool_feedback_metadata,
+)
 from kohakuterrarium.core.controller.controller import Controller
 from kohakuterrarium.core.event_inbox import EventEnvelope
 from kohakuterrarium.core.events import (
@@ -26,6 +30,7 @@ from kohakuterrarium.core.events import (
     TriggerEvent,
     create_tool_complete_event,
 )
+from kohakuterrarium.core.conversation.settled_identity import delivered_jobs
 from kohakuterrarium.core.conversation.continuation import live_branch_path
 from kohakuterrarium.core.pending_input import stamp_pending_id
 from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS
@@ -209,11 +214,24 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         self._turn_cancelled_jobs.clear()
         path = live_branch_path(self)
         retained = []
+        feedback = []
+        delivered = delivered_jobs(controller.conversation.snapshot_messages())
         for result_event, origin in self._deferred_job_results:
             if all(path.get(turn) == branch for turn, branch in origin.items()):
-                controller.push_event_sync(result_event)
+                if result_event.job_id not in delivered:
+                    feedback.append(result_event)
+                    delivered.add(result_event.job_id)
             else:
                 retained.append((result_event, origin))
+        if feedback:
+            controller.conversation.append(
+                "user",
+                format_events_for_context(feedback),
+                metadata={
+                    **tool_feedback_metadata(feedback),
+                    **self._message_origin(feedback),
+                },
+            )
         self._deferred_job_results = retained
         self._last_turn_text = []
         controller._interrupted = False
@@ -296,16 +314,26 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             for jid, handle in round_result.handles.items()
             if jid in self._direct_job_meta
         }
+        handles.update(
+            (jid, handle)
+            for jid, handle in self._active_handles.items()
+            if handle.done and not handle.promoted and jid in self._direct_job_meta
+        )
         if not handles:
             return
+        order = list(dict.fromkeys([*round_result.handle_order, *handles]))
+        tool_call_ids = {
+            jid: self._direct_job_meta[jid]["tool_call_id"] for jid in handles
+        }
+        native_mode = getattr(controller.config, "tool_format", None) == "native"
         if cancelled:
             self._cancel_handles(handles)
         results, promoted = await self._wait_handles(
             handles,
-            round_result.handle_order,
+            order,
             controller,
-            round_result.native_tool_call_ids,
-            round_result.native_mode,
+            tool_call_ids,
+            native_mode,
         )
         if promoted:
             self._turn_dispatched_bg.update(
@@ -315,10 +343,10 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             )
         self._save_direct_results(
             controller,
-            round_result.handle_order,
+            order,
             results,
-            round_result.native_tool_call_ids,
-            round_result.native_mode,
+            tool_call_ids,
+            native_mode,
         )
 
     async def _run_single_turn(self, controller: Controller) -> "_TurnResult":

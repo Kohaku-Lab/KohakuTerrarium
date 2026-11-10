@@ -434,7 +434,7 @@ class TestCancellationHandoff:
             assert event.context["error"]
             assert bool(event.context.get("interrupted")) == (outcome == "cancel")
 
-    async def test_completed_before_interrupt_is_saved_without_waiter(self, agent):
+    async def test_completed_before_interrupt_keeps_waiter_owner(self, agent):
         task = asyncio.create_task(
             asyncio.sleep(
                 0, result=JobResult(job_id="done", output="completed side effect")
@@ -448,14 +448,16 @@ class TestCancellationHandoff:
         agent._active_handles["done"] = handle
         agent._interrupt_requested = True
         assert agent._interrupt_direct_job("done")
-        assert "completed side effect" in str(
+        assert "done" in agent._active_handles
+        assert "completed side effect" not in str(
             agent.controller.conversation.get_messages()
         )
-        assert not agent._active_handles
+        assert not agent.output_router.activity_calls
         results, _ = await agent._wait_handles(
             {"done": handle}, ["done"], agent.controller, {"done": "done_call"}, True
         )
-        assert results == {}
+        assert results["done"].output == "completed side effect"
+        assert not agent._active_handles
         assert (
             len([e for e in agent.output_router.activity_calls if e[0] == "tool_done"])
             == 1
