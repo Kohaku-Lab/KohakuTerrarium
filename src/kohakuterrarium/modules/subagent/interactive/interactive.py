@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
 
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
@@ -31,6 +32,8 @@ class InteractiveOutput:
     text: str
     is_complete: bool = False
     context: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    response_outcome: dict[str, str] | None = None
 
 
 class InteractiveSubAgent(SubAgent):
@@ -146,8 +149,6 @@ class InteractiveSubAgent(SubAgent):
             except asyncio.CancelledError:
                 pass
 
-        self._output_buffer.clear()
-
         self._current_context = update.context.copy()
         self._current_task = asyncio.create_task(
             self._generate_response(update.context)
@@ -169,15 +170,6 @@ class InteractiveSubAgent(SubAgent):
             agent_name=self.config.name,
             context_keys=list(update.context.keys()),
         )
-
-        if self._output_buffer:
-            output = InteractiveOutput(
-                text="".join(self._output_buffer),
-                is_complete=True,
-                context=self._current_context.copy(),
-            )
-            self._emit_output(output)
-            self._output_buffer.clear()
 
         self._current_context = update.context.copy()
         await self._context_queue.put(update)
@@ -211,16 +203,19 @@ class InteractiveSubAgent(SubAgent):
             self._turns = 0
             self._start_time = datetime.now()
             output_parts: list[str] = []
+            assistant_recorded = False
+            assistant_content = ""
 
             try:
                 user_message = self._format_context_as_message(context)
                 self.conversation.append("user", user_message)
 
-                while self._turns < self.config.max_turns:
+                while not self.config.max_turns or self._turns < self.config.max_turns:
                     self._turns += 1
 
                     messages = self.conversation.to_messages()
                     assistant_content = ""
+                    assistant_recorded = False
                     self._parser = StreamParser(self._parser_config)
 
                     tool_calls: list[ToolCallEvent] = []
@@ -251,8 +246,12 @@ class InteractiveSubAgent(SubAgent):
                         elif isinstance(event, TextEvent):
                             output_parts.append(event.text)
                             self._output_buffer.append(event.text)
+                            self._emit_output(
+                                InteractiveOutput(text=event.text, context=context)
+                            )
 
                     self.conversation.append("assistant", assistant_content)
+                    assistant_recorded = True
 
                     if not tool_calls:
                         break
@@ -276,7 +275,64 @@ class InteractiveSubAgent(SubAgent):
                     duration=self._calculate_duration(),
                 )
 
+            except ResponseStreamError as exc:
+                for event in self._parser.flush():
+                    if isinstance(event, TextEvent):
+                        output_parts.append(event.text)
+                        self._output_buffer.append(event.text)
+                        self._emit_output(
+                            InteractiveOutput(text=event.text, context=context)
+                        )
+                warning = (
+                    f"[Response incomplete: {exc.code}; retry may duplicate work] {exc}"
+                )
+                self._output_buffer.append(f"\n{warning}\n")
+                if assistant_content and not assistant_recorded:
+                    self.conversation.append(
+                        "assistant",
+                        assistant_content,
+                        metadata={
+                            "incomplete": True,
+                            "response_outcome": exc.response_outcome,
+                        },
+                    )
+                self.conversation.append("user", warning)
+                self._emit_output(
+                    InteractiveOutput(
+                        text="",
+                        is_complete=True,
+                        context=context,
+                        error=str(exc),
+                        response_outcome=exc.response_outcome,
+                    )
+                )
+                return SubAgentResult(
+                    output="".join(output_parts),
+                    success=False,
+                    error=str(exc),
+                    metadata={"response_outcome": exc.response_outcome},
+                    turns=self._turns,
+                    duration=self._calculate_duration(),
+                )
             except asyncio.CancelledError:
+                for event in self._parser.flush():
+                    if isinstance(event, TextEvent):
+                        output_parts.append(event.text)
+                        self._output_buffer.append(event.text)
+                        self._emit_output(
+                            InteractiveOutput(text=event.text, context=context)
+                        )
+                if output_parts:
+                    self._output_buffer.append("\n[Response interrupted]\n")
+                if assistant_content and not assistant_recorded:
+                    self.conversation.append(
+                        "assistant", assistant_content, metadata={"incomplete": True}
+                    )
+                if assistant_content:
+                    self.conversation.append(
+                        "user",
+                        "[Response interrupted before completion; tool execution may have occurred]",
+                    )
                 logger.debug(
                     "Generation cancelled",
                     agent_name=self.config.name,

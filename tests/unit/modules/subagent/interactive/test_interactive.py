@@ -7,7 +7,9 @@ callback, buffers output for return_as_context, and stops cleanly.
 
 import asyncio
 
+import pytest
 
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
@@ -45,7 +47,145 @@ async def _collect_output(agent, expected_complete=1, timeout=2.0):
     return chunks
 
 
+@pytest.mark.parametrize("mode", list(ContextUpdateMode))
+async def test_unconfirmed_response_is_reported_and_next_update_runs(mode):
+    class FailOnceLLM(ScriptedLLM):
+        async def chat(self, messages, **kwargs):
+            async for chunk in super().chat(messages, **kwargs):
+                yield chunk
+            if self.call_count == 1:
+                raise ResponseStreamError()
+
+    llm = FailOnceLLM(["partial answer", "recovered"])
+    agent = InteractiveSubAgent(_config(mode), Registry(), llm)
+    outputs = []
+    terminal = asyncio.Queue()
+
+    def on_output(output):
+        outputs.append(output)
+        if output.is_complete:
+            terminal.put_nowait(output)
+
+    agent.on_output = on_output
+    await agent.start()
+    try:
+        await agent.push_context({"message": "first"})
+        first = await asyncio.wait_for(terminal.get(), 2)
+        assert first.error
+        assert first.response_outcome["code"] == "response_unconfirmed"
+        assert "partial answer" in "".join(item.text for item in outputs)
+        assert llm.call_count == 1
+        assert "partial answer" in agent.get_buffered_output()
+        assert "response stream" in first.error.lower()
+        assert agent.is_active
+        await agent.push_context({"message": "second"})
+        second = await asyncio.wait_for(terminal.get(), 2)
+        assert second.error is None
+        assert "recovered" in agent.get_buffered_output()
+        assert llm.call_count == 2
+    finally:
+        await agent.stop()
+    assert not agent.is_active
+
+
+@pytest.mark.parametrize("mode", list(ContextUpdateMode))
+async def test_failure_remains_visible_without_callback_and_is_not_recompleted(mode):
+    class FailOnceLLM(ScriptedLLM):
+        async def chat(self, messages, **kwargs):
+            async for chunk in super().chat(messages, **kwargs):
+                yield chunk
+            if self.call_count == 1:
+                raise ResponseStreamError()
+
+    llm = FailOnceLLM(["partial", "second"])
+    agent = InteractiveSubAgent(_config(mode), Registry(), llm)
+    await agent.start()
+    try:
+        await agent.push_context({"message": "first"})
+        for _ in range(100):
+            if llm.call_count == 1 and agent._current_task.done():
+                break
+            if "response_unconfirmed" in "".join(agent._output_buffer):
+                break
+            await asyncio.sleep(0.01)
+        output = agent.get_buffered_output()
+        assert "response_unconfirmed" in output
+    finally:
+        await agent.stop()
+
+
+async def test_flush_replace_does_not_reemit_failed_partial_as_success():
+    class FailOnceLLM(ScriptedLLM):
+        async def chat(self, messages, **kwargs):
+            async for chunk in super().chat(messages, **kwargs):
+                yield chunk
+            if self.call_count == 1:
+                raise ResponseStreamError()
+
+    agent = InteractiveSubAgent(
+        _config(ContextUpdateMode.FLUSH_REPLACE),
+        Registry(),
+        FailOnceLLM(["partial", "next"]),
+    )
+    terminals = asyncio.Queue()
+    agent.on_output = lambda out: terminals.put_nowait(out) if out.is_complete else None
+    await agent.start()
+    try:
+        await agent.push_context({"message": "one"})
+        failed = await asyncio.wait_for(terminals.get(), 2)
+        assert failed.response_outcome["code"] == "response_unconfirmed"
+        await agent.push_context({"message": "two"})
+        second = await asyncio.wait_for(terminals.get(), 2)
+        assert second.context == {"message": "two"}
+        assert second.error is None
+        assert terminals.empty()
+        assert "response_unconfirmed" in agent.get_buffered_output()
+    finally:
+        await agent.stop()
+
+
+async def test_cancellation_during_tool_does_not_duplicate_assistant():
+    llm = ScriptedLLM(["[/echo]x[echo/]"])
+    registry = Registry()
+    registry.register_tool(_EchoTool())
+    config = _config(ContextUpdateMode.QUEUE_APPEND, max_turns=2)
+    config.tools = ["echo"]
+    agent = InteractiveSubAgent(config, registry, llm, tool_format="bracket")
+    entered = asyncio.Event()
+
+    async def wait_tool(calls):
+        entered.set()
+        await asyncio.Event().wait()
+
+    agent._execute_tools = wait_tool
+    await agent.start()
+    try:
+        await agent.push_context({"message": "first"})
+        await asyncio.wait_for(entered.wait(), 2)
+        await agent.stop()
+        messages = agent.conversation.get_messages()
+        assert len([m for m in messages if m.role == "assistant"]) == 1
+        assert any(
+            "tool execution may have occurred" in m.get_text_content() for m in messages
+        )
+    finally:
+        await agent.stop()
+
+
 class TestLifecycle:
+    @pytest.mark.parametrize("mode", list(ContextUpdateMode))
+    async def test_default_turn_limit_runs_model(self, mode):
+        llm = ScriptedLLM(["hello"])
+        agent = InteractiveSubAgent(_config(mode, max_turns=0), Registry(), llm)
+        await agent.start()
+        try:
+            await agent.push_context({"message": "go"})
+            await _collect_output(agent)
+            assert llm.call_count == 1
+            assert "hello" in agent.get_buffered_output()
+        finally:
+            await agent.stop()
+
     async def test_start_activates_then_stop_deactivates(self):
         agent = InteractiveSubAgent(_config(), Registry(), ScriptedLLM(["hi"]))
         assert agent.is_active is False

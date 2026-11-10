@@ -1470,15 +1470,14 @@ class TestModulesIntegration:
             # Push two context updates — it stays alive across both and
             # fires the on_output callback once per processed update.
             await agent.subagent_manager.push_context("watcher", {"event": "first"})
-            await _settle(agent, until=lambda: len(outputs) >= 1)
+            await _settle(agent, until=lambda: sum(o.is_complete for o in outputs) >= 1)
             assert sub.is_active is True
             await agent.subagent_manager.push_context("watcher", {"event": "second"})
-            await _settle(agent, until=lambda: len(outputs) >= 2)
+            await _settle(agent, until=lambda: sum(o.is_complete for o in outputs) >= 2)
 
             # Both context updates were processed by the SAME live
             # instance — proof it stayed alive between updates.
-            assert len(outputs) == 2
-            assert all(o.is_complete for o in outputs)
+            assert sum(o.is_complete for o in outputs) == 2
             assert agent.subagent_manager.get_interactive("watcher") is sub
             assert sub.is_active is True
 
@@ -1496,9 +1495,10 @@ class TestModulesIntegration:
             await agent.subagent_manager.push_context_all({"event": "broadcast"})
             await _settle(
                 agent,
-                until=lambda: len(outputs) >= 3 and len(queue_outputs) >= 1,
+                until=lambda: sum(o.is_complete for o in outputs) >= 3
+                and any(o.is_complete for o in queue_outputs),
             )
-            assert len(outputs) == 3  # watcher saw the broadcast too
+            assert sum(o.is_complete for o in outputs) == 3
             assert len(queue_outputs) >= 1
             # The QUEUE_APPEND instance processed its update and emitted a
             # completion signal — proof it stayed alive in its own mode.
