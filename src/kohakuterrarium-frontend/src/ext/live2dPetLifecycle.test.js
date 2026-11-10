@@ -150,60 +150,82 @@ it("keeps a ready desktop renderer connected while the in-app renderer retires",
   }
 })
 
-it.each(["fatal", "timeout"])("revokes readiness on renderer %s and allows retry", async (kind) => {
-  vi.useFakeTimers()
-  const host = createMockHost({
-    package: `health-${kind}`,
-    routes: { "GET /models": { dragon: { version: "d".repeat(32) } } },
-  })
-  await register(host.kt)
-  const bridge = bridgeFor(host.kt)
-  const wrapper = mount(PetFrame, { props: { mini: true }, attachTo: document.body })
-  try {
-    await flushPromises()
-    const frame = wrapper.find("iframe").element
-    const url = new URL(frame.src),
-      channel = url.searchParams.get("channel")
-    const send = (data) =>
-      window.dispatchEvent(
-        new MessageEvent("message", {
-          source: frame.contentWindow,
-          origin: url.origin,
-          data: { channel, ...data },
-        }),
+it.each(["fatal", "timeout", "startup"])(
+  "revokes readiness on renderer %s and allows retry",
+  async (kind) => {
+    vi.useFakeTimers()
+    const host = createMockHost({
+      package: `health-${kind}`,
+      routes: { "GET /models": { dragon: { version: "d".repeat(32) } } },
+    })
+    await register(host.kt)
+    const bridge = bridgeFor(host.kt)
+    const wrapper = mount(PetFrame, { props: { mini: true }, attachTo: document.body })
+    try {
+      await flushPromises()
+      const frame = wrapper.find("iframe").element
+      const url = new URL(frame.src),
+        channel = url.searchParams.get("channel")
+      const send = (data) =>
+        window.dispatchEvent(
+          new MessageEvent("message", {
+            source: frame.contentWindow,
+            origin: url.origin,
+            data: { channel, ...data },
+          }),
+        )
+      if (kind === "startup") {
+        await vi.advanceTimersByTimeAsync(15000)
+        expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+        await vi.advanceTimersByTimeAsync(50000)
+        expect(wrapper.find('[role="alert"]').text()).toContain("重试")
+        await wrapper.find('[role="alert"] button').trigger("click")
+        await flushPromises()
+        expect(new URL(wrapper.find("iframe").element.src).searchParams.get("channel")).not.toBe(
+          channel,
+        )
+        send({ type: "kt-live2d-ready" })
+        expect(bridge.rendering.value).toBe(false)
+        return
+      }
+      const posted = vi.spyOn(frame.contentWindow, "postMessage")
+      bridge.work.value = { sessionId: "same", baseline: "popout-generation" }
+      send({ type: "kt-live2d-ready" })
+      expect(
+        posted.mock.calls.find(([value]) => value.type === "kt-live2d-work")[0].work.baseline,
+      ).toBe("popout-generation")
+      send({
+        type: "kt-live2d-actions-ready",
+        catalogKey: JSON.stringify(settingsFor(host.kt).state.value.models.dragon.actionSet),
+        error: "",
+      })
+      expect(bridge.rendering.value).toBe(true)
+      frame.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 800 })
+      frame.closest = () => ({ getBoundingClientRect: () => ({ left: 0, top: 0 }) })
+      send({
+        type: "kt-live2d-crop",
+        sequence: 1,
+        regions: [{ x: 0.2, y: 0.25, width: 0.4, height: 0.2 }],
+      })
+      expect(wrapper.emitted("regions").at(-1)).toEqual([[[100, 200, 200, 160]]])
+      if (kind === "fatal") send({ type: "kt-live2d-health", error: "GPU lost" })
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(bridge.rendering.value).toBe(false)
+      expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+      expect(wrapper.emitted("regions").at(-1)).toEqual([null])
+      await wrapper.find('[role="alert"] button').trigger("click")
+      await flushPromises()
+      expect(new URL(wrapper.find("iframe").element.src).searchParams.get("channel")).not.toBe(
+        channel,
       )
-    send({ type: "kt-live2d-ready" })
-    send({
-      type: "kt-live2d-actions-ready",
-      catalogKey: JSON.stringify(settingsFor(host.kt).state.value.models.dragon.actionSet),
-      error: "",
-    })
-    expect(bridge.rendering.value).toBe(true)
-    frame.getBoundingClientRect = () => ({ left: 0, top: 0, width: 500, height: 800 })
-    frame.closest = () => ({ getBoundingClientRect: () => ({ left: 0, top: 0 }) })
-    send({
-      type: "kt-live2d-crop",
-      sequence: 1,
-      regions: [{ x: 0.2, y: 0.25, width: 0.4, height: 0.2 }],
-    })
-    expect(wrapper.emitted("regions").at(-1)).toEqual([[[100, 200, 200, 160]]])
-    if (kind === "fatal") send({ type: "kt-live2d-health", error: "GPU lost" })
-    await vi.advanceTimersByTimeAsync(30000)
-    expect(bridge.rendering.value).toBe(false)
-    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
-    expect(wrapper.emitted("regions").at(-1)).toEqual([null])
-    await wrapper.find('[role="alert"] button').trigger("click")
-    await flushPromises()
-    expect(new URL(wrapper.find("iframe").element.src).searchParams.get("channel")).not.toBe(
-      channel,
-    )
-    expect(bridge.rendering.value).toBe(false)
-    expect(wrapper.emitted("regions").at(-1)).toEqual([null])
-  } finally {
-    wrapper.unmount()
-    host.dispose()
-  }
-})
+      expect(bridge.rendering.value).toBe(false)
+      expect(wrapper.emitted("regions").at(-1)).toEqual([null])
+    } finally {
+      wrapper.unmount()
+      host.dispose()
+    }
+  },
+)
 
 it("sends terminal renderer failure once and never sends alive after disposal", async () => {
   vi.useFakeTimers()

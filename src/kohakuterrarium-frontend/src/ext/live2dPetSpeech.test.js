@@ -65,4 +65,11 @@ it("plays varied syllables with punctuation rests and drops backlogs, stops, sta
   work = { ...work, sessionId: "b" }
   mouth.observe(work)
   expect(mouth.sample()).toBeNull()
+  send("live output before source switch")
+  tick(80)
+  work = { ...work, baseline: "another-window", speech: { ...work.speech, sequence: 1 } }
+  mouth.observe(work)
+  expect(mouth.sample()).toBeNull()
+  mouth.observe({ ...work, speech: { ...work.speech, sequence: 2, text: "新文字", at: time } })
+  expect(Math.max(...tick(120))).toBeGreaterThan(0.2)
 })

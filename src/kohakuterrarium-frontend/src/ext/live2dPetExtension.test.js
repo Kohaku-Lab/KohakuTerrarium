@@ -350,7 +350,7 @@ it("clips only the companion iframe and rejects stale or malformed crop regions"
   }
 })
 
-it("navigates with renewed credentials, rejects foreign messages, and preserves the frame on failure", async () => {
+it("navigates with renewed credentials, rejects foreign messages, and releases failed frames before retry", async () => {
   const host = createMockHost({ package: "live2d-pet-demo", overlayId: "dragon" })
   let token = "OLD"
   host.kt.freshAssetUrl = vi.fn(async () => `/api/ext/live2d-pet-demo/ui/${token}/stage.html`)
@@ -358,7 +358,7 @@ it("navigates with renewed credentials, rejects foreign messages, and preserves 
   const preview = mount(host.registered.tab.get("preview").component, { attachTo: document.body })
   try {
     await flushPromises()
-    const frame = preview.find("iframe").element
+    let frame = preview.find("iframe").element
     const origin = new URL(frame.src).origin
     const send = (data, source = frame.contentWindow, from = origin) =>
       window.dispatchEvent(new MessageEvent("message", { source, origin: from, data }))
@@ -373,14 +373,14 @@ it("navigates with renewed credentials, rejects foreign messages, and preserves 
     await flushPromises()
     expect(frame.src).toContain("/RENEWED/")
     expect(new URL(frame.src).searchParams.get("quality")).toBe("standard")
-    const standard = frame.src
     host.kt.freshAssetUrl.mockRejectedValueOnce(new Error("offline"))
     send({ ...select, quality: "high" })
     await flushPromises()
-    expect(frame.src).toBe(standard)
+    expect(preview.find("iframe").exists()).toBe(false)
     expect(preview.find('[role="alert"]').text()).toContain("重试")
     await preview.find('[role="alert"] button').trigger("click")
     await flushPromises()
+    frame = preview.find("iframe").element
     expect(new URL(frame.src).searchParams.get("quality")).toBe("high")
     let finishOlder
     host.kt.freshAssetUrl.mockImplementationOnce(

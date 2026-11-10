@@ -46,6 +46,7 @@ export const PetFrame = defineComponent({
             ? {
                 hostId: current.hostId,
                 sessionId: current.sessionId,
+                baseline: current.baseline,
                 creatureId: current.creatureId,
                 creatureLabel: current.creatureLabel,
                 speech: current.speech ? { ...current.speech } : null,
@@ -118,13 +119,16 @@ export const PetFrame = defineComponent({
       { flush: "sync" },
     );
     let heartbeat,
-      lastAlive = 0;
+      lastAlive = 0,
+      loadingStarted = 0;
     function failRenderer(message) {
+      generation++;
       ready = false;
       emit("ready", false);
       actionReady = false;
       clearInterval(heartbeat);
       resourceAbort.abort();
+      resourceContext = null;
       error.value = message;
       src.value = "";
       emit("regions", null);
@@ -156,6 +160,16 @@ export const PetFrame = defineComponent({
       emit("regions", null);
       if (props.mini) bridge.renderer(false);
       const current = ++generation;
+      loadingStarted = lastAlive = Date.now();
+      heartbeat = setInterval(() => {
+        if (disposed || current !== generation) return;
+        const elapsed = Date.now() - lastAlive;
+        if (!ready && (elapsed >= 60000 || Date.now() - loadingStarted >= 180000))
+          failRenderer("模型加载超时，请检查连接后重试。");
+        else if (ready && elapsed > 10000)
+          failRenderer("渲染器连接已中断，请重试。");
+        else if (ready && props.mini) bridge.renderer(actionReady, actionError);
+      }, 4000);
       channel = `${instance}:${current}`;
       error.value = "";
       resourceAbort.abort();
@@ -216,7 +230,7 @@ export const PetFrame = defineComponent({
         src.value = url.href;
       } catch (failure) {
         if (!disposed && current === generation)
-          error.value = failure.message || "加载失败，请重试。";
+          failRenderer(failure.message || "加载失败，请重试。");
       }
     }
     function receive(event) {
@@ -282,7 +296,10 @@ export const PetFrame = defineComponent({
         return;
       }
       if (data?.type === "kt-live2d-resource") {
-        if (resourceContext) void serveResource(kt, event, resourceContext);
+        if (resourceContext && data.channel === channel) {
+          if (!ready) lastAlive = Date.now();
+          void serveResource(kt, event, resourceContext);
+        }
         return;
       }
       if (data?.type === "kt-live2d-close") {
@@ -334,12 +351,6 @@ export const PetFrame = defineComponent({
         lastAlive = Date.now();
         if (props.mini) {
           bridge.renderer(actionReady, actionError);
-          clearInterval(heartbeat);
-          heartbeat = setInterval(() => {
-            if (Date.now() - lastAlive > 10000)
-              failRenderer("渲染器连接已中断，请重试。");
-            else bridge.renderer(actionReady, actionError);
-          }, 4000);
         }
         sendSettings();
         sendWork();

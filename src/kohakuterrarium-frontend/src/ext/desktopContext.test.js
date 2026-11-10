@@ -1,5 +1,7 @@
 import axios from "axios"
-import { flushPromises } from "@vue/test-utils"
+import { flushPromises, mount } from "@vue/test-utils"
+import { defineComponent, shallowRef } from "vue"
+import { desktopCapabilities } from "@/utils/hostBridge"
 import { expect, it, vi } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 import { useAuthStore } from "@/stores/auth"
@@ -11,7 +13,80 @@ import {
   desktopContextConnected,
   desktopWork,
   startDesktopContext,
+  useDesktopPublisher,
 } from "@/ext/desktopContext"
+
+it("rejects delayed native focus claims after blur or eligibility changes", async () => {
+  vi.useFakeTimers()
+  setActivePinia(createPinia())
+  useHostsStore().setActive(null)
+  vi.spyOn(useAuthStore(), "fetch").mockResolvedValue()
+  vi.spyOn(useAuthStore(), "fetchMe").mockResolvedValue()
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true)
+  const net = network(),
+    pending = []
+  let eligible = true,
+    wrapper,
+    pop
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      constructor() {
+        return net.port()
+      }
+    },
+  )
+  window.__TAURI_INTERNALS__ = {
+    invoke: vi.fn((name) =>
+      name === "get_desktop_capabilities"
+        ? Promise.resolve({ surface: "desktop", protocol: 1, desktopContextFocus: true })
+        : new Promise((resolve) => pending.push(resolve)),
+    ),
+  }
+  try {
+    await desktopCapabilities()
+    await startDesktopContext("main")
+    wrapper = mount(
+      defineComponent({
+        setup() {
+          useDesktopPublisher(
+            () => shallowRef(work("main")),
+            () => eligible,
+          )
+          return () => null
+        },
+      }),
+    )
+    await flushPromises()
+    focused.mockReturnValue(false)
+    window.dispatchEvent(new Event("blur"))
+    pop = createContextRelay({
+      mode: "popout",
+      port: net.port(),
+      realm: contextRealm,
+      host: () => ({}),
+    })
+    pop.publish(work("popout"), true)
+    pending.splice(0).forEach((resolve) => resolve(true))
+    await flushPromises()
+    expect(desktopWork.value.sessionId).toBe("popout")
+    focused.mockReturnValue(true)
+    window.dispatchEvent(new Event("focus"))
+    await flushPromises()
+    eligible = false
+    pending.splice(0).forEach((resolve) => resolve(true))
+    await flushPromises()
+    expect(desktopWork.value.sessionId).toBe("popout")
+  } finally {
+    wrapper?.unmount()
+    pop?.close()
+    window.dispatchEvent(new Event("pagehide"))
+    delete window.__TAURI_INTERNALS__
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
+})
 
 it("does not borrow the same-origin user for an anonymous remote backend", () => {
   setActivePinia(createPinia())

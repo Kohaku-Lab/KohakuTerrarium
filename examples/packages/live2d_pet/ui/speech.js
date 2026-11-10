@@ -39,6 +39,7 @@ export class SpeechMouth {
           work.hostId,
           work.sessionId,
           work.creatureId,
+          work.baseline,
           speech?.stream,
         ])
       : null;

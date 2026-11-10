@@ -50,6 +50,13 @@ it("animates live work edges once and does not replay old results across reload,
   pet.setWork(snapshot("running", 10))
   pet.setWork(snapshot("ready", 1))
   expect(pet.reaction).toBeNull()
+  pet.setWork({ ...snapshot("ready", 10), baseline: "main" })
+  pet.setWork({ ...snapshot("ready", 12), baseline: "popout" })
+  expect(pet.reaction).toBeNull()
+  pet.setWork({ ...snapshot("running", 13), baseline: "popout" })
+  expect(pet.reaction.kind).toBe("start")
+  pet.setWork({ ...snapshot("ready", 13), baseline: "main-resumed" })
+  expect(pet.action().state).toBe("idle")
 })
 
 it("bounds temporary touch feedback, rate-limits repeated taps, and returns to the work pose", () => {

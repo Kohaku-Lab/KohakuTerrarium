@@ -53,6 +53,7 @@ export class PetBehavior {
       old &&
       work &&
       old.hostId === work.hostId &&
+      old.baseline === work.baseline &&
       old.sessionId === work.sessionId;
     const time = this.now();
     this.action(time);

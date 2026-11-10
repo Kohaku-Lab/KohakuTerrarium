@@ -291,8 +291,18 @@ export function useDesktopPublisher(getWork, canClaim = () => true) {
     const realm = contextRealm()
     const runtime = getRuntimeScope()
     if (!canClaim() || !(await desktopWindowFocused())) return
-    if (!disposed && mine === revision && realm === contextRealm() && runtime === getRuntimeScope())
+    if (
+      !disposed &&
+      mine === revision &&
+      canClaim() &&
+      document.hasFocus() &&
+      realm === contextRealm() &&
+      runtime === getRuntimeScope()
+    )
       connection?.publish(work.value, true)
+  }
+  const blur = () => {
+    revision++
   }
   const stop = watch(
     work,
@@ -310,6 +320,7 @@ export function useDesktopPublisher(getWork, canClaim = () => true) {
     if (document.hasFocus()) focus()
   }
   window.addEventListener("focus", focus)
+  window.addEventListener("blur", blur)
   window.addEventListener("kt:desktop-context-rebound", rebound)
   window.addEventListener("kt:desktop-context-probe", publish)
   if (document.hasFocus()) focus()
@@ -321,6 +332,7 @@ export function useDesktopPublisher(getWork, canClaim = () => true) {
     stop()
     clearInterval(heartbeat)
     window.removeEventListener("focus", focus)
+    window.removeEventListener("blur", blur)
     window.removeEventListener("kt:desktop-context-rebound", rebound)
     window.removeEventListener("kt:desktop-context-probe", publish)
   })
