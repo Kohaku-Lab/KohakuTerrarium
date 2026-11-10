@@ -171,8 +171,15 @@ it("provides production settings without a renderer, synchronizes live changes, 
       .trigger("click")
     await settings
       .findAll("button")
-      .find((button) => button.text() === "显示宠物")
+      .find((button) => button.text() === "选择与显示宠物")
       .trigger("click")
+    expect(host.openedTabs.at(-1)).toEqual({
+      kind: "settings",
+      id: "settings",
+      section: "overlays",
+    })
+    expect(companion.find("iframe").exists()).toBe(false)
+    host.kt.showOverlay("dragon")
     await flushPromises()
     const frame = companion.find("iframe").element
     const url = new URL(frame.src)

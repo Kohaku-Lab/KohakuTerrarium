@@ -1,5 +1,5 @@
 /** Native presentation and viewport fallback for registered overlays. */
-import { nextTick, reactive, shallowRef, watch } from "vue"
+import { nextTick, reactive, shallowRef, shallowReactive, watch } from "vue"
 
 import {
   completeNativeReset,
@@ -11,6 +11,7 @@ import {
   resetOverlay,
   windowPreference,
   reloadPlacements,
+  isPetOverlay,
 } from "@/ext/overlays"
 import { extState } from "@/ext/state"
 import {
@@ -28,7 +29,7 @@ export const WINDOW_LABEL_PREFIX = "overlay-"
 export const windowStates = reactive(new Map())
 const capabilities = shallowRef(null)
 const open = new Map()
-const closing = new Map()
+const closing = shallowReactive(new Map())
 let started = false
 let generation = 0
 
@@ -68,6 +69,7 @@ function desired(overlay) {
     ? windowPreference(overlay.key) !== false && desktopPetSupported()
     : overlay?.options.firstParty === true || isWindowAllowed(overlay.key)
   const supported =
+    (!overlay?.options.clickThrough || capabilities.value?.overlayPointer === true) &&
     (!overlay?.options.windowReady || capabilities.value?.overlayPresentation >= 1) &&
     (!overlay?.options.contentPlacement ||
       (capabilities.value?.overlayResize && capabilities.value?.overlayPlacementNative))
@@ -85,6 +87,8 @@ export function windowActive(key) {
 
 export function windowFailure(key) {
   const overlay = overlays.get(key)
+  if (isPetOverlay(overlay) && [...closing.values()].some((entry) => entry.pet && entry.failed))
+    return "The previous desktop pet could not close. Retry to finish switching pets."
   if (!requiresPresentation(overlay) || windowPreference(key) === false) return ""
   if (
     overlay?.options.desktopPet &&
@@ -110,15 +114,27 @@ function spec(overlay) {
 }
 
 function retire(label, entry) {
-  if (closing.has(label)) return closing.get(label)
-  const done = entry.promise
+  if (closing.has(label)) return closing.get(label).promise
+  const record = { ...entry, failed: false }
+  record.promise = entry.promise
     .then(() => closeOverlayWindow(label))
-    .finally(() => {
-      closing.delete(label)
+    .catch(() => false)
+    .then((closed) => {
+      if (closed) closing.delete(label)
+      else closing.set(label, { ...record, failed: true })
       syncOverlayWindows()
+      return closed
     })
-  closing.set(label, done)
-  return done
+  closing.set(label, record)
+  return record.promise
+}
+
+export function petPresentationBlocked(key) {
+  return (
+    isPetOverlay(overlays.get(key)) &&
+    ([...closing.values()].some((entry) => entry.pet && (entry.key !== key || entry.failed)) ||
+      [...open.values()].some((entry) => entry.pet && entry.key !== key))
+  )
 }
 
 function cancel(label, entry) {
@@ -184,6 +200,13 @@ export function resetNativeOverlay(key) {
 }
 
 export function retryOverlayWindow(key) {
+  if (isPetOverlay(overlays.get(key))) {
+    for (const [label, entry] of closing) {
+      if (!entry.pet || !entry.failed) continue
+      closing.delete(label)
+      void retire(label, entry)
+    }
+  }
   const label = windowLabel(key)
   const entry = open.get(label)
   if (entry) cancel(label, entry)
@@ -200,6 +223,16 @@ export function setOverlayContentReady(overlay, available) {
 
 /** Reconcile singleton native windows, preserving a viewport renderer until readiness. */
 export function syncOverlayWindows() {
+  for (const [label, entry] of open) {
+    const overlay = overlays.get(entry.key)
+    if (
+      !overlay ||
+      !desired(overlay) ||
+      !isOverlayVisible(entry.key) ||
+      label !== windowLabel(entry.key)
+    )
+      cancel(label, entry)
+  }
   const wanted = new Set()
   for (const overlay of overlays.values()) {
     if (!desired(overlay) || !isOverlayVisible(overlay.key)) continue
@@ -211,9 +244,15 @@ export function syncOverlayWindows() {
     )
       continue
     wanted.add(label)
-    if (open.has(label) || closing.has(label)) continue
+    if (open.has(label) || closing.has(label) || petPresentationBlocked(overlay.key)) continue
     const request = spec(overlay)
-    const entry = { key: overlay.key, generation: null, timer: null, promise: null }
+    const entry = {
+      key: overlay.key,
+      pet: isPetOverlay(overlay),
+      generation: null,
+      timer: null,
+      promise: null,
+    }
     if (requiresPresentation(overlay)) {
       entry.generation = `${Date.now()}-${++generation}`
       request.generation = entry.generation

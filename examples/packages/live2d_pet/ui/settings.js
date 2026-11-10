@@ -1,6 +1,6 @@
 import { modelAdapter } from "./models/index.js";
 import { defineComponent, h } from "vue";
-import { useExtension } from "@kohakuterrarium/ui-sdk";
+import { useExtension, openTab } from "@kohakuterrarium/ui-sdk";
 import { bridgeFor } from "./bridge.js";
 import { ModelResources } from "./model-resources.js";
 import { ActionSettings } from "./action-settings.js";
@@ -70,13 +70,8 @@ export const PetSettings = defineComponent({
           h("div", { class: "l2d-settings-actions" }, [
             h(
               "button",
-              { onClick: () => kt.showOverlay("dragon") },
-              "显示宠物",
-            ),
-            h(
-              "button",
-              { onClick: () => kt.hideOverlay("dragon") },
-              "收起宠物",
+              { onClick: () => openTab({ kind: "settings", id: "settings", section: "overlays" }) },
+              "选择与显示宠物",
             ),
           ]),
           group("角色与外观", [

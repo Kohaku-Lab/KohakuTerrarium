@@ -124,8 +124,74 @@ function placement(key) {
   return placements[key] || {}
 }
 
+export const petSelectionKey = (hostKey) => `kt.petSelection.${hostKey}`
+export const isPetOverlay = (overlay) => overlay?.options.startupGroup === "pet"
+
+/** One selected pet and a separate display intent, scoped to the current host/user. */
+export function petSelection() {
+  if (validPetSelection(placements.$pet)) return placements.$pet
+  const pets = [...overlays.values()]
+    .filter(isPetOverlay)
+    .sort((a, b) => a.key.localeCompare(b.key))
+  const explicit = pets.find((o) => placement(o.key).visible === true)
+  const hidden = pets.find((o) => placement(o.key).visible === false)
+  const preferred =
+    explicit ||
+    hidden ||
+    pets.find((o) => o.options.defaultVisible !== false) ||
+    pets.find((o) => o.options.startupFallback) ||
+    pets[0]
+  return {
+    selected: preferred?.key || null,
+    visible: Boolean(
+      explicit ||
+      (!hidden &&
+        preferred &&
+        (preferred.options.defaultVisible !== false || preferred.options.startupFallback)),
+    ),
+  }
+}
+
+function validPetSelection(value) {
+  return (
+    value &&
+    typeof value.visible === "boolean" &&
+    (value.selected === null ||
+      (typeof value.selected === "string" && value.selected.startsWith("ext:")))
+  )
+}
+
+export function restorePetSelection(value = petSelection()) {
+  if (!validPetSelection(placements.$pet) && validPetSelection(value)) {
+    placements.$pet = { selected: value.selected, visible: value.visible }
+    writeStorage()
+  }
+}
+
+function savePetSelection(value) {
+  placements.$pet = value
+  writeStorage()
+  if (_storageKey) {
+    try {
+      setHybridPref(petSelectionKey(_storageKey.slice(STORAGE_PREFIX.length)), value, {
+        json: true,
+      })
+    } catch {
+      /* Selection still works in memory when storage is blocked. */
+    }
+  }
+}
+
+export function selectPet(key) {
+  if (isPetOverlay(overlays.get(key))) savePetSelection({ ...petSelection(), selected: key })
+}
+
 /** Whether the overlay is shown: the user's choice, else its ``defaultVisible``. */
 export function isOverlayVisible(key) {
+  if (isPetOverlay(overlays.get(key))) {
+    const choice = petSelection()
+    return choice.visible && choice.selected === key
+  }
   const saved = placement(key).visible
   if (typeof saved === "boolean") return saved
   return overlays.get(key)?.options.defaultVisible !== false
@@ -162,15 +228,19 @@ export function restoreVisibility(key, visible) {
 }
 
 export function showOverlay(key) {
+  if (isPetOverlay(overlays.get(key))) savePetSelection({ selected: key, visible: true })
   patch(key, { visible: true })
 }
 
 export function hideOverlay(key) {
+  if (isPetOverlay(overlays.get(key)) && petSelection().selected === key)
+    savePetSelection({ selected: key, visible: false })
   patch(key, { visible: false })
 }
 
 export function toggleOverlay(key) {
-  patch(key, { visible: !isOverlayVisible(key) })
+  if (isOverlayVisible(key)) hideOverlay(key)
+  else showOverlay(key)
 }
 
 /** Keep a box inside the viewport. */

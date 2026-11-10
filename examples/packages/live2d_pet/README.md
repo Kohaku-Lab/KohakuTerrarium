@@ -6,8 +6,9 @@ DeepSeek resources are private user imports; no model artwork is bundled.
 
 ## Use
 
-Open **Settings → Overlays → Live2D 宠物**, expand its settings and select
-**显示宠物**. The separate Live2D settings section and tab use the same state.
+Open **Settings → Overlays → Pet**, select **Live2D 宠物** and enable
+**Show pet**. Expand its settings to configure appearance and behavior. The
+separate Live2D settings section links to this entry with **选择与显示宠物**.
 Settings group appearance, interaction behavior, control mode and advanced options;
 the action-set controls have their own section. Narrow panels stack controls and
 mode descriptions vertically.
@@ -22,7 +23,7 @@ mode descriptions vertically.
   body to interact; right-click for model, quality, size, idle and appearance.
   **关闭宠物** stays in a separate footer while the menu content scrolls.
   It hides the pet and releases control; show it again
-  from Live2D settings. The size slider previews its percentage while dragging
+  from the host's pet display switch. The size slider previews its percentage while dragging
   and applies the size on release, keeping the menu stationary during the drag.
   Menus stay inside the visible host area; desktop menus use the monitor work
   area, excluding system bars, even when the transparent window extends offscreen.
@@ -43,10 +44,11 @@ mode descriptions vertically.
   windows suppress it. Switching conversations/models never replays old text.
   This is silent text animation, not voice or phoneme alignment, and adds no LLM
   calls. It is independent of **跟随会话动作** and preserves expression/appearance.
-- At host startup, if no overlay in the `pet` startup group is visible, KT opens
-  this extension and selects the dragon. Existing visible pets take precedence.
-  Closing all pets does not reopen one during that run; the next startup checks
-  again. Disabled/uninstalled extensions are never candidates.
+- The host displays one selected pet: switching between the sprite pet and
+  Live2D replaces the current pet. Pet type and display state are separate;
+  choosing a type while hidden keeps it hidden. Closing persists across refreshes
+  and restarts. Only first use chooses a default; disabled/uninstalled packages
+  never render. Each package retains its own appearance and behavior settings.
 
 Settings use package-scoped `kt.preferences`: immediate local state and KT's
 existing debounced backend UI-preference store. They survive the source app's
@@ -259,7 +261,10 @@ preceding action binding. Ordinary Pet also participates in UI ownership,
 but does not inject tools, poll actions or start an LLM call.
 Renewals cannot recreate an expired lease. The renderer sends a real health
 heartbeat; failure or ten seconds without a heartbeat clears readiness and
-provides Retry. One package runtime outlives settings/preview components. Closing the pet drops
+provides Retry. Initial loading also times out: 60 seconds without loading
+activity, capped at three minutes even if activity continues. Retry invalidates
+the old frame and pending resource requests. A desktop source/baseline change
+resets work counters and speech queues without replaying completed activity. One package runtime outlives settings/preview components. Closing the pet drops
 its renderer and action binding; disabling/reloading the extension, changing
 hosts/users or exiting disposes its subscriptions, watchers, timers and channels.
 Tool/skill updates retain the engine-managed graph context.

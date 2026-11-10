@@ -2,8 +2,16 @@ import { mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { afterEach, expect, it } from "vitest"
 import { h } from "vue"
+import { ElSwitch } from "element-plus"
 import OverlaysSettings from "@/ext/OverlaysSettings.vue"
-import { registerOverlay, clearOverlays, loadPlacements, overlays } from "@/ext/overlays"
+import {
+  registerOverlay,
+  clearOverlays,
+  loadPlacements,
+  overlays,
+  petSelection,
+  isOverlayVisible,
+} from "@/ext/overlays"
 import {
   registerSettingsSection,
   unregisterSettingsSection,
@@ -20,6 +28,38 @@ afterEach(() => {
   clearOverlays()
   unregisterSettingsSection("ext:pet/preferences")
   unregisterSettingsSection("ext:other/preferences")
+})
+
+it("offers a single pet selector and preserves hidden intent while changing type", async () => {
+  setActivePinia(createPinia())
+  localStorage.clear()
+  loadPlacements("pet-settings")
+  for (const [key, label] of [
+    ["ext:sprite/pet", "Sprite pet"],
+    ["ext:l2d/pet", "Live2D"],
+  ])
+    registerOverlay({
+      key,
+      pkg: key,
+      id: "pet",
+      label,
+      component: { template: "<div/>" },
+      options: { startupGroup: "pet" },
+    })
+  const wrapper = mount(OverlaysSettings, { global: { components: { ElSwitch } } })
+  try {
+    expect(wrapper.findAll('[data-test="pet-type"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-test="overlay-switch"]')).toHaveLength(0)
+    await wrapper.find('[data-test="pet-type"]').setValue("ext:sprite/pet")
+    expect(isOverlayVisible("ext:sprite/pet")).toBe(true)
+    expect(isOverlayVisible("ext:l2d/pet")).toBe(false)
+    await wrapper.find('[data-test="pet-switch"] .el-switch__core').trigger("click")
+    expect(isOverlayVisible("ext:sprite/pet")).toBe(false)
+    await wrapper.find('[data-test="pet-type"]').setValue("ext:l2d/pet")
+    expect(petSelection()).toEqual({ selected: "ext:l2d/pet", visible: false })
+  } finally {
+    wrapper.unmount()
+  }
 })
 
 it("mounts only the owning overlay's linked settings after expansion and releases them on collapse", async () => {

@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, onMounted, watchEffect } from "vue"
 
 import OverlayFrame from "@/ext/OverlayFrame.vue"
 import { isOverlayVisible, overlays, syncViewport } from "@/ext/overlays"
-import { windowActive } from "@/ext/overlayWindows"
+import { windowActive, petPresentationBlocked } from "@/ext/overlayWindows"
 import { runtime } from "@/ext/state"
 
 // A native renderer does not mount ExtensionContribution in the main window.
@@ -23,7 +23,7 @@ watchEffect(() => {
 
 const controllers = computed(() => [...overlays.values()].filter((o) => o.controller))
 
-const shown = computed(() => [...overlays.values()].filter((o) => isOverlayVisible(o.key) && !windowActive(o.key)))
+const shown = computed(() => [...overlays.values()].filter((o) => isOverlayVisible(o.key) && !petPresentationBlocked(o.key) && !windowActive(o.key)))
 
 onMounted(() => {
   syncViewport()

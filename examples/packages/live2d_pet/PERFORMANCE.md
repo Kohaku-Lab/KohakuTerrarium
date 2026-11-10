@@ -84,3 +84,12 @@ scale factors and long-running stability remain outside this acceptance scope.
 The measurements above predate the switch to private-only Dragon distribution.
 Both models now require import. Texture dimensions and renderer behavior are
 unchanged; these measurements are not a new benchmark of the import path.
+
+## Host lifecycle safeguards
+
+Pet replacement waits for the previous native window to close before mounting
+the replacement. The native pointer worker skips cursor/geometry sampling while
+its window is hidden and reduces its wake rate to roughly four times per second.
+It changes click-through state only when needed. A lightweight controller may
+remain mounted for cleanup and forwarding; it does not render another model.
+These are lifecycle bounds, not new CPU or memory benchmark measurements.

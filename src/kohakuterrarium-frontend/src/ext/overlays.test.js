@@ -148,8 +148,8 @@ describe("overlay state", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: original })
   })
 
-  it("survives blocked storage", () => {
-    const key = declare()
+  it("survives blocked storage for pet selection and visibility", () => {
+    const key = declare({ startupGroup: "pet" })
     const original = Storage.prototype.setItem
     Storage.prototype.setItem = () => {
       throw new Error("blocked")

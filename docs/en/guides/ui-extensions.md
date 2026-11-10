@@ -352,15 +352,23 @@ cleanup, not a second renderer.
   `kt.registerOverlay("pet", Pet, { settingsSection: "preferences" })`. This
   explicit link becomes available after the entry loads; cross-package IDs are
   rejected.
-- Optional manifest fields `startupGroup: pet` and `startupFallback: true` join
-  an overlay group and nominate a fallback. After all enabled contributions and
-  saved visibility are loaded, the host opens the first declared fallback only
-  if that group has no visible overlay. This runs once per host/user per app
-  run; hiding an overlay does not immediately resurrect it. Grouped visibility
-  uses the existing debounced UI-preference backend as well as local placement.
-  An inline entry can consume its one-shot selection with
-  `kt.consumeStartupFallback(id)` to initialize a default appearance. A disabled
-  package never participates. Other pet extensions should declare the same group.
+- `startupGroup: pet` opts into the host's single-pet selection. **Settings →
+  Overlays → Pet** owns the selected type and a separate display switch. Showing
+  another pet replaces the current pet; changing type while hidden keeps it
+  hidden. Closing a pet persists across reloads and restarts. Individual package
+  settings configure appearance and behavior; they can link to the host settings
+  with `openTab({ kind: "settings", id: "settings", section: "overlays" })`.
+  Native replacement waits for the previous window to close; a failed close
+  exposes Retry instead of displaying two pets.
+- On first use, an explicitly saved visible pet wins; otherwise a default-visible
+  pet or `startupFallback: true` supplies the initial selection. Legacy multiple
+  visible pets migrate to one deterministic selection; explicitly hidden pets
+  stay hidden. Selection and visibility are scoped per host/user and backed by
+  the debounced UI-preference store. Disabled packages are not rendered, and a
+  missing selected package does not silently select another pet. An inline entry
+  can consume its one-shot fallback with `kt.consumeStartupFallback(id)` to
+  initialize an appearance. Other startup groups retain their once-per-run
+  fallback behavior.
 - Overlays run inline in the dashboard origin, with the same trust as other
   contributions.
 
@@ -392,7 +400,8 @@ host.
 - With `clickThrough: true` the window catches the mouse only over elements
   with the class `kt-overlay-hit`; the rest of the window lets clicks through
   to whatever is underneath. Call `startDrag(event)` from a `pointerdown`
-  handler on such an element to move the window.
+  handler on such an element to move the window. Shells without reliable global
+  pointer coordinates (including Wayland) keep these overlays in the app layer.
 - Without `clickThrough` the host draws a title bar that drags the window
   and hides the overlay.
 - In a window overlay `move(left, top)` and `resize(width, height)` take

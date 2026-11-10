@@ -18,6 +18,7 @@ import {
   resetOverlay,
   showOverlay,
   windowPreference,
+  registerOverlay,
 } from "@/ext/overlays"
 import {
   OVERLAY_PARAM,
@@ -200,12 +201,25 @@ describe("native overlay windows", () => {
 
   it("requires consent and renderer readiness for an unreviewed content-sized overlay", async () => {
     const invoke = tauri()
-    declare({ windowReady: true, contentPlacement: true })
+    declare({ windowReady: true, contentPlacement: true, clickThrough: true })
     const viewport = viewportContent(KEY)
     await refreshOverlayCapabilities()
     viewport.surface.ready()
     expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
     setWindowAllowed(KEY, true)
+    invoke.mockImplementationOnce(async () => ({
+      surface: "desktop",
+      protocol: 1,
+      overlayWindows: true,
+      overlayPointer: false,
+      overlayPresentation: 1,
+      overlayResize: true,
+      overlayPlacementNative: true,
+    }))
+    await refreshOverlayCapabilities()
+    expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
+    expect(windowActive(KEY)).toBe(false)
+    await refreshOverlayCapabilities()
     syncOverlayWindows()
     await flushPromises()
     const request = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1].args[0]
@@ -220,6 +234,55 @@ describe("native overlay windows", () => {
     hideOverlay(KEY)
     syncOverlayWindows()
     await flushPromises()
+  })
+
+  it("retires the old native pet before mounting a replacement in the app", async () => {
+    const invoke = tauri()
+    declare({ startupGroup: "pet" })
+    registerOverlay({
+      key: "ext:second/pet",
+      pkg: "second",
+      id: "pet",
+      component: { template: '<div data-test="second-pet" />' },
+      options: { startupGroup: "pet", surface: "app" },
+    })
+    await refreshOverlayCapabilities()
+    setWindowAllowed(KEY, true)
+    showOverlay(KEY)
+    syncOverlayWindows()
+    await flushPromises()
+    let finishClose
+    invoke.mockImplementation((name) =>
+      name === "close_overlay_window"
+        ? new Promise((resolve) => {
+            finishClose = resolve
+          })
+        : Promise.resolve(true),
+    )
+    const layer = mount(OverlayLayer)
+    try {
+      showOverlay("ext:second/pet")
+      syncOverlayWindows()
+      await flushPromises()
+      expect(finishClose).toBeTypeOf("function")
+      expect(layer.find('[data-test="second-pet"]').exists()).toBe(false)
+      finishClose(false)
+      await flushPromises()
+      expect(layer.find('[data-test="second-pet"]').exists()).toBe(false)
+      expect(windowFailure("ext:second/pet")).toContain("could not close")
+      retryOverlayWindow("ext:second/pet")
+      await flushPromises()
+      expect(layer.find('[data-test="second-pet"]').exists()).toBe(false)
+      finishClose(true)
+      await flushPromises()
+      expect(windowFailure("ext:second/pet")).toBe("")
+      expect(layer.find('[data-test="second-pet"]').exists()).toBe(true)
+    } finally {
+      layer.unmount()
+      hideOverlay("ext:second/pet")
+      finishClose?.(true)
+      await flushPromises()
+    }
   })
 
   it("opens the window once, closes it when hidden, and leaves the in-app layer empty", async () => {
