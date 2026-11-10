@@ -14,6 +14,7 @@ import {
   registerPackageContributions,
   unregisterAllContributions,
   openExtensionTab,
+  contributionOverlayOptions,
 } from "@/ext/registry"
 import { BUILTIN_UI_PACKAGES } from "@/ext/builtin/index"
 import { closeOwnerSocket } from "@/ext/ownerSocket"
@@ -385,7 +386,9 @@ export async function reloadUiExtensions() {
   if (
     !error &&
     extState.packages.some(
-      (r) => r.status === "idle" && r.contributes.some((c) => c.overlay?.startupGroup),
+      (r) =>
+        r.status === "idle" &&
+        r.contributes.some((c) => contributionOverlayOptions(r, c)?.startupGroup),
     )
   ) {
     await restoreStartupVisibility(hostKey, () => generation === _reloadGeneration)

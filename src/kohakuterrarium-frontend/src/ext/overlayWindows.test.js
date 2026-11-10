@@ -236,54 +236,66 @@ describe("native overlay windows", () => {
     await flushPromises()
   })
 
-  it("retires the old native pet before mounting a replacement in the app", async () => {
-    const invoke = tauri()
-    declare({ startupGroup: "pet" })
-    registerOverlay({
-      key: "ext:second/pet",
-      pkg: "second",
-      id: "pet",
-      component: { template: '<div data-test="second-pet" />' },
-      options: { startupGroup: "pet", surface: "app" },
-    })
-    await refreshOverlayCapabilities()
-    setWindowAllowed(KEY, true)
-    showOverlay(KEY)
-    syncOverlayWindows()
-    await flushPromises()
-    let finishClose
-    invoke.mockImplementation((name) =>
-      name === "close_overlay_window"
-        ? new Promise((resolve) => {
-            finishClose = resolve
-          })
-        : Promise.resolve(true),
-    )
-    const layer = mount(OverlayLayer)
-    try {
-      showOverlay("ext:second/pet")
+  it.each([false, true])(
+    "retires the native pet before mounting in the app (same pet: %s)",
+    async (samePet) => {
+      const invoke = tauri()
+      declare({ startupGroup: "pet", windowReady: true })
+      const viewport = viewportContent(KEY)
+      viewport.surface.ready()
+      registerOverlay({
+        key: "ext:second/pet",
+        pkg: "second",
+        id: "pet",
+        component: { template: '<div data-test="second-pet" />' },
+        options: { startupGroup: "pet", surface: "app" },
+      })
+      await refreshOverlayCapabilities()
+      setWindowAllowed(KEY, true)
+      showOverlay(KEY)
       syncOverlayWindows()
       await flushPromises()
-      expect(finishClose).toBeTypeOf("function")
-      expect(layer.find('[data-test="second-pet"]').exists()).toBe(false)
-      finishClose(false)
-      await flushPromises()
-      expect(layer.find('[data-test="second-pet"]').exists()).toBe(false)
-      expect(windowFailure("ext:second/pet")).toContain("could not close")
-      retryOverlayWindow("ext:second/pet")
-      await flushPromises()
-      expect(layer.find('[data-test="second-pet"]').exists()).toBe(false)
-      finishClose(true)
-      await flushPromises()
-      expect(windowFailure("ext:second/pet")).toBe("")
-      expect(layer.find('[data-test="second-pet"]').exists()).toBe(true)
-    } finally {
-      layer.unmount()
-      hideOverlay("ext:second/pet")
-      finishClose?.(true)
-      await flushPromises()
-    }
-  })
+      const request = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1].args[0]
+      await receiveOverlayReady({ detail: { key: KEY, generation: request.generation } })
+      let finishClose
+      invoke.mockImplementation((name) =>
+        name === "close_overlay_window"
+          ? new Promise((resolve) => {
+              finishClose = resolve
+            })
+          : Promise.resolve(true),
+      )
+      const target = samePet ? KEY : "ext:second/pet"
+      const selector = samePet ? ".pet" : '[data-test="second-pet"]'
+      const layer = mount(OverlayLayer)
+      try {
+        if (samePet) setWindowAllowed(KEY, false)
+        else showOverlay(target)
+        syncOverlayWindows()
+        await flushPromises()
+        expect(finishClose).toBeTypeOf("function")
+        expect(layer.find(selector).exists()).toBe(false)
+        finishClose(false)
+        await flushPromises()
+        expect(layer.find(selector).exists()).toBe(false)
+        expect(windowFailure(target)).toContain("could not close")
+        retryOverlayWindow(target)
+        await flushPromises()
+        expect(layer.find(selector).exists()).toBe(false)
+        finishClose(true)
+        await flushPromises()
+        expect(windowFailure(target)).toBe("")
+        expect(layer.find(selector).exists()).toBe(true)
+      } finally {
+        layer.unmount()
+        viewport.dispose()
+        hideOverlay(target)
+        syncOverlayWindows()
+        finishClose?.(true)
+        await flushPromises()
+      }
+    },
+  )
 
   it("opens the window once, closes it when hidden, and leaves the in-app layer empty", async () => {
     declare({ width: 120, height: 90, anchor: "top-left", alwaysOnTop: false })

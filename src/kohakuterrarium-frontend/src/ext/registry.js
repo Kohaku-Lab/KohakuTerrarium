@@ -144,6 +144,20 @@ function overlayOptions(source) {
   return out
 }
 
+/** Effective manifest overlay options, including host-verified desktop pet defaults. */
+export function contributionOverlayOptions(record, contribution) {
+  if (contribution.kind !== "overlay") return null
+  const options = overlayOptions(contribution.overlay)
+  if (
+    record?.desktop_pet === true &&
+    !record.dev_url &&
+    record.package === "virtual-pet" &&
+    contribution.id === "pet"
+  )
+    Object.assign(options, { desktopPet: true, startupGroup: "pet" })
+  return options
+}
+
 const OWNER_KINDS = ["package", "plugin", "tool", "trigger"]
 const RENDERER_ID = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31}){1,3}$/
 const RESERVED_RENDERER_PREFIXES = ["kt.", "mcp."]
@@ -182,7 +196,7 @@ function hostFor(pkg, contribution) {
 }
 
 /** Register one contribution's host into the core registry for its kind. */
-export function registerContribution(pkg, contribution) {
+export function registerContribution(pkg, contribution, record = null) {
   const key = contributionKey(pkg, contribution.id)
   const host = hostFor(pkg, contribution)
   switch (contribution.kind) {
@@ -242,7 +256,7 @@ export function registerContribution(pkg, contribution) {
         id: contribution.id,
         label: contribution.label,
         component: host,
-        options: overlayOptions(contribution.overlay),
+        options: contributionOverlayOptions(record, contribution),
       })
       break
     case "command":
@@ -327,17 +341,7 @@ export function registerContribution(pkg, contribution) {
 /** Register every declared contribution of a listed package. */
 export function registerPackageContributions(record) {
   for (const contribution of record.contributes || []) {
-    registerContribution(record.package, contribution)
-    if (
-      record.desktop_pet === true &&
-      !record.dev_url &&
-      record.package === "virtual-pet" &&
-      contribution.kind === "overlay" &&
-      contribution.id === "pet"
-    ) {
-      const overlay = overlays.get(contributionKey(record.package, contribution.id))
-      if (overlay) overlay.options = { ...overlay.options, desktopPet: true, startupGroup: "pet" }
-    }
+    registerContribution(record.package, contribution, record)
   }
 }
 

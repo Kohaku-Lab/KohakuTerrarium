@@ -132,7 +132,7 @@ function retire(label, entry) {
 export function petPresentationBlocked(key) {
   return (
     isPetOverlay(overlays.get(key)) &&
-    ([...closing.values()].some((entry) => entry.pet && (entry.key !== key || entry.failed)) ||
+    ([...closing.values()].some((entry) => entry.pet) ||
       [...open.values()].some((entry) => entry.pet && entry.key !== key))
   )
 }

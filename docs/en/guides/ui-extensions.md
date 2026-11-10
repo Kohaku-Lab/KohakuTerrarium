@@ -358,14 +358,20 @@ cleanup, not a second renderer.
   hidden. Closing a pet persists across reloads and restarts. Individual package
   settings configure appearance and behavior; they can link to the host settings
   with `openTab({ kind: "settings", id: "settings", section: "overlays" })`.
-  Native replacement waits for the previous window to close; a failed close
-  exposes Retry instead of displaying two pets.
-- On first use, an explicitly saved visible pet wins; otherwise a default-visible
-  pet or `startupFallback: true` supplies the initial selection. Legacy multiple
-  visible pets migrate to one deterministic selection; explicitly hidden pets
-  stay hidden. Selection and visibility are scoped per host/user and backed by
-  the debounced UI-preference store. Disabled packages are not rendered, and a
-  missing selected package does not silently select another pet. An inline entry
+  Replacement waits for the previous native window to close, including switching
+  the same pet back into the app; a failed close exposes Retry instead of
+  displaying two pets.
+- Legacy preferences first select an explicitly visible pet, then a pet that
+  was visible by default without an explicit hide override. Hiding only Live2D
+  therefore preserves a still-visible sprite pet. If no pet was visible, an
+  explicit hidden choice stays hidden; only fresh preferences use
+  `startupFallback: true`. Multiple visible pets migrate deterministically to one.
+  Selection and visibility are scoped per host/user and backed by the debounced
+  UI-preference store. Backend preferences are restored before migration and
+  defaults, including when only the host-verified Virtual Pet is enabled: its
+  effective `pet` group comes from the host's shared contribution policy.
+  Disabled packages are not rendered, and a missing selected package does not
+  silently select another pet. An inline entry
   can consume its one-shot fallback with `kt.consumeStartupFallback(id)` to
   initialize an appearance. Other startup groups retain their once-per-run
   fallback behavior.

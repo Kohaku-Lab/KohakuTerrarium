@@ -1,7 +1,8 @@
 import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/utils/api", () => ({
+  settingsAPI: { getUIPrefs: vi.fn(), updateUIPrefs: vi.fn() },
   default: {
     get: vi.fn(),
     post: vi.fn(),
@@ -30,7 +31,11 @@ import { useAuthStore } from "@/stores/auth"
 import { useLayoutStore } from "@/stores/layout"
 import { settingsSections } from "@/stores/settingsSectionRegistry"
 import { tabKinds } from "@/stores/tabKindRegistry"
-import api from "@/utils/api"
+import api, { settingsAPI } from "@/utils/api"
+import { flushPromises } from "@vue/test-utils"
+import { hideOverlay, isOverlayVisible, overlays, petSelection, petSelectionKey } from "./overlays"
+import { resetStartupChecks } from "./overlayStartup"
+import { _resetUIPrefsForTests, ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
 const Comp = { template: "<div>x</div>" }
 
@@ -65,6 +70,8 @@ describe("ui extension loader", () => {
     localStorage.clear()
     unloadUiExtensions()
     vi.clearAllMocks()
+    _resetUIPrefsForTests()
+    resetStartupChecks()
     imported = []
     api.post.mockResolvedValue({ data: { token: "TOK", expires_at: Date.now() / 1000 + 3600 } })
     setLoaderDeps({
@@ -77,6 +84,69 @@ describe("ui extension loader", () => {
       },
     })
   })
+
+  afterEach(() => {
+    _resetUIPrefsForTests()
+    resetStartupChecks()
+    vi.useRealTimers()
+  })
+
+  it.each([false, true])(
+    "restores a lone desktop pet from backend preferences (manifest group: %s)",
+    async (explicitGroup) => {
+      vi.useFakeTimers()
+      const values = {}
+      settingsAPI.getUIPrefs.mockImplementation(async () => ({ values: structuredClone(values) }))
+      settingsAPI.updateUIPrefs.mockImplementation(async (update) => {
+        Object.assign(values, structuredClone(update))
+        return { values: structuredClone(values) }
+      })
+      const key = "ext:virtual-pet/pet"
+      listing([
+        pkg("virtual-pet", {
+          desktop_pet: true,
+          contributes: [
+            {
+              kind: "overlay",
+              id: "pet",
+              owner: "package:virtual-pet",
+              overlay: { defaultVisible: true, ...(explicitGroup ? { startupGroup: "pet" } : {}) },
+            },
+          ],
+        }),
+      ])
+      await reloadUiExtensions()
+      expect(isOverlayVisible(key)).toBe(true)
+      hideOverlay(key)
+      await vi.advanceTimersByTimeAsync(1600)
+      expect(values[petSelectionKey(currentHostKey())]).toEqual({ selected: key, visible: false })
+
+      for (const preload of [true, false]) {
+        unloadUiExtensions()
+        localStorage.clear()
+        _resetUIPrefsForTests()
+        resetStartupChecks()
+        let finishPrefs
+        if (preload) await ensureUIPrefsLoaded()
+        else
+          settingsAPI.getUIPrefs.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                finishPrefs = resolve
+              }),
+          )
+        const loading = reloadUiExtensions()
+        await flushPromises()
+        if (!preload) {
+          expect(overlays.has(key)).toBe(false)
+          finishPrefs({ values: structuredClone(values) })
+        }
+        await loading
+        expect(petSelection()).toEqual({ selected: key, visible: false })
+        expect(isOverlayVisible(key)).toBe(false)
+      }
+    },
+  )
 
   it("registers declared contributions and loads the entry lazily once", async () => {
     listing([pkg("alpha")])

@@ -134,21 +134,14 @@ export function petSelection() {
     .filter(isPetOverlay)
     .sort((a, b) => a.key.localeCompare(b.key))
   const explicit = pets.find((o) => placement(o.key).visible === true)
-  const hidden = pets.find((o) => placement(o.key).visible === false)
-  const preferred =
+  const visible =
     explicit ||
-    hidden ||
-    pets.find((o) => o.options.defaultVisible !== false) ||
-    pets.find((o) => o.options.startupFallback) ||
-    pets[0]
+    pets.find((o) => placement(o.key).visible !== false && o.options.defaultVisible !== false)
+  const hidden = pets.find((o) => placement(o.key).visible === false)
+  const preferred = visible || hidden || pets.find((o) => o.options.startupFallback) || pets[0]
   return {
     selected: preferred?.key || null,
-    visible: Boolean(
-      explicit ||
-      (!hidden &&
-        preferred &&
-        (preferred.options.defaultVisible !== false || preferred.options.startupFallback)),
-    ),
+    visible: Boolean(visible || (!hidden && preferred?.options.startupFallback)),
   }
 }
 

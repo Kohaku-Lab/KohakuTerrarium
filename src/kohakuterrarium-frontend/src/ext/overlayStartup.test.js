@@ -99,6 +99,26 @@ it("migrates multiple visible legacy pets deterministically and never revives an
   expect([...overlaysVisible()]).toHaveLength(0)
 })
 
+it.each([
+  ["only Live2D hidden", undefined, false, "ext:sprite/pet", true],
+  ["only sprite hidden", false, undefined, "ext:sprite/pet", false],
+  ["both hidden", false, false, "ext:l2d/pet", false],
+  ["explicit Live2D visible", undefined, true, "ext:l2d/pet", true],
+  ["explicit sprite visible", true, false, "ext:sprite/pet", true],
+  ["new preferences", undefined, undefined, "ext:sprite/pet", true],
+])("migrates effective legacy visibility: %s", (_name, sprite, l2d, selected, visible) => {
+  loadPlacements("legacy-effective")
+  add("ext:sprite/pet", { startupGroup: "pet", defaultVisible: true })
+  add("ext:l2d/pet", { startupGroup: "pet", startupFallback: true, defaultVisible: false })
+  if (typeof sprite === "boolean") placements["ext:sprite/pet"] = { visible: sprite }
+  if (typeof l2d === "boolean") placements["ext:l2d/pet"] = { visible: l2d }
+  applyStartupFallbacks("legacy-effective")
+  expect(petSelection()).toEqual({ selected, visible })
+  expect(overlaysVisible()).toEqual(visible ? [selected] : [])
+  loadPlacements("legacy-effective")
+  expect(petSelection()).toEqual({ selected, visible })
+})
+
 function overlaysVisible() {
   return ["ext:sprite/pet", "ext:l2d/pet"].filter(isOverlayVisible)
 }
