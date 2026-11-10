@@ -100,6 +100,10 @@ from kohakuterrarium.testing.output import OutputRecorder
 
 from tests.helpers.compact_protocol import exercise_compact_trace
 from tests.helpers.history_protocol import exercise_history_trace
+from tests.helpers.two_job_protocol import (
+    exercise_mid_turn_fold,
+    exercise_two_job_trace,
+)
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
 # ---------------------------------------------------------------------------
@@ -3664,6 +3668,27 @@ class TestCoreIntegration:
                 suppress_cancel=True,
                 resume=True,
             )
+
+        for label, trace in (
+            ("batched", ("finish_1", "finish_0", "begin", "end")),
+            (
+                "separate",
+                ("cancel_1", "finish_1", "begin", "end", "finish_0", "begin", "end"),
+            ),
+        ):
+            await exercise_two_job_trace(
+                tmp_path / f"two-job-{label}", monkeypatch, trace, resume=True
+            )
+
+        for first in (0, 1):
+            for cancelled in (False, True):
+                await exercise_mid_turn_fold(
+                    tmp_path / f"fold-{first}-{cancelled}",
+                    monkeypatch,
+                    first,
+                    cancelled,
+                    resume=True,
+                )
 
     async def _exercise_compact_tail(
         self, tmp_path, monkeypatch, compact_origin, prefix

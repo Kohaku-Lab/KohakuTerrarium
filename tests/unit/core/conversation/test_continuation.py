@@ -12,6 +12,7 @@ from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.core.compact.manager import CompactManager
+from kohakuterrarium.core.agent.history import message_history
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.conversation.continuation import (
     continue_on_branch,
@@ -27,11 +28,19 @@ from kohakuterrarium.session.history.raw import append_user_event_pair
 from kohakuterrarium.session.resume.resume import resume_agent
 
 import tests.helpers.history_protocol as history_protocol
+import tests.helpers.two_job_protocol as two_job_protocol
 from tests.helpers.history_protocol import (
     HistoryState,
     exercise_history_trace,
     successors,
     transition_cover,
+)
+from tests.helpers.two_job_protocol import (
+    TwoJobState,
+    exercise_mid_turn_fold,
+    exercise_two_job_trace,
+    successors as two_job_successors,
+    transition_cover as two_job_transition_cover,
 )
 
 
@@ -117,6 +126,175 @@ class _ToolLLM(ScriptedLLM):
             yield ""
             return
         yield step if isinstance(step, str) else str(step)
+
+
+@pytest.mark.parametrize("first", [0, 1])
+@pytest.mark.parametrize("cancel_second", [False, True])
+async def test_two_job_mid_turn_fold(tmp_path, monkeypatch, first, cancel_second):
+    await exercise_mid_turn_fold(tmp_path, monkeypatch, first, cancel_second)
+
+
+async def test_two_job_mid_turn_fold_detects_missing_projection(tmp_path, monkeypatch):
+    original = message_history.include_settled_tool_results
+
+    def without_same_turn_projection(events, live_event_ids, *, covered_event_ids=None):
+        result = original(events, live_event_ids, covered_event_ids=covered_event_ids)
+        by_id = {event.get("event_id"): event for event in events}
+        result_by_source = {
+            event.get("_source_event_id"): event
+            for event in result
+            if event.get("_settled_from_call")
+        }
+        same_turn_ids = {
+            event.get("event_id")
+            for event in events
+            if event.get("type") == "tool_result"
+            and event.get("event_id") in result_by_source
+            and any(
+                call.get("type") == "tool_call"
+                and call.get("call_id") == event.get("call_id")
+                and call.get("turn_index") == event.get("turn_index")
+                for call in events
+            )
+        }
+        events = list(events)
+        without_late = []
+        for event in result:
+            if event.get("_source_event_id") in same_turn_ids:
+                continue
+            if event.get("event_id") in same_turn_ids:
+                continue
+            without_late.append(event)
+        for source_id in same_turn_ids:
+            original_index = next(
+                i
+                for i, event in enumerate(events)
+                if event.get("event_id") == source_id
+            )
+            following = next(
+                (
+                    event.get("event_id")
+                    for event in events[original_index + 1 :]
+                    if event.get("event_id") is not None
+                    and any(
+                        item.get("event_id") == event.get("event_id")
+                        for item in without_late
+                    )
+                ),
+                None,
+            )
+            insertion = next(
+                (
+                    i
+                    for i, item in enumerate(without_late)
+                    if item.get("event_id") == following
+                ),
+                len(without_late),
+            )
+            without_late.insert(insertion, by_id[source_id])
+        return without_late
+
+    monkeypatch.setattr(
+        message_history, "include_settled_tool_results", without_same_turn_projection
+    )
+    with pytest.raises(AssertionError, match="restored folded outcome") as caught:
+        await exercise_mid_turn_fold(tmp_path, monkeypatch, 0, False)
+    assert "Cleanup also failed:" not in str(caught.value)
+
+
+async def test_two_job_mid_turn_fold_mutant_rejects_cleanup_failure(
+    tmp_path, monkeypatch
+):
+    original = two_job_protocol._Runtime.release
+
+    async def release_then_fail(runtime):
+        await original(runtime)
+        raise RuntimeError("injected cleanup failure")
+
+    monkeypatch.setattr(two_job_protocol._Runtime, "release", release_then_fail)
+    with pytest.raises(AssertionError, match="Cleanup also failed"):
+        await test_two_job_mid_turn_fold_detects_missing_projection(
+            tmp_path, monkeypatch
+        )
+
+
+def test_two_job_model_graph():
+    states, edges, traces = two_job_transition_cover()
+    visited, exercised = {TwoJobState()}, set()
+    for trace in traces:
+        state = TwoJobState()
+        for action in trace:
+            target = two_job_successors(state)[action]
+            exercised.add((state, action, target))
+            visited.add(target)
+            state = target
+    assert len(visited) == 76 and len(edges) == 88 and len(traces) == 29
+    assert visited == states
+    assert exercised == edges
+    assert any(state.may_switch for state in states)
+    assert any(
+        state.consuming and any(j.phase == "running" for j in state.jobs)
+        for state in states
+    )
+    assert any(len(state.consuming) == 2 for state in states)
+
+
+@pytest.mark.parametrize(
+    "trace", [pytest.param(t, id="-".join(t)) for t in two_job_transition_cover()[2]]
+)
+async def test_two_job_model_conformance(tmp_path, monkeypatch, trace):
+    await exercise_two_job_trace(tmp_path, monkeypatch, trace)
+
+
+@pytest.mark.parametrize(
+    "fault", ["swap", "duplicate", "extra_request", "repeat", "reverse"]
+)
+async def test_two_job_model_detects_oracle_faults(tmp_path, monkeypatch, fault):
+    original = two_job_protocol._Provider.chat
+
+    async def corrupted(self, messages, **kwargs):
+        if self.recording:
+            if fault == "swap":
+                messages = deepcopy(messages)
+                content = messages[-1]["content"]
+                messages[-1]["content"] = (
+                    content.replace("TWO_RESULT_0", "TEMP_SWAP")
+                    .replace("TWO_RESULT_1", "TWO_RESULT_0")
+                    .replace("TEMP_SWAP", "TWO_RESULT_1")
+                )
+            elif fault == "duplicate":
+                messages = deepcopy(messages)
+                messages[-1]["content"] += " TWO_RESULT_1"
+            elif fault == "repeat":
+                messages = deepcopy(messages)
+                messages[-1]["content"] += "\n\n" + messages[-1]["content"]
+            elif fault == "reverse":
+                messages = deepcopy(messages)
+                messages[-1]["content"] = "\n\n".join(
+                    reversed(messages[-1]["content"].split("\n\n"))
+                )
+            else:
+                self.requests.append([])
+        async for chunk in original(self, messages, **kwargs):
+            yield chunk
+
+    monkeypatch.setattr(two_job_protocol._Provider, "chat", corrupted)
+    trace = (
+        ("finish_0", "finish_1", "begin", "end")
+        if fault == "reverse"
+        else ("finish_0", "begin", "end", "finish_1", "begin", "end")
+    )
+    with pytest.raises(AssertionError, match="two jobs divergent prefix") as caught:
+        await exercise_two_job_trace(tmp_path, monkeypatch, trace)
+    assert (
+        "finish_0 -> finish_1 -> begin" if fault == "reverse" else "finish_0 -> begin"
+    ) in str(caught.value)
+    assert isinstance(caught.value.__cause__, AssertionError)
+    assert (
+        "provider request count"
+        if fault == "extra_request"
+        else "batch result attribution"
+    ) in str(caught.value.__cause__)
 
 
 @pytest.mark.parametrize("launch", ["declared", "requested", "promoted"])

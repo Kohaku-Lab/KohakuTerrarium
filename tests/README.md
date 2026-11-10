@@ -415,6 +415,67 @@ vetoes, graph changes, concurrent history mutation, provenance-metadata
 variations, arbitrary task factories, and stuck-cleanup recovery remain
 outside this slice.
 
+## Two-job result ownership model
+
+`tests/helpers/two_job_protocol.py` specifies two independently identified,
+declared-background tools on sibling branch B. The initial model state is
+**after both tools have started**. Each can be cancelled or completed in
+either order; the single consumer may claim both results together or in
+separate batches. The model tracks job outcome, ordered delivery, batch
+membership, consumption and the history-switch fence. Its breadth-first
+edge witnesses cover **76 states and 88 transitions with 29 runtime traces**;
+this is edge coverage of the specified finite graph, not all paths or all
+runtime schedules. The graph test pins the counts and checks edge coverage.
+
+Independent barriers gate the actual tools and the real inbox consumer;
+completion events are delivered by the real executor. Assertions check
+per-job status, result and persisted payload, ordered result events, exact
+batch identities and provider input, cancellation attribution, rejected
+branch-switch atomicity, and branch isolation after settlement. Targeted
+provider-input mutations check detection of swapped, extra and repeated
+results, reversed batch order and an extra request. The existing history
+integration workflow additionally cold-restores one combined batch and one
+separate cancellation/success sequence after an orderly branch switch, then
+switches back to B to check the reconstructed result identities and outcomes.
+Replay represents results as tool messages in original call order rather
+than preserving the live feedback-batch grouping or delivery order.
+
+This workflow exposed a replay defect: a cancelled job with empty output
+was reconstructed as an empty tool result even though the stored event
+retained the cancellation outcome. Replay now includes the cancellation
+marker, preserving any partial text or structured output. Unit regressions
+cover cancellation/interruption flags and successful structured output.
+
+The first attempted model permitted job 2 to finish while job 1's provider
+response was blocked. The real runtime may fold that completion into the
+active turn (`core/agent/turn/mid_turn.py`), so a model expecting a later
+inbox batch timed out. This is a model mismatch, not an established product
+failure. This slice excludes completion during active consumption; cancellation
+requests can still occur in that window. Four separate deterministic fold
+witnesses cover either job arriving first and a successful or cancelled
+second completion while the first provider request is blocked. Each checks
+live fold attribution, rejects branch switching until the turn settles,
+switches B→A→B, and verifies each outcome once; the existing integration
+workflow also closes and cold-resumes all four. A targeted mutation disables
+the same-turn projection and must fail at the folded-outcome assertion.
+These examples are not a model of every fold schedule.
+
+The replay fix only projects same-turn results when job and provider identity
+are unambiguous, an assistant round intervenes, and no user/injected or
+compaction boundary is crossed. It retains explicit/canonical announcements
+and assistant text; repeated or ambiguous identities, partial group
+announcements, and unsupported boundaries are conservatively left in their
+original order. The prior later-turn projection behavior is separate. This
+is not a guarantee that all ambiguous legacy histories can be repaired.
+Requested/promoted launches, more than two jobs, crash recovery, and arbitrary
+event-loop schedules remain outside this model. Orderly cold restore is not a
+crash test.
+
+```bash
+python -m pytest tests/unit/core/conversation/test_continuation.py -k two_job_model -n 0
+python -m pytest tests/integration/test_core.py -k history_ops -n 0
+```
+
 ## Out-of-scope (deterministic test is impractical)
 
 Excluded from coverage targets; covered by e2e where possible, manual

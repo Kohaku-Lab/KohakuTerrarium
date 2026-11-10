@@ -599,9 +599,21 @@ def replay_conversation(
                 )
         elif etype == "tool_result":
             job_id = evt.get("call_id", "") or evt.get("job_id", "")
+            content = evt.get("output", "") or ""
+            final_state = str(evt.get("final_state", "")).lower()
+            if (
+                evt.get("cancelled")
+                or evt.get("interrupted")
+                or final_state in {"cancelled", "interrupted"}
+            ):
+                prefix = f"[Tool {job_id} cancelled]"
+                if isinstance(content, list):
+                    content = [{"type": "text", "text": prefix}, *content]
+                else:
+                    content = f"{prefix}\n{content}" if content else prefix
             message = {
                 "role": "tool",
-                "content": evt.get("output", "") or "",
+                "content": content,
                 "tool_call_id": evt.get("tool_call_id")
                 or provider_ids.get(job_id, job_id),
                 "name": _clean_tool_name(evt),
