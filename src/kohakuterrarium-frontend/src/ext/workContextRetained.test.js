@@ -6,6 +6,7 @@ import { startWorkContextTracking, useWorkContext } from "./workContext"
 import { clearAttentionRegistry } from "@/stores/attention"
 import { useChatStore } from "@/stores/chat"
 import { useHostsStore } from "@/stores/hosts"
+import { desktopContextConnected, desktopWork } from "./desktopContext"
 import { useTabsStore } from "@/stores/tabs"
 
 it("retains work before the consumer mounts, follows live events, and clears closed or foreign bindings", () => {
@@ -80,45 +81,48 @@ it("retains work before the consumer mounts, follows live events, and clears clo
   }
 })
 
-it("only accepts selected popouts on the same host and keeps them while main shows settings", () => {
+it("uses selected desktop snapshots without feeding them back into local publishers", () => {
   setActivePinia(createPinia())
-  const tabs = useTabsStore(),
-    hosts = useHostsStore()
+  const tabs = useTabsStore()
   const tracker = startWorkContextTracking()
   tabs.byId = { a: { kind: "attach", target: "main" }, settings: { kind: "settings" } }
   tabs.activeId = "a"
-  let work
+  let work, spoken, local, scoped, focused
   const wrapper = mount(
     defineComponent({
       setup() {
         work = useWorkContext({ retainLast: true })
+        spoken = useWorkContext({ retainLast: true, includeSpeech: true })
+        local = useWorkContext({ retainLast: true, local: true })
+        scoped = useWorkContext("main", "Pinned main")
+        focused = useWorkContext()
         return () => null
       },
     }),
   )
-  const relay = (detail) =>
-    window.dispatchEvent(
-      new CustomEvent("kt:work-context", {
-        detail: { host: `${hosts.activeHostId || ""}|`, window: "popout-one", ...detail },
-      }),
-    )
   try {
-    relay({ work: { sessionId: "background" } })
-    expect(work.value.sessionId).toBe("main")
-    relay({ selected: true, host: "foreign|", work: { sessionId: "wrong-host" } })
-    expect(work.value.sessionId).toBe("main")
-    relay({ selected: true, work: { sessionId: "popout" } })
-    expect(work.value.sessionId).toBe("popout")
+    desktopContextConnected.value = true
+    desktopWork.value = { sessionId: "popout", creatureId: "alice", speech: { text: "hello" } }
+    expect(work.value).toMatchObject({ sessionId: "popout", creatureId: "alice" })
+    expect(work.value.speech).toBeUndefined()
+    expect(spoken.value.speech.text).toBe("hello")
+    expect(local.value.sessionId).toBe("main")
+    expect(focused.value.sessionId).toBe("popout")
+    expect(scoped.value.label).toBe("Pinned main")
     tabs.activeId = "settings"
     window.dispatchEvent(new Event("focus"))
     expect(work.value.sessionId).toBe("popout")
-    relay({ window: "popout-two", work: { sessionId: "background" } })
-    expect(work.value.sessionId).toBe("popout")
-    tabs.activeId = "a"
-    window.dispatchEvent(new Event("focus"))
-    relay({ work: { sessionId: "stale" } })
+    expect(local.value.sessionId).toBe("main")
+    expect(local.value.retained).toBe(true)
+    desktopWork.value = local.value
+    expect(focused.value).toBeNull()
     expect(work.value.sessionId).toBe("main")
+    desktopWork.value = null
+    expect(work.value).toBeNull()
+    expect(local.value.sessionId).toBe("main")
   } finally {
+    desktopContextConnected.value = false
+    desktopWork.value = null
     wrapper.unmount()
     tracker.stop()
     useChatStore("main")._cleanup()

@@ -78,6 +78,7 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
   let capturedTarget = null
   let press = null
   let reported = false
+  let explicitRegions = null
   const received = (event) => {
     lastPointer = performance.now()
     desktopPointer.value = event.detail?.valid
@@ -104,7 +105,7 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
           desktopPointer.value = null
           if (!reported) continue
         }
-        const regions = enabled ? overlayHitRegions() : []
+        const regions = enabled ? (explicitRegions ?? overlayHitRegions()) : []
         input.pointer = enabled && pointerEnabled() && !document.hidden
         const state = enabled
           ? { ...input, press, width: window.innerWidth, height: window.innerHeight }
@@ -119,6 +120,20 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
       }
     } finally {
       busy = false
+    }
+  }
+  const regionsChanged = ({ detail }) => {
+    if (
+      detail === null ||
+      (Array.isArray(detail) &&
+        detail.length <= 16 &&
+        detail.every(
+          (r) =>
+            Array.isArray(r) && r.length === 4 && r.every(Number.isFinite) && r[2] > 0 && r[3] > 0,
+        ))
+    ) {
+      explicitRegions = detail
+      void flush()
     }
   }
   const release = () => {
@@ -159,6 +174,7 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
   report = () => {
     void flush()
   }
+  window.addEventListener("kt-overlay-regions", regionsChanged)
   window.addEventListener(POINTER_EVENT, received)
   document.addEventListener("pointerdown", down, true)
   document.addEventListener("pointerup", release, true)
@@ -179,6 +195,7 @@ export function installOverlayInput(through, pointerEnabled = () => false) {
     disposed = true
     clearInterval(timer)
     observer.disconnect()
+    window.removeEventListener("kt-overlay-regions", regionsChanged)
     window.removeEventListener(POINTER_EVENT, received)
     document.removeEventListener("pointerdown", down, true)
     document.removeEventListener("pointerup", release, true)

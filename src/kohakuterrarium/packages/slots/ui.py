@@ -80,6 +80,8 @@ OVERLAY_FLAGS: tuple[str, ...] = (
     "clickThrough",
     "defaultVisible",
     "alwaysOnTop",
+    "windowReady",
+    "contentPlacement",
 )
 OVERLAY_MAX_SIZE = 4096
 _SHORTCUT_RE = re.compile(
@@ -542,6 +544,8 @@ def _parse_overlay(raw: dict, kind: str, where: str) -> dict:
         out[name] = value
     defaults = {"draggable": True, "resizable": False, "clickThrough": False}
     for flag in OVERLAY_FLAGS:
+        if flag in ("windowReady", "contentPlacement") and flag not in raw:
+            continue
         value = raw.get(flag, defaults.get(flag, True))
         if not isinstance(value, bool):
             raise _SlotError(f"{where}.{flag} must be true or false")

@@ -1,7 +1,7 @@
 const COMMANDS: &[&str] = &[
     "source_page_ready",
     "get_desktop_capabilities",
-    "relay_work_context",
+    "desktop_window_focused",
     "navigate_main",
     "request_desktop_attention",
     "open_external",

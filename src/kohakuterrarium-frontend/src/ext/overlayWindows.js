@@ -40,10 +40,14 @@ export function windowLabel(key) {
   const params = new URLSearchParams(window.location.search)
   if (params.get(OVERLAY_PARAM) === key && params.get("kt_overlay_label"))
     return params.get("kt_overlay_label")
-  const realm = overlays.get(key)?.options.desktopPet
+  const realm = requiresPresentation(overlays.get(key))
     ? `-${makeWindowLabel("", extState.hostKey).slice(-8)}`
     : ""
   return makeWindowLabel(WINDOW_LABEL_PREFIX, key + realm)
+}
+
+export function requiresPresentation(overlay) {
+  return overlay?.options.desktopPet === true || overlay?.options.windowReady === true
 }
 
 export function wantsWindow(overlay) {
@@ -63,21 +67,31 @@ function desired(overlay) {
   const allowed = overlay?.options.desktopPet
     ? windowPreference(overlay.key) !== false && desktopPetSupported()
     : overlay?.options.firstParty === true || isWindowAllowed(overlay.key)
-  return wantsWindow(overlay) && allowed && overlayWindowsSupported()
+  const supported =
+    (!overlay?.options.windowReady || capabilities.value?.overlayPresentation >= 1) &&
+    (!overlay?.options.contentPlacement ||
+      (capabilities.value?.overlayResize && capabilities.value?.overlayPlacementNative))
+  return wantsWindow(overlay) && allowed && supported && overlayWindowsSupported()
 }
 
 export function windowActive(key) {
   const overlay = overlays.get(key)
   return (
     desired(overlay) &&
-    (!overlay?.options.desktopPet || ["presenting", "ready"].includes(windowStates.get(key)?.phase))
+    (!requiresPresentation(overlay) ||
+      ["presenting", "ready"].includes(windowStates.get(key)?.phase))
   )
 }
 
 export function windowFailure(key) {
   const overlay = overlays.get(key)
-  if (!overlay?.options.desktopPet || windowPreference(key) === false) return ""
-  if (overlayWindowsSupported() && capabilities.value && !desktopPetSupported())
+  if (!requiresPresentation(overlay) || windowPreference(key) === false) return ""
+  if (
+    overlay?.options.desktopPet &&
+    overlayWindowsSupported() &&
+    capabilities.value &&
+    !desktopPetSupported()
+  )
     return "Desktop pointer/presentation support is unavailable in this shell. Using in-app display."
   return windowStates.get(key)?.reason || ""
 }
@@ -91,6 +105,7 @@ function spec(overlay) {
     width: options.width || 320,
     height: options.height || 240,
     alwaysOnTop: options.alwaysOnTop !== false,
+    ...(options.contentPlacement ? { contentPlacement: true } : {}),
   }
 }
 
@@ -176,9 +191,9 @@ export function retryOverlayWindow(key) {
   if (!entry) syncOverlayWindows()
 }
 
-/** Track decoded viewport content for the current reviewed overlay registration. */
+/** Track decoded viewport content for the current overlay registration. */
 export function setOverlayContentReady(overlay, available) {
-  if (!overlay?.options.desktopPet || overlays.get(overlay.key) !== overlay) return
+  if (!requiresPresentation(overlay) || overlays.get(overlay.key) !== overlay) return
   overlay.contentReady = Boolean(available)
   syncOverlayWindows()
 }
@@ -190,7 +205,7 @@ export function syncOverlayWindows() {
     if (!desired(overlay) || !isOverlayVisible(overlay.key)) continue
     const label = windowLabel(overlay.key)
     if (
-      overlay.options.desktopPet &&
+      requiresPresentation(overlay) &&
       !overlay.contentReady &&
       (!open.has(label) || windowStates.get(overlay.key)?.phase === "opening")
     )
@@ -199,7 +214,7 @@ export function syncOverlayWindows() {
     if (open.has(label) || closing.has(label)) continue
     const request = spec(overlay)
     const entry = { key: overlay.key, generation: null, timer: null, promise: null }
-    if (overlay.options.desktopPet) {
+    if (requiresPresentation(overlay)) {
       entry.generation = `${Date.now()}-${++generation}`
       request.generation = entry.generation
       request.hostKey = extState.hostKey
@@ -237,7 +252,7 @@ export function syncOverlayWindows() {
 }
 
 export async function refreshOverlayCapabilities() {
-  capabilities.value = await desktopCapabilities()
+  capabilities.value = await desktopCapabilities({ refresh: true })
   syncOverlayWindows()
 }
 

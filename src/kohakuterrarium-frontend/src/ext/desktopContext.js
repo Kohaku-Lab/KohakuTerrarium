@@ -3,7 +3,7 @@ import { computed, onUnmounted, readonly, shallowRef, watch } from "vue"
 import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
 import { getRuntimeScope } from "@/stores/runtimeScope"
-import { hostKind } from "@/utils/hostBridge"
+import { desktopWindowFocused, hostKind } from "@/utils/hostBridge"
 
 export const desktopWork = shallowRef(null)
 export const desktopContextConnected = shallowRef(false)
@@ -59,6 +59,7 @@ export function createContextRelay({
     }
   }
   function broadcast(probe = false) {
+    receive(current, { baseline: false, version: `${id}:${version}` })
     port.postMessage({
       probe,
       type: "context",
@@ -254,6 +255,8 @@ export async function startDesktopContext(mode, invalidate = () => {}) {
     stopRealm()
     connection?.close()
     connection = null
+    desktopWork.value = null
+    desktopContextConnected.value = false
     resolve(false)
     window.removeEventListener("pagehide", stop)
   }
@@ -269,12 +272,40 @@ export async function startDesktopContext(mode, invalidate = () => {}) {
   return true
 }
 
-export function useDesktopPublisher(getWork) {
+export function useDesktopPublisher(getWork, canClaim = () => true) {
   if (!connection) return
   const work = getWork()
-  const publish = () => connection?.publish(work.value)
-  const focus = () => connection?.publish(work.value, true)
-  const stop = watch(work, publish, { immediate: true, deep: true })
+  let disposed = false
+  let queued = false
+  let revision = 0
+  const publish = () => {
+    if (queued || disposed) return
+    queued = true
+    queueMicrotask(() => {
+      queued = false
+      if (!disposed) connection?.publish(work.value)
+    })
+  }
+  const focus = async () => {
+    const mine = ++revision
+    const realm = contextRealm()
+    const runtime = getRuntimeScope()
+    if (!canClaim() || !(await desktopWindowFocused())) return
+    if (!disposed && mine === revision && realm === contextRealm() && runtime === getRuntimeScope())
+      connection?.publish(work.value, true)
+  }
+  const stop = watch(
+    work,
+    (value, previous) => {
+      publish()
+      if (
+        document.hasFocus() &&
+        (value?.sessionId !== previous?.sessionId || value?.creatureId !== previous?.creatureId)
+      )
+        void focus()
+    },
+    { immediate: true, deep: true },
+  )
   const rebound = () => {
     if (document.hasFocus()) focus()
   }
@@ -284,6 +315,9 @@ export function useDesktopPublisher(getWork) {
   if (document.hasFocus()) focus()
   const heartbeat = setInterval(publish, 2000)
   onUnmounted(() => {
+    disposed = true
+    revision++
+    connection?.publish(null)
     stop()
     clearInterval(heartbeat)
     window.removeEventListener("focus", focus)

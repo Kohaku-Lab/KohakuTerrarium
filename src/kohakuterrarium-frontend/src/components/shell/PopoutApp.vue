@@ -39,7 +39,7 @@ const sessionScope = props.scope
 acquireScope(sessionScope)
 onScopeDispose(() => releaseScope(sessionScope))
 
-useDesktopPublisher(() => useWorkContext(props.scope))
+useDesktopPublisher(() => useWorkContext({ scope: props.scope, local: true, includeSpeech: true }))
 useWindowChrome()
 const { t } = useI18n()
 const tab = computed(() => ({ id: `popout:${props.scope}`, kind: "attach", target: props.scope }))

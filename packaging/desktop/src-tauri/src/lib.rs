@@ -18,6 +18,7 @@ mod opens;
 mod os;
 mod overlay;
 mod overlay_coordinates;
+mod overlay_geometry;
 mod overlay_placement;
 mod overlay_store;
 mod overlay_viewport;
@@ -121,9 +122,9 @@ pub fn run() {
             overlay::close_overlay_window,
             overlay::overlay_start_drag,
             overlay::overlay_set_bounds,
-            overlay::overlay_resize,
+            overlay_geometry::overlay_resize,
             overlay_placement::overlay_placement,
-            overlay::overlay_get_bounds,
+            overlay_geometry::overlay_get_bounds,
             overlay_viewport::overlay_get_viewport,
             overlay::overlay_set_hit_regions,
             overlay::overlay_ack,
@@ -132,7 +133,7 @@ pub fn run() {
             overlay::overlay_open_settings,
             overlay::reset_overlay_window,
             hud::focus_session,
-            ui_context::relay_work_context,
+            ui_context::desktop_window_focused,
             ui_context::navigate_main,
             tray::get_close_to_tray,
             tray::set_close_to_tray,
@@ -191,7 +192,6 @@ pub fn run() {
             }
             if popout::is_popout_label(window.label()) {
                 if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                    ui_context::popout_closed(window.app_handle(), window.label());
                     window
                         .app_handle()
                         .state::<popout::PopoutRegistry>()

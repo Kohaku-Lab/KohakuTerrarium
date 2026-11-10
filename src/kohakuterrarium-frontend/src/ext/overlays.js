@@ -274,12 +274,6 @@ export function beginDrag(key, event, mode = "move") {
 export function resetOverlay(key, native = false) {
   const { visible, windowAllowed, nativeReset } = placement(key)
   interactionRegions.delete(key)
-  try {
-    localStorage.removeItem(`kt.overlay.window.${key}`)
-    localStorage.setItem(`kt.overlay.reset.${key}`, String(Date.now()))
-  } catch {
-    /* Optional placement persistence. */
-  }
   const kept = {}
   if (typeof visible === "boolean") kept.visible = visible
   if (typeof windowAllowed === "boolean") kept.windowAllowed = windowAllowed

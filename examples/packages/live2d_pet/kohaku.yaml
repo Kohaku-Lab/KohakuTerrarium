@@ -26,6 +26,8 @@ ui:
       id: dragon
       label: Live2D 宠物
       surface: window
+      windowReady: true
+      contentPlacement: true
       anchor: bottom-right
       width: 384
       height: 516

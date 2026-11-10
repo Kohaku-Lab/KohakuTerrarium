@@ -10,7 +10,7 @@ import { targetView } from "./target.js";
 
 export const PetFrame = defineComponent({
   props: { mini: Boolean, getViewport: Function },
-  emits: ["model", "drag", "layout", "regions", "close"],
+  emits: ["model", "drag", "layout", "regions", "close", "ready"],
   setup(props, { emit }) {
     const kt = useExtension();
     const preferences = settingsFor(kt);
@@ -121,6 +121,7 @@ export const PetFrame = defineComponent({
       lastAlive = 0;
     function failRenderer(message) {
       ready = false;
+      emit("ready", false);
       actionReady = false;
       clearInterval(heartbeat);
       resourceAbort.abort();
@@ -148,6 +149,7 @@ export const PetFrame = defineComponent({
     async function navigate() {
       const next = preferences.state.value;
       ready = false;
+      emit("ready", false);
       actionReady = false;
       clearInterval(heartbeat);
       regions.value = [];
@@ -180,6 +182,7 @@ export const PetFrame = defineComponent({
         }
         if (disposed || current !== generation) return;
         ready = false;
+        emit("ready", false);
         regions.value = [];
         cropSequence = 0;
         settingsSequence = 0;
@@ -327,6 +330,7 @@ export const PetFrame = defineComponent({
         if (Object.hasOwn(models, data.model))
           emit("model", { model: data.model, aspect: data.aspect });
         ready = true;
+        emit("ready", true);
         lastAlive = Date.now();
         if (props.mini) {
           bridge.renderer(actionReady, actionError);

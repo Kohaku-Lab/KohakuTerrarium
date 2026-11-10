@@ -128,6 +128,8 @@ const OVERLAY_OPTION_NAMES = [
   "defaultVisible",
   "startupGroup",
   "startupFallback",
+  "windowReady",
+  "contentPlacement",
 ]
 
 function overlayOptions(source) {
@@ -334,7 +336,7 @@ export function registerPackageContributions(record) {
       contribution.id === "pet"
     ) {
       const overlay = overlays.get(contributionKey(record.package, contribution.id))
-      if (overlay) overlay.options = { ...overlay.options, desktopPet: true }
+      if (overlay) overlay.options = { ...overlay.options, desktopPet: true, startupGroup: "pet" }
     }
   }
 }

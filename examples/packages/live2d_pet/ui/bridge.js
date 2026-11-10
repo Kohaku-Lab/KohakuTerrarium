@@ -25,10 +25,22 @@ export function bridgeFor(kt) {
       : null;
   let applying = false,
     closed = false,
-    rendererAt = 0,
     snapshotAt = 0,
     workPeer = null;
   const retired = new Set();
+  const renderers = new Map();
+  const refreshRendering = () => {
+    for (const [id, renderer] of renderers)
+      if (Date.now() - renderer.at > 12000) renderers.delete(id);
+    rendering.value = [...renderers.values()].some((renderer) => renderer.ready);
+    renderError.value = rendering.value
+      ? ""
+      : [...renderers.values()].find((renderer) => renderer.error)?.error || "";
+  };
+  const reportRenderer = (id, ready, error = "") => {
+    renderers.set(id, { ready: ready === true, error, at: Date.now() });
+    refreshRendering();
+  };
   const ownership = createOwnership(kt, peer, desktop, () =>
     send("owner", null),
   );
@@ -79,6 +91,8 @@ export function bridgeFor(kt) {
         return;
       if (type === "goodbye") {
         retired.add(packet.peer);
+        renderers.delete(packet.peer);
+        refreshRendering();
         if (retired.size > 256) retired.delete(retired.values().next().value);
         if (desktop && workPeer === packet.peer) {
           work.value = null;
@@ -100,9 +114,7 @@ export function bridgeFor(kt) {
       }
       if (type === "action") command.value = data;
       if (type === "renderer") {
-        rendering.value = data.ready;
-        renderError.value = data.error || "";
-        rendererAt = Date.now();
+        reportRenderer(packet.peer, data.ready, data.error || "");
       }
     };
   const stopOwner = watch(
@@ -110,7 +122,10 @@ export function bridgeFor(kt) {
     (_, previous) => {
       if (desktop) work.value = null;
       command.value = { operation: "release", id: randomId() };
-      if (previous) rendering.value = false;
+      if (previous) {
+        renderers.clear();
+        refreshRendering();
+      }
       connection.value = null;
       if (ownership.owned.value) snapshot();
       else if (desktop) send("hello");
@@ -124,7 +139,7 @@ export function bridgeFor(kt) {
       work.value = null;
       command.value = { operation: "release", id: randomId() };
     }
-    if (Date.now() - rendererAt > 12000) rendering.value = false;
+    refreshRendering();
   }, 5000);
   const result = {
     work,
@@ -149,9 +164,7 @@ export function bridgeFor(kt) {
     sendWork: () => ownership.owned.value && send("work", work.value),
     renderer(value, error = "") {
       if (closed) return;
-      rendering.value = value;
-      renderError.value = error;
-      rendererAt = Date.now();
+      reportRenderer(peer, value, error);
       send("renderer", { ready: value, error });
     },
     perform(value) {
@@ -172,6 +185,7 @@ export function bridgeFor(kt) {
       work.value = null;
       connection.value = null;
       rendering.value = false;
+      renderers.clear();
       command.value = null;
       if (bridges.get(key) === result) bridges.delete(key);
     },

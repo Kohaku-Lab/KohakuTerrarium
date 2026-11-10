@@ -172,6 +172,7 @@ const Companion = defineComponent({
               mini: true,
               getViewport: overlay.getViewport,
               onClose: overlay.hide,
+              onReady: (ready) => overlay.ready?.(ready),
               onLayout: (offset) => {
                 headerOffset.value = offset;
               },

@@ -1,87 +1,55 @@
-import { computed, effectScope, onScopeDispose, ref, shallowRef, toValue, watch } from "vue"
+import {
+  computed,
+  effectScope,
+  hasInjectionContext,
+  inject,
+  onScopeDispose,
+  ref,
+  shallowRef,
+  toValue,
+  watch,
+} from "vue"
 
 import { acquireScope, releaseScope } from "@/composables/useScope"
 import { subscribeAttention, workForScope } from "@/stores/attention"
 import { useChatStore } from "@/stores/chat"
 import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { useTabsStore } from "@/stores/tabs"
+import { contextRealm, desktopContextConnected, desktopWork } from "./desktopContext"
 import { useWorkSpeech } from "./workSpeech"
 
+export const WORK_CONTEXT_KEY = Symbol("kt-work-context")
 const trackers = new WeakMap()
 
-/** Track the last focused live tab for the lifetime of the extension host. */
+/** Retain the last selected live tab within one runtime identity. */
 export function startWorkContextTracking() {
   const tabs = useTabsStore()
   if (trackers.has(tabs)) return trackers.get(tabs)
-  const hosts = useHostsStore()
   const last = ref(null)
-  const remote = shallowRef(null)
-  let remoteWindow = null
   const scope = effectScope(true)
   let owner
   scope.run(() =>
     watch(
-      () => {
-        const host = `${hosts.activeHostId}|${hosts.activeHost?.currentUser?.id ?? ""}`
-        const tab = tabs.activeTab
-        return {
-          host,
-          id: tabs.activeId,
-          live: tab?.kind === "attach" && !!tab.target,
-          retained: last.value && tabs.byId[last.value],
-        }
-      },
+      () => ({
+        host: JSON.stringify([contextRealm(), getRuntimeScope()]),
+        id: tabs.activeId,
+        live: tabs.activeTab?.kind === "attach" && !!tabs.activeTab.target,
+        retained: last.value && tabs.byId[last.value],
+      }),
       ({ host, id, live, retained }) => {
         const switched = owner !== undefined && host !== owner
         owner = host
         if (switched || !retained) last.value = null
-        if (switched) {
-          remote.value = null
-          remoteWindow = null
-        }
-        if (switched) return
-        if (live) {
-          last.value = id
-          if (document.hasFocus()) {
-            remote.value = null
-            remoteWindow = null
-          }
-        }
+        if (!switched && live) last.value = id
       },
       { immediate: true, flush: "sync" },
     ),
   )
-  const focus = () => {
-    if (tabs.activeTab?.kind === "attach") {
-      remote.value = null
-      remoteWindow = null
-      last.value = tabs.activeId
-    }
-  }
-  const receive = ({ detail }) => {
-    const host = `${hosts.activeHostId || ""}|${hosts.activeHost?.currentUser?.id ?? ""}`
-    if (!detail || typeof detail.window !== "string") return
-    if (detail.closed) {
-      if (remoteWindow === detail.window) {
-        remote.value = null
-        remoteWindow = null
-        last.value = null
-      }
-      return
-    }
-    if (detail.host !== host) return
-    if (detail.selected && detail.work) remoteWindow = detail.window
-    if (remoteWindow === detail.window) remote.value = detail.work
-  }
-  window.addEventListener("focus", focus)
-  window.addEventListener("kt:work-context", receive)
   const tracker = {
     last,
-    remote,
-    stop: () => {
-      window.removeEventListener("focus", focus)
-      window.removeEventListener("kt:work-context", receive)
+    stop() {
       scope.stop()
       trackers.delete(tabs)
     },
@@ -90,28 +58,42 @@ export function startWorkContextTracking() {
   return tracker
 }
 
-/** Read-only observed work, optionally retained while visiting non-session tabs. */
-export function useWorkContext({
-  retainLast = false,
-  includeSpeech = false,
-  target,
-  enabled = true,
-} = {}) {
+/** Selected desktop work, an explicit session scope, or a retained/pinned conversation. */
+export function useWorkContext(options = {}, label = "") {
+  const {
+    retainLast = false,
+    includeSpeech = false,
+    target,
+    enabled = true,
+    scope = null,
+    local = false,
+  } = typeof options === "string" || options === null ? { scope: options } : options
+  const injected = hasInjectionContext() ? inject(WORK_CONTEXT_KEY, null) : null
   const tabs = useTabsStore()
   const hosts = useHostsStore()
   const instances = useInstancesStore()
-  const tracker = retainLast && target === undefined ? startWorkContextTracking() : null
+  const tracker = retainLast && target === undefined && !scope ? startWorkContextTracking() : null
   const explicit = target === undefined ? null : observeTarget(target, enabled)
+  const tab = computed(() =>
+    explicit
+      ? { target: toValue(target)?.sessionId, label: toValue(target)?.label }
+      : scope
+        ? { kind: "attach", target: scope, label }
+        : tracker
+          ? tabs.byId[tracker.last.value]
+          : tabs.activeTab,
+  )
   const revision = ref(0)
-  const off = subscribeAttention(() => revision.value++)
-  onScopeDispose(off)
+  onScopeDispose(subscribeAttention(() => revision.value++))
   const binding = computed(() => {
     if (!toValue(enabled)) return null
     if (explicit) return explicit.value?.chat || null
-    const tab = tracker ? tabs.byId[tracker.last.value] : tabs.activeTab
-    if (tab?.kind !== "attach" || !tab.target) return null
-    const chat = useChatStore(tab.target)
-    return chat._instanceHostId === hosts.activeHostId ? chat : null
+    if (tab.value?.kind !== "attach" || !tab.value.target) return null
+    const chat = useChatStore(tab.value.target)
+    return chat._instanceHostId === hosts.activeHostId &&
+      chat._instanceRuntimeScope === getRuntimeScope()
+      ? chat
+      : null
   })
   const source = computed(() =>
     explicit ? explicit.value?.source : binding.value?.terrariumTarget,
@@ -119,19 +101,18 @@ export function useWorkContext({
   const speech = includeSpeech ? useWorkSpeech(binding, source) : null
   return computed(() => {
     revision.value
-    if (tracker?.remote.value && toValue(enabled)) {
-      const { speech: remoteSpeech, ...work } = tracker.remote.value
+    if (!toValue(enabled)) return null
+    if (!local && target === undefined && !scope && (injected || desktopContextConnected.value)) {
+      const value = injected ? injected.value : desktopWork.value
+      if (!value || (!retainLast && value.retained)) return null
+      const { speech: remoteSpeech, ...work } = value
       return Object.freeze({ ...work, ...(includeSpeech ? { speech: remoteSpeech } : {}) })
     }
     const chat = binding.value
     if (!chat) return null
-    const tab = explicit
-      ? { target: toValue(target)?.sessionId, label: toValue(target)?.label }
-      : tracker
-        ? tabs.byId[tracker.last.value]
-        : tabs.activeTab
+    const current = tab.value
     const instance = instances.list.find(
-      (item) => item.id === tab.target || item.graph_id === tab.target,
+      (item) => item.id === current.target || item.graph_id === current.target,
     )
     const creature = instance?.creatures?.find(
       (item) =>
@@ -141,12 +122,13 @@ export function useWorkContext({
     )
     return Object.freeze({
       hostId: chat._instanceHostId,
-      sessionId: tab.target,
+      sessionId: current.target,
       creatureId: creature?.creature_id || source.value || "",
       creatureLabel: creature?.name || source.value || "",
-      label: tab.label || tab.config_name || tab.target,
+      label: current.label || current.config_name || current.target,
       connected: chat.wsStatus === "open",
-      ...workForScope(tab.target),
+      ...(tracker ? { retained: tabs.activeId !== tracker.last.value } : {}),
+      ...workForScope(current.target),
       ...(speech ? { speech: speech.value } : {}),
     })
   })
@@ -161,7 +143,8 @@ function observeTarget(target, enabled) {
       () => toValue(enabled),
       () => toValue(target)?.sessionId,
       () => hosts.activeHostId,
-      () => hosts.activeHost?.currentUser?.id,
+      contextRealm,
+      getRuntimeScope,
     ],
     ([active, sessionId], _, cleanup) => {
       current.value = null
@@ -194,7 +177,12 @@ function observeTarget(target, enabled) {
   onScopeDispose(stop)
   return computed(() => {
     const value = current.value
-    if (!value) return null
+    if (
+      !value ||
+      value.chat._instanceHostId !== hosts.activeHostId ||
+      value.chat._instanceRuntimeScope !== getRuntimeScope()
+    )
+      return null
     const { sessionId, creatureId } = toValue(target) || {}
     const instance =
       instances.list.find((item) => item.id === sessionId || item.graph_id === sessionId) ||

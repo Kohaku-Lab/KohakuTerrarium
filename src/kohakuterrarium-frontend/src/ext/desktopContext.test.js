@@ -5,7 +5,13 @@ import { createPinia, setActivePinia } from "pinia"
 import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
 
-import { contextRealm, createContextRelay, startDesktopContext } from "@/ext/desktopContext"
+import {
+  contextRealm,
+  createContextRelay,
+  desktopContextConnected,
+  desktopWork,
+  startDesktopContext,
+} from "@/ext/desktopContext"
 
 it("does not borrow the same-origin user for an anonymous remote backend", () => {
   setActivePinia(createPinia())
@@ -168,8 +174,11 @@ it("resolves initial cookie auth before publishing identity and never relays cre
     }
     requester.postMessage(queued)
     expect(net.traffic.at(-1).work.sessionId).toBe("old-token-session")
+    expect(desktopContextConnected.value).toBe(true)
+    expect(desktopWork.value?.sessionId).toBe("old-token-session")
     hosts.setUserSession(id, { userToken: "private-new", user: null })
     expect(net.traffic.at(-1).work).toBeNull()
+    expect(desktopWork.value).toBeNull()
     requester.postMessage({ ...queued, sequence: 2 })
     expect(net.traffic.filter((m) => m.type === "context").at(-1).work).toBeNull()
     const fresh = net.traffic.filter((m) => m.type === "context").at(-1)
@@ -180,7 +189,11 @@ it("resolves initial cookie auth before publishing identity and never relays cre
       work: work("new-token-session"),
     })
     expect(net.traffic.at(-1).work.sessionId).toBe("new-token-session")
+    expect(desktopWork.value?.sessionId).toBe("new-token-session")
     expect(JSON.stringify(net.traffic)).not.toMatch(/private-old|private-new/)
+    window.dispatchEvent(new Event("pagehide"))
+    expect(desktopWork.value).toBeNull()
+    expect(desktopContextConnected.value).toBe(false)
   } finally {
     window.dispatchEvent(new Event("pagehide"))
     requester.close()

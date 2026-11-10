@@ -96,6 +96,28 @@ describe("UI SDK surface", () => {
     }
   })
 
+  it("keeps reviewed-pet navigation restricted while allowing L2D to open its conversation", async () => {
+    const invoke = vi.fn(async (name) =>
+      name === "get_desktop_capabilities"
+        ? { surface: "desktop", protocol: 1, mainNavigation: true }
+        : true,
+    )
+    window.__TAURI_INTERNALS__ = { invoke }
+    try {
+      window.history.replaceState({}, "", "/?kt_overlay=ext%3Avirtual-pet%2Fpet")
+      expect(await Sdk.openChat({ sessionId: "session" })).toBe(false)
+      expect(invoke).not.toHaveBeenCalledWith("navigate_main", expect.anything())
+      window.history.replaceState({}, "", "/?kt_overlay=ext%3Alive2d-pet-demo%2Fdragon")
+      expect(await Sdk.openChat({ sessionId: "session", creatureId: "dragon" })).toBe(true)
+      expect(invoke).toHaveBeenCalledWith("navigate_main", {
+        args: [{ kind: "attach", sessionId: "session", creatureId: "dragon" }],
+      })
+    } finally {
+      window.history.replaceState({}, "", "/")
+      delete window.__TAURI_INTERNALS__
+    }
+  })
+
   it("exports exactly the published names, and the mock exports them too", () => {
     expect(Object.keys(Sdk).sort()).toEqual([...SDK_EXPORT_NAMES].sort())
     for (const name of SDK_EXPORT_NAMES) expect(Mock[name], name).toBeDefined()

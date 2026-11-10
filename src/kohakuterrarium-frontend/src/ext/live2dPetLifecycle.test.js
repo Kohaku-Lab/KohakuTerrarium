@@ -110,6 +110,46 @@ it("does not reacquire a rejected lease on background heartbeats", async () => {
   }
 })
 
+it("keeps a ready desktop renderer connected while the in-app renderer retires", async () => {
+  vi.useFakeTimers()
+  let channel
+  vi.stubGlobal(
+    "BroadcastChannel",
+    class {
+      constructor() {
+        channel = this
+      }
+      postMessage() {}
+      close() {}
+    },
+  )
+  const host = createMockHost({ package: "renderer-handoff" })
+  const bridge = bridgeFor(host.kt)
+  bridge.ownership.current.value = { client: "controller", token: "lease" }
+  const remote = (ready, error = "") =>
+    channel.onmessage({
+      data: { type: "renderer", peer: "desktop", token: "lease", data: { ready, error } },
+    })
+  try {
+    bridge.renderer(true)
+    remote(true)
+    bridge.renderer(false)
+    expect(bridge.rendering.value).toBe(true)
+    remote(false, "renderer failed")
+    expect(bridge.rendering.value).toBe(false)
+    expect(bridge.renderError.value).toBe("renderer failed")
+    bridge.renderer(true)
+    expect(bridge.renderError.value).toBe("")
+    remote(false)
+    expect(bridge.rendering.value).toBe(true)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(bridge.rendering.value).toBe(false)
+  } finally {
+    bridge.close()
+    host.dispose()
+  }
+})
+
 it.each(["fatal", "timeout"])("revokes readiness on renderer %s and allows retry", async (kind) => {
   vi.useFakeTimers()
   const host = createMockHost({

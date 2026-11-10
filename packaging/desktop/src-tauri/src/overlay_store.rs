@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{Manager, WebviewWindow};
 
-use crate::overlay::overlay_get_bounds;
+use crate::overlay_geometry::overlay_get_bounds;
 use crate::overlay_placement::overlay_placement;
 
 #[derive(Default)]

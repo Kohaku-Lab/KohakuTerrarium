@@ -57,22 +57,23 @@ let capabilitiesBridge, capabilitiesPromise
 const nativeCapabilities = shallowRef(null)
 
 /** Shell capabilities cached for the current native bridge. Missing fields mean unsupported. */
-export async function desktopCapabilities() {
+export function desktopCapabilities({ refresh = false } = {}) {
   const bridge = window.pywebview?.api || window.__TAURI_INTERNALS__?.invoke
-  if (!bridge) return null
+  if (!bridge) return Promise.resolve(null)
   if (capabilitiesBridge !== bridge) {
     capabilitiesBridge = bridge
     nativeCapabilities.value = null
     capabilitiesPromise = null
   }
-  if (!hostSupports("get_desktop_capabilities")) return null
-  if (!capabilitiesPromise) {
+  if (!hostSupports("get_desktop_capabilities")) return Promise.resolve(null)
+  if (refresh || !capabilitiesPromise) {
     const pending = (async () => {
       try {
         const value = await call("get_desktop_capabilities")
         const result =
           value?.surface === "desktop" && value.protocol === DESKTOP_PROTOCOL ? value : null
-        if (capabilitiesBridge === bridge) nativeCapabilities.value = result
+        if (capabilitiesBridge === bridge && capabilitiesPromise === pending)
+          nativeCapabilities.value = result
         return result
       } catch {
         return null
@@ -394,7 +395,7 @@ export function overlayWindowsSupported() {
   return (
     hostKind() === KIND_TAURI &&
     capabilitiesBridge === window.__TAURI_INTERNALS__?.invoke &&
-    !!(caps?.overlayWindows && caps?.overlayResize && caps?.overlayPlacementNative)
+    caps?.overlayWindows === true
   )
 }
 
@@ -412,9 +413,9 @@ export function focusSession(scope) {
   return callBoolean("focus_session", String(scope))
 }
 
-export async function relayWorkContext(context) {
-  if (!(await desktopCapabilities())?.workContextRelay) return false
-  return callBoolean("relay_work_context", context)
+export async function desktopWindowFocused() {
+  if (!(await desktopCapabilities())?.desktopContextFocus) return document.hasFocus()
+  return callBoolean("desktop_window_focused")
 }
 
 export async function navigateMain(target) {

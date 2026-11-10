@@ -53,7 +53,7 @@ pub fn capabilities() -> Value {
         "overlayResize": true,
         "overlayPlacementV1": true,
         "overlayPlacementNative": true,
-        "workContextRelay": true,
+        "desktopContextFocus": true,
         "mainNavigation": true,
         "closeToTray": true,
         "trayBadge": true,
