@@ -18,7 +18,6 @@ from kohakuterrarium.llm.presets.aliases import (
     resolve_deprecated,
 )
 from kohakuterrarium.llm.presets.groups import (
-    _ANTHROPIC_EFFORT_46_GROUP,
     _ANTHROPIC_EFFORT_47_GROUP,
     _CODEX_REASONING_GROUP,
     _CODEX_SPEED_GROUP,
@@ -35,7 +34,13 @@ from kohakuterrarium.llm.presets.groups import (
     _OPENAI_REASONING_GROUP,
     _OPENAI_SPEED_GROUP,
     _OR_REASONING_GROUP,
+    _OR_CONTEXT_GROUP,
     _OR_REASONING_GROUP_56,
+    _OR_REASONING_GROUP_GROK_47,
+    _OR_REASONING_GROUP_LHM,
+    _OR_REASONING_GROUP_LHM_TOGGLE,
+    _OR_REASONING_GROUP_TOP,
+    _OR_REASONING_GROUP_TOP_TOGGLE,
     _OR_REASONING_GROUP_NO_MINIMAL,
     _OR_REASONING_GROUP_WITH_XHIGH,
     _OR_REASONING_TOGGLE_GROUP,
@@ -303,34 +308,50 @@ PRESETS: dict[str, dict[str, Any]] = {
             "mode": _GPT56_MODE_GROUP,
         },
     },
+    "gpt-6-astra-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-6-astra",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "medium"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP_TOGGLE},
+    },
+    "gpt-6.1-sol-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-6.1-sol",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "medium"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "gpt-6-sol-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-6-sol",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "medium"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "gpt-6.1-terra-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-6.1-terra",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "medium"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP_TOGGLE},
+    },
+    "gpt-6-luna-or": {
+        "provider": "openrouter",
+        "model": "openai/gpt-6-luna",
+        "max_context": 1050000,
+        "max_output": 128000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "medium"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP_TOGGLE},
+    },
     "gpt-5.5-or": {
         "provider": "openrouter",
         "model": "openai/gpt-5.5",
         "max_context": 272000,
-        "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "gpt-5.4-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-5.4",
-        "max_context": 400000,
-        "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "gpt-5.4-mini-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-5.4-mini",
-        "max_context": 400000,
-        "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "gpt-5.4-nano-or": {
-        "provider": "openrouter",
-        "model": "openai/gpt-5.4-nano",
-        "max_context": 400000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
@@ -361,6 +382,56 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
     },
+    "claude-fable-5.2": {
+        "provider": "anthropic",
+        "model": "claude-fable-5-2",
+        "max_context": 1000000,
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
+    "claude-fable-5.1": {
+        "provider": "anthropic",
+        "model": "claude-fable-5-1",
+        "max_context": 1000000,
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
+    "claude-opus-5.5": {
+        "provider": "anthropic",
+        "model": "claude-opus-5-5",
+        "max_context": 1000000,
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "medium"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
+    "claude-opus-5": {
+        "provider": "anthropic",
+        "model": "claude-opus-5",
+        "max_context": 1000000,
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
+    "claude-sonnet-5.5": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5",
+        "max_context": 1000000,
+        "extra_body": {
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "high"},
+        },
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
+    },
     "claude-opus-4.8": {
         "provider": "anthropic",
         "model": "claude-opus-4-8",
@@ -385,16 +456,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
     },
-    "claude-opus-4.6": {
-        "provider": "anthropic",
-        "model": "claude-opus-4-6",
-        "max_context": 1000000,
-        "extra_body": {
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": "high"},
-        },
-        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_46_GROUP},
-    },
     "claude-sonnet-5": {
         "provider": "anthropic",
         "model": "claude-sonnet-5",
@@ -408,15 +469,15 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
     },
-    "claude-sonnet-4.6": {
+    "claude-haiku-5.5": {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-6",
+        "model": "claude-haiku-5-5",
         "max_context": 1000000,
         "extra_body": {
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": "high"},
+            "thinking": {"type": "adaptive", "display": "summarized"},
+            "output_config": {"effort": "medium"},
         },
-        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_46_GROUP},
+        "variation_groups": {"reasoning": _ANTHROPIC_EFFORT_47_GROUP},
     },
     "claude-haiku-4.5": {
         "provider": "anthropic",
@@ -441,10 +502,77 @@ PRESETS: dict[str, dict[str, Any]] = {
         },
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
     },
+    "claude-fable-5.2-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-fable-5.2",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "claude-fable-5.1-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-fable-5.1",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "claude-opus-5.5-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-opus-5.5",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "medium"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "claude-opus-5-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-opus-5",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "claude-sonnet-5.5-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-sonnet-5.5",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
+    "claude-haiku-5.5-or": {
+        "provider": "openrouter",
+        "model": "anthropic/claude-haiku-5.5",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "medium"},
+            "cache_control": {"type": "ephemeral"},
+        },
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP_TOGGLE},
+    },
     "claude-opus-4.8-or": {
         "provider": "openrouter",
         "model": "anthropic/claude-opus-4.8",
         "max_context": 1000000,
+        "max_output": 128000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
             "cache_control": {"type": "ephemeral"},
@@ -455,41 +583,23 @@ PRESETS: dict[str, dict[str, Any]] = {
         "provider": "openrouter",
         "model": "anthropic/claude-opus-4.7",
         "max_context": 1000000,
+        "max_output": 128000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
             "cache_control": {"type": "ephemeral"},
         },
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "claude-opus-4.6-or": {
-        "provider": "openrouter",
-        "model": "anthropic/claude-opus-4.6",
-        "max_context": 1000000,
-        "extra_body": {
-            "reasoning": {"enabled": True, "effort": "high"},
-            "cache_control": {"type": "ephemeral"},
-        },
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
     "claude-sonnet-5-or": {
         "provider": "openrouter",
         "model": "anthropic/claude-sonnet-5",
         "max_context": 1000000,
+        "max_output": 128000,
         "extra_body": {
             "reasoning": {"enabled": True, "effort": "high"},
             "cache_control": {"type": "ephemeral"},
         },
         "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
-    },
-    "claude-sonnet-4.6-or": {
-        "provider": "openrouter",
-        "model": "anthropic/claude-sonnet-4.6",
-        "max_context": 1000000,
-        "extra_body": {
-            "reasoning": {"enabled": True, "effort": "high"},
-            "cache_control": {"type": "ephemeral"},
-        },
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
     },
     "claude-haiku-4.5-or": {
         "provider": "openrouter",
@@ -522,6 +632,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  4 Argon is the flagship; 3.8 Flash and 3.5 Flash-Lite are
     #  the stable Flash tiers.
     # ═══════════════════════════════════════════════════════
+    "gemini-4-carbon": {
+        "provider": "gemini",
+        "model": "gemini-4-carbon",
+        "max_context": 1048576,
+        "max_output": 65536,
+        "extra_body": _gemini_thinking("MEDIUM"),
+        "variation_groups": {"thinking": _GEMINI_THINKING_GROUP},
+    },
     "gemini-4-argon": {
         "provider": "gemini",
         "model": "gemini-4-argon",
@@ -538,6 +656,14 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": _gemini_thinking("HIGH"),
         "variation_groups": {"thinking": _GEMINI_THINKING_GROUP},
     },
+    "gemini-3.6-flash": {
+        "provider": "gemini",
+        "model": "gemini-3.6-flash",
+        "max_context": 1048576,
+        "max_output": 65536,
+        "extra_body": _gemini_thinking("HIGH"),
+        "variation_groups": {"thinking": _GEMINI_THINKING_GROUP},
+    },
     "gemini-3.5-flash-lite": {
         "provider": "gemini",
         "model": "gemini-3.5-flash-lite",
@@ -549,6 +675,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  Google Gemini via OpenRouter (-or suffix).
     # ═══════════════════════════════════════════════════════
+    "gemini-4-carbon-or": {
+        "provider": "openrouter",
+        "model": "google/gemini-4-carbon",
+        "max_context": 1048576,
+        "max_output": 65536,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "medium"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_NO_MINIMAL},
+    },
     "gemini-4-argon-or": {
         "provider": "openrouter",
         "model": "google/gemini-4-argon",
@@ -560,6 +694,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gemini-3.8-flash-or": {
         "provider": "openrouter",
         "model": "google/gemini-3.8-flash",
+        "max_context": 1048576,
+        "max_output": 65536,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_NO_MINIMAL},
+    },
+    "gemini-3.6-flash-or": {
+        "provider": "openrouter",
+        "model": "google/gemini-3.6-flash",
         "max_context": 1048576,
         "max_output": 65536,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
@@ -612,6 +754,30 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  3.6-flash the fast tier; the 3.5 open-weight releases are
     #  still the current open models. Coder line stays qwen3-*.
     # ═══════════════════════════════════════════════════════
+    "qwen3.8-max": {
+        "provider": "openrouter",
+        "model": "qwen/qwen3.8-max-0902",
+        "max_context": 1000000,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "xhigh"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
+    },
+    "qwen3.8-flash": {
+        "provider": "openrouter",
+        "model": "qwen/qwen3.8-flash",
+        "max_context": 1000000,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_WITH_XHIGH},
+    },
+    "qwen3-coder-next": {
+        "provider": "openrouter",
+        "model": "qwen/qwen3-coder-next",
+        "max_context": 262144,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
+    },
     "qwen3.7-max": {
         "provider": "openrouter",
         "model": "qwen/qwen3.7-max",
@@ -623,35 +789,6 @@ PRESETS: dict[str, dict[str, Any]] = {
     "qwen3.7-plus": {
         "provider": "openrouter",
         "model": "qwen/qwen3.7-plus",
-        "max_context": 1000000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "qwen3.6-flash": {
-        "provider": "openrouter",
-        "model": "qwen/qwen3.6-flash",
-        "max_context": 1000000,
-        "max_output": 65536,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "qwen3.5-397b": {
-        "provider": "openrouter",
-        "model": "qwen/qwen3.5-397b-a17b",
-        "max_context": 262144,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "qwen3.5-27b": {
-        "provider": "openrouter",
-        "model": "qwen/qwen3.5-27b",
-        "max_context": 262144,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
-    "qwen3-coder-plus": {
-        "provider": "openrouter",
-        "model": "qwen/qwen3-coder-plus",
         "max_context": 1000000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _OR_REASONING_GROUP},
@@ -673,6 +810,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     #   K2.7 Code:  coding-specialized — always-on thinking, no
     #               variation group. (No plain "k2.7" exists.)
     # ═══════════════════════════════════════════════════════
+    "kimi-k3.1-pro": {
+        "provider": "openrouter",
+        "model": "moonshotai/kimi-k3.1-pro",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "max"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_LHM_TOGGLE},
+    },
     "kimi-k2.7-code": {
         "provider": "openrouter",
         "model": "moonshotai/kimi-k2.7-code",
@@ -680,18 +825,19 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_output": 32768,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
-    "kimi-k2.6": {
-        "provider": "openrouter",
-        "model": "moonshotai/kimi-k2.6",
-        "max_context": 262144,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP},
-    },
     # ═══════════════════════════════════════════════════════
     #  MiniMax M3 (OpenRouter). 1M context; thinking is a toggle
     #  (disabled / adaptive / budget) — adaptive is the API default,
     #  we pin it on and expose an off switch.
     # ═══════════════════════════════════════════════════════
+    "minimax-m3.1-flash": {
+        "provider": "openrouter",
+        "model": "minimax/minimax-m3.1-flash",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "max"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_TOP},
+    },
     "minimax-m3": {
         "provider": "openrouter",
         "model": "minimax/minimax-m3",
@@ -751,6 +897,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  GLM (Z.ai, OpenRouter). Thinking effort is high / xhigh only.
     # ═══════════════════════════════════════════════════════
+    "glm-5.3-or": {
+        "provider": "openrouter",
+        "model": "z-ai/glm-5.3",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "max"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_LHM},
+    },
     "glm-5.2-or": {
         "provider": "openrouter",
         "model": "z-ai/glm-5.2",
@@ -782,17 +936,25 @@ PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  Xiaomi MiMo via OpenRouter (-or suffix).
     # ═══════════════════════════════════════════════════════
+    "mimo-v2.6-pro-or": {
+        "provider": "openrouter",
+        "model": "xiaomi/mimo-v2.6-pro",
+        "max_context": 1050000,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
+    },
     "mimo-v2.5-pro-or": {
         "provider": "openrouter",
         "model": "xiaomi/mimo-v2.5-pro",
-        "max_context": 1048576,
+        "max_context": 1024000,
         "extra_body": {"reasoning": {"enabled": True}},
         "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
     "mimo-v2.5-or": {
         "provider": "openrouter",
         "model": "xiaomi/mimo-v2.5",
-        "max_context": 1048576,
+        "max_context": 1000000,
         "extra_body": {"reasoning": {"enabled": True}},
         "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
@@ -822,25 +984,36 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_output": 65536,
     },
     # xAI Grok models via OpenRouter.
+    "grok-4.7": {
+        "provider": "openrouter",
+        "model": "x-ai/grok-4.7",
+        "max_context": 500000,
+        "max_output": 450000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_GROK_47},
+    },
+    "grok-4.6": {
+        "provider": "openrouter",
+        "model": "x-ai/grok-4.6",
+        "max_context": 500000,
+        "max_output": 450000,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_GROK_47},
+    },
+    "grok-4.3": {
+        "provider": "openrouter",
+        "model": "x-ai/grok-4.3",
+        "max_context": 1000000,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _GROK_EFFORT_GROUP},
+    },
     "grok-4.5": {
         "provider": "openrouter",
         "model": "x-ai/grok-4.5",
         "max_context": 500000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _GROK_EFFORT_GROUP},
-    },
-    "grok-4.1-fast": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-4.1-fast",
-        "max_context": 2000000,
-        "extra_body": {"reasoning": {"enabled": True}},
-        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
-    },
-    "grok-code-fast": {
-        "provider": "openrouter",
-        "model": "x-ai/grok-code-fast-1",
-        "max_context": 256000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
     },
     # ═══════════════════════════════════════════════════════
     #  Mistral (OpenRouter), post-2026-03 consolidation:
@@ -857,10 +1030,13 @@ PRESETS: dict[str, dict[str, Any]] = {
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
         "variation_groups": {"reasoning": _MISTRAL_REASONING_GROUP},
     },
-    "mistral-large-3": {
+    "mistral-large-4": {
         "provider": "openrouter",
-        "model": "mistralai/mistral-large-2512",
-        "max_context": 262144,
+        "model": "mistralai/mistral-large-4-0",
+        "max_context": 1048576,
+        "max_output": 262144,
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
     },
     "mistral-small-4": {
         "provider": "openrouter",
@@ -878,7 +1054,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "codestral": {
         "provider": "openrouter",
         "model": "mistralai/codestral-2508",
-        "max_context": 262144,
+        "max_context": 256000,
     },
     "ministral-3-14b": {
         "provider": "openrouter",
@@ -890,7 +1066,57 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "mistralai/ministral-8b-2512",
         "max_context": 262144,
     },
+    # ═══════════════════════════════════════════════════════
+    #  Other labs (OpenRouter only).
+    # ═══════════════════════════════════════════════════════
+    "ripple-65b-preview": {
+        "provider": "openrouter",
+        "model": "ricursiveai/ripple-65b-preview",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True}},
+        "variation_groups": {"reasoning": _OR_REASONING_TOGGLE_GROUP},
+    },
+    "muse-ember": {
+        "provider": "openrouter",
+        "model": "meta/muse-ember",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "max"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+    },
+    "hy4": {
+        "provider": "openrouter",
+        "model": "tencent/hy4",
+        "max_context": 1048576,
+        "max_output": 65536,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_LHM_TOGGLE},
+    },
+    "deepseek-v4.1-flash": {
+        "provider": "openrouter",
+        "model": "deepseek/deepseek-v4.1-flash",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "variation_groups": {"reasoning": _OR_REASONING_GROUP_LHM_TOGGLE},
+    },
 }
+
+
+def _add_context_presets(presets: dict[str, dict[str, Any]]) -> None:
+    """Offer local context budgets on every large-window OpenRouter preset."""
+    for data in presets.values():
+        if (
+            data.get("provider") == "openrouter"
+            and data.get("max_context", 0) >= 500000
+        ):
+            data.setdefault("variation_groups", {}).setdefault(
+                "context", _OR_CONTEXT_GROUP
+            )
+
+
+_add_context_presets(PRESETS)
 
 # Aliases stay separate from the canonical provider/name view.
 _all_presets_cache: dict[tuple[str, str], dict[str, Any]] | None = None

@@ -29,6 +29,7 @@ LEVELS = {
 }
 
 MODELS = {
+    "gemini-4-carbon": ModelSpec((256000, 512000, 900000), 65536, LEVELS),
     "gemini-4-argon": ModelSpec((256000, 512000, 900000), 65536, LEVELS),
     "gemini-3.8-flash": ModelSpec(
         (256000, 1048576),

@@ -64,8 +64,13 @@ def merge_reasoning_detail_stream(
         return
     idx = piece.get("index")
     ptype = piece.get("type")
-    for existing in accumulator:
-        if existing.get("index") == idx and existing.get("type") == ptype:
+    pid = piece.get("id")
+    for existing in accumulator[-1:]:
+        if (
+            existing.get("index") == idx
+            and existing.get("type") == ptype
+            and (pid is None or existing.get("id") in (None, pid))
+        ):
             for field in ("text", "thinking"):
                 value = piece.get(field)
                 if isinstance(value, str) and value:

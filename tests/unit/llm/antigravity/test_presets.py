@@ -40,6 +40,7 @@ def test_catalog_is_exactly_the_agy_agent_list():
         for effort in spec.efforts
     }
     assert advertised == {
+        *(f"gemini-4-carbon-{e}" for e in LEVELS),
         *(f"gemini-4-argon-{e}" for e in LEVELS),
         *(f"gemini-3.8-flash-{e}" for e in LEVELS),
         *(f"claude-opus-5-5-{e}" for e in LEVELS),

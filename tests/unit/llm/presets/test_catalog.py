@@ -73,8 +73,8 @@ class TestGetAllPresets:
         assert ("codex", "gpt-5.4") in allp
         # the -api variant collapses to bare 'gpt-5.4' under openai
         assert ("openai", "gpt-5.4") in allp
-        # the -or variant collapses to bare 'gpt-5.4' under openrouter
-        assert ("openrouter", "gpt-5.4") in allp
+        # the -or variant collapses to the bare name under openrouter
+        assert ("openrouter", "gpt-5.5") in allp
 
     def test_entry_values_drop_the_provider_key(self):
         allp = get_all_presets()
@@ -85,8 +85,8 @@ class TestGetAllPresets:
 
     def test_or_variant_has_distinct_model_id(self):
         allp = get_all_presets()
-        assert allp[("openrouter", "gpt-5.4")]["model"] == "openai/gpt-5.4"
-        assert allp[("codex", "gpt-5.4")]["model"] == "gpt-5.4"
+        assert allp[("openrouter", "gpt-5.5")]["model"] == "openai/gpt-5.5"
+        assert allp[("codex", "gpt-5.5")]["model"] == "gpt-5.5"
 
     def test_result_is_cached(self):
         first = get_all_presets()
@@ -117,18 +117,18 @@ class TestGetAllPresets:
 
 class TestResolveAlias:
     def test_short_friendly_alias(self):
-        assert resolve_alias("opus") == ("anthropic", "claude-opus-4.8")
-        assert resolve_alias("fable") == ("anthropic", "claude-fable-5")
-        assert resolve_alias("sonnet") == ("anthropic", "claude-sonnet-5")
+        assert resolve_alias("opus") == ("anthropic", "claude-opus-5.5")
+        assert resolve_alias("fable") == ("anthropic", "claude-fable-5.2")
+        assert resolve_alias("sonnet") == ("anthropic", "claude-sonnet-5.5")
         assert resolve_alias("gpt5") == ("codex", "gpt-5.5")
         assert resolve_alias("kimi-code") == ("kimi-code", "kimi-for-coding")
         assert resolve_alias("glm-coding") == ("glm-coding", "glm-5.2")
 
     def test_legacy_suffixed_alias(self):
-        assert resolve_alias("gpt-5.4-or") == ("openrouter", "gpt-5.4")
+        assert resolve_alias("gpt-5.4-or") == ("openrouter", "gpt-5.5")
         assert resolve_alias("claude-opus-4.6-direct") == (
             "anthropic",
-            "claude-opus-4.6",
+            "claude-opus-4.8",
         )
 
     def test_unknown_name_returns_none(self):
@@ -365,7 +365,7 @@ class TestPresetsDataIntegrity:
         )
         for name in ws_on:
             assert PRESETS[name]["extra_body"]["websocket_mode"] is True, name
-        for name in ("gpt-5.6-sol-or", "gpt-5.5-or", "gpt-5.4-or"):
+        for name in ("gpt-5.6-sol-or", "gpt-5.5-or"):
             assert "websocket_mode" not in PRESETS[name].get("extra_body", {}), name
 
     def test_gpt56_mode_composes_with_reasoning_selection(self):

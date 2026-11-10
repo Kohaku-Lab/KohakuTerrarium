@@ -148,11 +148,11 @@ class TestGetProfile:
         assert resolve_controller_llm({"model": model}).provider == "grok-subscription"
 
     def test_provider_arg_disambiguates(self):
-        profile = get_profile("gpt-5.4", provider="openrouter")
+        profile = get_profile("gpt-5.5", provider="openrouter")
         assert profile is not None
         assert profile.provider == "openrouter"
         # OR variant has the prefixed model id
-        assert profile.model == "openai/gpt-5.4"
+        assert profile.model == "openai/gpt-5.5"
         assert profile.base_url == "https://openrouter.ai/api/v1"
 
     def test_ambiguous_bare_name_raises(self):
@@ -161,11 +161,11 @@ class TestGetProfile:
             get_profile("gpt-5.4")
 
     def test_alias_resolves(self):
-        # 'opus' alias -> (anthropic, claude-opus-4.8)
+        # 'opus' alias -> (anthropic, claude-opus-5.5)
         profile = get_profile("opus")
         assert profile is not None
         assert profile.provider == "anthropic"
-        assert profile.model == "claude-opus-4-8"
+        assert profile.model == "claude-opus-5-5"
 
     def test_unknown_name_returns_none(self):
         assert get_profile("totally-made-up-model") is None
@@ -489,8 +489,8 @@ class TestDefaultModel:
         assert get_default_model() == "glm-coding/glm-5.3"
 
     def test_upgrade_bare_default_via_alias(self):
-        # 'gpt-5.4-or' is an alias -> (openrouter, gpt-5.4)
-        assert _upgrade_bare_default("gpt-5.4-or") == "openrouter/gpt-5.4"
+        # 'gpt-5.5-or' is an alias -> (openrouter, gpt-5.5)
+        assert _upgrade_bare_default("gpt-5.5-or") == "openrouter/gpt-5.5"
 
     def test_upgrade_bare_default_unknown_returns_empty(self):
         assert _upgrade_bare_default("not-a-model") == ""

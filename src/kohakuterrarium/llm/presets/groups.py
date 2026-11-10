@@ -219,3 +219,45 @@ _GROK_EFFORT_GROUP: dict[str, dict[str, Any]] = {
     "medium": {"extra_body.reasoning.effort": "medium"},
     "high": {"extra_body.reasoning.effort": "high"},
 }
+
+# OpenRouter effort scales read from ``GET /api/v1/models`` (``reasoning``).
+# ``TOP``: low..max, reasoning mandatory (Claude 5.x, GPT-6 Sol, MiniMax M3.1).
+_OR_REASONING_GROUP_TOP: dict[str, dict[str, Any]] = {
+    **_OR_REASONING_GROUP_NO_MINIMAL,
+    "xhigh": {"extra_body.reasoning.effort": "xhigh"},
+    "max": {"extra_body.reasoning.effort": "max"},
+}
+
+# ``TOP`` plus an off switch, for models where reasoning is optional.
+_OR_REASONING_GROUP_TOP_TOGGLE: dict[str, dict[str, Any]] = {
+    "off": {"extra_body.reasoning.enabled": False},
+    **_OR_REASONING_GROUP_TOP,
+}
+
+# low / high / max, reasoning mandatory (GLM 5.3).
+_OR_REASONING_GROUP_LHM: dict[str, dict[str, Any]] = {
+    "low": {"extra_body.reasoning.effort": "low"},
+    "high": {"extra_body.reasoning.effort": "high"},
+    "max": {"extra_body.reasoning.effort": "max"},
+}
+
+# low / high / max with an off switch (Kimi K3.1, DeepSeek V4.1).
+_OR_REASONING_GROUP_LHM_TOGGLE: dict[str, dict[str, Any]] = {
+    "off": {"extra_body.reasoning.enabled": False},
+    **_OR_REASONING_GROUP_LHM,
+}
+
+# Grok 4.6+: low..xhigh, reasoning mandatory.
+_OR_REASONING_GROUP_GROK_47: dict[str, dict[str, Any]] = {
+    **_OR_REASONING_GROUP_NO_MINIMAL,
+    "xhigh": {"extra_body.reasoning.effort": "xhigh"},
+}
+
+# Local context budgets for 1M-class OpenRouter models: KT compacts at
+# ``max_context * threshold``, so a smaller value compacts earlier.
+_OR_CONTEXT_GROUP: dict[str, dict[str, Any]] = {
+    "200k": {"max_context": 200000},
+    "400k": {"max_context": 400000},
+    "700k": {"max_context": 700000},
+    "1m": {"max_context": 1000000},
+}
