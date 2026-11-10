@@ -105,8 +105,11 @@ controller notification disabled do not require a feedback turn.
 `executor.wait_for(job_id)` waits for execution, not controller consumption.
 Cancellation is cooperative and does not undo external side effects. A tool
 that does not return or finish cancellation can therefore continue to block
-those history operations. This contract does not promise crash-safe execution or
-exactly-once external side effects.
+those history operations. After an interrupted direct tool call, the next turn
+also waits until its result can be paired with the call; a subsequent interrupt
+can withdraw that waiting turn. If result settlement fails, new turns fail closed
+rather than sending an incomplete exchange. This contract does not promise
+crash-safe execution or exactly-once external side effects.
 
 ## How we implement it
 

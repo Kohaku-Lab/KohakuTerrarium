@@ -549,6 +549,45 @@ class TestCancel:
             tool.release.set()
             await asyncio.gather(task, return_exceptions=True)
 
+    async def test_repeated_cancel_does_not_interrupt_cleanup(self):
+        ex = Executor()
+        tool = _CancellationTool(suppress=True)
+        ex.register_tool(tool)
+        jid = await ex.submit("slow", {})
+        task = ex.get_task(jid)
+        try:
+            await asyncio.wait_for(tool.started.wait(), 3)
+            assert await ex.cancel(jid)
+            await asyncio.wait_for(tool.cancelling.wait(), 3)
+            assert await ex.cancel(jid)
+            await asyncio.sleep(0)
+            assert not task.done()
+            assert ex.get_status(jid).state == JobState.RUNNING
+            tool.release.set()
+            result = await ex.wait_for(jid, timeout=3)
+            assert result.output == "settled" and not result.cancelled
+        finally:
+            tool.release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_repeated_cancel_after_uncancel_is_a_new_request(self):
+        ex = Executor()
+        tool = _CancellationTool(suppress=True)
+        ex.register_tool(tool)
+        jid = await ex.submit("slow", {})
+        task = ex.get_task(jid)
+        try:
+            await asyncio.wait_for(tool.started.wait(), 3)
+            assert await ex.cancel(jid)
+            await asyncio.wait_for(tool.cancelling.wait(), 3)
+            task.uncancel()
+            assert await ex.cancel(jid)
+            result = await ex.wait_for(jid, timeout=3)
+            assert result.cancelled
+        finally:
+            tool.release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_suppressed_cancellation_keeps_the_actual_outcome(self):
         ex = Executor()
         tool = _CancellationTool(suppress=True)

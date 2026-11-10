@@ -246,6 +246,10 @@ def include_settled_tool_results(
         for event in live_events
         if event.get("type") == "tool_result" and (identity := identities[id(event)])
     }
+    all_call_counts: dict[str, int] = {}
+    for event in events:
+        if event.get("type") == "tool_call" and (identity := _tool_identity(event)):
+            all_call_counts[identity] = all_call_counts.get(identity, 0) + 1
     late_results: dict[str, dict[str, Any]] = {}
     for event in events:
         if event.get("type") != "tool_result":
@@ -256,6 +260,7 @@ def include_settled_tool_results(
             continue
         if (
             identity
+            and all_call_counts.get(identity) == 1
             and identity in live_call_turns
             and identity not in live_result_ids
             and identity not in late_results
@@ -319,12 +324,14 @@ def include_settled_tool_results(
                     round_index,
                     str(event.get("tool_call_id") or identity),
                 )
-    provider_owners: dict[str, set[str]] = {}
-    for event in live_events:
+    provider_owners: dict[tuple[int, str], set[str]] = {}
+    for index, event in enumerate(live_events):
         if event.get("type") == "tool_call":
             identity = identities[id(event)]
             provider_id = str(event.get("tool_call_id") or identity)
-            provider_owners.setdefault(provider_id, set()).add(identity)
+            provider_owners.setdefault((boundaries[index], provider_id), set()).add(
+                identity
+            )
     candidates: dict[str, int] = {}
     for index, event in enumerate(live_events):
         if event.get("type") != "tool_result" or event.get("event_id") in (
@@ -336,7 +343,7 @@ def include_settled_tool_results(
         if (
             call is None
             or identity in late_results
-            or len(provider_owners[call[2]]) != 1
+            or len(provider_owners[(boundaries[call[0]], call[2])]) != 1
         ):
             continue
         call_index, call_round, _ = call
@@ -357,11 +364,15 @@ def include_settled_tool_results(
     call_group: list[int] = []
     for index, event in enumerate(live_events):
         etype = event.get("type")
+        canonical = event.get("message") if etype == "assistant_message" else None
+        is_announcement = etype == "assistant_tool_calls" or (
+            isinstance(canonical, dict) and canonical.get("tool_calls")
+        )
         if etype == "tool_call":
             call_group.append(index)
         elif etype == "subagent_call":
             pass
-        elif etype != "assistant_tool_calls":
+        elif not is_announcement:
             if pending and len(call_group) > 1:
                 invalid.update(pending.values())
                 pending.clear()
@@ -383,10 +394,11 @@ def include_settled_tool_results(
             call_group.clear()
         for identity in starts.get(index, ()):
             pending[call_info[identity][2]] = identity
-        if event.get("type") == "assistant_tool_calls" and pending:
-            announced = {
-                str(call.get("id") or "") for call in event.get("tool_calls") or []
-            }
+        if is_announcement and pending:
+            calls = (
+                canonical.get("tool_calls") if canonical else event.get("tool_calls")
+            )
+            announced = {str(call.get("id") or "") for call in calls or []}
             matched = announced & pending.keys()
             group_provider_ids = {
                 str(
@@ -395,7 +407,7 @@ def include_settled_tool_results(
                 )
                 for pos in call_group
             }
-            if matched and (
+            if not matched or (
                 not pending.keys() <= announced or not group_provider_ids <= announced
             ):
                 invalid.update(pending.values())

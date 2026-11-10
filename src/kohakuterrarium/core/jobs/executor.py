@@ -446,7 +446,8 @@ class Executor(ExecutorContextMixin):
         if task is None or task.done():
             return False
 
-        task.cancel()
+        if not task.cancelling():
+            task.cancel()
         logger.debug("Job cancellation requested", job_id=job_id)
         return True
 

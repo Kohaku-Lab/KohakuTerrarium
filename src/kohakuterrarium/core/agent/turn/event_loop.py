@@ -183,10 +183,38 @@ class AgentEventLoopMixin:
         self._turn_completion = completion
         self._active_event_run = run
         self._active_event_captures = captures
-        for cap in captures:
-            self.output_router.add_secondary(cap)
         interrupted = False
+        attached = False
         try:
+            finalizers = tuple(getattr(self, "_interrupt_finalizers", ()))
+            if finalizers:
+                wakeup = self._interrupt_fence_wakeup
+                wakeup.clear()
+                wake = asyncio.create_task(wakeup.wait())
+                try:
+                    remaining = set(finalizers)
+                    while remaining and not wake.done():
+                        done, remaining = await asyncio.wait(
+                            remaining | {wake}, return_when=asyncio.FIRST_COMPLETED
+                        )
+                        if wake in done:
+                            break
+                        remaining.discard(wake)
+                finally:
+                    wake.cancel()
+                    await asyncio.gather(wake, return_exceptions=True)
+            error = getattr(self, "_interrupt_finalizer_error", None)
+            if error:
+                raise RuntimeError(f"Interrupted job settlement failed: {error}")
+            if finalizers and (
+                any(env.withdrawn for env in run)
+                or primary.context.get("interrupted_by_user")
+            ):
+                self._reject_run(run, status="interrupted")
+                return
+            for cap in captures:
+                self.output_router.add_secondary(cap)
+            attached = True
             async with self._processing_lock:
                 self._turn_lock_holder = asyncio.current_task()
                 self._active_turn_stackable = primary.stackable
@@ -205,8 +233,9 @@ class AgentEventLoopMixin:
                 if interrupted:
                     self._flush_trigger_backlog_stash()
         finally:
-            for cap in captures:
-                self.output_router.remove_secondary(cap)
+            if attached:
+                for cap in captures:
+                    self.output_router.remove_secondary(cap)
             self._active_event_run = None
             self._active_event_captures = None
             if self._turn_completion is completion:

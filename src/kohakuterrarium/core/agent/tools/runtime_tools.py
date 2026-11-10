@@ -124,7 +124,7 @@ class AgentRuntimeToolsMixin:
             if handle.promoted:
                 logger.debug("Skipping promoted handle", job_id=job_id)
                 continue
-            if not handle.done:
+            if not handle.done and not handle.task.cancelling():
                 handle.task.cancel()
                 logger.debug("Cancelled direct handle", job_id=job_id)
 

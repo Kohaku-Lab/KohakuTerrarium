@@ -78,6 +78,21 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     set(waiters.values()) | {arrival},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+            except asyncio.CancelledError:
+                for waiter in waiters.values():
+                    waiter.cancel()
+                await asyncio.gather(*waiters.values(), return_exceptions=True)
+                for jid, handle in pending.items():
+                    if handle.promoted:
+                        self._handle_promotion(
+                            jid, controller, tool_call_ids, native_mode
+                        )
+                        self._direct_job_meta.pop(jid, None)
+                if native_mode and results:
+                    self._add_native_results_to_conversation(
+                        controller, handle_order, results, tool_call_ids
+                    )
+                raise
             finally:
                 if not arrival.done():
                     arrival.cancel()
@@ -151,15 +166,33 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         """Cancel and finalize a direct job tracked by the current run."""
         meta = self._direct_job_meta.get(job_id)
         handle = self._active_handles.get(job_id)
-        if not meta or not handle or handle.promoted or handle.done:
+        if not meta or not handle or handle.promoted:
+            return False
+        if handle.done:
+            if getattr(self, "_interrupt_requested", False):
+                self._start_interrupt_finalizer(job_id)
             return False
         if meta.get("kind") == "subagent":
             job = self.subagent_manager._jobs.get(job_id)
             if job and hasattr(job, "subagent"):
                 job.subagent.cancel()
-        handle.task.cancel()
-        asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
+        if not handle.task.cancelling():
+            handle.task.cancel()
+        if getattr(self, "_interrupt_requested", False):
+            self._start_interrupt_finalizer(job_id)
         return True
+
+    def _start_interrupt_finalizer(self, job_id: str) -> None:
+        task = asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
+        self._interrupt_finalizers.add(task)
+        task.add_done_callback(self._finish_interrupt_finalizer)
+
+    def _finish_interrupt_finalizer(self, task: asyncio.Task) -> None:
+        self._interrupt_finalizers.discard(task)
+        if task.cancelled():
+            self._interrupt_finalizer_error = "Interrupted job finalizer was cancelled"
+        elif task.exception() is not None:
+            self._interrupt_finalizer_error = repr(task.exception())
 
     def _register_direct_job(
         self,
@@ -174,7 +207,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         self._direct_job_meta[job_id] = {
             "kind": kind,
             "name": name,
-            "tool_call_id": tool_call_id or job_id,
+            "tool_call_id": tool_call_id,
             "background": False,
             "interruptible": True,
             "notify_controller_on_background_complete": notify_controller_on_background_complete,
@@ -239,7 +272,21 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         try:
             result = await asyncio.shield(handle.task)
         except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                raise
             result = None
+        except Exception as exc:
+            result = exc
+
+        if (
+            self._active_handles.get(job_id) is not handle
+            or self._direct_job_meta.get(job_id) is not meta
+        ):
+            return
+
+        if not self._running:
+            self._clear_direct_job_tracking(job_id)
+            return
 
         if result is None:
             kind = meta.get("kind", "tool")
@@ -255,8 +302,20 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 metadata={"interrupted": True, "final_state": "interrupted"},
             )
 
-        self._emit_interrupted_activity(job_id, result)
-        self._append_interrupted_tool_message(job_id, meta, result)
+        if not getattr(result, "cancelled", False) and not getattr(
+            result, "metadata", {}
+        ).get("interrupted", False):
+            self._emit_direct_completion_activity(job_id, result)
+            if meta.get("tool_call_id"):
+                self._add_native_results_to_conversation(
+                    self.controller,
+                    [job_id],
+                    {job_id: result},
+                    {job_id: meta["tool_call_id"]},
+                )
+        else:
+            self._emit_interrupted_activity(job_id, result)
+            self._append_interrupted_tool_message(job_id, meta, result)
         self._clear_direct_job_tracking(job_id)
 
     def _append_interrupted_tool_message(
@@ -275,34 +334,28 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         conversation = getattr(controller, "conversation", None)
         if conversation is None:
             return
-        tool_call_id = meta.get("tool_call_id") or job_id
+        tool_call_id = meta.get("tool_call_id")
         if not tool_call_id:
             return
-        try:
-            existing = conversation.get_messages()
-        except Exception:  # pragma: no cover - defensive
-            return
-        for msg in existing:
+        existing = conversation.get_messages()
+        for msg in reversed(existing):
+            if getattr(msg, "role", None) == "assistant" and any(
+                call.get("id") == tool_call_id
+                for call in (getattr(msg, "tool_calls", None) or [])
+            ):
+                break
             if getattr(msg, "role", None) == "tool" and (
                 getattr(msg, "tool_call_id", None) == tool_call_id
             ):
                 return
         tool_name = meta.get("name") or _make_job_label(job_id)[0]
         error_text = getattr(result, "error", None) or "User cancelled this job."
-        try:
-            conversation.append(
-                "tool",
-                f"Interrupted: {error_text}",
-                tool_call_id=tool_call_id,
-                name=tool_name,
-            )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "Synthetic interrupted-tool append failed",
-                job_id=job_id,
-                error=str(exc),
-                exc_info=True,
-            )
+        conversation.append(
+            "tool",
+            f"Interrupted: {error_text}",
+            tool_call_id=tool_call_id,
+            name=tool_name,
+        )
 
     async def _on_backgroundify_complete(self, job_id: str, result: Any) -> None:
         """Callback when a promoted (backgroundified) task completes.
@@ -400,7 +453,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         )
         metric_name = meta.get("name") or job_id.rsplit("_", 1)[0]
 
-        if isinstance(result, Exception):
+        if isinstance(result, (Exception, asyncio.CancelledError)):
             interrupted = isinstance(result, asyncio.CancelledError)
             error_text = (
                 "User manually interrupted this job." if interrupted else str(result)
@@ -552,7 +605,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             tool_name, _ = _make_job_label(job_id)
             tool_call_id = tool_call_ids.get(job_id, job_id)
 
-            if isinstance(result, Exception):
+            if isinstance(result, (Exception, asyncio.CancelledError)):
                 interrupted = isinstance(result, asyncio.CancelledError)
                 error_text = (
                     "User manually interrupted this job."
@@ -600,7 +653,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
             result = results[job_id]
 
-            if isinstance(result, Exception):
+            if isinstance(result, (Exception, asyncio.CancelledError)):
                 interrupted = isinstance(result, asyncio.CancelledError)
                 error_text = (
                     "User manually interrupted this job."

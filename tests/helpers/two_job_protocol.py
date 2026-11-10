@@ -395,12 +395,16 @@ async def exercise_mid_turn_fold(
                 assert runtime.agent._event_inbox.has_event(
                     lambda event: event.job_id == runtime.jobs[second]
                 )
+                await runtime.agent._session_output.drain()
                 before = runtime.snapshot()
                 with pytest.raises(ConflictError):
                     await runtime.agent.inject_input(
                         "forbidden switch", branch_view={1: 1}
                     )
-                assert runtime.snapshot() == before
+                after = runtime.snapshot()
+                assert (
+                    after == before
+                ), f"snapshot differences: {[(i, left, right) for i, (left, right) in enumerate(zip(before, after)) if left != right]}"
                 completion = runtime.agent._turn_completion
                 assert completion is not None
                 gate = await _wait(runtime.provider.releases.get())
@@ -425,6 +429,7 @@ async def exercise_mid_turn_fold(
                     == 1
                 )
                 assert len(runtime.provider.requests) == 2
+                await runtime.agent._session_output.drain()
                 before = runtime.snapshot()
                 with pytest.raises(ConflictError):
                     await _wait(
@@ -432,7 +437,10 @@ async def exercise_mid_turn_fold(
                             "forbidden folded switch", branch_view={1: 1}
                         )
                     )
-                assert runtime.snapshot() == before
+                after = runtime.snapshot()
+                assert (
+                    after == before
+                ), f"snapshot differences: {[(i, left, right) for i, (left, right) in enumerate(zip(before, after)) if left != right]}"
                 gate = await _wait(runtime.provider.releases.get())
                 gate.set()
                 await _wait(asyncio.shield(completion))

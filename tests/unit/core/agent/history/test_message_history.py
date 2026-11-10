@@ -207,7 +207,8 @@ def test_same_turn_projection_preserves_single_explicit_announcement():
     assert messages[call_index + 1]["content"] == "done"
 
 
-def test_same_turn_grouped_late_results_keep_one_announcement_and_text():
+@pytest.mark.parametrize("canonical", [False, True])
+def test_same_turn_grouped_late_results_keep_one_announcement_and_text(canonical):
     calls = [
         {
             "id": f"call{i}",
@@ -218,6 +219,7 @@ def test_same_turn_grouped_late_results_keep_one_announcement_and_text():
     ]
     events = [
         _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(9, "assistant_round_start", "", 3, branch_id=1),
         _event(
             2, "tool_call", "job1", 3, branch_id=1, name="work", tool_call_id="call1"
         ),
@@ -226,12 +228,22 @@ def test_same_turn_grouped_late_results_keep_one_announcement_and_text():
         ),
         _event(
             4,
-            "assistant_tool_calls",
+            "assistant_message" if canonical else "assistant_tool_calls",
             "",
             3,
             branch_id=1,
-            content="preserve this",
-            tool_calls=calls,
+            **(
+                {
+                    "round_start_event_id": 9,
+                    "message": {
+                        "role": "assistant",
+                        "content": "preserve this",
+                        "tool_calls": calls,
+                    },
+                }
+                if canonical
+                else {"content": "preserve this", "tool_calls": calls}
+            ),
         ),
         _event(5, "assistant_round_start", "", 3, branch_id=1),
         _event(
@@ -256,6 +268,35 @@ def test_same_turn_grouped_late_results_keep_one_announcement_and_text():
         (m.get("tool_call_id"), m["content"]) for m in messages[idx + 1 : idx + 3]
     } == {("call1", "first"), ("call2", "second")}
     assert any(m.get("content") == "intermediate" for m in messages)
+
+
+def test_mismatched_canonical_announcement_is_not_projected():
+    calls = [
+        {
+            "id": "other",
+            "type": "function",
+            "function": {"name": "work", "arguments": "{}"},
+        }
+    ]
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(2, "assistant_round_start", "", 3, branch_id=1),
+        _event(3, "tool_call", "job1", 3, branch_id=1, tool_call_id="call1"),
+        _event(
+            4,
+            "assistant_message",
+            "",
+            3,
+            branch_id=1,
+            round_start_event_id=2,
+            message={"role": "assistant", "content": "canonical", "tool_calls": calls},
+        ),
+        _event(5, "assistant_round_start", "", 3, branch_id=1),
+        _event(6, "tool_result", "job1", 3, branch_id=1, output="late"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4, 5, 6})
+    assert [e["type"] for e in actual] == [e["type"] for e in events]
+    assert actual[-1]["output"] == "late"
 
 
 def test_same_turn_canonical_announcement_preserves_text_and_result():
@@ -320,6 +361,15 @@ def test_same_turn_reused_provider_id_in_later_turn_is_not_suppressed():
         ),
         _event(3, "assistant_tool_calls", "", 1, branch_id=1, tool_calls=calls),
         _event(4, "assistant_round_start", "", 1, branch_id=1),
+        _event(
+            10,
+            "assistant_message",
+            "",
+            1,
+            branch_id=1,
+            round_start_event_id=4,
+            message={"role": "assistant", "content": "intermediate"},
+        ),
         _event(5, "tool_result", "job1", 1, branch_id=1, output="first"),
         _event(6, "user_message", "", 2, branch_id=1, content="two"),
         _event(
@@ -330,6 +380,9 @@ def test_same_turn_reused_provider_id_in_later_turn_is_not_suppressed():
     ]
     messages = history.replay_with_settled_tools(events, branch_view={1: 1, 2: 1})
     assert len([m for m in messages if m.get("tool_calls")]) == 2
+    first = next(i for i, m in enumerate(messages) if m.get("tool_calls"))
+    assert messages[first + 1]["role"] == "tool"
+    assert messages[first + 1]["content"] == "first"
     assert [m["content"] for m in messages if m["role"] == "tool"] == [
         "first",
         "second",
@@ -351,6 +404,16 @@ def test_same_turn_repeated_job_identity_keeps_each_original_result():
         "second",
     ]
     assert len([e for e in actual if e["type"] == "tool_call"]) == 2
+
+
+def test_reused_job_id_does_not_attach_discarded_earlier_result():
+    events = [
+        _event(1, "tool_call", "same", 1, branch_id=1),
+        _event(2, "tool_result", "same", 1, branch_id=1, output="old"),
+        _event(3, "tool_call", "same", 2, branch_id=1),
+    ]
+    actual = history.include_settled_tool_results(events, {3})
+    assert [event["type"] for event in actual] == ["tool_call"]
 
 
 def test_same_turn_multiple_results_do_not_disappear():

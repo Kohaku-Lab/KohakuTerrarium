@@ -67,6 +67,8 @@ class _FakeAgent(AgentToolsMixin, AgentEventLoopMixin):
         self._event_inbox = EventInbox()
         self._direct_job_meta = {}
         self._active_handles = {}
+        self._interrupt_finalizers = set()
+        self._interrupt_finalizer_error = None
         self._bg_controller_notify = {}
         self._termination_checker = None
         self._running = True
@@ -132,6 +134,7 @@ class TestInterruptDirectJob:
         h.promoted = False
         h.done = False
         h.task = MagicMock()
+        h.task.cancelling.return_value = 0
         agent._active_handles["x"] = h
         ok = agent._interrupt_direct_job("x")
         assert ok is True
@@ -146,6 +149,7 @@ class TestInterruptDirectJob:
         h.promoted = False
         h.done = False
         h.task = MagicMock()
+        h.task.cancelling.return_value = 0
         agent._active_handles["agent_x"] = h
         job = _SubAgentJob()
         agent.subagent_manager._jobs["agent_x"] = job
@@ -616,6 +620,300 @@ class TestTurnResult:
 
 
 class TestFinalizeInterruptedDirectJob:
+    async def test_cancelled_error_is_not_reported_as_success(self, agent):
+        job_id = "bash_preentry"
+        agent._register_direct_job(
+            job_id, kind="tool", name="bash", tool_call_id="call_preentry"
+        )
+        result = asyncio.CancelledError()
+        agent._emit_direct_completion_activity(job_id, result)
+        assert [call[0] for call in agent.output_router.activity_calls] == [
+            "tool_error"
+        ]
+        agent._add_native_results_to_conversation(
+            agent.controller, [job_id], {job_id: result}, {job_id: "call_preentry"}
+        )
+        assert "Interrupted" in agent.controller.conversation.get_messages()[-1].content
+        assert "INTERRUPTED" in agent._format_text_results([job_id], {job_id: result})
+
+    async def test_full_turn_finalizer_preserves_failure_after_cancel(self, agent):
+        agent._register_direct_job(
+            "bash_fail", kind="tool", name="bash", tool_call_id="call_fail"
+        )
+
+        async def runner():
+            return JobResult(job_id="bash_fail", error="real failure")
+
+        task = asyncio.create_task(runner())
+        agent._active_handles["bash_fail"] = BackgroundifyHandle(
+            task=task, job_id="bash_fail"
+        )
+        await agent._finalize_interrupted_direct_job("bash_fail")
+        message = agent.controller.conversation.get_messages()[-1]
+        assert "real failure" in message.content
+        assert "Interrupted" not in message.content
+        activity = agent.output_router.activity_calls[-1]
+        assert activity[0] == "tool_error"
+        assert activity[2]["final_state"] == "error"
+
+    async def test_full_interrupt_recovers_completed_uncollected_job(self, agent):
+        job_id = "bash_done"
+        agent._register_direct_job(
+            job_id, kind="tool", name="bash", tool_call_id="call_done"
+        )
+
+        async def runner():
+            return JobResult(job_id=job_id, output="finished")
+
+        task = asyncio.create_task(runner())
+        agent._active_handles[job_id] = BackgroundifyHandle(task=task, job_id=job_id)
+        await task
+        agent._interrupt_requested = True
+        agent._interrupt_direct_job(job_id)
+        await wait_until(lambda: job_id not in agent._direct_job_meta, timeout=1)
+        assert agent.controller.conversation.get_messages()[-1].content == "finished"
+
+    def test_interrupted_message_does_not_match_previous_turn_id(self, agent):
+        agent.controller.conversation.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "shared",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                }
+            ],
+        )
+        agent.controller.conversation.append("tool", "old", tool_call_id="shared")
+        agent.controller.conversation.append("user", "next")
+        agent.controller.conversation.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "shared",
+                    "type": "function",
+                    "function": {"name": "bash", "arguments": "{}"},
+                }
+            ],
+        )
+        agent._append_interrupted_tool_message(
+            "bash_new",
+            {"tool_call_id": "shared", "name": "bash"},
+            JobResult(job_id="bash_new", error="cancelled", cancelled=True),
+        )
+        assert agent.controller.conversation.get_messages()[-1].role == "tool"
+        assert "Interrupted" in agent.controller.conversation.get_messages()[-1].content
+
+    async def test_repeated_full_interrupt_finalizes_once(self, agent):
+        job_id = "bash_twice"
+        agent._register_direct_job(
+            job_id, kind="tool", name="bash", tool_call_id="call_twice"
+        )
+        release = asyncio.Event()
+
+        async def runner():
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return JobResult(job_id=job_id, output="finished")
+
+        task = asyncio.create_task(runner())
+        agent._active_handles[job_id] = BackgroundifyHandle(task=task, job_id=job_id)
+        await asyncio.sleep(0)
+        agent._interrupt_requested = True
+        agent._interrupt_direct_job(job_id)
+        await asyncio.sleep(0)
+        agent._interrupt_direct_job(job_id)
+        await asyncio.sleep(0)
+        release.set()
+        await wait_until(lambda: job_id not in agent._direct_job_meta, timeout=2)
+        await asyncio.sleep(0)
+        assert len(agent.output_router.activity_calls) == 1
+        assert (
+            len(
+                [
+                    m
+                    for m in agent.controller.conversation.get_messages()
+                    if m.role == "tool"
+                ]
+            )
+            == 1
+        )
+
+    async def test_interrupt_keeps_already_collected_native_results(self, agent):
+        release = asyncio.Event()
+
+        async def first():
+            return JobResult(job_id="first", output="first result")
+
+        async def second():
+            await release.wait()
+
+        tasks = {
+            "first": asyncio.create_task(first()),
+            "second": asyncio.create_task(second()),
+        }
+        handles = {
+            job: BackgroundifyHandle(task=task, job_id=job)
+            for job, task in tasks.items()
+        }
+        ids = {"first": "call_first", "second": "call_second"}
+        for job, handle in handles.items():
+            agent._register_direct_job(
+                job, kind="tool", name=job, tool_call_id=ids[job]
+            )
+            agent._active_handles[job] = handle
+        collector = asyncio.create_task(
+            agent._wait_handles(handles, list(handles), agent.controller, ids, True)
+        )
+        try:
+            await wait_until(
+                lambda: any(
+                    call[0] == "tool_done"
+                    for call in agent.output_router.activity_calls
+                ),
+                timeout=2,
+            )
+            agent._interrupt_requested = True
+            collector.cancel()
+            agent._interrupt_direct_job("second")
+            await asyncio.gather(collector, return_exceptions=True)
+            if agent._interrupt_finalizers:
+                await asyncio.wait(tuple(agent._interrupt_finalizers))
+            tool_messages = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "tool"
+            ]
+            assert {m.tool_call_id for m in tool_messages} == {
+                "call_first",
+                "call_second",
+            }
+        finally:
+            release.set()
+            await asyncio.gather(*tasks.values(), return_exceptions=True)
+
+    async def test_stopped_agent_does_not_finalize_owned_interrupted_job(self, agent):
+        job_id = "bash_stopped"
+        agent._register_direct_job(
+            job_id, kind="tool", name="bash", tool_call_id="call_stop"
+        )
+        release = asyncio.Event()
+
+        async def runner():
+            await release.wait()
+            return JobResult(job_id=job_id, output="late")
+
+        task = asyncio.create_task(runner())
+        agent._active_handles[job_id] = BackgroundifyHandle(task=task, job_id=job_id)
+        finalizer = asyncio.create_task(agent._finalize_interrupted_direct_job(job_id))
+        await asyncio.sleep(0)
+        agent._running = False
+        release.set()
+        await finalizer
+        assert not agent.output_router.activity_calls
+        assert not any(
+            m.role == "tool" for m in agent.controller.conversation.get_messages()
+        )
+
+    async def test_cancelling_finalizer_does_not_settle_running_job(self, agent):
+        job_id = "bash_finalizer_cancelled"
+        agent._register_direct_job(
+            job_id, kind="tool", name="bash", tool_call_id="call_live"
+        )
+        release = asyncio.Event()
+
+        async def runner():
+            await release.wait()
+            return JobResult(job_id=job_id, output="late")
+
+        task = asyncio.create_task(runner())
+        agent._active_handles[job_id] = BackgroundifyHandle(task=task, job_id=job_id)
+        agent._start_interrupt_finalizer(job_id)
+        finalizer = next(iter(agent._interrupt_finalizers))
+        try:
+            await asyncio.sleep(0)
+            finalizer.cancel()
+            await asyncio.gather(finalizer, return_exceptions=True)
+            await asyncio.sleep(0)
+            assert agent._interrupt_finalizer_error
+            assert not agent.output_router.activity_calls
+            assert not any(
+                m.role == "tool" for m in agent.controller.conversation.get_messages()
+            )
+            assert not task.done()
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_interrupt_after_promotion_preserves_native_placeholder(self, agent):
+        release = asyncio.Event()
+
+        async def runner():
+            await release.wait()
+            return JobResult(job_id="direct", output="finished")
+
+        task = asyncio.create_task(runner())
+        handle = BackgroundifyHandle(task=task, job_id="direct")
+        agent._register_direct_job(
+            "direct", kind="tool", name="work", tool_call_id="call_direct"
+        )
+        agent._active_handles["direct"] = handle
+        collector = asyncio.create_task(
+            agent._wait_handles(
+                {"direct": handle},
+                ["direct"],
+                agent.controller,
+                {"direct": "call_direct"},
+                True,
+            )
+        )
+        try:
+            await asyncio.sleep(0)
+            assert handle.promote()
+            agent._interrupt_requested = True
+            collector.cancel()
+            agent._interrupt_direct_job("direct")
+            await asyncio.gather(collector, return_exceptions=True)
+            replies = [
+                m
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "tool" and m.tool_call_id == "call_direct"
+            ]
+            assert len(replies) == 1
+            assert "background" in replies[0].content.lower()
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_cancel_handles_does_not_interrupt_existing_cleanup(self, agent):
+        started, cleanup, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def runner():
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cleanup.set()
+                await release.wait()
+                return "finished"
+
+        task = asyncio.create_task(runner())
+        handle = BackgroundifyHandle(task=task, job_id="direct")
+        try:
+            await started.wait()
+            task.cancel()
+            await cleanup.wait()
+            agent._cancel_handles({"direct": handle})
+            release.set()
+            assert await task == "finished"
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def test_no_handle_returns(self, agent):
         # Not registered → returns silently.
         await agent._finalize_interrupted_direct_job("ghost")

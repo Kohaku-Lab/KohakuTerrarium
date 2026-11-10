@@ -2465,7 +2465,7 @@ class TestCoreIntegration:
 
             # --- _cancel_job: cancel one running job by id -------------
             # ``_cancel_job`` is the TUI running-panel click handler. It
-            # cancels a tracked direct job and emits a ``job_cancelled``
+            # cancels a tracked direct job and emits a cancellation-request
             # activity. Drive a turn that hangs on the blocking tool,
             # then cancel that exact job by id mid-flight.
             block.started.clear()
@@ -2483,8 +2483,8 @@ class TestCoreIntegration:
             # script entry is keyed on the interruption message.
             await asyncio.wait_for(cancel_task, timeout=5.0)
             assert "job was cancelled" in _assistant_text(agent)
-            # A job_cancelled activity was surfaced.
-            assert len(recorder.activities_of_type("job_cancelled")) >= 1
+            # A cancellation request activity was surfaced.
+            assert len(recorder.activities_of_type("job_cancel_requested")) >= 1
             assert agent.is_running is True
 
             # --- stop_task builtin on a non-existent job ---------------
