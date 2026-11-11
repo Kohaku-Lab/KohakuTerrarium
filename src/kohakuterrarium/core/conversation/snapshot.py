@@ -310,6 +310,7 @@ def prepare_snapshot(
                 "assistant_image",
                 "user_message",
                 "tool_call",
+                "deferred_job_feedback",
                 "compact_complete",
                 "compact_replace",
                 "context_cleared",

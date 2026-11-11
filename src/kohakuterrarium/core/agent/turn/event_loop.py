@@ -490,6 +490,9 @@ class AgentEventLoopMixin:
         via ``interrupt()``."""
         primary = events[0]
         self._clear_rerun_execution_error(primary)
+        output = getattr(self, "_session_output", None)
+        if output is not None:
+            await output.drain()
         self._prepare_processing_cycle(primary, controller)
         # The controller turns this batch into one user message; declare the
         # branch it is written on so a later compaction can attribute its text.

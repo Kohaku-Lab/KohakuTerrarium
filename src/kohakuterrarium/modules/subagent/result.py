@@ -138,6 +138,7 @@ class SubAgentJob:
             exit_code=0 if self._result.success else 1,
             error=self._result.error,
             metadata={
+                **self._result.metadata,
                 "turns": self._result.turns,
                 "duration": self._result.duration,
             },

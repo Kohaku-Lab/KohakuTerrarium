@@ -98,11 +98,14 @@ class SessionActivityMixin:
         )
 
     def _handle_tool_done(self, name: str, detail: str, metadata: dict) -> None:
+        if metadata.get("defer_controller"):
+            return
         event_data: dict[str, Any] = {
             "name": _tool_name(name, metadata),
             "call_id": metadata.get("job_id", ""),
             "output": metadata.get("result", metadata.get("output", detail)),
             "exit_code": metadata.get("exit_code", 0),
+            "defer_controller": bool(metadata.get("defer_controller")),
         }
         # Persist preview metadata so history reload need not read the file again.
         canvas_preview = metadata.get("canvas_preview")
@@ -114,6 +117,8 @@ class SessionActivityMixin:
         self._record("tool_result", event_data)
 
     def _handle_tool_error(self, name: str, detail: str, metadata: dict) -> None:
+        if metadata.get("defer_controller"):
+            return
         self._record(
             "tool_result",
             {
@@ -125,6 +130,7 @@ class SessionActivityMixin:
                 "interrupted": bool(metadata.get("interrupted", False)),
                 "cancelled": bool(metadata.get("cancelled", False)),
                 "final_state": metadata.get("final_state", "error"),
+                "defer_controller": bool(metadata.get("defer_controller")),
             },
         )
 
@@ -205,6 +211,7 @@ class SessionActivityMixin:
                 "interrupted": bool(metadata.get("interrupted", False)),
                 "cancelled": bool(metadata.get("cancelled", False)),
                 "final_state": metadata.get("final_state", "error"),
+                "defer_controller": bool(metadata.get("defer_controller")),
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),
                 "duration": metadata.get("duration", 0),

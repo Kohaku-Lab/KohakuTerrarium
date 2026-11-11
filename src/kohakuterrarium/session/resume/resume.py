@@ -7,6 +7,7 @@ from typing import Any, NamedTuple
 from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.agent.turn.deferred import deferred_key, restore_deferred
 from kohakuterrarium.core.agent.history.compact import stage_resume_compact_state
 from kohakuterrarium.core.agent.history.message_history import replay_with_settled_tools
 from kohakuterrarium.core.agent.history.selection import restore_selections
@@ -382,6 +383,17 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
             if replayed:
                 agent.controller.conversation = _build_conversation(replayed)
                 _apply_restore_elision(agent)
+
+    if store.state.get(deferred_key(agent_name)):
+        deferred_events = (
+            events if not clean_checkpoint else store.get_events(agent_name)
+        )
+        agent._deferred_job_results = restore_deferred(
+            deferred_events,
+            load_persisted_branch_view(store, agent_name)
+            or {**dict(agent._parent_branch_path), agent._turn_index: agent._branch_id},
+            agent._context_cutoff_event_id,
+        )
 
     pad_data = store.load_scratchpad(agent_name)
     if pad_data:

@@ -1,3 +1,4 @@
+from kohakuterrarium.core.agent.turn.deferred import record_deferred
 from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.controller.controller import Controller
 from kohakuterrarium.core.event_inbox import EventEnvelope
@@ -165,6 +166,19 @@ class AgentRuntimeToolsMixin:
         job_id = getattr(event, "job_id", "")
         is_subagent = job_id.startswith("agent_")
         context = event.context or {}
+        if context.get("defer_controller"):
+            origin = context.get("job_branch_path") or {}
+            self._deferred_job_results.append((event, origin))
+            output = getattr(self, "_session_output", None)
+            if output is not None:
+                output._submit_store_write(
+                    record_deferred,
+                    output._store,
+                    output._event_key_prefix,
+                    event,
+                    origin,
+                    self.controller.config.tool_format != "native",
+                )
         error = context.get("error")
         exit_code = context.get("exit_code")
         try:
@@ -204,6 +218,10 @@ class AgentRuntimeToolsMixin:
                 f"[{label}] {state_label}: {error}",
                 metadata={
                     "job_id": job_id,
+                    "defer_controller": bool(
+                        context.get("defer_controller")
+                        and self.controller.config.tool_format != "native"
+                    ),
                     "subagent": sa_meta.get("subagent", ""),
                     "llm_name": sa_meta.get("llm_name", ""),
                     "model": sa_meta.get("model", ""),
@@ -229,6 +247,10 @@ class AgentRuntimeToolsMixin:
                 f"[{label}] tools: {tools_summary}",
                 metadata={
                     "job_id": job_id,
+                    "defer_controller": bool(
+                        context.get("defer_controller")
+                        and self.controller.config.tool_format != "native"
+                    ),
                     "subagent": sa_meta.get("subagent", ""),
                     "llm_name": sa_meta.get("llm_name", ""),
                     "model": sa_meta.get("model", ""),
@@ -246,6 +268,10 @@ class AgentRuntimeToolsMixin:
             result_metadata = context.get("result_metadata", {})
             metadata = {
                 "job_id": job_id,
+                "defer_controller": bool(
+                    context.get("defer_controller")
+                    and self.controller.config.tool_format != "native"
+                ),
                 "result": structured_result,
                 "output": event.content,
                 "output_preview": content[:5000],
@@ -265,13 +291,11 @@ class AgentRuntimeToolsMixin:
             )
 
         logger.info("Background job completed", job_id=job_id)
-        if context.get("defer_controller"):
-            self._deferred_job_results.append(
-                (event, context.get("job_branch_path") or {})
-            )
-        elif self._should_notify_controller_on_background_complete(job_id):
+        if not context.get(
+            "defer_controller"
+        ) and self._should_notify_controller_on_background_complete(job_id):
             stamp_pending_id(event)
             self._event_inbox.put(EventEnvelope(event))
             self._flush_trigger_backlog_stash()
-        else:
+        elif not context.get("defer_controller"):
             self._bg_controller_notify.pop(job_id, None)

@@ -2,6 +2,7 @@
 
 import asyncio
 from typing import Any
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,6 +33,7 @@ class _Router:
 class _Controller:
     def __init__(self):
         self.conversation = Conversation()
+        self.config = SimpleNamespace(tool_format="bracket")
         self.conversation.append("system", "sys")
         self.deferred = []
 

@@ -5,6 +5,7 @@ import importlib
 from contextlib import aclosing
 
 from kohakuterrarium.errors import AgentNotRunningError, ResponseStreamError
+from kohakuterrarium.core.agent.turn.deferred import deferred_key, restore_deferred
 from kohakuterrarium.core.agent.turn.mid_turn import AgentMidTurnMixin
 from kohakuterrarium.core.agent.turn.output_wiring import AgentOutputWiringMixin
 from kohakuterrarium.core.agent.turn.pre_dispatch import (
@@ -33,7 +34,7 @@ from kohakuterrarium.core.events import (
 from kohakuterrarium.core.conversation.settled_identity import delivered_jobs
 from kohakuterrarium.core.conversation.continuation import live_branch_path
 from kohakuterrarium.core.pending_input import stamp_pending_id
-from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS
+from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS, content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.tool.base import ExecutionMode
 from kohakuterrarium.parsing import (
@@ -216,6 +217,27 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         retained = []
         feedback = []
         delivered = delivered_jobs(controller.conversation.snapshot_messages())
+        restored = []
+        store = self.session_store
+        if store is not None and store.state.get(deferred_key(self.config.name)):
+            events = store.get_events(self.config.name)
+            cutoff = getattr(self, "_context_cutoff_event_id", 0)
+            expired = {
+                item.get("job_id")
+                for item in events
+                if item.get("type") == "deferred_job_result"
+                and item.get("event_id", 0) <= cutoff
+            }
+            self._deferred_job_results = [
+                (item, origin)
+                for item, origin in self._deferred_job_results
+                if item.job_id not in expired
+            ]
+            restored = restore_deferred(events, path, cutoff)
+        queued = {item.job_id for item, _ in self._deferred_job_results}
+        self._deferred_job_results.extend(
+            (item, origin) for item, origin in restored if item.job_id not in queued
+        )
         for result_event, origin in self._deferred_job_results:
             if all(path.get(turn) == branch for turn, branch in origin.items()):
                 if result_event.job_id not in delivered:
@@ -224,14 +246,26 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             else:
                 retained.append((result_event, origin))
         if feedback:
-            controller.conversation.append(
-                "user",
-                format_events_for_context(feedback),
-                metadata={
-                    **tool_feedback_metadata(feedback),
-                    **self._message_origin(feedback),
-                },
-            )
+            content = format_events_for_context(feedback)
+            metadata = {
+                **tool_feedback_metadata(feedback),
+                **self._message_origin(feedback),
+            }
+            controller.conversation.append("user", content, metadata=metadata)
+            output = getattr(self, "_session_output", None)
+            if output is not None:
+                output._record(
+                    "deferred_job_feedback",
+                    {
+                        "content": (
+                            content_parts_to_dicts(content)
+                            if isinstance(content, list)
+                            else content
+                        ),
+                        "metadata": metadata,
+                        "job_ids": [item.job_id for item in feedback],
+                    },
+                )
         self._deferred_job_results = retained
         self._last_turn_text = []
         controller._interrupted = False
@@ -334,10 +368,17 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             for jid, handle in round_result.handles.items()
             if jid in self._direct_job_meta
         }
+        path = live_branch_path(self)
         handles.update(
             (jid, handle)
             for jid, handle in self._active_handles.items()
-            if handle.done and not handle.promoted and jid in self._direct_job_meta
+            if handle.done
+            and not handle.promoted
+            and jid in self._direct_job_meta
+            and all(
+                path.get(turn) == branch
+                for turn, branch in self._direct_job_meta[jid]["branch_path"].items()
+            )
         )
         if not handles:
             return

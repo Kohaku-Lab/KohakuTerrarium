@@ -14,6 +14,7 @@ from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.llm.media.reference import session_media_scope
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.core.tools.output import (
     discard_raw_output_file,
     normalize_tool_output,
@@ -310,14 +311,20 @@ class SubAgent:
                 turn=self._turns,
             )
 
-            with session_media_scope(
-                self._snapshot.provenance.get("session_path")
-                if self._snapshot
-                else None
-            ):
-                tool_calls, turn_output = await self._run_single_turn(
-                    native_tool_schemas
-                )
+            try:
+                with session_media_scope(
+                    self._snapshot.provenance.get("session_path")
+                    if self._snapshot
+                    else None
+                ):
+                    tool_calls, turn_output = await self._run_single_turn(
+                        native_tool_schemas
+                    )
+            except ResponseStreamError as exc:
+                output_parts.extend(getattr(exc, "partial_output", []))
+                result = self._build_result(output_parts, tools_used, error=str(exc))
+                result.metadata["response_outcome"] = dict(exc.response_outcome)
+                return result
             output_parts.extend(turn_output)
             if self.on_checkpoint:
                 self.on_checkpoint()
@@ -406,14 +413,19 @@ class SubAgent:
         output_parts: list[str] = []
         tool_calls: list[ToolCallEvent] = []
 
-        async for chunk in self.llm.chat(
-            messages, stream=True, tools=tool_schemas or None
-        ):
-            if self._cancelled:
-                break
-            assistant_content += chunk
-            if chunk:
-                output_parts.append(chunk)
+        try:
+            async for chunk in self.llm.chat(
+                messages, stream=True, tools=tool_schemas or None
+            ):
+                if self._cancelled:
+                    break
+                assistant_content += chunk
+                if chunk:
+                    output_parts.append(chunk)
+        except ResponseStreamError as exc:
+            self._accumulate_tokens()
+            self._record_incomplete_turn(assistant_content, output_parts, exc)
+            raise
 
         native_calls = (
             self.llm.last_tool_calls if hasattr(self.llm, "last_tool_calls") else []
@@ -467,15 +479,23 @@ class SubAgent:
         output_parts: list[str] = []
         tool_calls: list[ToolCallEvent] = []
 
-        async for chunk in self.llm.chat(messages, stream=True):
-            if self._cancelled:
-                break
-            assistant_content += chunk
-            for event in self._parser.feed(chunk):
-                if isinstance(event, ToolCallEvent):
-                    tool_calls.append(event)
-                elif isinstance(event, TextEvent):
+        try:
+            async for chunk in self.llm.chat(messages, stream=True):
+                if self._cancelled:
+                    break
+                assistant_content += chunk
+                for event in self._parser.feed(chunk):
+                    if isinstance(event, ToolCallEvent):
+                        tool_calls.append(event)
+                    elif isinstance(event, TextEvent):
+                        output_parts.append(event.text)
+        except ResponseStreamError as exc:
+            self._accumulate_tokens()
+            for event in self._parser.flush():
+                if isinstance(event, TextEvent):
                     output_parts.append(event.text)
+            self._record_incomplete_turn(assistant_content, output_parts, exc)
+            raise
 
         for event in self._parser.flush():
             if isinstance(event, ToolCallEvent):
@@ -491,6 +511,24 @@ class SubAgent:
         self._log_turn_preview(assistant_content)
         self._accumulate_tokens()
         return tool_calls, output_parts
+
+    def _record_incomplete_turn(
+        self, content: str, output_parts: list[str], error: ResponseStreamError
+    ) -> None:
+        """Capture an unconfirmed assistant response without dispatching calls."""
+        error.partial_output = output_parts
+        if content:
+            self.conversation.append(
+                "assistant",
+                content,
+                metadata={
+                    "incomplete": True,
+                    "completion_state": "incomplete",
+                    "response_outcome": dict(error.response_outcome),
+                },
+            )
+        if self.on_checkpoint:
+            self.on_checkpoint()
 
     async def _run_post_llm_plugins(
         self,

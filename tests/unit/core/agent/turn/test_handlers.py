@@ -289,6 +289,30 @@ async def _build(tmp_path, llm, tool_format="bracket", tools=()):
     return agent, trace
 
 
+async def test_processing_cycle_waits_for_pending_session_writes(tmp_path):
+    agent, _ = await _build(tmp_path, ScriptedLLM(["answer"]))
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+
+    class PendingOutput:
+        async def drain(self):
+            entered.set()
+            await gate.wait()
+
+    agent._session_output = PendingOutput()
+    task = asyncio.create_task(agent.run("input", raise_on_error=False))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not task.done()
+        gate.set()
+        await asyncio.wait_for(task, 5)
+    finally:
+        gate.set()
+        await asyncio.gather(task, return_exceptions=True)
+        agent._session_output = None
+        await agent.stop()
+
+
 @pytest.mark.parametrize("action", ["edit", "regenerate", "input"])
 @pytest.mark.parametrize("batch_stackable", [False, True])
 async def test_deferred_feedback_is_context_not_a_separate_turn(
@@ -329,8 +353,9 @@ async def test_deferred_feedback_is_context_not_a_separate_turn(
         await agent.stop()
 
 
+@pytest.mark.parametrize("replace", [False, True])
 async def test_failed_round_recovers_completed_job_left_by_termination(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, replace
 ):
     release = asyncio.Event()
     tool = _OwnedTool(release)
@@ -347,17 +372,25 @@ async def test_failed_round_recovers_completed_job_left_by_termination(
         await asyncio.wait_for(next(iter(agent._active_handles.values())).task, 5)
         monkeypatch.setattr(agent, "_check_termination", original_check)
         llm.last_tool_calls = []
+        if replace:
+            origin = next(iter(agent._direct_job_meta.values()))["branch_path"]
+            assert origin
+            agent._parent_branch_path = [
+                [turn, branch + 1] for turn, branch in origin.items()
+            ]
+            agent._turn_index = max(origin) + 1
+            agent._branch_id = 1
         result = await agent.run("later failure", raise_on_error=False)
         assert result.status == "error"
-        assert not agent._active_handles and not agent._direct_job_meta
-        assert (
-            sum(
-                "owned result" in str(m["content"])
-                for m in agent.controller.conversation.snapshot_messages()
-            )
-            == 1
+        if not replace:
+            assert not agent._active_handles and not agent._direct_job_meta
+        assert sum(
+            "owned result" in str(m["content"])
+            for m in agent.controller.conversation.snapshot_messages()
+        ) == (0 if replace else 1)
+        assert len([e for e in trace.events if e.type == "tool_done"]) == (
+            0 if replace else 1
         )
-        assert len([e for e in trace.events if e.type == "tool_done"]) == 1
     finally:
         release.set()
         await agent.stop()

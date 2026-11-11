@@ -413,6 +413,7 @@ def replay_conversation(
     # migration can copy the same event twice; duplicate user messages
     # would break turn-targeted edit resolution and pollute the view.
     seen_user_messages: set[tuple[int, int]] = set()
+    user_message_indices: dict[tuple[int, int], int] = {}
     injected_at = -1
 
     def _flush_text() -> None:
@@ -489,6 +490,8 @@ def replay_conversation(
     for evt in project_assistant_rounds(events_list, eligible_ids):
         etype = evt.get("type", "")
         eid = evt.get("event_id")
+        if etype == "tool_result" and evt.get("defer_controller"):
+            continue
 
         # Synthetic events without identifiers bypass branch filtering.
         if isinstance(eid, int) and eid not in live_ids:
@@ -529,6 +532,7 @@ def replay_conversation(
             continue
         if etype in (
             "assistant_round_display",
+            "deferred_job_result",
             "assistant_round_end",
             "compact_start",
             "compact_complete",
@@ -556,6 +560,7 @@ def replay_conversation(
                 if (ti, bi) in seen_user_messages:
                     continue
                 seen_user_messages.add((ti, bi))
+                user_message_indices[(ti, bi)] = len(messages)
             message = {"role": "user", "content": evt.get("content", "")}
             if include_metadata:
                 message["metadata"] = {
@@ -564,6 +569,16 @@ def replay_conversation(
                     "branch_id": evt.get("branch_id"),
                 }
             messages.append(message)
+        elif etype == "deferred_job_feedback":
+            message = {"role": "user", "content": evt.get("content", "")}
+            if include_metadata:
+                message["metadata"] = dict(evt.get("metadata") or {})
+            ti, bi = evt.get("turn_index"), evt.get("branch_id")
+            user_index = user_message_indices.get((ti, bi), len(messages))
+            messages.insert(user_index, message)
+            for key, index in user_message_indices.items():
+                if index >= user_index:
+                    user_message_indices[key] = index + 1
         elif etype == "user_input_injected":
             content = evt.get("content", "")
             if injected_at == len(messages) - 1 and messages:
@@ -637,6 +652,12 @@ def _inject_synthetic_announcements(
     announcements suppress duplicates. Synthetic announcements intentionally omit
     event identifiers so replay preserves their inserted position.
     """
+    deferred_ids = {
+        str(evt.get("call_id") or evt.get("job_id") or "")
+        for evt in events
+        if (evt.get("type") == "tool_result" and evt.get("defer_controller"))
+        or (evt.get("type") == "deferred_job_result" and evt.get("text_mode"))
+    }
     uncovered_results = {
         str(evt.get("call_id") or evt.get("job_id") or "")
         for evt in events
@@ -700,6 +721,9 @@ def _inject_synthetic_announcements(
             continue
 
         if etype == "tool_call":
+            if str(evt.get("call_id") or evt.get("job_id") or "") in deferred_ids:
+                result.append(evt)
+                continue
             cid = _provider_call_id(evt)
             # Calls already announced must not be synthesized again.
             if cid and cid in announced_ids:
@@ -787,6 +811,10 @@ def normalize_resumable_events(
                 started_tools[str(job_id)] = evt
         elif etype == "tool_result":
             job_id = evt.get("call_id") or evt.get("job_id") or ""
+            if job_id:
+                finished_tools.add(str(job_id))
+        elif etype == "deferred_job_result" and evt.get("text_mode"):
+            job_id = evt.get("job_id") or ""
             if job_id:
                 finished_tools.add(str(job_id))
         elif etype == "subagent_call":

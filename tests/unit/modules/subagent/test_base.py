@@ -6,12 +6,15 @@ import pytest
 
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.errors import ResponseStreamError
+from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.recovery.context_repair import ContextRepair
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
+from kohakuterrarium.modules.subagent.result import SubAgentJob
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig, ToolResult
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -112,6 +115,62 @@ class TestBasicRun:
         # The run itself succeeds even though the tool failed.
         assert result.success is True
         assert "failtool" in result.metadata["tools_used"]
+
+
+class TestIncompleteResponse:
+    @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+    async def test_partial_output_survives_without_dispatching_unconfirmed_calls(
+        self, tool_format
+    ):
+        echo = _EchoTool()
+        call = (
+            '<echo text="unsafe"></echo>'
+            if tool_format == "xml"
+            else _bracket_call("echo", text="unsafe")
+        )
+
+        class FailingLLM(ScriptedLLM):
+            async def chat(self, messages, **kwargs):
+                self.last_tool_calls = [
+                    NativeToolCall("call", "echo", '{"text":"unsafe"}')
+                ]
+                self.last_usage = {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 2,
+                    "total_tokens": 5,
+                }
+                yield "partial output " + ("" if tool_format == "native" else call)
+                raise ResponseStreamError()
+
+        llm = FailingLLM([])
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["echo"], max_turns=3),
+            _registry(echo),
+            llm,
+            tool_format=tool_format,
+        )
+        result = await sa.run("task")
+        assert not result.success
+        assert "partial output" in result.output
+        assert "[/echo]" not in result.output
+        assert "<echo text=" not in result.output
+        assert result.metadata["response_outcome"]
+        assert result.total_tokens == 5
+        job = SubAgentJob(sa, "job")
+        job._result = result
+        assert (
+            job.to_job_result().metadata["response_outcome"]
+            == result.metadata["response_outcome"]
+        )
+        assert echo.calls == []
+        partial = sa.conversation.get_messages()[-1]
+        assert partial.role == "assistant"
+        assert "partial output" in partial.content
+        assert partial.metadata["incomplete"] is True
+        assert (
+            partial.metadata["response_outcome"] == result.metadata["response_outcome"]
+        )
+        assert not partial.tool_calls
 
 
 class TestContextRepairHook:

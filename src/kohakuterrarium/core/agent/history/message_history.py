@@ -243,11 +243,13 @@ def include_settled_tool_results(
     live_result_ids: set[str] = {
         identity
         for event in live_events
-        if event.get("type") == "tool_result" and (identity := _tool_identity(event))
+        if event.get("type") == "tool_result"
+        and not event.get("defer_controller")
+        and (identity := _tool_identity(event))
     }
     late_results: dict[str, dict[str, Any]] = {}
     for event in events:
-        if event.get("type") != "tool_result":
+        if event.get("type") != "tool_result" or event.get("defer_controller"):
             continue
         identity = _tool_identity(event)
         eid = event.get("event_id")

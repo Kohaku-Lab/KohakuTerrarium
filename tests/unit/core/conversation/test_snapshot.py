@@ -200,6 +200,38 @@ def _prepare(
     )
 
 
+def test_feedback_after_snapshot_invalidates_checkpoint(store):
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "question",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 2,
+            "type": "deferred_job_feedback",
+            "content": "late",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+    ]
+    store.save_branch_snapshot(
+        "alice",
+        [
+            {
+                "role": "user",
+                "content": "question",
+                "metadata": {"turn_index": 1, "branch_id": 1},
+            }
+        ],
+        branch={"turn_index": 1, "branch_id": 1, "parent_branch_path": []},
+        watermark=1,
+    )
+    assert _prepare(store, events, {1: 1}) is None
+
+
 def _save_branch_msgs_a(store: SessionStore) -> None:
     store.save_branch_snapshot(
         "alice",

@@ -45,6 +45,7 @@ from kohakuterrarium.builtins.tools.app.show import ShowAppTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.conversation.continuation import (
+    continue_on_branch,
     live_branch_path,
     load_persisted_branch_view,
     persist_branch_view,
@@ -68,6 +69,7 @@ from kohakuterrarium.core.conversation.pinned import pin_message
 from kohakuterrarium.core.turn import Activity, TurnCapture
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.media.artifacts import resolve_artifact_url
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.codex.format import to_responses_input
 from kohakuterrarium.llm.recovery.errors import drop_last_tool_round
@@ -2596,6 +2598,156 @@ class TestCoreIntegration:
         finally:
             await resumed_native.stop()
             native_store.close()
+
+        for fmt, block in (
+            ("bracket", "[/block][block/]"),
+            ("xml", "<block></block>"),
+        ):
+            deferred_tool = _LateCancellationTool()
+            deferred_llm = ScriptedLLM([block])
+            async with Terrarium(
+                session_dir=tmp_path / f"deferred-{fmt}"
+            ) as deferred_engine:
+                deferred_node = await deferred_engine.add_creature(
+                    AgentConfig(
+                        name=f"deferred_{fmt}", system_prompt="plain", tool_format=fmt
+                    ),
+                    llm=deferred_llm,
+                    tools=[deferred_tool],
+                    pwd=tmp_path,
+                    io="headless",
+                    start=True,
+                )
+                task = asyncio.create_task(
+                    deferred_node.run("start", raise_on_error=False)
+                )
+                await asyncio.wait_for(deferred_tool.started.wait(), 5)
+                deferred_node.agent.interrupt()
+                assert (await asyncio.wait_for(task, 5)).status == "interrupted"
+                deferred_tool.release.set()
+                await _settle(lambda: not deferred_node.agent._active_handles)
+                await deferred_node.agent.output_router.flush()
+                before = branch_history.replay_with_settled_tools(
+                    deferred_node.agent.session_store.get_events(f"deferred_{fmt}"),
+                    branch_view={1: 1},
+                    include_metadata=True,
+                    resumable=True,
+                )
+                assert "first late result" not in str(before)
+                assert not any(m.get("tool_calls") for m in before)
+                deferred_path = deferred_node.agent.session_store.path
+            resumed_llm = ScriptedLLM(["resumed", "edited", "replaced", "selected"])
+            resumed_agent, resumed_store = resume_agent(
+                deferred_path, io_mode="plain", llm=resumed_llm
+            )
+            try:
+                assert resumed_llm.call_count == 0
+                await resumed_agent.start()
+                assert resumed_llm.call_count == 0
+                await resumed_agent.run("inspect")
+                assert str(resumed_llm.last_messages).count("first late result") == 1
+                live = resumed_agent.controller.conversation.snapshot_messages()
+                await resumed_agent.output_router.flush()
+                replayed = branch_history.replay_with_settled_tools(
+                    resumed_store.get_events(f"deferred_{fmt}"),
+                    branch_view={1: 1, 2: 1},
+                    include_metadata=True,
+                    resumable=True,
+                )
+                live_order = [
+                    (m["role"], str(m["content"]))
+                    for m in live
+                    if "first late result" in str(m["content"])
+                    or m["content"] == "inspect"
+                ]
+                replay_order = [
+                    (m["role"], str(m["content"]))
+                    for m in replayed
+                    if "first late result" in str(m["content"])
+                    or m["content"] == "inspect"
+                ]
+                assert replay_order == live_order
+                assert await resumed_agent.edit_and_rerun(
+                    0, "revised inspect", turn_index=2
+                )
+                assert str(resumed_llm.last_messages).count("first late result") == 1
+                assert await resumed_agent.edit_and_rerun(
+                    0, "replace original", turn_index=1
+                )
+                assert "first late result" not in str(resumed_llm.last_messages)
+                from_original = create_user_input_event("return to original")
+                await continue_on_branch(resumed_agent, from_original, {1: 1, 2: 2})
+                assert str(resumed_llm.last_messages).count("first late result") == 1
+            finally:
+                await resumed_agent.stop()
+                resumed_store.close()
+            second_llm = ScriptedLLM(["resumed again", "edited"])
+            again, again_store = resume_agent(
+                deferred_path, io_mode="plain", llm=second_llm
+            )
+            try:
+                await again.start()
+                await again.run("inspect again")
+                assert str(second_llm.last_messages).count("first late result") == 1
+                assert await again.edit_and_rerun(0, "revised inspect", turn_index=2)
+                assert str(second_llm.last_messages).count("first late result") == 1
+            finally:
+                await again.stop()
+                again_store.close()
+
+        for action in ("edit", "regenerate"):
+            branch_tool = _LateCancellationTool()
+            branch_llm = ScriptedLLM(["[/block][block/]", "replacement partial"])
+
+            async def fail_replacement(messages, **kwargs):
+                async for chunk in ScriptedLLM.chat(branch_llm, messages, **kwargs):
+                    yield chunk
+                if branch_llm.call_count == 2:
+                    raise ResponseStreamError()
+
+            branch_llm.chat = fail_replacement
+            async with Terrarium(
+                session_dir=tmp_path / f"old-termination-{action}"
+            ) as branch_engine:
+                branch_node = await branch_engine.add_creature(
+                    AgentConfig(
+                        name=f"old_termination_{action}",
+                        system_prompt="plain",
+                        tool_format="bracket",
+                    ),
+                    llm=branch_llm,
+                    tools=[branch_tool],
+                    pwd=tmp_path,
+                    io="headless",
+                    start=True,
+                )
+                original_check = branch_node.agent._check_termination
+                monkeypatch.setattr(
+                    branch_node.agent, "_check_termination", lambda text: True
+                )
+                await branch_node.run("original", raise_on_error=False)
+                await asyncio.wait_for(branch_tool.started.wait(), 5)
+                branch_tool.release.set()
+                handle = next(iter(branch_node.agent._active_handles.values()))
+                handle.task.cancel()
+                await asyncio.wait_for(handle.task, 5)
+                monkeypatch.setattr(
+                    branch_node.agent, "_check_termination", original_check
+                )
+                if action == "edit":
+                    assert await branch_node.agent.edit_and_rerun(
+                        0, "replacement", turn_index=1
+                    )
+                else:
+                    await branch_node.agent.regenerate_last_response(turn_index=1)
+                assert "first late result" not in str(
+                    branch_node.agent.controller.conversation.snapshot_messages()
+                )
+                assert "first late result" not in str(
+                    branch_node.agent.session_store.load_conversation(
+                        branch_node.agent.config.name
+                    )
+                )
 
         llm = InterruptedResponseLLM(
             [

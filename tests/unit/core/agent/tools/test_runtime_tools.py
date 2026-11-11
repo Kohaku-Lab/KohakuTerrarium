@@ -77,6 +77,46 @@ def _make_mixin(*, running=True, notify_meta=None):
 # ── _make_job_label ──────────────────────────────────────────────
 
 
+def test_deferred_activity_does_not_persist_separate_result(tmp_path):
+    store = SessionStore(tmp_path / "fail.kohakutr")
+    agent = types.SimpleNamespace(_turn_index=1, _branch_id=1, _parent_branch_path=[])
+    output = SessionOutput("alice", store, agent)
+    try:
+        output._handle_tool_done(
+            "block",
+            "done",
+            {"job_id": "job", "result": "late", "defer_controller": True},
+        )
+        assert not store.get_events("alice")
+    finally:
+        store.close(update_status=False)
+
+
+def test_deferred_completion_is_submitted_before_activity():
+    agent = _make_mixin()
+    order = []
+    agent._deferred_job_results = []
+    agent.controller = types.SimpleNamespace(
+        config=types.SimpleNamespace(tool_format="bracket")
+    )
+    agent._session_output = types.SimpleNamespace(
+        _store=object(),
+        _event_key_prefix="alice",
+        _submit_store_write=lambda *args: order.append("durable"),
+    )
+    agent.output_router.notify_activity = lambda *args, **kwargs: order.append(
+        "activity"
+    )
+    event = TriggerEvent(
+        type="tool_complete",
+        job_id="bash_123",
+        content="late",
+        context={"defer_controller": True, "job_branch_path": {1: 1}},
+    )
+    agent._on_bg_complete(event)
+    assert order == ["durable", "activity"]
+
+
 class TestMakeJobLabel:
     def test_with_id(self):
         tool, label = _make_job_label("bash_abcdef123456")
