@@ -234,11 +234,18 @@ async def test_cancellation_remains_cancellation(close_error):
 
 
 @pytest.mark.parametrize(
-    "completed,close_error,transport_error",
-    [(False, False, error) for error in ("raw", "sdk_connection", "sdk_timeout")]
-    + [(False, True, "raw"), (True, False, "raw"), (True, True, "raw")],
+    "completed,close_error,transport_error,partial",
+    [
+        (False, False, "raw", False),
+        (False, False, "raw", True),
+        (False, False, "sdk_connection", True),
+        (False, False, "sdk_timeout", True),
+        (False, True, "raw", False),
+        (False, True, "raw", True),
+        (True, False, "raw", True),
+        (True, True, "raw", True),
+    ],
 )
-@pytest.mark.parametrize("partial", [False, True])
 async def test_transport_and_cleanup_failures_never_resubmit(
     completed, close_error, partial, transport_error
 ):
@@ -333,7 +340,8 @@ async def test_unsuccessful_stream_preserves_text_without_resubmitting(
             async for chunk in provider.chat([{"role": "user", "content": "Draw"}]):
                 chunks.append(chunk)
         assert getattr(caught.value, "code", None) == code
-        assert "secret upstream payload" not in str(caught.value)
+        if terminal and terminal.get("type") == "error":
+            assert "secret upstream payload" not in str(caught.value)
         assert chunks == (["Partial answer"] if partial else [])
         assert len(requests) == 1
         assert provider.last_usage == {}

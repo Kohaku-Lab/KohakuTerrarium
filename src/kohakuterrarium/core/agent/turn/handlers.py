@@ -265,8 +265,11 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                     break
 
                 self._reset_output_state()
-                round_result = _TurnResult()
-                round_result = await self._run_single_turn(controller)
+                round_result = _TurnResult(
+                    native_mode=getattr(controller.config, "tool_format", None)
+                    == "native"
+                )
+                await self._run_single_turn(controller, round_result)
                 all_round_text.extend(round_result.text_output)
                 self._last_turn_text = list(round_result.text_output)
                 self._emit_token_usage(controller)
@@ -294,11 +297,28 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                     break
                 self._maybe_trigger_compact(controller)
         except (asyncio.CancelledError, Exception) as exc:
-            await self._settle_failed_round(
-                controller,
-                round_result,
-                cancelled=isinstance(exc, asyncio.CancelledError),
-            )
+            if isinstance(exc, ResponseStreamError):
+                self.output_router.notify_activity(
+                    "processing_error",
+                    f"[{type(exc).__name__}] {exc}",
+                    metadata={
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        "response_outcome": exc.response_outcome,
+                    },
+                )
+                exc._activity_reported = True
+            try:
+                await self._settle_failed_round(
+                    controller,
+                    round_result,
+                    cancelled=isinstance(exc, asyncio.CancelledError),
+                )
+            except asyncio.CancelledError:
+                await self._settle_failed_round(
+                    controller, round_result, cancelled=True
+                )
+                raise
             raise
 
     async def _settle_failed_round(
@@ -325,7 +345,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         tool_call_ids = {
             jid: self._direct_job_meta[jid]["tool_call_id"] for jid in handles
         }
-        native_mode = getattr(controller.config, "tool_format", None) == "native"
+        native_mode = round_result.native_mode
         if cancelled:
             self._cancel_handles(handles)
         results, promoted = await self._wait_handles(
@@ -349,66 +369,45 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             native_mode,
         )
 
-    async def _run_single_turn(self, controller: Controller) -> "_TurnResult":
-        """Run one LLM turn, dispatching tools and sub-agents as they appear.
-
-        Returns a ``_TurnResult`` with collected job info and text output.
-        """
-        result = _TurnResult()
-        result.native_mode = getattr(controller.config, "tool_format", None) == "native"
+    async def _run_single_turn(
+        self, controller: Controller, result: "_TurnResult"
+    ) -> None:
+        """Dispatch one model stream into the caller-owned round state."""
         handles = result.handles
         handle_order = result.handle_order
         round_text = result.text_output
         native_mode = result.native_mode
         native_tool_call_ids = result.native_tool_call_ids
 
-        try:
-            async with aclosing(controller.run_once()) as stream:
-                async for parse_event in stream:
-                    if self._interrupt_requested:
-                        break
+        async with aclosing(controller.run_once()) as stream:
+            async for parse_event in stream:
+                if self._interrupt_requested:
+                    break
 
-                    if isinstance(parse_event, ToolCallEvent):
-                        await self._dispatch_tool_event(
-                            parse_event,
-                            controller,
-                            handles,
-                            handle_order,
-                            native_tool_call_ids,
-                            native_mode,
-                        )
-                    elif isinstance(parse_event, SubAgentCallEvent):
-                        await self._dispatch_subagent_event(
-                            parse_event,
-                            controller,
-                            handles,
-                            handle_order,
-                            native_tool_call_ids,
-                            native_mode,
-                        )
-                    elif isinstance(parse_event, CommandResultEvent):
-                        self._notify_command_result(parse_event)
-                    else:
-                        if isinstance(parse_event, TextEvent):
-                            round_text.append(parse_event.text)
-                        await self.output_router.route(parse_event)
-        except (asyncio.CancelledError, Exception) as exc:
-            if isinstance(exc, ResponseStreamError):
-                self.output_router.notify_activity(
-                    "processing_error",
-                    f"[{type(exc).__name__}] {exc}",
-                    metadata={
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                        "response_outcome": exc.response_outcome,
-                    },
-                )
-                exc._activity_reported = True
-            await self._settle_failed_round(
-                controller, result, cancelled=isinstance(exc, asyncio.CancelledError)
-            )
-            raise
-        return result
+                if isinstance(parse_event, ToolCallEvent):
+                    await self._dispatch_tool_event(
+                        parse_event,
+                        controller,
+                        handles,
+                        handle_order,
+                        native_tool_call_ids,
+                        native_mode,
+                    )
+                elif isinstance(parse_event, SubAgentCallEvent):
+                    await self._dispatch_subagent_event(
+                        parse_event,
+                        controller,
+                        handles,
+                        handle_order,
+                        native_tool_call_ids,
+                        native_mode,
+                    )
+                elif isinstance(parse_event, CommandResultEvent):
+                    self._notify_command_result(parse_event)
+                else:
+                    if isinstance(parse_event, TextEvent):
+                        round_text.append(parse_event.text)
+                    await self.output_router.route(parse_event)
 
     async def _dispatch_tool_event(
         self,

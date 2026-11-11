@@ -28,7 +28,9 @@ from kohakuterrarium.core.controller.plugins import (
     run_post_llm_call_chain,
 )
 from kohakuterrarium.core.controller.messages import (
+    assistant_image_events,
     begin_assistant,
+    deliver_interrupted_output,
     end_assistant,
     record_incomplete_assistant,
     _merge_text_and_parts,
@@ -67,7 +69,6 @@ from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE
 from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import ToolInfo
 from kohakuterrarium.parsing import (
-    AssistantImageEvent,
     CommandEvent,
     CommandResultEvent,
     ParseEvent,
@@ -447,31 +448,12 @@ class Controller:
                 structured = self._collect_structured_assistant_parts()
                 try:
                     if not self._interrupted and isinstance(exc, Exception):
-                        for part in structured:
-                            if isinstance(part, ImagePart):
-                                yield AssistantImageEvent(
-                                    url=part.url,
-                                    detail=part.detail,
-                                    source_type=part.source_type,
-                                    source_name=part.source_name,
-                                    revised_prompt=getattr(
-                                        part, "revised_prompt", None
-                                    ),
-                                )
-                    elif self.output_router is not None:
-                        for part in structured:
-                            if isinstance(part, ImagePart):
-                                await self.output_router.route(
-                                    AssistantImageEvent(
-                                        url=part.url,
-                                        detail=part.detail,
-                                        source_type=part.source_type,
-                                        source_name=part.source_name,
-                                        revised_prompt=getattr(
-                                            part, "revised_prompt", None
-                                        ),
-                                    )
-                                )
+                        for event in assistant_image_events(structured):
+                            yield event
+                    else:
+                        await deliver_interrupted_output(
+                            self, assistant_image_events(structured)
+                        )
                 finally:
                     await record_incomplete_assistant(
                         self, _merge_text_and_parts(assistant_content, structured), exc
@@ -483,15 +465,8 @@ class Controller:
         # remains small and later readers use stable session URLs.
         structured_parts = self._collect_structured_assistant_parts()
         try:
-            for part in structured_parts:
-                if isinstance(part, ImagePart):
-                    yield AssistantImageEvent(
-                        url=part.url,
-                        detail=part.detail,
-                        source_type=part.source_type,
-                        source_name=part.source_name,
-                        revised_prompt=getattr(part, "revised_prompt", None),
-                    )
+            for event in assistant_image_events(structured_parts):
+                yield event
         except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
             await record_incomplete_assistant(
                 self, _merge_text_and_parts(assistant_content, structured_parts), exc
@@ -647,40 +622,17 @@ class Controller:
                         for event in self._parser.flush():
                             if isinstance(event, TextEvent):
                                 yield event
-                        for part in structured:
-                            if isinstance(part, ImagePart):
-                                yield AssistantImageEvent(
-                                    url=part.url,
-                                    detail=part.detail,
-                                    source_type=part.source_type,
-                                    source_name=part.source_name,
-                                    revised_prompt=getattr(
-                                        part, "revised_prompt", None
-                                    ),
-                                )
-                    elif self.output_router is not None:
-                        for event in self._parser.flush():
-                            if isinstance(event, TextEvent):
-                                try:
-                                    await self.output_router.route(event)
-                                except Exception as output_error:
-                                    logger.warning(
-                                        "Interrupted output delivery failed",
-                                        error_type=type(output_error).__name__,
-                                    )
-                        for part in structured:
-                            if isinstance(part, ImagePart):
-                                await self.output_router.route(
-                                    AssistantImageEvent(
-                                        url=part.url,
-                                        detail=part.detail,
-                                        source_type=part.source_type,
-                                        source_name=part.source_name,
-                                        revised_prompt=getattr(
-                                            part, "revised_prompt", None
-                                        ),
-                                    )
-                                )
+                        for event in assistant_image_events(structured):
+                            yield event
+                    else:
+                        buffered = [
+                            event
+                            for event in self._parser.flush()
+                            if isinstance(event, TextEvent)
+                        ]
+                        await deliver_interrupted_output(
+                            self, [*buffered, *assistant_image_events(structured)]
+                        )
                 finally:
                     await record_incomplete_assistant(
                         self, _merge_text_and_parts(assistant_content, structured), exc
@@ -1006,15 +958,8 @@ class Controller:
             self._log_token_usage()
             structured = self._collect_structured_assistant_parts()
             try:
-                for part in structured:
-                    if isinstance(part, ImagePart):
-                        yield AssistantImageEvent(
-                            url=part.url,
-                            detail=part.detail,
-                            source_type=part.source_type,
-                            source_name=part.source_name,
-                            revised_prompt=getattr(part, "revised_prompt", None),
-                        )
+                for event in assistant_image_events(structured):
+                    yield event
             except (Exception, asyncio.CancelledError, GeneratorExit) as exc:
                 await record_incomplete_assistant(
                     self,

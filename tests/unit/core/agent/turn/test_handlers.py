@@ -145,6 +145,14 @@ async def test_completed_feedback_follows_interrupted_stream(
     )
     agent, trace = await _build(tmp_path, llm, tool_format, [tool])
     settling = asyncio.Event()
+    settlement_rounds = []
+    original_settle = agent._settle_failed_round
+
+    async def track_settlement(controller, round_result, **kwargs):
+        settlement_rounds.append(round_result)
+        return await original_settle(controller, round_result, **kwargs)
+
+    monkeypatch.setattr(agent, "_settle_failed_round", track_settlement)
     original_wait = agent._wait_handles
 
     async def pause_first_wait(*args, **kwargs):
@@ -163,6 +171,9 @@ async def test_completed_feedback_follows_interrupted_stream(
         await asyncio.wait_for(next(iter(agent._active_handles.values())).task, 5)
         await agent.interrupt_and_wait()
         assert (await task).status == "interrupted"
+        assert settlement_rounds
+        assert all(result is settlement_rounds[0] for result in settlement_rounds)
+        assert settlement_rounds[0].handle_order
         snapshot = agent.controller.conversation.snapshot_messages()
         call_index = next(
             i
@@ -315,6 +326,40 @@ async def test_deferred_feedback_is_context_not_a_separate_turn(
         assert "next input" in str(llm.last_messages[-1])
         assert not agent.controller.has_pending_events()
     finally:
+        await agent.stop()
+
+
+async def test_failed_round_recovers_completed_job_left_by_termination(
+    tmp_path, monkeypatch
+):
+    release = asyncio.Event()
+    tool = _OwnedTool(release)
+    llm = _FailingLLM(
+        ["[/owned][owned/]", "later partial"], ResponseStreamError(), fail_call=2
+    )
+    agent, trace = await _build(tmp_path, llm, tools=[tool])
+    original_check = agent._check_termination
+    monkeypatch.setattr(agent, "_check_termination", lambda text: True)
+    try:
+        await agent.run("terminated round")
+        assert len(agent._active_handles) == 1
+        release.set()
+        await asyncio.wait_for(next(iter(agent._active_handles.values())).task, 5)
+        monkeypatch.setattr(agent, "_check_termination", original_check)
+        llm.last_tool_calls = []
+        result = await agent.run("later failure", raise_on_error=False)
+        assert result.status == "error"
+        assert not agent._active_handles and not agent._direct_job_meta
+        assert (
+            sum(
+                "owned result" in str(m["content"])
+                for m in agent.controller.conversation.snapshot_messages()
+            )
+            == 1
+        )
+        assert len([e for e in trace.events if e.type == "tool_done"]) == 1
+    finally:
+        release.set()
         await agent.stop()
 
 

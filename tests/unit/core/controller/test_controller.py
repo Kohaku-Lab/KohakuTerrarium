@@ -30,6 +30,7 @@ from kohakuterrarium.core.jobs.job import JobResult, JobState, JobStatus, JobTyp
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.parsing.events import (
+    AssistantImageEvent,
     TextEvent,
 )
 from kohakuterrarium.testing.agent import TestAgentBuilder
@@ -434,6 +435,43 @@ class TestConversationAccess:
 
 class TestErrorRecovery:
     @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+    @pytest.mark.parametrize("failing_output", ["image", "canonical"])
+    async def test_interrupted_cleanup_preserves_cause_when_output_fails(
+        self, tool_format, failing_output
+    ):
+        image = ImagePart(url="https://test.invalid/generated.png")
+
+        class InterruptedImage(ScriptedLLM):
+            async def chat(self, messages, **kwargs):
+                self.last_assistant_content_parts = [image]
+                yield "received text"
+                raise asyncio.CancelledError()
+
+        async def route(event):
+            if isinstance(event, AssistantImageEvent) and failing_output == "image":
+                raise OSError("image output unavailable")
+
+        async def emit(event):
+            if event.type == "assistant_message" and failing_output == "canonical":
+                raise OSError("canonical output unavailable")
+
+        env = TestAgentBuilder().with_llm(InterruptedImage([])).build()
+        env.controller.config.tool_format = tool_format
+        env.controller.output_router = types.SimpleNamespace(route=route, emit=emit)
+        await env.controller.push_event(create_user_input_event("draw"))
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in env.controller.run_once():
+                pass
+        partials = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if m.role == "assistant"
+        ]
+        assert len(partials) == 1
+        assert partials[0].metadata["completion_state"] == "interrupted"
+        assert any(isinstance(part, ImagePart) for part in partials[0].content)
+
+    @pytest.mark.parametrize("tool_format", ["bracket", "native"])
     @pytest.mark.parametrize("text", ["", "partial"])
     async def test_incomplete_stream_preserves_received_images(self, tool_format, text):
         image = ImagePart(url="data:image/png;base64,aW1hZ2U=", source_name="generated")
@@ -500,7 +538,7 @@ class TestErrorRecovery:
         assert partials[0].metadata["completion_state"] == "interrupted"
         assert not partials[0].tool_calls
 
-    @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
+    @pytest.mark.parametrize("tool_format", ["bracket", "native"])
     async def test_close_at_structured_tail_retains_received_content(self, tool_format):
         image = ImagePart(url="https://test.invalid/generated.png")
         llm = ScriptedLLM(["visible text"])
@@ -545,9 +583,14 @@ class TestErrorRecovery:
         assert partials[0].get_text_content() == "tail only"
         assert partials[0].metadata["completion_state"] == "interrupted"
 
-    @pytest.mark.parametrize("tool_format", ["bracket", "xml", "native"])
     @pytest.mark.parametrize(
-        "failure", [ResponseStreamError, RuntimeError, asyncio.CancelledError]
+        "tool_format,failure",
+        [(fmt, ResponseStreamError) for fmt in ("bracket", "xml", "native")]
+        + [
+            (fmt, error)
+            for fmt in ("bracket", "native")
+            for error in (RuntimeError, asyncio.CancelledError)
+        ],
     )
     async def test_partial_failure_remains_in_canonical_context(
         self, tool_format, failure

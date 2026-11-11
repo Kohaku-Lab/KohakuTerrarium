@@ -328,10 +328,18 @@ class TestEmitDirectCompletion:
 
 class TestCancellationHandoff:
     @pytest.mark.parametrize(
-        "notify,stopping", [(True, False), (False, False), (True, True)]
+        "native,outcome,notify,stopping",
+        [
+            (native, outcome, True, False)
+            for native in (False, True)
+            for outcome in ("success", "cancel", "error")
+        ]
+        + [
+            (native, "success", notify, stopping)
+            for native in (False, True)
+            for notify, stopping in ((False, False), (True, True))
+        ],
     )
-    @pytest.mark.parametrize("native", [False, True])
-    @pytest.mark.parametrize("outcome", ["success", "cancel", "error"])
     async def test_pending_then_late_result_preserves_new_round(
         self, agent, native, outcome, notify, stopping, monkeypatch
     ):

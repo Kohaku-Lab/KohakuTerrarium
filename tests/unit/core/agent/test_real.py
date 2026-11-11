@@ -25,6 +25,7 @@ from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.parsing import SubAgentCallEvent
 from kohakuterrarium.bootstrap import llm as bootstrap_llm
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.agent.tools.dispatch import _TurnResult
 from kohakuterrarium.core.config.types import (
     AgentConfig,
     InputConfig,
@@ -2692,14 +2693,12 @@ class TestAssistantReasoningEmission:
     async def test_reasoning_emitted_after_each_controller_round(
         self, make_agent, monkeypatch
     ):
-        from kohakuterrarium.core.agent.tools.dispatch import _TurnResult
-
         agent = make_agent(script=["resp"])
         await agent.start()
         try:
             rounds = 0
 
-            async def fake_turn(controller):
+            async def fake_turn(controller, result):
                 nonlocal rounds
                 rounds += 1
                 if rounds == 1:
@@ -2710,13 +2709,7 @@ class TestAssistantReasoningEmission:
                     controller.llm.last_assistant_extra_fields = {
                         "reasoning_content": "think B"
                     }
-                return _TurnResult(
-                    handles={},
-                    handle_order=[],
-                    text_output=["text"],
-                    native_mode=False,
-                    native_tool_call_ids={},
-                )
+                result.text_output.append("text")
 
             async def fake_feedback(*args, **kwargs):
                 return rounds < 2
@@ -4127,18 +4120,9 @@ class TestInterruptMidStream:
         await agent.start()
         try:
             # Set interrupt flag to fire in the loop.
-            async def fake_run_single_turn(controller):
-                # Set the flag mid-turn.
+            async def fake_run_single_turn(controller, result):
                 agent._interrupt_requested = True
-                from kohakuterrarium.core.agent.tools.dispatch import _TurnResult
-
-                return _TurnResult(
-                    handles={},
-                    handle_order=[],
-                    text_output=["t1"],
-                    native_mode=False,
-                    native_tool_call_ids={},
-                )
+                result.text_output.append("t1")
 
             agent._run_single_turn = fake_run_single_turn
             event = create_user_input_event("hi")
@@ -4212,7 +4196,8 @@ class TestRunSingleTurnInterruptMidLoop:
                 yield TextEvent(text="second")  # never reached
 
             agent.controller.run_once = fake_run_once
-            result = await agent._run_single_turn(agent.controller)
+            result = _TurnResult()
+            await agent._run_single_turn(agent.controller, result)
             # Only the first text chunk made it in.
             assert "first" in result.text_output
         finally:
@@ -4241,7 +4226,7 @@ class TestRunSingleTurnSubAgentEvent:
                 called.append(args)
 
             agent._dispatch_subagent_event = fake_dispatch
-            await agent._run_single_turn(agent.controller)
+            await agent._run_single_turn(agent.controller, _TurnResult())
             assert called
         finally:
             await agent.stop()

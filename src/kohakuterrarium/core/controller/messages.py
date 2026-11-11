@@ -4,8 +4,41 @@ import asyncio
 from copy import deepcopy
 from typing import Any
 
-from kohakuterrarium.llm.message import ContentPart, TextPart
+from kohakuterrarium.parsing import AssistantImageEvent, ParseEvent
+from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.llm.message import ContentPart, ImagePart, TextPart
 from kohakuterrarium.modules.output.event import OutputEvent
+
+logger = get_logger(__name__)
+
+
+def assistant_image_events(parts: list[ContentPart]) -> list[AssistantImageEvent]:
+    """Project received image parts into display events."""
+    return [
+        AssistantImageEvent(
+            url=part.url,
+            detail=part.detail,
+            source_type=part.source_type,
+            source_name=part.source_name,
+            revised_prompt=getattr(part, "revised_prompt", None),
+        )
+        for part in parts
+        if isinstance(part, ImagePart)
+    ]
+
+
+async def deliver_interrupted_output(controller: Any, events: list[ParseEvent]) -> None:
+    """Deliver buffered display events without replacing the interrupted outcome."""
+    if controller.output_router is None:
+        return
+    for event in events:
+        try:
+            await controller.output_router.route(event)
+        except Exception as output_error:
+            logger.warning(
+                "Interrupted output delivery failed",
+                error_type=type(output_error).__name__,
+            )
 
 
 def _merge_text_and_parts(
@@ -64,7 +97,13 @@ async def record_incomplete_assistant(
         content,
         metadata=metadata,
     )
-    await end_assistant(controller)
+    try:
+        await end_assistant(controller)
+    except Exception as output_error:
+        logger.warning(
+            "Incomplete assistant delivery failed",
+            error_type=type(output_error).__name__,
+        )
 
 
 async def end_assistant(controller: Any) -> None:
