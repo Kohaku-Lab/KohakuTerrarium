@@ -417,6 +417,49 @@ class TestGraphManifest:
         store.meta[MANIFEST_KEY] = None
         assert load_manifest(store) is None
 
+
+class TestManifestConfigRefResolution:
+    def _parse_single(self, row):
+        return parse_manifest(_raw_manifest(creatures=[row])).creatures[0]
+
+    def test_resolvable_ref_reads_disk_config(self, tmp_path):
+        folder = tmp_path / "creature"
+        folder.mkdir()
+        (folder / "config.yaml").write_text("name: from-disk\n", encoding="utf-8")
+
+        row = _creature_row()
+        row["config_snapshot"] = pack_agent_config(AgentConfig(name="from-snapshot"))
+        row["config_ref"] = str(folder)
+
+        assert self._parse_single(row).unpack_config().name == "from-disk"
+
+    def test_unresolvable_ref_falls_back_to_snapshot(self):
+        row = _creature_row()
+        row["config_snapshot"] = pack_agent_config(AgentConfig(name="from-snapshot"))
+        row["config_ref"] = "@__missing__/creatures/absent"
+        row["source_ref"] = "@__missing__/creatures/absent"
+
+        assert self._parse_single(row).unpack_config().name == "from-snapshot"
+
+    def test_missing_ref_falls_back_to_snapshot(self):
+        row = _creature_row()
+        row["config_snapshot"] = pack_agent_config(AgentConfig(name="from-snapshot"))
+        row["config_ref"] = None
+        row["source_ref"] = None
+
+        assert self._parse_single(row).unpack_config().name == "from-snapshot"
+
+    def test_unreadable_disk_config_falls_back_to_snapshot(self, tmp_path):
+        folder = tmp_path / "creature"
+        folder.mkdir()
+        (folder / "config.yaml").write_text("name: [unclosed\n", encoding="utf-8")
+
+        row = _creature_row()
+        row["config_snapshot"] = pack_agent_config(AgentConfig(name="from-snapshot"))
+        row["config_ref"] = str(folder)
+
+        assert self._parse_single(row).unpack_config().name == "from-snapshot"
+
         graph = GraphTopology(graph_id="graph_test")
         engine = _Engine(graph, {})
         assert checkpoint_graph(engine, "graph_test") is None

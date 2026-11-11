@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.core.config.load import AgentConfig
+from kohakuterrarium.core.config.load import AgentConfig, load_agent_config
 from kohakuterrarium.core.config.serde import pack_agent_config, unpack_agent_config
 from kohakuterrarium.errors import (
     GraphManifestError,
@@ -12,11 +12,15 @@ from kohakuterrarium.errors import (
     GraphManifestVersionError,
     SessionNotResumableError,
 )
+from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.terrarium.graph.topology import is_legacy_direct_channel
+from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.session.store import SessionStore
     from kohakuterrarium.terrarium.engine.engine import Terrarium
+
+logger = get_logger(__name__)
 
 MANIFEST_KEY = "live_graph_manifest"
 MANIFEST_KIND = "kohakuterrarium.live_graph"
@@ -38,7 +42,27 @@ class ManifestCreature:
     config_ref: str | None = None
 
     def unpack_config(self) -> AgentConfig:
-        """Recreate the resolved agent config stored in this record."""
+        """Recreate the agent config for this graph member.
+
+        A resolvable ``config_ref`` supersedes the packed snapshot; the
+        snapshot covers inline-spawn and cross-node records whose ref does
+        not resolve here.
+        """
+        ref = self.config_ref
+        if ref:
+            try:
+                path = resolve_any_path(ref)
+            except (FileNotFoundError, ValueError):
+                path = None
+            if path is not None and path.exists():
+                try:
+                    return load_agent_config(str(path))
+                except Exception:
+                    logger.warning(
+                        "manifest config_ref unreadable; using snapshot",
+                        config_ref=ref,
+                        exc_info=True,
+                    )
         return unpack_agent_config(self.config_snapshot)
 
 
