@@ -8,6 +8,7 @@ LocalTerrariumService instance).
 
 from types import SimpleNamespace
 
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.registry import (
     StudioSessionRegistry,
@@ -17,10 +18,12 @@ from kohakuterrarium.studio.sessions.registry import (
     meta_for,
     register_session_meta,
     registry_for,
+    release_stale_store,
     stores_for,
 )
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
+from kohakuterrarium.utils.file.lock import FileLock
 
 
 class TestRegistryIsolation:
@@ -115,3 +118,34 @@ class TestAccessors:
         assert lifecycle.stores_for is stores_for
         assert lifecycle.get_session_meta is get_session_meta
         assert lifecycle.register_session_meta is register_session_meta
+
+
+class TestReleaseStaleStore:
+    async def test_closes_the_store_holding_the_lease(self, tmp_path):
+        t = Terrarium()
+        try:
+            session_path = tmp_path / "s.kohakutr"
+            stores_for(t)["sid"] = SessionStore(str(session_path), writer_lock=True)
+
+            release_stale_store(t, session_path)
+
+            assert "sid" not in stores_for(t)
+            # The writer lock is free again, so a delete can proceed.
+            lock = FileLock(str(session_path) + ".lock")
+            lock.acquire()
+            lock.release()
+        finally:
+            await t.shutdown()
+
+    async def test_leaves_stores_for_other_files_alone(self, tmp_path):
+        t = Terrarium()
+        try:
+            store = SessionStore(str(tmp_path / "b.kohakutr"), writer_lock=True)
+            try:
+                stores_for(t)["other"] = store
+                release_stale_store(t, tmp_path / "a.kohakutr")
+                assert stores_for(t)["other"] is store
+            finally:
+                store.close(update_status=False)
+        finally:
+            await t.shutdown()

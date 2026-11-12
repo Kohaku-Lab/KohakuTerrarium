@@ -21,9 +21,11 @@ to preserve the session API URLs.
 """
 
 import os
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
 )
@@ -36,9 +38,17 @@ from kohakuterrarium.studio.persistence.session_index.refresh import (
 )
 from kohakuterrarium.studio.persistence.store import (
     _session_dir,
+    all_versions_for_session_default,
     delete_session_files,
     disk_usage,
+    resolve_session_path_default,
 )
+from kohakuterrarium.studio.sessions import live as _live
+from kohakuterrarium.studio.sessions.lifecycle import end_session
+from kohakuterrarium.studio.sessions.registry import release_stale_store
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -158,13 +168,48 @@ async def list_sessions(
     )
 
 
+async def _stop_live_session_holders(session_name: str, service: Any) -> None:
+    """Stop live sessions that still hold one of the target files open.
+
+    A running session keeps its writer lock; deleting underneath it would fail
+    with a lock error naming this same process. Ending the session first
+    releases the store, the lock and the live-registry row.
+    """
+    targets = all_versions_for_session_default(session_name)
+    if not targets:
+        resolved = resolve_session_path_default(session_name)
+        if resolved is not None:
+            targets = [resolved]
+    for path in targets:
+        row = _live.live_sessions().get(path)
+        session_id = (row or {}).get("session_id")
+        if session_id:
+            try:
+                await end_session(service, session_id)
+            except Exception:
+                logger.warning(
+                    "delete: stopping live session failed",
+                    session_id=session_id,
+                    exc_info=True,
+                )
+        # A store left open by a failed resume survives the stop above; closing
+        # it here is what actually frees the writer lock.
+        release_stale_store(service, path)
+
+
 @router.delete("/{session_name}")
-async def delete_session(session_name: str):
+async def delete_session(
+    session_name: str,
+    service: Any = Depends(get_service),
+):
     """Delete every file belonging to one logical saved session.
 
     Versioned and rollback files are removed together. Raw stems are accepted
     through fuzzy lookup for session names that omit the canonical suffix.
+    A session that is still running is stopped first so its writer lock is
+    released before the file family is detached.
     """
+    await _stop_live_session_holders(session_name, service)
     try:
         deleted_paths = await run_in_persistence_executor(
             delete_session_files, session_name
@@ -185,6 +230,12 @@ async def delete_session(session_name: str):
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
         )
+    # A deleted session must not keep a live row: the history list reads those
+    # rows and would otherwise show it as running — and un-deletable — until the
+    # next boot prunes them.
+    registry = _live.live_sessions()
+    for path in deleted_paths:
+        registry.remove(path)
     # File deletion also removes the corresponding session-index entries.
     return {
         "status": "deleted",

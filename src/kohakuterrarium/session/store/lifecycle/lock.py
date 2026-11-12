@@ -4,6 +4,7 @@ Read-only consumers remain lock-free, and operating-system lock ownership is
 released automatically when a process exits.
 """
 
+import os
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -32,17 +33,26 @@ def acquire_writer_lock(path: str) -> FileLock:
     """Acquire the writer lock for session ``path``.
 
     Return the held lock for release at store close. If another writer owns it,
-    raise :class:`SessionLockedError` with the holder process identifier.
+    raise :class:`SessionLockedError` with the holder process identifier. A
+    holder in this same process is reported as such: the message points at the
+    live session rather than at a second instance that does not exist.
     """
     lock = FileLock(path + ".lock")
     try:
         lock.acquire()
     except FileLockBusy as exc:
+        holder = exc.holder_pid
+        if holder is not None and holder == os.getpid():
+            raise SessionLockedError(
+                f"Session is open in this process (pid {holder}): {path}. "
+                f"Stop the session before deleting it.",
+                holder_pid=holder,
+            ) from exc
         raise SessionLockedError(
             f"Session is already open for writing by another process "
-            f"(pid {exc.holder_pid}): {path}. Close the other instance, or "
+            f"(pid {holder}): {path}. Close the other instance, or "
             f"open it read-only to view.",
-            holder_pid=exc.holder_pid,
+            holder_pid=holder,
         ) from exc
     return lock
 
