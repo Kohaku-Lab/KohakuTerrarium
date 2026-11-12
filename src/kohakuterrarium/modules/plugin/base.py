@@ -268,8 +268,17 @@ class BasePlugin(UIOwnerMixin):
     prompt_renderers: frozenset[str] = frozenset()
     # Names ``<doc_prefix>:<topic>`` that ``info`` resolves through doc_topic.
     doc_prefix: str = ""
+    # Assigned by PluginManager before on_load runs, so the context proxies
+    # below work even when a subclass overrides on_load without calling super().
+    _plugin_context: "PluginContext | None" = None
 
-    def __init__(self) -> None:
+    def __init__(self, **options: Any) -> None:
+        if options:
+            logger.warning(
+                "plugin received options it does not declare; ignoring",
+                plugin_name=getattr(self, "name", "?"),
+                keys=sorted(options),
+            )
         # Compile once because applicability is evaluated for every hook.
         self._model_pattern_res: list[re.Pattern[str]] = []
         for pattern in self.applies_to.get("model_patterns", []) or []:
@@ -425,6 +434,36 @@ class BasePlugin(UIOwnerMixin):
 
     async def on_load(self, context: PluginContext) -> None:
         """Called when plugin is loaded."""
+        self._plugin_context = context
+
+    @property
+    def plugin_context(self) -> PluginContext:
+        """The live context, raising clearly when the plugin was never loaded."""
+        ctx = getattr(self, "_plugin_context", None)
+        if ctx is None:
+            raise RuntimeError(
+                f"plugin {getattr(self, 'name', '?')!r} is not loaded: "
+                "on_load(context) has not run"
+            )
+        return ctx
+
+    @property
+    def controller(self) -> "Controller | None":
+        """Shortcut for ``plugin_context.controller``."""
+        return self.plugin_context.controller
+
+    @property
+    def host_agent(self) -> "Agent | None":
+        """Shortcut for ``plugin_context.host_agent``."""
+        return self.plugin_context.host_agent
+
+    def inject_message_before_llm(self, role: str, content: str | list) -> None:
+        """Shortcut for ``plugin_context.inject_message_before_llm``."""
+        self.plugin_context.inject_message_before_llm(role, content)
+
+    def pin_message(self, key: str, role: str, content: str | list) -> bool:
+        """Shortcut for ``plugin_context.pin_message``."""
+        return self.plugin_context.pin_message(key, role, content)
 
     async def on_unload(self) -> None:
         """Called when agent shuts down."""

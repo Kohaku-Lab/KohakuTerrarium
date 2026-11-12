@@ -533,3 +533,66 @@ class TestPluginLogger:
 
     def test_unnamed_plugin_falls_back_to_unnamed(self):
         assert BasePlugin().logger.name.endswith("kohakuterrarium.plugins.unnamed")
+
+
+class TestConstructorAcceptsOptions:
+    def test_undeclared_options_are_ignored_not_fatal(self, caplog):
+        class Plain(BasePlugin):
+            name = "plain"
+
+        plugin = Plain(retries=3, label="x")
+
+        assert plugin.name == "plain"
+        assert any("does not declare" in r.getMessage() for r in caplog.records)
+
+    def test_no_options_stays_quiet(self, caplog):
+        class Plain(BasePlugin):
+            name = "plain"
+
+        Plain()
+        assert not [r for r in caplog.records if "does not declare" in r.getMessage()]
+
+
+class TestPluginContextProxies:
+    def test_context_raises_clearly_before_load(self):
+        class Plain(BasePlugin):
+            name = "plain"
+
+        with pytest.raises(RuntimeError, match="is not loaded"):
+            _ = Plain().plugin_context
+
+    async def test_on_load_records_the_context(self):
+        class Plain(BasePlugin):
+            name = "plain"
+
+        plugin = Plain()
+        ctx = PluginContext(agent_name="a")
+        await plugin.on_load(ctx)
+
+        assert plugin.plugin_context is ctx
+
+    async def test_proxies_delegate_to_the_context(self):
+        class Plain(BasePlugin):
+            name = "plain"
+
+        plugin = Plain()
+        ctx = PluginContext(agent_name="a")
+        await plugin.on_load(ctx)
+
+        assert plugin.controller is ctx.controller
+        assert plugin.host_agent is ctx.host_agent
+
+    async def test_manager_assignment_works_when_on_load_is_overridden(self):
+        # A subclass that replaces on_load without calling super() still gets
+        # the context, because the manager assigns it directly.
+        class Overrides(BasePlugin):
+            name = "overrides"
+
+            async def on_load(self, context):
+                self.seen = context.agent_name
+
+        plugin = Overrides()
+        ctx = PluginContext(agent_name="a")
+        plugin._plugin_context = ctx
+
+        assert plugin.plugin_context is ctx
