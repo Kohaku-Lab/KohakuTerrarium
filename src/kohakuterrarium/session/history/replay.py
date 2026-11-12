@@ -93,7 +93,7 @@ def project_branch_metadata(
         try:
             turn_index = int(evt.get("turn_index"))
             branch_id = int(evt.get("branch_id"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         event_id = evt.get("event_id")
         path = (
@@ -830,7 +830,7 @@ def normalize_resumable_events(
             job_id = evt.get("call_id") or evt.get("job_id") or ""
             if job_id:
                 finished_tools.add(str(job_id))
-        elif etype == "deferred_job_result" and evt.get("text_mode"):
+        elif etype == "deferred_job_result":
             job_id = evt.get("job_id") or ""
             if job_id:
                 finished_tools.add(str(job_id))

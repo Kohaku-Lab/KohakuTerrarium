@@ -1575,7 +1575,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         evt.name || "tool",
         evt.output || evt.content || evt.error || "",
         {
-          error: evt.error ? true : false,
+          error: !!(evt.error || evt.context?.error),
           interrupted: !!evt.interrupted || evt.context?.interrupted === true,
           finalState: evt.final_state || evt.context?.final_state,
           output_meta: evt.output_meta,

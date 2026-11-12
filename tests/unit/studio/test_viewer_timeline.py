@@ -68,6 +68,19 @@ class TestBuildTimelinePayload:
         finally:
             s.close()
 
+    def test_native_deferred_result_closes_resume(self, tmp_path):
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            s.append_event("alice", "tool_call", {"call_id": "job"})
+            s.append_event(
+                "alice", "deferred_job_result", {"job_id": "job", "text_mode": False}
+            )
+            normalized = s.get_resumable_events("alice")
+            assert not any(item.get("_synthetic_resume") for item in normalized)
+        finally:
+            s.close()
+
     def test_elapsed_ms_fallback(self, tmp_path):
         s = _store(tmp_path)
         try:

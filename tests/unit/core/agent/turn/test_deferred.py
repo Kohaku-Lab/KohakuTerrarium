@@ -170,6 +170,26 @@ def test_invisible_deferred_result_does_not_split_streamed_text():
     ]
 
 
+def test_native_deferred_result_prevents_resume_synthetic():
+    events = [
+        {
+            "event_id": 1,
+            "type": "tool_call",
+            "call_id": "job",
+            "name": "block",
+        },
+        {
+            "event_id": 2,
+            "type": "deferred_job_result",
+            "job_id": "job",
+            "text_mode": False,
+            "content": "late",
+        },
+    ]
+    normalized = replay_with_settled_tools(events, branch_view={}, resumable=True)
+    assert not any(evt.get("_synthetic_resume") for evt in normalized)
+
+
 def test_feedback_without_new_user_preserves_event_order():
     events = [
         {

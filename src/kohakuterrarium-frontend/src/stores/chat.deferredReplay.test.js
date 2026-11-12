@@ -15,4 +15,22 @@ describe("deferred terminal replay", () => {
     expect(tool?.result).toBe("late")
     expect(replayed.pendingJobs).not.toHaveProperty("job")
   })
+
+  it("marks deferred failures from persisted context", () => {
+    const events = [
+      { type: "tool_call", event_id: 1, call_id: "job", name: "block", args: {} },
+      {
+        type: "deferred_job_result",
+        event_id: 2,
+        job_id: "job",
+        content: "",
+        context: { error: "failed" },
+      },
+    ]
+    const replayed = _replayEvents([], events)
+    const tool = replayed.messages
+      .flatMap((message) => message.parts || [])
+      .find((part) => part.jobId === "job")
+    expect(tool?.status).toBe("error")
+  })
 })
