@@ -511,3 +511,25 @@ class TestSubclassSkippingBaseInit:
         assert not plugin.should_apply(
             types.SimpleNamespace(agent_name="a", model="claude-4")
         )
+
+
+class TestPluginLogger:
+    def test_logger_is_namespaced_to_the_plugin(self):
+        class Named(BasePlugin):
+            name = "demo_plugin"
+
+        assert Named().logger.name.endswith("kohakuterrarium.plugins.demo_plugin")
+
+    def test_logger_survives_a_skipped_base_initializer(self):
+        class SkipsSuperInit(BasePlugin):
+            name = "skip_init"
+
+            def __init__(self):
+                pass
+
+        assert SkipsSuperInit().logger.name.endswith(
+            "kohakuterrarium.plugins.skip_init"
+        )
+
+    def test_unnamed_plugin_falls_back_to_unnamed(self):
+        assert BasePlugin().logger.name.endswith("kohakuterrarium.plugins.unnamed")

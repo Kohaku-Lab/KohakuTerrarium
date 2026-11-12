@@ -299,6 +299,17 @@ class BasePlugin(UIOwnerMixin):
         """Return the schema used to validate and render runtime options."""
         return {}
 
+    @property
+    def logger(self) -> Any:
+        """A logger namespaced to this plugin.
+
+        Hooks that take an early return — no matching files, empty input, a
+        setting that disables the feature — should say so here. A silent
+        ``return`` is the hardest plugin failure to diagnose from outside,
+        because registration and the hook dispatch both look healthy.
+        """
+        return get_logger(f"kohakuterrarium.plugins.{getattr(self, 'name', 'unnamed')}")
+
     def _options_dict(self) -> dict[str, Any]:
         """Return an option store even for subclasses that skip base initialization."""
         opts = getattr(self, "options", None)
