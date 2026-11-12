@@ -1,10 +1,13 @@
 """Unit tests for :mod:`kohakuterrarium.studio.sessions.live.restore`."""
 
+import os
+
 import kohakuterrarium.session.run_state as rs
 from kohakuterrarium.session.resume.target import SUCCESSOR_KEY
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.live import live_sessions
 from kohakuterrarium.studio.sessions.live.restore import (
+    _held_elsewhere,
     restore_live_sessions,
     restore_row,
 )
@@ -179,6 +182,9 @@ async def test_session_held_by_another_process_is_skipped_not_failed(
     monkeypatch.setattr(rs, "SERVER_KEY", "port:8848")
     holder = FileLock(str(path) + ".lock")
     holder.acquire()
+    # The lock is held in-process here; pretend the recorded holder is a
+    # different process, which is the situation the guard exists for.
+    monkeypatch.setattr(FileLock, "read_holder_pid", lambda self: os.getpid() + 1)
     engine = Terrarium(session_dir=str(tmp_path / "sessions"))
     service = LocalTerrariumService(engine)
     try:
@@ -189,3 +195,18 @@ async def test_session_held_by_another_process_is_skipped_not_failed(
     finally:
         holder.release()
         await engine.shutdown()
+
+
+async def test_lock_held_by_this_process_does_not_count_as_elsewhere(tmp_path):
+    """A leaked handle from an earlier restore must not strand the row forever."""
+    path = tmp_path / "s.kohakutr"
+    leaked = FileLock(str(path) + ".lock")
+    leaked.acquire()
+    try:
+        assert _held_elsewhere(str(path)) is False
+    finally:
+        leaked.release()
+
+
+async def test_free_lock_is_not_held(tmp_path):
+    assert _held_elsewhere(str(tmp_path / "s.kohakutr")) is False

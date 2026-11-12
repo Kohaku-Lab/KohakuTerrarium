@@ -45,6 +45,7 @@ from kohakuterrarium.studio.persistence.store import (
 )
 from kohakuterrarium.studio.sessions import live as _live
 from kohakuterrarium.studio.sessions.lifecycle import end_session
+from kohakuterrarium.studio.sessions.registry import release_stale_store
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -181,19 +182,19 @@ async def _stop_live_session_holders(session_name: str, service: Any) -> None:
             targets = [resolved]
     for path in targets:
         row = _live.live_sessions().get(path)
-        if not row:
-            continue
-        session_id = row.get("session_id")
-        if not session_id:
-            continue
-        try:
-            await end_session(service, session_id)
-        except Exception:
-            logger.warning(
-                "delete: stopping live session failed",
-                session_id=session_id,
-                exc_info=True,
-            )
+        session_id = (row or {}).get("session_id")
+        if session_id:
+            try:
+                await end_session(service, session_id)
+            except Exception:
+                logger.warning(
+                    "delete: stopping live session failed",
+                    session_id=session_id,
+                    exc_info=True,
+                )
+        # A store left open by a failed resume survives the stop above; closing
+        # it here is what actually frees the writer lock.
+        release_stale_store(service, path)
 
 
 @router.delete("/{session_name}")

@@ -10,6 +10,7 @@ row that fails keeps its error for the Lab to show with a Retry.
 """
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -23,6 +24,7 @@ from kohakuterrarium.studio.sessions.live.run_classes import (
     read_killed_jobs,
     read_run_classes,
 )
+from kohakuterrarium.studio.sessions.registry import release_stale_store
 from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
@@ -93,15 +95,18 @@ def _hosted_by_another_server(row: dict) -> bool:
 
 
 def _held_elsewhere(path: str) -> bool:
-    """Whether a live process holds the session's writer lock (requires blocking).
+    """Whether a *different* live process holds the session's writer lock.
 
-    That session is running elsewhere, so it is neither resumed nor failed.
+    Rows from this boot are filtered out before this runs, so a holder pid
+    equal to ours can only be a store that was never closed. Reporting that as
+    "held elsewhere" would strand the row forever — it would never resume, and
+    the leaked handle would keep the file undeletable.
     """
     lock = FileLock(str(path) + ".lock")
     try:
         lock.acquire()
     except FileLockBusy:
-        return True
+        return lock.read_holder_pid() != os.getpid()
     except OSError:
         return False
     lock.release()
@@ -144,5 +149,6 @@ async def restore_live_sessions(service_for_dir: ServiceForDir) -> list[dict]:
         if service is None:
             outcomes.append({"path": row["path"], "status": "skipped"})
             continue
+        release_stale_store(service, row["path"])
         outcomes.append(await restore_row(service, row, target))
     return outcomes
