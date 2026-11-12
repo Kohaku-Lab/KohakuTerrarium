@@ -218,6 +218,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         feedback = []
         delivered = delivered_jobs(controller.conversation.snapshot_messages())
         restored = []
+        events: list[dict] = []
         store = self.session_store
         if store is not None and store.state.get(deferred_key(self.config.name)):
             events = store.get_events(
