@@ -239,10 +239,6 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                 if item.job_id not in expired
             ]
             restored = restore_deferred(events, path, cutoff)
-            if events:
-                store.state[f"{deferred_key(self.config.name)}:cursor"] = max(
-                    item.get("event_id", 0) for item in events
-                )
         queued = {item.job_id for item, _ in self._deferred_job_results}
         self._deferred_job_results.extend(
             (item, origin) for item, origin in restored if item.job_id not in queued
@@ -283,6 +279,11 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         self._deferred_job_results = retained
         if store is not None:
             store.state[deferred_key(self.config.name)] = bool(retained)
+            if not retained and events:
+                store.state[f"{deferred_key(self.config.name)}:cursor"] = max(
+                    item.get("event_id", 0) for item in events
+                )
+
         self._last_turn_text = []
         controller._interrupted = False
         # Fresh turn — forget the previous turn's backgrounded jobs so the

@@ -133,7 +133,11 @@ class _Replay:
                     data.get("args"),
                 )
             case "tool_result" | "deferred_job_result":
-                call_id = str(data.get("call_id") or data.get("job_id", ""))
+                call_id = str(
+                    data.get("call_id")
+                    or data.get("job_id")
+                    or (data.get("context") or {}).get("tool_call_id", "")
+                )
                 name, detail, args = self.calls.pop(
                     call_id, (str(data.get("name", "")), "", None)
                 )
@@ -155,7 +159,19 @@ class _Replay:
                     or interrupted
                     or final_state in {"cancelled", "interrupted", "failed", "error"}
                 )
-                message = str(error or output or f"exit {exit_code}") if failed else ""
+                message = (
+                    str(error)
+                    if error
+                    else (
+                        "cancelled"
+                        if cancelled or final_state == "cancelled"
+                        else (
+                            "interrupted"
+                            if interrupted or final_state == "interrupted"
+                            else str(output or f"exit {exit_code}") if failed else ""
+                        )
+                    )
+                )
                 view.render("tool_start", call_id, name, detail, False)
                 view.render("tool_end", call_id, name, output, message, 0.0, args)
                 for media, url, label in media_of(parts):
