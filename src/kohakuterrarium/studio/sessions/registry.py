@@ -84,29 +84,38 @@ def release_stale_store(runtime, path: str | Path) -> None:
     A failed resume can leave a handle open. The session then reads as "held by
     another process" on every boot, never resumes, and cannot be deleted.
     Closing it here makes the next attempt — and a delete — succeed.
+
+    Both registries are scanned: Studio keeps its own ``stores`` dict, while the
+    engine keeps ``_session_stores``; a resume populates the engine's one first,
+    so missing it would leave the file locked with nothing pointing at it.
     """
     target = os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
-    stores = stores_for(runtime)
-    for session_id, store in list(stores.items()):
-        if store is None or getattr(store, "_closed", False):
-            continue
-        store_path = getattr(store, "path", "")
-        if os.path.normcase(str(store_path)) != target:
-            continue
-        logger.warning(
-            "releasing a session store left open by an earlier resume",
-            session_id=session_id,
-            path=target,
-        )
-        try:
-            store.close(update_status=False)
-        except Exception:  # noqa: BLE001 - a stale handle must not block the caller
+    engine = host_engine_or_none(runtime)
+    engine_stores = getattr(engine, "_session_stores", None) if engine else None
+    groups = [stores_for(runtime)]
+    if isinstance(engine_stores, dict):
+        groups.append(engine_stores)
+    for stores in groups:
+        for session_id, store in list(stores.items()):
+            if store is None or getattr(store, "_closed", False):
+                continue
+            store_path = getattr(store, "path", "")
+            if os.path.normcase(str(store_path)) != target:
+                continue
             logger.warning(
-                "stale session store close failed",
+                "releasing a session store left open by an earlier resume",
                 session_id=session_id,
-                exc_info=True,
+                path=target,
             )
-        stores.pop(session_id, None)
+            try:
+                store.close(update_status=False)
+            except Exception:  # noqa: BLE001 - a stale handle must not block caller
+                logger.warning(
+                    "stale session store close failed",
+                    session_id=session_id,
+                    exc_info=True,
+                )
+            stores.pop(session_id, None)
 
 
 def get_session_meta(runtime, session_id: str) -> dict[str, Any]:

@@ -230,6 +230,12 @@ async def delete_session(
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
         )
+    # A deleted session must not keep a live row: the history list reads those
+    # rows and would otherwise show it as running — and un-deletable — until the
+    # next boot prunes them.
+    registry = _live.live_sessions()
+    for path in deleted_paths:
+        registry.remove(path)
     # File deletion also removes the corresponding session-index entries.
     return {
         "status": "deleted",
