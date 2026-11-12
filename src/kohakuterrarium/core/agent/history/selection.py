@@ -9,6 +9,7 @@ best-effort: an invalid or vanished profile/plugin name silently keeps
 the default rather than failing the resume.
 """
 
+import hashlib
 import json
 from typing import Any
 
@@ -37,6 +38,28 @@ def _state_key(agent: Any, suffix: str) -> str | None:
     return f"{name}:{suffix}" if name else None
 
 
+def plugin_config_fingerprint(agent: Any) -> str:
+    """Fingerprint the config-declared plugin spec, not the live enabled set.
+
+    A session snapshot describes how one run deviated from these specs. When
+    the specs themselves change — a plugin added, removed, or flipped to
+    ``enabled: false`` in Settings — that deviation is stale and the config
+    must win.
+    """
+    config = getattr(agent, "config", None)
+    specs = getattr(config, "plugins", None) or []
+    defaults = getattr(config, "default_plugins", None) or []
+    try:
+        payload = json.dumps(
+            {"plugins": specs, "default_plugins": defaults},
+            sort_keys=True,
+            default=str,
+        )
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def persist_model_selection(agent: Any, selector: str) -> None:
     """Snapshot the model selector so resume can restore it."""
     store = _store_of(agent)
@@ -50,13 +73,19 @@ def persist_model_selection(agent: Any, selector: str) -> None:
 
 
 def persist_plugin_selection(agent: Any, enabled_names: list[str]) -> None:
-    """Snapshot the currently enabled plugin names."""
+    """Snapshot the enabled plugin names against the config spec they deviate from."""
     store = _store_of(agent)
     key = _state_key(agent, PLUGIN_SELECTION_STATE_KEY)
     if store is None or key is None:
         return
     try:
-        store.state[key] = json.dumps(sorted(enabled_names))
+        store.state[key] = json.dumps(
+            {
+                "config": plugin_config_fingerprint(agent),
+                "enabled": sorted(enabled_names),
+            },
+            sort_keys=True,
+        )
     except Exception:  # pragma: no cover - persistence must never break a toggle
         logger.warning("plugin selection persist skipped", exc_info=True)
 
@@ -89,9 +118,9 @@ def load_plugin_selection(
 ) -> tuple[list[str], bool]:
     """Return ``(enabled_names, snapshot_ok)``.
 
-    ``snapshot_ok`` is False when the snapshot is absent or malformed, so
-    callers can keep config defaults instead of treating a corrupted key
-    as an explicit empty set.
+    ``snapshot_ok`` is False when the snapshot is absent, malformed, written by
+    the legacy full-set format, or taken against a different config spec, so
+    callers keep the config defaults instead of replaying a stale deviation.
     """
     store = _store_of(agent, store)
     key = _state_key(agent, PLUGIN_SELECTION_STATE_KEY)
@@ -107,9 +136,22 @@ def load_plugin_selection(
         parsed = json.loads(str(raw))
     except (TypeError, ValueError):
         return [], False
-    if not isinstance(parsed, list):
+    if isinstance(parsed, list):
+        # Legacy full-set snapshot: it cannot say which entries were explicit
+        # user toggles, so replaying it would override the current Settings.
         return [], False
-    return [p for p in parsed if isinstance(p, str)], True
+    if not isinstance(parsed, dict):
+        return [], False
+    if parsed.get("config") != plugin_config_fingerprint(agent):
+        logger.info(
+            "plugin selection snapshot superseded by a config change",
+            agent=str(getattr(getattr(agent, "config", None), "name", "")),
+        )
+        return [], False
+    names = parsed.get("enabled")
+    if not isinstance(names, list):
+        return [], False
+    return [p for p in names if isinstance(p, str)], True
 
 
 def restore_selections(agent: Any, store: Any | None = None) -> None:

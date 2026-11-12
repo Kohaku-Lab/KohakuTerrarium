@@ -8,10 +8,19 @@ from kohakuterrarium.core.agent.history.selection import (
     load_plugin_selection,
     persist_model_selection,
     persist_plugin_selection,
+    plugin_config_fingerprint,
     restore_selections,
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
+
+
+def _snapshot(agent, enabled):
+    """Encode a plugin selection the way ``persist_plugin_selection`` does."""
+    return json.dumps(
+        {"config": plugin_config_fingerprint(agent), "enabled": enabled},
+        sort_keys=True,
+    )
 
 
 class _Store:
@@ -74,14 +83,13 @@ class TestPersist:
         persist_model_selection(agent, "openai/gpt-5.4@reasoning=high")
         assert store.state["alice:model_selection"] == "openai/gpt-5.4@reasoning=high"
 
-    def test_persist_plugin_selection_sorted_json(self):
+    def test_persist_plugin_selection_records_config_fingerprint(self):
         store = _Store()
         agent = _Agent(store=store)
-        persist_plugin_selection(agent, ["budget", "permgate"])
-        assert json.loads(store.state["alice:plugin_selection"]) == [
-            "budget",
-            "permgate",
-        ]
+        persist_plugin_selection(agent, ["permgate", "budget"])
+        saved = json.loads(store.state["alice:plugin_selection"])
+        assert saved["enabled"] == ["budget", "permgate"]
+        assert saved["config"] == plugin_config_fingerprint(agent)
 
     def test_persist_without_store_is_silent(self):
         agent = _Agent(store=None)
@@ -117,17 +125,34 @@ class TestLoad:
 
     def test_load_plugin_selection_empty_ok(self):
         store = _Store()
-        store.state["alice:plugin_selection"] = json.dumps([])
         agent = _Agent(store=store)
+        store.state["alice:plugin_selection"] = _snapshot(agent, [])
         names, ok = load_plugin_selection(agent)
         assert names == [] and ok is True
 
     def test_load_plugin_selection_filters_non_strings(self):
         store = _Store()
-        store.state["alice:plugin_selection"] = json.dumps(["budget", 42])
         agent = _Agent(store=store)
+        store.state["alice:plugin_selection"] = _snapshot(agent, ["budget", 42])
         names, ok = load_plugin_selection(agent)
         assert names == ["budget"] and ok is True
+
+    def test_load_plugin_selection_legacy_list_is_not_replayed(self):
+        # The old format stored the full enabled set, so it cannot say which
+        # entries were explicit user toggles; replaying it overrides Settings.
+        store = _Store()
+        store.state["alice:plugin_selection"] = json.dumps(["budget"])
+        agent = _Agent(store=store)
+        names, ok = load_plugin_selection(agent)
+        assert names == [] and ok is False
+
+    def test_load_plugin_selection_superseded_by_config_change(self):
+        store = _Store()
+        agent = _Agent(store=store)
+        store.state["alice:plugin_selection"] = _snapshot(agent, ["budget"])
+        agent.config.plugins = [{"name": "budget", "enabled": False}]
+        names, ok = load_plugin_selection(agent)
+        assert names == [] and ok is False
 
 
 class TestRestore:
@@ -156,9 +181,9 @@ class TestRestore:
 
     def test_restore_enables_persisted_plugins(self):
         store = _Store()
-        store.state["alice:plugin_selection"] = json.dumps(["budget", "gone"])
         agent = _Agent(store=store, plugins=_PluginManager(["budget", "other"]))
         agent.plugins.disable("budget")
+        store.state["alice:plugin_selection"] = _snapshot(agent, ["budget", "gone"])
         restore_selections(agent)
         assert agent.plugins.is_enabled("budget")
         # Unknown plugin names are skipped, not fatal.
@@ -166,12 +191,22 @@ class TestRestore:
 
     def test_restore_disables_defaults_user_had_off(self):
         store = _Store()
-        store.state["alice:plugin_selection"] = json.dumps(["budget"])
         agent = _Agent(store=store, plugins=_PluginManager(["budget", "other"]))
+        store.state["alice:plugin_selection"] = _snapshot(agent, ["budget"])
         # "other" is a config default the user had disabled before save.
         restore_selections(agent)
         assert agent.plugins.is_enabled("budget")
         assert agent.plugins.is_enabled("other") is False
+
+    def test_restore_keeps_config_defaults_after_config_change(self):
+        # Settings disabled "budget" after the snapshot was written; the
+        # snapshot must not switch it back on.
+        store = _Store()
+        agent = _Agent(store=store, plugins=_PluginManager(["budget"]))
+        store.state["alice:plugin_selection"] = _snapshot(agent, [])
+        agent.config.plugins = [{"name": "budget", "enabled": False}]
+        restore_selections(agent)
+        assert agent.plugins.is_enabled("budget")
 
     def test_restore_no_plugin_snapshot_keeps_defaults(self):
         agent = _Agent(plugins=_PluginManager(["budget"]))
@@ -189,8 +224,8 @@ class TestRestore:
 
     def test_restore_empty_snapshot_disables_all(self):
         store = _Store()
-        store.state["alice:plugin_selection"] = json.dumps([])
         agent = _Agent(store=store, plugins=_PluginManager(["budget"]))
+        store.state["alice:plugin_selection"] = _snapshot(agent, [])
         restore_selections(agent)
         assert agent.plugins.is_enabled("budget") is False
 
