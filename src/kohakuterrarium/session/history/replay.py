@@ -93,7 +93,7 @@ def project_branch_metadata(
         try:
             turn_index = int(evt.get("turn_index"))
             branch_id = int(evt.get("branch_id"))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         event_id = evt.get("event_id")
         path = (
