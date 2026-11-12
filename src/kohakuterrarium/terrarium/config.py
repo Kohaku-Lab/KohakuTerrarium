@@ -93,6 +93,40 @@ def _format_channel_block(
     return f"- `{ch_name}` [{ch_cfg.channel_type}]{role_str}{desc}"
 
 
+_CREATURE_CONFIG_NAMES = ("config.yaml", "config.yml", "config.json", "config.toml")
+_RECIPE_CONFIG_NAMES = ("terrarium.yaml", "terrarium.yml")
+
+
+def _resolve_config_root(path: str | Path | None) -> Path | None:
+    """Resolve a path or ``@pkg`` reference, or ``None`` when it does not."""
+    if not path:
+        return None
+    try:
+        return resolve_any_path(path)
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def looks_like_recipe(path: str | Path | None) -> bool:
+    """Whether ``path`` names a terrarium recipe rather than a creature folder."""
+    resolved = _resolve_config_root(path)
+    if resolved is None:
+        return False
+    if resolved.is_file():
+        return True
+    return any((resolved / name).exists() for name in _RECIPE_CONFIG_NAMES)
+
+
+def looks_like_creature(path: str | Path | None) -> bool:
+    """Whether ``path`` names a creature folder: an agent config and no recipe."""
+    resolved = _resolve_config_root(path)
+    if resolved is None or not resolved.is_dir():
+        return False
+    if any((resolved / name).exists() for name in _RECIPE_CONFIG_NAMES):
+        return False
+    return any((resolved / name).exists() for name in _CREATURE_CONFIG_NAMES)
+
+
 def _find_terrarium_config(path: Path) -> Path:
     """
     Resolve the terrarium config file path.

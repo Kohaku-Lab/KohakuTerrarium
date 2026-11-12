@@ -62,6 +62,95 @@ async def _async_noop(*_a, **_k):
 
 
 class TestResumeIntoEngine:
+    async def test_terrarium_type_without_recipe_resumes_as_agent(
+        self, monkeypatch, tmp_path
+    ):
+        """Hot-plugging a second creature promotes config_type; no recipe exists."""
+        creature_dir = tmp_path / "creatures" / "general"
+        creature_dir.mkdir(parents=True)
+        (creature_dir / "config.yaml").write_text("name: general\n", encoding="utf-8")
+
+        base = tmp_path / "saved.kohakutr"
+        SessionStore(base).close(update_status=False)
+
+        monkeypatch.setattr(
+            resume_mod,
+            "read_session_meta",
+            lambda path: {
+                "config_type": "terrarium",
+                "config_path": str(creature_dir),
+                "pwd": str(tmp_path),
+            },
+        )
+        monkeypatch.setattr(resume_mod, "detect_session_type", lambda path: "terrarium")
+        seen: dict[str, str] = {}
+
+        async def agent_resume(engine, path, *, pwd=None, llm=None, io="none"):
+            seen["route"] = "agent"
+            return "graph-agent"
+
+        async def terrarium_resume(engine, path, *, pwd=None, llm=None, io="none"):
+            seen["route"] = "terrarium"
+            return "graph-terrarium"
+
+        monkeypatch.setattr(resume_mod, "_resume_agent_into_engine", agent_resume)
+        monkeypatch.setattr(
+            resume_mod, "_resume_terrarium_into_engine", terrarium_resume
+        )
+
+        t = await TestTerrariumBuilder().build()
+        try:
+            graph_id = await resume_mod.resume_into_engine(t, base)
+        finally:
+            await t.shutdown()
+
+        assert graph_id == "graph-agent"
+        assert seen == {"route": "agent"}
+
+    async def test_terrarium_type_with_recipe_still_resumes_as_terrarium(
+        self, monkeypatch, tmp_path
+    ):
+        recipe_dir = tmp_path / "team"
+        recipe_dir.mkdir()
+        (recipe_dir / "terrarium.yaml").write_text("name: team\n", encoding="utf-8")
+
+        base = tmp_path / "saved.kohakutr"
+        SessionStore(base).close(update_status=False)
+
+        monkeypatch.setattr(
+            resume_mod,
+            "read_session_meta",
+            lambda path: {
+                "config_type": "terrarium",
+                "config_path": str(recipe_dir),
+                "pwd": str(tmp_path),
+            },
+        )
+        monkeypatch.setattr(resume_mod, "detect_session_type", lambda path: "terrarium")
+        seen: dict[str, str] = {}
+
+        async def agent_resume(engine, path, *, pwd=None, llm=None, io="none"):
+            seen["route"] = "agent"
+            return "graph-agent"
+
+        async def terrarium_resume(engine, path, *, pwd=None, llm=None, io="none"):
+            seen["route"] = "terrarium"
+            return "graph-terrarium"
+
+        monkeypatch.setattr(resume_mod, "_resume_agent_into_engine", agent_resume)
+        monkeypatch.setattr(
+            resume_mod, "_resume_terrarium_into_engine", terrarium_resume
+        )
+
+        t = await TestTerrariumBuilder().build()
+        try:
+            graph_id = await resume_mod.resume_into_engine(t, base)
+        finally:
+            await t.shutdown()
+
+        assert graph_id == "graph-terrarium"
+        assert seen == {"route": "terrarium"}
+
     async def test_pwd_and_workspace_overrides_are_mutually_exclusive(self, tmp_path):
         t = await TestTerrariumBuilder().build()
         try:

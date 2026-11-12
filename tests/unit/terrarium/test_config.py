@@ -15,6 +15,7 @@ from kohakuterrarium.terrarium.config import (
     _parse_channels,
     _parse_creature,
     load_terrarium_config,
+    looks_like_recipe,
 )
 
 # ── dataclasses ──────────────────────────────────────────────────
@@ -231,3 +232,28 @@ class TestLoadTerrariumConfig:
         monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path / "none")
         with pytest.raises(PackageNotInstalledError):
             load_terrarium_config("@ghost/terrariums/x")
+
+
+class TestLooksLikeRecipe:
+    def test_recipe_directory(self, tmp_path):
+        (tmp_path / "terrarium.yaml").write_text("name: team\n", encoding="utf-8")
+        assert looks_like_recipe(tmp_path)
+
+    def test_creature_directory_is_not_a_recipe(self, tmp_path):
+        (tmp_path / "config.yaml").write_text("name: general\n", encoding="utf-8")
+        assert not looks_like_recipe(tmp_path)
+
+    def test_recipe_file(self, tmp_path):
+        path = tmp_path / "team.yaml"
+        path.write_text("name: team\n", encoding="utf-8")
+        assert looks_like_recipe(path)
+
+    def test_absent_path(self, tmp_path):
+        assert not looks_like_recipe(tmp_path / "absent")
+
+    def test_empty_path(self):
+        assert not looks_like_recipe("")
+        assert not looks_like_recipe(None)
+
+    def test_uninstalled_package_ref(self):
+        assert not looks_like_recipe("@__missing__/terrariums/absent")

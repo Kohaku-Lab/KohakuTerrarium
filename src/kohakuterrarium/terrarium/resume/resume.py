@@ -34,7 +34,7 @@ from kohakuterrarium.session.resume.async_flow import (
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.open import open_owned_store
-from kohakuterrarium.terrarium.config import load_terrarium_config
+from kohakuterrarium.terrarium.config import load_terrarium_config, looks_like_creature
 from kohakuterrarium.terrarium.creature.host import (
     Creature,
     _safe_creature_id,
@@ -203,6 +203,15 @@ async def resume_into_engine(
         # Tombstoned between the read-only probe and writer-lock revalidation.
     await asyncio.to_thread(preflight_legacy_workspace, path, pwd)
     session_type = await asyncio.to_thread(detect_session_type, path)
+    config_path_hint = meta.get("config_path")
+    if session_type == "terrarium" and looks_like_creature(config_path_hint):
+        logger.warning(
+            "Session is marked as a terrarium but its config path is a creature "
+            "folder; resuming as a single-agent session",
+            session=path.name,
+            config_path=str(config_path_hint),
+        )
+        session_type = "agent"
 
     if session_type == "agent":
         return await _resume_agent_into_engine(engine, path, pwd=pwd, llm=llm, io=io)
