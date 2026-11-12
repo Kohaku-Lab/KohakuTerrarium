@@ -5,14 +5,19 @@ anchor. Multi-node lab hosts use the service itself because remote-session
 metadata is controller-side state. Registries are created lazily on first use.
 """
 
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from weakref import WeakKeyDictionary
 
 from kohakuterrarium.studio._runtime import host_engine_or_none
+from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.session.store import SessionStore
+
+logger = get_logger(__name__)
 
 
 class StudioSessionRegistry:
@@ -71,6 +76,37 @@ def meta_for(runtime) -> dict[str, dict[str, Any]]:
 def stores_for(runtime) -> "dict[str, SessionStore]":
     """The per-runtime attached-store dict (``session_id`` → store)."""
     return registry_for(runtime).stores
+
+
+def release_stale_store(runtime, path: str | Path) -> None:
+    """Close a store this process still holds for ``path``, freeing its lock.
+
+    A failed resume can leave a handle open. The session then reads as "held by
+    another process" on every boot, never resumes, and cannot be deleted.
+    Closing it here makes the next attempt — and a delete — succeed.
+    """
+    target = os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
+    stores = stores_for(runtime)
+    for session_id, store in list(stores.items()):
+        if store is None or getattr(store, "_closed", False):
+            continue
+        store_path = getattr(store, "path", "")
+        if os.path.normcase(str(store_path)) != target:
+            continue
+        logger.warning(
+            "releasing a session store left open by an earlier resume",
+            session_id=session_id,
+            path=target,
+        )
+        try:
+            store.close(update_status=False)
+        except Exception:  # noqa: BLE001 - a stale handle must not block the caller
+            logger.warning(
+                "stale session store close failed",
+                session_id=session_id,
+                exc_info=True,
+            )
+        stores.pop(session_id, None)
 
 
 def get_session_meta(runtime, session_id: str) -> dict[str, Any]:
