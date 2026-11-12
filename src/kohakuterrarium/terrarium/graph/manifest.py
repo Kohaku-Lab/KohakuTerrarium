@@ -477,8 +477,8 @@ def _raw_from_store(store: Any) -> tuple[bool, object]:
 
 
 def unpack_creature_config(creature: ManifestCreature) -> AgentConfig:
-    """Unpack one manifest creature's authoritative resolved config."""
-    return unpack_agent_config(creature.config_snapshot)
+    """Unpack one manifest creature's config through its ref-aware resolver."""
+    return creature.unpack_config()
 
 
 def load_manifest(store: "SessionStore") -> GraphManifest | None:

@@ -20,6 +20,7 @@ from kohakuterrarium.terrarium.graph.manifest import (
     manifest_to_dict,
     parse_manifest,
     save_manifest,
+    unpack_creature_config,
 )
 from kohakuterrarium.terrarium.graph.topology import (
     ChannelInfo,
@@ -459,6 +460,18 @@ class TestManifestConfigRefResolution:
         row["config_ref"] = str(folder)
 
         assert self._parse_single(row).unpack_config().name == "from-snapshot"
+
+    def test_resume_helper_resolves_the_same_way(self, tmp_path):
+        """Resume calls the module helper, so it must honour config_ref too."""
+        folder = tmp_path / "creature"
+        folder.mkdir()
+        (folder / "config.yaml").write_text("name: from-disk\n", encoding="utf-8")
+
+        row = _creature_row()
+        row["config_snapshot"] = pack_agent_config(AgentConfig(name="from-snapshot"))
+        row["config_ref"] = str(folder)
+
+        assert unpack_creature_config(self._parse_single(row)).name == "from-disk"
 
         graph = GraphTopology(graph_id="graph_test")
         engine = _Engine(graph, {})
