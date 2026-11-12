@@ -44,7 +44,7 @@
           <div class="min-w-0">
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-[13px] font-medium text-warm-800 dark:text-warm-100 truncate" :title="r.label" data-test="history-label">{{ r.label }}</span>
-              <span v-if="r.status" class="shrink-0 text-[10px] px-1.5 rounded flex items-center gap-1" :class="STATUS_CHIP[r.status]" :title="r.status === 'running' ? '' : t(`lab.history.status.${r.status}Hint`)" :data-test="`history-status-${r.status}`"><span class="w-1.5 h-1.5 rounded-full bg-current" />{{ t(`lab.history.status.${r.status}`) }}</span>
+              <span v-if="r.status" class="shrink-0 text-[10px] px-1.5 rounded flex items-center gap-1" :class="STATUS_CHIP[r.status]" :title="r.status === 'running' ? '' : t(`lab.history.status.${r.status}Hint`)" :data-test="`history-status-${r.status}`"><span v-if="restoring && r.status === 'running'" class="i-carbon-renew animate-spin text-[9px]" data-test="history-status-restoring" :title="t('lab.history.status.restoringHint')" /><span v-else class="w-1.5 h-1.5 rounded-full bg-current" />{{ t(`lab.history.status.${r.status}`) }}</span>
               <span v-if="r.labelFrom !== 'recipe' && r.recipe" class="kt-v2-edge shrink-0 max-w-40 truncate text-[10px] px-1.5 rounded border font-mono text-warm-500" :title="r.recipe">{{ r.recipe }}</span>
               <span v-if="r.forkedFrom" class="shrink-0 text-[10px] px-1.5 rounded bg-iolite/10 text-iolite dark:text-iolite-light" :title="r.forkedFrom">{{ t("lab.history.fork") }}</span>
               <span v-if="r.forks" class="shrink-0 text-[10px] px-1.5 rounded bg-aquamarine/10 text-aquamarine-shadow dark:text-aquamarine-light">{{ t("lab.history.forks", { n: r.forks }) }}</span>
@@ -144,6 +144,7 @@ const search = ref("")
 const sort = ref("last_active")
 const resumeOn = ref("")
 const resuming = ref("")
+const restoring = ref(false)
 const buildTarget = ref(null)
 const buildOpen = ref(false)
 const buildRebuild = ref(false)
@@ -249,9 +250,39 @@ function onMore(cmd, r) {
   }
 }
 
-onMounted(() => fetchSessions())
+// The boot restore walks the live-session rows one at a time, so the list grows
+// while this page is already open. Poll while it runs and spin the "running"
+// chips, so the label reads as "coming back" rather than "already usable".
+const RESTORE_POLL_MS = 1500
+const RESTORE_POLL_LIMIT = 120
+let restoreTimer = null
+let restorePolls = 0
+
+async function pollRestore() {
+  let running = false
+  try {
+    const state = await sessionAPI.getRestoreState()
+    running = !!state?.running
+    restoring.value = running
+    if (running) await fetchSessions()
+  } catch {
+    restoring.value = false
+  }
+  restorePolls++
+  if (running && restorePolls < RESTORE_POLL_LIMIT) {
+    restoreTimer = setTimeout(pollRestore, RESTORE_POLL_MS)
+  } else {
+    restoring.value = false
+  }
+}
+
+onMounted(() => {
+  fetchSessions()
+  pollRestore()
+})
 onBeforeUnmount(() => {
   generation++
   clearTimeout(searchTimer)
+  clearTimeout(restoreTimer)
 })
 </script>
