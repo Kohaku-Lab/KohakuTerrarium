@@ -48,6 +48,26 @@ class TestBuildTimelinePayload:
         finally:
             s.close()
 
+    def test_deferred_result_closes_tool_span(self, tmp_path):
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            s.append_event(
+                "alice", "tool_call", {"call_id": "job", "name": "block"}, turn_index=1
+            )
+            s.append_event(
+                "alice",
+                "deferred_job_result",
+                {"job_id": "job", "content": "late"},
+                turn_index=1,
+            )
+            s.flush()
+            out = build_timeline_payload(s, "sess", agent=None, limit=100)
+            assert out["spans"][0]["type"] == "tool_call"
+            assert out["spans"][0]["dur"] is not None
+        finally:
+            s.close()
+
     def test_elapsed_ms_fallback(self, tmp_path):
         s = _store(tmp_path)
         try:

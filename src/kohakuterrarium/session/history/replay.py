@@ -571,14 +571,31 @@ def replay_conversation(
             messages.append(message)
         elif etype == "deferred_job_feedback":
             message = {"role": "user", "content": evt.get("content", "")}
+            metadata = dict(evt.get("metadata") or {})
             if include_metadata:
-                message["metadata"] = dict(evt.get("metadata") or {})
-            ti, bi = evt.get("turn_index"), evt.get("branch_id")
-            user_index = user_message_indices.get((ti, bi), len(messages))
-            messages.insert(user_index, message)
-            for key, index in user_message_indices.items():
-                if index >= user_index:
-                    user_message_indices[key] = index + 1
+                message["metadata"] = metadata
+            delivery_turn = metadata.get("delivery_turn_index")
+            delivery_branch = metadata.get("delivery_branch_id")
+            if isinstance(delivery_turn, int) and isinstance(delivery_branch, int):
+                delivery_index = user_message_indices.get(
+                    (delivery_turn, delivery_branch), len(messages)
+                )
+                if delivery_index >= len(messages):
+                    delivery_index = len(messages)
+                else:
+                    delivery_index = max(
+                        delivery_index,
+                        user_message_indices.get(
+                            (delivery_turn, delivery_branch), delivery_index
+                        )
+                        + 1,
+                    )
+                messages.insert(delivery_index, message)
+                for key, index in user_message_indices.items():
+                    if index >= delivery_index:
+                        user_message_indices[key] = index + 1
+            else:
+                messages.append(message)
         elif etype == "user_input_injected":
             content = evt.get("content", "")
             if injected_at == len(messages) - 1 and messages:

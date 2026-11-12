@@ -170,6 +170,35 @@ def test_invisible_deferred_result_does_not_split_streamed_text():
     ]
 
 
+def test_feedback_without_new_user_preserves_event_order():
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "call",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 2,
+            "type": "tool_call",
+            "call_id": "job",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 3,
+            "type": "deferred_job_feedback",
+            "content": "late",
+            "turn_index": 1,
+            "branch_id": 1,
+            "metadata": {"delivery_turn_index": 1, "delivery_branch_id": 1},
+        },
+    ]
+    messages = replay_conversation(events, include_metadata=True)
+    assert [m["content"] for m in messages if m["role"] == "user"] == ["call", "late"]
+
+
 def test_cutoff_excludes_already_buffered_deferred_feedback(tmp_path):
     store = SessionStore(tmp_path / "cutoff.kohakutr")
     result = create_tool_complete_event("job", "late")

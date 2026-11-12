@@ -23,7 +23,7 @@ _DURATION_KEYS = ("duration_ms", "elapsed_ms")
 _NOISE_TYPES = frozenset({"cache_stats"})
 
 #: Result event types that close a ``tool_call`` span (by ``call_id``).
-_TOOL_RESULT_TYPES = frozenset({"tool_result", "tool_error"})
+_TOOL_RESULT_TYPES = frozenset({"tool_result", "tool_error", "deferred_job_result"})
 #: Result event types that close a ``subagent_call`` span (by ``job_id``).
 _JOB_RESULT_TYPES = frozenset(
     {"subagent_result", "subagent_error", "background_result"}
@@ -87,7 +87,9 @@ def _pair_durations(paired: list[tuple[dict, dict]]) -> None:
             if call_id:
                 pending_tools[str(call_id)] = span
         elif etype in _TOOL_RESULT_TYPES:
-            start = pending_tools.pop(str(evt.get("call_id") or ""), None)
+            start = pending_tools.pop(
+                str(evt.get("call_id") or evt.get("job_id") or ""), None
+            )
             if start is not None:
                 _set_span_dur(start, evt.get("ts"))
         elif etype == "subagent_call":

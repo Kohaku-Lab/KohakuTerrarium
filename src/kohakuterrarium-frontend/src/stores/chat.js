@@ -1566,29 +1566,25 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
     } else if (t === "tool_call") {
       addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id, _evtStartedTs(evt))
       if (cur) addHistoryKey(cur, evt)
-    } else if (t === "tool_result") {
+    } else if (t === "tool_result" || t === "deferred_job_result") {
       const jobId = evt.call_id || evt.job_id
       if (evt._history_key && jobId && !findToolByJobId(jobId)) {
-        addTool(evt.name, "tool", {}, jobId)
+        addTool(evt.name || "tool", "tool", {}, jobId)
       }
       updateTool(
-        evt.name,
-        evt.output || evt.error || "",
+        evt.name || "tool",
+        evt.output || evt.content || evt.error || "",
         {
           error: evt.error ? true : false,
-          interrupted: !!evt.interrupted,
-          finalState: evt.final_state,
+          interrupted: !!evt.interrupted || evt.context?.interrupted === true,
+          finalState: evt.final_state || evt.context?.final_state,
           output_meta: evt.output_meta,
           result_meta: evt.result_meta,
           metadata: evt.metadata,
-          // Backend persists canvas_preview at the top level of the
-          // tool_result event row (session/output._handle_tool_done).
-          // Forward it so updateTool's resultMeta picks it up — that's
-          // what the canvas store later reads (Feat 1).
           canvas_preview: evt.canvas_preview,
           tool_metadata: evt.tool_metadata,
         },
-        evt.call_id || evt.job_id,
+        jobId,
       )
       const tool = jobId ? findToolByJobId(jobId) : null
       const owner = tool ? result.find((message) => message.parts?.includes(tool)) : cur

@@ -264,9 +264,16 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                         ),
                         "metadata": metadata,
                         "job_ids": [item.job_id for item in feedback],
+                        "delivery_turn_index": self._turn_index,
+                        "delivery_branch_id": self._branch_id,
+                        "delivery_parent_branch_path": [
+                            list(pair) for pair in self._parent_branch_path
+                        ],
                     },
                 )
         self._deferred_job_results = retained
+        if store is not None:
+            store.state[deferred_key(self.config.name)] = bool(retained)
         self._last_turn_text = []
         controller._interrupted = False
         # Fresh turn — forget the previous turn's backgrounded jobs so the

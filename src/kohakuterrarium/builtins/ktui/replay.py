@@ -132,15 +132,15 @@ class _Replay:
                     args_preview(name, data.get("args")),
                     data.get("args"),
                 )
-            case "tool_result":
-                call_id = str(data.get("call_id", ""))
+            case "tool_result" | "deferred_job_result":
+                call_id = str(data.get("call_id") or data.get("job_id", ""))
                 name, detail, args = self.calls.pop(
                     call_id, (str(data.get("name", "")), "", None)
                 )
-                error = data.get("error")
-                exit_code = data.get("exit_code", 0)
-                raw = data.get("output", "") or ""
-                # a tool that returned parts (pictures, files) keeps them as a list
+                context = data.get("context") or {}
+                error = data.get("error") or context.get("error")
+                exit_code = data.get("exit_code", context.get("exit_code", 0))
+                raw = data.get("output", data.get("content", "")) or ""
                 parts = raw if isinstance(raw, list) else data.get("result")
                 output = (
                     content_display_text(raw) if isinstance(raw, list) else str(raw)
@@ -150,10 +150,9 @@ class _Replay:
                 view.render("tool_start", call_id, name, detail, False)
                 view.render("tool_end", call_id, name, output, message, 0.0, args)
                 for media, url, label in media_of(parts):
-                    if media == "image":
-                        view.render("image", url, label)
-                    else:
-                        view.render("media", url, label, media)
+                    view.render(
+                        "image" if media == "image" else "media", url, label, media
+                    )
             case "subagent_call":
                 self.flush_text()
                 self.subagents[str(data.get("job_id", ""))] = one_line(
