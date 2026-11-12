@@ -2,6 +2,7 @@
 
 import importlib
 import importlib.util
+import inspect
 import sys
 from pathlib import Path
 from typing import Any, TypeVar
@@ -21,6 +22,44 @@ class ModuleLoadError(Exception):
     """Raised when a configured module or object cannot be loaded."""
 
     pass
+
+
+def _init_keyword_names(cls: type) -> set[str] | None:
+    """Keyword names ``cls.__init__`` accepts; ``None`` means it takes ``**kwargs``."""
+    try:
+        params = inspect.signature(cls.__init__).parameters
+    except (TypeError, ValueError):
+        return None
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return None
+    return {
+        name
+        for name, param in params.items()
+        if param.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+        and name != "self"
+    }
+
+
+def instantiate_with_options(cls: type[T], options: dict[str, Any] | None) -> T:
+    """Build ``cls`` from an options mapping under either constructor contract.
+
+    Configured classes take the mapping expanded (``cls(**options)``) or as one
+    argument (``cls(options=options)``); both are accepted. A class that takes
+    neither keeps the mapping on ``self.options`` so option validation still
+    sees it.
+    """
+    opts = dict(options or {})
+    if not opts:
+        return cls()
+    names = _init_keyword_names(cls)
+    if names is None or (set(opts) <= names and "options" not in names):
+        return cls(**opts)
+    if "options" in names:
+        return cls(options=opts)
+    instance = cls()
+    instance.options = opts
+    return instance
 
 
 class ModuleLoader:
@@ -63,8 +102,7 @@ class ModuleLoader:
     ) -> T:
         """Load a class and instantiate it with configured options."""
         cls = self.load_class(module_path, class_name, module_type)
-        options = options or {}
-        return cls(**options)
+        return instantiate_with_options(cls, options)
 
     def load_config_object(
         self,

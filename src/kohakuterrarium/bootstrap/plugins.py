@@ -10,7 +10,7 @@ from kohakuterrarium.builtins.plugin_catalog import (
     lookup_plugin,
     resolve_plugin_specs,
 )
-from kohakuterrarium.core.loader import ModuleLoader
+from kohakuterrarium.core.loader import ModuleLoader, instantiate_with_options
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.packages.resolve import ensure_package_importable
@@ -174,10 +174,9 @@ def _load_one(
                 module, class_name, module_type=ptype, options=options
             )
         else:
-            # Both load paths pass options as constructor keyword arguments.
             mod = importlib.import_module(module)
             cls = getattr(mod, class_name)
-            plugin = cls(**options) if options else cls()
+            plugin = instantiate_with_options(cls, options)
 
         if not isinstance(plugin, BasePlugin):
             if strict:

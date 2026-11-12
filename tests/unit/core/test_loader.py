@@ -8,6 +8,7 @@ import pytest
 from kohakuterrarium.core.loader import (
     ModuleLoadError,
     ModuleLoader,
+    instantiate_with_options,
     load_custom_module,
 )
 from kohakuterrarium.packages import locations as loc_mod
@@ -343,3 +344,43 @@ class TestSpecFailure:
         )
         with pytest.raises(ModuleLoadError, match="Cannot create module spec"):
             loader.load_class("custom/x.py", "T", module_type="custom")
+
+
+class TestInstantiateWithOptions:
+    def test_expanded_keywords_contract(self):
+        class TakesKeywords:
+            def __init__(self, budget: float = 0.0):
+                self.budget = budget
+
+        assert instantiate_with_options(TakesKeywords, {"budget": 12.5}).budget == 12.5
+
+    def test_single_mapping_contract(self):
+        class TakesMapping:
+            def __init__(self, options=None):
+                self.received = options
+
+        inst = instantiate_with_options(TakesMapping, {"budget": 12.5})
+        assert inst.received == {"budget": 12.5}
+
+    def test_var_keyword_contract(self):
+        class TakesAnything:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        inst = instantiate_with_options(TakesAnything, {"budget": 12.5})
+        assert inst.kwargs == {"budget": 12.5}
+
+    def test_class_accepting_neither_keeps_options_on_instance(self):
+        class TakesNothing:
+            def __init__(self):
+                pass
+
+        inst = instantiate_with_options(TakesNothing, {"budget": 12.5})
+        assert inst.options == {"budget": 12.5}
+
+    def test_no_options_calls_bare_constructor(self):
+        class TakesKeywords:
+            def __init__(self, budget: float = 7.0):
+                self.budget = budget
+
+        assert instantiate_with_options(TakesKeywords, None).budget == 7.0

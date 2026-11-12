@@ -490,3 +490,24 @@ class TestPluginBlockError:
         err = PluginBlockError("denied: budget exhausted")
         assert isinstance(err, Exception)
         assert str(err) == "denied: budget exhausted"
+
+
+class TestSubclassSkippingBaseInit:
+    def test_should_apply_answers_instead_of_raising(self):
+        class SkipsSuperInit(BasePlugin):
+            def __init__(self):
+                self.name = "skips-super"
+
+        plugin = SkipsSuperInit()
+        context = types.SimpleNamespace(agent_name="any", model="any-model")
+        assert plugin.should_apply(context) is True
+
+    def test_model_patterns_still_gate_when_base_init_runs(self):
+        class CompilesPatterns(BasePlugin):
+            applies_to = {"model_patterns": ["^gpt-"]}
+
+        plugin = CompilesPatterns()
+        assert plugin.should_apply(types.SimpleNamespace(agent_name="a", model="gpt-5"))
+        assert not plugin.should_apply(
+            types.SimpleNamespace(agent_name="a", model="claude-4")
+        )

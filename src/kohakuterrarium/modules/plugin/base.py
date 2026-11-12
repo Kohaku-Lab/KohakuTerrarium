@@ -260,6 +260,10 @@ class BasePlugin(UIOwnerMixin):
 
     # An empty applicability filter enables the plugin for every context.
     applies_to: dict[str, list[str]] = {}
+    # Class-level default so a subclass that skips ``super().__init__()`` still
+    # answers applicability instead of raising AttributeError. Instances that
+    # call the base initializer shadow it with their own compiled list.
+    _model_pattern_res: list[re.Pattern[str]] = []
     # Renderer ids whose attach or detach changes get_prompt_content.
     prompt_renderers: frozenset[str] = frozenset()
     # Names ``<doc_prefix>:<topic>`` that ``info`` resolves through doc_topic.
