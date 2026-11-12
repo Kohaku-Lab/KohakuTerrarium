@@ -22,11 +22,13 @@ def record_deferred(
     pairs = sorted(origin.items())
     if not pairs:
         return
-    if any(
-        recorded.get("type") == "deferred_job_result"
-        and recorded.get("job_id") == event.job_id
-        for recorded in store.get_events(namespace)
-    ):
+    dedupe_key = f"{namespace}:deferred_job_ids"
+    try:
+        state_jobs = store.state.get(dedupe_key, [])
+    except (AttributeError, TypeError):
+        state_jobs = []
+    recorded_jobs = set(state_jobs) if isinstance(state_jobs, list) else set()
+    if event.job_id in recorded_jobs:
         return
     turn, branch = pairs[-1]
     content = (
@@ -35,6 +37,8 @@ def record_deferred(
         else event.content
     )
     context = event.context or {}
+    recorded_jobs.add(event.job_id)
+    store.state[dedupe_key] = sorted(recorded_jobs)
     store.state[deferred_key(namespace)] = True
     store.append_event(
         namespace,

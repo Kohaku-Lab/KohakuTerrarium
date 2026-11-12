@@ -573,7 +573,10 @@ def replay_conversation(
             message = {"role": "user", "content": evt.get("content", "")}
             metadata = dict(evt.get("metadata") or {})
             if include_metadata:
-                message["metadata"] = metadata
+                message["metadata"] = {
+                    **metadata,
+                    "deferred_job_feedback": True,
+                }
             delivery_turn = metadata.get("delivery_turn_index")
             delivery_branch = metadata.get("delivery_branch_id")
             if isinstance(delivery_turn, int) and isinstance(delivery_branch, int):
@@ -590,6 +593,17 @@ def replay_conversation(
                         )
                         + 1,
                     )
+                while delivery_index < len(messages):
+                    prior = messages[delivery_index]
+                    prior_metadata = prior.get("metadata") or {}
+                    if (
+                        prior_metadata.get("deferred_job_feedback")
+                        and prior_metadata.get("delivery_turn_index") == delivery_turn
+                        and prior_metadata.get("delivery_branch_id") == delivery_branch
+                    ):
+                        delivery_index += 1
+                        continue
+                    break
                 messages.insert(delivery_index, message)
                 for key, index in user_message_indices.items():
                     if index >= delivery_index:

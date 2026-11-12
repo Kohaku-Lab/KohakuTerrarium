@@ -145,7 +145,16 @@ class _Replay:
                 output = (
                     content_display_text(raw) if isinstance(raw, list) else str(raw)
                 )
-                failed = error or exit_code not in (0, None)
+                cancelled = context.get("cancelled") is True
+                interrupted = context.get("interrupted") is True
+                final_state = context.get("final_state")
+                failed = (
+                    bool(error)
+                    or exit_code not in (0, None)
+                    or cancelled
+                    or interrupted
+                    or final_state in {"cancelled", "interrupted", "failed", "error"}
+                )
                 message = str(error or output or f"exit {exit_code}") if failed else ""
                 view.render("tool_start", call_id, name, detail, False)
                 view.render("tool_end", call_id, name, output, message, 0.0, args)

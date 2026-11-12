@@ -220,7 +220,12 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         restored = []
         store = self.session_store
         if store is not None and store.state.get(deferred_key(self.config.name)):
-            events = store.get_events(self.config.name)
+            events = store.get_events(
+                self.config.name,
+                since_event_id=store.state.get(
+                    f"{deferred_key(self.config.name)}:cursor", 0
+                ),
+            )
             cutoff = getattr(self, "_context_cutoff_event_id", 0)
             expired = {
                 item.get("job_id")
@@ -234,6 +239,10 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                 if item.job_id not in expired
             ]
             restored = restore_deferred(events, path, cutoff)
+            if events:
+                store.state[f"{deferred_key(self.config.name)}:cursor"] = max(
+                    item.get("event_id", 0) for item in events
+                )
         queued = {item.job_id for item, _ in self._deferred_job_results}
         self._deferred_job_results.extend(
             (item, origin) for item, origin in restored if item.job_id not in queued

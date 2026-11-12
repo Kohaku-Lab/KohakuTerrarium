@@ -190,6 +190,38 @@ def test_native_deferred_result_prevents_resume_synthetic():
     assert not any(evt.get("_synthetic_resume") for evt in normalized)
 
 
+def test_deferred_feedback_multiple_same_turn_keep_event_order():
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "call",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 2,
+            "type": "deferred_job_feedback",
+            "content": "first",
+            "metadata": {"delivery_turn_index": 1, "delivery_branch_id": 1},
+        },
+        {
+            "event_id": 3,
+            "type": "deferred_job_feedback",
+            "content": "second",
+            "metadata": {"delivery_turn_index": 1, "delivery_branch_id": 1},
+        },
+    ]
+    messages = replay_conversation(events, include_metadata=True)
+    assert [
+        message["content"] for message in messages if message["role"] == "user"
+    ] == [
+        "call",
+        "first",
+        "second",
+    ]
+
+
 def test_feedback_without_new_user_preserves_event_order():
     events = [
         {
