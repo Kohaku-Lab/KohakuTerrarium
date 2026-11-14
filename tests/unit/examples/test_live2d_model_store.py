@@ -31,7 +31,7 @@ def test_import_generates_both_qualities_and_keeps_previous_on_failure(
     assert current_model(root, "deepseek") == first
     for quality in ("high", "standard"):
         path = model_file(root, "deepseek", first["version"], f"{quality}.model3.json")
-        manifest = json.loads(path.read_text())
+        manifest = json.loads(path.read_text(encoding="utf-8"))
         assert manifest["Demo"]["profile"] == "deepseek"
         assert manifest["KohakuTerrarium"] == {"adapter": "deepseek"}
         assert manifest["Demo"]["textureBytes"] == 16 * 32 * (
@@ -146,7 +146,7 @@ def test_real_imported_fish_manifest_has_all_adapter_assets(tmp_path):
         manifest = json.loads(
             model_file(
                 root, "deepseek", imported["version"], f"{quality}.model3.json"
-            ).read_text()
+            ).read_text(encoding="utf-8")
         )
         totals.append(manifest["Demo"]["textureBytes"])
         for name in DEEPSEEK_WORK:
@@ -164,7 +164,7 @@ def test_dragon_import_preserves_motions_and_both_private_qualities(
         manifest = json.loads(
             model_file(
                 root, "dragon", imported["version"], f"{quality}.model3.json"
-            ).read_text()
+            ).read_text(encoding="utf-8")
         )
         refs = manifest["FileReferences"]
         assert refs["Motions"]["Sleep"][0]["File"] == "sleep2.motion3.json"
