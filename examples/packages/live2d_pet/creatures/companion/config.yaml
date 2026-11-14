@@ -1,5 +1,4 @@
 name: live2d_companion
-llm: default
 system_prompt_file: system.md
 input:
   type: cli
