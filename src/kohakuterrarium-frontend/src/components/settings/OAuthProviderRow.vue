@@ -50,7 +50,7 @@ const detail = computed(() => {
   if (error.value) return error.value
   if (state.value === "pending") return t("settings.oauth.autoRefresh")
   if (kind.value === "google-antigravity" && ["missing", "expired", "unsupported", "attention"].includes(state.value)) {
-    const known = ["expired", "login_required", "ambiguous_sources", "unsupported_platform", "malformed_credential", "credential_store_unavailable"]
+    const known = ["expired", "login_required", "ambiguous_sources", "unsupported_platform", "malformed_credential", "credential_store_unavailable", "credential_store_locked"]
     return t(known.includes(status.value?.state) ? `settings.antigravity.${status.value.state}` : "settings.oauth.checkFailed")
   }
   if (kind.value === "grok-subscription" && state.value === "missing") return t("settings.oauth.grokLogin")

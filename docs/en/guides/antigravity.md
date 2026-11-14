@@ -1,6 +1,6 @@
 # Google Antigravity through a local agy login
 
-This optional provider reuses a single **official agy consumer login on Windows**.
+This optional provider reuses a single **official agy consumer login on Windows or Linux**.
 Sign in using `agy` first. KT does not start an OAuth flow, copy refresh tokens,
 write an account token file, or log out the Google account.
 
@@ -26,7 +26,7 @@ share the built-in model catalog and its reasoning variation selector. No preset
 
 ## Models and reasoning
 
-The presets mirror the agent model list of the agy 1.3.4 CLI (2026-10-14). The
+The presets describe the supported agy agent model families. The
 server chooses that list by the client User-Agent, which KT sends in agy's
 `antigravity/cli/<version> (...)` shape; any other shape gets a smaller catalog
 and a 404 for models outside it. Limits are token limits, not account quota.
@@ -67,8 +67,14 @@ IDs remain supported without inferred effort controls.
 
 ## Ownership and request behavior
 
-The Windows adapter reads only `gemini:antigravity` in Credential Manager and the
-known fallback file `~/.gemini/antigravity-cli/antigravity-oauth-token`. If both
+The Windows adapter reads only `gemini:antigravity` in Credential Manager.
+On Linux, install `kohakuterrarium[antigravity]` and run KT under the same user
+and session D-Bus as agy, with an unlocked Secret Service keyring. KT searches
+only the login collection (default alias if login is absent), matching
+`service=gemini`, `username=antigravity`. It never creates or unlocks collections;
+locked, duplicate, and unavailable stores fail explicitly. D-Bus replies share
+a five-second deadline. A locked or unavailable store does not fall back to a file.
+Both platforms also check the known fallback file `~/.gemini/antigravity-cli/antigravity-oauth-token`. If both
 exist, resolve the conflict in agy before continuing. Only the consumer Bearer
 schema is supported. Tokens remain in memory; the refresh operation is the
 noninteractive, time-limited `agy --output-format json models` command. A local
@@ -76,7 +82,8 @@ lock serializes refreshes across KT processes, and concurrent callers share one
 refresh within a process.
 
 The transport is pinned to `https://daily-cloudcode-pa.googleapis.com`, using the
-agy 1.3.4 header profile. Redirects are rejected.
+agy 1.5.7 header profile (changelist `1019769835`), with host OS and architecture.
+Redirects are rejected.
 Each request rereads credentials. Project discovery is checked against the token
 used so that an account switch cannot silently combine a new token and an old
 project. Errors omit raw upstream bodies and credential material. A 401 permits
@@ -97,8 +104,9 @@ requires a new or compacted session for signed tool history. A family selector
 and an explicit tier ID for the same wire model can reuse signed history.
 Switching to OpenAI strips the internal Google state from requests.
 
-This first implementation supports local Windows CLI/Web operation only.
-Remote workers, multiple accounts, macOS/Linux credential stores, arbitrary
+This implementation supports local Windows and Linux CLI/Web operation.
+Remote workers, multiple accounts, macOS credential stores, Linux without an
+accessible Secret Service, arbitrary
 endpoints, media generation, and arbitrary extra-body overrides are not supported.
 Inline images are accepted; remote image URLs and unsupported content/schema types fail
 explicitly. Discovery lists model IDs and is not a guarantee that every listed
@@ -106,6 +114,24 @@ model supports every modality.
 
 Use of this optional integration remains subject to the account provider's terms
 and restrictions. There is no compatibility or account-availability guarantee.
+
+## Linux verification
+
+Install with `python -m pip install -e '.[antigravity]'`, sign in with official
+agy, and unlock the desktop keyring. Run `kt config antigravity status` (expected
+`ready`, source `linux_secret_service`) and `kt config antigravity models`.
+Model discovery does not generate text; a generation test uses account quota.
+Use `google-antigravity/gemini-3.8-flash@reasoning=high` for a short smoke test.
+Refresh testing requires an expired access token; refreshing a fresh token skips
+agy and does not verify renewal.
+
+With an eligible account, text-generation smoke tests also succeeded for
+`gemini-4-argon-medium`, `gemini-4-hydrogen-high`, `gemini-4-hydrogen-xhigh`, and
+`gemini-pro-orchestrator-g1-pro` (Orchestrator / Argon). Hydrogen and Orchestrator
+currently use explicit custom model IDs without inferred thinking settings;
+dedicated presets, explicit thinking configuration, and Orchestrator's orchestration
+behavior are not validated by these smoke tests. Existing presets, including
+Gemini 4 Carbon, are preserved. Catalog visibility is not an account-access guarantee.
 
 ## Output limits and tool results
 

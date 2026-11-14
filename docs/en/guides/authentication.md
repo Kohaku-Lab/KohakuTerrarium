@@ -285,4 +285,4 @@ frontend nags with a banner *"connection is not encrypted"* when
   termination + CORS allowlist for hosted static frontends
 
 
-For a local Windows agy consumer account, see [Antigravity](antigravity.md).
+For a local Windows or Linux agy consumer account, see [Antigravity](antigravity.md).

@@ -9,16 +9,12 @@ import pytest
 from kohakuterrarium.core.compact.manager import CompactManager
 from kohakuterrarium.llm.antigravity import auth
 from kohakuterrarium.llm.antigravity.auth import AntigravityError, BorrowedCredential
+from kohakuterrarium.llm.antigravity.client import USER_AGENT
 from kohakuterrarium.llm.antigravity.provider import AntigravityProvider
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.media.reference import session_media_scope
 
 pytestmark = pytest.mark.real_llm_provider
-
-AGY_CLI_USER_AGENT = (
-    "antigravity/cli/1.3.4 (aidev_client; os_type=windows; arch=amd64; "
-    "cl=998275202; auth_method=consumer)"
-)
 
 
 def frame(parts, reason="STOP"):
@@ -311,7 +307,7 @@ async def test_agy_effort_reaches_wire_request(model, effort, wire, thinking, li
         if request.url.path.endswith("loadCodeAssist"):
             return httpx.Response(200, json={"cloudaicompanionProject": "test-project"})
         requests.append(json.loads(request.content))
-        assert request.headers["user-agent"] == AGY_CLI_USER_AGENT
+        assert request.headers["user-agent"] == USER_AGENT
         assert "client-metadata" not in request.headers
         if model.startswith("claude-"):
             assert (

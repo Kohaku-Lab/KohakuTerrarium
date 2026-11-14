@@ -2,23 +2,38 @@
 
 import asyncio
 import hashlib
+import platform
+import sys
 
 import httpx
 
 from kohakuterrarium.llm.antigravity.auth import AgyCredentials, AntigravityError
 from kohakuterrarium.llm.recovery.errors import ErrorClass, RetryPolicy
 
-AGY_VERSION = "1.3.4"
-AGY_CHANGELIST = "998275202"
-# The server selects the agy CLI model catalog by this User-Agent shape.
-USER_AGENT = (
-    f"antigravity/cli/{AGY_VERSION} (aidev_client; os_type=windows; arch=amd64; "
-    f"cl={AGY_CHANGELIST}; auth_method=consumer)"
-)
+AGY_VERSION = "1.5.7"
+AGY_CHANGELIST = "1019769835"
+
+
+def user_agent(system: str | None = None, machine: str | None = None) -> str:
+    """Build the agy CLI User-Agent for the given (default: host) platform."""
+    os_type = "windows" if (system or sys.platform) == "win32" else "linux"
+    arch = (
+        "arm64"
+        if (machine or platform.machine()).lower() in {"arm64", "aarch64"}
+        else "amd64"
+    )
+    return (
+        f"antigravity/cli/{AGY_VERSION} (aidev_client; os_type={os_type}; "
+        f"arch={arch}; cl={AGY_CHANGELIST}; auth_method=consumer)"
+    )
+
+
+USER_AGENT = user_agent()
 BASE_URL = "https://daily-cloudcode-pa.googleapis.com/v1internal:"
 METADATA = {
     "ideType": "ANTIGRAVITY",
-    "platform": "WINDOWS_AMD64",
+    "platform": f"{'WINDOWS' if sys.platform == 'win32' else 'LINUX'}_"
+    f"{'ARM64' if platform.machine().lower() in {'arm64', 'aarch64'} else 'AMD64'}",
     "pluginType": "GEMINI",
 }
 

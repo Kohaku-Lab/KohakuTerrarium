@@ -1,6 +1,6 @@
 # 复用本地 agy 登录接入 Antigravity
 
-首版支持 **Windows 本机 CLI＋Web、单账号**。先通过官方 `agy` 登录。
+支持 **Windows 或 Linux 本机 CLI＋Web、单账号**。先通过官方 `agy` 登录。
 KT 不实现 OAuth 登录，不保存 refresh token，也不会替用户退出 Google 账号。
 
 ```powershell
@@ -20,7 +20,7 @@ kt run ./my-creature --llm google-antigravity/gemini-4-argon@reasoning=medium
 
 ## 内置模型与 reasoning effort
 
-预设对齐 agy 1.3.4 CLI 的 agent 模型列表（2026-10-14）。服务端按客户端
+预设列出已支持的 agy agent 模型系列。服务端按客户端
 User-Agent 决定返回哪份列表，KT 发送与 agy 相同的 `antigravity/cli/<version> (...)`
 格式；其他格式只会拿到较小的目录，目录外的模型返回 404。以下均为 token 限制，不是账号额度。
 
@@ -55,13 +55,18 @@ profile 输出上限可手动调低，但不得超过模型上限或小于等于
 
 ## 凭据与会话
 
-仅检查 Windows 凭据项 `gemini:antigravity` 和已知 agy 后备文件。
+Windows 仅检查凭据项 `gemini:antigravity`。Linux 需安装
+`kohakuterrarium[antigravity]`，与 agy 使用相同用户和 session D-Bus，
+并在桌面中解锁 Secret Service 密钥环。仅搜索 login collection，缺失时使用
+default alias，精确匹配 `service=gemini`、`username=antigravity`。
+不会创建或解锁集合；重复条目、锁定和不可用状态均明确报错，D-Bus 回复共享五秒期限。
+两平台也检查已知 agy 后备文件；存储锁定或不可用时不会退回文件。
 若两处同时存在凭据则明确报错，请先在 agy 中解决来源冲突。
 只接受 consumer Bearer 凭据；access token 仅驻留内存，不进入日志。
 KT 通过有超时限制的 agy 子进程刷新，跨进程锁及进程内共享任务避免重复刷新。
 
-请求固定发往 `daily-cloudcode-pa.googleapis.com`，使用 agy 1.3.4
-请求头配置，不跟随重定向。项目发现与凭据代次绑定；账号切换期间会重新核验。
+请求固定发往 `daily-cloudcode-pa.googleapis.com`，使用 agy 1.5.7
+请求头配置（changelist `1019769835`），OS 和架构跟随本机，不跟随重定向。项目发现与凭据代次绑定；账号切换期间会重新核验。
 收到任何文本、思考、工具调用或签名后，不自动重发该推理。
 
 会话保存原始签名片段，同时绑定实际模型 ID、项目与当前消息内容。
@@ -71,9 +76,22 @@ Claude 回传时会组装流式文本／思考块及末尾签名，去掉空占�
 会提示新建或压缩会话。改变 effort 会改变实际模型 ID，带工具签名的会话应先压缩或新建；
 对应同一实际 ID 的系列名与明确档位 ID 可相互复用历史。切换到 OpenAI 时不会外发 Google 内部状态字段。
 
+## Linux 验证
+
+运行 `kt config antigravity status`，预期状态为 `ready`、来源为
+`linux_secret_service`；`kt config antigravity models` 可检查模型目录。
+使用 `google-antigravity/gemini-3.8-flash@reasoning=high` 做简短生成测试，
+会消耗账号额度。令牌未过期时 refresh 不会调用 agy，不能据此证明续期成功。
+
+在具备权限的账号上，`gemini-4-argon-medium`、`gemini-4-hydrogen-high`、
+`gemini-4-hydrogen-xhigh` 和 `gemini-pro-orchestrator-g1-pro`（Orchestrator / Argon）
+也已通过简短文本生成测试。Hydrogen 和 Orchestrator 当前使用明确的自定义模型 ID，
+不推断 thinking 配置；这些测试不代表已验证专用预设、显式 thinking 配置或 Orchestrator 编排能力。
+保留上游已有模型，包括 Gemini 4 Carbon。目录可见不代表账号有访问权限。
+
 ## 当前边界
 
-暂不支持远程节点、多账号、macOS/Linux 凭据源、自定义 API 地址、媒体生成及
+暂不支持远程节点、多账号、macOS 凭据源、没有可用 Secret Service 的 Linux、自定义 API 地址、媒体生成及
 任意 extra_body 覆盖。支持内联图片，
 其他不支持的内容或工具 schema 会明确报错。发现列表不保证每个模型支持所有模态。
 
