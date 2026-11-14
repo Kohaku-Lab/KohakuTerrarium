@@ -33,22 +33,28 @@ and a 404 for models outside it. Limits are token limits, not account quota.
 
 | Preset under `google-antigravity/` | Context choices | Output | Reasoning | Thinking sent |
 | --- | --- | ---: | --- | --- |
+| `gemini-4-hydrogen` | 256k (default), 1048k | 262,144 | low, medium, high, xhigh | `thinkingLevel` |
+| `gemini-pro-orchestrator-g1-pro` | 256k (default), 1048k | 65,536 | high only | `thinkingLevel: HIGH`; fixed wire ID |
 | `gemini-4-argon` | 256k (default), 512k, 900k | 65,536 | low, medium, high | `thinkingLevel` |
 | `gemini-3.8-flash` | 256k (default), 1048k | 65,536 | low, medium, high | `thinkingBudget` 1,000 / 4,000 / dynamic |
 | `claude-opus-5-5` | 256k (default), 840k | 128,000 | low, medium, high | `thinkingLevel` |
 | `claude-sonnet-5-5` | 256k (default), 840k | 128,000 | low, medium, high | `thinkingLevel` |
 | `gpt-oss-120b` | 80k (default), 131k | 32,768 | medium only | `thinkingBudget` 8,192 |
 
-Each effort is its own wire model, `<preset>-<effort>` (for example
+For model families, each effort is its own wire model, `<preset>-<effort>` (for example
 `gemini-4-argon-high`), with the thinking setting the catalog lists for it. The
-default effort is **medium**, as in agy. Select with `@reasoning=low|medium|high`
-or the CLI/Web model picker; explicit IDs such as `claude-opus-5-5-low` are
+default family effort is **medium**. Hydrogen also accepts `@reasoning=xhigh`.
+Select family effort with `@reasoning=low|medium|high` or the CLI/Web model picker.
+Orchestrator uses its exact ID with HIGH thinking, without an effort suffix or
+reasoning selector. Explicit IDs such as `claude-opus-5-5-low` are
 accepted too, and an effort that conflicts with the ID fails before
 authentication. Gemini 4 Argon requires a Google AI Ultra (or eligible
 Enterprise) account. The catalog marks GPT-OSS for removal on 2026-11-02.
 
 The `context` variation sets the profile's `max_context`, the history budget KT
-compacts against. The defaults are agy's own compaction limits; the larger
+compacts against. Hydrogen and Orchestrator use a conservative 256k default with the catalog's
+1,048,576-token maximum available as `context=1048k`. Other defaults are agy's
+compaction limits; the larger
 choices are agy's Argon context picker (512k / 900k), agy's Claude long-context
 limit (840k), and the catalog maximum (Flash 1048k, GPT-OSS 131k). The choice is
 not sent upstream; a larger window costs more quota per turn only because each
@@ -127,10 +133,9 @@ agy and does not verify renewal.
 
 With an eligible account, text-generation smoke tests also succeeded for
 `gemini-4-argon-medium`, `gemini-4-hydrogen-high`, `gemini-4-hydrogen-xhigh`, and
-`gemini-pro-orchestrator-g1-pro` (Orchestrator / Argon). Hydrogen and Orchestrator
-currently use explicit custom model IDs without inferred thinking settings;
-dedicated presets, explicit thinking configuration, and Orchestrator's orchestration
-behavior are not validated by these smoke tests. Existing presets, including
+`gemini-pro-orchestrator-g1-pro` (Orchestrator / Argon). Explicit XHIGH thinking
+for Hydrogen and HIGH thinking for Orchestrator also passed text-generation
+smoke tests. These checks do not validate Orchestrator's orchestration behavior. Existing presets, including
 Gemini 4 Carbon, are preserved. Catalog visibility is not an account-access guarantee.
 
 ## Output limits and tool results

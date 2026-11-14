@@ -241,8 +241,10 @@ async def test_account_change_during_project_discovery_never_uses_old_project(
     assert projects == ["project-b"]
 
 
-# The agy 1.3.4 CLI agent catalog: every wire ID KT may request.
+# Supported agy agent wire IDs.
 AGY_AGENT_MODELS = {
+    *(f"gemini-4-hydrogen-{effort}" for effort in ("low", "medium", "high", "xhigh")),
+    "gemini-pro-orchestrator-g1-pro",
     *(f"gemini-4-argon-{effort}" for effort in ("low", "medium", "high")),
     *(f"gemini-3.8-flash-{effort}" for effort in ("low", "medium", "high")),
     *(f"claude-opus-5-5-{effort}" for effort in ("low", "medium", "high")),
@@ -264,6 +266,7 @@ FLASH_BUDGETS = {"low": 1000, "medium": 4000, "high": -1}
         )
         for family, limit in (
             ("gemini-4-argon", 65536),
+            ("gemini-4-hydrogen", 262144),
             ("claude-opus-5-5", 128000),
             ("claude-sonnet-5-5", 128000),
         )
@@ -283,6 +286,20 @@ FLASH_BUDGETS = {"low": 1000, "medium": 4000, "high": -1}
         for effort in ("", "low", "medium", "high")
     ]
     + [
+        (
+            "gemini-4-hydrogen",
+            "xhigh",
+            "gemini-4-hydrogen-xhigh",
+            {"includeThoughts": True, "thinkingLevel": "XHIGH"},
+            262144,
+        ),
+        (
+            "gemini-pro-orchestrator-g1-pro",
+            "",
+            "gemini-pro-orchestrator-g1-pro",
+            {"includeThoughts": True, "thinkingLevel": "HIGH"},
+            65536,
+        ),
         (
             "gpt-oss-120b",
             "",
