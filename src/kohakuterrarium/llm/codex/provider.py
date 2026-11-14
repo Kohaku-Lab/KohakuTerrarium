@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import importlib
 import importlib.util
+import inspect
 import logging
 from contextlib import aclosing
 from copy import deepcopy
@@ -14,6 +15,7 @@ import httpx
 AsyncOpenAI = None
 HAS_OPENAI = importlib.util.find_spec("openai") is not None
 
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.responses import ws_options
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
@@ -305,6 +307,8 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                                 yield text
                     return
                 except Exception as exc:
+                    if isinstance(exc, ResponseStreamError):
+                        raise
                     limit = reported_image_limit(exc, self._request_image_limit)
                     if (
                         limit is not None
@@ -531,12 +535,36 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
             logger.error("Codex API request failed", error=str(e))
             raise
 
-        async for event in stream:
-            if recovery is not None:
-                await recovery.status(None)
-            piece = self._process_stream_event(event, collected_tool_calls)
-            if piece is not None:
-                yield piece
+        completed = False
+        try:
+            try:
+                async for event in stream:
+                    if recovery is not None:
+                        await recovery.status(None)
+                    piece = process_codex_event(
+                        self, event, collected_tool_calls, validate_outcome=True
+                    )
+                    if piece is not None:
+                        yield piece
+                    if getattr(event, "type", "") == "response.completed":
+                        completed = True
+                        break
+            finally:
+                close = getattr(stream, "aclose", None) or getattr(
+                    stream, "close", None
+                )
+                if close is not None:
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+            if not completed:
+                raise ResponseStreamError()
+        except asyncio.CancelledError:
+            raise
+        except ResponseStreamError:
+            raise
+        except (httpx.TransportError, TimeoutError) as exc:
+            raise ResponseStreamError() from exc
 
         self._last_assistant_extra_fields = self._reasoning.fields()
         self._last_tool_calls = collected_tool_calls
@@ -577,4 +605,6 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
         image_parts: list | None = None,
     ) -> str | None:
         """Fold one HTTP or WebSocket event into the current attempt."""
-        return process_codex_event(self, event, collected_tool_calls, image_parts)
+        return process_codex_event(
+            self, event, collected_tool_calls, image_parts, validate_outcome=False
+        )

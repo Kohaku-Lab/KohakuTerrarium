@@ -627,6 +627,7 @@ class Controller:
     def _log_token_usage(self) -> None:
         """Extract and log token usage from the last LLM completion."""
         usage = self.llm.last_usage if hasattr(self.llm, "last_usage") else {}
+        self._last_usage = {}
         if usage:
             self._last_usage = usage
             logger.info(
@@ -900,6 +901,7 @@ class Controller:
             )
 
         logger.info("Generating response...")
+        self._last_usage = {}
 
         await begin_assistant(self)
 
