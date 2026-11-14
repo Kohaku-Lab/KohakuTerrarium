@@ -18,7 +18,7 @@ def _latest_resume_file(path: Path) -> Path:
     for candidate in bare.parent.glob(f"{bare.name}.v*"):
         version = candidate.name.rsplit(".v", 1)[-1]
         if version.isdigit() and candidate.is_file():
-            candidates.append((int(version), 1, candidate))
+            candidates.append((int(version), 0, candidate))
     if not candidates:
         return path
     if bare.is_file():
@@ -27,7 +27,7 @@ def _latest_resume_file(path: Path) -> Path:
                 version = int(view.get("meta", "format_version", 1))
             except (TypeError, ValueError):
                 version = 1
-        candidates.append((version, 0, bare))
+        candidates.append((version, 1, bare))
     readable = [item for item in candidates if item[0] <= FORMAT_VERSION]
     return max(readable or candidates)[2]
 
