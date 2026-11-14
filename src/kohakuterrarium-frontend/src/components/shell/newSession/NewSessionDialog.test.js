@@ -88,16 +88,19 @@ describe("NewSessionDialog: creature", () => {
     w.unmount()
   })
 
-  it("starts from a typed local path and the chosen name and open mode", async () => {
-    const w = mount(NewSessionDialog, { attachTo: document.body })
+  it("prefills configuration, name and chat opening without starting until submitted", async () => {
+    const w = mount(NewSessionDialog, {
+      props: { initialConfig: "/my/creature", initialName: "alice", initialAttachMode: "chat" },
+      attachTo: document.body,
+    })
     await flushPromises()
-    await configInput(w).setValue("/my/creature")
-    await w.find('[data-test="new-name"]').setValue("alice")
-    await w.find('[data-test="new-open-both"]').trigger("click")
+    expect(createSession).not.toHaveBeenCalled()
+    expect(configInput(w).element.value).toBe("/my/creature")
+    expect(w.find('[data-test="new-open-chat"]').attributes("aria-checked")).toBe("true")
     await submit(w).trigger("click")
     await flushPromises()
     expect(createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ configPath: "/my/creature", name: "alice", attachMode: "both" }),
+      expect.objectContaining({ configPath: "/my/creature", name: "alice", attachMode: "chat" }),
     )
     expect(w.emitted("started")).toEqual([[{ id: "sid", opened: true }]])
     w.unmount()

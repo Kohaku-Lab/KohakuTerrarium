@@ -218,8 +218,10 @@ export function publishAttention(scope, tab, state, event) {
       ["processing_end", "tool_done", "tool_error", "subagent_done", "subagent_error"].includes(
         event?.type,
       )
-    )
+    ) {
       period.outcome = "ready"
+      if (workForScope(scope).status !== "waiting") period.completed = (period.completed || 0) + 1
+    }
     workPeriods.set(scope, period)
   }
   notifyListeners()
@@ -237,7 +239,7 @@ export function workForScope(scope) {
   }
   const period = workPeriods.get(scope)
   const status = waiting ? "waiting" : busy ? "running" : period?.outcome || "idle"
-  return { status, busy, started: period?.started || 0 }
+  return { status, busy, started: period?.started || 0, completed: period?.completed || 0 }
 }
 
 export function removeAttentionScope(scope) {

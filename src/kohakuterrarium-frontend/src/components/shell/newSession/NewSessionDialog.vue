@@ -81,6 +81,8 @@ const props = defineProps({
   silent: { type: Boolean, default: false },
   initialConfig: { type: String, default: "" },
   initialPwd: { type: String, default: "" },
+  initialName: { type: String, default: "" },
+  initialAttachMode: { type: String, default: "none" },
 })
 const emit = defineEmits(["close", "started"])
 
@@ -97,13 +99,13 @@ const tabs = useTabsStore()
 const cluster = useClusterStore()
 
 const mode = ref(MODES.some((m) => m.id === props.mode) ? props.mode : "creature")
-const name = ref("")
+const name = ref(props.initialName)
 const namePlaceholder = ref(randomNameFor(mode.value))
 const onNode = ref(initialNode(mode.value))
 const pwd = ref(props.initialPwd)
 const pwdTouched = ref(Boolean(props.initialPwd))
 const configPath = ref(props.initialConfig)
-const attachMode = ref("none")
+const attachMode = ref(OPEN_MODES.includes(props.initialAttachMode) ? props.initialAttachMode : "none")
 const starting = ref(false)
 const error = ref("")
 let pwdRequest = 0

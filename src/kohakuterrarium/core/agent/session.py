@@ -36,6 +36,9 @@ class AgentSessionMixin:
         self.session_store: Any = None
         self._session_output: Any = None
         self._pending_resume_events: list[dict] | None = None
+        self._system_prompt_override: str | None = None
+        self._system_prompt_appends: list[str] = []
+        self._managed_prompt_sections: dict[str, str] = {}
 
     def _publish_session_info(self) -> None:
         """Publish session info to output (for TUI session panel).
@@ -203,10 +206,19 @@ class AgentSessionMixin:
             return
 
         if replace:
+            self._system_prompt_override = content
+            self._managed_prompt_sections = {}
+            self._system_prompt_appends = []
             sys_msg.content = content
+        elif isinstance(sys_msg.content, str):
+            self._system_prompt_appends = [
+                *getattr(self, "_system_prompt_appends", []),
+                content,
+            ]
+            sys_msg.content += "\n\n" + content
         else:
-            if isinstance(sys_msg.content, str):
-                sys_msg.content = sys_msg.content + "\n\n" + content
+            return
+        self._controller_config.system_prompt = sys_msg.content
 
         logger.info("System prompt updated", replace=replace, added_length=len(content))
 

@@ -7,8 +7,9 @@
  * host renders the real component once the entry has called ``kt.register*``.
  */
 
-import { defineComponent, h, markRaw } from "vue"
+import { defineComponent, h, markRaw, provide } from "vue"
 
+import { EXTENSION_INJECT_KEY } from "@/ext/sdk/keys"
 import ExtensionContribution from "@/ext/ExtensionContribution.vue"
 import { clearActions, registerAction } from "@/ext/actions"
 import { clearDecorators, registerDecorator } from "@/ext/decorators"
@@ -125,13 +126,36 @@ const OVERLAY_OPTION_NAMES = [
   "resizable",
   "clickThrough",
   "defaultVisible",
+  "startupGroup",
+  "startupFallback",
+  "windowReady",
+  "contentPlacement",
 ]
 
 function overlayOptions(source) {
   const out = {}
   for (const name of OVERLAY_OPTION_NAMES)
     if (source?.[name] !== undefined) out[name] = source[name]
+  if (
+    typeof source?.settingsSection === "string" &&
+    /^[a-z0-9][a-z0-9._-]{0,63}$/.test(source.settingsSection)
+  )
+    out.settingsSection = source.settingsSection
   return out
+}
+
+/** Effective manifest overlay options, including host-verified desktop pet defaults. */
+export function contributionOverlayOptions(record, contribution) {
+  if (contribution.kind !== "overlay") return null
+  const options = overlayOptions(contribution.overlay)
+  if (
+    record?.desktop_pet === true &&
+    !record.dev_url &&
+    record.package === "virtual-pet" &&
+    contribution.id === "pet"
+  )
+    Object.assign(options, { desktopPet: true, startupGroup: "pet" })
+  return options
 }
 
 const OWNER_KINDS = ["package", "plugin", "tool", "trigger"]
@@ -172,7 +196,7 @@ function hostFor(pkg, contribution) {
 }
 
 /** Register one contribution's host into the core registry for its kind. */
-export function registerContribution(pkg, contribution) {
+export function registerContribution(pkg, contribution, record = null) {
   const key = contributionKey(pkg, contribution.id)
   const host = hostFor(pkg, contribution)
   switch (contribution.kind) {
@@ -232,7 +256,7 @@ export function registerContribution(pkg, contribution) {
         id: contribution.id,
         label: contribution.label,
         component: host,
-        options: overlayOptions(contribution.overlay),
+        options: contributionOverlayOptions(record, contribution),
       })
       break
     case "command":
@@ -317,17 +341,7 @@ export function registerContribution(pkg, contribution) {
 /** Register every declared contribution of a listed package. */
 export function registerPackageContributions(record) {
   for (const contribution of record.contributes || []) {
-    registerContribution(record.package, contribution)
-    if (
-      record.desktop_pet === true &&
-      !record.dev_url &&
-      record.package === "virtual-pet" &&
-      contribution.kind === "overlay" &&
-      contribution.id === "pet"
-    ) {
-      const overlay = overlays.get(contributionKey(record.package, contribution.id))
-      if (overlay) overlay.options = { ...overlay.options, desktopPet: true }
-    }
+    registerContribution(record.package, contribution, record)
   }
 }
 
@@ -430,7 +444,18 @@ export function provideContributionComponent(pkg, kind, id, component, options =
   if (kind === "message-renderer") updateMessageRendererEntry(contributionKey(pkg, id), options)
   if (kind === "overlay") {
     const entry = overlays.get(contributionKey(pkg, id))
-    if (entry) entry.options = { ...entry.options, ...overlayOptions(options) }
+    if (entry) {
+      entry.options = { ...entry.options, ...overlayOptions(options) }
+      if (options.controller)
+        entry.controller = markRaw(
+          defineComponent({
+            setup() {
+              provide(EXTENSION_INJECT_KEY, findPackage(pkg)?.handle)
+              return () => h(options.controller)
+            },
+          }),
+        )
+    }
   }
 }
 

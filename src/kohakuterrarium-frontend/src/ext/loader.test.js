@@ -1,7 +1,8 @@
 import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/utils/api", () => ({
+  settingsAPI: { getUIPrefs: vi.fn(), updateUIPrefs: vi.fn() },
   default: {
     get: vi.fn(),
     post: vi.fn(),
@@ -30,7 +31,11 @@ import { useAuthStore } from "@/stores/auth"
 import { useLayoutStore } from "@/stores/layout"
 import { settingsSections } from "@/stores/settingsSectionRegistry"
 import { tabKinds } from "@/stores/tabKindRegistry"
-import api from "@/utils/api"
+import api, { settingsAPI } from "@/utils/api"
+import { flushPromises } from "@vue/test-utils"
+import { hideOverlay, isOverlayVisible, overlays, petSelection, petSelectionKey } from "./overlays"
+import { resetStartupChecks } from "./overlayStartup"
+import { _resetUIPrefsForTests, ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
 const Comp = { template: "<div>x</div>" }
 
@@ -65,6 +70,8 @@ describe("ui extension loader", () => {
     localStorage.clear()
     unloadUiExtensions()
     vi.clearAllMocks()
+    _resetUIPrefsForTests()
+    resetStartupChecks()
     imported = []
     api.post.mockResolvedValue({ data: { token: "TOK", expires_at: Date.now() / 1000 + 3600 } })
     setLoaderDeps({
@@ -77,6 +84,69 @@ describe("ui extension loader", () => {
       },
     })
   })
+
+  afterEach(() => {
+    _resetUIPrefsForTests()
+    resetStartupChecks()
+    vi.useRealTimers()
+  })
+
+  it.each([false, true])(
+    "restores a lone desktop pet from backend preferences (manifest group: %s)",
+    async (explicitGroup) => {
+      vi.useFakeTimers()
+      const values = {}
+      settingsAPI.getUIPrefs.mockImplementation(async () => ({ values: structuredClone(values) }))
+      settingsAPI.updateUIPrefs.mockImplementation(async (update) => {
+        Object.assign(values, structuredClone(update))
+        return { values: structuredClone(values) }
+      })
+      const key = "ext:virtual-pet/pet"
+      listing([
+        pkg("virtual-pet", {
+          desktop_pet: true,
+          contributes: [
+            {
+              kind: "overlay",
+              id: "pet",
+              owner: "package:virtual-pet",
+              overlay: { defaultVisible: true, ...(explicitGroup ? { startupGroup: "pet" } : {}) },
+            },
+          ],
+        }),
+      ])
+      await reloadUiExtensions()
+      expect(isOverlayVisible(key)).toBe(true)
+      hideOverlay(key)
+      await vi.advanceTimersByTimeAsync(1600)
+      expect(values[petSelectionKey(currentHostKey())]).toEqual({ selected: key, visible: false })
+
+      for (const preload of [true, false]) {
+        unloadUiExtensions()
+        localStorage.clear()
+        _resetUIPrefsForTests()
+        resetStartupChecks()
+        let finishPrefs
+        if (preload) await ensureUIPrefsLoaded()
+        else
+          settingsAPI.getUIPrefs.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                finishPrefs = resolve
+              }),
+          )
+        const loading = reloadUiExtensions()
+        await flushPromises()
+        if (!preload) {
+          expect(overlays.has(key)).toBe(false)
+          finishPrefs({ values: structuredClone(values) })
+        }
+        await loading
+        expect(petSelection()).toEqual({ selected: key, visible: false })
+        expect(isOverlayVisible(key)).toBe(false)
+      }
+    },
+  )
 
   it("registers declared contributions and loads the entry lazily once", async () => {
     listing([pkg("alpha")])
@@ -96,6 +166,31 @@ describe("ui extension loader", () => {
       "/api/ext/alpha/ui/TOK/a.css",
     )
     expect(api.post).toHaveBeenCalledTimes(1)
+  })
+
+  it("disposes extension resources once on unload, including late registrations", async () => {
+    listing([pkg("alpha")])
+    await reloadUiExtensions()
+    let handle
+    const dispose = vi.fn()
+    setLoaderDeps({
+      importModule: async () => ({
+        default: (kt) => {
+          handle = kt
+          kt.onDispose(dispose)
+        },
+      }),
+    })
+    await ensurePackageLoaded("alpha")
+    unloadUiExtensions()
+    unloadUiExtensions()
+    expect(dispose).toHaveBeenCalledTimes(1)
+    const late = vi.fn()
+    handle.onDispose(late)
+    expect(late).toHaveBeenCalledTimes(1)
+    expect(handle.signal.aborted).toBe(true)
+    handle.registerTab("too-late", { template: "<div />" })
+    expect(contributionComponents.has("ext:alpha/too-late")).toBe(false)
   })
 
   it("never loads disabled, broken or incompatible packages", async () => {
@@ -239,6 +334,44 @@ describe("ui extension loader", () => {
     await refreshAssetTokens()
     expect(alpha.assetUrl("x.png")).toBe("/api/ext/alpha/ui/T3-alpha/x.png")
     expect(alpha.assetUrl("x.png")).not.toContain("/-/")
+  })
+
+  it("refreshes asset URLs on demand after expiry or a server restart and rejects stale handles", async () => {
+    let clock = 1000
+    let minted = 0
+    setLoaderDeps({
+      now: () => clock,
+      builtinPackages: () => [],
+      enableCompiler: async () => true,
+      fetchJson: async () => ({}),
+      importModule: async () => ({ default: (kt) => kt.registerSettingsSection("s", Comp) }),
+    })
+    api.post.mockImplementation(async () => ({
+      data: { token: `T${++minted}`, expires_at: clock + 21600 },
+    }))
+    listing([pkg("alpha")])
+    await reloadUiExtensions()
+    await ensurePackageLoaded("alpha")
+    const handle = findPackage("alpha").handle
+    const old = handle.assetUrl("stage.html")
+    clock += 21601
+    expect(await handle.freshAssetUrl("stage.html")).toBe("/api/ext/alpha/ui/T2/stage.html")
+    expect(old).toContain("/T1/")
+    expect(await handle.freshAssetUrl("stage.html")).toContain("/T3/")
+    api.post.mockRejectedValueOnce(new Error("offline"))
+    await expect(handle.freshAssetUrl("stage.html")).rejects.toThrow("offline")
+    let finish
+    api.post.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    const pending = handle.freshAssetUrl("stage.html")
+    unloadUiExtensions()
+    finish({ data: { token: "OLD-HOST", expires_at: clock + 21600 } })
+    await expect(pending).rejects.toThrow(/no longer active/)
+    await expect(handle.freshAssetUrl("stage.html")).rejects.toThrow(/no longer active/)
   })
 
   it("re-imports the entry with a fresh token after a failed import", async () => {

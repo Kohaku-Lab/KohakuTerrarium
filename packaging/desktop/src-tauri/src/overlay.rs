@@ -8,14 +8,15 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tauri::{
-    AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
-    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, LogicalPosition, LogicalSize, Manager, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 use url::Url;
 
 use crate::backend::Backend;
 use crate::commands::{number_arg, string_arg, Args};
 use crate::navigation::is_internal;
+use crate::overlay_coordinates::{DesktopSpace, PointerCoordinates};
 use crate::smoke;
 
 pub const LABEL_PREFIX: &str = "overlay-";
@@ -35,7 +36,7 @@ pub struct HitRegions(Mutex<HashMap<String, Arc<Mutex<PointerState>>>>);
 struct Capture {
     id: String,
     cursor: (f64, f64),
-    origin: (i32, i32),
+    origin: (f64, f64),
     scale: (f64, f64),
 }
 
@@ -53,6 +54,7 @@ struct PointerState {
 struct OverlayIdentity {
     key: String,
     generation: Option<String>,
+    content_placement: bool,
 }
 
 #[derive(Default)]
@@ -65,6 +67,7 @@ impl OverlayWindows {
             OverlayIdentity {
                 key: spec.key.clone(),
                 generation: spec.generation.clone(),
+                content_placement: spec.content_placement,
             },
         );
     }
@@ -101,6 +104,7 @@ pub fn forget(app: &AppHandle, label: &str) {
         Some(OverlayIdentity {
             key,
             generation: Some(generation),
+            ..
         }),
         Some(main),
     ) = (removed, app.get_webview_window("main"))
@@ -172,6 +176,7 @@ struct Spec {
     position: Option<(f64, f64)>,
     on_top: bool,
     generation: Option<String>,
+    content_placement: bool,
     host_key: String,
 }
 
@@ -212,6 +217,10 @@ fn parse_spec(value: &Value) -> Option<Spec> {
             .and_then(Value::as_str)
             .filter(|v| v.len() <= 128)
             .map(str::to_string),
+        content_placement: value
+            .get("contentPlacement")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         on_top: value
             .get("alwaysOnTop")
             .and_then(Value::as_bool)
@@ -243,6 +252,10 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
         return false;
     };
     if let Some(existing) = app.get_webview_window(&spec.label) {
+        let _ = crate::overlay_placement::overlay_placement(
+            existing.clone(),
+            Some(vec![serde_json::json!("validate")]),
+        );
         return existing.show().is_ok();
     }
     let Some(mut url) = app
@@ -284,6 +297,12 @@ pub fn open(app: &AppHandle, spec: &Value) -> bool {
             }
         })
         .build()
+        .map(|window| {
+            let _ = crate::overlay_placement::overlay_placement(
+                window,
+                Some(vec![serde_json::json!("restore")]),
+            );
+        })
         .is_ok();
     if !opened {
         app.state::<OverlayWindows>()
@@ -355,6 +374,10 @@ pub fn reset_overlay_window(app: AppHandle, window: WebviewWindow, args: Args) -
     let Some(overlay) = app.get_webview_window(&spec.label) else {
         return false;
     };
+    if spec.content_placement {
+        return crate::overlay_placement::overlay_placement(overlay, Some(vec![json!("reset")]))
+            .is_some();
+    }
     let (x, y) = default_position(&app, &spec);
     let ok = overlay
         .set_size(LogicalSize::new(spec.size.0, spec.size.1))
@@ -372,6 +395,7 @@ pub fn overlay_present(app: AppHandle, window: WebviewWindow, args: Args) -> boo
     let Some(OverlayIdentity {
         key,
         generation: Some(generation),
+        ..
     }) = presentations.get(window.label()).cloned()
     else {
         return false;
@@ -383,14 +407,11 @@ pub fn overlay_present(app: AppHandle, window: WebviewWindow, args: Args) -> boo
     let Some(main) = app.get_webview_window("main") else {
         return false;
     };
-    if !dispatch(
+    dispatch(
         &main,
         "kt:overlay-ready",
         &json!({"key": key, "generation": generation}),
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 /// Main-window acknowledgement after retiring the viewport renderer.
@@ -521,29 +542,35 @@ pub fn overlay_set_hit_regions(
             .and_then(Value::as_bool)
             .unwrap_or(false)
     };
-    let scale = css_scale(&window, viewport);
     let capture = if flag("captured") {
         match (
             window.cursor_position(),
             window.outer_position(),
             window.inner_position(),
+            window.scale_factor(),
+            pointer_cursor_scale(&window),
         ) {
-            (Ok(c), Ok(o), Ok(inner)) => Some(Capture {
-                id: settings
-                    .and_then(|v| v.get("press"))
-                    .and_then(|v| v.get("id"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned(),
-                cursor: press_point(
-                    settings.and_then(|v| v.get("press")),
-                    (inner.x as f64, inner.y as f64),
+            (Ok(c), Ok(o), Ok(inner), Ok(window_scale), Some(cursor_scale)) => {
+                let coordinates =
+                    PointerCoordinates::new(DesktopSpace::CURRENT, cursor_scale, window_scale);
+                let scale = coordinates.css_scale(css_scale(&window, viewport));
+                Some(Capture {
+                    id: settings
+                        .and_then(|v| v.get("press"))
+                        .and_then(|v| v.get("id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    cursor: press_point(
+                        settings.and_then(|v| v.get("press")),
+                        coordinates.origin((inner.x as f64, inner.y as f64)),
+                        scale,
+                    )
+                    .unwrap_or(coordinates.cursor((c.x, c.y))),
+                    origin: coordinates.origin((o.x as f64, o.y as f64)),
                     scale,
-                )
-                .unwrap_or((c.x, c.y)),
-                origin: (o.x, o.y),
-                scale,
-            }),
+                })
+            }
             _ => None,
         }
     } else {
@@ -605,6 +632,17 @@ fn css_scale(window: &WebviewWindow, viewport: Option<(f64, f64)>) -> (f64, f64)
     (scale, scale)
 }
 
+fn pointer_cursor_scale(window: &WebviewWindow) -> Option<f64> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(window.primary_monitor().ok()??.scale_factor())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        window.scale_factor().ok()
+    }
+}
+
 fn reachable_position(position: (f64, f64), size: (f64, f64), area: Rect) -> (f64, f64) {
     (
         position
@@ -624,21 +662,27 @@ fn reconcile_position(window: &WebviewWindow) {
     ) else {
         return;
     };
-    let position = (origin.x as f64, origin.y as f64);
+    let space = DesktopSpace::CURRENT;
+    let divisor = space.divisor(window.scale_factor().unwrap_or(1.0));
+    let position = (origin.x as f64 / divisor, origin.y as f64 / divisor);
+    let size = (
+        f64::from(size.width) / divisor,
+        f64::from(size.height) / divisor,
+    );
     let mut nearest = None;
     let mut distance = f64::INFINITY;
     for monitor in monitors {
         let area = monitor.work_area();
-        let rect = Rect {
-            x: area.position.x as f64,
-            y: area.position.y as f64,
-            w: area.size.width as f64,
-            h: area.size.height as f64,
-        };
-        let fitted = (
-            f64::from(size.width).min(rect.w),
-            f64::from(size.height).min(rect.h),
+        let rect = space.rect(
+            Rect {
+                x: area.position.x as f64,
+                y: area.position.y as f64,
+                w: area.size.width as f64,
+                h: area.size.height as f64,
+            },
+            monitor.scale_factor(),
         );
+        let fitted = (size.0.min(rect.w), size.1.min(rect.h));
         let next = reachable_position(position, fitted, rect);
         let delta = (next.0 - position.0).hypot(next.1 - position.1);
         if delta < distance {
@@ -647,11 +691,11 @@ fn reconcile_position(window: &WebviewWindow) {
         }
     }
     if let Some((next, fitted)) = nearest {
-        if fitted != (f64::from(size.width), f64::from(size.height)) {
-            let _ = window.set_size(PhysicalSize::new(fitted.0 as u32, fitted.1 as u32));
+        if fitted != size {
+            let _ = window.set_size(space.size(fitted.0, fitted.1));
         }
         if next != position {
-            let _ = window.set_position(PhysicalPosition::new(next.0 as i32, next.1 as i32));
+            let _ = window.set_position(space.position(next.0, next.1));
         }
     }
 }
@@ -669,6 +713,8 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
     let mut previous = Value::Null;
     let mut sent = Instant::now();
     let mut geometry_checked = Instant::now() - Duration::from_secs(1);
+    let mut cursor_checked = geometry_checked;
+    let mut cursor_scale = None;
     loop {
         thread::sleep(HIT_POLL);
         let state = app.state::<HitRegions>();
@@ -692,34 +738,71 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
             }
             state.clone()
         };
+        if !visible {
+            if ignoring != Some(true) && window.set_ignore_cursor_events(true).is_ok() {
+                ignoring = Some(true);
+            }
+            if input.subscribed && previous != json!({"valid": false}) {
+                previous = json!({"valid": false});
+                dispatch(window, "kt:overlay-pointer", &previous);
+            }
+            thread::sleep(Duration::from_millis(220));
+            continue;
+        }
+        if cursor_checked.elapsed() >= Duration::from_secs(1) {
+            cursor_scale = pointer_cursor_scale(window);
+            cursor_checked = Instant::now();
+        }
         if visible
             && input.capture.is_none()
             && geometry_checked.elapsed() >= Duration::from_secs(1)
         {
-            reconcile_position(window);
+            let content_placement = app
+                .state::<OverlayWindows>()
+                .0
+                .lock()
+                .unwrap()
+                .get(window.label())
+                .is_some_and(|entry| entry.content_placement);
+            if content_placement {
+                let _ = crate::overlay_placement::overlay_placement(
+                    window.clone(),
+                    Some(vec![json!("validate")]),
+                );
+            } else {
+                reconcile_position(window);
+            }
             geometry_checked = Instant::now();
         }
-        let sample = match (window.cursor_position(), window.inner_position()) {
-            (Ok(cursor), Ok(origin)) if visible => {
-                let scale = css_scale(window, input.viewport);
+        let sample = match (
+            window.cursor_position(),
+            window.inner_position(),
+            window.scale_factor(),
+            cursor_scale,
+        ) {
+            (Ok(cursor), Ok(origin), Ok(window_scale), Some(cursor_scale)) => {
+                let coordinates =
+                    PointerCoordinates::new(DesktopSpace::CURRENT, cursor_scale, window_scale);
+                let cursor = coordinates.cursor((cursor.x, cursor.y));
+                let scale = coordinates.css_scale(css_scale(window, input.viewport));
                 let (mut x, mut y) = local_point(
-                    (cursor.x, cursor.y),
-                    (origin.x as f64, origin.y as f64),
+                    cursor,
+                    coordinates.origin((origin.x as f64, origin.y as f64)),
                     scale,
                 );
                 let (mut dx, mut dy) = (0.0, 0.0);
                 if let Some(capture) = &input.capture {
-                    (dx, dy) = local_point((cursor.x, cursor.y), capture.cursor, capture.scale);
+                    (dx, dy) = local_point(cursor, capture.cursor, capture.scale);
                     if input.dragging {
-                        let _ = window.set_position(PhysicalPosition::new(
-                            capture.origin.0 + (cursor.x - capture.cursor.0).round() as i32,
-                            capture.origin.1 + (cursor.y - capture.cursor.1).round() as i32,
+                        let _ = window.set_position(coordinates.space.position(
+                            capture.origin.0 + cursor.0 - capture.cursor.0,
+                            capture.origin.1 + cursor.1 - capture.cursor.1,
                         ));
                         if let Ok(origin) = window.inner_position() {
                             (x, y) = local_point(
-                                (cursor.x, cursor.y),
-                                (origin.x as f64, origin.y as f64),
-                                css_scale(window, input.viewport),
+                                cursor,
+                                coordinates.origin((origin.x as f64, origin.y as f64)),
+                                coordinates.css_scale(css_scale(window, input.viewport)),
                             );
                         }
                     }
@@ -733,8 +816,9 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
             _ => {
                 input.capture = None;
                 input.dragging = false;
-                let _ = window.set_ignore_cursor_events(true);
-                ignoring = Some(true);
+                if ignoring != Some(true) && window.set_ignore_cursor_events(true).is_ok() {
+                    ignoring = Some(true);
+                }
                 json!({"valid": false})
             }
         };
@@ -749,220 +833,4 @@ fn poll_cursor(app: &AppHandle, window: &WebviewWindow, shared: &Arc<Mutex<Point
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn pet_settings_follow_registered_window_identity_without_a_generation() {
-        let windows = OverlayWindows::default();
-        for generation in [Some("ready-generation"), None] {
-            let mut spec = parse_spec(&json!({
-                "label": "overlay-pet", "key": "ext:virtual-pet/pet",
-                "width": 224, "height": 280, "generation": generation
-            }))
-            .unwrap();
-            assert!(!windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
-            windows.register(&spec);
-            assert!(windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
-            assert!(windows.settings_allowed(&spec.label, "overlays"));
-            assert_eq!(
-                windows.matches_generation(&spec.label, "ready-generation"),
-                generation.is_some()
-            );
-            assert!(!windows.matches_generation(&spec.label, ""));
-            assert!(!windows.matches_generation(&spec.label, "stale"));
-            assert!(!windows.matches_generation("overlay-unknown", "ready-generation"));
-            for section in [
-                "",
-                "auth",
-                "ext:other/settings",
-                "ext:virtual-pet/pets/extra",
-            ] {
-                assert!(!windows.settings_allowed(&spec.label, section));
-            }
-            assert!(!windows.settings_allowed("main", "ext:virtual-pet/pets"));
-            assert!(!windows.settings_allowed("overlay-unknown", "ext:virtual-pet/pets"));
-            windows.0.lock().unwrap().remove(&spec.label);
-            assert!(!windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
-            assert!(!windows.matches_generation(&spec.label, "ready-generation"));
-            spec.key = "ext:other/pet".into();
-            windows.register(&spec);
-            assert!(!windows.settings_allowed(&spec.label, "ext:virtual-pet/pets"));
-            windows.0.lock().unwrap().remove(&spec.label);
-        }
-    }
-
-    #[test]
-    fn capture_releases_and_represses_do_not_share_an_origin() {
-        let press = |id: &str, x| Capture {
-            id: id.into(),
-            cursor: (x, 0.0),
-            origin: (0, 0),
-            scale: (1.0, 1.0),
-        };
-        assert_eq!(
-            continue_capture(Some(press("one", 30.0)), Some(press("one", 10.0)))
-                .unwrap()
-                .cursor
-                .0,
-            10.0
-        );
-        assert_eq!(
-            continue_capture(Some(press("two", 30.0)), Some(press("one", 10.0)))
-                .unwrap()
-                .cursor
-                .0,
-            30.0
-        );
-        assert!(continue_capture(None, Some(press("one", 10.0))).is_none());
-    }
-
-    #[test]
-    fn pointer_coordinates_include_negative_monitors_zoom_and_stationary_moves() {
-        let press = json!({"x": 80.0, "y": 120.0});
-        assert_eq!(
-            press_point(Some(&press), (-1600.0, 100.0), (1.25, 1.25)),
-            Some((-1500.0, 250.0))
-        );
-        assert_eq!(press_point(None, (0.0, 0.0), (1.0, 1.0)), None);
-        let cursor = (-1500.0, 250.0);
-        assert_eq!(
-            local_point(cursor, (-1600.0, 100.0), (1.25, 1.25)),
-            (80.0, 120.0)
-        );
-        assert_eq!(
-            local_point(cursor, (-1600.0, 100.0), (2.5, 2.5)),
-            (40.0, 60.0)
-        );
-        assert_eq!(
-            local_point(cursor, (-1400.0, 100.0), (1.25, 1.25)),
-            (-80.0, 120.0)
-        );
-        let press = (-1525.0, 225.0);
-        assert_eq!(local_point(cursor, press, (1.25, 1.25)), (20.0, 20.0));
-    }
-
-    #[test]
-    fn monitor_reconciliation_preserves_reachable_positions_and_avoids_docks() {
-        let area = Rect {
-            x: -1920.0,
-            y: -100.0,
-            w: 1920.0,
-            h: 1040.0,
-        };
-        assert_eq!(
-            reachable_position((-1500.0, 100.0), (224.0, 280.0), area),
-            (-1500.0, 100.0)
-        );
-        assert_eq!(
-            reachable_position((-100.0, 900.0), (224.0, 280.0), area),
-            (-224.0, 660.0)
-        );
-        assert_eq!(
-            reachable_position((-3000.0, -400.0), (224.0, 280.0), area),
-            (-1920.0, -100.0)
-        );
-    }
-
-    #[test]
-    fn only_overlay_labels_are_accepted() {
-        assert!(is_overlay_label("overlay-pets-cat"));
-        assert!(!is_overlay_label("main"));
-        assert!(!is_overlay_label("overlay-"));
-        assert!(!is_overlay_label("overlay-Upper"));
-        assert!(!is_overlay_label("overlay-a/b"));
-        assert!(!is_overlay_label(&format!("overlay-{}", "a".repeat(49))));
-    }
-
-    #[test]
-    fn anchors_stay_inside_the_screen_with_a_margin() {
-        let screen = (1000.0, 600.0);
-        let size = (200.0, 100.0);
-        assert_eq!(anchored_position("top-left", screen, size), (16.0, 16.0));
-        assert_eq!(
-            anchored_position("bottom-right", screen, size),
-            (784.0, 484.0)
-        );
-        assert_eq!(anchored_position("top-right", screen, size), (784.0, 16.0));
-        assert_eq!(
-            anchored_position("bottom-left", screen, size),
-            (16.0, 484.0)
-        );
-        assert_eq!(anchored_position("center", screen, size), (400.0, 250.0));
-        assert_eq!(anchored_position("nonsense", screen, size), (784.0, 484.0));
-    }
-
-    #[test]
-    fn hit_regions_are_half_open_rectangles() {
-        let regions = [Rect {
-            x: 10.0,
-            y: 10.0,
-            w: 20.0,
-            h: 20.0,
-        }];
-        assert!(hits(&regions, 10.0, 10.0));
-        assert!(hits(&regions, 29.9, 29.9));
-        assert!(!hits(&regions, 30.0, 20.0));
-        assert!(!hits(&regions, 9.9, 20.0));
-        assert!(!hits(&[], 0.0, 0.0));
-    }
-
-    #[test]
-    fn a_spec_needs_a_valid_label_key_and_size() {
-        let good = json!({ "label": "overlay-a", "key": "ext:p/o", "width": 10, "height": 9999 });
-        let spec = parse_spec(&good).unwrap();
-        assert_eq!(spec.size, (MIN_SIZE, MAX_SIZE));
-        assert!(spec.on_top && spec.position.is_none());
-        assert_eq!(spec.anchor, "bottom-right");
-        for bad in [
-            json!({ "label": "main", "key": "k", "width": 100, "height": 100 }),
-            json!({ "label": "overlay-a", "width": 100, "height": 100 }),
-            json!({ "label": "overlay-a", "key": "k", "height": 100 }),
-        ] {
-            assert!(parse_spec(&bad).is_none());
-        }
-        let placed = json!({
-            "label": "overlay-a", "key": "k", "width": 100, "height": 100,
-            "x": 5, "y": 6, "alwaysOnTop": false, "anchor": "center"
-        });
-        let spec = parse_spec(&placed).unwrap();
-        assert_eq!(spec.position, Some((5.0, 6.0)));
-        assert!(!spec.on_top);
-        assert_eq!(spec.anchor, "center");
-    }
-
-    #[test]
-    fn regions_are_read_from_a_list_of_quads() {
-        let args: Args = Some(vec![json!([[1, 2, 3, 4], [5, 6], "x", [7, 8, 9, 10]])]);
-        assert_eq!(
-            parse_regions(&args),
-            vec![
-                Rect {
-                    x: 1.0,
-                    y: 2.0,
-                    w: 3.0,
-                    h: 4.0
-                },
-                Rect {
-                    x: 7.0,
-                    y: 8.0,
-                    w: 9.0,
-                    h: 10.0
-                },
-            ]
-        );
-        assert!(parse_regions(&None).is_empty());
-    }
-
-    #[test]
-    fn the_overlay_url_carries_the_key_as_one_encoded_parameter() {
-        let url = overlay_url(8001, "ext:pets/cat&x=1").unwrap();
-        assert_eq!(url.host_str(), Some("127.0.0.1"));
-        assert_eq!(url.port(), Some(8001));
-        let pairs: Vec<_> = url.query_pairs().collect();
-        assert_eq!(pairs.len(), 1);
-        assert_eq!(pairs[0].0, OVERLAY_PARAM);
-        assert_eq!(pairs[0].1, "ext:pets/cat&x=1");
-    }
-}
+mod tests;

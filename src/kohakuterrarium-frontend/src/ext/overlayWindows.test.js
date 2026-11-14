@@ -8,6 +8,7 @@ import OverlayLayer from "@/ext/OverlayLayer.vue"
 import { desktopContextConnected } from "@/ext/desktopContext"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
 import overlayWindowSource from "@/ext/OverlayWindowApp.vue?raw"
+import { desktopCapabilities } from "@/utils/hostBridge"
 import { toggleHud } from "@/ext/hud"
 import {
   hideOverlay,
@@ -17,6 +18,7 @@ import {
   resetOverlay,
   showOverlay,
   windowPreference,
+  registerOverlay,
 } from "@/ext/overlays"
 import {
   OVERLAY_PARAM,
@@ -38,10 +40,11 @@ import {
   registerPackageContributions,
   unregisterAllContributions,
 } from "@/ext/registry"
-import { useOverlay } from "@/ext/sdk"
+import { useOverlay, useExtension } from "@/ext/sdk"
 import { OVERLAY_INJECT_KEY, OVERLAY_MODE_INJECT_KEY } from "@/ext/sdk/keys"
-import { extState } from "@/ext/state"
+import { extState, runtime } from "@/ext/state"
 
+const providedLoader = async () => {}
 const Pet = { template: '<div class="pet kt-overlay-hit">pet</div>' }
 const KEY = "ext:pets/cat"
 
@@ -49,7 +52,7 @@ function declare(overlay = {}) {
   const rec = {
     package: "pets",
     enabled: true,
-    status: "idle",
+    status: "loaded",
     contributes: [
       {
         kind: "overlay",
@@ -61,6 +64,7 @@ function declare(overlay = {}) {
     ],
   }
   extState.packages = [rec]
+  runtime.ensureLoaded = providedLoader
   registerPackageContributions(rec)
   provideContributionComponent("pets", "overlay", "cat", Pet)
 }
@@ -85,7 +89,19 @@ function viewportContent(key) {
 }
 
 function tauri() {
-  const invoke = vi.fn(async () => true)
+  const invoke = vi.fn(async (name) =>
+    name === "get_desktop_capabilities"
+      ? {
+          surface: "desktop",
+          protocol: 1,
+          overlayWindows: true,
+          overlayPointer: true,
+          overlayPresentation: 1,
+          overlayResize: true,
+          overlayPlacementNative: true,
+        }
+      : true,
+  )
   window.__TAURI_INTERNALS__ = { invoke }
   return invoke
 }
@@ -127,22 +143,164 @@ describe("native overlay windows", () => {
     expect(windowActive(KEY)).toBe(false)
 
     const invoke = tauri()
+    await desktopCapabilities()
     expect(windowActive(KEY)).toBe(false)
     setWindowAllowed(KEY, true)
     expect(windowActive(KEY)).toBe(true)
 
     delete window.__TAURI_INTERNALS__
     expect(windowActive(KEY)).toBe(false)
-    expect(invoke).not.toHaveBeenCalled()
+    expect(invoke.mock.calls.every(([name]) => name === "get_desktop_capabilities")).toBe(true)
 
     const layer = mount(OverlayLayer, { global: { stubs: { ExtensionContribution: true } } })
     expect(layer.findAll('[data-test="overlay-frame"]')).toHaveLength(1)
     layer.unmount()
   })
 
+  it("keeps a package controller mounted when its renderer is native or hidden", async () => {
+    declare()
+    extState.packages[0].handle = { package: "pets" }
+    const Controller = defineComponent({
+      setup() {
+        const kt = useExtension()
+        return () => h("span", { "data-controller": "" }, kt.package)
+      },
+    })
+    provideContributionComponent("pets", "overlay", "cat", Pet, { controller: Controller })
+    tauri()
+    await desktopCapabilities()
+    setWindowAllowed(KEY, true)
+    const layer = mount(OverlayLayer)
+    try {
+      expect(layer.find("[data-controller]").text()).toBe("pets")
+      expect(layer.findAll('[data-test="overlay-frame"]')).toHaveLength(0)
+      hideOverlay(KEY)
+      await nextTick()
+      expect(layer.find("[data-controller]").exists()).toBe(true)
+    } finally {
+      layer.unmount()
+    }
+  })
+
+  it("loads a visible native overlay's package in the main window for its controller", async () => {
+    declare()
+    tauri()
+    await desktopCapabilities()
+    setWindowAllowed(KEY, true)
+    const original = runtime.ensureLoaded
+    runtime.ensureLoaded = vi.fn(async () => {})
+    const layer = mount(OverlayLayer)
+    try {
+      await nextTick()
+      expect(runtime.ensureLoaded).toHaveBeenCalledWith("pets")
+    } finally {
+      layer.unmount()
+      runtime.ensureLoaded = original
+    }
+  })
+
+  it("requires consent and renderer readiness for an unreviewed content-sized overlay", async () => {
+    const invoke = tauri()
+    declare({ windowReady: true, contentPlacement: true, clickThrough: true })
+    const viewport = viewportContent(KEY)
+    await refreshOverlayCapabilities()
+    viewport.surface.ready()
+    expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
+    setWindowAllowed(KEY, true)
+    invoke.mockImplementationOnce(async () => ({
+      surface: "desktop",
+      protocol: 1,
+      overlayWindows: true,
+      overlayPointer: false,
+      overlayPresentation: 1,
+      overlayResize: true,
+      overlayPlacementNative: true,
+    }))
+    await refreshOverlayCapabilities()
+    expect(invoke.mock.calls.some(([name]) => name === "open_overlay_window")).toBe(false)
+    expect(windowActive(KEY)).toBe(false)
+    await refreshOverlayCapabilities()
+    syncOverlayWindows()
+    await flushPromises()
+    const request = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1].args[0]
+    expect(request).toMatchObject({ contentPlacement: true, hostKey: extState.hostKey })
+    expect(request.generation).toBeTruthy()
+    expect(windowActive(KEY)).toBe(false)
+    await receiveOverlayReady({ detail: { key: KEY, generation: "stale" } })
+    expect(windowActive(KEY)).toBe(false)
+    await receiveOverlayReady({ detail: { key: KEY, generation: request.generation } })
+    expect(windowActive(KEY)).toBe(true)
+    viewport.dispose()
+    hideOverlay(KEY)
+    syncOverlayWindows()
+    await flushPromises()
+  })
+
+  it.each([false, true])(
+    "retires the native pet before mounting in the app (same pet: %s)",
+    async (samePet) => {
+      const invoke = tauri()
+      declare({ startupGroup: "pet", windowReady: true })
+      const viewport = viewportContent(KEY)
+      viewport.surface.ready()
+      registerOverlay({
+        key: "ext:second/pet",
+        pkg: "second",
+        id: "pet",
+        component: { template: '<div data-test="second-pet" />' },
+        options: { startupGroup: "pet", surface: "app" },
+      })
+      await refreshOverlayCapabilities()
+      setWindowAllowed(KEY, true)
+      showOverlay(KEY)
+      syncOverlayWindows()
+      await flushPromises()
+      const request = invoke.mock.calls.find(([name]) => name === "open_overlay_window")[1].args[0]
+      await receiveOverlayReady({ detail: { key: KEY, generation: request.generation } })
+      let finishClose
+      invoke.mockImplementation((name) =>
+        name === "close_overlay_window"
+          ? new Promise((resolve) => {
+              finishClose = resolve
+            })
+          : Promise.resolve(true),
+      )
+      const target = samePet ? KEY : "ext:second/pet"
+      const selector = samePet ? ".pet" : '[data-test="second-pet"]'
+      const layer = mount(OverlayLayer)
+      try {
+        if (samePet) setWindowAllowed(KEY, false)
+        else showOverlay(target)
+        syncOverlayWindows()
+        await flushPromises()
+        expect(finishClose).toBeTypeOf("function")
+        expect(layer.find(selector).exists()).toBe(false)
+        finishClose(false)
+        await flushPromises()
+        expect(layer.find(selector).exists()).toBe(false)
+        expect(windowFailure(target)).toContain("could not close")
+        retryOverlayWindow(target)
+        await flushPromises()
+        expect(layer.find(selector).exists()).toBe(false)
+        finishClose(true)
+        await flushPromises()
+        expect(windowFailure(target)).toBe("")
+        expect(layer.find(selector).exists()).toBe(true)
+      } finally {
+        layer.unmount()
+        viewport.dispose()
+        hideOverlay(target)
+        syncOverlayWindows()
+        finishClose?.(true)
+        await flushPromises()
+      }
+    },
+  )
+
   it("opens the window once, closes it when hidden, and leaves the in-app layer empty", async () => {
     declare({ width: 120, height: 90, anchor: "top-left", alwaysOnTop: false })
     const invoke = tauri()
+    await desktopCapabilities()
     setWindowAllowed(KEY, true)
 
     syncOverlayWindows()
@@ -186,6 +344,7 @@ describe("native overlay windows", () => {
     expect(windowActive("hud")).toBe(false)
 
     const invoke = tauri()
+    await desktopCapabilities()
     expect(windowActive("hud")).toBe(true)
     expect(isOverlayVisible("hud")).toBe(false)
 
@@ -475,6 +634,7 @@ describe("native overlay windows", () => {
   it("follows visibility and consent changes while running", async () => {
     declare()
     const invoke = tauri()
+    await desktopCapabilities()
     startOverlayWindows()
     setWindowAllowed(KEY, true)
     await nextTick()
@@ -521,8 +681,9 @@ describe("OverlayWindowApp", () => {
   it("acknowledges itself, draws the overlay with chrome and hides through the shell", async () => {
     declare()
     const invoke = tauri()
+    await desktopCapabilities()
     const page = mount(OverlayWindowApp, { props: { overlayKey: KEY } })
-    await nextTick()
+    await flushPromises()
     expect(invoke).toHaveBeenCalledWith("overlay_ack", {})
     expect(page.find(".pet").exists()).toBe(true)
 
@@ -546,6 +707,7 @@ describe("OverlayWindowApp", () => {
       })
       declare({ clickThrough: true })
       const invoke = tauri()
+      await desktopCapabilities()
       const page = mount(OverlayWindowApp, { props: { overlayKey: KEY }, attachTo: document.body })
       expect(page.find('[data-test="overlay-window-bar"]').exists()).toBe(false)
       await vi.advanceTimersByTimeAsync(250)
@@ -554,6 +716,23 @@ describe("OverlayWindowApp", () => {
       const before = invoke.mock.calls.length
       await vi.advanceTimersByTimeAsync(1000)
       expect(invoke.mock.calls.length).toBe(before)
+      const hitCalls = () =>
+        invoke.mock.calls.filter(([name]) => name === "overlay_set_hit_regions")
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: [[50, 40, 100, 200]] }))
+      expect(hitCalls().at(-1)[1].args[0]).toEqual([[50, 40, 100, 200]])
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: [null] }))
+      const explicitCount = hitCalls().length
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(hitCalls().length).toBe(explicitCount)
+      page.get(".pet").element.getBoundingClientRect = () => ({
+        left: 15,
+        top: 10,
+        width: 250,
+        height: 60,
+      })
+      window.dispatchEvent(new CustomEvent("kt-overlay-regions", { detail: null }))
+      await flushPromises()
+      expect(hitCalls().at(-1)[1].args[0]).toEqual([[15, 10, 250, 60]])
       page.unmount()
     } finally {
       vi.useRealTimers()
@@ -585,8 +764,9 @@ describe("OverlayWindowApp", () => {
     window.history.replaceState({}, "", "/")
   })
 
-  it("says so when the overlay is not provided by any extension", () => {
+  it("says so when the overlay is not provided by any extension", async () => {
     tauri()
+    await desktopCapabilities()
     const page = mount(OverlayWindowApp, { props: { overlayKey: "ext:none/x" } })
     expect(page.find('[data-test="overlay-window-missing"]').text()).toContain("not available")
     page.unmount()
@@ -594,6 +774,7 @@ describe("OverlayWindowApp", () => {
 
   it("gives the SDK a window-mode useOverlay", async () => {
     const invoke = tauri()
+    await desktopCapabilities()
     let control
     const Probe = defineComponent({
       setup() {
@@ -615,8 +796,8 @@ describe("OverlayWindowApp", () => {
       args: [10, 20, window.innerWidth, window.innerHeight],
     })
     await control.resize(300, 200)
-    expect(invoke).toHaveBeenLastCalledWith("overlay_set_bounds", {
-      args: [window.screenX, window.screenY, 300, 200],
+    expect(invoke).toHaveBeenLastCalledWith("overlay_resize", {
+      args: [300, 200],
     })
     let prevented = false
     await control.startDrag({ preventDefault: () => (prevented = true) })

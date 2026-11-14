@@ -1,5 +1,5 @@
 /** Native presentation and viewport fallback for registered overlays. */
-import { nextTick, reactive, shallowRef, watch } from "vue"
+import { nextTick, reactive, shallowRef, shallowReactive, watch } from "vue"
 
 import {
   completeNativeReset,
@@ -11,6 +11,7 @@ import {
   resetOverlay,
   windowPreference,
   reloadPlacements,
+  isPetOverlay,
 } from "@/ext/overlays"
 import { extState } from "@/ext/state"
 import {
@@ -28,7 +29,7 @@ export const WINDOW_LABEL_PREFIX = "overlay-"
 export const windowStates = reactive(new Map())
 const capabilities = shallowRef(null)
 const open = new Map()
-const closing = new Map()
+const closing = shallowReactive(new Map())
 let started = false
 let generation = 0
 
@@ -40,10 +41,14 @@ export function windowLabel(key) {
   const params = new URLSearchParams(window.location.search)
   if (params.get(OVERLAY_PARAM) === key && params.get("kt_overlay_label"))
     return params.get("kt_overlay_label")
-  const realm = overlays.get(key)?.options.desktopPet
+  const realm = requiresPresentation(overlays.get(key))
     ? `-${makeWindowLabel("", extState.hostKey).slice(-8)}`
     : ""
   return makeWindowLabel(WINDOW_LABEL_PREFIX, key + realm)
+}
+
+export function requiresPresentation(overlay) {
+  return overlay?.options.desktopPet === true || overlay?.options.windowReady === true
 }
 
 export function wantsWindow(overlay) {
@@ -63,21 +68,34 @@ function desired(overlay) {
   const allowed = overlay?.options.desktopPet
     ? windowPreference(overlay.key) !== false && desktopPetSupported()
     : overlay?.options.firstParty === true || isWindowAllowed(overlay.key)
-  return wantsWindow(overlay) && allowed && overlayWindowsSupported()
+  const supported =
+    (!overlay?.options.clickThrough || capabilities.value?.overlayPointer === true) &&
+    (!overlay?.options.windowReady || capabilities.value?.overlayPresentation >= 1) &&
+    (!overlay?.options.contentPlacement ||
+      (capabilities.value?.overlayResize && capabilities.value?.overlayPlacementNative))
+  return wantsWindow(overlay) && allowed && supported && overlayWindowsSupported()
 }
 
 export function windowActive(key) {
   const overlay = overlays.get(key)
   return (
     desired(overlay) &&
-    (!overlay?.options.desktopPet || ["presenting", "ready"].includes(windowStates.get(key)?.phase))
+    (!requiresPresentation(overlay) ||
+      ["presenting", "ready"].includes(windowStates.get(key)?.phase))
   )
 }
 
 export function windowFailure(key) {
   const overlay = overlays.get(key)
-  if (!overlay?.options.desktopPet || windowPreference(key) === false) return ""
-  if (overlayWindowsSupported() && capabilities.value && !desktopPetSupported())
+  if (isPetOverlay(overlay) && [...closing.values()].some((entry) => entry.pet && entry.failed))
+    return "The previous desktop pet could not close. Retry to finish switching pets."
+  if (!requiresPresentation(overlay) || windowPreference(key) === false) return ""
+  if (
+    overlay?.options.desktopPet &&
+    overlayWindowsSupported() &&
+    capabilities.value &&
+    !desktopPetSupported()
+  )
     return "Desktop pointer/presentation support is unavailable in this shell. Using in-app display."
   return windowStates.get(key)?.reason || ""
 }
@@ -91,19 +109,32 @@ function spec(overlay) {
     width: options.width || 320,
     height: options.height || 240,
     alwaysOnTop: options.alwaysOnTop !== false,
+    ...(options.contentPlacement ? { contentPlacement: true } : {}),
   }
 }
 
 function retire(label, entry) {
-  if (closing.has(label)) return closing.get(label)
-  const done = entry.promise
+  if (closing.has(label)) return closing.get(label).promise
+  const record = { ...entry, failed: false }
+  record.promise = entry.promise
     .then(() => closeOverlayWindow(label))
-    .finally(() => {
-      closing.delete(label)
+    .catch(() => false)
+    .then((closed) => {
+      if (closed) closing.delete(label)
+      else closing.set(label, { ...record, failed: true })
       syncOverlayWindows()
+      return closed
     })
-  closing.set(label, done)
-  return done
+  closing.set(label, record)
+  return record.promise
+}
+
+export function petPresentationBlocked(key) {
+  return (
+    isPetOverlay(overlays.get(key)) &&
+    ([...closing.values()].some((entry) => entry.pet) ||
+      [...open.values()].some((entry) => entry.pet && entry.key !== key))
+  )
 }
 
 function cancel(label, entry) {
@@ -169,6 +200,13 @@ export function resetNativeOverlay(key) {
 }
 
 export function retryOverlayWindow(key) {
+  if (isPetOverlay(overlays.get(key))) {
+    for (const [label, entry] of closing) {
+      if (!entry.pet || !entry.failed) continue
+      closing.delete(label)
+      void retire(label, entry)
+    }
+  }
   const label = windowLabel(key)
   const entry = open.get(label)
   if (entry) cancel(label, entry)
@@ -176,30 +214,46 @@ export function retryOverlayWindow(key) {
   if (!entry) syncOverlayWindows()
 }
 
-/** Track decoded viewport content for the current reviewed overlay registration. */
+/** Track decoded viewport content for the current overlay registration. */
 export function setOverlayContentReady(overlay, available) {
-  if (!overlay?.options.desktopPet || overlays.get(overlay.key) !== overlay) return
+  if (!requiresPresentation(overlay) || overlays.get(overlay.key) !== overlay) return
   overlay.contentReady = Boolean(available)
   syncOverlayWindows()
 }
 
 /** Reconcile singleton native windows, preserving a viewport renderer until readiness. */
 export function syncOverlayWindows() {
+  for (const [label, entry] of open) {
+    const overlay = overlays.get(entry.key)
+    if (
+      !overlay ||
+      !desired(overlay) ||
+      !isOverlayVisible(entry.key) ||
+      label !== windowLabel(entry.key)
+    )
+      cancel(label, entry)
+  }
   const wanted = new Set()
   for (const overlay of overlays.values()) {
     if (!desired(overlay) || !isOverlayVisible(overlay.key)) continue
     const label = windowLabel(overlay.key)
     if (
-      overlay.options.desktopPet &&
+      requiresPresentation(overlay) &&
       !overlay.contentReady &&
       (!open.has(label) || windowStates.get(overlay.key)?.phase === "opening")
     )
       continue
     wanted.add(label)
-    if (open.has(label) || closing.has(label)) continue
+    if (open.has(label) || closing.has(label) || petPresentationBlocked(overlay.key)) continue
     const request = spec(overlay)
-    const entry = { key: overlay.key, generation: null, timer: null, promise: null }
-    if (overlay.options.desktopPet) {
+    const entry = {
+      key: overlay.key,
+      pet: isPetOverlay(overlay),
+      generation: null,
+      timer: null,
+      promise: null,
+    }
+    if (requiresPresentation(overlay)) {
       entry.generation = `${Date.now()}-${++generation}`
       request.generation = entry.generation
       request.hostKey = extState.hostKey
@@ -237,7 +291,7 @@ export function syncOverlayWindows() {
 }
 
 export async function refreshOverlayCapabilities() {
-  capabilities.value = await desktopCapabilities()
+  capabilities.value = await desktopCapabilities({ refresh: true })
   syncOverlayWindows()
 }
 

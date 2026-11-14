@@ -300,6 +300,10 @@ def apply_managed_section(agent: Any, content: str) -> None:
     """Splice ``content`` into the agent's system prompt, replacing any
     prior runtime-graph block. Silently no-ops when the agent's prompt
     surface isn't reachable (test fakes)."""
+    setter = getattr(agent, "set_system_prompt_section", None)
+    if callable(setter):
+        setter("runtime-graph", f"{_BEGIN}\n{content}\n{_END}" if content else "")
+        return
     controller = getattr(agent, "controller", None)
     conversation = getattr(controller, "conversation", None) if controller else None
     get_system = (

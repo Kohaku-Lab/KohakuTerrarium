@@ -177,6 +177,10 @@ jobs:
           src/utils/hostBridge.test.js
           src/components/settings/DesktopAppSettings.test.js
           src/composables/useBackendStatus.test.js
+      - name: Run extension and Live2D regression tests
+        run: >-
+          npm test -- --maxWorkers=4
+          src/ext
       - name: Run history and branch regression tests
         run: >-
           npm test -- --maxWorkers=4

@@ -14,6 +14,7 @@ import {
   registerPackageContributions,
   unregisterAllContributions,
   openExtensionTab,
+  contributionOverlayOptions,
 } from "@/ext/registry"
 import { BUILTIN_UI_PACKAGES } from "@/ext/builtin/index"
 import { closeOwnerSocket } from "@/ext/ownerSocket"
@@ -21,9 +22,21 @@ import { enableRuntimeCompiler } from "@/ext/runtimeCompiler"
 import { buildFrameDocument } from "@/ext/frameDocument"
 import { SDK_VERSION, satisfiesRange } from "@/ext/sdk/version"
 import { installCommandShortcuts } from "@/ext/commands"
-import { createPackageStorage } from "@/ext/hostServices"
-import { hideOverlay, loadPlacements, showOverlay, toggleOverlay } from "@/ext/overlays"
+import { createPackageStorage, createPackagePreferences } from "@/ext/hostServices"
+import {
+  hideOverlay,
+  isOverlayVisible,
+  loadPlacements,
+  showOverlay,
+  toggleOverlay,
+} from "@/ext/overlays"
+import {
+  restoreStartupVisibility,
+  applyStartupFallbacks,
+  consumeStartupFallback,
+} from "@/ext/overlayStartup"
 import { registerOverlaySettings } from "@/ext/overlaySettings"
+import { startWorkContextTracking } from "@/ext/workContext"
 import { contributionKey, extState, findPackage, runtime } from "@/ext/state"
 import { useHostsStore } from "@/stores/hosts"
 import { useAuthStore } from "@/stores/auth"
@@ -175,12 +188,38 @@ async function loadBundles(record, locales, token) {
 
 function createHandle(record) {
   const pkg = record.package
+  const hostKey = extState.hostKey
+  const disposers = new Set()
+  const abort = new AbortController()
+  let disposed = false
+  record.dispose = () => {
+    if (disposed) return
+    disposed = true
+    abort.abort()
+    for (const dispose of disposers) {
+      try {
+        dispose()
+      } catch (error) {
+        console.warn(`[ui-extensions] ${pkg}: cleanup failed`, error)
+      }
+    }
+    disposers.clear()
+  }
   const join = (path) => `/ext/${encodeURIComponent(pkg)}/${String(path || "").replace(/^\/+/, "")}`
-  const provide = (kind) => (id, component, options) =>
-    provideContributionComponent(pkg, kind, id, component, options)
+  const provide = (kind) => (id, component, options) => {
+    if (disposed || findPackage(pkg) !== record || extState.hostKey !== hostKey) return
+    return provideContributionComponent(pkg, kind, id, component, options)
+  }
   return {
     package: pkg,
+    scopeKey: hostKey,
     sdkVersion: SDK_VERSION,
+    signal: abort.signal,
+    onDispose(callback) {
+      if (disposed) callback()
+      else disposers.add(callback)
+      return () => disposers.delete(callback)
+    },
     registerTab: provide("tab"),
     registerPanel: provide("panel"),
     registerRailGroup: provide("rail"),
@@ -200,6 +239,12 @@ function createHandle(record) {
     registerGraphBadge: provide("graph-badge"),
     registerGraphPanel: provide("graph-panel"),
     storage: createPackageStorage(pkg),
+    preferences: createPackagePreferences(pkg),
+    consumeStartupFallback: (id) =>
+      extState.hostKey === hostKey &&
+      findPackage(pkg) === record &&
+      consumeStartupFallback(contributionKey(pkg, id), hostKey),
+    isOverlayVisible: (id) => isOverlayVisible(contributionKey(pkg, id)),
     showOverlay: (id) => showOverlay(contributionKey(pkg, id)),
     hideOverlay: (id) => hideOverlay(contributionKey(pkg, id)),
     toggleOverlay: (id) => toggleOverlay(contributionKey(pkg, id)),
@@ -220,6 +265,17 @@ function createHandle(record) {
     assetUrl(path) {
       const token = _tokens.get(pkg)?.value
       if (!token) throw new Error(`${pkg}: no asset token (package not loaded from this host)`)
+      return assetUrlFor(pkg, path, token)
+    },
+    async freshAssetUrl(path) {
+      const hostKey = extState.hostKey
+      const assertActive = () => {
+        if (extState.hostKey !== hostKey || findPackage(pkg) !== record)
+          throw new Error(`${pkg}: extension is no longer active`)
+      }
+      assertActive()
+      const token = await assetToken(pkg, { force: true })
+      assertActive()
       return assetUrlFor(pkg, path, token)
     },
     openTab: (id) => openExtensionTab(`${pkg}/${id}`),
@@ -255,14 +311,19 @@ async function loadPackage(pkg) {
         mod = await deps.importModule(entryUrl(token))
       }
     }
-    if (extState.hostKey !== hostKey) return
+    if (extState.hostKey !== hostKey || findPackage(pkg) !== record) return
     const register = typeof mod?.default === "function" ? mod.default : mod?.register
     if (typeof register !== "function")
       throw new Error(`${pkg}: entry exports no register(kt) function`)
     record.handle = markRaw(createHandle(record))
     await register(record.handle)
+    if (extState.hostKey !== hostKey || findPackage(pkg) !== record) {
+      record.dispose?.()
+      return
+    }
     record.status = "loaded"
   } catch (err) {
+    record.dispose?.()
     record.status = "error"
     record.loadError = err?.message || String(err)
     throw err
@@ -284,6 +345,7 @@ export function ensurePackageLoaded(pkg) {
 
 /** Drop every contribution, style and cached load of the current host. */
 export function unloadUiExtensions() {
+  for (const record of extState.packages) record.dispose?.()
   unregisterAllContributions()
   closeOwnerSocket({ forget: true })
   removeStyles()
@@ -321,9 +383,21 @@ export async function reloadUiExtensions() {
     handle: null,
     bundles: { ...(p.messages || {}) },
   }))
+  if (
+    !error &&
+    extState.packages.some(
+      (r) =>
+        r.status === "idle" &&
+        r.contributes.some((c) => contributionOverlayOptions(r, c)?.startupGroup),
+    )
+  ) {
+    await restoreStartupVisibility(hostKey, () => generation === _reloadGeneration)
+    if (generation !== _reloadGeneration) return
+  }
   for (const record of extState.packages) {
     if (record.status === "idle") registerPackageContributions(record)
   }
+  if (!error) applyStartupFallbacks(hostKey)
   extState.loading = false
 }
 
@@ -340,6 +414,7 @@ export function startUiExtensions() {
   if (_started) return
   _started = true
   registerOverlaySettings()
+  startWorkContextTracking()
   installCommandShortcuts()
   runtime.ensureLoaded = ensurePackageLoaded
   runtime.loadFrameDocument = loadFrameDocument

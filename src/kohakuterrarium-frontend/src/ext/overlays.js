@@ -7,6 +7,7 @@
  */
 
 import { markRaw, reactive } from "vue"
+import { setHybridPref } from "@/utils/uiPrefs"
 
 export const OVERLAY_MARGIN = 16
 const MIN_SIZE = 48
@@ -14,6 +15,19 @@ const STORAGE_PREFIX = "kt.overlays."
 
 export const overlays = reactive(new Map())
 export const placements = reactive({})
+export const interactionRegions = reactive(new Map())
+
+export function setOverlayInteractionRegions(key, regions) {
+  if (regions === null) interactionRegions.delete(key)
+  else if (
+    Array.isArray(regions) &&
+    regions.length <= 16 &&
+    regions.every(
+      (r) => Array.isArray(r) && r.length === 4 && r.every(Number.isFinite) && r[2] > 0 && r[3] > 0,
+    )
+  )
+    interactionRegions.set(key, regions)
+}
 
 /** Size of the window the overlays live in; the layer keeps it current. */
 export const viewport = reactive({
@@ -24,6 +38,11 @@ export const viewport = reactive({
 export function syncViewport() {
   viewport.width = window.innerWidth
   viewport.height = window.innerHeight
+  for (const key of interactionRegions.keys()) {
+    const saved = placement(key)
+    if (Number.isFinite(saved.left) && Number.isFinite(saved.top))
+      moveOverlay(key, saved.left, saved.top)
+  }
 }
 
 let _storageKey = ""
@@ -90,10 +109,14 @@ export function registerOverlay({ key, pkg, id, label, component, options }) {
 }
 
 export function unregisterOverlays(keys) {
-  for (const key of keys) overlays.delete(key)
+  for (const key of keys) {
+    overlays.delete(key)
+    interactionRegions.delete(key)
+  }
 }
 
 export function clearOverlays() {
+  interactionRegions.clear()
   overlays.clear()
 }
 
@@ -101,8 +124,67 @@ function placement(key) {
   return placements[key] || {}
 }
 
+export const petSelectionKey = (hostKey) => `kt.petSelection.${hostKey}`
+export const isPetOverlay = (overlay) => overlay?.options.startupGroup === "pet"
+
+/** One selected pet and a separate display intent, scoped to the current host/user. */
+export function petSelection() {
+  if (validPetSelection(placements.$pet)) return placements.$pet
+  const pets = [...overlays.values()]
+    .filter(isPetOverlay)
+    .sort((a, b) => a.key.localeCompare(b.key))
+  const explicit = pets.find((o) => placement(o.key).visible === true)
+  const visible =
+    explicit ||
+    pets.find((o) => placement(o.key).visible !== false && o.options.defaultVisible !== false)
+  const hidden = pets.find((o) => placement(o.key).visible === false)
+  const preferred = visible || hidden || pets.find((o) => o.options.startupFallback) || pets[0]
+  return {
+    selected: preferred?.key || null,
+    visible: Boolean(visible || (!hidden && preferred?.options.startupFallback)),
+  }
+}
+
+function validPetSelection(value) {
+  return (
+    value &&
+    typeof value.visible === "boolean" &&
+    (value.selected === null ||
+      (typeof value.selected === "string" && value.selected.startsWith("ext:")))
+  )
+}
+
+export function restorePetSelection(value = petSelection()) {
+  if (!validPetSelection(placements.$pet) && validPetSelection(value)) {
+    placements.$pet = { selected: value.selected, visible: value.visible }
+    writeStorage()
+  }
+}
+
+function savePetSelection(value) {
+  placements.$pet = value
+  writeStorage()
+  if (_storageKey) {
+    try {
+      setHybridPref(petSelectionKey(_storageKey.slice(STORAGE_PREFIX.length)), value, {
+        json: true,
+      })
+    } catch {
+      /* Selection still works in memory when storage is blocked. */
+    }
+  }
+}
+
+export function selectPet(key) {
+  if (isPetOverlay(overlays.get(key))) savePetSelection({ ...petSelection(), selected: key })
+}
+
 /** Whether the overlay is shown: the user's choice, else its ``defaultVisible``. */
 export function isOverlayVisible(key) {
+  if (isPetOverlay(overlays.get(key))) {
+    const choice = petSelection()
+    return choice.visible && choice.selected === key
+  }
   const saved = placement(key).visible
   if (typeof saved === "boolean") return saved
   return overlays.get(key)?.options.defaultVisible !== false
@@ -111,29 +193,63 @@ export function isOverlayVisible(key) {
 function patch(key, fields) {
   placements[key] = { ...placement(key), ...fields }
   writeStorage()
+  if (
+    typeof fields.visible === "boolean" &&
+    overlays.get(key)?.options.startupGroup &&
+    _storageKey
+  ) {
+    const visibility = Object.fromEntries(
+      Object.entries(placements)
+        .filter(([, p]) => typeof p.visible === "boolean")
+        .map(([id, p]) => [id, p.visible]),
+    )
+    try {
+      setHybridPref(
+        `kt.overlayVisibility.${_storageKey.slice(STORAGE_PREFIX.length)}`,
+        visibility,
+        { json: true },
+      )
+    } catch {
+      /* local placement remains available */
+    }
+  }
+}
+
+export function restoreVisibility(key, visible) {
+  placements[key] = { ...placement(key), visible }
+  writeStorage()
 }
 
 export function showOverlay(key) {
+  if (isPetOverlay(overlays.get(key))) savePetSelection({ selected: key, visible: true })
   patch(key, { visible: true })
 }
 
 export function hideOverlay(key) {
+  if (isPetOverlay(overlays.get(key)) && petSelection().selected === key)
+    savePetSelection({ selected: key, visible: false })
   patch(key, { visible: false })
 }
 
 export function toggleOverlay(key) {
-  patch(key, { visible: !isOverlayVisible(key) })
+  if (isOverlayVisible(key)) hideOverlay(key)
+  else showOverlay(key)
 }
 
 /** Keep a box inside the viewport. */
-function clampBox(box, viewport) {
+export function clampBox(box, viewport, regions) {
   const width = Math.min(Math.max(box.width, MIN_SIZE), viewport.width)
   const height = Math.min(Math.max(box.height, MIN_SIZE), viewport.height)
+  const valid = regions?.length ? regions : [[0, 0, width, height]]
+  const left = Math.min(...valid.map((r) => r[0]))
+  const top = Math.min(...valid.map((r) => r[1]))
+  const right = Math.max(...valid.map((r) => r[0] + r[2]))
+  const bottom = Math.max(...valid.map((r) => r[1] + r[3]))
   return {
     width,
     height,
-    left: Math.min(Math.max(box.left, 0), Math.max(viewport.width - width, 0)),
-    top: Math.min(Math.max(box.top, 0), Math.max(viewport.height - height, 0)),
+    left: Math.min(Math.max(box.left, -left), Math.max(viewport.width - right, -left)) + 0,
+    top: Math.min(Math.max(box.top, -top), Math.max(viewport.height - bottom, -top)) + 0,
   }
 }
 
@@ -167,18 +283,30 @@ export function resolveBounds(options, saved, viewport) {
 
 export function overlayBounds(key, vp = viewport) {
   const overlay = overlays.get(key)
-  return resolveBounds(overlay?.options || {}, placement(key), vp)
+  const saved = placement(key)
+  const resolved = resolveBounds(overlay?.options || {}, saved, vp)
+  return interactionRegions.has(key) && Number.isFinite(saved.left) && Number.isFinite(saved.top)
+    ? { ...resolved, left: saved.left, top: saved.top }
+    : resolved
 }
 
 export function moveOverlay(key, left, top, vp = viewport) {
   const box = overlayBounds(key, vp)
-  const next = clampBox({ ...box, left, top }, vp)
+  const next = clampBox({ ...box, left, top }, vp, interactionRegions.get(key))
   patch(key, { left: next.left, top: next.top })
 }
 
 export function resizeOverlay(key, width, height, vp = viewport) {
   const box = overlayBounds(key, vp)
-  const next = clampBox({ ...box, width, height }, vp)
+  const regions = interactionRegions
+    .get(key)
+    ?.map(([x, y, w, h]) => [
+      (x * width) / box.width,
+      (y * height) / box.height,
+      (w * width) / box.width,
+      (h * height) / box.height,
+    ])
+  const next = clampBox({ ...box, width, height }, vp, regions)
   patch(key, { width: next.width, height: next.height, left: next.left, top: next.top })
 }
 
@@ -208,6 +336,7 @@ export function beginDrag(key, event, mode = "move") {
 /** Forget the saved position and size of one overlay. */
 export function resetOverlay(key, native = false) {
   const { visible, windowAllowed, nativeReset } = placement(key)
+  interactionRegions.delete(key)
   const kept = {}
   if (typeof visible === "boolean") kept.visible = visible
   if (typeof windowAllowed === "boolean") kept.windowAllowed = windowAllowed
