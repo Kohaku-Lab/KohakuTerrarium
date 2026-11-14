@@ -6,8 +6,9 @@ import importlib
 import importlib.util
 import inspect
 import logging
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
 import httpx
@@ -59,6 +60,49 @@ from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _ResponseStreamOutcome:
+    """Track the primary response outcome separately from cleanup diagnostics."""
+
+    completed: bool = False
+    primary_error: BaseException | None = None
+    cleanup_error: BaseException | None = None
+
+
+@asynccontextmanager
+async def _preserve_stream_outcome(
+    stream: Any,
+) -> AsyncIterator[_ResponseStreamOutcome]:
+    """Close a response stream without replacing its primary outcome.
+
+    The stream outcome is authoritative; cleanup failures are secondary diagnostics.
+    """
+    outcome = _ResponseStreamOutcome()
+    try:
+        yield outcome
+        if not outcome.completed:
+            outcome.primary_error = ResponseStreamError()
+    except BaseException as exc:
+        outcome.primary_error = exc
+        raise
+    finally:
+        try:
+            close = getattr(stream, "aclose", None) or getattr(stream, "close", None)
+            if close is not None:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+        except BaseException as exc:
+            if outcome.primary_error is None and not outcome.completed:
+                raise
+            outcome.cleanup_error = exc
+            logger.warning(
+                "Codex response stream cleanup failed after a primary outcome",
+                error=str(exc),
+                exc_info=True,
+            )
 
 
 class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
@@ -535,9 +579,8 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
             logger.error("Codex API request failed", error=str(e))
             raise
 
-        completed = False
         try:
-            try:
+            async with _preserve_stream_outcome(stream) as outcome:
                 async for event in stream:
                     if recovery is not None:
                         await recovery.status(None)
@@ -547,18 +590,12 @@ class CodexOAuthProvider(CodexWSMixin, BaseLLMProvider):
                     if piece is not None:
                         yield piece
                     if getattr(event, "type", "") == "response.completed":
-                        completed = True
+                        outcome.completed = True
                         break
-            finally:
-                close = getattr(stream, "aclose", None) or getattr(
-                    stream, "close", None
-                )
-                if close is not None:
-                    result = close()
-                    if inspect.isawaitable(result):
-                        await result
-            if not completed:
-                raise ResponseStreamError()
+            if outcome.primary_error is not None:
+                if outcome.cleanup_error is not None:
+                    raise outcome.primary_error from outcome.cleanup_error
+                raise outcome.primary_error
         except asyncio.CancelledError:
             raise
         except ResponseStreamError:
