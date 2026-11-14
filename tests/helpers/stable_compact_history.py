@@ -53,7 +53,11 @@ async def _provider(requests, output=None):
             {"type": "response.output_text.delta", "delta": "reply"},
             {
                 "type": "response.completed",
-                "response": {"id": f"r{len(requests)}", "output": []},
+                "response": {
+                    "id": f"r{len(requests)}",
+                    "status": "completed",
+                    "output": [],
+                },
             },
         ]
         if output is not None:
