@@ -3,7 +3,7 @@
 - Status: Proposed
 - Date: 2026-11-14
 - Related issue: [#582](https://github.com/Kohaku-Lab/KohakuTerrarium/issues/582)
-- Related PR: To be opened
+- Related PR: [#583](https://github.com/Kohaku-Lab/KohakuTerrarium/pull/583)
 
 ## Context
 
