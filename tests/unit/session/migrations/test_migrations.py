@@ -114,6 +114,17 @@ class TestDiscoverVersions:
         versions = [v for v, _ in discover_versions(bare)]
         assert versions == sorted(versions, reverse=True)
 
+    def test_bare_file_wins_a_version_tie(self, tmp_path, monkeypatch):
+        bare = tmp_path / "alice.kohakutr"
+        _meta(bare)
+        v2 = tmp_path / "alice.kohakutr.v2"
+        v2.write_bytes(b"")
+        monkeypatch.setattr(
+            mig_mod, "read_session_meta", lambda p: {"format_version": 2}
+        )
+        assert discover_versions(bare) == [(2, bare)]
+        assert discover_versions(v2) == [(2, bare)]
+
     def test_bare_readonly_probe_failure_defaults_to_v1(self, tmp_path, monkeypatch):
         bare = tmp_path / "alice.kohakutr"
         _meta(bare)

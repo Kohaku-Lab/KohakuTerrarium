@@ -108,6 +108,21 @@ def test_version_companions_prefer_latest_supported_explicit_file(tmp_path):
             store.close(update_status=False)
 
 
+def test_bare_file_wins_a_version_tie_with_its_retired_companion(tmp_path):
+    bare = saved(tmp_path / "graph.kohakutr", agents=("alice", "bob"))
+    retired = saved(tmp_path / "graph.kohakutr.v2")
+    try:
+        bare.checkpoint()
+        successor(retired, bare)
+        assert resolve_resume_path(bare.path, session_dir=tmp_path) == Path(bare.path)
+        assert resolve_resume_path(retired.path, session_dir=tmp_path) == Path(
+            bare.path
+        )
+    finally:
+        bare.close(update_status=False)
+        retired.close(update_status=False)
+
+
 def test_explicit_historical_fork_does_not_follow_parent_successor(tmp_path):
     source = saved(tmp_path / "old.kohakutr")
     target = saved(tmp_path / "current.kohakutr")
