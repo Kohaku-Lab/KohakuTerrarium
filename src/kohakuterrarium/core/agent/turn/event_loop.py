@@ -519,10 +519,14 @@ class AgentEventLoopMixin:
             error_msg = str(e)
             self._record_rerun_execution_error(primary, e)
             logger.error("Processing error", error_type=error_type, error=error_msg)
+            error_metadata = {"error_type": error_type, "error": error_msg}
+            outcome = getattr(e, "response_outcome", None)
+            if isinstance(outcome, dict):
+                error_metadata["response_outcome"] = dict(outcome)
             self.output_router.notify_activity(
                 "processing_error",
                 f"[{error_type}] {error_msg}",
-                metadata={"error_type": error_type, "error": error_msg},
+                metadata=error_metadata,
             )
             metrics.observe_error("controller")
         finally:
