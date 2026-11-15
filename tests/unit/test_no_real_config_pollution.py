@@ -3,7 +3,7 @@
 The whole suite runs with ``KT_CONFIG_DIR`` redirected to a per-test
 ``tmp_path`` via the autouse fixture in ``tests/conftest.py``.  This
 file is a separate, last-resort check: snapshot the *content* of
-``~/.kohakuterrarium/`` at module import and fail the test if any
+``~/.kohakuterrarium/`` before this module runs and fail the test if any
 file's content changed during the test run.
 
 A failure here usually means a new test introduced a save / write
@@ -12,14 +12,10 @@ of ``config_dir()`` — for example the deprecated
 ``monkeypatch.setattr(mod, "PROFILES_PATH", …)`` seam that stopped
 working when the live read/write path moved to ``_profiles_path()``.
 
-**Why we compare content hashes, not mtime/size**: when the operator
-has KohakuTerrarium running locally (browser tab, desktop app) it may
-re-write identical content into files like ``ui_prefs.json`` every
-few seconds (frontend polling save_prefs with no changes). That
-bumps the mtime but doesn't change the bytes — and it's not a test
-leak. A real test leak shows up as a content drift (added key,
-modified value, new file). We compare SHA-256 of each file's bytes
-to keep the guard tight while ignoring no-op external rewrites.
+Existing session files are tracked by path only because this guard already
+ignores their content changes. Other files use chunked SHA-256 hashing so
+large files do not need to be loaded into memory. The xdist group keeps the
+module's snapshot work in one worker.
 """
 
 import ctypes
@@ -43,6 +39,9 @@ _REAL_CONFIG_DIR = Path.home() / ".kohakuterrarium"
 # operator's daemon opening a pre-existing session included. A real leak mints
 # the base file, which is still flagged.
 _SIDECAR_SUFFIXES: tuple[str, ...] = ("-wal", "-shm", "-journal", ".migrate-lock")
+_HASH_CHUNK_SIZE = 1024 * 1024
+
+pytestmark = pytest.mark.xdist_group("real-config-pollution")
 
 _RUNTIME_STATE_SUBDIRS: tuple[str, ...] = (
     "run",  # web daemon PID / state / log files
@@ -75,7 +74,23 @@ def _is_runtime_state(p: Path) -> bool:
     return False
 
 
-def _snapshot() -> dict[str, str]:
+def _is_session_file(p: Path) -> bool:
+    try:
+        p.relative_to(_REAL_CONFIG_DIR / "sessions")
+    except ValueError:
+        return False
+    return True
+
+
+def _file_digest(p: Path) -> str:
+    digest = hashlib.sha256()
+    with p.open("rb") as stream:
+        while chunk := stream.read(_HASH_CHUNK_SIZE):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _snapshot() -> dict[str, str | None]:
     """Map every test-touchable file under the real config dir to its
     content SHA-256.
 
@@ -89,14 +104,14 @@ def _snapshot() -> dict[str, str]:
     """
     if not _REAL_CONFIG_DIR.exists():
         return {}
-    out: dict[str, str] = {}
+    out: dict[str, str | None] = {}
     for p in _REAL_CONFIG_DIR.rglob("*"):
         if not p.is_file():
             continue
         if _is_runtime_state(p):
             continue
         try:
-            out[str(p)] = hashlib.sha256(p.read_bytes()).hexdigest()
+            out[str(p)] = None if _is_session_file(p) else _file_digest(p)
         except OSError:
             # File may have been deleted / locked / become inaccessible
             # between iglob and read — that's an external race, not a
@@ -141,39 +156,28 @@ def _running_daemon_pid(config_dir: Path | None = None) -> int | None:
     return pid if _pid_alive(pid) else None
 
 
-_BEFORE: dict[str, str] = _snapshot()
+@pytest.fixture(scope="module", autouse=True)
+def _real_config_snapshot():
+    """Check the real config after all module tests finish."""
+    before = _snapshot()
+    yield
+    _assert_no_real_config_leaks(before, _snapshot())
 
 
-def test_no_writes_to_real_kohakuterrarium_dir():
-    """Compare real-config snapshots; content drift fails loudly.
-
-    Tolerates files that disappeared (operator-side cleanup is fine)
-    and tolerates mtime-only rewrites with identical content (the
-    operator's running KohakuTerrarium frontend may poll-save prefs
-    with no changes). Only NEW files and CONTENT-changed files are
-    flagged as test leaks.
-    """
-    after = _snapshot()
-    sessions_prefix = str(_REAL_CONFIG_DIR / "sessions")
+def _assert_no_real_config_leaks(
+    before: dict[str, str | None], after: dict[str, str | None]
+) -> None:
     leaks: list[str] = []
     for path, digest in after.items():
-        before = _BEFORE.get(path)
-        if before is None:
+        if path not in before:
             leaks.append(f"NEW: {path}")
-        elif before != digest:
-            # A live operator agent continuously rewrites its OWN
-            # pre-existing session files (WAL/SHM churn, periodic
-            # checkpoints into the base .kohakutr and the .kt-index
-            # sidecar). That is operator activity, not a test leak — a
-            # broken KT_CONFIG_DIR redirect mints NEW session files
-            # (random session names), which stays flagged above.
-            if path.startswith(sessions_prefix) or path.endswith(
+        elif before[path] != digest:
+            file_path = Path(path)
+            if _is_session_file(file_path) or file_path.name.endswith(
                 ("-wal", "-shm", "-journal")
             ):
                 continue
             leaks.append(f"CONTENT-CHANGED: {path}")
-    # A live daemon rewrites llm_profiles.yaml / ui_prefs.json on its own
-    # schedule, which no snapshot can tell apart from a leak.
     daemon = _running_daemon_pid()
     if leaks and daemon is not None:
         pytest.skip(
@@ -189,6 +193,52 @@ def test_no_writes_to_real_kohakuterrarium_dir():
     )
 
 
+def test_snapshot_hashes_regular_files_and_tracks_sessions_by_path(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "config"
+    session_dir = config_dir / "sessions"
+    session_dir.mkdir(parents=True)
+    regular = config_dir / "settings.json"
+    session = session_dir / "large.kohakutr"
+    regular.write_bytes(b"settings")
+    session.write_bytes(b"session contents")
+    monkeypatch.setattr(sys.modules[__name__], "_REAL_CONFIG_DIR", config_dir)
+    monkeypatch.setattr(sys.modules[__name__], "_HASH_CHUNK_SIZE", 3)
+
+    snapshot = _snapshot()
+
+    assert snapshot[str(regular)] == hashlib.sha256(b"settings").hexdigest()
+    assert snapshot[str(session)] is None
+
+
+def test_session_content_changes_are_ignored_but_new_files_are_detected(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "config"
+    session_dir = config_dir / "sessions"
+    session_dir.mkdir(parents=True)
+    existing = session_dir / "existing.kohakutr"
+    regular = config_dir / "settings.json"
+    existing.write_bytes(b"before")
+    regular.write_bytes(b"before")
+    monkeypatch.setattr(sys.modules[__name__], "_REAL_CONFIG_DIR", config_dir)
+
+    before = _snapshot()
+    existing.write_bytes(b"after")
+    regular.write_bytes(b"after")
+    with pytest.raises(AssertionError, match="CONTENT-CHANGED:"):
+        _assert_no_real_config_leaks(before, _snapshot())
+
+    regular.write_bytes(b"before")
+    assert _assert_no_real_config_leaks(before, _snapshot()) is None
+
+    new_session = session_dir / "new.kohakutr"
+    new_session.write_bytes(b"new")
+    with pytest.raises(AssertionError, match="NEW:"):
+        _assert_no_real_config_leaks(before, _snapshot())
+
+
 def test_sidecars_are_runtime_state_but_the_store_itself_is_not():
     base = _REAL_CONFIG_DIR / "sessions" / "s.kohakutr"
     assert not _is_runtime_state(base)
@@ -196,7 +246,7 @@ def test_sidecars_are_runtime_state_but_the_store_itself_is_not():
         assert _is_runtime_state(Path(str(base) + suffix)), suffix
 
 
-def test_daemon_probe_ignores_a_missing_or_dead_pid(tmp_path):
+def test_daemon_probe_ignores_a_missing_or_dead_pid(tmp_path, monkeypatch):
     assert _running_daemon_pid(tmp_path) is None
 
     run_dir = tmp_path / "run"
@@ -204,10 +254,11 @@ def test_daemon_probe_ignores_a_missing_or_dead_pid(tmp_path):
     (run_dir / "web.pid").write_text("not-a-pid")
     assert _running_daemon_pid(tmp_path) is None
 
-    # Our own pid is alive on every platform, unlike PID 1.
+    # Our own pid is alive on every platform.
     (run_dir / "web.pid").write_text(str(os.getpid()))
     assert _running_daemon_pid(tmp_path) == os.getpid()
 
+    monkeypatch.setattr(sys.modules[__name__], "_pid_alive", lambda pid: False)
     (run_dir / "web.pid").write_text("999999")
     assert _running_daemon_pid(tmp_path) is None
 
