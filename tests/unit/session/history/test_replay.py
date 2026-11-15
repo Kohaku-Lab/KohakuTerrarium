@@ -1698,7 +1698,51 @@ class TestDedupe:
 # ── normalize_tool_call_events / normalize_resumable_events ──────
 
 
-class TestNormalizeToolCallEvents:
+def test_replay_reuses_each_call_provider_id_in_order():
+    events = [
+        {
+            "type": "tool_call",
+            "call_id": "job1",
+            "tool_call_id": "shared",
+            "name": "first",
+        },
+        {
+            "type": "assistant_tool_calls",
+            "tool_calls": [
+                {
+                    "id": "shared",
+                    "type": "function",
+                    "function": {"name": "first", "arguments": "{}"},
+                }
+            ],
+        },
+        {"type": "tool_result", "call_id": "job1", "output": "one"},
+        {
+            "type": "tool_call",
+            "call_id": "job2",
+            "tool_call_id": "shared",
+            "name": "second",
+        },
+        {
+            "type": "assistant_tool_calls",
+            "tool_calls": [
+                {
+                    "id": "shared",
+                    "type": "function",
+                    "function": {"name": "second", "arguments": "{}"},
+                }
+            ],
+        },
+        {"type": "tool_result", "call_id": "job2", "output": "two"},
+    ]
+    messages = replay_conversation(events)
+    assert [
+        message["content"] for message in messages if message["role"] == "tool"
+    ] == [
+        "one",
+        "two",
+    ]
+
     @pytest.mark.parametrize(
         "normalize", [normalize_tool_call_events, normalize_resumable_events]
     )

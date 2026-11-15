@@ -299,6 +299,47 @@ def test_mismatched_canonical_announcement_is_not_projected():
     assert actual[-1]["output"] == "late"
 
 
+def test_same_turn_result_with_mismatched_provider_id_is_not_projected():
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(
+            2,
+            "tool_call",
+            "job1",
+            3,
+            branch_id=1,
+            name="work",
+            tool_call_id="call1",
+        ),
+        _event(
+            3,
+            "assistant_tool_calls",
+            "",
+            3,
+            branch_id=1,
+            tool_calls=[
+                {
+                    "id": "call1",
+                    "type": "function",
+                    "function": {"name": "work", "arguments": "{}"},
+                }
+            ],
+        ),
+        _event(4, "assistant_round_start", "", 3, branch_id=1),
+        _event(
+            5,
+            "tool_result",
+            "job1",
+            3,
+            branch_id=1,
+            tool_call_id="other",
+            output="late",
+        ),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4, 5})
+    assert actual == events
+
+
 def test_same_turn_canonical_announcement_preserves_text_and_result():
     calls = [
         {

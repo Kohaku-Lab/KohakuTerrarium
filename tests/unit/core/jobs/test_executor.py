@@ -630,6 +630,25 @@ class TestCancel:
         ex = Executor()
         assert await ex.cancel("nope") is False
 
+    async def test_cancel_supports_tasks_without_cancelling_method(self):
+        class LegacyTask:
+            def __init__(self):
+                self.cancel_calls = 0
+
+            def done(self):
+                return False
+
+            def cancel(self):
+                self.cancel_calls += 1
+
+        task = LegacyTask()
+        ex = Executor()
+        ex._tasks["legacy"] = task
+        assert await ex.cancel("legacy")
+        assert task.cancel_calls == 1
+        assert await ex.cancel("legacy")
+        assert task.cancel_calls == 1
+
     async def test_cancel_completed_returns_false(self):
         ex = Executor()
         ex.register_tool(_EchoTool())

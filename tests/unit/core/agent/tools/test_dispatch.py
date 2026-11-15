@@ -814,10 +814,10 @@ class TestFinalizeInterruptedDirectJob:
         agent._running = False
         release.set()
         await finalizer
-        assert not agent.output_router.activity_calls
-        assert not any(
-            m.role == "tool" for m in agent.controller.conversation.get_messages()
+        assert any(
+            call[0] == "tool_done" for call in agent.output_router.activity_calls
         )
+        assert agent.controller.conversation.get_messages()[-1].content == "late"
 
     async def test_cancelling_finalizer_does_not_settle_running_job(self, agent):
         job_id = "bash_finalizer_cancelled"

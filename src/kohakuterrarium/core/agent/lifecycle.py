@@ -6,6 +6,7 @@ Centralizes warm-pause and orderly shutdown behavior for agents.
 import asyncio
 from typing import Any
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.jobs.job import JobState, JobType
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.utils.logging import get_logger
@@ -156,6 +157,7 @@ class AgentLifecycleMixin:
 
         await self._cancel_executor_tasks()
         await self.subagent_manager.cancel_all()
+        await self._await_interrupt_finalizers()
         controller = getattr(self, "controller", None)
         cleanup_inline_files = getattr(controller, "cleanup_inline_files", None)
         if callable(cleanup_inline_files):
@@ -191,6 +193,8 @@ class AgentLifecycleMixin:
 
     def _finalize_inflight_jobs_for_stop(self) -> None:
         """Finalize each running job as interrupted exactly once during shutdown."""
+        for job_id in getattr(self, "_direct_job_meta", {}):
+            self._start_interrupt_finalizer(job_id)
         router = getattr(self, "output_router", None)
         if router is None or not hasattr(router, "notify_activity"):
             return
@@ -207,6 +211,9 @@ class AgentLifecycleMixin:
         for status, store in jobs:
             job_id = getattr(status, "job_id", None)
             if not job_id or job_id in seen:
+                continue
+            if job_id in getattr(self, "_direct_job_meta", {}):
+                self._start_interrupt_finalizer(job_id)
                 continue
             seen.add(job_id)
             is_subagent = getattr(status, "job_type", None) == JobType.SUBAGENT
@@ -261,13 +268,28 @@ class AgentLifecycleMixin:
                 kind="subagent" if is_subagent else "tool",
             )
 
+    async def _await_interrupt_finalizers(self) -> None:
+        """Wait for interrupted direct jobs before closing result sinks."""
+        finalizers = tuple(getattr(self, "_interrupt_finalizers", ()))
+        if finalizers:
+            await asyncio.gather(*finalizers, return_exceptions=True)
+        if getattr(self, "_interrupt_finalizer_error", None):
+            raise RuntimeError(
+                f"Interrupted job settlement failed: {self._interrupt_finalizer_error}"
+            )
+
     async def _cancel_executor_tasks(self) -> None:
         executor = getattr(self, "executor", None)
         if executor is None:
             return
-        tasks = [task for task in executor._tasks.values() if not task.done()]
+        tasks = [
+            task
+            for task in executor._tasks.values()
+            if not task.done()
+            and task not in getattr(self, "_interrupt_finalizers", ())
+        ]
         if not tasks:
             return
         for task in tasks:
-            task.cancel()
+            request_cancellation(task)
         await asyncio.gather(*tasks, return_exceptions=True)

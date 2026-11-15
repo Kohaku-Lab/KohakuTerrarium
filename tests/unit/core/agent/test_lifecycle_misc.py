@@ -5,7 +5,7 @@
 import asyncio
 import types
 from contextlib import closing
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 
 from kohakuterrarium.core.agent.turn.budget_recovery import (
@@ -128,6 +128,34 @@ class TestAgentLifecycle:
         await a.stop()
         assert a._running is False
         assert a.llm.close.await_count == 1
+
+    async def test_stop_does_not_cancel_existing_direct_finalizer_twice(self):
+        a = _build_lifecycle_agent()
+        gate = asyncio.Event()
+
+        async def finalizer():
+            await gate.wait()
+
+        task = asyncio.create_task(finalizer())
+        a._interrupt_finalizers = {task}
+        a._direct_job_meta = {"job": {}}
+        await a._cancel_executor_tasks()
+        assert not task.cancelled()
+        gate.set()
+        await task
+
+    def test_stop_hands_direct_jobs_to_settlement_owner(self):
+        a = _build_lifecycle_agent()
+        a._direct_job_meta = {"direct": {"kind": "tool"}}
+        a._active_handles = {"direct": types.SimpleNamespace(promoted=False)}
+        a._start_interrupt_finalizer = MagicMock()
+
+        a.executor.get_running_jobs = MagicMock(
+            return_value=[types.SimpleNamespace(job_id="direct", job_type="tool")]
+        )
+        a._finalize_inflight_jobs_for_stop()
+
+        a._start_interrupt_finalizer.assert_called_once_with("direct")
 
     async def test_cancel_executor_tasks_no_executor(self):
         a = _build_lifecycle_agent()

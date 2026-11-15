@@ -389,13 +389,30 @@ def replay_conversation(
     live_ids = select_live_event_ids(
         events_list, branch_view=branch_view, parent_paths=parent_paths
     )
-    provider_ids = {
-        evt.get("call_id") or evt.get("job_id"): evt["tool_call_id"]
-        for evt in events_list
-        if evt.get("type") == "tool_call"
-        and evt.get("tool_call_id")
-        and (not isinstance(evt.get("event_id"), int) or evt["event_id"] in live_ids)
-    }
+    provider_ids: dict[tuple[str, Any, Any], str] = {}
+    provider_id_counts: dict[tuple[str, Any, Any], int] = {}
+    provider_ids_by_identity: dict[str, set[str]] = {}
+    identity_key_counts: dict[str, int] = {}
+    for evt in events_list:
+        if (
+            evt.get("type") != "tool_call"
+            or not evt.get("tool_call_id")
+            or isinstance(evt.get("event_id"), int)
+            and evt["event_id"] not in live_ids
+        ):
+            continue
+        identity = evt.get("call_id") or evt.get("job_id")
+        if identity is None:
+            continue
+        key = (str(identity), evt.get("turn_index"), evt.get("branch_id"))
+        provider_id_counts[key] = provider_id_counts.get(key, 0) + 1
+        provider_ids[key] = str(evt["tool_call_id"])
+        identity_key_counts[str(identity)] = (
+            identity_key_counts.get(str(identity), 0) + 1
+        )
+        provider_ids_by_identity.setdefault(str(identity), set()).add(
+            str(evt["tool_call_id"])
+        )
     replaced_rules = compact_replacement_rules(
         events_list, branch_view, parent_paths=parent_paths
     )
@@ -611,11 +628,23 @@ def replay_conversation(
                     content = [{"type": "text", "text": prefix}, *content]
                 else:
                     content = f"{prefix}\n{content}" if content else prefix
+            result_key = (str(job_id), evt.get("turn_index"), evt.get("branch_id"))
+            provider_id = (
+                provider_ids.get(result_key)
+                if provider_id_counts.get(result_key, 0) == 1
+                else None
+            )
+            if provider_id is None:
+                identity_providers = provider_ids_by_identity.get(str(job_id), set())
+                if (
+                    identity_key_counts.get(str(job_id), 0) == 1
+                    and len(identity_providers) == 1
+                ):
+                    provider_id = next(iter(identity_providers))
             message = {
                 "role": "tool",
                 "content": content,
-                "tool_call_id": evt.get("tool_call_id")
-                or provider_ids.get(job_id, job_id),
+                "tool_call_id": evt.get("tool_call_id") or provider_id or job_id,
                 "name": _clean_tool_name(evt),
             }
             if include_metadata:

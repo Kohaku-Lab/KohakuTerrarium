@@ -237,10 +237,12 @@ def include_settled_tool_results(
     ]
     identities = {id(event): _tool_identity(event) for event in live_events}
     live_call_turns: dict[str, Any] = {}
+    live_call_provider_ids: dict[str, Any] = {}
     for event in live_events:
         if event.get("type") == "tool_call" and (identity := identities[id(event)]):
             if identity not in live_call_turns:
                 live_call_turns[identity] = event.get("turn_index")
+                live_call_provider_ids[identity] = event.get("tool_call_id")
     live_result_ids: set[str] = {
         identity
         for event in live_events
@@ -263,6 +265,10 @@ def include_settled_tool_results(
             and all_call_counts.get(identity) == 1
             and identity in live_call_turns
             and identity not in live_result_ids
+            and (
+                event.get("tool_call_id") is None
+                or event.get("tool_call_id") == live_call_provider_ids.get(identity)
+            )
             and identity not in late_results
         ):
             projected = dict(event)
@@ -274,6 +280,10 @@ def include_settled_tool_results(
             and identity in live_call_turns
             and isinstance(eid, int)
             and eid in live_event_ids
+            and (
+                event.get("tool_call_id") is None
+                or event.get("tool_call_id") == live_call_provider_ids.get(identity)
+            )
             and identity not in late_results
         ):
             # Live results recorded in later turns are paired at their call.
@@ -347,6 +357,10 @@ def include_settled_tool_results(
         ):
             continue
         call_index, call_round, _ = call
+        result_provider_id = event.get("tool_call_id")
+        call_provider_id = live_events[call_index].get("tool_call_id")
+        if result_provider_id is not None and result_provider_id != call_provider_id:
+            continue
         if (
             index > call_index
             and boundaries[index] == boundaries[call_index]

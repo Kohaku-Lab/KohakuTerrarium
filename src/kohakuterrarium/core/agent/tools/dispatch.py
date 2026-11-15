@@ -9,6 +9,10 @@ from kohakuterrarium.core.agent.tools.runtime_tools import (
     AgentRuntimeToolsMixin,
     _make_job_label,
 )
+from kohakuterrarium.core.asyncio_compat import (
+    cancellation_requested,
+    request_cancellation,
+)
 from kohakuterrarium.core.agent.tools.metrics import (
     emit_completion_metrics as _emit_completion_metrics,
 )
@@ -176,19 +180,27 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             job = self.subagent_manager._jobs.get(job_id)
             if job and hasattr(job, "subagent"):
                 job.subagent.cancel()
-        if not handle.task.cancelling():
-            handle.task.cancel()
+        request_cancellation(handle.task)
         if getattr(self, "_interrupt_requested", False):
             self._start_interrupt_finalizer(job_id)
         return True
 
     def _start_interrupt_finalizer(self, job_id: str) -> None:
+        finalizer_jobs = getattr(self, "_interrupt_finalizer_jobs", None)
+        if finalizer_jobs is None:
+            finalizer_jobs = self._interrupt_finalizer_jobs = {}
+        if job_id in finalizer_jobs.values():
+            return
         task = asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
         self._interrupt_finalizers.add(task)
+        finalizer_jobs[task] = job_id
         task.add_done_callback(self._finish_interrupt_finalizer)
 
     def _finish_interrupt_finalizer(self, task: asyncio.Task) -> None:
         self._interrupt_finalizers.discard(task)
+        finalizer_jobs = getattr(self, "_interrupt_finalizer_jobs", None)
+        if finalizer_jobs is not None:
+            finalizer_jobs.pop(task, None)
         if task.cancelled():
             self._interrupt_finalizer_error = "Interrupted job finalizer was cancelled"
         elif task.exception() is not None:
@@ -272,7 +284,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         try:
             result = await asyncio.shield(handle.task)
         except asyncio.CancelledError:
-            if asyncio.current_task().cancelling():
+            if cancellation_requested(asyncio.current_task()):
                 raise
             result = None
         except Exception as exc:
@@ -282,10 +294,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             self._active_handles.get(job_id) is not handle
             or self._direct_job_meta.get(job_id) is not meta
         ):
-            return
-
-        if not self._running:
-            self._clear_direct_job_tracking(job_id)
             return
 
         if result is None:
@@ -313,6 +321,19 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     {job_id: result},
                     {job_id: meta["tool_call_id"]},
                 )
+            else:
+                text = self._format_text_results([job_id], {job_id: result})
+                if text:
+                    self.controller.conversation.append(
+                        "user",
+                        text,
+                        metadata={
+                            "origin_known": False,
+                            "kind": "tool_feedback",
+                            "job_ids": [job_id],
+                            "tool_result_phase": "final",
+                        },
+                    )
         else:
             self._emit_interrupted_activity(job_id, result)
             self._append_interrupted_tool_message(job_id, meta, result)
@@ -426,9 +447,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
     def _emit_direct_completion_activity(self, job_id: str, result: Any) -> None:
         """Emit terminal activity immediately when a direct job finishes."""
-        # The post-stop sweep already emitted a terminal state for this job.
-        if not self._running:
-            return
         # Termination checkers need the recent result tail to evaluate stopping.
         checker = getattr(self, "_termination_checker", None)
         if checker is not None and hasattr(checker, "record_tool_result"):

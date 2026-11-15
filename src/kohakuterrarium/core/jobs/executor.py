@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.tools.execution_context import (
     ExecutionBinding,
     ExecutorContextMixin,
@@ -446,8 +447,7 @@ class Executor(ExecutorContextMixin):
         if task is None or task.done():
             return False
 
-        if not task.cancelling():
-            task.cancel()
+        request_cancellation(task)
         logger.debug("Job cancellation requested", job_id=job_id)
         return True
 

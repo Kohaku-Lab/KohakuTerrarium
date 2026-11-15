@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.event_inbox import TurnOutcome
 from kohakuterrarium.utils.logging import get_logger
 
@@ -22,6 +23,7 @@ class AgentInterruptMixin:
 
         self._active_handles: dict[str, Any] = {}
         self._interrupt_finalizers: set[asyncio.Task] = set()
+        self._interrupt_finalizer_jobs: dict[asyncio.Task, str] = {}
         self._interrupt_finalizer_error: str | None = None
         self._interrupt_fence_wakeup = asyncio.Event()
         self._direct_job_meta: dict[str, dict[str, Any]] = {}
@@ -87,8 +89,7 @@ class AgentInterruptMixin:
             # Try executor (tools) first
             task = self.executor._tasks.get(job_id)
             if task and not task.done():
-                if not task.cancelling():
-                    task.cancel()
+                request_cancellation(task)
                 cancelled = True
 
             # Try sub-agent manager. Use cooperative cancellation so
@@ -100,8 +101,7 @@ class AgentInterruptMixin:
                     job = self.subagent_manager._jobs.get(job_id)
                     if job and hasattr(job, "subagent"):
                         job.subagent.cancel()
-                    if not sa_task.cancelling():
-                        sa_task.cancel()
+                    request_cancellation(sa_task)
                     cancelled = True
 
         if cancelled:
