@@ -19,7 +19,7 @@ from kohakuterrarium.core.agent.tools.metrics import (
 from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle, PromotionResult
 from kohakuterrarium.core.controller.controller import Controller
 from kohakuterrarium.core.events import create_tool_complete_event
-from kohakuterrarium.core.jobs.job import JobResult
+from kohakuterrarium.core.jobs.job import JobResult, JobState
 from kohakuterrarium.core.tools.dispatch import start_tool_task
 from kohakuterrarium.core.tools.output import render_content_text
 from kohakuterrarium.llm.message import content_parts_to_dicts
@@ -278,21 +278,33 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         """Wait for cancellation to settle, then emit a terminal interrupted event."""
         handle = self._active_handles.get(job_id)
         meta = self._direct_job_meta.get(job_id)
-        if not handle or not meta:
+        if not meta:
             return
 
-        try:
-            result = await asyncio.shield(handle.task)
-        except asyncio.CancelledError:
-            if cancellation_requested(asyncio.current_task()):
-                raise
-            result = None
-        except Exception as exc:
-            result = exc
+        result = None
+        task = (
+            handle.task
+            if handle is not None
+            else (
+                self.subagent_manager.get_task(job_id)
+                if meta.get("kind") == "subagent"
+                else self.executor.get_task(job_id)
+            )
+        )
+        if task is not None:
+            try:
+                result = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                if cancellation_requested(asyncio.current_task()):
+                    raise
+                result = None
+            except Exception as exc:
+                result = exc
 
         if (
-            self._active_handles.get(job_id) is not handle
-            or self._direct_job_meta.get(job_id) is not meta
+            self._direct_job_meta.get(job_id) is not meta
+            or handle is not None
+            and self._active_handles.get(job_id) not in {handle, None}
         ):
             return
 
@@ -304,11 +316,28 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 result = self.executor.get_result(job_id)
 
         if result is None:
+            stop_requested = bool(meta.get("stop_requested"))
             result = JobResult(
                 job_id=job_id,
-                error="User manually interrupted this job.",
+                error=(
+                    "Agent stopped while this job was still running."
+                    if stop_requested
+                    else "User manually interrupted this job."
+                ),
                 metadata={"interrupted": True, "final_state": "interrupted"},
             )
+            store = (
+                getattr(self.subagent_manager, "job_store", None)
+                if kind == "subagent"
+                else getattr(self.executor, "job_store", None)
+            )
+            if store is not None:
+                store.update_status(
+                    job_id,
+                    state=JobState.CANCELLED,
+                    error=result.error,
+                )
+                store.store_result(result)
 
         if not getattr(result, "cancelled", False) and not getattr(
             result, "metadata", {}

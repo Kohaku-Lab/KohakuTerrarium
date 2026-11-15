@@ -458,6 +458,10 @@ class SubAgentManager(SideConversationMixin, InteractiveManagerMixin):
             else:
                 await release_forked_llm(job.subagent.llm)
 
+    def get_task(self, job_id: str) -> asyncio.Task | None:
+        """Return the task tracking ``job_id``, if present."""
+        return self._tasks.get(job_id)
+
     async def wait_for(
         self,
         job_id: str,

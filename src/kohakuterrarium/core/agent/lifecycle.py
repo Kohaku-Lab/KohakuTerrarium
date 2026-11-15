@@ -104,7 +104,7 @@ class AgentLifecycleMixin:
             await self.plugins.unload_all()
 
         # Job terminals require both the running state and output router to remain live.
-        self._finalize_inflight_jobs_for_stop()
+        had_direct_jobs = self._finalize_inflight_jobs_for_stop()
 
         self._running = False
         self._shutdown_event.set()
@@ -158,6 +158,11 @@ class AgentLifecycleMixin:
         await self._cancel_executor_tasks()
         await self.subagent_manager.cancel_all()
         await self._await_interrupt_finalizers()
+        if had_direct_jobs:
+            session_output = getattr(self, "_session_output", None)
+            persist_snapshot = getattr(session_output, "on_processing_end", None)
+            if callable(persist_snapshot):
+                await persist_snapshot()
         controller = getattr(self, "controller", None)
         cleanup_inline_files = getattr(controller, "cleanup_inline_files", None)
         if callable(cleanup_inline_files):
@@ -191,13 +196,21 @@ class AgentLifecycleMixin:
         if first_error is not None:
             raise first_error
 
-    def _finalize_inflight_jobs_for_stop(self) -> None:
+    def _finalize_inflight_jobs_for_stop(self) -> bool:
         """Finalize each running job as interrupted exactly once during shutdown."""
-        for job_id in getattr(self, "_direct_job_meta", {}):
+        direct_jobs = getattr(self, "_direct_job_meta", {})
+        active_direct_jobs = [
+            job_id
+            for job_id, meta in direct_jobs.items()
+            if not meta.get("background") and meta.get("interruptible", True)
+        ]
+        for job_id in active_direct_jobs:
+            meta = direct_jobs[job_id]
+            meta["stop_requested"] = True
             self._start_interrupt_finalizer(job_id)
         router = getattr(self, "output_router", None)
         if router is None or not hasattr(router, "notify_activity"):
-            return
+            return bool(active_direct_jobs)
         jobs: list[tuple[Any, Any]] = []
         executor = getattr(self, "executor", None)
         if executor is not None and hasattr(executor, "get_running_jobs"):
@@ -207,12 +220,21 @@ class AgentLifecycleMixin:
         if manager is not None and hasattr(manager, "get_running_jobs"):
             store = getattr(manager, "job_store", None)
             jobs.extend((status, store) for status in manager.get_running_jobs())
+        had_jobs = bool(active_direct_jobs or jobs)
         seen: set[str] = set()
         for status, store in jobs:
             job_id = getattr(status, "job_id", None)
             if not job_id or job_id in seen:
                 continue
+            if job_id in getattr(self, "_active_handles", {}):
+                if getattr(self._active_handles[job_id], "promoted", False):
+                    seen.add(job_id)
+                    continue
             if job_id in getattr(self, "_direct_job_meta", {}):
+                meta = self._direct_job_meta[job_id]
+                if meta.get("background") or not meta.get("interruptible", True):
+                    seen.add(job_id)
+                    continue
                 self._start_interrupt_finalizer(job_id)
                 continue
             seen.add(job_id)
@@ -267,6 +289,7 @@ class AgentLifecycleMixin:
                 job_id=job_id,
                 kind="subagent" if is_subagent else "tool",
             )
+        return had_jobs
 
     async def _await_interrupt_finalizers(self) -> None:
         """Wait for interrupted direct jobs before closing result sinks."""
