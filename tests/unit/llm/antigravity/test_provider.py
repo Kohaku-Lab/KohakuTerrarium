@@ -9,16 +9,12 @@ import pytest
 from kohakuterrarium.core.compact.manager import CompactManager
 from kohakuterrarium.llm.antigravity import auth
 from kohakuterrarium.llm.antigravity.auth import AntigravityError, BorrowedCredential
+from kohakuterrarium.llm.antigravity.client import USER_AGENT
 from kohakuterrarium.llm.antigravity.provider import AntigravityProvider
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.media.reference import session_media_scope
 
 pytestmark = pytest.mark.real_llm_provider
-
-AGY_CLI_USER_AGENT = (
-    "antigravity/cli/1.3.4 (aidev_client; os_type=windows; arch=amd64; "
-    "cl=998275202; auth_method=consumer)"
-)
 
 
 def frame(parts, reason="STOP"):
@@ -245,8 +241,10 @@ async def test_account_change_during_project_discovery_never_uses_old_project(
     assert projects == ["project-b"]
 
 
-# The agy 1.3.4 CLI agent catalog: every wire ID KT may request.
+# Supported agy agent wire IDs.
 AGY_AGENT_MODELS = {
+    *(f"gemini-4-hydrogen-{effort}" for effort in ("low", "medium", "high", "xhigh")),
+    "gemini-pro-orchestrator-g1-pro",
     *(f"gemini-4-argon-{effort}" for effort in ("low", "medium", "high")),
     *(f"gemini-3.8-flash-{effort}" for effort in ("low", "medium", "high")),
     *(f"claude-opus-5-5-{effort}" for effort in ("low", "medium", "high")),
@@ -268,6 +266,7 @@ FLASH_BUDGETS = {"low": 1000, "medium": 4000, "high": -1}
         )
         for family, limit in (
             ("gemini-4-argon", 65536),
+            ("gemini-4-hydrogen", 262144),
             ("claude-opus-5-5", 128000),
             ("claude-sonnet-5-5", 128000),
         )
@@ -287,6 +286,20 @@ FLASH_BUDGETS = {"low": 1000, "medium": 4000, "high": -1}
         for effort in ("", "low", "medium", "high")
     ]
     + [
+        (
+            "gemini-4-hydrogen",
+            "xhigh",
+            "gemini-4-hydrogen-xhigh",
+            {"includeThoughts": True, "thinkingLevel": "XHIGH"},
+            262144,
+        ),
+        (
+            "gemini-pro-orchestrator-g1-pro",
+            "",
+            "gemini-pro-orchestrator-g1-pro",
+            {"includeThoughts": True, "thinkingLevel": "HIGH"},
+            65536,
+        ),
         (
             "gpt-oss-120b",
             "",
@@ -311,7 +324,7 @@ async def test_agy_effort_reaches_wire_request(model, effort, wire, thinking, li
         if request.url.path.endswith("loadCodeAssist"):
             return httpx.Response(200, json={"cloudaicompanionProject": "test-project"})
         requests.append(json.loads(request.content))
-        assert request.headers["user-agent"] == AGY_CLI_USER_AGENT
+        assert request.headers["user-agent"] == USER_AGENT
         assert "client-metadata" not in request.headers
         if model.startswith("claude-"):
             assert (

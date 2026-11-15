@@ -13,7 +13,7 @@ from kohakuterrarium.studio.identity.antigravity import (
 
 def login_cli() -> int:
     status = get_status()
-    print("Antigravity uses the official agy login on this Windows host.")
+    print("Antigravity uses the official agy login on this Windows or Linux host.")
     print("Run agy to sign in, then use kt config antigravity status.")
     print(json.dumps(status))
     return 0 if status["state"] == "ready" else 1

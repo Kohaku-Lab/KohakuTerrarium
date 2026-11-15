@@ -5,8 +5,24 @@ import httpx
 import pytest
 
 from kohakuterrarium.llm.antigravity import auth
-from kohakuterrarium.llm.antigravity.client import discover_models
+from kohakuterrarium.llm.antigravity.client import discover_models, user_agent
 from kohakuterrarium.llm.antigravity.auth import AntigravityError
+
+
+@pytest.mark.parametrize(
+    "system,machine,expected",
+    [
+        ("linux", "x86_64", "os_type=linux; arch=amd64"),
+        ("linux", "aarch64", "os_type=linux; arch=arm64"),
+        ("win32", "AMD64", "os_type=windows; arch=amd64"),
+        ("win32", "ARM64", "os_type=windows; arch=arm64"),
+    ],
+)
+def test_agy_157_header_profile(system, machine, expected):
+    assert user_agent(system, machine) == (
+        f"antigravity/cli/1.5.7 (aidev_client; {expected}; "
+        "cl=1019769835; auth_method=consumer)"
+    )
 
 
 @pytest.mark.asyncio
@@ -27,7 +43,7 @@ async def test_discovery_uses_empty_body_and_one_401_refresh(monkeypatch, tmp_pa
         requests.append(request)
         assert json.loads(request.content) == {}
         assert request.url.path.endswith("fetchAvailableModels")
-        assert request.headers["user-agent"].startswith("antigravity/cli/1.3.4 (")
+        assert request.headers["user-agent"].startswith("antigravity/cli/1.5.7 (")
         assert "auth_method=consumer" in request.headers["user-agent"]
         assert "client-metadata" not in request.headers
         if len(requests) == 1:

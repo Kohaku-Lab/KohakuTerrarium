@@ -62,6 +62,30 @@ def test_missing_conflicting_sources_and_offline_status(monkeypatch):
     assert "access-example" not in json.dumps(auth.AgyCredentials.status())
 
 
+def test_linux_sources_conflicts_and_fail_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(auth.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        auth, "read_keyring", lambda: (payload(), "linux_secret_service")
+    )
+    assert auth.load_credential().source == "linux_secret_service"
+    path = tmp_path / ".gemini/antigravity-cli/antigravity-oauth-token"
+    path.parent.mkdir(parents=True)
+    path.write_text(payload(), encoding="utf-8")
+    with pytest.raises(AntigravityError, match="ambiguous_sources"):
+        auth.load_credential()
+    monkeypatch.setattr(auth, "read_keyring", lambda: (None, "linux_secret_service"))
+    assert auth.load_credential().source == "agy_file"
+    monkeypatch.setattr(auth, "read_keyring", lambda: ("", "linux_secret_service"))
+    with pytest.raises(AntigravityError, match="malformed_credential"):
+        auth.load_credential()
+
+    def locked():
+        raise AntigravityError("credential_store_locked")
+
+    monkeypatch.setattr(auth, "read_keyring", locked)
+    assert auth.AgyCredentials.status()["state"] == "credential_store_locked"
+
+
 @pytest.mark.asyncio
 async def test_refresh_is_shared_and_survives_caller_cancellation(
     monkeypatch, tmp_path

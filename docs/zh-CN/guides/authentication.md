@@ -268,4 +268,4 @@ API 令牌和邀请由 CSPRNG 生成并以哈希形式存储，DB 泄漏无法�
   CORS 白名单用于托管的静态前端
 
 
-复用 Windows 本机 agy consumer 登录，请参阅 [Antigravity 接入](antigravity.md)。
+复用 Windows 或 Linux 本机 agy consumer 登录，请参阅 [Antigravity 接入](antigravity.md)。
