@@ -151,21 +151,7 @@ class MemorySearchMixin:
             if agent and meta.get("agent") != agent:
                 continue
             text, _ = self._fts.get_by_id(row_id)
-            out.append(
-                SearchResult(
-                    content=text or "",
-                    round_num=meta.get("round", 0),
-                    block_num=meta.get("block", 0),
-                    agent=meta.get("agent", ""),
-                    block_type=meta.get("type", ""),
-                    score=score,
-                    ts=meta.get("ts", 0),
-                    tool_name=meta.get("tool_name", ""),
-                    channel=meta.get("channel", ""),
-                    block_id=meta.get("block_id", ""),
-                    **_source_result_metadata(meta),
-                )
-            )
+            out.append(_result_from_metadata(text or "", score, meta))
             if len(out) >= k:
                 break
         return out
@@ -208,19 +194,7 @@ class MemorySearchMixin:
             if agent and meta.get("agent") != agent:
                 continue
             out.append(
-                SearchResult(
-                    content=meta.get("content", ""),
-                    round_num=meta.get("round", 0),
-                    block_num=meta.get("block", 0),
-                    agent=meta.get("agent", ""),
-                    block_type=meta.get("type", ""),
-                    score=1.0 - distance,
-                    ts=meta.get("ts", 0),
-                    tool_name=meta.get("tool_name", ""),
-                    channel=meta.get("channel", ""),
-                    block_id=meta.get("block_id", ""),
-                    **_source_result_metadata(meta),
-                )
+                _result_from_metadata(meta.get("content", ""), 1.0 - distance, meta)
             )
             if len(out) >= k:
                 break
@@ -278,3 +252,22 @@ def _source_result_metadata(meta: dict[str, Any]) -> dict[str, Any]:
         "source_fingerprint": meta.get("source_fingerprint", ""),
         "source_ref": meta.get("source_ref", ""),
     }
+
+
+def _result_from_metadata(
+    content: str, score: float, meta: dict[str, Any]
+) -> SearchResult:
+    """Build a result with identical source metadata for FTS and vectors."""
+    return SearchResult(
+        content=content,
+        round_num=meta.get("round", 0),
+        block_num=meta.get("block", 0),
+        agent=meta.get("agent", ""),
+        block_type=meta.get("type", ""),
+        score=score,
+        ts=meta.get("ts", 0),
+        tool_name=meta.get("tool_name", ""),
+        channel=meta.get("channel", ""),
+        block_id=meta.get("block_id", ""),
+        **_source_result_metadata(meta),
+    )

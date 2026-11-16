@@ -182,6 +182,38 @@ class TestBuildEmbeddings:
 
 
 class TestSearchSessionMemory:
+    async def test_saved_search_obeys_persisted_branch_selection(self, tmp_path):
+        path = tmp_path / "branch-search.kohakutr"
+        store = SessionStore(path)
+        try:
+            store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+            for branch, content in ((1, "needle-first"), (2, "needle-second")):
+                store.append_event(
+                    "alice",
+                    "user_input",
+                    {"content": content},
+                    turn_index=1,
+                    branch_id=branch,
+                    parent_branch_path=[],
+                )
+            store.state["alice:branch_view"] = {"1": 1}
+            store.flush()
+        finally:
+            store.close(update_status=False)
+
+        first = await mem_mod.search_session_memory(path, q="needle", mode="fts", k=5)
+        assert {item["content"] for item in first["results"]} == {"needle-first"}
+
+        store = SessionStore(path)
+        try:
+            store.state["alice:branch_view"] = {"1": 2}
+            store.flush()
+        finally:
+            store.close(update_status=False)
+
+        second = await mem_mod.search_session_memory(path, q="needle", mode="fts", k=5)
+        assert {item["content"] for item in second["results"]} == {"needle-second"}
+
     async def test_search_runs(self, tmp_path, monkeypatch):
         path = tmp_path / "s.kohakutr"
         store = SessionStore(str(path))

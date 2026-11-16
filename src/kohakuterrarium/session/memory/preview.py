@@ -17,10 +17,6 @@ class TextSlice:
     def truncated(self) -> bool:
         return self.start > 0 or self.end < self.total
 
-    @property
-    def next_offset(self) -> int | None:
-        return self.end if self.end < self.total else None
-
 
 def _focus_position(text: str, query: str) -> int:
     """Return a likely literal hit, or zero for semantic/nonliteral queries."""

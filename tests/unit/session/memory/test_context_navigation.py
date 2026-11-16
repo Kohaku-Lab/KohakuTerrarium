@@ -123,6 +123,16 @@ async def test_anchor_retains_original_branch_when_selection_switches(tmp_path):
         assert "needle old" in first.output
         assert "needle new" not in first.output
         token = _anchor(first.output)
+        memory = await store.run(lambda: store._live_memory._memory)
+        generation = await store.run(memory._generation, "alice")
+        stats = await store.run(memory.get_stats)
+        assert stats == {
+            "fts_blocks": 4,
+            "vec_blocks": 0,
+            "has_vectors": False,
+            "dimensions": 0,
+        }
+
         await store.run(store.state.__setitem__, "alice:branch_view", {"1": 2})
         expanded = await tool.execute(
             {"anchor": token, "before": 0, "after": 3}, context=ctx
@@ -134,6 +144,8 @@ async def test_anchor_retains_original_branch_when_selection_switches(tmp_path):
         assert second.error is None
         assert "needle new" in second.output
         assert "needle old" not in second.output
+        assert await store.run(memory._generation, "alice") == generation
+        assert await store.run(memory.get_stats) == stats
     finally:
         store.close(update_status=False)
 
@@ -410,12 +422,12 @@ async def test_explicit_other_agent_context_keeps_its_own_lineage(tmp_path):
     store.append_event(
         "alice",
         "user_input",
-        {"content": "alice-private"},
+        {"content": "needle-alice"},
         turn_index=1,
         branch_id=1,
         parent_branch_path=[],
     )
-    for branch, content in ((1, "targetneedle"), (2, "bob alternate")):
+    for branch, content in ((1, "needle-bob-old"), (2, "needle-bob-new")):
         store.append_event(
             "bob",
             "user_input",
@@ -436,10 +448,13 @@ async def test_explicit_other_agent_context_keeps_its_own_lineage(tmp_path):
     try:
         tool, ctx = SearchMemoryTool(), _context(store)
         found = await tool.execute(
-            {"query": "targetneedle", "mode": "fts", "agent": "bob"},
+            {"query": "needle", "mode": "fts", "agent": "bob"},
             context=ctx,
         )
         assert found.error is None
+        assert "needle-bob-old" in found.output
+        assert "needle-bob-new" not in found.output
+        assert "needle-alice" not in found.output
         read = await tool.execute(
             {"anchor": _anchor(found.output), "before": 2, "after": 5},
             context=ctx,
@@ -447,7 +462,8 @@ async def test_explicit_other_agent_context_keeps_its_own_lineage(tmp_path):
         assert read.error is None
         assert "bob branch 1 answer" in read.output
         assert "bob branch 2 answer" not in read.output
-        assert "alice-private" not in read.output
+        assert "needle-bob-new" not in read.output
+        assert "needle-alice" not in read.output
     finally:
         store.close(update_status=False)
 

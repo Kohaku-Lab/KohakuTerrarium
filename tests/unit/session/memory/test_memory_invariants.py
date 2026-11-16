@@ -1,4 +1,4 @@
-"""Review regressions: source identity, legacy paths, hash cost, anchor budget."""
+"""Memory identity, lineage, migration, and resource-budget invariants."""
 
 import tracemalloc
 
