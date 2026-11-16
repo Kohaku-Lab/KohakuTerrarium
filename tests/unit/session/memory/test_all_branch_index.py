@@ -200,7 +200,7 @@ def test_selected_index_migrates_to_all_branches_and_rebuilds_once(tmp_path):
     upgraded = SessionMemory(path, upgraded_embedder, index_all_branches=True)
     try:
         assert upgraded.index_events("alice", rows) == 2
-        assert upgraded._state["alice:index_format"] == 2
+        assert upgraded._state["alice:index_format"] == 3
         assert upgraded._generation("alice") > previous_generation
         for mode in ("fts", "semantic", "hybrid"):
             assert {r.content for r in upgraded.search("needle", mode=mode)} == {

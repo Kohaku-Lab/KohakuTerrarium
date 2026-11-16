@@ -25,6 +25,8 @@ Searches the recorded event log of the current session.
   the result reports the fallback. Explicit `semantic` returns an error.
 - Model work does not block session history, persistence, or shutdown.
 - Only the current session is searched, and only what was recorded before now.
+- All branches stay indexed; normal searches follow the selected branch lineage. Switching branches does not re-embed previous work.
+- If too many excluded candidates exhaust the search budget, narrow the query. No incomplete top-k is returned.
 
 ## Limits
 

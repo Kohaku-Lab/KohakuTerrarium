@@ -166,7 +166,7 @@ def build_index(
         if dimensions:
             embed_config["dimensions"] = dimensions
         embedder = create_embedder(embed_config)
-        memory = SessionMemory(str(path), embedder=embedder)
+        memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
         try:
             # Reset both indexes so a forced build starts from event zero.
             if force:

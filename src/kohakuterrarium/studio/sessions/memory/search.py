@@ -17,6 +17,10 @@ from typing import Any
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.visibility import (
+    requested_store_view,
+    resolve_search_view,
+)
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import (
@@ -131,13 +135,19 @@ def _search_session_sync(
                     _ = e  # Search can fall back to FTS when embedding is unavailable.
                     embedder = None
 
-            memory = SessionMemory(str(path), embedder=embedder)
+            memory = SessionMemory(
+                str(path), embedder=embedder, index_all_branches=True
+            )
             stack.callback(memory.close)
 
-            # Incremental indexing skips events already represented in memory.
+            # Persist all branches, then project each agent's selected lineage.
             meta = store.load_meta()
+            branch_views = {}
             for agent_name in meta.get("agents", []):
                 events = store.get_events(agent_name)
+                branch_views[agent_name] = resolve_search_view(
+                    events, requested_store_view(store, agent_name)
+                )
                 if events:
                     memory.index_events(agent_name, events)
 
@@ -152,7 +162,13 @@ def _search_session_sync(
                 logger.warning("No embedding model, falling back to FTS")
                 effective_mode = "fts"
 
-            results = memory.search(query=q, mode=effective_mode, k=k, agent=agent)
+            results = memory.search(
+                query=q,
+                mode=effective_mode,
+                k=k,
+                agent=agent,
+                branch_views=branch_views,
+            )
     except Exception as e:
         # Callers receive a concise typed error while logs retain the traceback.
         logger.exception(

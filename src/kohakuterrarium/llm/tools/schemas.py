@@ -341,6 +341,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "type": "integer",
                 "description": "Max results (default: 5)",
             },
+            "agent": {
+                "type": "string",
+                "description": "Optional agent namespace to search within this session",
+            },
         },
         "required": ["query"],
     },

@@ -7,6 +7,13 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.visibility import (
+    AgentBranchVisibility,
+    MemoryCandidateLimitError,
+    MemoryLineageUnavailableError,
+    requested_store_view,
+    resolve_search_view,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,7 +65,7 @@ class LiveSessionMemory:
 
     def __init__(self, store):
         self._store = store
-        self._memory = SessionMemory(store.path)
+        self._memory = SessionMemory(store.path, index_all_branches=True)
         self._worker = _EmbeddingWorker()
         self._semantic_lock = asyncio.Lock()
         self._embedder: BaseEmbedder | None = None
@@ -71,9 +78,23 @@ class LiveSessionMemory:
             self._worker.close()
             self._memory.close()
 
-    def _index_keywords(self, names: list[str]) -> None:
+    def _index_keywords(
+        self,
+        names: list[str],
+        overrides: dict[str, dict[int, int]] | None = None,
+    ) -> dict[str, dict[int, int]]:
+        """Index immutable facts and resolve each agent's selected projection."""
+        views: dict[str, dict[int, int]] = {}
         for name in names:
-            self._memory._index_keywords(name, self._store.get_events(name))
+            events = self._store.get_events(name)
+            self._memory._index_keywords(name, events)
+            selected = (
+                overrides[name]
+                if overrides is not None and name in overrides
+                else requested_store_view(self._store, name)
+            )
+            views[name] = resolve_search_view(events, selected)
+        return views
 
     def _vector_batch(self, name: str):
         events = self._store.get_events(name)
@@ -91,10 +112,18 @@ class LiveSessionMemory:
         k: int = 10,
         agent: str | None = None,
         semantic_fallback: bool = False,
+        selected_branch_view: dict[int, int] | None = None,
+        selected_agent: str | None = None,
     ):
         if mode not in ("auto", "fts", "hybrid", "semantic"):
             raise ValueError(f"Unknown search mode {mode!r}")
-        await self._store.run(self._index_keywords, names)
+        overrides = (
+            {selected_agent: selected_branch_view}
+            if selected_branch_view is not None and selected_agent in names
+            else None
+        )
+        views = await self._store.run(self._index_keywords, names, overrides)
+        scope = AgentBranchVisibility(views)
         warning = None
         if mode != "fts":
             try:
@@ -106,7 +135,7 @@ class LiveSessionMemory:
                     if isinstance(self._embedder, NullEmbedder):
                         if mode != "semantic":
                             results = await self._store.run(
-                                self._memory._search_fts, query, k, agent
+                                self._memory._search_fts, query, k, agent, scope=scope
                             )
                             return results, None
                         raise ValueError("semantic search needs an embedding model")
@@ -135,22 +164,32 @@ class LiveSessionMemory:
                         vector,
                         k if mode == "semantic" else k * 2,
                         agent,
+                        scope=scope,
                     )
                     if mode == "semantic":
                         return results, None
                     keywords = await self._store.run(
-                        self._memory._search_fts, query, k * 2, agent
+                        self._memory._search_fts, query, k * 2, agent, scope=scope
                     )
                     return self._memory._fuse_results(keywords, results, k), None
             except Exception as exc:
-                if self._closed or (mode == "semantic" and not semantic_fallback):
+                if (
+                    self._closed
+                    or isinstance(
+                        exc,
+                        (MemoryCandidateLimitError, MemoryLineageUnavailableError),
+                    )
+                    or (mode == "semantic" and not semantic_fallback)
+                ):
                     raise
                 warning = f"Embedding unavailable; using keyword search: {str(exc) or type(exc).__name__}"
                 logger.warning(
                     "Memory search using FTS fallback",
                     error=str(exc) or type(exc).__name__,
                 )
-        results = await self._store.run(self._memory._search_fts, query, k, agent)
+        results = await self._store.run(
+            self._memory._search_fts, query, k, agent, scope=scope
+        )
         return results, warning
 
 

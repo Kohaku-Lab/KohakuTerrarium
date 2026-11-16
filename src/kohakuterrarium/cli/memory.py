@@ -9,6 +9,10 @@ module is strictly the rich-CLI presentation layer.
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.visibility import (
+    requested_store_view,
+    resolve_search_view,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import build_index
 from kohakuterrarium.utils.logging import get_logger
@@ -80,6 +84,7 @@ def search_cli(
 
     # Read-only: searching must not bump the session's last_active.
     store = SessionStore.open_readonly(path)
+    memory = None
     try:
         # Semantic modes can fall back when no query embedder is available.
         embedder = None
@@ -92,7 +97,17 @@ def search_cli(
                 )
 
         # Saved dimensions let SessionMemory discover existing vector tables.
-        memory = SessionMemory(str(path), embedder=embedder)
+        memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
+        # The CLI must not silently read an obsolete selected-only index after
+        # a Studio or live search upgraded this session's index format.
+        branch_views = {}
+        for name in store.load_meta().get("agents", []):
+            events = store.get_events(name)
+            branch_views[name] = resolve_search_view(
+                events, requested_store_view(store, name)
+            )
+            if events:
+                memory.index_events(name, events)
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:
             print("No vector index found. Run 'kt embedding' first, or use --mode fts")
@@ -100,7 +115,9 @@ def search_cli(
                 return 1
             mode = "fts"
 
-        results = memory.search(query, mode=mode, k=k, agent=agent)
+        results = memory.search(
+            query, mode=mode, k=k, agent=agent, branch_views=branch_views
+        )
 
         if not results:
             print("No results found.")
@@ -132,4 +149,6 @@ def search_cli(
         print(f"Error: {e}")
         return 1
     finally:
-        store.close()
+        if memory is not None:
+            memory.close()
+        store.close(update_status=False)

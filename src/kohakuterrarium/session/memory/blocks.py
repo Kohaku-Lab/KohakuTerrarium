@@ -95,6 +95,24 @@ def extract_batch(
         live_ids=None if all_branches else live_ids,
         all_branches=all_branches,
     )
+    if all_branches:
+        # Older stored turns may omit an explicit parent path. Replay infers
+        # their ancestry from physical event order; use the same derivation
+        # for indexed blocks so sibling branches cannot pass filtering by
+        # matching the child turn/branch alone. Fully stamped modern events
+        # avoid this extra history projection.
+        missing = [
+            block
+            for block in blocks
+            if block.turn_index is not None
+            and block.turn_index > 1
+            and not block.parent_branch_path
+        ]
+        if missing:
+            inferred = index_parent_paths(events)
+            for block in missing:
+                if block.event_id is not None and block.event_id in inferred:
+                    block.parent_branch_path = inferred[block.event_id]
     if start_from > count:
         blocks = [
             b

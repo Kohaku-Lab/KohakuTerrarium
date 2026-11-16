@@ -3,7 +3,6 @@
 Events are grouped into rounds and searchable text, tool, trigger, or user blocks.
 """
 
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -24,44 +23,12 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Format 1 indexes the selected lineage; format 2 retains all branches.
-# Format 2 is staged until filtered top-k retrieval is available.
-_SELECTED_INDEX_FORMAT = 1
-_ALL_BRANCH_INDEX_FORMAT = 2
-
-
-@dataclass
-class SearchResult:
-    """A single search result with metadata."""
-
-    content: str
-    round_num: int
-    block_num: int
-    agent: str
-    block_type: str
-    score: float
-    ts: float = 0.0
-    tool_name: str = ""
-    channel: str = ""
-    block_id: str = ""
-    event_id: int | None = None
-    event_position: int | None = None
-    part_index: int = 0
-    turn_index: int | None = None
-    branch_id: int | None = None
-    parent_branch_path: tuple[tuple[int, int], ...] | None = None
-
-    @property
-    def age_str(self) -> str:
-        """Return a compact elapsed-time label for the result timestamp."""
-        if self.ts <= 0:
-            return ""
-        elapsed = time.time() - self.ts
-        if elapsed < 60:
-            return f"{int(elapsed)}s ago"
-        if elapsed < 3600:
-            return f"{int(elapsed / 60)}m ago"
-        return f"{elapsed / 3600:.1f}h ago"
+from kohakuterrarium.session.memory.query import (
+    MemorySearchMixin,
+    SearchResult as SearchResult,
+    _ALL_BRANCH_INDEX_FORMAT,
+    _SELECTED_INDEX_FORMAT,
+)
 
 
 @dataclass
@@ -73,7 +40,7 @@ class _IndexBatch:
     checkpoint: dict
 
 
-class SessionMemory:
+class SessionMemory(MemorySearchMixin):
     """Search index over session event history.
 
     Manages FTS5 (keyword) and vector (semantic) indexes for a session.
@@ -344,141 +311,6 @@ class SessionMemory:
             self._vec.insert(vector, _block_metadata(block, include_content=True))
         self._finish_batch(agent, kind, start)
 
-    def search(
-        self,
-        query: str,
-        mode: str = "auto",
-        k: int = 10,
-        agent: str | None = None,
-    ) -> list[SearchResult]:
-        """Return relevance-ranked search results with an optional agent filter.
-
-        ``auto`` selects hybrid search when embeddings are configured and keyword
-        search otherwise. Explicit semantic search requires embeddings.
-        """
-        if mode == "auto":
-            mode = "hybrid" if self._has_vectors else "fts"
-
-        match mode:
-            case "fts":
-                return self._search_fts(query, k, agent)
-            case "semantic":
-                if not self._has_vectors:
-                    # Explicit semantic mode must not silently degrade to keywords.
-                    raise ValueError(
-                        "semantic search needs an embedding model — "
-                        "pass embedder= (see session.embedding."
-                        "create_embedder) or run `kt embedding` first; "
-                        "use mode='auto'/'hybrid' for graceful fallback"
-                    )
-                return self._search_semantic(query, k, agent)
-            case "hybrid":
-                if not self._has_vectors:
-                    return self._search_fts(query, k, agent)
-                return self._search_hybrid(query, k, agent)
-            case _:
-                raise ValueError(
-                    f"Unknown search mode {mode!r} — expected 'fts', "
-                    "'semantic', 'hybrid', or 'auto'"
-                )
-
-    def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
-        """FTS5 keyword search."""
-        results = self._fts.search(query, k=k * 2)  # Agent filtering may discard rows.
-        out = []
-        for row_id, score, meta in results:
-            if agent and meta.get("agent") != agent:
-                continue
-            text, _ = self._fts.get_by_id(row_id)
-            out.append(
-                SearchResult(
-                    content=text or "",
-                    round_num=meta.get("round", 0),
-                    block_num=meta.get("block", 0),
-                    agent=meta.get("agent", ""),
-                    block_type=meta.get("type", ""),
-                    score=score,
-                    ts=meta.get("ts", 0),
-                    tool_name=meta.get("tool_name", ""),
-                    channel=meta.get("channel", ""),
-                    block_id=meta.get("block_id", ""),
-                    **_source_result_metadata(meta),
-                )
-            )
-            if len(out) >= k:
-                break
-        return out
-
-    def _search_semantic(
-        self, query: str, k: int, agent: str | None
-    ) -> list[SearchResult]:
-        """Vector semantic search."""
-        if not self._vec:
-            return []
-
-        query_vec = self._embedder.encode_one(query)
-        return self._search_vector(query_vec, k, agent)
-
-    def _search_vector(
-        self, query_vec, k: int, agent: str | None
-    ) -> list[SearchResult]:
-        results = self._vec.search(query_vec, k=k * 2)
-        out = []
-        for _, distance, meta in results:
-            if agent and meta.get("agent") != agent:
-                continue
-            content = meta.get("content", "")
-            out.append(
-                SearchResult(
-                    content=content,
-                    round_num=meta.get("round", 0),
-                    block_num=meta.get("block", 0),
-                    agent=meta.get("agent", ""),
-                    block_type=meta.get("type", ""),
-                    score=1.0 - distance,
-                    ts=meta.get("ts", 0),
-                    tool_name=meta.get("tool_name", ""),
-                    channel=meta.get("channel", ""),
-                    block_id=meta.get("block_id", ""),
-                    **_source_result_metadata(meta),
-                )
-            )
-            if len(out) >= k:
-                break
-        return out
-
-    def _search_hybrid(
-        self, query: str, k: int, agent: str | None
-    ) -> list[SearchResult]:
-        """Hybrid search: FTS + vector with reciprocal rank fusion."""
-        fts_results = self._search_fts(query, k=k * 2, agent=agent)
-        sem_results = self._search_semantic(query, k=k * 2, agent=agent)
-        return self._fuse_results(fts_results, sem_results, k)
-
-    @staticmethod
-    def _fuse_results(fts_results, sem_results, k: int) -> list[SearchResult]:
-        scores: dict[str, float] = {}
-        result_map: dict[str, SearchResult] = {}
-
-        for rank, r in enumerate(fts_results):
-            key = r.block_id or f"{r.agent}:r{r.round_num}:b{r.block_num}"
-            scores[key] = scores.get(key, 0) + 1.0 / (60 + rank)
-            result_map[key] = r
-
-        for rank, r in enumerate(sem_results):
-            key = r.block_id or f"{r.agent}:r{r.round_num}:b{r.block_num}"
-            scores[key] = scores.get(key, 0) + 1.0 / (60 + rank)
-            if key not in result_map:
-                result_map[key] = r
-
-        ranked = sorted(scores.items(), key=lambda x: -x[1])[:k]
-        out = []
-        for key, score in ranked:
-            r = result_map[key]
-            r.score = score
-            out.append(r)
-        return out
-
     def get_stats(self) -> dict[str, Any]:
         """Get index statistics."""
         fts_count = self._fts.count() if hasattr(self._fts, "count") else 0
@@ -489,20 +321,6 @@ class SessionMemory:
             "has_vectors": self._has_vectors,
             "dimensions": self._embedder.dimensions,
         }
-
-
-def _source_result_metadata(meta: dict[str, Any]) -> dict[str, Any]:
-    path = meta.get("parent_branch_path")
-    return {
-        "event_id": meta.get("event_id"),
-        "event_position": meta.get("event_position"),
-        "part_index": meta.get("part_index", 0),
-        "turn_index": meta.get("turn_index"),
-        "branch_id": meta.get("branch_id"),
-        "parent_branch_path": (
-            tuple(tuple(pair) for pair in path) if path is not None else None
-        ),
-    }
 
 
 def _block_metadata(block: Block, include_content: bool = False) -> dict[str, Any]:

@@ -215,7 +215,7 @@ class TestSearchSessionMemory:
             def index_events(self, *a, **kw):
                 return 0
 
-            def search(self, query, mode, k, agent):
+            def search(self, query, mode, k, agent, branch_views=None):
                 return [
                     SearchResult(
                         content="hi",
@@ -372,7 +372,7 @@ class TestSearchSessionMemory:
             def index_events(self, *a, **kw):
                 return 0
 
-            def search(self, query, mode, k, agent):
+            def search(self, query, mode, k, agent, branch_views=None):
                 return [
                     SearchResult(
                         content="needle",

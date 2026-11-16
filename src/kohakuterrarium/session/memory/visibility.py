@@ -1,0 +1,121 @@
+"""Branch-scoped search visibility and bounded, exact ranked candidate filtering.
+
+The vault backends currently expose ranked top-k without metadata predicates.
+Widening preserves rank order, but exhausting the candidate budget must fail
+closed: returning fewer hits would silently misreport a valid branch as empty.
+"""
+
+from collections.abc import Callable
+from typing import Any, TypeVar
+
+from kohakuterrarium.session.history.branch_paths import _coerce_branch_view
+from kohakuterrarium.session.history.selection import SelectionCompatibility
+from kohakuterrarium.session.history.replay import (
+    index_parent_paths,
+    resolve_selected_branches,
+)
+
+DEFAULT_MAX_CANDIDATES = 8192
+T = TypeVar("T")
+
+
+class MemoryCandidateLimitError(RuntimeError):
+    """Cannot prove the branch-filtered top-k within the candidate budget."""
+
+
+class MemoryLineageUnavailableError(RuntimeError):
+    """The source event lacks ancestry needed for safe branch filtering."""
+
+
+class BranchVisibility:
+    """Filter stored block metadata against a fully resolved branch view."""
+
+    def __init__(self, branch_view: dict[int, int]):
+        self.selected = _coerce_branch_view(branch_view)
+        self._ancestry = SelectionCompatibility(self.selected)
+
+    def matches(self, meta: dict[str, Any]) -> bool:
+        turn, branch = meta.get("turn_index"), meta.get("branch_id")
+        # Keep the existing replay behavior for unscoped legacy events.
+        if type(turn) is not int or type(branch) is not int:
+            return True
+        if self.selected.get(turn) != branch:
+            return False
+        raw_path = meta.get("parent_branch_path")
+        if raw_path is None:
+            if any(parent_turn < turn for parent_turn in self.selected):
+                raise MemoryLineageUnavailableError(
+                    "Cannot verify this historical event's ancestor lineage. "
+                    "Rebuild its memory index before searching this branch."
+                )
+            return True
+        try:
+            path = tuple(tuple(pair) for pair in raw_path)
+            return self._ancestry.matches(path, turn)
+        except (TypeError, ValueError):
+            return False
+
+
+def ranked_filtered(
+    ranked_search: Callable[[int], list[T]],
+    *,
+    k: int,
+    matches: Callable[[T], bool],
+    max_candidates: int = DEFAULT_MAX_CANDIDATES,
+) -> list[T]:
+    """Return exact filtered top-k or fail rather than return incomplete hits.
+
+    Searches are assumed to be ranked and prefix-stable as k grows. Finding k
+    matching candidates proves the top-k result, even if other matches follow.
+    Exhaustion is proved by fewer than the requested candidates being returned.
+    """
+    if type(k) is not int or k <= 0:
+        raise ValueError("k must be a positive integer")
+    if k > max_candidates:
+        raise ValueError(f"k exceeds filtered search candidate cap {max_candidates}")
+    limit = min(max_candidates, max(k * 2, 32))
+    while True:
+        candidates = ranked_search(limit)
+        eligible = [hit for hit in candidates if matches(hit)]
+        if len(eligible) >= k or len(candidates) < limit:
+            return eligible[:k]
+        if limit == max_candidates:
+            raise MemoryCandidateLimitError(
+                f"Cannot prove filtered top-{k} within {max_candidates} ranked "
+                "candidates. Narrow the query or use a more selective scope."
+            )
+        limit = min(limit * 2, max_candidates)
+
+
+class AgentBranchVisibility:
+    """A session-level visibility projection, with one view per agent."""
+
+    def __init__(self, branch_views: dict[str, dict[int, int]]):
+        self._views = {
+            name: BranchVisibility(view) for name, view in branch_views.items()
+        }
+
+    def matches(self, meta: dict[str, Any]) -> bool:
+        view = self._views.get(meta.get("agent"))
+        return view is not None and view.matches(meta)
+
+
+def resolve_search_view(
+    events: list[dict],
+    requested_view: dict[int, int] | None = None,
+) -> dict[int, int]:
+    """Resolve explicit selections and implicit latest compatible branches.
+
+    Keep this consistent with conversation replay; callers compute it when
+    reading source events, not by interpreting only ranked search candidates.
+    """
+    return resolve_selected_branches(events, index_parent_paths(events), requested_view)
+
+
+def requested_store_view(store: Any, agent: str) -> dict[int, int] | None:
+    """Read a validated persisted branch selection from the owning store."""
+    try:
+        view = store.state.get(f"{agent}:branch_view")
+        return _coerce_branch_view(view) if view else None
+    except (KeyError, ValueError, TypeError):
+        return None

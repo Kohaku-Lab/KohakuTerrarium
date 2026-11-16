@@ -71,6 +71,13 @@ class SearchMemoryTool(BaseTool):
         try:
             store = getattr(context.agent, "session_store", None)
             if isinstance(memory, LiveSessionMemory):
+                # Resolve the active (possibly explicitly selected) lineage on
+                # the store owner thread, not from an event-loop database read.
+                from kohakuterrarium.core.conversation.continuation import (
+                    selected_branch_view,
+                )
+
+                current_view = await store.run(selected_branch_view, context.agent)
                 config = (
                     await store.run(self._load_embed_config, store, context.agent)
                     if mode != "fts"
@@ -78,12 +85,16 @@ class SearchMemoryTool(BaseTool):
                 )
                 results, warning = await memory.search(
                     query,
-                    names=[context.agent_name or "agent"],
+                    # Explicit agent queries must index the target namespace
+                    # rather than only whatever creature issued the call.
+                    names=[agent] if agent else [context.agent_name or "agent"],
                     config=config,
                     create_embedder=create_embedder,
                     mode=mode,
                     k=k,
                     agent=agent,
+                    selected_branch_view=current_view or None,
+                    selected_agent=context.agent_name or "agent",
                 )
             else:
                 results = await asyncio.to_thread(

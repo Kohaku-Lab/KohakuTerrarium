@@ -99,7 +99,7 @@ class TestSearchSessionMemoryEmbedderFallback:
             def index_events(self, *a, **kw):
                 return 0
 
-            def search(self, query, mode, k, agent):
+            def search(self, query, mode, k, agent, branch_views=None):
                 return []
 
         monkeypatch.setattr(mem_mod, "SessionMemory", _Mem)

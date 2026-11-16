@@ -12,6 +12,10 @@ from kohakuterrarium.session.history.replay import (
     select_live_event_ids,
 )
 from kohakuterrarium.session.memory.index import SearchResult, SessionMemory
+from kohakuterrarium.session.memory.visibility import (
+    requested_store_view,
+    resolve_search_view,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -141,15 +145,22 @@ class SessionReader:
         Sessions without an existing memory index return no hits; call
         :meth:`index` first for ad-hoc keyword search.
         """
-        memory = SessionMemory(str(self._path))
+        memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
-            return memory.search(query, mode=mode, k=k, agent=agent)
+            views = {
+                name: resolve_search_view(
+                    self._store.get_events(name),
+                    requested_store_view(self._store, name),
+                )
+                for name in self.agents
+            }
+            return memory.search(query, mode=mode, k=k, agent=agent, branch_views=views)
         finally:
             memory.close()
 
     def index(self) -> int:
         """Index this session's events for :meth:`search` (FTS only)."""
-        memory = SessionMemory(str(self._path))
+        memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
             total = 0
             for name in self.agents:
