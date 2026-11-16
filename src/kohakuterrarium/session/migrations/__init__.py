@@ -85,15 +85,14 @@ def discover_versions(base_path: str | Path) -> list[tuple[int, Path]]:
     """Return every version file sharing ``base_path``'s basename.
 
     Results are descending by version. Bare-file versions come from metadata;
-    suffixed files trust their filename. Missing candidates are ignored.
+    suffixed files trust their filename and lose a tie to the bare file.
     """
     result: dict[int, Path] = {}
     for suffix_version, candidate in archive_family(base_path):
         if suffix_version is None:
-            version = _read_discovery_version(candidate)
-            result.setdefault(version, candidate)
+            result[_read_discovery_version(candidate)] = candidate
         else:
-            result[suffix_version] = candidate
+            result.setdefault(suffix_version, candidate)
 
     return sorted(result.items(), key=lambda pair: pair[0], reverse=True)
 

@@ -1,8 +1,7 @@
-"""Borrow consumer credentials from the official Windows agy CLI."""
+"""Borrow consumer credentials from the official local agy CLI."""
 
 import asyncio
 import base64
-import ctypes
 import hashlib
 import json
 import os
@@ -10,21 +9,13 @@ import re
 import shutil
 import subprocess
 import time
-from ctypes import wintypes
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from kohakuterrarium.llm.antigravity.store import AntigravityError, read_keyring
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
-
-
-class AntigravityError(ValueError):
-    """A fixed, credential-free diagnostic code."""
-
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(f"Antigravity: {code}")
 
 
 @dataclass(frozen=True)
@@ -69,57 +60,11 @@ def parse_credential(raw: str, source: str) -> BorrowedCredential:
         raise AntigravityError("malformed_credential") from None
 
 
-class _WindowsCredential(ctypes.Structure):
-    _fields_ = [
-        ("Flags", wintypes.DWORD),
-        ("Type", wintypes.DWORD),
-        ("TargetName", wintypes.LPWSTR),
-        ("Comment", wintypes.LPWSTR),
-        ("LastWritten", wintypes.FILETIME),
-        ("CredentialBlobSize", wintypes.DWORD),
-        ("CredentialBlob", ctypes.POINTER(ctypes.c_byte)),
-        ("Persist", wintypes.DWORD),
-        ("AttributeCount", wintypes.DWORD),
-        ("Attributes", ctypes.c_void_p),
-        ("TargetAlias", wintypes.LPWSTR),
-        ("UserName", wintypes.LPWSTR),
-    ]
-
-
-def read_keyring() -> str | None:
-    """Read the single known Windows Credential Manager target."""
-    if os.name != "nt":
-        raise AntigravityError("unsupported_platform")
-    library = ctypes.WinDLL("Advapi32.dll", use_last_error=True)
-    library.CredReadW.argtypes = [
-        wintypes.LPCWSTR,
-        wintypes.DWORD,
-        wintypes.DWORD,
-        ctypes.POINTER(ctypes.POINTER(_WindowsCredential)),
-    ]
-    library.CredReadW.restype = wintypes.BOOL
-    library.CredFree.argtypes = [ctypes.c_void_p]
-    pointer = ctypes.POINTER(_WindowsCredential)()
-    if not library.CredReadW("gemini:antigravity", 1, 0, ctypes.byref(pointer)):
-        if ctypes.get_last_error() == 1168:
-            return None
-        raise AntigravityError("credential_store_unavailable")
-    try:
-        length = pointer.contents.CredentialBlobSize
-        if length > 65536:
-            raise AntigravityError("malformed_credential")
-        return ctypes.string_at(pointer.contents.CredentialBlob, length).decode("utf-8")
-    except UnicodeError:
-        raise AntigravityError("malformed_credential") from None
-    finally:
-        library.CredFree(pointer)
-
-
 def read_sources() -> list[BorrowedCredential]:
     """Read only the agy keyring entry and its documented fallback file."""
     try:
-        raw = read_keyring()
-        values = [parse_credential(raw, "windows_keyring")] if raw else []
+        raw, source = read_keyring()
+        values = [parse_credential(raw, source)] if raw is not None else []
         path = Path.home() / ".gemini/antigravity-cli/antigravity-oauth-token"
         if path.exists():
             with path.open(encoding="utf-8") as handle:

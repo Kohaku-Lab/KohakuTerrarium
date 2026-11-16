@@ -107,6 +107,9 @@
     "@vscode/markdown-it-katex": {
       "katex": "0.19.1"
     },
+    "@vscode/vsce": {
+      "minimatch": "11.0.8"
+    },
     "@azure/msal-node": "7.1.1"
   }
 }

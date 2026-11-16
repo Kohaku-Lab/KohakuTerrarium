@@ -12,6 +12,8 @@ LEVELS = ["low", "medium", "high"]
 @pytest.mark.parametrize(
     "model,context,output,efforts,contexts",
     [
+        ("gemini-4-hydrogen", 256000, 262144, [*LEVELS, "xhigh"], ["256k", "1048k"]),
+        ("gemini-pro-orchestrator-g1-pro", 256000, 65536, [], ["256k", "1048k"]),
         ("gemini-4-argon", 256000, 65536, LEVELS, ["256k", "512k", "900k"]),
         ("gemini-3.8-flash", 256000, 65536, LEVELS, ["256k", "1048k"]),
         ("claude-opus-5-5", 256000, 128000, LEVELS, ["256k", "840k"]),
@@ -22,7 +24,9 @@ LEVELS = ["low", "medium", "high"]
 def test_current_agy_limits_and_variations(model, context, output, efforts, contexts):
     preset = get_all_presets()[("google-antigravity", model)]
     assert (preset["max_context"], preset["max_output"]) == (context, output)
-    assert preset["reasoning_effort"] == "medium"
+    assert preset["reasoning_effort"] == (
+        "high" if model == "gemini-pro-orchestrator-g1-pro" else "medium"
+    )
     groups = preset["variation_groups"]
     assert list(groups.get("reasoning", {})) == efforts
     assert list(groups["context"]) == contexts
@@ -35,11 +39,13 @@ def test_current_agy_limits_and_variations(model, context, output, efforts, cont
 
 def test_catalog_is_exactly_the_agy_agent_list():
     advertised = {
-        f"{family}-{effort}"
+        spec.wire_model or f"{family}-{effort}"
         for family, spec in MODELS.items()
         for effort in spec.efforts
     }
     assert advertised == {
+        *(f"gemini-4-hydrogen-{e}" for e in [*LEVELS, "xhigh"]),
+        "gemini-pro-orchestrator-g1-pro",
         *(f"gemini-4-carbon-{e}" for e in LEVELS),
         *(f"gemini-4-argon-{e}" for e in LEVELS),
         *(f"gemini-3.8-flash-{e}" for e in LEVELS),
@@ -91,6 +97,41 @@ def test_catalog_is_exactly_the_agy_agent_list():
             {"thinkingLevel": "LOW"},
             128000,
         ),
+        (
+            "gemini-4-hydrogen",
+            "",
+            "gemini-4-hydrogen-medium",
+            {"thinkingLevel": "MEDIUM"},
+            262144,
+        ),
+        (
+            "gemini-4-hydrogen",
+            "xhigh",
+            "gemini-4-hydrogen-xhigh",
+            {"thinkingLevel": "XHIGH"},
+            262144,
+        ),
+        (
+            "gemini-4-hydrogen-xhigh",
+            "",
+            "gemini-4-hydrogen-xhigh",
+            {"thinkingLevel": "XHIGH"},
+            262144,
+        ),
+        (
+            "gemini-pro-orchestrator-g1-pro",
+            "",
+            "gemini-pro-orchestrator-g1-pro",
+            {"thinkingLevel": "HIGH"},
+            65536,
+        ),
+        (
+            "gemini-pro-orchestrator-g1-pro",
+            "high",
+            "gemini-pro-orchestrator-g1-pro",
+            {"thinkingLevel": "HIGH"},
+            65536,
+        ),
         ("gpt-oss-120b", "", "gpt-oss-120b-medium", {"thinkingBudget": 8192}, 32768),
     ],
 )
@@ -114,6 +155,22 @@ def test_custom_model_passes_through_without_thinking():
 @pytest.mark.parametrize(
     "model,effort,limit,error",
     [
+        (
+            "gemini-pro-orchestrator-g1-pro",
+            "medium",
+            None,
+            "unsupported_reasoning_effort",
+        ),
+        (
+            "gemini-pro-orchestrator-g1-pro-high",
+            "",
+            None,
+            "unsupported_reasoning_effort",
+        ),
+        ("gemini-4-hydrogen-xhigh", "high", None, "conflicting_reasoning_effort"),
+        ("gemini-4-hydrogen", "max", None, "unsupported_reasoning_effort"),
+        ("gemini-4-hydrogen", "", 262145, "invalid_max_output_tokens"),
+        ("gemini-pro-orchestrator-g1-pro", "", 65537, "invalid_max_output_tokens"),
         ("gemini-4-argon-minimal", "", None, "unsupported_reasoning_effort"),
         ("gemini-4-argon-tiered", "", None, "unsupported_reasoning_effort"),
         ("gemini-3.8-flash-low", "high", None, "conflicting_reasoning_effort"),
@@ -159,6 +216,8 @@ def test_smaller_explicit_output_is_preserved():
 @pytest.mark.parametrize(
     "selector",
     [
+        "gemini-pro-orchestrator-g1-pro@reasoning=medium",
+        "gemini-4-hydrogen@reasoning=max",
         "gemini-4-argon@reasoning=minimal",
         "gemini-4-argon@context=1048k",
         "gemini-3.8-flash@context=900k",
@@ -174,6 +233,8 @@ def test_catalog_rejects_unsupported_variations(selector):
 @pytest.mark.parametrize(
     "selector,context,effort",
     [
+        ("gemini-4-hydrogen@context=1048k,reasoning=xhigh", 1048576, "xhigh"),
+        ("gemini-pro-orchestrator-g1-pro@context=1048k", 1048576, "high"),
         ("gemini-4-argon", 256000, "medium"),
         ("gemini-4-argon@context=512k", 512000, "medium"),
         ("gemini-4-argon@context=900k,reasoning=low", 900000, "low"),
@@ -187,7 +248,11 @@ def test_context_window_selects_profile_budget(selector, context, effort):
     assert profile.max_context == context
     assert profile.reasoning_effort == effort
     settings = model_settings(profile.model, profile.reasoning_effort)
-    assert settings.wire_model == f"{profile.model}-{effort}"
+    assert settings.wire_model == (
+        profile.model
+        if profile.model == "gemini-pro-orchestrator-g1-pro"
+        else f"{profile.model}-{effort}"
+    )
 
 
 @pytest.mark.parametrize(

@@ -1,15 +1,16 @@
-"""Model limits and effort routing for the agy 1.3.4 CLI agent catalog."""
+"""Model limits and effort routing for the agy CLI agent catalog."""
 
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class ModelSpec:
-    """One agy model family: each effort is the wire model `<family>-<effort>`."""
+    """An agy model family or a fixed wire model with its supported settings."""
 
     context_windows: tuple[int, ...]
     max_output: int
     thinking: dict[str, dict]
+    wire_model: str = ""
 
     @property
     def max_context(self) -> int:
@@ -29,6 +30,15 @@ LEVELS = {
 }
 
 MODELS = {
+    "gemini-4-hydrogen": ModelSpec(
+        (256000, 1048576), 262144, {**LEVELS, "xhigh": {"thinkingLevel": "XHIGH"}}
+    ),
+    "gemini-pro-orchestrator-g1-pro": ModelSpec(
+        (256000, 1048576),
+        65536,
+        {"high": LEVELS["high"]},
+        wire_model="gemini-pro-orchestrator-g1-pro",
+    ),
     "gemini-4-carbon": ModelSpec((256000, 512000, 900000), 65536, LEVELS),
     "gemini-4-argon": ModelSpec((256000, 512000, 900000), 65536, LEVELS),
     "gemini-3.8-flash": ModelSpec(
@@ -107,7 +117,7 @@ def model_settings(
         for name, candidate in MODELS.items():
             if model.startswith(name + "-"):
                 suffix = model[len(name) + 1 :]
-                if suffix not in candidate.thinking:
+                if candidate.wire_model or suffix not in candidate.thinking:
                     raise ValueError("unsupported_reasoning_effort")
                 family, fixed_effort = name, suffix
                 break
@@ -132,5 +142,9 @@ def model_settings(
     if 0 < thinking.get("thinkingBudget", 0) and limit <= thinking["thinkingBudget"]:
         raise ValueError("max_output_tokens_must_exceed_thinking_budget")
     return ModelSettings(
-        f"{family}-{effort}", effort, spec.max_context, limit, thinking
+        spec.wire_model or f"{family}-{effort}",
+        effort,
+        spec.max_context,
+        limit,
+        thinking,
     )

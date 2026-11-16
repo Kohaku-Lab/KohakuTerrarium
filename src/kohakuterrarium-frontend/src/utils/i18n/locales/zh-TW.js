@@ -1501,7 +1501,7 @@ export default {
   "settings.account.antigravity.cliSignIn": "agy 登入",
   "settings.account.antigravity.notLoggedIn": "請先在本機登入 agy 以查看額度。",
   "settings.account.antigravity.authExpired": "agy 憑證已變更或失效，請檢查 agy 登入後重新整理。",
-  "settings.account.antigravity.localOnly": "目前僅支援本機 Windows agy 帳戶的額度查詢。",
+  "settings.account.antigravity.localOnly": "目前僅支援本機 Windows 或 Linux agy 帳戶的額度查詢。",
   "settings.account.antigravity.noData": "服務未傳回額度資料。",
   "settings.account.antigravity.loadFailed": "無法取得 Antigravity 額度。",
   "settings.account.antigravity.stale": "正在顯示 {value} 的上次成功資料。",

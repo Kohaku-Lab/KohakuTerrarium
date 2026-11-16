@@ -33,7 +33,6 @@ import base64
 import io
 import json
 import random
-import time
 from collections import deque
 from copy import deepcopy
 from pathlib import Path
@@ -2613,6 +2612,24 @@ class TestLlmIntegration:
                 (4096, {"thinkingLevel": "MEDIUM"}),
             ),
             (
+                "google-antigravity/gemini-4-hydrogen@reasoning=xhigh,context=1048k",
+                "gemini-4-hydrogen-xhigh",
+                1048576,
+                False,
+                262144,
+                {"thinkingLevel": "XHIGH"},
+                (4096, {"thinkingLevel": "XHIGH"}),
+            ),
+            (
+                "google-antigravity/gemini-pro-orchestrator-g1-pro",
+                "gemini-pro-orchestrator-g1-pro",
+                256000,
+                False,
+                65536,
+                {"thinkingLevel": "HIGH"},
+                (4000, {"thinkingLevel": "HIGH"}),
+            ),
+            (
                 "google-antigravity/claude-sonnet-5-5",
                 "claude-sonnet-5-5-medium",
                 256000,
@@ -2623,14 +2640,26 @@ class TestLlmIntegration:
             ),
         ):
             with monkeypatch.context() as agy_patch:
+                agy_patch.setattr(agy_auth.Path, "home", lambda: tmp_path)
                 agy_patch.setattr(
                     agy_auth,
-                    "read_sources",
-                    lambda: [
-                        agy_auth.BorrowedCredential(
-                            "offline-agy", time.time() + 3600, "test"
-                        )
-                    ],
+                    "read_keyring",
+                    lambda: (
+                        json.dumps(
+                            {
+                                "auth_method": "consumer",
+                                "token": {
+                                    "access_token": "offline-agy",
+                                    "token_type": "Bearer",
+                                    "expiry": "2099-01-01T00:00:00Z",
+                                },
+                            }
+                        ),
+                        "linux_secret_service",
+                    ),
+                )
+                assert (
+                    agy_auth.AgyCredentials.status()["source"] == "linux_secret_service"
                 )
                 submissions = []
 

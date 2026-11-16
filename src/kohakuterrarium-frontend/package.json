@@ -1,6 +1,6 @@
 {
   "name": "kohakuterrarium-web",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -54,7 +54,7 @@
     "@unocss/transformer-directives": "^66.6.8",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/eslint-config-prettier": "^10.2.0",
-    "@vue/test-utils": "^2.4.6",
+    "@vue/test-utils": "^2.6.0",
     "eslint": "^10.2.0",
     "eslint-plugin-vue": "^10.8.0",
     "jsdom": "^29.0.2",
@@ -74,6 +74,10 @@
   "overrides": {
     "@vscode/markdown-it-katex": {
       "katex": "0.19.1"
+    },
+    "js-beautify": {
+      "editorconfig": "4.0.1",
+      "glob": "14.0.6"
     }
   }
 }

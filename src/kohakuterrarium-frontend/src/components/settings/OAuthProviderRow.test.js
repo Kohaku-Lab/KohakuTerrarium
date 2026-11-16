@@ -61,6 +61,16 @@ describe("OAuth provider actions and status", () => {
     expect(wrapper.text()).toContain("settings.oauth.expired")
     expect(wrapper.text()).not.toContain("settings.oauth.pending")
   })
+  it("shows the locked keyring diagnostic", async () => {
+    settingsAPI.getAntigravityStatus.mockResolvedValue({
+      state: "credential_store_locked",
+      refresh_available: true,
+    })
+    const wrapper = row("google-antigravity")
+    await flushPromises()
+    expect(wrapper.text()).toContain("settings.antigravity.credential_store_locked")
+    expect(wrapper.text()).not.toContain("settings.oauth.ready")
+  })
   it("distinguishes permission failures from missing login", async () => {
     settingsAPI.getAntigravityStatus.mockRejectedValue({ response: { status: 403 } })
     const wrapper = row("google-antigravity")
