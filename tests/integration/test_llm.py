@@ -1884,7 +1884,11 @@ class TestLlmIntegration:
             events.append(
                 {
                     "type": "response.completed",
-                    "response": {"id": "response1", "output": []},
+                    "response": {
+                        "id": "response1",
+                        "status": "completed",
+                        "output": [],
+                    },
                 }
             )
             return httpx.Response(
@@ -2027,7 +2031,8 @@ class TestLlmIntegration:
                 return httpx.Response(
                     200,
                     headers={"content-type": "text/event-stream"},
-                    content='data: {"type":"response.output_text.delta","delta":"bounded"}\n\n',
+                    content='data: {"type":"response.output_text.delta","delta":"bounded"}\n\n'
+                    'data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
                 )
 
             previous_client = responses_provider._client
@@ -2179,7 +2184,8 @@ class TestLlmIntegration:
                 return httpx.Response(
                     200,
                     headers={"content-type": "text/event-stream"},
-                    content='data: {"type":"response.output_text.delta","delta":"fits"}\n\n',
+                    content='data: {"type":"response.output_text.delta","delta":"fits"}\n\n'
+                    'data: {"type":"response.completed","response":{"status":"completed"}}\n\n',
                 )
 
             previous_client = responses_provider._client
@@ -2302,6 +2308,7 @@ class TestLlmIntegration:
                             "type": "response.completed",
                             "response": {
                                 "id": response_id,
+                                "status": "completed",
                                 "output": [
                                     {
                                         "type": "message",
@@ -2526,7 +2533,11 @@ class TestLlmIntegration:
                             json.dumps(
                                 {
                                     "type": "response.completed",
-                                    "response": {"id": f"r{attempt}", "output": []},
+                                    "response": {
+                                        "id": f"r{attempt}",
+                                        "status": "completed",
+                                        "output": [],
+                                    },
                                 }
                             )
                         )

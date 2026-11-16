@@ -2,7 +2,10 @@
 
 from copy import deepcopy
 
-from kohakuterrarium.session.history.assistant import project_assistant_rounds
+from kohakuterrarium.session.history.assistant import (
+    project_assistant_rounds,
+    replay_assistant_event,
+)
 
 
 def _evt(event_id, etype, **kwargs):
@@ -57,6 +60,36 @@ class _CountId(int):
     def __hash__(self):
         type(self).calls += 1
         return int.__hash__(self)
+
+
+def test_incomplete_assistant_replay_preserves_state_without_provider_metadata():
+    event = _evt(
+        8,
+        "assistant_message",
+        _assistant_projected=True,
+        message=_message(
+            content="partial",
+            metadata={"incomplete": True, "completion_state": "incomplete"},
+        ),
+    )
+    messages: list[dict] = []
+    replay_assistant_event(messages, event, include_metadata=True)
+    assert messages == [
+        {
+            "role": "assistant",
+            "content": "partial",
+            "metadata": {
+                "incomplete": True,
+                "completion_state": "incomplete",
+                "event_id": 8,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+        }
+    ]
+    provider_messages: list[dict] = []
+    replay_assistant_event(provider_messages, event, include_metadata=False)
+    assert provider_messages == [{"role": "assistant", "content": "partial"}]
 
 
 class TestProjectAssistantRounds:

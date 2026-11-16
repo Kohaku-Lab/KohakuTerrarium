@@ -285,11 +285,13 @@ class _FakeResponses:
     async def create(self, **kwargs):
         self.kwargs = kwargs
 
-        async def _empty():
-            if False:  # pragma: no cover - make this an async generator
-                yield
+        async def _completed():
+            yield SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(status="completed"),
+            )
 
-        return _empty()
+        return _completed()
 
 
 class _FakeClient:
@@ -309,9 +311,11 @@ class _TokenExpiredError(Exception):
         }
 
 
-async def _empty_stream():
-    if False:  # pragma: no cover - make this an async generator
-        yield
+async def _completed_stream():
+    yield SimpleNamespace(
+        type="response.completed",
+        response=SimpleNamespace(status="completed"),
+    )
 
 
 class _ScriptedResponses:
@@ -362,7 +366,7 @@ class TestUnauthorizedRecovery:
         p = CodexOAuthProvider(model="gpt-x")
         p._tokens = stale
         p._rebuild_client = lambda: None
-        p._client = _ScriptedClient([_TokenExpiredError(), _empty_stream])
+        p._client = _ScriptedClient([_TokenExpiredError(), _completed_stream])
         session = _FakeWSSession()
         p._ws_session = session
 
@@ -394,7 +398,7 @@ class TestUnauthorizedRecovery:
         p = CodexOAuthProvider(model="gpt-x")
         p._tokens = stale
         p._rebuild_client = lambda: None
-        p._client = _ScriptedClient([_TokenExpiredError(), _empty_stream])
+        p._client = _ScriptedClient([_TokenExpiredError(), _completed_stream])
         refresh_calls: list[CodexTokens] = []
 
         async def _refresh(tokens):
@@ -647,6 +651,298 @@ class _Ev:
         self.__dict__.update(kwargs)
 
 
+class TestHTTPResponseOutcomes:
+    def _provider(self, stream_factory):
+        provider = CodexOAuthProvider(
+            model="test", api_key="test", base_url="https://test.invalid/v1"
+        )
+        provider._client = SimpleNamespace(
+            responses=SimpleNamespace(
+                create=lambda **kwargs: stream_factory(),
+            )
+        )
+        return provider
+
+    async def test_missing_completion_raises_without_retry(self):
+        calls = 0
+
+        class _EOFStream:
+            def __init__(self):
+                self.sent = False
+                self.aclose_called = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.sent:
+                    raise StopAsyncIteration
+                self.sent = True
+                return _Ev(type="response.output_text.delta", delta="partial")
+
+            async def aclose(self):
+                self.aclose_called = True
+
+        stream = _EOFStream()
+
+        async def create(**kwargs):
+            nonlocal calls
+            calls += 1
+            return stream
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        chunks = []
+        with pytest.raises(cp.ResponseStreamError) as caught:
+            async for chunk in provider.chat([{"role": "user", "content": "hi"}]):
+                chunks.append(chunk)
+        assert caught.value.code == "response_unconfirmed"
+        assert chunks == ["partial"]
+        assert calls == 1
+        assert stream.aclose_called
+
+    @pytest.mark.parametrize(
+        "event,code",
+        [
+            (_Ev(type="response.failed"), "response_failed"),
+            (_Ev(type="response.incomplete"), "response_incomplete"),
+            (
+                _Ev(type="response.completed", response=_Ev(status="failed")),
+                "response_failed",
+            ),
+            (
+                _Ev(type="response.completed", response=_Ev(status="incomplete")),
+                "response_incomplete",
+            ),
+        ],
+    )
+    async def test_terminal_outcomes_raise_typed_error(self, event, code):
+        async def stream():
+            yield event
+
+        async def create(**kwargs):
+            return stream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        with pytest.raises(cp.ResponseStreamError) as caught:
+            [
+                chunk
+                async for chunk in provider.chat([{"role": "user", "content": "hi"}])
+            ]
+        assert caught.value.code == code
+
+    async def test_completed_without_usage_clears_previous_usage(self):
+        streams = [
+            [
+                _Ev(
+                    type="response.completed",
+                    response=_Ev(
+                        status="completed",
+                        usage=_Ev(
+                            input_tokens=10,
+                            output_tokens=2,
+                            total_tokens=12,
+                            input_tokens_details=None,
+                        ),
+                    ),
+                )
+            ],
+            [_Ev(type="response.completed", response=_Ev(status="completed"))],
+        ]
+
+        async def create(**kwargs):
+            events = streams.pop(0)
+
+            async def stream():
+                for event in events:
+                    yield event
+
+            return stream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        [chunk async for chunk in provider.chat([{"role": "user", "content": "hi"}])]
+        assert provider.last_usage["total_tokens"] == 12
+        [chunk async for chunk in provider.chat([{"role": "user", "content": "hi"}])]
+        assert provider.last_usage == {}
+
+    async def test_cleanup_failure_does_not_replace_failed_outcome(self):
+        class _FailingCloseStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                return _Ev(type="response.failed")
+
+            async def aclose(self):
+                raise OSError("close failed")
+
+        calls = 0
+
+        async def create(**kwargs):
+            nonlocal calls
+            calls += 1
+            return _FailingCloseStream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        with pytest.raises(cp.ResponseStreamError) as caught:
+            [
+                chunk
+                async for chunk in provider.chat([{"role": "user", "content": "hi"}])
+            ]
+        assert caught.value.code == "response_failed"
+        assert calls == 1
+
+    async def test_cleanup_failure_does_not_replace_incomplete_outcome(self):
+        class _FailingCloseStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                return _Ev(type="response.incomplete")
+
+            async def aclose(self):
+                raise OSError("close failed")
+
+        calls = 0
+
+        async def create(**kwargs):
+            nonlocal calls
+            calls += 1
+            return _FailingCloseStream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        with pytest.raises(cp.ResponseStreamError) as caught:
+            [
+                chunk
+                async for chunk in provider.chat([{"role": "user", "content": "hi"}])
+            ]
+        assert caught.value.code == "response_incomplete"
+        assert calls == 1
+
+    async def test_successful_cleanup_closes_terminal_stream(self):
+        class _ClosableStream:
+            def __init__(self):
+                self.sent = False
+                self.aclose_called = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if self.sent:
+                    raise StopAsyncIteration
+                self.sent = True
+                return _Ev(type="response.completed", response=_Ev(status="completed"))
+
+            async def aclose(self):
+                self.aclose_called = True
+
+        stream = _ClosableStream()
+
+        async def create(**kwargs):
+            return stream
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        [chunk async for chunk in provider.chat([{"role": "user", "content": "hi"}])]
+        assert stream.aclose_called
+
+    async def test_cleanup_failure_does_not_replace_unconfirmed_outcome(self):
+        class _FailingCloseStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def aclose(self):
+                raise OSError("close failed")
+
+        calls = 0
+
+        async def create(**kwargs):
+            nonlocal calls
+            calls += 1
+            return _FailingCloseStream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        with pytest.raises(cp.ResponseStreamError) as caught:
+            [
+                chunk
+                async for chunk in provider.chat([{"role": "user", "content": "hi"}])
+            ]
+        assert caught.value.code == "response_unconfirmed"
+        assert isinstance(caught.value.__cause__, OSError)
+        assert calls == 1
+
+    async def test_cleanup_failure_does_not_turn_completion_into_retry(self):
+        class _FailingCloseStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if hasattr(self, "sent"):
+                    raise StopAsyncIteration
+                self.sent = True
+                return _Ev(type="response.completed", response=_Ev(status="completed"))
+
+            async def aclose(self):
+                raise OSError("close failed")
+
+        calls = 0
+
+        async def create(**kwargs):
+            nonlocal calls
+            calls += 1
+            return _FailingCloseStream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        [chunk async for chunk in provider.chat([{"role": "user", "content": "hi"}])]
+        assert calls == 1
+
+    async def test_cleanup_cancellation_after_completion_preserves_success(self):
+        class _CancelledCloseStream:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if hasattr(self, "sent"):
+                    raise StopAsyncIteration
+                self.sent = True
+                return _Ev(type="response.completed", response=_Ev(status="completed"))
+
+            async def aclose(self):
+                raise asyncio.CancelledError
+
+        calls = 0
+
+        async def create(**kwargs):
+            nonlocal calls
+            calls += 1
+            return _CancelledCloseStream()
+
+        provider = self._provider(lambda: None)
+        provider._client.responses.create = create
+        [chunk async for chunk in provider.chat([{"role": "user", "content": "hi"}])]
+        assert calls == 1
+
+    async def test_cleanup_failure_does_not_replace_cancellation(self):
+        class _FailingCloseStream:
+            async def aclose(self):
+                raise OSError("close failed")
+
+        stream = _FailingCloseStream()
+        with pytest.raises(asyncio.CancelledError):
+            async with cp._preserve_stream_outcome(stream):
+                raise asyncio.CancelledError
+
+
 class TestReasoningCapture:
     """Codex must retain Responses reasoning text for snapshot persistence."""
 
@@ -780,11 +1076,10 @@ class _FakeWSResponses:
     async def create(self, **kwargs):
         self.kwargs = kwargs
 
-        async def _empty():
-            if False:  # pragma: no cover - async generator shape
-                yield
+        async def _completed():
+            yield _Ev(type="response.completed", response=_Ev(status="completed"))
 
-        return _empty()
+        return _completed()
 
 
 class _FakeWSClient:

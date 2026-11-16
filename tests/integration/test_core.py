@@ -97,6 +97,7 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
+from tests.helpers.response_stream import InterruptedResponseLLM
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
 # ---------------------------------------------------------------------------
@@ -2495,6 +2496,44 @@ class TestCoreIntegration:
         and ``Agent.attach_session_store`` is how the engine wires
         persistence onto a creature.
         """
+        llm = InterruptedResponseLLM(
+            [
+                ScriptEntry(
+                    "First answer", usage={"prompt_tokens": 100, "completion_tokens": 5}
+                ),
+                ScriptEntry("Partial answer", match="incomplete response"),
+                ScriptEntry("Recovered", match="recover"),
+            ]
+        )
+        async with Terrarium(session_dir=tmp_path / "response-outcomes") as engine:
+            node = await engine.add_creature(
+                AgentConfig(
+                    name="outcome", system_prompt="plain", tool_format="native"
+                ),
+                llm=llm,
+                pwd=tmp_path,
+                io="headless",
+                start=True,
+            )
+            assert (await node.run("hello")).text == "First answer"
+            failed = await node.run("incomplete response", raise_on_error=False)
+            assert failed.status == "error"
+            assert failed.text == "Partial answer"
+            events = node.agent.session_store.get_events("outcome")
+            error = next(e for e in events if e["type"] == "processing_error")
+            assert "response_outcome" in error
+            assert error["response_outcome"]["code"] == "response_unconfirmed"
+            replayed = replay_conversation(events, include_metadata=True)
+            incomplete = [
+                message
+                for message in replayed
+                if message["role"] == "assistant"
+                and message.get("metadata", {}).get("incomplete")
+            ]
+            assert [message["content"] for message in incomplete] == ["Partial answer"]
+            assert (await node.run("recover")).text == "Recovered"
+            assert "Partial answer" in str(llm.last_messages)
+
         legacy_image = tmp_path / "legacy-image.png"
         Image.new("RGB", (2, 2), "red").save(legacy_image)
         repair_command = RepairImagesCommand()

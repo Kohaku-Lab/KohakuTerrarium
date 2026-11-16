@@ -9,9 +9,11 @@ from kohakuterrarium.core.controller.controller import Controller, ControllerCon
 from kohakuterrarium.core.controller.messages import (
     begin_assistant,
     end_assistant,
+    record_incomplete_assistant,
 )
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.events import create_user_input_event
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.output import OutputRecorder
@@ -86,6 +88,43 @@ class TestBeginAssistant:
         await begin_assistant(controller)
 
         assert controller._completed_assistant_message is None
+
+
+class TestIncompleteAssistant:
+    @pytest.mark.parametrize(
+        "error",
+        [ResponseStreamError(), RuntimeError("secret"), asyncio.CancelledError()],
+    )
+    @pytest.mark.parametrize("content", ["", "partial"])
+    async def test_capture_keeps_partial_content_without_protocol_state(
+        self, error, content
+    ):
+        recorder = OutputRecorder()
+        controller = _controller(router=recorder)
+        controller.conversation.append(
+            "user",
+            "draw",
+            metadata={"turn_index": 2, "branch_id": 3, "origin_known": True},
+        )
+        await begin_assistant(controller)
+        if content:
+            await record_incomplete_assistant(controller, content, error)
+        if not content:
+            assert controller._completed_assistant_message is None
+            assert _event_types(recorder) == ["assistant_round_start"]
+            return
+        message = controller._completed_assistant_message
+        assert message.get_text_content() == content
+        assert message.metadata["incomplete"] is True
+        assert message.metadata["completion_state"] == (
+            "interrupted" if isinstance(error, asyncio.CancelledError) else "incomplete"
+        )
+        assert not message.tool_calls and not message.extra_fields
+        assert "secret" not in str(message.metadata)
+        payload = _message_payload(recorder)
+        assert payload["metadata"]["incomplete"] is True
+        assert "metadata" not in controller.conversation.to_messages()
+        assert controller.conversation.snapshot_messages()[-1]["metadata"]["incomplete"]
 
 
 class TestEndAssistant:

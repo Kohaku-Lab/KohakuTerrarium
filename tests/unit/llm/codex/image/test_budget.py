@@ -160,7 +160,7 @@ async def custom_backend():
             headers={"content-type": "text/event-stream"},
             content=(
                 'data: {"type":"response.output_text.delta","delta":"ok"}\n\n'
-                'data: {"type":"response.completed","response":{"id":"ok","output":[]}}\n\n'
+                'data: {"type":"response.completed","response":{"id":"ok","status":"completed","output":[]}}\n\n'
             ),
         )
 

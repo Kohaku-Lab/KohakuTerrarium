@@ -14,7 +14,7 @@ from kohakuterrarium.core.controller.controller import (
     ControllerContext,
     _merge_text_and_parts,
 )
-from kohakuterrarium.errors import InvalidRequestError, LLMError
+from kohakuterrarium.errors import InvalidRequestError, LLMError, ResponseStreamError
 from kohakuterrarium.core.conversation.elide import (
     ELISION_MARKER,
     TOOL_FEEDBACK_KIND,
@@ -437,17 +437,54 @@ class TestErrorRecovery:
                 if self.call_count == 0:
                     self.call_count += 1
                     raise RuntimeError("api error")
-                async for c in super().chat(messages, **kwargs):
-                    yield c
+                async for chunk in super().chat(messages, **kwargs):
+                    yield chunk
 
         bad = _BadLLM(["recovered"])
         env = TestAgentBuilder().with_llm(bad).build()
-        evt = create_user_input_event("hi")
-        await env.controller.push_event(evt)
-        # Run a single iteration directly so we can observe the exception.
+        await env.controller.push_event(create_user_input_event("hi"))
         with pytest.raises(RuntimeError, match="api error"):
             async for _ in env.controller.run_once():
                 pass
+
+    async def test_partial_response_is_retained_for_next_turn(self):
+        class _InterruptedLLM(ScriptedLLM):
+            async def chat(self, messages, **kwargs):
+                if self.call_count == 0:
+                    self.call_count += 1
+                    self.call_log.append(self._normalize_messages(messages))
+                    self.last_usage = {}
+                    yield "partial answer"
+                    raise ResponseStreamError()
+                async for chunk in super().chat(messages, **kwargs):
+                    yield chunk
+
+        llm = _InterruptedLLM(["continued answer"])
+        env = TestAgentBuilder().with_llm(llm).build()
+        await env.controller.push_event(create_user_input_event("first request"))
+        with pytest.raises(ResponseStreamError):
+            async for _ in env.controller.run_once():
+                pass
+
+        incomplete = env.controller.conversation.get_last_assistant_message()
+        assert incomplete is not None
+        assert incomplete.get_text_content() == "partial answer"
+        assert incomplete.metadata["incomplete"] is True
+        assert incomplete.metadata["completion_state"] == "incomplete"
+        assert incomplete.metadata["response_outcome"]["retry_safety"] == "no_retry"
+
+        await env.controller.push_event(create_user_input_event("continue"))
+        async for _ in env.controller.run_once():
+            pass
+        assert any(
+            message["role"] == "assistant" and message["content"] == "partial answer"
+            for message in llm.last_messages
+        )
+        assert "metadata" not in next(
+            message
+            for message in llm.last_messages
+            if message["role"] == "assistant" and message["content"] == "partial answer"
+        )
 
 
 # ── tool format override ─────────────────────────────────────────

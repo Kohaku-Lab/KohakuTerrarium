@@ -3,11 +3,12 @@
 from contextlib import aclosing
 from typing import Any, AsyncIterator
 
-from kohakuterrarium.llm.codex.image.gen import build_image_part
+from kohakuterrarium.errors import ResponseStreamError
 from kohakuterrarium.llm.codex.format import (
     fix_tool_call_pairing,
     maybe_capture_stream_rate_limit,
 )
+from kohakuterrarium.llm.codex.image.gen import build_image_part
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.codex.rate_limits import (
     parse_rate_limit_event,
@@ -77,6 +78,8 @@ def process_codex_event(
     event: Any,
     collected_tool_calls: list[NativeToolCall],
     image_parts: list | None = None,
+    *,
+    validate_outcome: bool = False,
 ) -> str | None:
     """Fold one Responses stream event into provider state; return text."""
     # Generic SDK events may carry fresher inline rate-limit payloads.
@@ -86,6 +89,10 @@ def process_codex_event(
     provider._reasoning.consume(event)
 
     match getattr(event, "type", ""):
+        case "response.failed" | "error" if validate_outcome:
+            raise ResponseStreamError("response_failed")
+        case "response.incomplete" if validate_outcome:
+            raise ResponseStreamError("response_incomplete")
         case "response.output_text.delta":
             piece = strip_surrogates(event.delta)
             provider._reasoning.consume_output_text(piece)
@@ -117,6 +124,12 @@ def process_codex_event(
                     target.append(part)
         case "response.completed":
             resp = getattr(event, "response", None)
+            status = getattr(resp, "status", None)
+            if validate_outcome and status != "completed":
+                code = (
+                    "response_failed" if status == "failed" else "response_incomplete"
+                )
+                raise ResponseStreamError(code)
             if resp:
                 u = getattr(resp, "usage", None)
                 if u:
