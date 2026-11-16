@@ -9,13 +9,19 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from kohakuterrarium.session.history.branch_paths import index_parent_paths
+from kohakuterrarium.session.history.branch_paths import index_parent_paths_by_position
 from kohakuterrarium.session.history.paging import _ordered_event_refs
 from kohakuterrarium.session.memory.blocks import _anchor, _content_to_text
+from kohakuterrarium.session.memory.preview import (
+    MAX_FOCUS_CHARS,
+    TextSlice,
+    preview_text,
+)
 from kohakuterrarium.session.memory.visibility import BranchVisibility
-from kohakuterrarium.session.vault.io import key_text, scan_keys
 
 MAX_ANCHORS = 8192
+MAX_VIEW_PAIRS = 120_000
+MAX_CACHED_VIEWS = 32
 MAX_WINDOW_SIDE = 10
 DEFAULT_WINDOW_SIDE = 3
 MAX_SCANNED_PER_SIDE = 8192
@@ -54,6 +60,7 @@ class _Location:
     fingerprint: str
     view: tuple[tuple[int, int], ...]
     part_index: int = 0
+    focus: str = ""
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,9 @@ class ContextEvent:
     truncated: bool
     role: str
     part_index: int = 0
+    content_start: int = 0
+    content_end: int = 0
+    content_total: int = 0
 
 
 @dataclass(frozen=True)
@@ -79,7 +89,13 @@ class ContextWindow:
     has_after: bool
 
 
-def _preview(event: dict, *, part_index: int | None = None) -> tuple[str, bool]:
+def _preview(
+    event: dict,
+    *,
+    part_index: int | None = None,
+    focus: str = "",
+    offset: int | None = None,
+) -> TextSlice:
     kind = event.get("type")
     if kind in ("text", "text_chunk") and part_index is not None:
         text = _content_to_text(event.get("content"))
@@ -104,10 +120,7 @@ def _preview(event: dict, *, part_index: int | None = None) -> tuple[str, bool]:
         )
     if not content.strip():
         content = "(no text payload)"
-    truncated = len(content) > MAX_EVENT_CHARS
-    if truncated:
-        content = content[:MAX_EVENT_CHARS] + f"… ({len(content)} chars total)"
-    return content, truncated
+    return preview_text(content, MAX_EVENT_CHARS, focus=focus, offset=offset)
 
 
 class MemoryContextNavigator:
@@ -116,69 +129,98 @@ class MemoryContextNavigator:
     def __init__(self, store):
         self._store = store
         self._anchors: OrderedDict[str, _Location] = OrderedDict()
+        self._view_cache: OrderedDict[str, tuple[tuple[int, int], ...]] = OrderedDict()
+        # Track unique snapshots, not the number of anchors referring to them.
+        self._view_refs: dict[int, tuple[tuple, int]] = {}
+        self._view_pairs = 0
 
     def close(self) -> None:
         self._anchors.clear()
+        self._view_cache.clear()
+        self._view_refs.clear()
+        self._view_pairs = 0
+
+    def _freeze_view(
+        self, agent: str, selected: dict[int, int]
+    ) -> tuple[tuple[int, int], ...]:
+        view = tuple(sorted(selected.items()))
+        cached = self._view_cache.get(agent)
+        if cached is not None and cached == view:
+            self._view_cache.move_to_end(agent)
+            return cached
+        self._view_cache[agent] = view
+        self._view_cache.move_to_end(agent)
+        if len(self._view_cache) > MAX_CACHED_VIEWS:
+            self._view_cache.popitem(last=False)
+        return view
+
+    def _evict_oldest(self) -> None:
+        _, loc = self._anchors.popitem(last=False)
+        key = id(loc.view)
+        view, count = self._view_refs[key]
+        if count > 1:
+            self._view_refs[key] = (view, count - 1)
+        else:
+            self._view_pairs -= len(view)
+            del self._view_refs[key]
+            if self._view_cache.get(loc.agent) is view:
+                self._view_cache.pop(loc.agent, None)
 
     def _remember(self, loc: _Location) -> str:
+        if len(loc.view) > MAX_VIEW_PAIRS:
+            raise MemoryContextError(
+                "ANCHOR_BUDGET",
+                "Selected lineage exceeds the memory navigation budget.",
+            )
         token = secrets.token_urlsafe(24)
         self._anchors[token] = loc
-        if len(self._anchors) > MAX_ANCHORS:
-            self._anchors.popitem(last=False)
+        key = id(loc.view)
+        if key in self._view_refs:
+            view, count = self._view_refs[key]
+            self._view_refs[key] = (view, count + 1)
+        else:
+            self._view_refs[key] = (loc.view, 1)
+            self._view_pairs += len(loc.view)
+        while len(self._anchors) > MAX_ANCHORS or self._view_pairs > MAX_VIEW_PAIRS:
+            self._evict_oldest()
         return token
 
     def register_results(
         self,
         results: list,
         branch_views: dict[str, dict[int, int]],
+        query: str = "",
     ) -> list:
         """Bind search hits to verified physical source records.
 
-        The index stores logical event positions in get_events() order, which
-        can differ from numeric physical order on long or imported sessions.
-        Reuse get_events()' lexical key order here; the source fingerprint
-        guards against unreadable holes and stale index positions.
+        Every hit carries a physical ref plus a fingerprint. Neither logical
+        event IDs nor ordinal positions are needed, so unreadable neighbors
+        cannot shift the source location.
         """
-        index_refs: dict[str, list[str]] = {}
         prepared: list[tuple[Any, _Location]] = []
+        views: dict[str, tuple[tuple[int, int], ...]] = {}
         for result in results:
             if result.agent not in branch_views:
                 raise MemoryContextError(
                     "ANCHOR_SOURCE_MISMATCH",
                     "Search result belongs to an agent outside the selected scope.",
                 )
+            ref = result.source_ref
+            prefix = f"{result.agent}:e"
+            suffix = (
+                ref[len(prefix) :]
+                if isinstance(ref, str) and ref.startswith(prefix)
+                else ""
+            )
             if (
-                type(result.event_position) is not int
-                or result.event_position < 0
+                not suffix
+                or not suffix.isascii()
+                or not suffix.isdecimal()
                 or not result.source_fingerprint
             ):
                 raise MemoryContextError(
                     "ANCHOR_SOURCE_MISMATCH",
-                    "Search index lacks a verifiable source. Reindex and retry.",
-                )
-            if result.agent not in index_refs:
-                prefix = f"{result.agent}:e"
-                index_refs[result.agent] = [
-                    key_text(key) for key in scan_keys(self._store.events, prefix)
-                ]
-            refs = index_refs[result.agent]
-            pos = result.event_position
-            if pos >= len(refs):
-                raise MemoryContextError(
-                    "ANCHOR_SOURCE_MISMATCH", "Source event is no longer available."
-                )
-            ref = refs[pos]
-            # Reject unusual keys: a valid search match must resolve to one
-            # physical event record, not a nested or similarly prefixed key.
-            suffix = ref.removeprefix(f"{result.agent}:e")
-            if (
-                not ref.startswith(f"{result.agent}:e")
-                or not suffix
-                or not suffix.isascii()
-                or not suffix.isdecimal()
-            ):
-                raise MemoryContextError(
-                    "ANCHOR_SOURCE_MISMATCH", "Source event key is invalid."
+                    "Search index lacks a verifiable source reference. Reindex and retry.",
                 )
             try:
                 event = self._store.events[ref]
@@ -194,7 +236,11 @@ class MemoryContextNavigator:
                     "ANCHOR_SOURCE_MISMATCH",
                     "Search index and source history disagree. Reindex and retry.",
                 )
-            view = tuple(sorted(branch_views[result.agent].items()))
+            if result.agent not in views:
+                views[result.agent] = self._freeze_view(
+                    result.agent, branch_views[result.agent]
+                )
+            view = views[result.agent]
             prepared.append(
                 (
                     result,
@@ -204,6 +250,7 @@ class MemoryContextNavigator:
                         result.source_fingerprint,
                         view,
                         result.part_index,
+                        query[:MAX_FOCUS_CHARS],
                     ),
                 )
             )
@@ -215,8 +262,9 @@ class MemoryContextNavigator:
     def _visible(
         self,
         event: dict,
+        ref: str,
         visibility: BranchVisibility,
-        legacy_paths: dict[int, tuple | None] | None,
+        legacy_paths: dict[str, tuple] | None,
     ) -> bool:
         if event.get("type") not in CONTEXT_TYPES:
             return False
@@ -228,35 +276,27 @@ class MemoryContextNavigator:
             and type(branch) is int
             and event.get("parent_branch_path") is None
         ):
-            eid = event.get("event_id")
-            if (
-                legacy_paths is None
-                or type(eid) is not int
-                or eid not in legacy_paths
-                or legacy_paths[eid] is None
-            ):
+            if legacy_paths is None or ref not in legacy_paths:
                 raise MemoryContextError(
                     "LINEAGE_UNAVAILABLE",
                     "Cannot establish the ancestry of this historical event.",
                 )
-            record = {**event, "parent_branch_path": legacy_paths[eid]}
+            record = {**event, "parent_branch_path": legacy_paths[ref]}
         return visibility.matches(record)
 
-    def _legacy_paths(self, agent: str) -> dict[int, tuple | None]:
-        """Resolve historical ancestry, refusing ambiguous mirrored IDs."""
-        events = self._store.get_events(agent)
-        paths = index_parent_paths(events)
-        seen: set[int] = set()
-        for event in events:
-            eid = event.get("event_id")
-            if type(eid) is not int:
-                continue
-            if eid in seen:
-                paths[eid] = None
-            seen.add(eid)
-        return paths
+    def _legacy_paths(self, agent: str) -> dict[str, tuple]:
+        """Resolve each legacy event's ancestry by its unique physical ref."""
+        events = self._store.get_memory_events(agent)
+        paths = index_parent_paths_by_position(events)
+        return {event.source_ref: path for event, path in zip(events, paths)}
 
-    def expand(self, anchor: str, before: int = 3, after: int = 3) -> ContextWindow:
+    def expand(
+        self,
+        anchor: str,
+        before: int = 3,
+        after: int = 3,
+        offset: int | None = None,
+    ) -> ContextWindow:
         if type(before) is not int or not 0 <= before <= MAX_WINDOW_SIDE:
             raise MemoryContextError(
                 "INVALID_WINDOW",
@@ -266,6 +306,10 @@ class MemoryContextNavigator:
             raise MemoryContextError(
                 "INVALID_WINDOW",
                 f"after must be an integer from 0 to {MAX_WINDOW_SIDE}",
+            )
+        if offset is not None and (type(offset) is not int or offset < 0):
+            raise MemoryContextError(
+                "INVALID_CONTENT_OFFSET", "offset must be a nonnegative integer"
             )
         if (
             not isinstance(anchor, str)
@@ -323,7 +367,7 @@ class MemoryContextNavigator:
                     and legacy_paths is None
                 ):
                     legacy_paths = self._legacy_paths(loc.agent)
-                if self._visible(event, visibility, legacy_paths):
+                if self._visible(event, ref, visibility, legacy_paths):
                     found.append((ref, event))
                     if len(found) > n:
                         return found[:n], True
@@ -343,22 +387,30 @@ class MemoryContextNavigator:
                 if role == "match"
                 else self._remember(_Location(loc.agent, ref, _anchor(event), loc.view))
             )
-            content, truncated = _preview(
-                event,
-                part_index=loc.part_index if role == "match" else None,
-            )
+            try:
+                preview = _preview(
+                    event,
+                    part_index=loc.part_index if role == "match" else None,
+                    focus=loc.focus if role == "match" and offset is None else "",
+                    offset=offset if role == "match" else None,
+                )
+            except ValueError as exc:
+                raise MemoryContextError("INVALID_CONTENT_OFFSET", str(exc)) from exc
             turn = event.get("turn_index")
             branch = event.get("branch_id")
             items.append(
                 ContextEvent(
                     anchor=token,
                     kind=str(event.get("type", "unknown")),
-                    content=content,
+                    content=preview.content,
                     turn_index=turn if type(turn) is int else None,
                     branch_id=branch if type(branch) is int else None,
-                    truncated=truncated,
+                    truncated=preview.truncated,
                     role=role,
                     part_index=loc.part_index if role == "match" else 0,
+                    content_start=preview.start,
+                    content_end=preview.end,
+                    content_total=preview.total,
                 )
             )
         return ContextWindow(items, has_before, has_after)

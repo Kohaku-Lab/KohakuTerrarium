@@ -15,10 +15,10 @@ from kohakuterrarium.session.memory.visibility import (
 
 
 # Format 1 indexes the selected lineage; format 2 staged all branches;
-# format 3 added legacy ancestry; format 4 records the source fingerprint
-# needed to safely bind a searchable paragraph to a physical event.
+# format 3 added legacy ancestry, format 4 a source fingerprint, and
+# format 5 records exact physical source refs and disambiguates mirrored IDs.
 _SELECTED_INDEX_FORMAT = 1
-_ALL_BRANCH_INDEX_FORMAT = 4
+_ALL_BRANCH_INDEX_FORMAT = 5
 
 
 @dataclass
@@ -42,6 +42,7 @@ class SearchResult:
     branch_id: int | None = None
     parent_branch_path: tuple[tuple[int, int], ...] | None = None
     source_fingerprint: str = ""
+    source_ref: str = ""
     anchor: str = ""
 
     @property
@@ -275,4 +276,5 @@ def _source_result_metadata(meta: dict[str, Any]) -> dict[str, Any]:
             tuple(tuple(pair) for pair in path) if path is not None else None
         ),
         "source_fingerprint": meta.get("source_fingerprint", ""),
+        "source_ref": meta.get("source_ref", ""),
     }

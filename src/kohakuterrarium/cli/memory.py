@@ -102,7 +102,7 @@ def search_cli(
         # a Studio or live search upgraded this session's index format.
         branch_views = {}
         for name in store.load_meta().get("agents", []):
-            events = store.get_events(name)
+            events = store.get_memory_events(name)
             branch_views[name] = resolve_search_view(
                 events, requested_store_view(store, name)
             )

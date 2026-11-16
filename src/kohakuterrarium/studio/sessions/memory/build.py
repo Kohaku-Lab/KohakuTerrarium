@@ -187,7 +187,7 @@ def build_index(
             # Count first so indexing progress has a stable denominator.
             agent_events: dict[str, list[dict]] = {}
             for agent_name in agents:
-                events = store.get_events(agent_name) or []
+                events = store.get_memory_events(agent_name) or []
                 agent_events[agent_name] = events
                 total_events_seen += len(events)
             emit(

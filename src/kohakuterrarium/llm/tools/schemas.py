@@ -361,6 +361,11 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "maximum": 10,
                 "description": "Chronological events following anchor (default 3)",
             },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Optional character offset within the anchored event",
+            },
         },
         # The tool validates exactly-one-of, as provider support for oneOf varies.
         "required": [],

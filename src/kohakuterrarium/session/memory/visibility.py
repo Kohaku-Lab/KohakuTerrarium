@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 from kohakuterrarium.session.history.branch_paths import _coerce_branch_view
 from kohakuterrarium.session.history.selection import SelectionCompatibility
 from kohakuterrarium.session.history.replay import (
-    index_parent_paths,
+    index_parent_paths_by_position,
     resolve_selected_branches,
 )
 
@@ -109,7 +109,9 @@ def resolve_search_view(
     Keep this consistent with conversation replay; callers compute it when
     reading source events, not by interpreting only ranked search candidates.
     """
-    return resolve_selected_branches(events, index_parent_paths(events), requested_view)
+    return resolve_selected_branches(
+        events, index_parent_paths_by_position(events), requested_view
+    )
 
 
 def requested_store_view(store: Any, agent: str) -> dict[int, int] | None:

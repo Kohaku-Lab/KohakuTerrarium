@@ -13,7 +13,22 @@ from kohakuterrarium.session.store.events.discovery import (
     discover_attached_agents,
 )
 from kohakuterrarium.session.store.events.values import _iter_event_values
-from kohakuterrarium.session.vault.io import key_text, read_prefix, scan_keys
+from kohakuterrarium.session.vault.io import (
+    key_text,
+    read_prefix,
+    read_values,
+    scan_keys,
+)
+
+
+class MemoryEvent(dict):
+    """Detached event with a source locator that is never persisted as payload."""
+
+    __slots__ = ("source_ref",)
+
+    def __init__(self, content: dict, source_ref: str):
+        super().__init__(content)
+        self.source_ref = source_ref
 
 
 class EventReadMixin:
@@ -32,6 +47,21 @@ class EventReadMixin:
         returned (cursor-style incremental reads).
         """
         return list(self._iter_events(agent, since_event_id))
+
+    def get_memory_events(self, agent: str) -> list[dict]:
+        """Read indexed history with its exact physical source refs attached.
+
+        Ref identity lives on an ephemeral dict subclass, not inside the
+        persistent event content. Unreadable rows are skipped without shifting
+        the physical locator of subsequent readable events.
+        """
+        self._flush_events_cache()
+        keys = scan_keys(self.events, f"{agent}:e")
+        return [
+            MemoryEvent(event, key_text(key))
+            for key, event in read_values(self.events, keys, what="memory event")
+            if isinstance(event, dict)
+        ]
 
     def _iter_events(
         self, agent: str, since_event_id: int | None = None

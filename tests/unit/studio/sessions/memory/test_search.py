@@ -320,14 +320,14 @@ class TestSearchSessionMemory:
         finally:
             store.close()
 
-        real_get_events = SessionStore.get_events
+        real_get_events = SessionStore.get_memory_events
         witness = LoopWitness(asyncio.get_running_loop())
 
         def observed_get_events(self, agent, **kwargs):
             witness.observe()
             return real_get_events(self, agent, **kwargs)
 
-        monkeypatch.setattr(SessionStore, "get_events", observed_get_events)
+        monkeypatch.setattr(SessionStore, "get_memory_events", observed_get_events)
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, None)
         )
@@ -349,14 +349,14 @@ class TestSearchSessionMemory:
             live_store.close()
             raise
 
-        real_get_events = live_store.get_events
+        real_get_events = live_store.get_memory_events
         witness = LoopWitness(asyncio.get_running_loop())
 
         def observed_get_events(agent, **kwargs):
             witness.observe()
             return real_get_events(agent, **kwargs)
 
-        live_store.get_events = observed_get_events
+        live_store.get_memory_events = observed_get_events
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, live_store)
         )

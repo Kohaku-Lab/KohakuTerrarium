@@ -149,7 +149,7 @@ class SessionReader:
         try:
             views = {
                 name: resolve_search_view(
-                    self._store.get_events(name),
+                    self._store.get_memory_events(name),
                     requested_store_view(self._store, name),
                 )
                 for name in self.agents
@@ -164,7 +164,7 @@ class SessionReader:
         try:
             total = 0
             for name in self.agents:
-                total += memory.index_events(name, self._store.get_events(name))
+                total += memory.index_events(name, self._store.get_memory_events(name))
             return total
         finally:
             memory.close()

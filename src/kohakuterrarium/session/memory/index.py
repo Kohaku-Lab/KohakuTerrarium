@@ -185,6 +185,12 @@ class SessionMemory(MemorySearchMixin):
             checkpoint is None
             or checkpoint.get("generation") != generation
             or self._state.get(f"{key}:pending", False)
+            or (
+                self._index_format == _ALL_BRANCH_INDEX_FORMAT
+                and checkpoint.get("source_refs_complete") is False
+                and events
+                and bool(getattr(events[-1], "source_ref", ""))
+            )
         )
         if not reset:
             try:
@@ -338,6 +344,7 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
         "channel": block.channel,
         "block_id": block.block_id,
         "source_fingerprint": block.source_fingerprint,
+        "source_ref": block.source_ref,
         "event_id": block.event_id,
         "event_position": block.event_position,
         "part_index": block.part_index,

@@ -23,17 +23,15 @@ def _coerce_path(raw: Any) -> tuple[tuple[int, int], ...]:
     return tuple(out)
 
 
-def index_parent_paths(
+def index_parent_paths_by_position(
     events_list: list[dict[str, Any]],
-) -> dict[int, tuple[tuple[int, int], ...]]:
-    """Map each event_id → its parent_branch_path.
+) -> list[tuple[tuple[int, int], ...]]:
+    """Return each physical event's ancestry in input order.
 
-    Explicit paths take precedence. Legacy events inherit the latest branch seen
-    for each earlier turn at that point in event order.
-    Public: shared by replay selection and ``session.resume`` branch-state
-    restore.
+    A position is unique within this history snapshot, even when mirrored
+    events reuse a logical event_id.
     """
-    paths: dict[int, tuple[tuple[int, int], ...]] = {}
+    paths: list[tuple[tuple[int, int], ...]] = []
     latest_by_turn: dict[int, int] = {}
     shared: dict[tuple, tuple] = {}
     legacy: dict[int, tuple] = {}
@@ -42,36 +40,36 @@ def index_parent_paths(
     for evt in events_list:
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
-        eid = evt.get("event_id")
         if canonical and any(
             isinstance(value, int) and type(value) is not int for value in (ti, bi)
         ):
             canonical = False
             legacy.clear()
         explicit = _coerce_path(evt.get("parent_branch_path"))
-        if isinstance(eid, int):
-            if explicit:
-                if all(type(t) is int and type(b) is int for t, b in explicit):
-                    explicit = shared.setdefault(explicit, explicit)
-                paths[eid] = explicit
-            elif isinstance(ti, int):
-                path = legacy.get(ti) if canonical else None
-                if path is None:
-                    path = tuple(
-                        sorted(
-                            ((t, b) for t, b in latest_by_turn.items() if t < ti),
-                            key=lambda p: p[0],
-                        )
+        if explicit:
+            if all(type(t) is int and type(b) is int for t, b in explicit):
+                explicit = shared.setdefault(explicit, explicit)
+            path = explicit
+        elif isinstance(ti, int):
+            path = legacy.get(ti) if canonical else None
+            if path is None:
+                path = tuple(
+                    sorted(
+                        ((t, b) for t, b in latest_by_turn.items() if t < ti),
+                        key=lambda pair: pair[0],
                     )
-                    if canonical:
-                        path = shared.setdefault(path, path)
-                        legacy[ti] = path
-                        latest_cached_turn = (
-                            ti
-                            if latest_cached_turn is None
-                            else max(latest_cached_turn, ti)
-                        )
-                paths[eid] = path
+                )
+                if canonical:
+                    path = shared.setdefault(path, path)
+                    legacy[ti] = path
+                    latest_cached_turn = (
+                        ti
+                        if latest_cached_turn is None
+                        else max(latest_cached_turn, ti)
+                    )
+        else:
+            path = ()
+        paths.append(path)
         if isinstance(ti, int) and isinstance(bi, int):
             prev = latest_by_turn.get(ti, 0)
             if bi > prev:
@@ -81,9 +79,25 @@ def index_parent_paths(
                     and latest_cached_turn is not None
                     and ti < latest_cached_turn
                 ):
-                    legacy = {t: path for t, path in legacy.items() if t <= ti}
+                    legacy = {t: p for t, p in legacy.items() if t <= ti}
                     latest_cached_turn = max(legacy, default=None)
     return paths
+
+
+def index_parent_paths(
+    events_list: list[dict[str, Any]],
+) -> dict[int, tuple[tuple[int, int], ...]]:
+    """Legacy event_id lookup. Prefer positional paths when IDs may repeat."""
+    ordered = index_parent_paths_by_position(events_list)
+    return {
+        event["event_id"]: path
+        for event, path in zip(events_list, ordered)
+        if isinstance(event.get("event_id"), int)
+        and (
+            _coerce_path(event.get("parent_branch_path"))
+            or isinstance(event.get("turn_index"), int)
+        )
+    }
 
 
 def _path_matches(
@@ -140,13 +154,13 @@ def resolve_branch_view_strict(
     """Validate a branch view and return its authoritative branch projection."""
     events_list = list(events)
     requested = _coerce_branch_view(branch_view)
-    parent_paths = index_parent_paths(events_list)
+    parent_paths = index_parent_paths_by_position(events_list)
 
     pairs: set[tuple[int, int]] = set()
     pair_paths: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
     candidates: dict[int, list[tuple[tuple[tuple[int, int], ...], int]]] = {}
     seen_pairs: set[tuple[Any, Any]] = set()
-    for evt in events_list:
+    for position, evt in enumerate(events_list):
         seen_pairs.add((evt.get("turn_index"), evt.get("branch_id")))
         if evt.get("type") not in ("user_message", "user_input"):
             continue
@@ -154,10 +168,9 @@ def resolve_branch_view_strict(
             pair = (int(evt.get("turn_index")), int(evt.get("branch_id")))
         except (TypeError, ValueError):
             continue
-        event_id = evt.get("event_id")
         path = (
-            parent_paths.get(event_id, ())
-            if isinstance(event_id, int)
+            parent_paths[position]
+            if isinstance(evt.get("event_id"), int)
             else _coerce_path(evt.get("parent_branch_path"))
         )
         pairs.add(pair)

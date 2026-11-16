@@ -7,7 +7,7 @@ tags: [memory, search]
 
 # search_memory
 
-Search session events and inspect adjacent context.
+Search indexed session history and nearby events.
 
 ## Arguments
 
@@ -17,6 +17,7 @@ Search session events and inspect adjacent context.
 | anchor | string | navigate | Opaque token from search/context |
 | before | integer | no | Earlier events, 0–10 (default 3) |
 | after | integer | no | Later events, 0–10 (default 3) |
+| offset | integer | no | Character offset within anchored event |
 | k | integer | no | Search results (default 5) |
 | mode | string | no | `auto`, `fts`, `semantic`, `hybrid` |
 | agent | string | no | Search an agent in this session |
@@ -25,12 +26,12 @@ Pass exactly one of `query` or `anchor`.
 
 ## Behavior
 
-- Search hits include `anchor: ...`; call `search_memory(anchor="...", before=3, after=3)` for adjacent events. Context events have anchors and `has_before`/`has_after` flags.
-- Anchors freeze the matched branch lineage. Later branch switches do not change their context. Changed sources and expired anchors return explicit errors.
+- Hits include `anchor: ...`; call `search_memory(anchor="...", before=3, after=3)`. Context has anchors and `has_before`/`has_after` flags.
+- Anchors freeze lineage. Changed sources or expired anchors return errors.
 - `fts`/anchor reads do not load embeddings. `auto`/`hybrid` fall back to FTS on embedding errors; `semantic` errors instead.
-- Searches include the selected branch history of the current session, not files. Use `grep` for files.
+- Searches cover this session's selected lineage, not files. Use `grep` for files.
 
 ## Limits
 
-- Read windows have at most 10 events each way, bounded text per event and a bounded history scan.
-- Compaction retains raw events; anchors survive unchanged source history.
+- Each side has up to 10 events. Long text exposes content_slice and next_offset; use `search_memory(anchor="...", offset=N, before=0, after=0)`.
+- Compaction keeps raw history; valid anchors survive.

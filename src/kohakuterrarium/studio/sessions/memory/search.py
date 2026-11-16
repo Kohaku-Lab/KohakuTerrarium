@@ -144,7 +144,7 @@ def _search_session_sync(
             meta = store.load_meta()
             branch_views = {}
             for agent_name in meta.get("agents", []):
-                events = store.get_events(agent_name)
+                events = store.get_memory_events(agent_name)
                 branch_views[agent_name] = resolve_search_view(
                     events, requested_store_view(store, agent_name)
                 )

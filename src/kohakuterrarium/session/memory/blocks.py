@@ -8,6 +8,7 @@ from typing import Any
 from kohakuterrarium.session.history.replay import (
     _coerce_path,
     index_parent_paths,
+    index_parent_paths_by_position,
     resolve_selected_branches,
     select_live_event_ids,
 )
@@ -106,13 +107,13 @@ def extract_batch(
             for block in blocks
             if block.turn_index is not None
             and block.turn_index > 1
-            and not block.parent_branch_path
+            and block.parent_branch_path is None
         ]
         if missing:
-            inferred = index_parent_paths(events)
+            inferred = index_parent_paths_by_position(events)
             for block in missing:
-                if block.event_id is not None and block.event_id in inferred:
-                    block.parent_branch_path = inferred[block.event_id]
+                if block.event_position is not None:
+                    block.parent_branch_path = inferred[block.event_position]
     if start_from > count:
         blocks = [
             b
@@ -122,6 +123,9 @@ def extract_batch(
     state.update(count=len(events), anchor=_anchor(events[-1]) if events else "")
     if all_branches:
         state["all_branches"] = True
+        state["source_refs_complete"] = state.get("source_refs_complete", True) and all(
+            bool(block.source_ref) for block in blocks
+        )
     else:
         state.update(branches=branches, legacy_conflicts=legacy_conflicts)
     return blocks, state
@@ -149,6 +153,7 @@ class Block:
     branch_id: int | None = None
     parent_branch_path: tuple[tuple[int, int], ...] | None = None
     source_fingerprint: str = ""
+    source_ref: str = ""
 
 
 def _content_to_text(content: Any) -> str:
@@ -339,8 +344,12 @@ def _extract_blocks(
         elif etype == "processing_end":
             in_round = False
 
-        for part, block in enumerate(blocks[first_block:]):
-            block.source_fingerprint = _anchor(evt)
+        # Hash the physical source only once, even if it yields many paragraphs.
+        event_blocks = blocks[first_block:]
+        fingerprint = _anchor(evt) if event_blocks else ""
+        for part, block in enumerate(event_blocks):
+            block.source_fingerprint = fingerprint
+            block.source_ref = getattr(evt, "source_ref", "")
             block.block_id = f"{agent}:e{event_offset + i}:p{part}"
             block.event_id = eid if type(eid) is int else None
             block.event_position = event_offset + i

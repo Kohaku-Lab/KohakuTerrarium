@@ -7,6 +7,7 @@ import asyncio
 from typing import Any
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.core.conversation.continuation import selected_branch_view
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -15,6 +16,7 @@ from kohakuterrarium.modules.tool.base import (
 )
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.context import MemoryContextError
+from kohakuterrarium.session.memory.preview import preview_text
 from kohakuterrarium.session.memory.async_search import (
     LiveSessionMemory,
     live_memory_for_store,
@@ -80,6 +82,7 @@ class SearchMemoryTool(BaseTool):
                     anchor,
                     before=args.get("before", 3),
                     after=args.get("after", 3),
+                    offset=args.get("offset"),
                 )
                 return ToolResult(
                     output=self._format_window(window),
@@ -104,10 +107,6 @@ class SearchMemoryTool(BaseTool):
             if isinstance(memory, LiveSessionMemory):
                 # Resolve the active (possibly explicitly selected) lineage on
                 # the store owner thread, not from an event-loop database read.
-                from kohakuterrarium.core.conversation.continuation import (
-                    selected_branch_view,
-                )
-
                 current_view = await store.run(selected_branch_view, context.agent)
                 config = (
                     await store.run(self._load_embed_config, store, context.agent)
@@ -160,13 +159,11 @@ class SearchMemoryTool(BaseTool):
             if r.anchor:
                 lines.append(f"anchor: {r.anchor}")
             # Bound each result so one event cannot consume the tool-result context.
-            content = r.content
-            if len(content) > SEARCH_RESULT_DISPLAY_CHARS:
-                content = (
-                    content[:SEARCH_RESULT_DISPLAY_CHARS]
-                    + f"... ({len(r.content)} chars total)"
-                )
-            lines.append(content)
+            lines.append(
+                preview_text(
+                    r.content, SEARCH_RESULT_DISPLAY_CHARS, focus=query
+                ).content
+            )
             lines.append("")
 
         return ToolResult(output="\n".join(lines), exit_code=0)
@@ -184,7 +181,18 @@ class SearchMemoryTool(BaseTool):
                 header += "]"
             if event.role == "match" and event.part_index:
                 header += f" [part {event.part_index}]"
-            lines.extend((header, f"anchor: {event.anchor}", event.content, ""))
+            lines.extend((header, f"anchor: {event.anchor}", event.content))
+            if event.truncated:
+                next_offset = (
+                    str(event.content_end)
+                    if event.content_end < event.content_total
+                    else "none"
+                )
+                lines.append(
+                    f"content_slice={event.content_start}:{event.content_end}"
+                    f"/{event.content_total} next_offset={next_offset}"
+                )
+            lines.append("")
         lines.append(
             f"has_before={str(window.has_before).lower()} "
             f"has_after={str(window.has_after).lower()}"

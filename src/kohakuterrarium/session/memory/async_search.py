@@ -92,7 +92,7 @@ class LiveSessionMemory:
         """Index immutable facts and resolve each agent's selected projection."""
         views: dict[str, dict[int, int]] = {}
         for name in names:
-            events = self._store.get_events(name)
+            events = self._store.get_memory_events(name)
             self._memory._index_keywords(name, events)
             selected = (
                 overrides[name]
@@ -103,24 +103,33 @@ class LiveSessionMemory:
         return views
 
     def _vector_batch(self, name: str):
-        events = self._store.get_events(name)
+        events = self._store.get_memory_events(name)
         start, blocks = self._memory._vector_batch(name, events)
         return start, len(events), blocks
 
-    async def _with_anchors(self, results, views, warning):
+    async def _with_anchors(self, results, views, warning, query):
         if self._closed:
             raise RuntimeError("Session memory is closed")
         if results:
             results = await self._store.run(
-                self._context.register_results, results, views
+                self._context.register_results, results, views, query
             )
         return results, warning
 
-    async def read_context(self, anchor: str, *, before: int = 3, after: int = 3):
+    async def read_context(
+        self,
+        anchor: str,
+        *,
+        before: int = 3,
+        after: int = 3,
+        offset: int | None = None,
+    ):
         """Read a verified history window without loading an embedder."""
         if self._closed:
             raise RuntimeError("Session memory is closed")
-        return await self._store.run(self._context.expand, anchor, before, after)
+        return await self._store.run(
+            self._context.expand, anchor, before, after, offset
+        )
 
     async def search(
         self,
@@ -158,7 +167,7 @@ class LiveSessionMemory:
                             results = await self._store.run(
                                 self._memory._search_fts, query, k, agent, scope=scope
                             )
-                            return await self._with_anchors(results, views, None)
+                            return await self._with_anchors(results, views, None, query)
                         raise ValueError("semantic search needs an embedding model")
                     for name in names:
                         start, count, blocks = await self._store.run(
@@ -188,12 +197,12 @@ class LiveSessionMemory:
                         scope=scope,
                     )
                     if mode == "semantic":
-                        return await self._with_anchors(results, views, None)
+                        return await self._with_anchors(results, views, None, query)
                     keywords = await self._store.run(
                         self._memory._search_fts, query, k * 2, agent, scope=scope
                     )
                     fused = self._memory._fuse_results(keywords, results, k)
-                    return await self._with_anchors(fused, views, None)
+                    return await self._with_anchors(fused, views, None, query)
             except Exception as exc:
                 if (
                     self._closed
@@ -216,7 +225,7 @@ class LiveSessionMemory:
         results = await self._store.run(
             self._memory._search_fts, query, k, agent, scope=scope
         )
-        return await self._with_anchors(results, views, warning)
+        return await self._with_anchors(results, views, warning, query)
 
 
 def live_memory_for_store(store) -> LiveSessionMemory:

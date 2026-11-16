@@ -148,6 +148,8 @@ A successful Creature-side search returns an opaque `anchor` for each hit. Use i
 
 The tool returns chronological user messages, tool calls/results and other relevant events, each with another anchor for continued navigation. `has_before` and `has_after` indicate whether more matching-lineage context exists beyond the window. Set `before` and `after` independently from 0 to 10 (default 3); individual event previews and the scan are also bounded. The anchor captures the branch lineage selected when it was created, so later branch switches do not mix histories.
 
+Long tool outputs show the matching excerpt rather than only their beginning. For a truncated event, use the displayed content_slice / next_offset with search_memory(anchor=..., offset=..., before=0, after=0) to page through its text.
+
 Anchors are valid only for the current attached SessionStore lifetime. They survive ordinary appends and compaction when the source is unchanged, but expire on restart, eviction or source-record changes. Invalid or expired anchors return explicit errors. Anchor reads do not load an embedding model.
 
 

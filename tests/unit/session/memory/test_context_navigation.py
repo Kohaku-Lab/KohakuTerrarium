@@ -324,7 +324,7 @@ async def test_legacy_ancestry_excludes_incompatible_siblings(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_legacy_source_fails_closed(tmp_path):
+async def test_duplicate_legacy_ids_navigate_with_physical_refs(tmp_path):
     store = SessionStore(tmp_path / "ambiguous.kohakutr")
     store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
     store.append_event(
@@ -351,7 +351,9 @@ async def test_ambiguous_legacy_source_fails_closed(tmp_path):
             {"anchor": _anchor(found.output), "before": 0, "after": 2},
             context=ctx,
         )
-        assert "LINEAGE_UNAVAILABLE" in expanded.error
+        assert expanded.error is None
+        assert "legacy first" in expanded.output
+        assert "legacy second" in expanded.output
     finally:
         store.close(update_status=False)
 
@@ -503,7 +505,7 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
     try:
         assert upgraded.index_events("alice", events) == 1
         assert upgraded._generation("alice") > generation
-        assert upgraded._state["alice:index_format"] == 4
+        assert upgraded._state["alice:index_format"] == 5
         hits = upgraded.search("needle", mode="fts")
         assert len(hits) == 1
         assert hits[0].source_fingerprint == _anchor(events[0])
@@ -511,3 +513,51 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
         assert upgraded.get_stats()["fts_blocks"] == 1
     finally:
         upgraded.close()
+
+
+@pytest.mark.asyncio
+async def test_long_tool_hit_is_visible_and_offset_is_pageable(tmp_path):
+    store = SessionStore(tmp_path / "long-tool.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    _append(store, 1, "user_input", {"content": "request"})
+    payload = "prefix " * 700 + "uniqueerrorneedle" + " suffix" * 800
+    _append(store, 1, "tool_result", {"name": "bash", "output": payload})
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        found = await tool.execute(
+            {"query": "uniqueerrorneedle", "mode": "fts"}, context=ctx
+        )
+        assert found.error is None
+        token = _anchor(found.output)
+        search_body = found.output.split("anchor: ", 1)[1].split("\n", 1)[1]
+        assert "uniqueerrorneedle" in search_body
+        assert len(search_body) < 2400
+
+        window = await tool.execute(
+            {"anchor": token, "before": 0, "after": 0}, context=ctx
+        )
+        assert window.error is None
+        assert "uniqueerrorneedle" in window.output
+        assert "content_slice=" in window.output
+        assert len(window.output) < 1500
+
+        beginning = await tool.execute(
+            {"anchor": token, "before": 0, "after": 0, "offset": 0},
+            context=ctx,
+        )
+        assert beginning.error is None
+        assert "uniqueerrorneedle" not in beginning.output
+        assert "next_offset=900" in beginning.output
+        next_slice = await tool.execute(
+            {"anchor": token, "before": 0, "after": 0, "offset": 900},
+            context=ctx,
+        )
+        assert next_slice.error is None
+        assert "content_slice=900:1800/" in next_slice.output
+
+        invalid = await tool.execute(
+            {"anchor": token, "offset": len(payload) + 1}, context=ctx
+        )
+        assert "INVALID_CONTENT_OFFSET" in invalid.error
+    finally:
+        store.close(update_status=False)

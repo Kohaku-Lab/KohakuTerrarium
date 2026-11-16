@@ -133,6 +133,8 @@ Creature 的搜索结果会为每条命中返回一个不透明的 `anchor`。�
 
 返回内容按事件时间排序，包括用户输入、工具调用与结果等相关事件。每条上下文事件也带有可继续导航的 Anchor，`has_before` / `has_after` 表示窗口两端是否仍有可读历史。`before` / `after` 各为 0～10（默认 3），单事件预览和扫描量也有限制。Anchor 固定其创建时的祖先链，后续切换分支不会把不同分支的事件混在一起。
 
+长工具输出优先展示命中词附近的片段，而非只截取开头。对被截断的事件，可以根据 content_slice / next_offset 使用 search_memory(anchor=..., offset=..., before=0, after=0) 在事件内部继续分页读取。
+
 Anchor 仅在当前附加的 SessionStore 生命周期内有效。普通追加和保留源事件的压缩不会使其失效；重启、Anchor 被淘汰或源记录变化会返回明确错误。上下文读取不加载 embedding 模型。
 
 
