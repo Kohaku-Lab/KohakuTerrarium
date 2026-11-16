@@ -1743,6 +1743,8 @@ def test_replay_reuses_each_call_provider_id_in_order():
         "two",
     ]
 
+
+class TestNormalizeToolCallEvents:
     @pytest.mark.parametrize(
         "normalize", [normalize_tool_call_events, normalize_resumable_events]
     )

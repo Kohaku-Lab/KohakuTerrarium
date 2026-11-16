@@ -2462,6 +2462,10 @@ class TestCoreIntegration:
             out = await _drain_chat(creature, "are you ok")
             assert "recovered fine" in out
             assert agent.llm.call_count == 2
+            assert any(
+                "User manually interrupted" in str(message.get("content", ""))
+                for message in agent.llm.call_log[-1]
+            )
 
             # --- _cancel_job: cancel one running job by id -------------
             # ``_cancel_job`` is the TUI running-panel click handler. It
@@ -2673,6 +2677,50 @@ class TestCoreIntegration:
             finally:
                 await resumed.stop()
                 store.close()
+
+        promoted_tool = _BlockingTool()
+        async with Terrarium(session_dir=tmp_path / "promoted_stop") as engine:
+            promoted = await engine.add_creature(
+                AgentConfig(
+                    name="promoted_stop", system_prompt="plain", tool_format="bracket"
+                ),
+                llm=ScriptedLLM(["[/block][block/]", "background pending"]),
+                tools=[promoted_tool],
+                io="headless",
+                start=True,
+            )
+            promoted_agent = promoted.agent
+            turn = asyncio.create_task(promoted.run("launch", timeout=5))
+            await asyncio.wait_for(promoted_tool.started.wait(), 5)
+            job_id, handle = next(iter(promoted_agent._active_handles.items()))
+            handle.promote()
+            await turn
+            await promoted_agent.stop()
+            results = [
+                event
+                for event in promoted_agent.session_store.get_events("promoted_stop")
+                if event["type"] == "tool_result" and event.get("call_id") == job_id
+            ]
+            assert len(results) == 1
+            assert results[0]["final_state"] == "interrupted"
+            assert "Agent stopped" in results[0]["error"]
+            session_path = promoted_agent.session_store.path
+        resumed, store = resume_agent(
+            session_path, io_mode="plain", llm=ScriptedLLM(["resumed"])
+        )
+        try:
+            terminals = [
+                event
+                for event in store.get_events("promoted_stop")
+                if event["type"] == "tool_result" and event.get("call_id") == job_id
+            ]
+            assert len(terminals) == 1
+            assert terminals[0]["final_state"] == "interrupted"
+            await resumed.start()
+            await resumed.run("continue", timeout=5)
+        finally:
+            await resumed.stop()
+            store.close()
 
     @pytest.mark.timeout(120)
     async def test_history_ops(self, make_creature, tmp_path, monkeypatch):

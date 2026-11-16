@@ -79,6 +79,34 @@ def agent():
     return _FakeAgent()
 
 
+@pytest.mark.parametrize("cancelled", [True, False])
+async def test_text_cancellation_feedback_precedes_tracking_release(agent, cancelled):
+    job_id = "bash_text_cancel"
+    agent._register_direct_job(job_id, kind="tool", name="bash")
+    result = JobResult(
+        job_id=job_id,
+        error="cancelled by user",
+        cancelled=cancelled,
+        metadata={} if cancelled else {"interrupted": True},
+    )
+
+    async def finish():
+        return result
+
+    task = asyncio.create_task(finish())
+    agent._active_handles[job_id] = BackgroundifyHandle(task, job_id=job_id)
+    await agent._finalize_interrupted_direct_job(job_id)
+    feedback = agent.controller.conversation.get_messages()[-1]
+    assert feedback.role == "user"
+    assert "cancelled by user" in feedback.content
+    assert feedback.metadata["kind"] == "tool_feedback"
+    assert feedback.metadata["job_ids"] == [job_id]
+    assert feedback.metadata["origin_known"] is False
+    assert job_id not in agent._direct_job_meta
+    await agent._finalize_interrupted_direct_job(job_id)
+    assert len(agent.controller.conversation.get_messages()) == 2
+
+
 # ── _register_direct_job / _clear_direct_job_tracking ────────────
 
 

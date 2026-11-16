@@ -157,8 +157,12 @@ class AgentLifecycleMixin:
 
         await self._cancel_executor_tasks()
         await self.subagent_manager.cancel_all()
-        await self._await_interrupt_finalizers()
-        if had_direct_jobs:
+        settlement_error = None
+        try:
+            await self._await_interrupt_finalizers()
+        except RuntimeError as exc:
+            settlement_error = exc
+        if had_direct_jobs and settlement_error is None:
             session_output = getattr(self, "_session_output", None)
             persist_snapshot = getattr(session_output, "on_processing_end", None)
             if callable(persist_snapshot):
@@ -193,6 +197,8 @@ class AgentLifecycleMixin:
                 failed.append(provider)
                 first_error = first_error or exc
         self._retired_llms = failed
+        if settlement_error is not None:
+            raise settlement_error
         if first_error is not None:
             raise first_error
 
@@ -202,7 +208,11 @@ class AgentLifecycleMixin:
         active_direct_jobs = [
             job_id
             for job_id, meta in direct_jobs.items()
-            if not meta.get("background") and meta.get("interruptible", True)
+            if not meta.get("background")
+            and meta.get("interruptible", True)
+            and not getattr(
+                getattr(self, "_active_handles", {}).get(job_id), "promoted", False
+            )
         ]
         for job_id in active_direct_jobs:
             meta = direct_jobs[job_id]
@@ -226,16 +236,7 @@ class AgentLifecycleMixin:
             job_id = getattr(status, "job_id", None)
             if not job_id or job_id in seen:
                 continue
-            if job_id in getattr(self, "_active_handles", {}):
-                if getattr(self._active_handles[job_id], "promoted", False):
-                    seen.add(job_id)
-                    continue
-            if job_id in getattr(self, "_direct_job_meta", {}):
-                meta = self._direct_job_meta[job_id]
-                if meta.get("background") or not meta.get("interruptible", True):
-                    seen.add(job_id)
-                    continue
-                self._start_interrupt_finalizer(job_id)
+            if job_id in active_direct_jobs:
                 continue
             seen.add(job_id)
             is_subagent = getattr(status, "job_type", None) == JobType.SUBAGENT
@@ -254,7 +255,10 @@ class AgentLifecycleMixin:
                 metadata["result"] = error
             # Pair only announced native calls; an orphan result would invalidate text-mode history.
             meta = getattr(self, "_direct_job_meta", {}).get(job_id) or {}
-            tool_call_id = meta.get("tool_call_id")
+            promoted = getattr(
+                getattr(self, "_active_handles", {}).get(job_id), "promoted", False
+            ) or meta.get("background", False)
+            tool_call_id = None if promoted else meta.get("tool_call_id")
             controller = getattr(self, "controller", None)
             if tool_call_id and controller is not None:
                 announced = any(

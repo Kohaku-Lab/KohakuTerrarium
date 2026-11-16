@@ -350,22 +350,22 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     {job_id: result},
                     {job_id: meta["tool_call_id"]},
                 )
-            else:
-                text = self._format_text_results([job_id], {job_id: result})
-                if text:
-                    self.controller.conversation.append(
-                        "user",
-                        text,
-                        metadata={
-                            "origin_known": False,
-                            "kind": "tool_feedback",
-                            "job_ids": [job_id],
-                            "tool_result_phase": "final",
-                        },
-                    )
         else:
             self._emit_interrupted_activity(job_id, result)
             self._append_interrupted_tool_message(job_id, meta, result)
+        if not meta.get("tool_call_id"):
+            text = self._format_text_results([job_id], {job_id: result})
+            if text:
+                self.controller.conversation.append(
+                    "user",
+                    text,
+                    metadata={
+                        "origin_known": False,
+                        "kind": "tool_feedback",
+                        "job_ids": [job_id],
+                        "tool_result_phase": "final",
+                    },
+                )
         self._clear_direct_job_tracking(job_id)
 
     def _append_interrupted_tool_message(

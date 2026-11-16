@@ -7,6 +7,7 @@ import types
 from contextlib import closing
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 from kohakuterrarium.core.agent.turn.budget_recovery import (
     _message_to_conversation_json,
@@ -18,6 +19,7 @@ from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
 from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
+from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobStore, JobType
 from kohakuterrarium.core.conversation.conversation import (
     Conversation,
     ConversationConfig,
@@ -156,6 +158,76 @@ class TestAgentLifecycle:
         a._finalize_inflight_jobs_for_stop()
 
         a._start_interrupt_finalizer.assert_called_once_with("direct")
+
+    @pytest.mark.parametrize("failure", ["finalizer failed", "finalizer cancelled"])
+    async def test_settlement_failure_still_closes_resources(self, failure):
+        a = _build_lifecycle_agent()
+        a._interrupt_finalizer_error = failure
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match=failure):
+                await a.stop()
+        assert a._interrupt_finalizer_error == failure
+        assert not a._running
+        for cleanup in (
+            a.trigger_manager.stop_all,
+            a.input.stop,
+            a.compact_manager.cancel,
+            a.output_router.stop,
+            a.llm.close,
+        ):
+            assert cleanup.await_count >= 1
+
+    @pytest.mark.parametrize("job_type", [JobType.TOOL, JobType.SUBAGENT])
+    @pytest.mark.parametrize("retained_meta", [False, True])
+    def test_stop_emits_promoted_terminal(self, job_type, retained_meta):
+        a = _build_lifecycle_agent()
+        store = JobStore()
+        status = JobStatus("promoted", job_type, "worker", state=JobState.RUNNING)
+        store.register(status)
+        a.output_router.notify_activity = MagicMock()
+        manager = a.executor if job_type == JobType.TOOL else a.subagent_manager
+        manager.job_store = store
+        manager.get_running_jobs = lambda: [status] if status.is_running else []
+        a._active_handles = {"promoted": types.SimpleNamespace(promoted=True)}
+        conversation = Conversation()
+        conversation.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "native_promoted",
+                    "type": "function",
+                    "function": {"name": "worker", "arguments": "{}"},
+                }
+            ],
+        )
+        conversation.append("tool", "pending", tool_call_id="native_promoted")
+        a.controller = types.SimpleNamespace(conversation=conversation)
+        a._direct_job_meta = (
+            {
+                "promoted": {
+                    "background": True,
+                    "interruptible": False,
+                    "tool_call_id": "native_promoted",
+                }
+            }
+            if retained_meta
+            else {}
+        )
+        a._start_interrupt_finalizer = MagicMock()
+        a._finalize_inflight_jobs_for_stop()
+        a._finalize_inflight_jobs_for_stop()
+        a._start_interrupt_finalizer.assert_not_called()
+        a.output_router.notify_activity.assert_called_once()
+        call = a.output_router.notify_activity.call_args
+        assert call.args[0] == (
+            "tool_error" if job_type == JobType.TOOL else "subagent_error"
+        )
+        assert call.kwargs["metadata"]["final_state"] == "interrupted"
+        assert status.state == JobState.CANCELLED
+        assert [m.content for m in conversation.get_messages() if m.role == "tool"] == [
+            "pending"
+        ]
 
     async def test_cancel_executor_tasks_no_executor(self):
         a = _build_lifecycle_agent()
