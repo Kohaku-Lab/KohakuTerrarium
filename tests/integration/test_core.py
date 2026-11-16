@@ -2467,6 +2467,14 @@ class TestCoreIntegration:
                 for message in agent.llm.call_log[-1]
             )
 
+            feedback = [
+                message
+                for message in agent.controller.conversation.get_messages()
+                if "User manually interrupted" in message.get_text_content()
+            ]
+            assert len(feedback) == 1
+            assert feedback[0].metadata["kind"] == "tool_results"
+
             # --- _cancel_job: cancel one running job by id -------------
             # ``_cancel_job`` is the TUI running-panel click handler. It
             # cancels a tracked direct job and emits a cancellation-request

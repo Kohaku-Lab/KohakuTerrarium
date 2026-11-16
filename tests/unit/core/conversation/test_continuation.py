@@ -19,6 +19,7 @@ from kohakuterrarium.core.conversation.continuation import (
     live_branch_path,
     load_persisted_branch_view,
     persist_branch_view,
+    require_no_running_jobs,
     selected_branch_view,
 )
 from kohakuterrarium.core.jobs.executor import Executor
@@ -43,6 +44,16 @@ from tests.helpers.two_job_protocol import (
     successors as two_job_successors,
     transition_cover as two_job_transition_cover,
 )
+
+
+@pytest.mark.parametrize("pending,error", [(True, None), (False, "failed")])
+def test_history_mutation_rejects_pending_interruption_settlement(pending, error):
+    agent = SimpleNamespace(
+        _interrupt_finalizers={object()} if pending else set(),
+        _interrupt_finalizer_error=error,
+    )
+    with pytest.raises(ConflictError, match="interruption settlement"):
+        require_no_running_jobs(agent)
 
 
 def _non_system(agent):

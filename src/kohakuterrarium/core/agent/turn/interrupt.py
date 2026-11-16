@@ -124,13 +124,26 @@ class AgentInterruptMixin:
         if not handle:
             return False
 
+        def promote_if_unclaimed() -> bool:
+            if (
+                self._active_handles.get(job_id) is not handle
+                or job_id in getattr(self, "_interrupt_finalizer_jobs", {}).values()
+            ):
+                return False
+            if not handle.promote():
+                return False
+            self.output_router.notify_activity(
+                "task_promoted",
+                f"[{job_id}] Moved to background",
+                metadata={"job_id": job_id},
+            )
+            logger.info("Task promoted via UI", job_id=job_id)
+            return True
+
         # Thread-safe promotion: asyncio.Event.set() must run on the
         # event loop thread. TUI calls this from Textual's thread.
         try:
             asyncio.get_running_loop()
-            # Already on the event loop (API handler) — promote directly
-            if not handle.promote():
-                return False
         except RuntimeError:
             # TUI thread — schedule on the loop captured at ``start()``.
             # ``asyncio.get_event_loop()`` is unsafe on Python 3.14+.
@@ -140,12 +153,6 @@ class AgentInterruptMixin:
                     loop = asyncio.get_event_loop()
                 except RuntimeError:
                     return False
-            loop.call_soon_threadsafe(handle.promote)
-
-        self.output_router.notify_activity(
-            "task_promoted",
-            f"[{job_id}] Moved to background",
-            metadata={"job_id": job_id},
-        )
-        logger.info("Task promoted via UI", job_id=job_id)
-        return True
+            loop.call_soon_threadsafe(promote_if_unclaimed)
+            return True
+        return promote_if_unclaimed()

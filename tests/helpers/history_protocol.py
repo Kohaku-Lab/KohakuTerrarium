@@ -5,7 +5,6 @@ import sys
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -438,15 +437,6 @@ class _Runtime:
                 await _wait(asyncio.shield(completion))
             await self.agent._session_output.drain()
         self.released = True
-
-
-def test_history_mutation_rejects_pending_interruption_settlement():
-    agent = SimpleNamespace(
-        _interrupt_finalizers={object()},
-        _interrupt_finalizer_error=None,
-    )
-    with pytest.raises(ConflictError, match="interruption settlement"):
-        require_no_running_jobs(agent)
 
 
 async def exercise_history_trace(

@@ -7,6 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from kohakuterrarium.core.agent.turn.event_loop import AgentEventLoopMixin
+from kohakuterrarium.core.agent.turn.interrupt import AgentInterruptMixin
+from kohakuterrarium.core.compact.splice import is_real_user_message
+from kohakuterrarium.core.conversation.elide import (
+    TOOL_FEEDBACK_KIND,
+    _is_tool_feedback,
+)
 from kohakuterrarium.core.agent.tools.dispatch import AgentToolsMixin, _TurnResult
 from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.conversation.conversation import Conversation
@@ -99,12 +105,105 @@ async def test_text_cancellation_feedback_precedes_tracking_release(agent, cance
     feedback = agent.controller.conversation.get_messages()[-1]
     assert feedback.role == "user"
     assert "cancelled by user" in feedback.content
-    assert feedback.metadata["kind"] == "tool_feedback"
+    assert feedback.metadata["kind"] == TOOL_FEEDBACK_KIND
+    assert not is_real_user_message(feedback)
+    assert _is_tool_feedback(feedback)
     assert feedback.metadata["job_ids"] == [job_id]
     assert feedback.metadata["origin_known"] is False
     assert job_id not in agent._direct_job_meta
     await agent._finalize_interrupted_direct_job(job_id)
     assert len(agent.controller.conversation.get_messages()) == 2
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_collector_cancel_during_arrival_cleanup_releases_ownership(
+    agent, legacy
+):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Inbox:
+        def has_event(self, predicate):
+            return False
+
+        async def wait_put(self):
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                entered.set()
+                await release.wait()
+
+    async def finish():
+        return JobResult(job_id="job", output="done")
+
+    agent._event_inbox = Inbox()
+    task = asyncio.create_task(finish())
+    handle = BackgroundifyHandle(task, job_id="job")
+    agent._active_handles["job"] = handle
+    agent._register_direct_job("job", kind="tool", name="work", tool_call_id="call")
+
+    class LegacyTask(asyncio.Task):
+        cancelling = None
+
+    collector = (LegacyTask if legacy else asyncio.create_task)(
+        agent._wait_handles(
+            {"job": handle}, ["job"], agent.controller, {"job": "call"}, True
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        collector.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await collector
+        await agent._finalize_interrupted_direct_job("job")
+        assert len(agent.output_router.activity_calls) == 1
+        assert (
+            len(
+                [
+                    m
+                    for m in agent.controller.conversation.get_messages()
+                    if m.role == "tool"
+                ]
+            )
+            == 1
+        )
+    finally:
+        release.set()
+        await asyncio.gather(collector, return_exceptions=True)
+
+
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_promotion_rechecks_finalizer_ownership(agent, monkeypatch, scheduled):
+    async def work():
+        await asyncio.Future()
+
+    task = asyncio.create_task(work())
+    handle = BackgroundifyHandle(task, job_id="job")
+    agent._active_handles["job"] = handle
+    agent._interrupt_finalizer_jobs = {} if scheduled else {object(): "job"}
+    callbacks = []
+    try:
+        if scheduled:
+            loop = MagicMock()
+            loop.is_closed.return_value = False
+            loop.call_soon_threadsafe.side_effect = lambda fn, *args: callbacks.append(
+                (fn, args)
+            )
+            agent._loop = loop
+            with monkeypatch.context() as patch:
+                patch.setattr(
+                    asyncio, "get_running_loop", MagicMock(side_effect=RuntimeError)
+                )
+                AgentInterruptMixin._promote_handle(agent, "job")
+            agent._interrupt_finalizer_jobs = {object(): "job"}
+            for fn, args in callbacks:
+                fn(*args)
+        else:
+            assert not AgentInterruptMixin._promote_handle(agent, "job")
+        assert not handle.promoted
+        assert agent.output_router.activity_calls == []
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 # ── _register_direct_job / _clear_direct_job_tracking ────────────

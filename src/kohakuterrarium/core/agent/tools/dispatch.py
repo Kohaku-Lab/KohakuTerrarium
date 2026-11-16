@@ -18,6 +18,7 @@ from kohakuterrarium.core.agent.tools.metrics import (
 )
 from kohakuterrarium.core.jobs.backgroundify import BackgroundifyHandle, PromotionResult
 from kohakuterrarium.core.controller.controller import Controller
+from kohakuterrarium.core.conversation.elide import TOOL_FEEDBACK_KIND
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.jobs.job import JobResult, JobState
 from kohakuterrarium.core.tools.dispatch import start_tool_task
@@ -78,10 +79,15 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                         handle.promote()
             arrival = asyncio.create_task(self._event_inbox.wait_put())
             try:
-                done, _ = await asyncio.wait(
-                    set(waiters.values()) | {arrival},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
+                try:
+                    done, _ = await asyncio.wait(
+                        set(waiters.values()) | {arrival},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    if not arrival.done():
+                        arrival.cancel()
+                        await asyncio.gather(arrival, return_exceptions=True)
             except asyncio.CancelledError:
                 for waiter in waiters.values():
                     waiter.cancel()
@@ -97,13 +103,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                         controller, handle_order, results, tool_call_ids
                     )
                 raise
-            finally:
-                if not arrival.done():
-                    arrival.cancel()
-                    try:
-                        await arrival
-                    except asyncio.CancelledError:
-                        pass
 
             finished_job_ids = [jid for jid, task in waiters.items() if task in done]
             for jid in finished_job_ids:
@@ -361,7 +360,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     text,
                     metadata={
                         "origin_known": False,
-                        "kind": "tool_feedback",
+                        "kind": TOOL_FEEDBACK_KIND,
                         "job_ids": [job_id],
                         "tool_result_phase": "final",
                     },
