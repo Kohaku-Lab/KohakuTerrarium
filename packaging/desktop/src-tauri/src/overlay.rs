@@ -383,14 +383,11 @@ pub fn overlay_present(app: AppHandle, window: WebviewWindow, args: Args) -> boo
     let Some(main) = app.get_webview_window("main") else {
         return false;
     };
-    if !dispatch(
+    dispatch(
         &main,
         "kt:overlay-ready",
         &json!({"key": key, "generation": generation}),
-    ) {
-        return false;
-    }
-    true
+    )
 }
 
 /// Main-window acknowledgement after retiring the viewport renderer.
