@@ -26,10 +26,21 @@ def _anchor(event: dict) -> str:
 
 
 def extract_batch(
-    agent: str, events: list[dict], checkpoint: dict | None = None, start_from: int = 0
+    agent: str,
+    events: list[dict],
+    checkpoint: dict | None = None,
+    start_from: int = 0,
+    *,
+    all_branches: bool = False,
 ):
-    """Extract the append-only suffix, retaining round and branch context."""
+    """Extract the append-only suffix.
+
+    All-branch indexing is staged separately until retrieval can filter before
+    applying top-k, so existing creature searches retain their old semantics.
+    """
     state = dict(checkpoint or {})
+    if checkpoint and bool(state.get("all_branches", False)) != all_branches:
+        raise RebuildRequired("memory index extraction scope changed")
     count = state.get("count", 0)
     if count > len(events) or (
         count and state.get("anchor") != _anchor(events[count - 1])
@@ -38,7 +49,7 @@ def extract_batch(
     branches = dict(state.get("branches", {}))
     legacy_conflicts = state.get("legacy_conflicts", [])
     max_turn = max((int(t) for t in branches), default=0)
-    if checkpoint:
+    if checkpoint and not all_branches:
         for event in events[count:]:
             turn, branch = event.get("turn_index"), event.get("branch_id")
             if not isinstance(turn, int) or not isinstance(branch, int):
@@ -60,7 +71,7 @@ def extract_batch(
             branches[key] = branch
             max_turn = max(max_turn, turn)
         live_ids = None
-    else:
+    elif not all_branches:
         paths = index_parent_paths(events)
         branches = {
             str(k): v for k, v in resolve_selected_branches(events, paths, None).items()
@@ -77,7 +88,12 @@ def extract_batch(
             k: v for k, v in events[count - 1].items() if k not in {"event_id", "ts"}
         }
     blocks = _extract_blocks(
-        agent, events[count:], count, cursor=state, live_ids=live_ids
+        agent,
+        events[count:],
+        count,
+        cursor=state,
+        live_ids=None if all_branches else live_ids,
+        all_branches=all_branches,
     )
     if start_from > count:
         blocks = [
@@ -85,12 +101,11 @@ def extract_batch(
             for b in blocks
             if int(b.block_id.rsplit(":e", 1)[1].split(":")[0]) >= start_from
         ]
-    state.update(
-        count=len(events),
-        branches=branches,
-        legacy_conflicts=legacy_conflicts,
-        anchor=_anchor(events[-1]) if events else "",
-    )
+    state.update(count=len(events), anchor=_anchor(events[-1]) if events else "")
+    if all_branches:
+        state["all_branches"] = True
+    else:
+        state.update(branches=branches, legacy_conflicts=legacy_conflicts)
     return blocks, state
 
 
@@ -108,6 +123,13 @@ class Block:
     tool_args: dict[str, Any] = field(default_factory=dict)
     channel: str = ""
     block_id: str = ""
+    # The per-agent event position is a lookup hint, not a physical key.
+    event_id: int | None = None
+    event_position: int | None = None
+    part_index: int = 0
+    turn_index: int | None = None
+    branch_id: int | None = None
+    parent_branch_path: tuple[tuple[int, int], ...] | None = None
 
 
 def _content_to_text(content: Any) -> str:
@@ -147,16 +169,19 @@ def _extract_blocks(
     *,
     cursor: dict | None = None,
     live_ids: set[int] | None = None,
+    all_branches: bool = False,
 ) -> list[Block]:
     """Extract searchable blocks from session events."""
     state = cursor if cursor is not None else {}
-    if live_ids is None and cursor is None:
+    if live_ids is None and cursor is None and not all_branches:
         live_ids = select_live_event_ids(events)
     blocks: list[Block] = []
     round_num = state.get("round", 0)
     block_num = state.get("block", 0)
     in_round = state.get("in_round", False)
     previous = state.pop("previous", None)
+    # Keep only currently open modern turns; sibling branches may interleave.
+    open_branches = dict(state.get("open_branches", {})) if all_branches else {}
 
     for i, evt in enumerate(events):
         signature = {k: v for k, v in evt.items() if k not in {"event_id", "ts"}}
@@ -170,8 +195,31 @@ def _extract_blocks(
         if live_ids is not None and isinstance(eid, int) and eid not in live_ids:
             continue
 
+        turn = evt.get("turn_index")
+        branch = evt.get("branch_id")
+        scoped = (
+            all_branches
+            and type(turn) is int
+            and turn > 0
+            and type(branch) is int
+            and branch > 0
+        )
+        if scoped:
+            legacy_state = (round_num, block_num, in_round)
+            scope_key = f"{turn}:{branch}"
+            scoped_state = open_branches.get(scope_key, {})
+            scoped_path = (
+                _coerce_path(scoped_state["parent_branch_path"])
+                if "parent_branch_path" in scoped_state
+                else None
+            )
+            round_num = turn
+            block_num = scoped_state.get("block", 0)
+            in_round = scoped_state.get("in_round", False)
+
         if etype == "user_input":
-            round_num += 1
+            if not scoped:
+                round_num += 1
             block_num = 0
             in_round = True
             content = _content_to_text(evt.get("content", ""))
@@ -189,7 +237,8 @@ def _extract_blocks(
                 block_num += 1
 
         elif etype == "trigger_fired":
-            round_num += 1
+            if not scoped:
+                round_num += 1
             block_num = 0
             in_round = True
             channel = evt.get("channel", "")
@@ -273,6 +322,31 @@ def _extract_blocks(
 
         for part, block in enumerate(blocks[first_block:]):
             block.block_id = f"{agent}:e{event_offset + i}:p{part}"
+            block.event_id = eid if type(eid) is int else None
+            block.event_position = event_offset + i
+            block.part_index = part
+            block.turn_index = turn if type(turn) is int and turn > 0 else None
+            block.branch_id = branch if type(branch) is int and branch > 0 else None
+            if "parent_branch_path" in evt:
+                block.parent_branch_path = _coerce_path(evt["parent_branch_path"])
+            elif scoped:
+                block.parent_branch_path = scoped_path
+
+        if scoped:
+            if "parent_branch_path" in evt:
+                scoped_path = _coerce_path(evt["parent_branch_path"])
+            if in_round:
+                next_scope = {"block": block_num, "in_round": True}
+                if scoped_path is not None:
+                    next_scope["parent_branch_path"] = [
+                        list(pair) for pair in scoped_path
+                    ]
+                open_branches[scope_key] = next_scope
+            else:
+                open_branches.pop(scope_key, None)
+            round_num, block_num, in_round = legacy_state
 
     state.update(round=round_num, block=block_num, in_round=in_round)
+    if all_branches:
+        state["open_branches"] = open_branches
     return blocks

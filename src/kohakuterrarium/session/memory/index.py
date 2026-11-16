@@ -24,6 +24,11 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Format 1 indexes the selected lineage; format 2 retains all branches.
+# Format 2 is staged until filtered top-k retrieval is available.
+_SELECTED_INDEX_FORMAT = 1
+_ALL_BRANCH_INDEX_FORMAT = 2
+
 
 @dataclass
 class SearchResult:
@@ -39,6 +44,12 @@ class SearchResult:
     tool_name: str = ""
     channel: str = ""
     block_id: str = ""
+    event_id: int | None = None
+    event_position: int | None = None
+    part_index: int = 0
+    turn_index: int | None = None
+    branch_id: int | None = None
+    parent_branch_path: tuple[tuple[int, int], ...] | None = None
 
     @property
     def age_str(self) -> str:
@@ -73,8 +84,13 @@ class SessionMemory:
         self,
         db_path: str,
         embedder: BaseEmbedder | None = None,
+        *,
+        index_all_branches: bool = False,
     ):
         require_writable_format(db_path)
+        self._index_format = (
+            _ALL_BRANCH_INDEX_FORMAT if index_all_branches else _SELECTED_INDEX_FORMAT
+        )
         self._path = db_path
         self._embedder = embedder or NullEmbedder()
         self._has_vectors = not isinstance(self._embedder, NullEmbedder)
@@ -158,6 +174,17 @@ class SessionMemory:
     def _clear_fts(self, agent: str) -> None:
         self._clear_index(agent, "keywords")
 
+    def _ensure_index_format(self, agent: str) -> None:
+        """Invalidate FTS and vector indexes together if their corpus changes.
+
+        The generation fence rejects in-flight vector batches prepared under
+        the old projection, without modifying the persisted session event log.
+        """
+        key = f"{agent}:index_format"
+        if self._state.get(key, _SELECTED_INDEX_FORMAT) != self._index_format:
+            self._state[key] = self._index_format
+            self._state[f"{agent}:generation"] = self._generation(agent) + 1
+
     def _clear_index(self, agent: str, kind: str) -> None:
         vault = self._fts if kind == "keywords" else self._vec
         if kind == "keywords":
@@ -182,6 +209,7 @@ class SessionMemory:
                 vault.delete(row_id)
 
     def _prepare(self, agent: str, events: list[dict], kind: str, start_from: int):
+        self._ensure_index_format(agent)
         key = f"{agent}:cursor:{kind}"
         checkpoint = self._state.get(key)
         revision = self._state.get(f"{key}:revision", 0)
@@ -194,7 +222,11 @@ class SessionMemory:
         if not reset:
             try:
                 blocks, next_state = extract_batch(
-                    agent, events, checkpoint, start_from
+                    agent,
+                    events,
+                    checkpoint,
+                    start_from,
+                    all_branches=self._index_format == _ALL_BRANCH_INDEX_FORMAT,
                 )
             except RebuildRequired:
                 generation += 1
@@ -206,7 +238,12 @@ class SessionMemory:
             revision += 1
             self._state[f"{key}:revision"] = revision
             checkpoint = None
-            blocks, next_state = extract_batch(agent, events, start_from=start_from)
+            blocks, next_state = extract_batch(
+                agent,
+                events,
+                start_from=start_from,
+                all_branches=self._index_format == _ALL_BRANCH_INDEX_FORMAT,
+            )
         next_state["generation"] = generation
         return (
             _IndexBatch(
@@ -365,6 +402,7 @@ class SessionMemory:
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
                     block_id=meta.get("block_id", ""),
+                    **_source_result_metadata(meta),
                 )
             )
             if len(out) >= k:
@@ -402,6 +440,7 @@ class SessionMemory:
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
                     block_id=meta.get("block_id", ""),
+                    **_source_result_metadata(meta),
                 )
             )
             if len(out) >= k:
@@ -452,6 +491,20 @@ class SessionMemory:
         }
 
 
+def _source_result_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+    path = meta.get("parent_branch_path")
+    return {
+        "event_id": meta.get("event_id"),
+        "event_position": meta.get("event_position"),
+        "part_index": meta.get("part_index", 0),
+        "turn_index": meta.get("turn_index"),
+        "branch_id": meta.get("branch_id"),
+        "parent_branch_path": (
+            tuple(tuple(pair) for pair in path) if path is not None else None
+        ),
+    }
+
+
 def _block_metadata(block: Block, include_content: bool = False) -> dict[str, Any]:
     """Build metadata dict for a block.
 
@@ -466,6 +519,16 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
         "tool_name": block.tool_name,
         "channel": block.channel,
         "block_id": block.block_id,
+        "event_id": block.event_id,
+        "event_position": block.event_position,
+        "part_index": block.part_index,
+        "turn_index": block.turn_index,
+        "branch_id": block.branch_id,
+        "parent_branch_path": (
+            [list(pair) for pair in block.parent_branch_path]
+            if block.parent_branch_path is not None
+            else None
+        ),
     }
     if include_content:
         meta["content"] = block.content
