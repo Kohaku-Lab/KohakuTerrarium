@@ -7,6 +7,10 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.context import (
+    MemoryContextError,
+    MemoryContextNavigator,
+)
 from kohakuterrarium.session.memory.visibility import (
     AgentBranchVisibility,
     MemoryCandidateLimitError,
@@ -66,6 +70,7 @@ class LiveSessionMemory:
     def __init__(self, store):
         self._store = store
         self._memory = SessionMemory(store.path, index_all_branches=True)
+        self._context = MemoryContextNavigator(store)
         self._worker = _EmbeddingWorker()
         self._semantic_lock = asyncio.Lock()
         self._embedder: BaseEmbedder | None = None
@@ -76,6 +81,7 @@ class LiveSessionMemory:
         if not self._closed:
             self._closed = True
             self._worker.close()
+            self._context.close()
             self._memory.close()
 
     def _index_keywords(
@@ -100,6 +106,21 @@ class LiveSessionMemory:
         events = self._store.get_events(name)
         start, blocks = self._memory._vector_batch(name, events)
         return start, len(events), blocks
+
+    async def _with_anchors(self, results, views, warning):
+        if self._closed:
+            raise RuntimeError("Session memory is closed")
+        if results:
+            results = await self._store.run(
+                self._context.register_results, results, views
+            )
+        return results, warning
+
+    async def read_context(self, anchor: str, *, before: int = 3, after: int = 3):
+        """Read a verified history window without loading an embedder."""
+        if self._closed:
+            raise RuntimeError("Session memory is closed")
+        return await self._store.run(self._context.expand, anchor, before, after)
 
     async def search(
         self,
@@ -137,7 +158,7 @@ class LiveSessionMemory:
                             results = await self._store.run(
                                 self._memory._search_fts, query, k, agent, scope=scope
                             )
-                            return results, None
+                            return await self._with_anchors(results, views, None)
                         raise ValueError("semantic search needs an embedding model")
                     for name in names:
                         start, count, blocks = await self._store.run(
@@ -167,17 +188,22 @@ class LiveSessionMemory:
                         scope=scope,
                     )
                     if mode == "semantic":
-                        return results, None
+                        return await self._with_anchors(results, views, None)
                     keywords = await self._store.run(
                         self._memory._search_fts, query, k * 2, agent, scope=scope
                     )
-                    return self._memory._fuse_results(keywords, results, k), None
+                    fused = self._memory._fuse_results(keywords, results, k)
+                    return await self._with_anchors(fused, views, None)
             except Exception as exc:
                 if (
                     self._closed
                     or isinstance(
                         exc,
-                        (MemoryCandidateLimitError, MemoryLineageUnavailableError),
+                        (
+                            MemoryCandidateLimitError,
+                            MemoryLineageUnavailableError,
+                            MemoryContextError,
+                        ),
                     )
                     or (mode == "semantic" and not semantic_fallback)
                 ):
@@ -190,7 +216,7 @@ class LiveSessionMemory:
         results = await self._store.run(
             self._memory._search_fts, query, k, agent, scope=scope
         )
-        return results, warning
+        return await self._with_anchors(results, views, warning)
 
 
 def live_memory_for_store(store) -> LiveSessionMemory:

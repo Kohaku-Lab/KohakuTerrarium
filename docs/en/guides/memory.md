@@ -134,6 +134,23 @@ Tool args (shape; concrete syntax depends on your `tool_format`; default bracket
 [search_memory/]
 ```
 
+### Explore context around a search hit
+
+A successful Creature-side search returns an opaque `anchor` for each hit. Use it to inspect the nearby event timeline without guessing another search query:
+
+```text
+[/search_memory]
+@@anchor=<paste anchor from the search result>
+@@before=4
+@@after=6
+[search_memory/]
+```
+
+The tool returns chronological user messages, tool calls/results and other relevant events, each with another anchor for continued navigation. `has_before` and `has_after` indicate whether more matching-lineage context exists beyond the window. Set `before` and `after` independently from 0 to 10 (default 3); individual event previews and the scan are also bounded. The anchor captures the branch lineage selected when it was created, so later branch switches do not mix histories.
+
+Anchors are valid only for the current attached SessionStore lifetime. They survive ordinary appends and compaction when the source is unchanged, but expire on restart, eviction or source-record changes. Invalid or expired anchors return explicit errors. Anchor reads do not load an embedding model.
+
+
 For RAG over *external* sources, build a custom tool or a [plugin](plugins.md) that calls your vector store.
 
 ## Configuring memory in a creature

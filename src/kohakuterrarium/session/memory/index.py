@@ -337,6 +337,7 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
         "tool_name": block.tool_name,
         "channel": block.channel,
         "block_id": block.block_id,
+        "source_fingerprint": block.source_fingerprint,
         "event_id": block.event_id,
         "event_position": block.event_position,
         "part_index": block.part_index,

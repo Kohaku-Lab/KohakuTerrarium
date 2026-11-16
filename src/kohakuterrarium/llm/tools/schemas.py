@@ -345,8 +345,25 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "type": "string",
                 "description": "Optional agent namespace to search within this session",
             },
+            "anchor": {
+                "type": "string",
+                "description": "Opaque anchor from a search/context result (instead of query)",
+            },
+            "before": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "description": "Chronological events preceding anchor (default 3)",
+            },
+            "after": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10,
+                "description": "Chronological events following anchor (default 3)",
+            },
         },
-        "required": ["query"],
+        # The tool validates exactly-one-of, as provider support for oneOf varies.
+        "required": [],
     },
     "web_fetch": {
         "type": "object",

@@ -119,6 +119,23 @@ memory:
 [search_memory/]
 ```
 
+### 根据搜索命中展开上下文
+
+Creature 的搜索结果会为每条命中返回一个不透明的 `anchor`。无需猜测下一组关键词，可以直接读取命中事件前后的时间线：
+
+```text
+[/search_memory]
+@@anchor=<复制上一条搜索结果中的 anchor>
+@@before=4
+@@after=6
+[search_memory/]
+```
+
+返回内容按事件时间排序，包括用户输入、工具调用与结果等相关事件。每条上下文事件也带有可继续导航的 Anchor，`has_before` / `has_after` 表示窗口两端是否仍有可读历史。`before` / `after` 各为 0～10（默认 3），单事件预览和扫描量也有限制。Anchor 固定其创建时的祖先链，后续切换分支不会把不同分支的事件混在一起。
+
+Anchor 仅在当前附加的 SessionStore 生命周期内有效。普通追加和保留源事件的压缩不会使其失效；重启、Anchor 被淘汰或源记录变化会返回明确错误。上下文读取不加载 embedding 模型。
+
+
 如果你要对 *外部* 数据源做 RAG，请自己做一个 custom tool，或做一个会调用向量数据库的 [插件指南](plugins.md)。
 
 ## 在Creature里设置记忆

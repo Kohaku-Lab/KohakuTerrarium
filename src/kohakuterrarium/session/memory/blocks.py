@@ -148,6 +148,7 @@ class Block:
     turn_index: int | None = None
     branch_id: int | None = None
     parent_branch_path: tuple[tuple[int, int], ...] | None = None
+    source_fingerprint: str = ""
 
 
 def _content_to_text(content: Any) -> str:
@@ -339,6 +340,7 @@ def _extract_blocks(
             in_round = False
 
         for part, block in enumerate(blocks[first_block:]):
+            block.source_fingerprint = _anchor(evt)
             block.block_id = f"{agent}:e{event_offset + i}:p{part}"
             block.event_id = eid if type(eid) is int else None
             block.event_position = event_offset + i
