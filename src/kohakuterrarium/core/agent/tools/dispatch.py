@@ -98,10 +98,26 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                             jid, controller, tool_call_ids, native_mode
                         )
                         self._direct_job_meta.pop(jid, None)
-                if native_mode and results:
-                    self._add_native_results_to_conversation(
-                        controller, handle_order, results, tool_call_ids
-                    )
+                if results:
+                    if native_mode:
+                        self._add_native_results_to_conversation(
+                            controller, handle_order, results, tool_call_ids
+                        )
+                    else:
+                        text = self._format_text_results(handle_order, results)
+                        if text:
+                            controller.conversation.append(
+                                "user",
+                                text,
+                                metadata={
+                                    "origin_known": False,
+                                    "kind": TOOL_FEEDBACK_KIND,
+                                    "job_ids": [
+                                        jid for jid in handle_order if jid in results
+                                    ],
+                                    "tool_result_phase": "final",
+                                },
+                            )
                 raise
 
             finished_job_ids = [jid for jid, task in waiters.items() if task in done]

@@ -870,7 +870,8 @@ class TestFinalizeInterruptedDirectJob:
             == 1
         )
 
-    async def test_interrupt_keeps_already_collected_native_results(self, agent):
+    @pytest.mark.parametrize("native", [True, False])
+    async def test_interrupt_keeps_already_collected_results(self, agent, native):
         release = asyncio.Event()
 
         async def first():
@@ -890,11 +891,11 @@ class TestFinalizeInterruptedDirectJob:
         ids = {"first": "call_first", "second": "call_second"}
         for job, handle in handles.items():
             agent._register_direct_job(
-                job, kind="tool", name=job, tool_call_id=ids[job]
+                job, kind="tool", name=job, tool_call_id=ids[job] if native else None
             )
             agent._active_handles[job] = handle
         collector = asyncio.create_task(
-            agent._wait_handles(handles, list(handles), agent.controller, ids, True)
+            agent._wait_handles(handles, list(handles), agent.controller, ids, native)
         )
         try:
             await wait_until(
@@ -915,10 +916,18 @@ class TestFinalizeInterruptedDirectJob:
                 for m in agent.controller.conversation.get_messages()
                 if m.role == "tool"
             ]
-            assert {m.tool_call_id for m in tool_messages} == {
-                "call_first",
-                "call_second",
-            }
+            if native:
+                assert [m.tool_call_id for m in tool_messages].count("call_first") == 1
+                assert [m.tool_call_id for m in tool_messages].count("call_second") == 1
+            else:
+                assert tool_messages == []
+                feedback = [
+                    m
+                    for m in agent.controller.conversation.get_messages()
+                    if m.metadata.get("kind") == TOOL_FEEDBACK_KIND
+                ]
+                assert sum("first result" in m.content for m in feedback) == 1
+                assert any(m.metadata.get("job_ids") == ["first"] for m in feedback)
         finally:
             release.set()
             await asyncio.gather(*tasks.values(), return_exceptions=True)

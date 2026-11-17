@@ -74,7 +74,7 @@ class AgentInterruptMixin:
         self._interrupt_fence_wakeup.set()
         processing = getattr(self, "_processing_task", None)
         if processing and not processing.done() and not already_requested:
-            processing.cancel()
+            request_cancellation(processing)
         for job_id in list(self._active_handles.keys()):
             self._interrupt_direct_job(job_id)
 

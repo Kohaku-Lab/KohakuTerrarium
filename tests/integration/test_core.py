@@ -99,6 +99,7 @@ from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
 from tests.helpers.compact_protocol import exercise_compact_trace
+from tests.helpers.waiting import wait_until
 from tests.helpers.history_protocol import exercise_history_trace
 from tests.helpers.two_job_protocol import (
     exercise_mid_turn_fold,
@@ -2404,7 +2405,10 @@ class TestCoreIntegration:
         """
         creature, recorder = make_creature(
             script=[
-                ScriptEntry("[/block][block/]", match="start blocking"),
+                ScriptEntry(
+                    "[/echo]saved-before-interrupt[echo/][/block][block/]",
+                    match="start blocking",
+                ),
                 # After the interrupt, a fresh input runs normally.
                 ScriptEntry("recovered fine", match="are you ok"),
                 # A turn that dispatches the blocking tool again, this
@@ -2429,7 +2433,7 @@ class TestCoreIntegration:
         block = _BlockingTool()
         stop_task = StopTaskTool()
         bgboom = _BackgroundRaisingTool()
-        for tool in (block, stop_task, bgboom):
+        for tool in (block, stop_task, bgboom, _EchoTool()):
             agent.registry.register_tool(tool)
             agent.executor.register_tool(tool)
 
@@ -2443,6 +2447,16 @@ class TestCoreIntegration:
             # Wait until the blocking tool is actually executing.
             await asyncio.wait_for(block.started.wait(), timeout=5.0)
 
+            await wait_until(
+                lambda: not any(
+                    job.startswith("echo_") for job in agent._direct_job_meta
+                )
+                and any(
+                    job.job_id.startswith("echo_")
+                    for job in agent.executor.job_store.get_all_statuses()
+                ),
+                timeout=5,
+            )
             # Interrupt: cancels the processing task + the direct job.
             agent.interrupt()
             # inject_input awaits the processing cycle; the cancellation
@@ -2462,6 +2476,13 @@ class TestCoreIntegration:
             out = await _drain_chat(creature, "are you ok")
             assert "recovered fine" in out
             assert agent.llm.call_count == 2
+            assert (
+                sum(
+                    "echoed:saved-before-interrupt" in str(message.get("content", ""))
+                    for message in agent.llm.call_log[-1]
+                )
+                == 1
+            )
             assert any(
                 "User manually interrupted" in str(message.get("content", ""))
                 for message in agent.llm.call_log[-1]

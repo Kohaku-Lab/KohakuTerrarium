@@ -19,6 +19,7 @@ from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
 from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
+from kohakuterrarium.core.agent.turn.interrupt import AgentInterruptMixin
 from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobStore, JobType
 from kohakuterrarium.core.conversation.conversation import (
     Conversation,
@@ -83,6 +84,55 @@ def _build_lifecycle_agent(*, has_mcp=False, has_compact=True, compact_llm=None)
 
 
 class TestAgentLifecycle:
+    @pytest.mark.parametrize("legacy", [False, True])
+    async def test_stop_joins_processing_cleanup_after_interrupt(self, legacy):
+        agent = _build_lifecycle_agent()
+        agent.controller = types.SimpleNamespace(_interrupted=False)
+        agent._active_handles = {}
+        agent._interrupt_requested = False
+        agent._interrupt_fence_wakeup = asyncio.Event()
+        started, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        outcomes = []
+
+        class CountingTask(asyncio.Task):
+            cancelling = None if legacy else getattr(asyncio.Task, "cancelling", None)
+            requests = 0
+
+            def cancel(self, *args, **kwargs):
+                self.requests += 1
+                return super().cancel(*args, **kwargs)
+
+        async def processing():
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cleaning.set()
+                await release.wait()
+                outcomes.append("settled")
+
+        task = CountingTask(processing())
+        agent._processing_task = task
+        stop = None
+        try:
+            await started.wait()
+            AgentInterruptMixin._interrupt_active_turn(agent)
+            await cleaning.wait()
+            AgentInterruptMixin._interrupt_active_turn(agent)
+            stop = asyncio.create_task(agent.stop())
+            await agent._shutdown_event.wait()
+            assert task.requests == 1
+            assert not stop.done()
+            release.set()
+            await asyncio.wait_for(stop, 2)
+            assert outcomes == ["settled"]
+            assert task.requests == 1
+        finally:
+            release.set()
+            await asyncio.gather(
+                task, *([stop] if stop else []), return_exceptions=True
+            )
+
     async def test_full_stop_cascade(self):
         a = _build_lifecycle_agent()
         await a.stop()

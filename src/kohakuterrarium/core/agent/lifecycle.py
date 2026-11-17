@@ -125,7 +125,7 @@ class AgentLifecycleMixin:
             and not processing.done()
             and processing is not asyncio.current_task()
         ):
-            processing.cancel()
+            request_cancellation(processing)
             await asyncio.gather(processing, return_exceptions=True)
         # The processing lock also covers output, wiring, and session finalization.
         turn_lock = getattr(self, "_processing_lock", None)
