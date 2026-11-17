@@ -12,7 +12,7 @@ from kohakuterrarium.session.memory.visibility import (
     BranchVisibility,
     ranked_filtered,
 )
-
+from kohakuterrarium.session.vault.io import key_text, scan_keys
 
 # Format 1 indexes the selected lineage; format 2 staged all branches;
 # format 3 added legacy ancestry, format 4 a source fingerprint, and
@@ -84,22 +84,39 @@ class MemorySearchMixin:
         ):
             raise ValueError("Branch-scoped search requires an all-branch memory index")
         if branch_views is not None:
-            for name in branch_views:
-                if (
-                    self._state.get(f"{name}:index_format", _SELECTED_INDEX_FORMAT)
-                    != _ALL_BRANCH_INDEX_FORMAT
-                    and self._get_indexed_count(name) > 0
-                ):
-                    raise ValueError(
-                        f"Memory index for {name!r} uses an older format; "
-                        "reindex this session before branch-scoped search"
-                    )
+            scoped_agents = branch_views.keys()
+        elif branch_view is not None:
+            if agent:
+                scoped_agents = (agent,)
+            else:
+                # A single view with no agent applies to every indexed
+                # namespace, including those not present in the top-k hits.
+                # A v5 instance alone does not prove its persisted rows are v5.
+                scoped_agents = {
+                    key_text(key).removesuffix(":indexed_keywords")
+                    for key in scan_keys(self._state)
+                    if key_text(key).endswith(":indexed_keywords")
+                } | {
+                    key_text(key).removesuffix(":indexed_events")
+                    for key in scan_keys(self._state)
+                    if key_text(key).endswith(":indexed_events")
+                }
+        else:
+            scoped_agents = ()
+        for name in scoped_agents:
+            if (
+                self._get_indexed_count(name) > 0
+                and self._state.get(f"{name}:index_format", _SELECTED_INDEX_FORMAT)
+                != _ALL_BRANCH_INDEX_FORMAT
+            ):
+                raise ValueError(
+                    f"Memory index for {name!r} uses an older format; "
+                    "reindex this session before branch-scoped search"
+                )
         scope = (
             AgentBranchVisibility(branch_views)
             if branch_views is not None
-            else BranchVisibility(branch_view)
-            if branch_view is not None
-            else None
+            else BranchVisibility(branch_view) if branch_view is not None else None
         )
         if mode == "auto":
             mode = "hybrid" if self._has_vectors else "fts"

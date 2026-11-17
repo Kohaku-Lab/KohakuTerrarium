@@ -435,3 +435,31 @@ class TestSearchSessionMemory:
             )
         # The audit defect: the lookup minted an empty .kohakutr.
         assert not ghost.exists()
+
+
+@pytest.mark.asyncio
+async def test_saved_search_with_zero_turn_injected_bookkeeping(tmp_path):
+    path = tmp_path / "zero-turn.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_input_injected",
+            {"content": "before first turn"},
+            turn_index=0,
+            branch_id=0,
+        )
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle selected"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.flush()
+    finally:
+        store.close(update_status=False)
+    result = await mem_mod.search_session_memory(path, q="needle", mode="fts")
+    assert {hit["content"] for hit in result["results"]} == {"needle selected"}

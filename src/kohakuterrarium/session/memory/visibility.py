@@ -39,6 +39,11 @@ class BranchVisibility:
         # Keep the existing replay behavior for unscoped legacy events.
         if type(turn) is not int or type(branch) is not int:
             return True
+        # Legacy bookkeeping and early injected input can be recorded at
+        # (0, 0). It belongs to no selected branch, unlike malformed mixed
+        # zero/positive coordinates which must remain excluded.
+        if turn == 0 and branch == 0:
+            return True
         if self.selected.get(turn) != branch:
             return False
         raw_path = meta.get("parent_branch_path")
@@ -109,9 +114,17 @@ def resolve_search_view(
     Keep this consistent with conversation replay; callers compute it when
     reading source events, not by interpreting only ranked search candidates.
     """
-    return resolve_selected_branches(
+    selected = resolve_selected_branches(
         events, index_parent_paths_by_position(events), requested_view
     )
+    # Resolved history can contain (0, 0) bookkeeping rows. Explicit
+    # selections remain strictly positive, but these unscoped coordinates
+    # must never reach BranchVisibility's strict branch-view validator.
+    return {
+        turn: branch
+        for turn, branch in selected.items()
+        if type(turn) is int and turn > 0 and type(branch) is int and branch > 0
+    }
 
 
 def requested_store_view(store: Any, agent: str) -> dict[int, int] | None:

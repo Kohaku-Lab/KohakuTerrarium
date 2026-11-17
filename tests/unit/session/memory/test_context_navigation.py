@@ -37,9 +37,9 @@ def _append(store, turn, event_type, data, branch=1, parent=None):
         data,
         turn_index=turn,
         branch_id=branch,
-        parent_branch_path=parent
-        if parent is not None
-        else ([[1, 1]] if turn == 2 else []),
+        parent_branch_path=(
+            parent if parent is not None else ([[1, 1]] if turn == 2 else [])
+        ),
     )
 
 
@@ -575,5 +575,87 @@ async def test_long_tool_hit_is_visible_and_offset_is_pageable(tmp_path):
             {"anchor": token, "offset": len(payload) + 1}, context=ctx
         )
         assert "INVALID_CONTENT_OFFSET" in invalid.error
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_injected_inputs_and_zero_turn_bookkeeping_remain_navigable(tmp_path):
+    store = SessionStore(tmp_path / "injected.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    store.append_event(
+        "alice",
+        "user_input_injected",
+        {"content": "pre-turn instruction"},
+        turn_index=0,
+        branch_id=0,
+        parent_branch_path=[],
+    )
+    _append(store, 1, "user_input", {"content": "original task"})
+    store.append_event(
+        "alice",
+        "user_input_injected",
+        {"content": "mid-turn correction"},
+        turn_index=1,
+        branch_id=1,
+        parent_branch_path=[],
+    )
+    _append(
+        store,
+        1,
+        "tool_result",
+        {"name": "bash", "output": "needle output has a problem"},
+    )
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        found = await tool.execute({"query": "needle", "mode": "fts"}, context=ctx)
+        assert found.error is None
+        expanded = await tool.execute(
+            {"anchor": _anchor(found.output), "before": 5, "after": 0},
+            context=ctx,
+        )
+        assert expanded.error is None
+        assert "pre-turn instruction" in expanded.output
+        assert "mid-turn correction" in expanded.output
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_neighbor_text_anchor_keeps_whole_event_offset_range(tmp_path):
+    store = SessionStore(tmp_path / "paragraph-neighbor.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    _append(store, 1, "user_input", {"content": "start"})
+    first = "A" * 600
+    second = "B" * 1200
+    _append(store, 1, "text", {"content": first + "\n\n" + second})
+    _append(
+        store,
+        1,
+        "tool_result",
+        {"name": "bash", "output": "needle report shows event"},
+    )
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        found = await tool.execute({"query": "needle", "mode": "fts"}, context=ctx)
+        assert found.error is None
+        window = await tool.execute(
+            {"anchor": _anchor(found.output), "before": 1, "after": 0},
+            context=ctx,
+        )
+        assert window.error is None
+        lines = window.output.splitlines()
+        row = next(
+            i for i, line in enumerate(lines) if line.startswith("[before] text")
+        )
+        neighbor = lines[row + 1].split(": ", 1)[1]
+        assert "next_offset=900" in window.output
+        page = await tool.execute(
+            {"anchor": neighbor, "offset": 900, "before": 0, "after": 0},
+            context=ctx,
+        )
+        assert page.error is None
+        assert "B" * 100 in page.output
+        assert "content_slice=900:1800/" in page.output
     finally:
         store.close(update_status=False)

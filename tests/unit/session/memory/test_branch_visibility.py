@@ -320,3 +320,110 @@ def test_unverifiable_legacy_ancestor_rejects_instead_of_leaking():
         visibility.matches(
             {"turn_index": 2, "branch_id": 1, "parent_branch_path": None}
         )
+
+
+@pytest.mark.parametrize("agent", ["alice", None])
+def test_singular_branch_view_rejects_unmigrated_corpus(tmp_path, agent):
+    """A v5 *instance* must not search persisted v1 rows using either scope."""
+    path = str(tmp_path / "legacy-singular.kohakutr")
+    rows = [
+        {
+            "type": "user_input",
+            "content": f"needle sibling {branch}",
+            "event_id": branch,
+            "turn_index": 1,
+            "branch_id": branch,
+        }
+        for branch in (1, 2)
+    ]
+    prior = SessionMemory(path)
+    try:
+        prior.index_events("alice", rows)
+    finally:
+        prior.close()
+
+    opened = SessionMemory(path, index_all_branches=True)
+    try:
+        with pytest.raises(ValueError, match="reindex"):
+            opened.search("needle", mode="fts", agent=agent, branch_view={1: 1})
+        opened.index_events("alice", rows)
+        results = opened.search("needle", mode="fts", agent=agent, branch_view={1: 1})
+        assert {r.content for r in results} == {"needle sibling 1"}
+    finally:
+        opened.close()
+
+
+def test_resolved_view_handles_zero_turn_bookkeeping_without_weakening_explicit_validation():
+    from kohakuterrarium.session.history.branch_paths import InvalidBranchViewError
+    from kohakuterrarium.session.memory.visibility import resolve_search_view
+
+    events = [
+        {
+            "type": "user_input_injected",
+            "content": "early note",
+            "turn_index": 0,
+            "branch_id": 0,
+            "event_id": 1,
+        },
+        {
+            "type": "user_input",
+            "content": "needle",
+            "turn_index": 1,
+            "branch_id": 1,
+            "event_id": 2,
+        },
+    ]
+    selected = resolve_search_view(events)
+    assert selected == {1: 1}
+    visibility = BranchVisibility(selected)
+    assert visibility.matches(
+        {"turn_index": 0, "branch_id": 0, "parent_branch_path": []}
+    )
+    assert visibility.matches(
+        {"turn_index": 1, "branch_id": 1, "parent_branch_path": []}
+    )
+    with pytest.raises(InvalidBranchViewError):
+        BranchVisibility({0: 0})
+
+
+def test_singular_view_without_agent_validates_all_indexed_namespaces(tmp_path):
+    path = str(tmp_path / "mixed-index-formats.kohakutr")
+    alice = SessionMemory(path)
+    try:
+        alice.index_events(
+            "alice",
+            [
+                {
+                    "type": "user_input",
+                    "content": "needle alice",
+                    "event_id": 1,
+                    "turn_index": 1,
+                    "branch_id": 1,
+                }
+            ],
+        )
+    finally:
+        alice.close()
+    bob = SessionMemory(path, index_all_branches=True)
+    try:
+        bob.index_events(
+            "bob",
+            [
+                {
+                    "type": "user_input",
+                    "content": "needle bob",
+                    "event_id": 2,
+                    "turn_index": 1,
+                    "branch_id": 1,
+                    "parent_branch_path": [],
+                }
+            ],
+        )
+        assert {
+            r.content
+            for r in bob.search("needle", mode="fts", agent="bob", branch_view={1: 1})
+        } == {"needle bob"}
+        with pytest.raises(ValueError, match="reindex"):
+            bob.search("needle", mode="fts", branch_view={1: 1})
+    finally:
+        bob.close()

@@ -108,3 +108,47 @@ class TestSemanticModeStrict:
                 memory.search("q", mode="telepathy")
         finally:
             memory.close()
+
+
+def test_legacy_index_migrates_on_search_but_never_indexes_an_empty_reader(tmp_path):
+    from kohakuterrarium.session.memory.index import SessionMemory
+
+    path = tmp_path / "old-index.kohakutr"
+    store = SessionStore(path)
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    for branch in (1, 2):
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": f"needle branch {branch}"},
+            turn_index=1,
+            branch_id=branch,
+            parent_branch_path=[],
+        )
+    store.state["alice:branch_view"] = {"1": 1}
+    rows = store.get_events("alice")
+    store.close(update_status=False)
+
+    with SessionReader(path) as reader:
+        assert reader.search("needle") == []
+        original_meta = dict(reader.meta)
+
+    original = SessionMemory(str(path))
+    try:
+        assert original.index_events("alice", rows) == 1
+        assert original._state.get("alice:index_format", 1) == 1
+    finally:
+        original.close()
+
+    with SessionReader(path) as reader:
+        results = reader.search("needle")
+        assert {result.content for result in results} == {"needle branch 1"}
+        assert reader.meta == original_meta
+
+    upgraded = SessionMemory(str(path), index_all_branches=True)
+    try:
+        assert upgraded._state["alice:index_format"] == 5
+        assert upgraded.index_events("alice", rows) == 0
+        assert upgraded.get_stats()["fts_blocks"] == 2
+    finally:
+        upgraded.close()

@@ -32,6 +32,7 @@ MAX_EVENT_CHARS = 900
 CONTEXT_TYPES = frozenset(
     {
         "user_input",
+        "user_input_injected",
         "user_message",
         "trigger_fired",
         "text",
@@ -58,7 +59,9 @@ class _Location:
     ref: str
     fingerprint: str
     view: tuple[tuple[int, int], ...]
-    part_index: int = 0
+    # None means a whole event (for neighbor navigation), while zero is the
+    # first paragraph of a block returned by search.
+    part_index: int | None = None
     focus: str = ""
 
 
@@ -406,7 +409,11 @@ class MemoryContextNavigator:
                     branch_id=branch if type(branch) is int else None,
                     truncated=preview.truncated,
                     role=role,
-                    part_index=loc.part_index if role == "match" else 0,
+                    part_index=(
+                        loc.part_index
+                        if role == "match" and loc.part_index is not None
+                        else 0
+                    ),
                     content_start=preview.start,
                     content_end=preview.end,
                     content_total=preview.total,

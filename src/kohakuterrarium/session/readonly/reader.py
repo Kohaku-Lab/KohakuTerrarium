@@ -147,13 +147,17 @@ class SessionReader:
         """
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
-            views = {
-                name: resolve_search_view(
-                    self._store.get_memory_events(name),
-                    requested_store_view(self._store, name),
+            views = {}
+            for name in self.agents:
+                events = self._store.get_memory_events(name)
+                views[name] = resolve_search_view(
+                    events, requested_store_view(self._store, name)
                 )
-                for name in self.agents
-            }
+                # Preserve the Reader contract: never index a session which
+                # has no memory index yet. Existing indexes, however, must be
+                # refreshed/migrated before branch-scoped retrieval.
+                if memory._get_indexed_count(name) > 0:
+                    memory._index_keywords(name, events)
             return memory.search(query, mode=mode, k=k, agent=agent, branch_views=views)
         finally:
             memory.close()
