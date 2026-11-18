@@ -511,17 +511,20 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
     old = SessionMemory(path, index_all_branches=True)
     try:
         assert old.index_events("alice", events) == 1
-        generation = old._generation("alice")
-        # Represent an existing M2 index (version 3), with a valid checkpoint.
-        old._state["alice:index_format"] = 3
+        epoch = old._state["memory:index_manifest"]["epoch"]
+        # Represent a pre-v5 session-wide index (the migration input).
+        old._state["memory:index_manifest"] = {
+            **old._state["memory:index_manifest"],
+            "format": 3,
+        }
     finally:
         old.close()
 
     upgraded = SessionMemory(path, index_all_branches=True)
     try:
         assert upgraded.index_events("alice", events) == 1
-        assert upgraded._generation("alice") > generation
-        assert upgraded._state["alice:index_format"] == 5
+        assert upgraded._state["memory:index_manifest"]["epoch"] > epoch
+        assert upgraded._state["memory:index_manifest"]["format"] == 5
         hits = upgraded.search("needle", mode="fts")
         assert len(hits) == 1
         assert hits[0].source_fingerprint == _anchor(events[0])

@@ -143,7 +143,12 @@ def _search_session_sync(
             # Persist all branches, then project each agent's selected lineage.
             meta = store.load_meta()
             branch_views = {}
-            for agent_name in meta.get("agents", []):
+            known_agents = list(
+                dict.fromkeys(
+                    [*meta.get("agents", []), *sorted(memory._known_agents())]
+                )
+            )
+            for agent_name in known_agents:
                 events = store.get_memory_events(agent_name)
                 branch_views[agent_name] = resolve_search_view(
                     events, requested_store_view(store, agent_name)

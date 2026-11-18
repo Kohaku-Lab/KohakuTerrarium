@@ -51,10 +51,10 @@ class TestBuildEmbeddingsConfigOverrides:
             def get_stats(self):
                 return {}
 
-            def _set_indexed_count(self, *a, **kw):
-                pass
+            def _known_agents(self):
+                return set()
 
-            def _clear_fts(self, *a, **kw):
+            def force_rebuild(self, agents):
                 pass
 
         monkeypatch.setattr(build_mod, "SessionMemory", _Mem)
@@ -98,6 +98,9 @@ class TestSearchSessionMemoryEmbedderFallback:
 
             def index_events(self, *a, **kw):
                 return 0
+
+            def _known_agents(self):
+                return set()
 
             def search(self, query, mode, k, agent, branch_views=None):
                 return []

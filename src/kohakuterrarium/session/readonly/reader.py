@@ -148,7 +148,8 @@ class SessionReader:
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
             views = {}
-            for name in self.agents:
+            known = list(dict.fromkeys([*self.agents, *sorted(memory._known_agents())]))
+            for name in known:
                 events = self._store.get_memory_events(name)
                 views[name] = resolve_search_view(
                     events, requested_store_view(self._store, name)
@@ -167,7 +168,8 @@ class SessionReader:
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
             total = 0
-            for name in self.agents:
+            names = list(dict.fromkeys([*self.agents, *sorted(memory._known_agents())]))
+            for name in names:
                 total += memory.index_events(name, self._store.get_memory_events(name))
             return total
         finally:

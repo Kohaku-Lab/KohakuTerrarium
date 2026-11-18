@@ -234,8 +234,7 @@ class TestSessionMemoryIndexing:
             memory.index_events("alice", rows)
             assert embedder.inputs == ["needle prompt", "needle reply"]
             for _ in range(2):
-                memory._set_indexed_count("alice", 0)
-                memory._clear_fts("alice")
+                memory.force_rebuild(["alice"])
                 memory.index_events("alice", rows)
                 assert memory.get_stats()["vec_blocks"] == 2
                 assert memory.get_stats()["fts_blocks"] == 2
@@ -409,6 +408,9 @@ class TestSessionMemoryIndexing:
             memory._set_embedder(_FakeEmbedder())
             for name, rows in events.items():
                 memory.index_events(name, rows)
+            # A model-wide vector rebuild publishes only after all known
+            # agents have completed, not after the first agent's cursor.
+            for name in events:
                 hits = memory.search(f"{name} needle", mode="semantic", agent=name)
                 assert [hit.content for hit in hits] == [f"{name} needle"]
             events["alice"].append({"type": "user_input", "content": "later needle"})
@@ -424,7 +426,7 @@ class TestSessionMemoryIndexing:
         try:
             rows = [{"type": "user_input", "content": "needle"}]
             memory.index_events("alice", rows)
-            memory._set_indexed_count("alice", 0)
+            memory.force_rebuild(["alice"])
             start, blocks = memory._vector_batch("alice", rows)
             assert start.start == 0
             assert [block.content for block in blocks] == ["needle"]

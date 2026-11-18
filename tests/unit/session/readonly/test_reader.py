@@ -136,7 +136,7 @@ def test_legacy_index_migrates_on_search_but_never_indexes_an_empty_reader(tmp_p
     original = SessionMemory(str(path))
     try:
         assert original.index_events("alice", rows) == 1
-        assert original._state.get("alice:index_format", 1) == 1
+        assert original._state["memory:index_manifest"]["format"] == 1
     finally:
         original.close()
 
@@ -147,7 +147,7 @@ def test_legacy_index_migrates_on_search_but_never_indexes_an_empty_reader(tmp_p
 
     upgraded = SessionMemory(str(path), index_all_branches=True)
     try:
-        assert upgraded._state["alice:index_format"] == 5
+        assert upgraded._state["memory:index_manifest"]["format"] == 5
         assert upgraded.index_events("alice", rows) == 0
         assert upgraded.get_stats()["fts_blocks"] == 2
     finally:

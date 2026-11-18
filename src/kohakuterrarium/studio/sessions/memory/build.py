@@ -56,8 +56,15 @@ def index_status(path: Path) -> dict[str, Any]:
             except (KeyError, Exception):
                 pass
             vec_blocks = int(stats.get("vec_blocks") or 0)
+            manifest = memory._manifest()
+            ready = bool(
+                manifest
+                and manifest.get("format") == 5
+                and manifest.get("vector") == "ready"
+                and manifest.get("fts") == "ready"
+            )
             return {
-                "indexed": vec_blocks > 0,
+                "indexed": ready and vec_blocks > 0,
                 "embedder": saved_provider,
                 "model": saved_model,
                 "dimensions": stats.get("dimensions"),
@@ -83,8 +90,14 @@ def index_status_quick(path: Path) -> bool:
     try:
         memory = SessionMemory(str(path), embedder=None)
         try:
-            return (
-                memory.has_vectors and (memory.get_stats().get("vec_blocks") or 0) > 0
+            manifest = memory._manifest()
+            return bool(
+                manifest
+                and manifest.get("format") == 5
+                and manifest.get("vector") == "ready"
+                and manifest.get("fts") == "ready"
+                and memory.has_vectors
+                and (memory.get_stats().get("vec_blocks") or 0) > 0
             )
         finally:
             memory.close()
@@ -168,20 +181,14 @@ def build_index(
         embedder = create_embedder(embed_config)
         memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
         try:
-            # Reset both indexes so a forced build starts from event zero.
             if force:
-                for agent_name in agents:
-                    try:
-                        memory._set_indexed_count(agent_name, 0)
-                        memory._clear_fts(agent_name)
-                    except Exception as e:  # pragma: no cover - defensive
-                        logger.warning(
-                            "force-rebuild clear failed",
-                            agent=agent_name,
-                            error=str(e),
-                            exc_info=True,
-                        )
+                memory.force_rebuild(agents)
 
+            # Format migration invalidated every historical Agent namespace,
+            # even one no longer present in the session's current metadata.
+            # Empty deleted-Agent histories complete the epoch without
+            # resurrecting their old indexed content.
+            stale_agents = sorted(memory._known_agents() - set(agents))
             indexed_per_agent: dict[str, dict[str, int]] = {}
             total_events_seen = 0
             # Count first so indexing progress has a stable denominator.
@@ -221,6 +228,9 @@ def build_index(
                     blocks_indexed=done_events,
                     blocks_total=total_events_seen,
                 )
+
+            for stale_agent in stale_agents:
+                memory.index_events(stale_agent, [])
 
             # Persist configuration only for a non-empty vector index; otherwise
             # status must continue to present the session as needing its first build.

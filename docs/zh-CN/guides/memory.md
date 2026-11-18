@@ -67,7 +67,11 @@ kt embedding swe.kohakutr \
 
 `--dimensions` 是 Matryoshka truncation：如果模型支持，可用它在执行时直接缩小向量维度。
 
-增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
+增量建立：通常再次执行 `kt embedding` 时，只处理新增事件。
+当会话的记忆索引格式或 Embedding 模型发生变化时，整个 Session 会开启新的索引代际：
+旧 FTS 和向量记录会先失效，不能继续参与检索。FTS 可在不加载 Embedding 模型时重建；
+Semantic/Hybrid 检索则需要所有已索引 Agent 的向量完成重建。
+中断或失败的重建会保持不可用，待安全重试，不会误用旧版本的向量。
 
 ## 从 CLI 搜索
 

@@ -67,7 +67,13 @@ kt embedding swe.kohakutr \
 
 `--dimensions` is Matryoshka truncation; use it to shrink vectors on the fly when the model supports it.
 
-Incremental: running `kt embedding` again only indexes new events.
+Incremental: running `kt embedding` again normally indexes only new events.
+When the session's memory index format or embedding model changes, a session-wide
+index epoch replaces the previous index. Old FTS and vector rows become
+unqueryable before rebuilding starts. FTS can be rebuilt without loading an
+embedding model; semantic/hybrid searches require the vector rebuild to finish
+for all indexed agents. A failed or interrupted rebuild remains unavailable
+until safely retried; it never serves stale vectors from an earlier version.
 
 ## Search from the CLI
 

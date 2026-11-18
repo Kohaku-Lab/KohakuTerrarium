@@ -104,15 +104,19 @@ def search_cli(
         # The CLI must not silently read an obsolete selected-only index after
         # a Studio or live search upgraded this session's index format.
         branch_views = {}
-        for name in store.load_meta().get("agents", []):
+        known_names = list(
+            dict.fromkeys(
+                [*store.load_meta().get("agents", []), *sorted(memory._known_agents())]
+            )
+        )
+        for name in known_names:
             events = store.get_memory_events(name)
             branch_views[name] = resolve_search_view(
                 events, requested_store_view(store, name)
             )
-            if events:
-                # A search is not authorized to rewrite vectors using an
-                # independently chosen embedding model. Catch up FTS only.
-                memory._index_keywords(name, events)
+            # A search never writes vectors. Empty historical agent names
+            # still need an epoch checkpoint to finish a global migration.
+            memory._index_keywords(name, events)
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:
             print("No vector index found. Run 'kt embedding' first, or use --mode fts")

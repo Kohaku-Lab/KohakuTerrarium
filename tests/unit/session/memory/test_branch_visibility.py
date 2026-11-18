@@ -260,7 +260,7 @@ def test_index_must_be_migrated_before_scoped_query(tmp_path):
         original.close()
     new_reader = SessionMemory(path, index_all_branches=True)
     try:
-        with pytest.raises(ValueError, match="reindex"):
+        with pytest.raises(ValueError, match="rebuild"):
             new_reader.search("needle", mode="fts", branch_views={"alice": {1: 1}})
     finally:
         new_reader.close()
@@ -344,7 +344,7 @@ def test_singular_branch_view_rejects_unmigrated_corpus(tmp_path, agent):
 
     opened = SessionMemory(path, index_all_branches=True)
     try:
-        with pytest.raises(ValueError, match="reindex"):
+        with pytest.raises(ValueError, match="rebuild"):
             opened.search("needle", mode="fts", agent=agent, branch_view={1: 1})
         opened.index_events("alice", rows)
         results = opened.search("needle", mode="fts", agent=agent, branch_view={1: 1})
@@ -419,11 +419,25 @@ def test_singular_view_without_agent_validates_all_indexed_namespaces(tmp_path):
                 }
             ],
         )
+        # A format upgrade is session-wide. Bob's freshly indexed rows must
+        # not be published while Alice's old-version cursor is still pending.
+        with pytest.raises(ValueError, match="rebuild"):
+            bob.search("needle", mode="fts", agent="bob", branch_view={1: 1})
+        bob.index_events(
+            "alice",
+            [
+                {
+                    "type": "user_input",
+                    "content": "needle alice",
+                    "event_id": 1,
+                    "turn_index": 1,
+                    "branch_id": 1,
+                    "parent_branch_path": [],
+                }
+            ],
+        )
         assert {
-            r.content
-            for r in bob.search("needle", mode="fts", agent="bob", branch_view={1: 1})
-        } == {"needle bob"}
-        with pytest.raises(ValueError, match="reindex"):
-            bob.search("needle", mode="fts", branch_view={1: 1})
+            r.content for r in bob.search("needle", mode="fts", branch_view={1: 1})
+        } == {"needle alice", "needle bob"}
     finally:
         bob.close()

@@ -91,15 +91,37 @@ class LiveSessionMemory:
     ) -> dict[str, dict[int, int]]:
         """Index immutable facts and resolve each agent's selected projection."""
         views: dict[str, dict[int, int]] = {}
-        for name in names:
+        manifest = self._memory._manifest()
+        migration = (
+            manifest is None
+            or manifest.get("format") != self._memory._index_format
+            or manifest.get("fts") != "ready"
+        )
+        # A session-wide migration cannot be published with only the active
+        # agent upgraded. Existing agent indexes are rebuilt together.
+        refresh_names = (
+            list(
+                dict.fromkeys(
+                    [
+                        *self._store.load_meta().get("agents", []),
+                        *sorted(self._memory._known_agents()),
+                        *names,
+                    ]
+                )
+            )
+            if migration
+            else names
+        )
+        for name in refresh_names:
             events = self._store.get_memory_events(name)
             self._memory._index_keywords(name, events)
-            selected = (
-                overrides[name]
-                if overrides is not None and name in overrides
-                else requested_store_view(self._store, name)
-            )
-            views[name] = resolve_search_view(events, selected)
+            if name in names:
+                selected = (
+                    overrides[name]
+                    if overrides is not None and name in overrides
+                    else requested_store_view(self._store, name)
+                )
+                views[name] = resolve_search_view(events, selected)
         return views
 
     def _vector_batch(self, name: str):
@@ -169,7 +191,15 @@ class LiveSessionMemory:
                             )
                             return await self._with_anchors(results, views, None, query)
                         raise ValueError("semantic search needs an embedding model")
-                    for name in names:
+                    manifest = self._memory._manifest()
+                    # Model / format migration must finish every Agent before
+                    # the session-wide vector corpus can be published.
+                    vector_names = (
+                        list(manifest.get("agents", names))
+                        if manifest and manifest.get("vector") != "ready"
+                        else names
+                    )
+                    for name in vector_names:
                         start, count, blocks = await self._store.run(
                             self._vector_batch, name
                         )
