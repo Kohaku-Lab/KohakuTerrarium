@@ -255,20 +255,12 @@ class AgentLifecycleMixin:
                 metadata["result"] = error
             # Pair only announced native calls; an orphan result would invalidate text-mode history.
             meta = getattr(self, "_direct_job_meta", {}).get(job_id) or {}
-            promoted = getattr(
-                getattr(self, "_active_handles", {}).get(job_id), "promoted", False
-            ) or meta.get("background", False)
-            tool_call_id = None if promoted else meta.get("tool_call_id")
+            tool_call_id = meta.get("tool_call_id")
             controller = getattr(self, "controller", None)
             if tool_call_id and controller is not None:
-                announced = any(
-                    any(
-                        tc.get("id") == tool_call_id
-                        for tc in (getattr(m, "tool_calls", None) or [])
-                    )
-                    for m in controller.conversation.get_messages()
-                )
-                if announced:
+                if controller.conversation.owes_tool_response(
+                    tool_call_id, meta.get("announcement")
+                ):
                     metadata["tool_call_id"] = tool_call_id
                     try:
                         controller.conversation.append(
@@ -276,6 +268,7 @@ class AgentLifecycleMixin:
                             error,
                             tool_call_id=tool_call_id,
                             name=meta.get("name") or name,
+                            metadata={"job_id": job_id, "tool_result_phase": "final"},
                         )
                     except Exception:  # pragma: no cover - defensive
                         logger.warning(

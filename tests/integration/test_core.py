@@ -2711,20 +2711,35 @@ class TestCoreIntegration:
         async with Terrarium(session_dir=tmp_path / "promoted_stop") as engine:
             promoted = await engine.add_creature(
                 AgentConfig(
-                    name="promoted_stop", system_prompt="plain", tool_format="bracket"
+                    name="promoted_stop", system_prompt="plain", tool_format="native"
                 ),
-                llm=ScriptedLLM(["[/block][block/]", "background pending"]),
+                llm=_HistoryReplayLLM(
+                    True,
+                    plan=[
+                        [NativeToolCall("promoted_call", "block", "{}")],
+                        "background pending",
+                    ],
+                ),
                 tools=[promoted_tool],
                 io="headless",
                 start=True,
             )
             promoted_agent = promoted.agent
-            turn = asyncio.create_task(promoted.run("launch", timeout=5))
+            turn = asyncio.create_task(
+                promoted.run("launch", timeout=5, raise_on_error=False)
+            )
             await asyncio.wait_for(promoted_tool.started.wait(), 5)
             job_id, handle = next(iter(promoted_agent._active_handles.items()))
-            handle.promote()
-            await turn
+            assert handle.promote()
             await promoted_agent.stop()
+            await turn
+            paired = [
+                m
+                for m in promoted_agent.controller.conversation.to_messages()
+                if m.get("tool_call_id") == "promoted_call"
+            ]
+            assert len(paired) == 1
+            assert "Agent stopped" in paired[0]["content"]
             results = [
                 event
                 for event in promoted_agent.session_store.get_events("promoted_stop")

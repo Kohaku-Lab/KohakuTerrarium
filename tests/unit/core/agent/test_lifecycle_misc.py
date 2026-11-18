@@ -19,6 +19,7 @@ from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
 from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
+from kohakuterrarium.core.agent.tools.dispatch import AgentToolsMixin
 from kohakuterrarium.core.agent.turn.interrupt import AgentInterruptMixin
 from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobStore, JobType
 from kohakuterrarium.core.conversation.conversation import (
@@ -278,6 +279,70 @@ class TestAgentLifecycle:
         assert [m.content for m in conversation.get_messages() if m.role == "tool"] == [
             "pending"
         ]
+
+    @pytest.mark.parametrize("first", ["collector", "stop"])
+    @pytest.mark.parametrize(
+        "slot", ["unannounced", "open", "pending", "final", "closed", "stale_owner"]
+    )
+    def test_promotion_and_stop_share_current_response_slot(self, first, slot):
+        a = _build_lifecycle_agent()
+        a.plugins = None
+        a.output_router.notify_activity = MagicMock()
+        store = a.executor.job_store = JobStore()
+        status = JobStatus("job", JobType.TOOL, "work", state=JobState.RUNNING)
+        store.register(status)
+        a.executor.get_running_jobs = lambda: [status] if status.is_running else []
+        a._active_handles = {"job": types.SimpleNamespace(promoted=True)}
+        a._direct_job_meta = {}
+        conv = Conversation()
+        a.controller = types.SimpleNamespace(conversation=conv)
+        calls = [
+            {
+                "id": "id",
+                "type": "function",
+                "function": {"name": "work", "arguments": "{}"},
+            }
+        ]
+        conv.append("assistant", "", tool_calls=calls)
+        if slot == "stale_owner":
+            AgentToolsMixin._register_direct_job(
+                a, "job", kind="tool", name="work", tool_call_id="id"
+            )
+        conv.append("tool", "previous occurrence", tool_call_id="id")
+        conv.append("user", "next")
+        if slot != "unannounced":
+            conv.append("assistant", "", tool_calls=calls)
+        if slot != "stale_owner":
+            AgentToolsMixin._register_direct_job(
+                a, "job", kind="tool", name="work", tool_call_id="id"
+            )
+        if slot in ("pending", "final"):
+            conv.append("tool", slot, tool_call_id="id")
+        if slot == "closed":
+            conv.append("assistant", "new round")
+
+        def collect():
+            AgentToolsMixin._handle_promotion(
+                a, "job", a.controller, {"job": "id"}, True
+            )
+
+        if first == "collector":
+            collect()
+            a._finalize_inflight_jobs_for_stop()
+        else:
+            a._finalize_inflight_jobs_for_stop()
+            collect()
+        replies = [m.content for m in conv.get_messages() if m.role == "tool"]
+        expected = ["previous occurrence"]
+        if slot in ("pending", "final"):
+            expected.append(slot)
+        elif slot == "open":
+            expected.append(
+                "[job] Promoted to background. Result arrives in a later turn."
+                if first == "collector"
+                else "Agent stopped while this job was still running."
+            )
+        assert replies == expected
 
     async def test_cancel_executor_tasks_no_executor(self):
         a = _build_lifecycle_agent()

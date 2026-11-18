@@ -149,6 +149,28 @@ class Conversation:
             _get_content_text_length(m.content) for m in self._messages
         )
 
+    def unanswered_tool_call(self, tool_call_id: str) -> Message | None:
+        """Return the current assistant announcement if this response slot is open."""
+        for msg in reversed(self._messages):
+            if msg.role == "tool" and msg.tool_call_id == tool_call_id:
+                break
+            if msg.role == "user":
+                break
+            if msg.role == "assistant":
+                if any(call.get("id") == tool_call_id for call in msg.tool_calls or ()):
+                    return msg
+                break
+        return None
+
+    def owes_tool_response(
+        self, tool_call_id: str, announcement: Message | None
+    ) -> bool:
+        """Whether this particular announcement still owns an open response slot."""
+        return (
+            announcement is not None
+            and self.unanswered_tool_call(tool_call_id) is announcement
+        )
+
     def to_messages(
         self,
         *,

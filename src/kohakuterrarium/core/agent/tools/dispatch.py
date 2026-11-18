@@ -9,10 +9,7 @@ from kohakuterrarium.core.agent.tools.runtime_tools import (
     AgentRuntimeToolsMixin,
     _make_job_label,
 )
-from kohakuterrarium.core.asyncio_compat import (
-    cancellation_requested,
-    request_cancellation,
-)
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.agent.tools.metrics import (
     emit_completion_metrics as _emit_completion_metrics,
 )
@@ -23,7 +20,7 @@ from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.jobs.job import JobResult, JobState
 from kohakuterrarium.core.tools.dispatch import start_tool_task
 from kohakuterrarium.core.tools.output import render_content_text
-from kohakuterrarium.llm.message import content_parts_to_dicts
+from kohakuterrarium.llm.message import Message, content_parts_to_dicts
 from kohakuterrarium.parsing import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 
@@ -68,6 +65,11 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         results: dict[str, Any] = {}
         had_promotions = False
         pending = dict(handles)
+        announcement = (
+            controller.conversation.get_last_assistant_message()
+            if native_mode
+            else None
+        )
         waiters = {
             jid: asyncio.create_task(handle.wait()) for jid, handle in pending.items()
         }
@@ -95,7 +97,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 for jid, handle in pending.items():
                     if handle.promoted:
                         self._handle_promotion(
-                            jid, controller, tool_call_ids, native_mode
+                            jid, controller, tool_call_ids, native_mode, announcement
                         )
                         self._direct_job_meta.pop(jid, None)
                 if results:
@@ -130,7 +132,9 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                     result = exc
 
                 if isinstance(result, PromotionResult):
-                    self._handle_promotion(jid, controller, tool_call_ids, native_mode)
+                    self._handle_promotion(
+                        jid, controller, tool_call_ids, native_mode, announcement
+                    )
                     self._direct_job_meta.pop(jid, None)
                     had_promotions = True
                 else:
@@ -146,6 +150,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         controller: Controller,
         tool_call_ids: dict[str, str],
         native_mode: bool,
+        collector_announcement: Message | None = None,
     ) -> None:
         """Handle a task that was promoted to background mid-wait."""
         tool_name, label = _make_job_label(job_id)
@@ -154,7 +159,19 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         # Native tool-call protocols require a result even when the real result
         # will arrive in a later turn.
         tool_call_id = tool_call_ids.get(job_id)
-        if native_mode and tool_call_id:
+        meta = self._direct_job_meta.get(job_id)
+        if (
+            native_mode
+            and tool_call_id
+            and controller.conversation.owes_tool_response(
+                tool_call_id,
+                (
+                    meta.get("announcement")
+                    if meta is not None
+                    else collector_announcement
+                ),
+            )
+        ):
             controller.conversation.append(
                 "tool",
                 f"[{tool_name}] Promoted to background. Result arrives in a later turn.",
@@ -170,7 +187,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 )
             )
 
-        meta = self._direct_job_meta.get(job_id)
         if meta is not None:
             meta["background"] = True
             meta["interruptible"] = False
@@ -235,6 +251,11 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             "kind": kind,
             "name": name,
             "tool_call_id": tool_call_id,
+            "announcement": (
+                self.controller.conversation.unanswered_tool_call(tool_call_id)
+                if tool_call_id
+                else None
+            ),
             "background": False,
             "interruptible": True,
             "notify_controller_on_background_complete": notify_controller_on_background_complete,
@@ -307,14 +328,12 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             )
         )
         if task is not None:
-            try:
-                result = await asyncio.shield(task)
-            except asyncio.CancelledError:
-                if cancellation_requested(asyncio.current_task()):
-                    raise
-                result = None
-            except Exception as exc:
-                result = exc
+            await asyncio.wait({task})
+            if not task.cancelled():
+                try:
+                    result = task.result()
+                except Exception as exc:
+                    result = exc
 
         if (
             self._direct_job_meta.get(job_id) is not meta
@@ -358,7 +377,11 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             result, "metadata", {}
         ).get("interrupted", False):
             self._emit_direct_completion_activity(job_id, result)
-            if meta.get("tool_call_id"):
+            if (
+                call_id := meta.get("tool_call_id")
+            ) and self.controller.conversation.owes_tool_response(
+                call_id, meta.get("announcement")
+            ):
                 self._add_native_results_to_conversation(
                     self.controller,
                     [job_id],
@@ -400,19 +423,10 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         if conversation is None:
             return
         tool_call_id = meta.get("tool_call_id")
-        if not tool_call_id:
+        if not tool_call_id or not conversation.owes_tool_response(
+            tool_call_id, meta.get("announcement")
+        ):
             return
-        existing = conversation.get_messages()
-        for msg in reversed(existing):
-            if getattr(msg, "role", None) == "assistant" and any(
-                call.get("id") == tool_call_id
-                for call in (getattr(msg, "tool_calls", None) or [])
-            ):
-                break
-            if getattr(msg, "role", None) == "tool" and (
-                getattr(msg, "tool_call_id", None) == tool_call_id
-            ):
-                return
         tool_name = meta.get("name") or _make_job_label(job_id)[0]
         error_text = getattr(result, "error", None) or "User cancelled this job."
         conversation.append(
@@ -420,6 +434,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             f"Interrupted: {error_text}",
             tool_call_id=tool_call_id,
             name=tool_name,
+            metadata={"job_id": job_id, "tool_result_phase": "final"},
         )
 
     async def _on_backgroundify_complete(self, job_id: str, result: Any) -> None:
