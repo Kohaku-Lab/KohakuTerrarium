@@ -180,7 +180,9 @@ async def test_promotion_rechecks_finalizer_ownership(agent, monkeypatch, schedu
     task = asyncio.create_task(work())
     handle = BackgroundifyHandle(task, job_id="job")
     agent._active_handles["job"] = handle
-    agent._interrupt_finalizer_jobs = {} if scheduled else {object(): "job"}
+    agent._register_direct_job("job", kind="tool", name="work")
+    if not scheduled:
+        agent._start_interrupt_finalizer("job")
     callbacks = []
     try:
         if scheduled:
@@ -195,7 +197,7 @@ async def test_promotion_rechecks_finalizer_ownership(agent, monkeypatch, schedu
                     asyncio, "get_running_loop", MagicMock(side_effect=RuntimeError)
                 )
                 AgentInterruptMixin._promote_handle(agent, "job")
-            agent._interrupt_finalizer_jobs = {object(): "job"}
+            agent._start_interrupt_finalizer("job")
             for fn, args in callbacks:
                 fn(*args)
         else:
@@ -204,7 +206,7 @@ async def test_promotion_rechecks_finalizer_ownership(agent, monkeypatch, schedu
         assert agent.output_router.activity_calls == []
     finally:
         task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.gather(task, *agent._interrupt_finalizers, return_exceptions=True)
 
 
 # ── _register_direct_job / _clear_direct_job_tracking ────────────

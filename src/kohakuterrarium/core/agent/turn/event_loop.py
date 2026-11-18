@@ -559,6 +559,7 @@ class AgentEventLoopMixin:
             )
             metrics.observe_error("controller")
         finally:
+            self._release_direct_collectors()
             self._processing_task = None
         if self._interrupt_requested and not any(
             env.withdrawn for env in getattr(self, "_active_event_run", None) or []

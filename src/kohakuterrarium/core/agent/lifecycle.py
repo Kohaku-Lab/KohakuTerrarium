@@ -51,7 +51,9 @@ class AgentLifecycleMixin:
         lock = getattr(self, "_processing_lock", None)
         inbox = getattr(self, "_event_inbox", None)
         return bool(
-            (lock is not None and lock.locked()) or (inbox is not None and len(inbox))
+            getattr(self, "_active_event_run", None)
+            or (lock is not None and lock.locked())
+            or (inbox is not None and len(inbox))
         )
 
     async def interrupt_and_wait(self, *, timeout: float = 10.0) -> None:

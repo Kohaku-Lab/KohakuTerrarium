@@ -2447,8 +2447,14 @@ class TestCoreIntegration:
             await engine.add_creature(creature)
 
             # Drive a turn that will hang on the blocking tool.
+            first_frames = asyncio.Queue()
             inject_task = asyncio.create_task(
-                agent.inject_input("start blocking", source="chat")
+                _process_input(
+                    agent, "start blocking", first_frames, "test", "first-id"
+                )
+            )
+            following = asyncio.create_task(
+                agent.run("discard following", timeout=10, raise_on_error=False)
             )
             # Wait until the blocking tool is actually executing.
             await asyncio.wait_for(block.started.wait(), timeout=5.0)
@@ -2471,6 +2477,12 @@ class TestCoreIntegration:
             # inject_input itself returns without raising.
             try:
                 await asyncio.wait_for(inject_task, timeout=5.0)
+                assert agent._active_event_run[0].event.content == "discard following"
+                assert first_frames.empty(), "Previous input marked a claimed run idle"
+                assert agent.is_processing
+                agent.interrupt()
+                assert (await following).interrupted_by_user
+                assert not agent.is_processing
                 frames = asyncio.Queue()
                 web = asyncio.create_task(
                     _process_input(
@@ -2489,6 +2501,7 @@ class TestCoreIntegration:
                 ]
             finally:
                 block.release_cleanup.set()
+                await asyncio.gather(following, return_exceptions=True)
 
             # The agent survived the interrupt and is still running.
             assert agent.is_running is True

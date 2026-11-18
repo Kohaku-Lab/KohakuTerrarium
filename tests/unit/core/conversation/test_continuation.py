@@ -11,6 +11,7 @@ from kohakuterrarium.errors import AgentNotRunningError, ConflictError
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.testing.output import OutputRecorder
 from kohakuterrarium.core.compact.manager import CompactManager
 from kohakuterrarium.core.agent.history import message_history
 from kohakuterrarium.core.config.types import AgentConfig
@@ -169,8 +170,13 @@ async def test_tui_cancel_keeps_history_fenced_until_cleanup(
                 await runtime.release()
 
 
+@pytest.mark.parametrize(
+    "dispatch", ["collect", "exit_then_cancel", "cancel_then_exit"]
+)
 @pytest.mark.parametrize("suppress", [False, True])
-async def test_direct_tui_cancel_reports_actual_outcome_once(tmp_path, suppress):
+async def test_direct_tui_cancel_reports_actual_outcome_once(
+    tmp_path, monkeypatch, dispatch, suppress
+):
     tool = history_protocol._Work("promoted", suppress)
     provider = history_protocol._Provider("promoted")
     async with Terrarium() as engine:
@@ -185,16 +191,52 @@ async def test_direct_tui_cancel_reports_actual_outcome_once(tmp_path, suppress)
             start=True,
         )
         agent = creature.agent
-        turn = asyncio.create_task(creature.run("launch-model-job", timeout=15))
+        recorder = OutputRecorder()
+        agent.output_router.add_secondary(recorder)
+        entered, resume = asyncio.Event(), asyncio.Event()
+        output = agent.output_router.default_output
+        flush = output.flush
+
+        async def dispatch_flush():
+            if agent._direct_job_meta and not entered.is_set():
+                entered.set()
+                await resume.wait()
+                if dispatch != "collect":
+                    raise OSError("post-dispatch flush failed")
+            await flush()
+
+        monkeypatch.setattr(output, "flush", dispatch_flush)
+        turn = asyncio.create_task(
+            creature.run("launch-model-job", timeout=15, raise_on_error=False)
+        )
         try:
             await asyncio.wait_for(tool.started.wait(), 8)
+            await asyncio.wait_for(entered.wait(), 8)
             job_id = next(iter(agent._active_handles))
+            if dispatch == "exit_then_cancel":
+                resume.set()
+                await asyncio.wait_for(turn, 8)
+                assert not tool.cleanup.is_set() and not agent._interrupt_finalizers
             agent._cancel_job(job_id, tool.tool_name)
             await asyncio.wait_for(tool.cleanup.wait(), 8)
             assert agent.executor.get_status(job_id).state == JobState.RUNNING
+            resume.set()
+            if dispatch != "collect":
+                await asyncio.wait_for(turn, 8)
             tool.release.set()
+            await asyncio.wait_for(agent.executor.wait_for(job_id), 8)
             await asyncio.wait_for(turn, 8)
-            await asyncio.sleep(0)
+            await asyncio.wait_for(agent._await_interrupt_finalizers(), 8)
+            assert (
+                job_id not in agent._direct_job_meta
+                and job_id not in agent._active_handles
+            )
+            terminals = [
+                kind
+                for kind in recorder.activity_types()
+                if kind in ("tool_error", "tool_done")
+            ]
+            assert terminals == ["tool_done" if suppress else "tool_error"]
             result = agent.executor.get_result(job_id)
             assert result.cancelled is not suppress
             messages = agent.controller.conversation.to_messages()
@@ -212,8 +254,10 @@ async def test_direct_tui_cancel_reports_actual_outcome_once(tmp_path, suppress)
                     or "interrupt" in str(replies[0]["content"]).lower()
                 )
         finally:
+            resume.set()
             tool.release.set()
             await asyncio.gather(turn, return_exceptions=True)
+            agent.output_router.remove_secondary(recorder)
 
 
 async def test_full_turn_interrupt_preserves_suppressed_direct_success(tmp_path):
@@ -332,12 +376,19 @@ async def test_finalizer_exception_blocks_following_turn(
             def broken(*args, **kwargs):
                 raise RuntimeError(error_message)
 
-            monkeypatch.setattr(agent, "_emit_interrupted_activity", broken)
+            recorder = OutputRecorder()
+            agent.output_router.add_secondary(recorder)
+            job_id = next(iter(agent._active_handles))
+            monkeypatch.setattr(agent, "_append_interrupted_tool_message", broken)
             agent.interrupt()
             await asyncio.wait_for(tool.cleanup.wait(), 8)
             tool.release.set()
             await asyncio.wait_for(turn, 8)
             await wait_until(lambda: not agent._interrupt_finalizers, timeout=8)
+            agent._cancel_job(job_id, tool.tool_name)
+            with pytest.raises(RuntimeError, match="settlement failed"):
+                await agent._await_interrupt_finalizers()
+            assert recorder.activity_types().count("tool_error") == 1
             before = provider.call_count
             result = await creature.run("next request", timeout=3, raise_on_error=False)
             assert result.status != "ok"

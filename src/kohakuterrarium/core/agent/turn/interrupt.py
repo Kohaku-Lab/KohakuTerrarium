@@ -23,7 +23,6 @@ class AgentInterruptMixin:
 
         self._active_handles: dict[str, Any] = {}
         self._interrupt_finalizers: set[asyncio.Task] = set()
-        self._interrupt_finalizer_jobs: dict[asyncio.Task, str] = {}
         self._interrupt_finalizer_error: str | None = None
         self._interrupt_fence_wakeup = asyncio.Event()
         self._direct_job_meta: dict[str, dict[str, Any]] = {}
@@ -127,7 +126,8 @@ class AgentInterruptMixin:
         def promote_if_unclaimed() -> bool:
             if (
                 self._active_handles.get(job_id) is not handle
-                or job_id in getattr(self, "_interrupt_finalizer_jobs", {}).values()
+                or self._direct_job_meta.get(job_id, {}).get("settlement_owner")
+                == "finalizer"
             ):
                 return False
             if not handle.promote():

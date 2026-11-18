@@ -203,35 +203,48 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         handle = self._active_handles.get(job_id)
         if not meta or not handle or handle.promoted:
             return False
+        needs_finalizer = meta.get("settlement_owner") == "unclaimed" or getattr(
+            self, "_interrupt_requested", False
+        )
         if handle.done:
-            if getattr(self, "_interrupt_requested", False):
+            if needs_finalizer:
                 self._start_interrupt_finalizer(job_id)
             return False
         if meta.get("kind") == "subagent":
             job = self.subagent_manager._jobs.get(job_id)
             if job and hasattr(job, "subagent"):
                 job.subagent.cancel()
+        meta["cancel_requested"] = True
         request_cancellation(handle.task)
-        if getattr(self, "_interrupt_requested", False):
+        if needs_finalizer:
             self._start_interrupt_finalizer(job_id)
         return True
 
+    def _release_direct_collectors(self) -> None:
+        """Hand cancelled, uncollected jobs to finalizers when their turn exits."""
+        for job_id, meta in self._direct_job_meta.items():
+            if meta.get("settlement_owner") != "collector":
+                continue
+            meta["settlement_owner"] = "unclaimed"
+            handle = self._active_handles.get(job_id)
+            if (
+                meta.get("cancel_requested")
+                and handle is not None
+                and not handle.promoted
+            ):
+                self._start_interrupt_finalizer(job_id)
+
     def _start_interrupt_finalizer(self, job_id: str) -> None:
-        finalizer_jobs = getattr(self, "_interrupt_finalizer_jobs", None)
-        if finalizer_jobs is None:
-            finalizer_jobs = self._interrupt_finalizer_jobs = {}
-        if job_id in finalizer_jobs.values():
+        meta = self._direct_job_meta[job_id]
+        if meta.get("settlement_owner") == "finalizer":
             return
+        meta["settlement_owner"] = "finalizer"
         task = asyncio.create_task(self._finalize_interrupted_direct_job(job_id))
         self._interrupt_finalizers.add(task)
-        finalizer_jobs[task] = job_id
         task.add_done_callback(self._finish_interrupt_finalizer)
 
     def _finish_interrupt_finalizer(self, task: asyncio.Task) -> None:
         self._interrupt_finalizers.discard(task)
-        finalizer_jobs = getattr(self, "_interrupt_finalizer_jobs", None)
-        if finalizer_jobs is not None:
-            finalizer_jobs.pop(task, None)
         if task.cancelled():
             self._interrupt_finalizer_error = "Interrupted job finalizer was cancelled"
         elif task.exception() is not None:
@@ -258,6 +271,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             ),
             "background": False,
             "interruptible": True,
+            "settlement_owner": "collector",
             "notify_controller_on_background_complete": notify_controller_on_background_complete,
             # Monotonic time avoids wall-clock adjustments corrupting durations.
             "started_at": time.monotonic(),
