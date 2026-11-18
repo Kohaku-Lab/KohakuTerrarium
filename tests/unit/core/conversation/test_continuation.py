@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium import Terrarium, TurnEnded
-from kohakuterrarium.errors import AgentNotRunningError, ConflictError
+from kohakuterrarium.errors import AgentNotRunningError, ConflictError, TurnError
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -382,16 +382,37 @@ async def test_finalizer_exception_blocks_following_turn(
             monkeypatch.setattr(agent, "_append_interrupted_tool_message", broken)
             agent.interrupt()
             await asyncio.wait_for(tool.cleanup.wait(), 8)
-            tool.release.set()
             await asyncio.wait_for(turn, 8)
+            before = provider.call_count
+            batch = asyncio.gather(
+                agent.inject_input("primary"),
+                agent.inject_input("folded"),
+                return_exceptions=True,
+            )
+            try:
+                await wait_until(lambda: agent._active_event_run, timeout=3)
+                assert [env.event.content for env in agent._active_event_run] == [
+                    "primary",
+                    "folded",
+                ]
+            finally:
+                tool.release.set()
+                outcomes = await asyncio.wait_for(batch, 8)
+            assert all(
+                isinstance(exc, TurnError) and "settlement failed" in str(exc)
+                for exc in outcomes
+            )
             await wait_until(lambda: not agent._interrupt_finalizers, timeout=8)
             agent._cancel_job(job_id, tool.tool_name)
             with pytest.raises(RuntimeError, match="settlement failed"):
                 await agent._await_interrupt_finalizers()
             assert recorder.activity_types().count("tool_error") == 1
-            before = provider.call_count
             result = await creature.run("next request", timeout=3, raise_on_error=False)
-            assert result.status != "ok"
+            assert result.status == "error"
+            with pytest.raises(TurnError, match="Interrupted job settlement failed"):
+                await agent.inject_input(
+                    "not buffered", branch_view=live_branch_path(agent)
+                )
             assert provider.call_count == before
         finally:
             tool.release.set()

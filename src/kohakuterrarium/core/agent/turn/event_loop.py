@@ -203,7 +203,11 @@ class AgentEventLoopMixin:
                     await wakeup.wait()
             error = getattr(self, "_interrupt_finalizer_error", None)
             if error:
-                raise RuntimeError(f"Interrupted job settlement failed: {error}")
+                reason = f"Interrupted job settlement failed: {error}"
+                for env in run:
+                    if env.future is not None and env.event.type == "user_input":
+                        env.event.context["settlement_error"] = reason
+                raise RuntimeError(reason)
             for cap in captures:
                 self.output_router.add_secondary(cap)
             attached = True

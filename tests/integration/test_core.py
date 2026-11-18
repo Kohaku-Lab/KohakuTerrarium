@@ -2616,10 +2616,20 @@ class TestCoreIntegration:
                     ScriptEntry("must not execute", match="withdrawn request"),
                     ScriptEntry("owned answer one", match="owned input one"),
                     ScriptEntry("owned answer two", match="owned input two"),
+                    ScriptEntry("[/block][block/]", match="launch failed settlement"),
                 ]
             )
             agent.llm = owned_llm
             agent.controller.llm = owned_llm
+            frames = asyncio.Queue()
+            agent.pause()
+            try:
+                await _process_input(agent, "paused", frames, "test", "paused-id")
+                queued = frames.get_nowait()
+                assert queued["type"] == "input_queued"
+                assert agent.cancel_pending(queued["event_id"])
+            finally:
+                agent.resume()
             block.started.clear()
             owner = asyncio.create_task(agent.run("owned blocking"))
             try:
@@ -2647,6 +2657,30 @@ class TestCoreIntegration:
             finally:
                 if not owner.done():
                     owner.cancel()
+                await asyncio.gather(owner, return_exceptions=True)
+
+            block.started.clear()
+            block.release_cleanup.clear()
+            owner = asyncio.create_task(
+                agent.run("launch failed settlement", timeout=8, raise_on_error=False)
+            )
+            try:
+                await asyncio.wait_for(block.started.wait(), 5)
+                agent.interrupt()
+                await asyncio.wait_for(owner, 5)
+                (finalizer,) = agent._interrupt_finalizers
+                finalizer.cancel()
+                await asyncio.gather(finalizer, return_exceptions=True)
+                before = owned_llm.call_count
+                await _process_input(agent, "not queued", frames, "test", "failed-id")
+                error = frames.get_nowait()
+                assert (
+                    error["type"] == "error" and "settlement failed" in error["content"]
+                )
+                assert frames.empty() and not agent.cancel_pending("failed-id")
+                assert owned_llm.call_count == before
+            finally:
+                block.release_cleanup.set()
                 await asyncio.gather(owner, return_exceptions=True)
 
         for launch in ("declared", "requested"):
