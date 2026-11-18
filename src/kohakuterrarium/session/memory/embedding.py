@@ -1,5 +1,7 @@
 """Create local or API embedding providers for session memory search."""
 
+import hashlib
+import json
 import os
 from abc import ABC, abstractmethod
 from typing import Any
@@ -27,6 +29,33 @@ class BaseEmbedder(ABC):
         return self.encode([text])[0]
 
 
+def embedder_identity(embedder: BaseEmbedder) -> str:
+    """Stable model identity for vector index checkpoints.
+
+    Include the concrete class and its initialized scalar configuration, not
+    mutable runtime buffers or HTTP clients. Custom embedders with opaque
+    configuration may supply an explicit index_identity string.
+    """
+    explicit = getattr(embedder, "index_identity", None)
+    config = (
+        {"identity": explicit}
+        if isinstance(explicit, str) and explicit
+        else {
+            key: value
+            for key, value in vars(embedder).items()
+            if type(value) in (str, int, float, bool, type(None))
+        }
+    )
+    descriptor = {
+        "class": f"{type(embedder).__module__}.{type(embedder).__qualname__}",
+        "dimensions": embedder.dimensions,
+        "config": config,
+    }
+    return hashlib.sha256(
+        json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 class Model2VecEmbedder(BaseEmbedder):
     """Provide lightweight CPU-only static embeddings through Model2Vec."""
 
@@ -40,6 +69,7 @@ class Model2VecEmbedder(BaseEmbedder):
             )
 
         logger.info("Loading Model2Vec", model=model_name)
+        self._model_name = model_name
         self._model = StaticModel.from_pretrained(model_name)
         self.dimensions = self._model.dim
         logger.info("Model2Vec loaded", model=model_name, dimensions=self.dimensions)
@@ -66,6 +96,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             )
 
         logger.info("Loading SentenceTransformer", model=model_name)
+        self._model_name = model_name
         # Retrieval-capable Jina models require a default task; others ignore it.
         self._model = SentenceTransformer(
             model_name,
@@ -112,6 +143,7 @@ class APIEmbedder(BaseEmbedder):
             timeout=30.0,
         )
         self._model = model
+        self._base_url = base_url
         self.dimensions = dimensions or 1536
         self._request_dims = dimensions
 

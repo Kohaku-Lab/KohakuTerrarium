@@ -86,11 +86,14 @@ def search_cli(
     store = SessionStore.open_readonly(path)
     memory = None
     try:
-        # Semantic modes can fall back when no query embedder is available.
+        # Query vectors must come from the same configured model that
+        # produced the persisted index, never the CLI's own auto default.
         embedder = None
         if mode in ("semantic", "hybrid", "auto"):
             try:
-                embedder = create_embedder({"provider": "auto"})
+                saved = store.state.get("embedding_config")
+                config = saved if isinstance(saved, dict) else {"provider": "auto"}
+                embedder = create_embedder(config)
             except Exception as e:
                 logger.warning(
                     "Failed to create embedder for search", error=str(e), exc_info=True
@@ -107,7 +110,9 @@ def search_cli(
                 events, requested_store_view(store, name)
             )
             if events:
-                memory.index_events(name, events)
+                # A search is not authorized to rewrite vectors using an
+                # independently chosen embedding model. Catch up FTS only.
+                memory._index_keywords(name, events)
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:
             print("No vector index found. Run 'kt embedding' first, or use --mode fts")
@@ -115,9 +120,18 @@ def search_cli(
                 return 1
             mode = "fts"
 
-        results = memory.search(
-            query, mode=mode, k=k, agent=agent, branch_views=branch_views
-        )
+        try:
+            results = memory.search(
+                query, mode=mode, k=k, agent=agent, branch_views=branch_views
+            )
+        except ValueError as exc:
+            if mode not in ("auto", "hybrid") or "vector index stale" not in str(exc):
+                raise
+            print("Vector index requires a rebuild; using FTS instead.")
+            mode = "fts"
+            results = memory.search(
+                query, mode=mode, k=k, agent=agent, branch_views=branch_views
+            )
 
         if not results:
             print("No results found.")

@@ -195,6 +195,22 @@ class MemorySearchMixin:
         *,
         scope: BranchVisibility | AgentBranchVisibility | None = None,
     ) -> list[SearchResult]:
+        # The current model, corpus generation, and keyword watermark must
+        # all agree before reading *any* ranked vector candidates. Checking
+        # after Top-K could silently hide valid hits behind stale vectors.
+        if agent:
+            agents = (agent,)
+        elif isinstance(scope, AgentBranchVisibility):
+            agents = scope._views.keys()
+        else:
+            suffix = f":indexed_vectors:{self._embedder.dimensions}"
+            agents = {
+                key_text(key)[: -len(suffix)]
+                for key in scan_keys(self._state)
+                if key_text(key).endswith(suffix)
+            }
+        for name in agents:
+            self._assert_vector_readable(name)
         if scope is not None:
             results = ranked_filtered(
                 lambda limit: self._vec.search(query_vec, k=limit),

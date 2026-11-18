@@ -8,7 +8,11 @@ from typing import Any
 
 from kohakuvault import KVault, TextVault, VectorKVault
 
-from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
+from kohakuterrarium.session.memory.embedding import (
+    BaseEmbedder,
+    NullEmbedder,
+    embedder_identity,
+)
 from kohakuterrarium.session.memory.resources import MemoryResources
 from kohakuterrarium.session.memory.blocks import (
     Block,
@@ -61,6 +65,9 @@ class SessionMemory(MemorySearchMixin):
         self._path = db_path
         self._embedder = embedder or NullEmbedder()
         self._has_vectors = not isinstance(self._embedder, NullEmbedder)
+        self._vector_identity = (
+            embedder_identity(self._embedder) if self._has_vectors else None
+        )
 
         self._resources = MemoryResources(db_path)
         try:
@@ -186,6 +193,11 @@ class SessionMemory(MemorySearchMixin):
             or checkpoint.get("generation") != generation
             or self._state.get(f"{key}:pending", False)
             or (
+                kind.startswith("vectors:")
+                and checkpoint is not None
+                and checkpoint.get("embedder_identity") != self._vector_identity
+            )
+            or (
                 self._index_format == _ALL_BRANCH_INDEX_FORMAT
                 and checkpoint.get("source_refs_complete") is False
                 and events
@@ -218,6 +230,8 @@ class SessionMemory(MemorySearchMixin):
                 all_branches=self._index_format == _ALL_BRANCH_INDEX_FORMAT,
             )
         next_state["generation"] = generation
+        if kind.startswith("vectors:"):
+            next_state["embedder_identity"] = self._vector_identity
         return (
             _IndexBatch(
                 checkpoint["count"] if checkpoint else 0,
@@ -276,6 +290,9 @@ class SessionMemory(MemorySearchMixin):
     def _set_embedder(self, embedder: BaseEmbedder) -> None:
         self._embedder = embedder
         self._has_vectors = not isinstance(embedder, NullEmbedder)
+        self._vector_identity = (
+            embedder_identity(embedder) if self._has_vectors else None
+        )
         if self._has_vectors and embedder.dimensions > 0:
             previous = self._vec
             self._vec = self._resources.open(
@@ -287,6 +304,34 @@ class SessionMemory(MemorySearchMixin):
             if previous is not None:
                 self._resources.drop(previous)
             self._state["vec_dimensions"] = embedder.dimensions
+
+    def _assert_vector_readable(self, agent: str) -> None:
+        """Forbid stale, partly migrated, or different-model vector reads."""
+        dims = self._embedder.dimensions
+        key = f"{agent}:cursor:vectors:{dims}"
+        checkpoint = self._state.get(key)
+        indexed = self._state.get(f"{agent}:indexed_vectors:{dims}", 0)
+        if checkpoint is None and not indexed:
+            return  # This agent has no vector corpus yet.
+        keywords = self._state.get(f"{agent}:cursor:keywords")
+        latest_count = (
+            keywords["count"]
+            if isinstance(keywords, dict)
+            else self._get_indexed_count(agent)
+        )
+        if (
+            not isinstance(checkpoint, dict)
+            or checkpoint.get("generation") != self._generation(agent)
+            or checkpoint.get("embedder_identity") != self._vector_identity
+            or checkpoint.get("count") != latest_count
+            or bool(checkpoint.get("all_branches", False))
+            != (self._index_format == _ALL_BRANCH_INDEX_FORMAT)
+            or self._state.get(f"{key}:pending", False)
+        ):
+            raise ValueError(
+                "vector index stale or incompatible; reindex this session "
+                "with its configured embedding model before semantic search"
+            )
 
     def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
         return self._prepare(
