@@ -207,9 +207,8 @@ def build_index(
             done_events = 0
             for agent_name in agents:
                 events = agent_events[agent_name]
-                if not events:
-                    indexed_per_agent[agent_name] = {"events": 0, "blocks": 0}
-                    continue
+                # Empty Agents must still commit a zero-count checkpoint, or
+                # the session-wide FTS/vector build can never reach Ready.
                 blocks_count = memory.index_events(agent_name, events)
                 indexed_per_agent[agent_name] = {
                     "events": len(events),

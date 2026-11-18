@@ -153,8 +153,9 @@ def _search_session_sync(
                 branch_views[agent_name] = resolve_search_view(
                     events, requested_store_view(store, agent_name)
                 )
-                if events:
-                    memory.index_events(agent_name, events)
+                # A registered Agent with no events still has to complete
+                # its zero-count checkpoint during a session-wide rebuild.
+                memory.index_events(agent_name, events)
 
             # Preserve the adapter contract by degrading unsupported semantic requests to FTS.
             effective_mode = mode

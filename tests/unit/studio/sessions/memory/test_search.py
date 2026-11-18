@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.session.memory.embedding import NullEmbedder
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory import build as build_mod
 from kohakuterrarium.studio.sessions.memory import search as mem_mod
@@ -469,3 +471,56 @@ async def test_saved_search_with_zero_turn_injected_bookkeeping(tmp_path):
         store.close(update_status=False)
     result = await mem_mod.search_session_memory(path, q="needle", mode="fts")
     assert {hit["content"] for hit in result["results"]} == {"needle selected"}
+
+
+@pytest.mark.asyncio
+async def test_studio_and_reader_recover_empty_agent_during_fts_migration(tmp_path):
+    path = tmp_path / "empty-pending.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "empty"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        rows = store.get_memory_events("alice")
+    finally:
+        store.close(update_status=False)
+
+    old = SessionMemory(str(path))
+    try:
+        old.index_events("alice", rows)
+    finally:
+        old.close()
+
+    upgraded = SessionMemory(str(path), index_all_branches=True)
+    try:
+        upgraded.force_rebuild(["alice", "empty"])
+        upgraded._index_keywords("alice", rows)
+        assert upgraded._manifest()["fts_pending"] == ["empty"]
+    finally:
+        upgraded.close()
+
+    result = await mem_mod.search_session_memory(path, q="needle", mode="fts", k=5)
+    assert {hit["content"] for hit in result["results"]} == {"needle"}
+
+    forced = SessionMemory(str(path), index_all_branches=True)
+    try:
+        forced.force_rebuild(["alice", "empty"])
+        assert forced._manifest()["fts_pending"] == ["alice", "empty"]
+    finally:
+        forced.close()
+
+    with SessionReader(path) as reader:
+        hits = reader.search("needle")
+        assert {hit.content for hit in hits} == {"needle"}
+    verified = SessionMemory(str(path), index_all_branches=True)
+    try:
+        assert verified._manifest()["fts"] == "ready"
+        assert not verified._manifest()["fts_pending"]
+    finally:
+        verified.close()

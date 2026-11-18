@@ -101,6 +101,9 @@ class MemoryIndexLifecycle:
             "epoch": epoch,
             "fts_revision": (current or {}).get("fts_revision", 0) + 1,
             "vector_revision": (current or {}).get("vector_revision", 0) + 1,
+            # Tracks destructive vector-table replacement independently of
+            # ordinary writes or the session-wide FTS index epoch.
+            "vector_generation": (current or {}).get("vector_generation", 0),
             "fts": "building",
             "fts_pending": sorted(agents),
             "agents": sorted(agents),
@@ -184,6 +187,7 @@ class MemoryIndexLifecycle:
         identity = self._vector_identity
         restart = (
             manifest.get("vector") == "invalid"
+            or type(manifest.get("vector_generation")) is not int
             or manifest.get("vector_identity") != identity
             or manifest.get("vector_dimensions") != dims
             or manifest.get("vector_needs_clear", False)
@@ -193,6 +197,12 @@ class MemoryIndexLifecycle:
         )
         if restart:
             self._claim_build("vector")
+            # A pre-generation manifest cannot certify even a checkpoint
+            # that happens to carry the next numeric token. Invalidate those
+            # legacy cursors once before clearing the shared table.
+            if type(manifest.get("vector_generation")) is not int:
+                for name in set(manifest.get("agents", ())) | {agent}:
+                    self._state.delete(f"{name}:cursor:vectors:{dims}")
             manifest["vector"] = "building"
             manifest["vector_identity"] = identity
             manifest["vector_dimensions"] = dims
@@ -200,6 +210,7 @@ class MemoryIndexLifecycle:
                 set(manifest.get("agents", ())) | {agent}
             )
             manifest["vector_needs_clear"] = True
+            manifest["vector_generation"] = manifest.get("vector_generation", 0) + 1
             manifest["vector_revision"] = manifest.get("vector_revision", 0) + 1
             self._save_manifest(manifest)
             self._clear_vector_table()
@@ -233,6 +244,7 @@ class MemoryIndexLifecycle:
             and isinstance(vector, dict)
             and keyword.get("count") == vector.get("count")
             and vector.get("index_epoch") == manifest["epoch"]
+            and vector.get("vector_generation") == manifest["vector_generation"]
         )
         if complete:
             pending.discard(agent)
@@ -297,6 +309,7 @@ class MemoryIndexLifecycle:
             or manifest.get("format") != self._index_format
             or manifest.get("fts") != "ready"
             or manifest.get("vector") != "ready"
+            or type(manifest.get("vector_generation")) is not int
             or manifest.get("vector_identity") != self._vector_identity
             or manifest.get("vector_dimensions") != dims
         ):
@@ -328,6 +341,7 @@ class MemoryIndexLifecycle:
             not isinstance(checkpoint, dict)
             or checkpoint.get("generation") != self._generation(agent)
             or checkpoint.get("index_epoch") != manifest["epoch"]
+            or checkpoint.get("vector_generation") != manifest["vector_generation"]
             or checkpoint.get("embedder_identity") != self._vector_identity
             or checkpoint.get("count") != latest_count
             or bool(checkpoint.get("all_branches", False))

@@ -158,7 +158,11 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
             or (
                 kind.startswith("vectors:")
                 and checkpoint is not None
-                and checkpoint.get("embedder_identity") != self._vector_identity
+                and (
+                    checkpoint.get("embedder_identity") != self._vector_identity
+                    or checkpoint.get("vector_generation")
+                    != self._manifest()["vector_generation"]
+                )
             )
             or (
                 self._index_format == _ALL_BRANCH_INDEX_FORMAT
@@ -222,6 +226,7 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
         next_state["index_epoch"] = self._manifest()["epoch"]
         if kind.startswith("vectors:"):
             next_state["embedder_identity"] = self._vector_identity
+            next_state["vector_generation"] = self._manifest()["vector_generation"]
         return (
             _IndexBatch(
                 checkpoint["count"] if checkpoint else 0,
@@ -313,6 +318,8 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
             key = f"{agent}:cursor:{kind}"
             if (
                 start.checkpoint.get("index_epoch") != self._manifest()["epoch"]
+                or start.checkpoint.get("vector_generation")
+                != self._manifest()["vector_generation"]
                 or start.embedder is not self._embedder
                 or start.generation != self._generation(agent)
                 or start.revision != self._state.get(f"{key}:revision", 0)

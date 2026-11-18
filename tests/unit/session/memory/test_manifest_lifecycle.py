@@ -412,3 +412,185 @@ def test_idempotent_vector_index_does_not_republish_or_lock(tmp_path):
         assert memory._fts_build_lock is None
     finally:
         memory.close()
+
+
+def test_reopened_partial_build_reencodes_previously_completed_agent(tmp_path):
+    """A shared table reset invalidates every prior vector checkpoint."""
+    path = str(tmp_path / "partial-reopen.kohakutr")
+    alice, bob = _rows("alice"), _rows("bob")
+    initial = SessionMemory(path, DummyEmbedder(), index_all_branches=True)
+    try:
+        initial._index_keywords("alice", alice)
+        initial._index_keywords("bob", bob)
+        batch, blocks = initial._vector_batch("alice", alice)
+        initial._commit_vectors(
+            "alice",
+            batch,
+            len(alice),
+            blocks,
+            initial._embedder.encode([block.content for block in blocks]),
+        )
+        generation = initial._manifest().get("vector_generation", 0)
+        assert initial.get_stats()["vec_blocks"] == 2
+        assert initial._manifest()["vector"] == "building"
+    finally:
+        initial.close()
+
+    reopened = SessionMemory(path, DummyEmbedder(), index_all_branches=True)
+    try:
+        reopened.index_events("alice", alice)
+        reopened.index_events("bob", bob)
+        manifest = reopened._manifest()
+        assert manifest["vector"] == "ready"
+        assert manifest["vector_generation"] > generation
+        assert reopened.get_stats()["vec_blocks"] == 4
+        assert {
+            h.content
+            for h in reopened.search(
+                "needle", agent="alice", mode="semantic", branch_view={1: 1}
+            )
+        } == {"needle alice 1"}
+        assert {
+            h.content
+            for h in reopened.search(
+                "needle", agent="bob", mode="semantic", branch_view={1: 2}
+            )
+        } == {"needle bob 2"}
+    finally:
+        reopened.close()
+
+
+def test_return_to_previous_vector_dimensions_rebuilds_all_agents(tmp_path):
+    class ThreeDimEmbedder(BaseEmbedder):
+        dimensions = 3
+
+        def encode(self, texts):
+            return np.tile(np.array([1, 0, 0], dtype=np.float32), (len(texts), 1))
+
+    path = str(tmp_path / "dimension-roundtrip.kohakutr")
+    agents = ("alice", "bob")
+    before = SessionMemory(path, DummyEmbedder(), index_all_branches=True)
+    try:
+        for agent in agents:
+            before.index_events(agent, _rows(agent))
+        first_generation = before._manifest()["vector_generation"]
+    finally:
+        before.close()
+
+    other_dim = SessionMemory(path, ThreeDimEmbedder(), index_all_branches=True)
+    try:
+        for agent in agents:
+            other_dim.index_events(agent, _rows(agent))
+        assert other_dim._manifest()["vector"] == "ready"
+    finally:
+        other_dim.close()
+
+    same_dim = SessionMemory(path, DummyEmbedder(), index_all_branches=True)
+    try:
+        for agent in agents:
+            same_dim.index_events(agent, _rows(agent))
+        assert same_dim._manifest()["vector_generation"] > first_generation
+        assert same_dim.get_stats()["vec_blocks"] == 4
+        for agent in agents:
+            assert (
+                len(
+                    same_dim.search(
+                        "needle", agent=agent, mode="semantic", branch_view={1: 2}
+                    )
+                )
+                == 1
+            )
+    finally:
+        same_dim.close()
+
+
+def test_empty_agents_finish_forced_studio_rebuild(tmp_path, monkeypatch):
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.studio.sessions.memory import build
+
+    path = tmp_path / "empty-agents.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta(
+            "s", "terrarium", "", str(tmp_path), ["alice", "empty_a", "empty_b"]
+        )
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle alice"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+    finally:
+        store.close(update_status=False)
+
+    monkeypatch.setattr(build, "create_embedder", lambda config: DummyEmbedder())
+    result = build.build_index(path, provider="auto", force=True)
+    assert result["indexed_per_agent"]["empty_a"] == {"events": 0, "blocks": 0}
+    assert result["indexed_per_agent"]["empty_b"] == {"events": 0, "blocks": 0}
+
+    memory = SessionMemory(str(path), DummyEmbedder(), index_all_branches=True)
+    try:
+        manifest = memory._manifest()
+        assert manifest["fts"] == "ready"
+        assert manifest["vector"] == "ready"
+        assert not manifest["fts_pending"]
+        assert not manifest["vector_pending"]
+        for name in ("empty_a", "empty_b"):
+            assert memory._state[f"{name}:cursor:keywords"]["count"] == 0
+            assert memory._state[f"{name}:cursor:vectors:4"]["count"] == 0
+        assert len(memory.search("needle", mode="semantic", branch_view={1: 1})) == 1
+    finally:
+        memory.close()
+
+
+def test_only_empty_agents_finish_studio_rebuild(tmp_path, monkeypatch):
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.studio.sessions.memory import build
+
+    path = tmp_path / "only-empty.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+    finally:
+        store.close(update_status=False)
+
+    monkeypatch.setattr(build, "create_embedder", lambda config: DummyEmbedder())
+    result = build.build_index(path, force=True)
+    assert result["stats"]["vec_blocks"] == 0
+    mem = SessionMemory(str(path), DummyEmbedder(), index_all_branches=True)
+    try:
+        assert mem._manifest()["fts"] == "ready"
+        assert mem._manifest()["vector"] == "ready"
+        assert mem.search("anything", mode="fts", branch_views={}) == []
+    finally:
+        mem.close()
+
+
+def test_legacy_ready_vector_manifest_without_generation_must_rebuild(tmp_path):
+    """Pre-generation manifests must not be treated as proof of physical rows."""
+    path = str(tmp_path / "legacy-vector-manifest.kohakutr")
+    rows = _rows("alice")
+    original = SessionMemory(path, DummyEmbedder(), index_all_branches=True)
+    try:
+        original.index_events("alice", rows)
+        manifest = dict(original._manifest())
+        manifest.pop("vector_generation")
+        original._state["memory:index_manifest"] = manifest
+    finally:
+        original.close()
+
+    reopened = SessionMemory(path, DummyEmbedder(), index_all_branches=True)
+    try:
+        with pytest.raises(ValueError, match="vector index stale or invalid"):
+            reopened.search("needle", mode="semantic", branch_view={1: 1})
+        reopened.index_events("alice", rows)
+        assert reopened._manifest()["vector_generation"] >= 1
+        assert reopened.get_stats()["vec_blocks"] == 2
+        assert {
+            hit.content
+            for hit in reopened.search("needle", mode="semantic", branch_view={1: 1})
+        } == {"needle alice 1"}
+    finally:
+        reopened.close()

@@ -157,7 +157,10 @@ class SessionReader:
                 # Preserve the Reader contract: never index a session which
                 # has no memory index yet. Existing indexes, however, must be
                 # refreshed/migrated before branch-scoped retrieval.
-                if memory._get_indexed_count(name) > 0:
+                if (
+                    memory._manifest() is not None
+                    or memory._get_indexed_count(name) > 0
+                ):
                     memory._index_keywords(name, events)
             return memory.search(query, mode=mode, k=k, agent=agent, branch_views=views)
         finally:
