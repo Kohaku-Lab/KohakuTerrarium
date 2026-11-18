@@ -74,6 +74,7 @@ class _FakeAgent(AgentToolsMixin, AgentEventLoopMixin):
         self._direct_job_meta = {}
         self._active_handles = {}
         self._interrupt_finalizers = set()
+        self._interrupt_fence_wakeup = asyncio.Event()
         self._interrupt_finalizer_error = None
         self._bg_controller_notify = {}
         self._termination_checker = None

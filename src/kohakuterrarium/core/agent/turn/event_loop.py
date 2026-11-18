@@ -186,36 +186,24 @@ class AgentEventLoopMixin:
         interrupted = False
         attached = False
         try:
-            finalizers = tuple(getattr(self, "_interrupt_finalizers", ()))
-            if finalizers:
+            if getattr(self, "_interrupt_finalizers", ()):
                 wakeup = self._interrupt_fence_wakeup
-                wakeup.clear()
-                wake = asyncio.create_task(wakeup.wait())
-                try:
-                    remaining = set(finalizers)
-                    while remaining and not wake.done():
-                        done, remaining = await asyncio.wait(
-                            remaining | {wake}, return_when=asyncio.FIRST_COMPLETED
+                while not self._interrupt_finalizer_error:
+                    interrupted_by_user = bool(
+                        primary.context.get("interrupted_by_user")
+                    )
+                    if interrupted_by_user or any(env.withdrawn for env in run):
+                        self._resolve_run(
+                            run, status="interrupted", interrupted=interrupted_by_user
                         )
-                        if wake in done:
-                            break
-                        remaining.discard(wake)
-                finally:
-                    wake.cancel()
-                    await asyncio.gather(wake, return_exceptions=True)
+                        return
+                    if not self._interrupt_finalizers:
+                        break
+                    wakeup.clear()
+                    await wakeup.wait()
             error = getattr(self, "_interrupt_finalizer_error", None)
             if error:
                 raise RuntimeError(f"Interrupted job settlement failed: {error}")
-            if finalizers and (
-                any(env.withdrawn for env in run)
-                or primary.context.get("interrupted_by_user")
-            ):
-                self._resolve_run(
-                    run,
-                    status="interrupted",
-                    interrupted=bool(primary.context.get("interrupted_by_user")),
-                )
-                return
             for cap in captures:
                 self.output_router.add_secondary(cap)
             attached = True

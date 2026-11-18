@@ -249,6 +249,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             self._interrupt_finalizer_error = "Interrupted job finalizer was cancelled"
         elif task.exception() is not None:
             self._interrupt_finalizer_error = repr(task.exception())
+        self._interrupt_fence_wakeup.set()
 
     def _register_direct_job(
         self,

@@ -450,15 +450,16 @@ class _HugeOutputTool(BaseTool):
 class _BlockingTool(BaseTool):
     """DIRECT tool that blocks forever — used to test interrupt()."""
 
-    def __init__(self) -> None:
+    def __init__(self, name="block") -> None:
         super().__init__()
+        self.name = name
         self.started = asyncio.Event()
         self.release_cleanup = asyncio.Event()
         self.release_cleanup.set()
 
     @property
     def tool_name(self) -> str:
-        return "block"
+        return self.name
 
     @property
     def description(self) -> str:
@@ -2400,7 +2401,7 @@ class TestCoreIntegration:
             assert b_agent.is_running is False
         assert budget_creature.is_running is False
 
-    async def test_interrupt_mid_turn(self, make_creature, tmp_path):
+    async def test_interrupt_mid_turn(self, make_creature, tmp_path, monkeypatch):
         """A turn dispatches a blocking DIRECT tool; ``interrupt()`` is
         called while the controller is waiting on it; the processing
         task is cancelled cleanly and the agent stays alive for the
@@ -2747,6 +2748,7 @@ class TestCoreIntegration:
                 store.close()
 
         promoted_tool = _BlockingTool()
+        late_tool = _BlockingTool("late")
         async with Terrarium(session_dir=tmp_path / "promoted_stop") as engine:
             promoted = await engine.add_creature(
                 AgentConfig(
@@ -2755,15 +2757,80 @@ class TestCoreIntegration:
                 llm=_HistoryReplayLLM(
                     True,
                     plan=[
+                        [
+                            NativeToolCall("first_call", "block", "{}"),
+                            NativeToolCall("late_call", "late", "{}"),
+                        ],
+                        "both settled",
                         [NativeToolCall("promoted_call", "block", "{}")],
                         "background pending",
                     ],
                 ),
-                tools=[promoted_tool],
+                tools=[promoted_tool, late_tool],
                 io="headless",
                 start=True,
             )
             promoted_agent = promoted.agent
+            output = promoted_agent.output_router.default_output
+            flush = output.flush
+
+            async def fail_after_dispatch():
+                if len(promoted_agent._direct_job_meta) == 2:
+                    raise OSError("post-dispatch flush failed")
+                await flush()
+
+            with monkeypatch.context() as patch:
+                patch.setattr(output, "flush", fail_after_dispatch)
+                await promoted.run("start both", timeout=5, raise_on_error=False)
+            jobs = {
+                meta["name"]: jid
+                for jid, meta in promoted_agent._direct_job_meta.items()
+            }
+            assert set(jobs) == {"block", "late"}
+            await asyncio.wait_for(
+                asyncio.gather(promoted_tool.started.wait(), late_tool.started.wait()),
+                5,
+            )
+            pending = None
+            try:
+                promoted_tool.release_cleanup.clear()
+                late_tool.release_cleanup.clear()
+                promoted_agent._cancel_job(jobs["block"], "block")
+                (first,) = promoted_agent._interrupt_finalizers
+                first_wait, second_wait = asyncio.Event(), asyncio.Event()
+                wakeup = promoted_agent._interrupt_fence_wakeup
+                wait = wakeup.wait
+
+                async def observe_wait():
+                    (second_wait if first.done() else first_wait).set()
+                    return await wait()
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(wakeup, "wait", observe_wait)
+                    pending = asyncio.create_task(
+                        promoted.run("continue after both", timeout=8)
+                    )
+                    await asyncio.wait_for(first_wait.wait(), 5)
+                    promoted_agent._cancel_job(jobs["late"], "late")
+                    promoted_tool.release_cleanup.set()
+                    await wait_until(
+                        lambda: second_wait.is_set() or pending.done(), timeout=5
+                    )
+                assert second_wait.is_set() and not pending.done()
+                assert promoted_agent.llm.call_count == 1
+                late_tool.release_cleanup.set()
+                assert (await pending).text == "both settled"
+                assert [
+                    m.get("tool_call_id")
+                    for m in promoted_agent.llm.call_log[-1]
+                    if m.get("role") == "tool"
+                ] == ["first_call", "late_call"]
+            finally:
+                promoted_tool.release_cleanup.set()
+                late_tool.release_cleanup.set()
+                if pending is not None:
+                    await asyncio.gather(pending, return_exceptions=True)
+            promoted_tool.started.clear()
             turn = asyncio.create_task(
                 promoted.run("launch", timeout=5, raise_on_error=False)
             )
