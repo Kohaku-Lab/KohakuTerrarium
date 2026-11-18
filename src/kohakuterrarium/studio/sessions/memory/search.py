@@ -17,10 +17,7 @@ from typing import Any
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
-from kohakuterrarium.session.memory.visibility import (
-    requested_store_view,
-    resolve_search_view,
-)
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import (
@@ -140,22 +137,14 @@ def _search_session_sync(
             )
             stack.callback(memory.close)
 
-            # Persist all branches, then project each agent's selected lineage.
-            meta = store.load_meta()
-            branch_views = {}
-            known_agents = list(
-                dict.fromkeys(
-                    [*meta.get("agents", []), *sorted(memory._known_agents())]
-                )
+            # The Reconciler captures one source snapshot for all Agent
+            # materializers and resolves the selected search projections.
+            reconciler = SessionIndexReconciler(store, memory)
+            source = reconciler.capture(
+                store.load_meta().get("agents", []), all_agents=True
             )
-            for agent_name in known_agents:
-                events = store.get_memory_events(agent_name)
-                branch_views[agent_name] = resolve_search_view(
-                    events, requested_store_view(store, agent_name)
-                )
-                # A registered Agent with no events still has to complete
-                # its zero-count checkpoint during a session-wide rebuild.
-                memory.index_events(agent_name, events)
+            branch_views = reconciler.selected_views(source, source.agents)
+            reconciler.build(source)
 
             # Preserve the adapter contract by degrading unsupported semantic requests to FTS.
             effective_mode = mode

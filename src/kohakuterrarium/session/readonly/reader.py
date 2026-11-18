@@ -12,10 +12,7 @@ from kohakuterrarium.session.history.replay import (
     select_live_event_ids,
 )
 from kohakuterrarium.session.memory.index import SearchResult, SessionMemory
-from kohakuterrarium.session.memory.visibility import (
-    requested_store_view,
-    resolve_search_view,
-)
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -147,21 +144,10 @@ class SessionReader:
         """
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
-            views = {}
-            known = list(dict.fromkeys([*self.agents, *sorted(memory._known_agents())]))
-            for name in known:
-                events = self._store.get_memory_events(name)
-                views[name] = resolve_search_view(
-                    events, requested_store_view(self._store, name)
-                )
-                # Preserve the Reader contract: never index a session which
-                # has no memory index yet. Existing indexes, however, must be
-                # refreshed/migrated before branch-scoped retrieval.
-                if (
-                    memory._manifest() is not None
-                    or memory._get_indexed_count(name) > 0
-                ):
-                    memory._index_keywords(name, events)
+            reconciler = SessionIndexReconciler(self._store, memory)
+            _, views = reconciler.prepare_keywords(
+                self.agents, all_agents=True, existing_only=True, project_all=True
+            )
             return memory.search(query, mode=mode, k=k, agent=agent, branch_views=views)
         finally:
             memory.close()
@@ -170,10 +156,8 @@ class SessionReader:
         """Index this session's events for :meth:`search` (FTS only)."""
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
-            total = 0
-            names = list(dict.fromkeys([*self.agents, *sorted(memory._known_agents())]))
-            for name in names:
-                total += memory.index_events(name, self._store.get_memory_events(name))
-            return total
+            reconciler = SessionIndexReconciler(self._store, memory)
+            source = reconciler.capture(self.agents, all_agents=True)
+            return sum(reconciler.refresh_keywords(source).values())
         finally:
             memory.close()

@@ -54,6 +54,9 @@ class TestBuildEmbeddingsConfigOverrides:
             def _known_agents(self):
                 return set()
 
+            def _manifest(self):
+                return None
+
             def force_rebuild(self, agents):
                 pass
 
@@ -101,6 +104,9 @@ class TestSearchSessionMemoryEmbedderFallback:
 
             def _known_agents(self):
                 return set()
+
+            def _manifest(self):
+                return None
 
             def search(self, query, mode, k, agent, branch_views=None):
                 return []

@@ -8,7 +8,6 @@ from contextlib import contextmanager
 
 from kohakuvault import TextVault
 
-from kohakuterrarium.session.memory.blocks import _anchor
 from kohakuterrarium.session.memory.query import _ALL_BRANCH_INDEX_FORMAT
 from kohakuterrarium.session.vault.io import key_text, scan_keys
 from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
@@ -124,25 +123,23 @@ class MemoryIndexLifecycle:
             self._claim_build("fts")
             self._reset_session_indexes(set(agents), self._manifest())
 
-    def _begin_fts_append(self, agent: str, events: list[dict]) -> None:
-        manifest = self._ensure_index_format(agent)
+    def _begin_fts_append(self, agent: str, *, changed: bool) -> None:
+        """Enter BUILDING for every planned mutation, including source resets.
+
+        The caller prepares the batch before entering this method. Physical
+        clear and insert operations can only follow a persisted barrier.
+        """
+        if not changed:
+            return
+        manifest = self._manifest()
         if manifest["fts"] != "ready":
             return
-        checkpoint = self._state.get(f"{agent}:cursor:keywords")
-        if (
-            not isinstance(checkpoint, dict)
-            or checkpoint.get("index_epoch") != manifest["epoch"]
-            or checkpoint.get("generation") != self._generation(agent)
-            or checkpoint.get("count") != len(events)
-            or (events and checkpoint.get("anchor") != _anchor(events[-1]))
-            or self._state.get(f"{agent}:cursor:keywords:pending", False)
-        ):
-            pending = set(manifest.get("fts_pending", ()))
-            pending.add(agent)
-            self._claim_build("fts")
-            manifest = dict(manifest, fts="building", fts_pending=sorted(pending))
-            manifest["fts_revision"] = manifest.get("fts_revision", 0) + 1
-            self._save_manifest(manifest)
+        pending = set(manifest.get("fts_pending", ()))
+        pending.add(agent)
+        self._claim_build("fts")
+        manifest = dict(manifest, fts="building", fts_pending=sorted(pending))
+        manifest["fts_revision"] = manifest.get("fts_revision", 0) + 1
+        self._save_manifest(manifest)
 
     def _finish_fts(self, agent: str, changed: bool) -> None:
         manifest = dict(self._manifest())
@@ -181,7 +178,7 @@ class MemoryIndexLifecycle:
             raise ValueError("Memory index invalid or building; rebuild before search")
         return manifest
 
-    def _begin_vector(self, agent: str) -> None:
+    def _begin_vector(self, agent: str, *, planned_change: bool = False) -> None:
         manifest = dict(self._ensure_index_format(agent))
         dims = self._embedder.dimensions
         identity = self._vector_identity
@@ -217,9 +214,9 @@ class MemoryIndexLifecycle:
             manifest["vector_needs_clear"] = False
             self._save_manifest(manifest)
         elif manifest.get("vector") in ("ready", "dirty"):
-            if manifest["vector"] == "ready":
-                # A completed vector cursor is a pure no-op: don't cycle
-                # through Building for every idempotent index_events call.
+            if manifest["vector"] == "ready" and not planned_change:
+                # Reuse the published corpus only when the batch planner agrees
+                # that no source event or source-reference rewrite is pending.
                 try:
                     self._assert_vector_readable(agent)
                 except ValueError:
@@ -243,8 +240,13 @@ class MemoryIndexLifecycle:
             isinstance(keyword, dict)
             and isinstance(vector, dict)
             and keyword.get("count") == vector.get("count")
+            and keyword.get("anchor") == vector.get("anchor")
+            and keyword.get("source_refs_complete", True)
+            == vector.get("source_refs_complete", True)
             and vector.get("index_epoch") == manifest["epoch"]
             and vector.get("vector_generation") == manifest["vector_generation"]
+            and vector.get("keyword_revision")
+            == self._state.get(f"{agent}:cursor:keywords:revision", 0)
         )
         if complete:
             pending.discard(agent)
@@ -344,6 +346,12 @@ class MemoryIndexLifecycle:
             or checkpoint.get("vector_generation") != manifest["vector_generation"]
             or checkpoint.get("embedder_identity") != self._vector_identity
             or checkpoint.get("count") != latest_count
+            or not isinstance(keywords, dict)
+            or checkpoint.get("anchor") != keywords.get("anchor")
+            or checkpoint.get("source_refs_complete", True)
+            != keywords.get("source_refs_complete", True)
+            or checkpoint.get("keyword_revision")
+            != self._state.get(f"{agent}:cursor:keywords:revision", 0)
             or bool(checkpoint.get("all_branches", False))
             != (self._index_format == _ALL_BRANCH_INDEX_FORMAT)
             or self._state.get(f"{key}:pending", False)

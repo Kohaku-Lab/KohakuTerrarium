@@ -312,13 +312,14 @@ def test_delayed_vector_commit_never_publishes_a_lagging_model(tmp_path):
         batch, blocks = memory._vector_batch("alice", rows)
         rows = _rows("alice")
         memory._index_keywords("alice", rows)
-        memory._commit_vectors(
-            "alice",
-            batch,
-            1,
-            blocks,
-            embedder.encode([b.content for b in blocks]),
-        )
+        with pytest.raises(RuntimeError, match="index changed"):
+            memory._commit_vectors(
+                "alice",
+                batch,
+                1,
+                blocks,
+                embedder.encode([b.content for b in blocks]),
+            )
         assert memory._manifest()["vector"] != "ready"
         with pytest.raises(ValueError, match="vector.*(invalid|stale)"):
             memory.search("needle", mode="semantic", branch_view={1: 2})

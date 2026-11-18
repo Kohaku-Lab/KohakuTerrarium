@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.memory.context import (
     MemoryContextError,
     MemoryContextNavigator,
@@ -15,8 +16,6 @@ from kohakuterrarium.session.memory.visibility import (
     AgentBranchVisibility,
     MemoryCandidateLimitError,
     MemoryLineageUnavailableError,
-    requested_store_view,
-    resolve_search_view,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -70,6 +69,7 @@ class LiveSessionMemory:
     def __init__(self, store):
         self._store = store
         self._memory = SessionMemory(store.path, index_all_branches=True)
+        self._reconciler = SessionIndexReconciler(store, self._memory)
         self._context = MemoryContextNavigator(store)
         self._worker = _EmbeddingWorker()
         self._semantic_lock = asyncio.Lock()
@@ -83,51 +83,6 @@ class LiveSessionMemory:
             self._worker.close()
             self._context.close()
             self._memory.close()
-
-    def _index_keywords(
-        self,
-        names: list[str],
-        overrides: dict[str, dict[int, int]] | None = None,
-    ) -> dict[str, dict[int, int]]:
-        """Index immutable facts and resolve each agent's selected projection."""
-        views: dict[str, dict[int, int]] = {}
-        manifest = self._memory._manifest()
-        migration = (
-            manifest is None
-            or manifest.get("format") != self._memory._index_format
-            or manifest.get("fts") != "ready"
-        )
-        # A session-wide migration cannot be published with only the active
-        # agent upgraded. Existing agent indexes are rebuilt together.
-        refresh_names = (
-            list(
-                dict.fromkeys(
-                    [
-                        *self._store.load_meta().get("agents", []),
-                        *sorted(self._memory._known_agents()),
-                        *names,
-                    ]
-                )
-            )
-            if migration
-            else names
-        )
-        for name in refresh_names:
-            events = self._store.get_memory_events(name)
-            self._memory._index_keywords(name, events)
-            if name in names:
-                selected = (
-                    overrides[name]
-                    if overrides is not None and name in overrides
-                    else requested_store_view(self._store, name)
-                )
-                views[name] = resolve_search_view(events, selected)
-        return views
-
-    def _vector_batch(self, name: str):
-        events = self._store.get_memory_events(name)
-        start, blocks = self._memory._vector_batch(name, events)
-        return start, len(events), blocks
 
     async def _with_anchors(self, results, views, warning, query):
         if self._closed:
@@ -174,7 +129,9 @@ class LiveSessionMemory:
             if selected_branch_view is not None and selected_agent in names
             else None
         )
-        views = await self._store.run(self._index_keywords, names, overrides)
+        source, views = await self._store.run(
+            self._reconciler.prepare_keywords, names, overrides
+        )
         scope = AgentBranchVisibility(views)
         warning = None
         if mode != "fts":
@@ -191,18 +148,20 @@ class LiveSessionMemory:
                             )
                             return await self._with_anchors(results, views, None, query)
                         raise ValueError("semantic search needs an embedding model")
-                    manifest = self._memory._manifest()
-                    # Model / format migration must finish every Agent before
-                    # the session-wide vector corpus can be published.
-                    vector_names = (
-                        list(manifest.get("agents", names))
-                        if manifest and manifest.get("vector") != "ready"
-                        else names
+                    source, vector_names = await self._store.run(
+                        self._reconciler.prepare_vectors, source, names
                     )
+                    # Source capture can advance during lazy model creation;
+                    # visibility must correspond to the vector batch snapshot.
+                    views = await self._store.run(
+                        self._reconciler.selected_views, source, names, overrides
+                    )
+                    scope = AgentBranchVisibility(views)
                     for name in vector_names:
-                        start, count, blocks = await self._store.run(
-                            self._vector_batch, name
+                        start, blocks = await self._store.run(
+                            self._memory._vector_batch, name, source.events[name]
                         )
+                        count = len(source.events[name])
                         vectors = (
                             await self._worker.run(
                                 self._embedder.encode, [b.content for b in blocks]

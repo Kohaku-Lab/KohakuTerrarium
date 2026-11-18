@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -181,40 +182,20 @@ def build_index(
         embedder = create_embedder(embed_config)
         memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
         try:
-            if force:
-                memory.force_rebuild(agents)
-
-            # Format migration invalidated every historical Agent namespace,
-            # even one no longer present in the session's current metadata.
-            # Empty deleted-Agent histories complete the epoch without
-            # resurrecting their old indexed content.
-            stale_agents = sorted(memory._known_agents() - set(agents))
+            reconciler = SessionIndexReconciler(store, memory)
+            source = reconciler.capture(agents, all_agents=True)
+            total_events_seen = sum(len(source.events[name]) for name in agents)
             indexed_per_agent: dict[str, dict[str, int]] = {}
-            total_events_seen = 0
-            # Count first so indexing progress has a stable denominator.
-            agent_events: dict[str, list[dict]] = {}
-            for agent_name in agents:
-                events = store.get_memory_events(agent_name) or []
-                agent_events[agent_name] = events
-                total_events_seen += len(events)
-            emit(
-                "scan",
-                10,
-                blocks_indexed=0,
-                blocks_total=total_events_seen,
-            )
+            emit("scan", 10, blocks_indexed=0, blocks_total=total_events_seen)
 
             done_events = 0
-            for agent_name in agents:
-                events = agent_events[agent_name]
-                # Empty Agents must still commit a zero-count checkpoint, or
-                # the session-wide FTS/vector build can never reach Ready.
-                blocks_count = memory.index_events(agent_name, events)
-                indexed_per_agent[agent_name] = {
-                    "events": len(events),
-                    "blocks": blocks_count,
-                }
-                done_events += len(events)
+
+            def on_agent(name: str, count: int, blocks: int) -> None:
+                nonlocal done_events
+                if name not in agents:
+                    return  # Retired Agent namespaces still need empty checkpoints.
+                indexed_per_agent[name] = {"events": count, "blocks": blocks}
+                done_events += count
                 percent = (
                     10 + int(80 * done_events / max(1, total_events_seen))
                     if total_events_seen
@@ -223,13 +204,12 @@ def build_index(
                 emit(
                     "embed",
                     percent,
-                    agent=agent_name,
+                    agent=name,
                     blocks_indexed=done_events,
                     blocks_total=total_events_seen,
                 )
 
-            for stale_agent in stale_agents:
-                memory.index_events(stale_agent, [])
+            reconciler.build(source, force=force, progress=on_agent)
 
             # Persist configuration only for a non-empty vector index; otherwise
             # status must continue to present the session as needing its first build.

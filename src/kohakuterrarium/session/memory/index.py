@@ -4,6 +4,7 @@ Events are grouped into rounds and searchable text, tool, trigger, or user block
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from kohakuvault import KVault, TextVault, VectorKVault
@@ -43,6 +44,9 @@ class _IndexBatch:
     generation: int
     embedder: object
     checkpoint: dict
+    reset: bool = False
+    was_pending: bool = False
+    previous: dict | None = None
 
 
 class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
@@ -63,7 +67,9 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
         self._index_format = (
             _ALL_BRANCH_INDEX_FORMAT if index_all_branches else _SELECTED_INDEX_FORMAT
         )
-        self._path = db_path
+        # Every alias to one physical SessionStore must contend on identical
+        # memory build/mutation lock files and open the same native resources.
+        self._path = str(Path(db_path).resolve())
         self._embedder = embedder or NullEmbedder()
         self._has_vectors = not isinstance(self._embedder, NullEmbedder)
         self._vector_identity = (
@@ -72,9 +78,9 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
 
         self._fts_build_lock = None
         self._vector_build_lock = None
-        self._resources = MemoryResources(db_path)
+        self._resources = MemoryResources(self._path)
         try:
-            self._open_indexes(db_path)
+            self._open_indexes(self._path)
         except BaseException as primary:
             try:
                 self._resources.close()
@@ -144,24 +150,42 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
         return self._state.get(f"{agent}:generation", 0)
 
     def _prepare(self, agent: str, events: list[dict], kind: str, start_from: int):
-        self._ensure_index_format(agent)
+        """Plan a batch without changing cursors, manifest, or physical rows.
+
+        The caller stages a BUILDING manifest *before* applying this plan.
+        Embedding may run without the short mutation lock, but its cursor is
+        fenced at commit against this planned source snapshot.
+        """
+        manifest = self._manifest()
         key = f"{agent}:cursor:{kind}"
         checkpoint = self._state.get(key)
-        was_pending = self._state.get(f"{key}:pending", False)
+        was_pending = bool(self._state.get(f"{key}:pending", False))
         revision = self._state.get(f"{key}:revision", 0)
         generation = self._generation(agent)
         reset = (
             checkpoint is None
-            or checkpoint.get("index_epoch") != self._manifest()["epoch"]
+            or checkpoint.get("index_epoch") != manifest["epoch"]
             or checkpoint.get("generation") != generation
-            or self._state.get(f"{key}:pending", False)
+            or was_pending
             or (
                 kind.startswith("vectors:")
                 and checkpoint is not None
                 and (
                     checkpoint.get("embedder_identity") != self._vector_identity
                     or checkpoint.get("vector_generation")
-                    != self._manifest()["vector_generation"]
+                    != manifest["vector_generation"]
+                    or (
+                        checkpoint.get("keyword_revision")
+                        != self._state.get(f"{agent}:cursor:keywords:revision", 0)
+                        and (
+                            # Ordinary FTS appends advance its revision without
+                            # invalidating the previously embedded prefix.
+                            # A missing revision or same-length FTS rewrite
+                            # cannot prove that old vectors still match.
+                            "keyword_revision" not in checkpoint
+                            or checkpoint.get("count") >= len(events)
+                        )
+                    )
                 )
             )
             or (
@@ -182,40 +206,8 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
                 )
             except RebuildRequired:
                 generation += 1
-                self._state[f"{agent}:generation"] = generation
                 reset = True
         if reset:
-            self._state[f"{key}:pending"] = True
-            epoch = self._manifest()["epoch"]
-            globally_cleared = (
-                getattr(
-                    self,
-                    (
-                        "_vec_cleared_epoch"
-                        if kind.startswith("vectors:")
-                        else "_fts_cleared_epoch"
-                    ),
-                    None,
-                )
-                == epoch
-            )
-            if (
-                was_pending
-                or (
-                    isinstance(checkpoint, dict)
-                    and checkpoint.get("index_epoch") == epoch
-                )
-                or (
-                    not globally_cleared
-                    and self._state.get(f"{agent}:indexed_{kind}", 0) > 0
-                )
-            ):
-                # Global reset already cleared every row. Within one epoch,
-                # still remove interrupted or checkpointless Agent rows.
-                self._clear_index(agent, kind)
-            revision += 1
-            self._state[f"{key}:revision"] = revision
-            checkpoint = None
             blocks, next_state = extract_batch(
                 agent,
                 events,
@@ -223,20 +215,61 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
                 all_branches=self._index_format == _ALL_BRANCH_INDEX_FORMAT,
             )
         next_state["generation"] = generation
-        next_state["index_epoch"] = self._manifest()["epoch"]
+        next_state["index_epoch"] = manifest["epoch"]
         if kind.startswith("vectors:"):
             next_state["embedder_identity"] = self._vector_identity
-            next_state["vector_generation"] = self._manifest()["vector_generation"]
-        return (
-            _IndexBatch(
-                checkpoint["count"] if checkpoint else 0,
-                revision,
-                generation,
-                self._embedder,
-                next_state,
-            ),
-            blocks,
+            next_state["vector_generation"] = manifest["vector_generation"]
+            # Bind the vector's source to the exact published FTS checkpoint,
+            # not just an event count that may be reused after a rewrite.
+            next_state["keyword_revision"] = self._state.get(
+                f"{agent}:cursor:keywords:revision", 0
+            )
+        batch = _IndexBatch(
+            checkpoint["count"] if checkpoint and not reset else 0,
+            revision + int(reset),
+            generation,
+            self._embedder,
+            next_state,
+            reset=reset,
+            was_pending=was_pending,
+            previous=checkpoint,
         )
+        return batch, blocks
+
+    def _stage_batch(self, agent: str, kind: str, batch: _IndexBatch) -> None:
+        """Apply a planned destructive reset after the build barrier is set."""
+        if not batch.reset:
+            return
+        key = f"{agent}:cursor:{kind}"
+        self._state[f"{key}:pending"] = True
+        epoch = self._manifest()["epoch"]
+        globally_cleared = (
+            getattr(
+                self,
+                (
+                    "_vec_cleared_epoch"
+                    if kind.startswith("vectors:")
+                    else "_fts_cleared_epoch"
+                ),
+                None,
+            )
+            == epoch
+        )
+        if (
+            batch.was_pending
+            or (
+                isinstance(batch.previous, dict)
+                and batch.previous.get("index_epoch") == epoch
+            )
+            or (
+                not globally_cleared
+                and self._state.get(f"{agent}:indexed_{kind}", 0) > 0
+            )
+        ):
+            self._clear_index(agent, kind)
+        self._state[f"{key}:revision"] = batch.revision
+        if self._generation(agent) != batch.generation:
+            self._state[f"{agent}:generation"] = batch.generation
 
     def _finish_batch(self, agent: str, kind: str, batch: _IndexBatch) -> None:
         key = f"{agent}:cursor:{kind}"
@@ -270,19 +303,17 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
         self, agent: str, events: list[dict], start_from: int = 0
     ) -> int:
         with self._mutation():
-            self._begin_fts_append(agent, events)
+            self._ensure_index_format(agent)
             batch, blocks = self._prepare(agent, events, "keywords", start_from)
-            no_change = (
-                batch.start == len(events)
-                and not blocks
-                and not self._state.get(f"{agent}:cursor:keywords:pending")
-            )
-            if not no_change:
+            changed = batch.reset or batch.start != len(events) or bool(blocks)
+            if changed:
+                self._begin_fts_append(agent, changed=True)
+                self._stage_batch(agent, "keywords", batch)
                 self._state[f"{agent}:cursor:keywords:pending"] = True
                 for block in blocks:
                     self._fts.insert(block.content, _block_metadata(block))
                 self._finish_batch(agent, "keywords", batch)
-            self._finish_fts(agent, not no_change)
+            self._finish_fts(agent, changed)
             return len(blocks)
 
     def _set_embedder(self, embedder: BaseEmbedder) -> None:
@@ -305,10 +336,22 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
 
     def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
         with self._mutation():
-            self._begin_vector(agent)
-            return self._prepare(
-                agent, events, f"vectors:{self._embedder.dimensions}", start_from
-            )
+            self._ensure_index_format(agent)
+            kind = f"vectors:{self._embedder.dimensions}"
+            manifest = self._manifest()
+            # A Ready vector may still need a destructive per-agent rebuild
+            # (e.g. source-reference migration). Plan before deciding whether
+            # it is safe to leave the global vector status at Ready.
+            planned_change = False
+            if type(manifest.get("vector_generation")) is int:
+                preview, blocks = self._prepare(agent, events, kind, start_from)
+                planned_change = (
+                    preview.reset or preview.start != len(events) or bool(blocks)
+                )
+            self._begin_vector(agent, planned_change=planned_change)
+            batch, blocks = self._prepare(agent, events, kind, start_from)
+            self._stage_batch(agent, kind, batch)
+            return batch, blocks
 
     def _commit_vectors(
         self, agent, start: _IndexBatch, count, blocks, vectors
@@ -320,6 +363,8 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
                 start.checkpoint.get("index_epoch") != self._manifest()["epoch"]
                 or start.checkpoint.get("vector_generation")
                 != self._manifest()["vector_generation"]
+                or start.checkpoint.get("keyword_revision")
+                != self._state.get(f"{agent}:cursor:keywords:revision", 0)
                 or start.embedder is not self._embedder
                 or start.generation != self._generation(agent)
                 or start.revision != self._state.get(f"{key}:revision", 0)
@@ -329,6 +374,16 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
                 )
             if len(vectors) != len(blocks) or count != start.checkpoint["count"]:
                 raise ValueError("Embedding result count does not match memory blocks")
+            keywords = self._state.get(f"{agent}:cursor:keywords")
+            if (
+                not isinstance(keywords, dict)
+                or keywords.get("index_epoch") != start.checkpoint["index_epoch"]
+                or keywords.get("count") != start.checkpoint["count"]
+                or keywords.get("anchor") != start.checkpoint["anchor"]
+                or keywords.get("source_refs_complete", True)
+                != start.checkpoint.get("source_refs_complete", True)
+            ):
+                raise RuntimeError("Memory keyword snapshot changed during embedding")
             if (
                 start.start == count
                 and not blocks

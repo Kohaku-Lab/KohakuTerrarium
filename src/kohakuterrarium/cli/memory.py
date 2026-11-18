@@ -9,10 +9,7 @@ module is strictly the rich-CLI presentation layer.
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
-from kohakuterrarium.session.memory.visibility import (
-    requested_store_view,
-    resolve_search_view,
-)
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import build_index
 from kohakuterrarium.utils.logging import get_logger
@@ -101,22 +98,12 @@ def search_cli(
 
         # Saved dimensions let SessionMemory discover existing vector tables.
         memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
-        # The CLI must not silently read an obsolete selected-only index after
-        # a Studio or live search upgraded this session's index format.
-        branch_views = {}
-        known_names = list(
-            dict.fromkeys(
-                [*store.load_meta().get("agents", []), *sorted(memory._known_agents())]
-            )
+        # CLI search never writes vectors. Reconciler owns source discovery,
+        # FTS migration and the selected per-Agent visibility projection.
+        reconciler = SessionIndexReconciler(store, memory)
+        _, branch_views = reconciler.prepare_keywords(
+            store.load_meta().get("agents", []), all_agents=True, project_all=True
         )
-        for name in known_names:
-            events = store.get_memory_events(name)
-            branch_views[name] = resolve_search_view(
-                events, requested_store_view(store, name)
-            )
-            # A search never writes vectors. Empty historical agent names
-            # still need an epoch checkpoint to finish a global migration.
-            memory._index_keywords(name, events)
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:
             print("No vector index found. Run 'kt embedding' first, or use --mode fts")

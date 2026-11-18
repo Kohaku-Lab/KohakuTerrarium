@@ -162,7 +162,7 @@ class MemorySearchMixin:
         scope: BranchVisibility | AgentBranchVisibility | None = None,
     ) -> list[SearchResult]:
         """Vector semantic search."""
-        if not self._vec:
+        if self._vec is None:
             return []
         query_vec = self._embedder.encode_one(query)
         return self._search_vector(query_vec, k, agent, scope=scope)
