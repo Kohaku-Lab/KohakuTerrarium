@@ -19,22 +19,34 @@ class TextSlice:
 
 
 def _focus_position(text: str, query: str) -> int:
-    """Return a likely literal hit, or zero for semantic/nonliteral queries."""
+    """Return the hit position in original text, not casefolded coordinates."""
     if not query:
         return 0
     haystack = text.casefold()
     needle = query[:MAX_FOCUS_CHARS].strip().casefold()
     found = haystack.find(needle) if needle else -1
-    if found >= 0:
+    if found < 0:
+        # FTS queries often contain several tokens rather than one literal span.
+        for token in sorted(re.findall(r"\w+", needle), key=len, reverse=True):
+            if len(token) < 3:
+                continue
+            found = haystack.find(token)
+            if found >= 0:
+                break
+    if found < 0:
+        return 0
+    if len(haystack) == len(text):
         return found
-    # FTS queries often contain several tokens rather than one literal span.
-    for token in sorted(re.findall(r"\w+", needle), key=len, reverse=True):
-        if len(token) < 3:
-            continue
-        found = haystack.find(token)
-        if found >= 0:
-            return found
-    return 0
+
+    # Unicode casefold can expand characters (e.g. ß -> ss, İ -> i + dot).
+    # Map just the chosen offset back rather than materializing an O(n)-size
+    # per-character offset table for long tool outputs.
+    folded = 0
+    for original, char in enumerate(text):
+        folded += len(char.casefold())
+        if folded > found:
+            return original
+    return len(text)
 
 
 def preview_text(

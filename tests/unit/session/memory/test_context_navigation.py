@@ -747,3 +747,32 @@ async def test_navigation_accepts_decimal_text_from_bracket_or_xml_tools(tmp_pat
             )
     finally:
         store.close(update_status=False)
+
+
+@pytest.mark.parametrize(
+    ("prefix", "query", "needle"),
+    [
+        ("straße " * 500, "needle", "needle"),
+        ("İ" * 1000, "needle", "needle"),
+        ("e\u0301" * 1000, "needle", "needle"),
+        ("straße " * 500, "STRASSE", "straße"),
+    ],
+)
+def test_focus_preview_offsets_track_original_unicode_text(prefix, query, needle):
+    from kohakuterrarium.session.memory.preview import preview_text
+
+    text = prefix + "needle" + "z" * 5000
+    excerpt = preview_text(text, 900, focus=query)
+    original = text.casefold().find(needle.casefold())
+    assert original >= 0
+    if query == "needle":
+        assert excerpt.start <= text.index("needle") < excerpt.end
+        assert "needle" in excerpt.content
+    else:
+        assert needle in excerpt.content.casefold() or needle in excerpt.content
+        assert excerpt.start <= 0 < excerpt.end
+
+    assert excerpt.total == len(text)
+    assert excerpt.end - excerpt.start <= 900
+    next_page = preview_text(text, 900, offset=excerpt.end)
+    assert next_page.start == excerpt.end
