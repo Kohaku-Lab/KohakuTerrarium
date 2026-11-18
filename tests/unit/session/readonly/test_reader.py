@@ -147,7 +147,7 @@ def test_legacy_index_migrates_on_search_but_never_indexes_an_empty_reader(tmp_p
 
     upgraded = SessionMemory(str(path), index_all_branches=True)
     try:
-        assert upgraded._state["memory:index_manifest"]["format"] == 5
+        assert upgraded._state["memory:index_manifest"]["format"] == 6
         assert upgraded.index_events("alice", rows) == 0
         assert upgraded.get_stats()["fts_blocks"] == 2
     finally:

@@ -5,6 +5,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from kohakuterrarium.session.history.semantics import (
+    BranchScope,
+    can_continue_legacy_round,
+    classify_branch_scope,
+)
 from kohakuterrarium.session.history.replay import (
     _coerce_path,
     index_parent_paths,
@@ -105,7 +110,7 @@ def extract_batch(
         missing = [
             block
             for block in blocks
-            if block.turn_index is not None
+            if type(block.turn_index) is int
             and block.turn_index > 1
             and block.parent_branch_path is None
         ]
@@ -149,8 +154,10 @@ class Block:
     event_id: int | None = None
     event_position: int | None = None
     part_index: int = 0
-    turn_index: int | None = None
-    branch_id: int | None = None
+    # Raw coordinates remain visible to the shared history classifier.
+    # Invalid coordinates must never be normalized into legacy None/None.
+    turn_index: Any = None
+    branch_id: Any = None
     parent_branch_path: tuple[tuple[int, int], ...] | None = None
     source_fingerprint: str = ""
     source_ref: str = ""
@@ -216,22 +223,34 @@ def _extract_blocks(
         etype = evt.get("type", "")
         ts = evt.get("ts", 0)
         eid = evt.get("event_id")
-        if live_ids is not None and isinstance(eid, int) and eid not in live_ids:
-            continue
-
         turn = evt.get("turn_index")
         branch = evt.get("branch_id")
-        scoped = (
-            all_branches
-            and type(turn) is int
-            and turn > 0
-            and type(branch) is int
-            and branch > 0
+        coordinate_scope = classify_branch_scope(turn, branch)
+        if (
+            live_ids is not None
+            and isinstance(eid, int)
+            and eid not in live_ids
+            and coordinate_scope is not BranchScope.BOOKKEEPING
+        ):
+            continue
+        if not all_branches and coordinate_scope is BranchScope.INVALID:
+            # Replay retains its historical compatibility projection, but
+            # scoped memory indexing must not publish malformed coordinates.
+            # Keep this strict policy the same as all-branch search visibility.
+            continue
+        # Invalid records retain their physical metadata but cannot open or
+        # close a trusted conversational round.
+        before_invalid = (
+            (round_num, block_num, in_round)
+            if coordinate_scope is BranchScope.INVALID
+            else None
         )
+        scoped = all_branches and coordinate_scope is BranchScope.EXPLICIT
         scope_key = f"{turn}:{branch}" if scoped else None
         if (
             scope_key is None
             and all_branches
+            and coordinate_scope is BranchScope.LEGACY
             and not in_round
             and len(open_branches) == 1
             and etype
@@ -242,8 +261,27 @@ def _extract_blocks(
             # when exactly one scoped round is open; never guess between siblings.
             scope_key = next(iter(open_branches))
         if scope_key is not None:
-            legacy_state = (round_num, block_num, in_round)
-            scoped_state = open_branches.get(scope_key, {})
+            inherited = (
+                scoped
+                and scope_key not in open_branches
+                and (
+                    can_continue_legacy_round(
+                        etype,
+                        legacy_open=in_round,
+                        legacy_round=round_num,
+                        explicit_turn=turn,
+                        other_open_scopes=len(open_branches),
+                    )
+                )
+            )
+            # Transfer ownership of an unambiguous legacy round to its newly
+            # stamped continuation; do not leave a second legacy round open
+            # after a stamped processing_end.
+            legacy_state = (round_num, block_num, False if inherited else in_round)
+            scoped_state = open_branches.get(
+                scope_key,
+                {"block": block_num, "in_round": True} if inherited else {},
+            )
             scoped_path = (
                 _coerce_path(scoped_state["parent_branch_path"])
                 if "parent_branch_path" in scoped_state
@@ -366,8 +404,10 @@ def _extract_blocks(
             block.event_id = eid if type(eid) is int else None
             block.event_position = event_offset + i
             block.part_index = part
-            block.turn_index = turn if type(turn) is int and turn > 0 else None
-            block.branch_id = branch if type(branch) is int and branch > 0 else None
+            # The original pair, even if incomplete or malformed, is part
+            # of the provenance that branch projection must validate.
+            block.turn_index = turn
+            block.branch_id = branch
             if evt.get("parent_branch_path") is not None:
                 block.parent_branch_path = _coerce_path(evt["parent_branch_path"])
             elif scoped and etype not in ("user_input", "trigger_fired"):
@@ -391,6 +431,8 @@ def _extract_blocks(
             else:
                 open_branches.pop(scope_key, None)
             round_num, block_num, in_round = legacy_state
+        if before_invalid is not None:
+            round_num, block_num, in_round = before_invalid
 
     state.update(round=round_num, block=block_num, in_round=in_round)
     if all_branches:

@@ -15,9 +15,10 @@ from kohakuterrarium.session.memory.visibility import (
 
 # Format 1 indexes the selected lineage; format 2 staged all branches;
 # format 3 added legacy ancestry, format 4 a source fingerprint, and
-# format 5 records exact physical source refs and disambiguates mirrored IDs.
+# format 5 records physical source refs and disambiguates mirrored IDs;
+# format 6 preserves raw branch coordinates and strict scoped visibility.
 _SELECTED_INDEX_FORMAT = 1
-_ALL_BRANCH_INDEX_FORMAT = 5
+_ALL_BRANCH_INDEX_FORMAT = 6
 
 
 @dataclass
@@ -37,8 +38,10 @@ class SearchResult:
     event_id: int | None = None
     event_position: int | None = None
     part_index: int = 0
-    turn_index: int | None = None
-    branch_id: int | None = None
+    # Raw source coordinates: malformed values are retained for provenance,
+    # though scoped branch projections always reject them.
+    turn_index: Any = None
+    branch_id: Any = None
     parent_branch_path: tuple[tuple[int, int], ...] | None = None
     source_fingerprint: str = ""
     source_ref: str = ""

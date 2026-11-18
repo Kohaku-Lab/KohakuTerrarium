@@ -512,7 +512,7 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
     try:
         assert old.index_events("alice", events) == 1
         epoch = old._state["memory:index_manifest"]["epoch"]
-        # Represent a pre-v5 session-wide index (the migration input).
+        # Represent a pre-v6 session-wide index (the migration input).
         old._state["memory:index_manifest"] = {
             **old._state["memory:index_manifest"],
             "format": 3,
@@ -524,7 +524,7 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
     try:
         assert upgraded.index_events("alice", events) == 1
         assert upgraded._state["memory:index_manifest"]["epoch"] > epoch
-        assert upgraded._state["memory:index_manifest"]["format"] == 5
+        assert upgraded._state["memory:index_manifest"]["format"] == 6
         hits = upgraded.search("needle", mode="fts")
         assert len(hits) == 1
         assert hits[0].source_fingerprint == _anchor(events[0])

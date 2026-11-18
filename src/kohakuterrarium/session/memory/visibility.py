@@ -8,6 +8,7 @@ closed: returning fewer hits would silently misreport a valid branch as empty.
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from kohakuterrarium.session.history.semantics import BranchScope, classify_branch_scope
 from kohakuterrarium.session.history.branch_paths import _coerce_branch_view
 from kohakuterrarium.session.history.selection import SelectionCompatibility
 from kohakuterrarium.session.history.replay import (
@@ -36,14 +37,11 @@ class BranchVisibility:
 
     def matches(self, meta: dict[str, Any]) -> bool:
         turn, branch = meta.get("turn_index"), meta.get("branch_id")
-        # Keep the existing replay behavior for unscoped legacy events.
-        if type(turn) is not int or type(branch) is not int:
+        scope = classify_branch_scope(turn, branch)
+        if scope in (BranchScope.LEGACY, BranchScope.BOOKKEEPING):
             return True
-        # Legacy bookkeeping and early injected input can be recorded at
-        # (0, 0). It belongs to no selected branch, unlike malformed mixed
-        # zero/positive coordinates which must remain excluded.
-        if turn == 0 and branch == 0:
-            return True
+        if scope is BranchScope.INVALID:
+            return False
         if self.selected.get(turn) != branch:
             return False
         raw_path = meta.get("parent_branch_path")

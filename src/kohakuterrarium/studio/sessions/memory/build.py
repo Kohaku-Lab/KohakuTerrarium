@@ -11,6 +11,7 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.query import _ALL_BRANCH_INDEX_FORMAT
 from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
@@ -60,7 +61,7 @@ def index_status(path: Path) -> dict[str, Any]:
             manifest = memory._manifest()
             ready = bool(
                 manifest
-                and manifest.get("format") == 5
+                and manifest.get("format") == _ALL_BRANCH_INDEX_FORMAT
                 and manifest.get("vector") == "ready"
                 and manifest.get("fts") == "ready"
             )
@@ -94,7 +95,7 @@ def index_status_quick(path: Path) -> bool:
             manifest = memory._manifest()
             return bool(
                 manifest
-                and manifest.get("format") == 5
+                and manifest.get("format") == _ALL_BRANCH_INDEX_FORMAT
                 and manifest.get("vector") == "ready"
                 and manifest.get("fts") == "ready"
                 and memory.has_vectors

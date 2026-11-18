@@ -49,7 +49,7 @@ def test_global_format_migration_rebuilds_all_agents_before_fts_is_ready(tmp_pat
     try:
         upgrade._index_keywords("alice", _rows("alice"))
         manifest = upgrade._state["memory:index_manifest"]
-        assert manifest["format"] == 5
+        assert manifest["format"] == 6
         assert manifest["fts"] != "ready"
         with pytest.raises(ValueError, match="index.*(building|invalid|rebuild)"):
             upgrade.search("needle", mode="fts", branch_view={1: 2})
