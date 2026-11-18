@@ -75,6 +75,12 @@ embedding model; semantic/hybrid searches require the vector rebuild to finish
 for all indexed agents. A failed or interrupted rebuild remains unavailable
 until safely retried; it never serves stale vectors from an earlier version.
 
+A Terrarium session can contain events from multiple Creatures, but all
+Creatures sharing that SessionStore must use the same embedding configuration.
+A conflicting Creature configuration is rejected on startup instead of
+silently changing another Creature's model. To change the session model,
+explicitly rebuild the embedding index and align the Creatures' configurations.
+
 ## Search from the CLI
 
 ```bash

@@ -74,7 +74,7 @@ class AgentSessionMixin:
                 memory_cfg.get("embedding") if isinstance(memory_cfg, dict) else None
             )
             if embed_cfg:
-                self.session_store.state["embedding_config"] = embed_cfg
+                self.session_store.claim_embedding_config(self.config.name, embed_cfg)
 
         # Get the actual model name from the LLM provider
         model = (

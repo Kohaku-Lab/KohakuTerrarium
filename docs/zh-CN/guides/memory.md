@@ -73,6 +73,11 @@ kt embedding swe.kohakutr \
 Semantic/Hybrid 检索则需要所有已索引 Agent 的向量完成重建。
 中断或失败的重建会保持不可用，待安全重试，不会误用旧版本的向量。
 
+Terrarium Session 可以包含多个 Creature 的事件，但共享同一个 SessionStore 的
+Creature 必须使用相同的 Embedding 配置。配置冲突会在 Creature 启动时报错，
+不会静默覆盖其他 Creature 的模型。需要切换 Session 模型时，应明确重建向量索引，
+并同步调整各 Creature 的配置。
+
 ## 从 CLI 搜索
 
 ```bash

@@ -66,6 +66,29 @@ class StoreMetaMixin:
         if terrarium_creatures:
             self.meta["terrarium_creatures"] = terrarium_creatures
 
+    def claim_embedding_config(self, creature: str, config: dict[str, Any]) -> None:
+        """Enforce one embedding configuration for a shared SessionStore.
+
+        Multiple Creatures can start concurrently in a Terrarium; the
+        check-and-write must use the same store-wide gate as event appends.
+        Explicit offline re-embedding is the separate model-switch path.
+        """
+        if self._flush is None:
+            raise PermissionError("Cannot set embedding config on a read-only session")
+        with self._flush.lock:
+            saved = self.state.get("embedding_config")
+            if saved is None:
+                self.state["embedding_config"] = dict(config)
+            elif not isinstance(saved, dict) or {
+                key: value for key, value in saved.items() if value is not None
+            } != {key: value for key, value in config.items() if value is not None}:
+                raise ValueError(
+                    f"Creature {creature!r} has a conflicting session embedding "
+                    "configuration; all Creatures sharing a SessionStore must "
+                    "use the same model. Rebuild the session embedding index "
+                    "explicitly to change it."
+                )
+
     def update_status(self, status: str) -> None:
         """Update session status (running, paused, completed, crashed)."""
 
