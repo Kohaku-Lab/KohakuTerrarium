@@ -82,6 +82,7 @@ from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.skills.registry import Skill
+from kohakuterrarium.studio.attach.input_ops import _process_input
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
@@ -452,6 +453,8 @@ class _BlockingTool(BaseTool):
     def __init__(self) -> None:
         super().__init__()
         self.started = asyncio.Event()
+        self.release_cleanup = asyncio.Event()
+        self.release_cleanup.set()
 
     @property
     def tool_name(self) -> str:
@@ -467,7 +470,10 @@ class _BlockingTool(BaseTool):
 
     async def _execute(self, args, **kwargs):
         self.started.set()
-        await asyncio.sleep(3600)
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            await self.release_cleanup.wait()
         return ToolResult(output="never")
 
 
@@ -2458,11 +2464,31 @@ class TestCoreIntegration:
                 timeout=5,
             )
             # Interrupt: cancels the processing task + the direct job.
+            block.release_cleanup.clear()
             agent.interrupt()
             # inject_input awaits the processing cycle; the cancellation
             # is caught inside ``_process_event_with_controller`` so
             # inject_input itself returns without raising.
-            await asyncio.wait_for(inject_task, timeout=5.0)
+            try:
+                await asyncio.wait_for(inject_task, timeout=5.0)
+                frames = asyncio.Queue()
+                web = asyncio.create_task(
+                    _process_input(
+                        agent, "discard web input", frames, "test", "fenced-id"
+                    )
+                )
+                await wait_until(
+                    lambda: agent._active_event_run
+                    and agent._active_event_run[0].event.content == "discard web input",
+                    timeout=5,
+                )
+                agent.interrupt()
+                await asyncio.wait_for(web, 5)
+                assert [frames.get_nowait()["type"] for _ in range(frames.qsize())] == [
+                    "idle"
+                ]
+            finally:
+                block.release_cleanup.set()
 
             # The agent survived the interrupt and is still running.
             assert agent.is_running is True

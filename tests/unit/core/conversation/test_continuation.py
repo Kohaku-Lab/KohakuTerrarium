@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium import Terrarium
+from kohakuterrarium import Terrarium, TurnEnded
 from kohakuterrarium.errors import AgentNotRunningError, ConflictError
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.base import NativeToolCall
@@ -347,8 +347,7 @@ async def test_finalizer_exception_blocks_following_turn(
             await asyncio.gather(turn, return_exceptions=True)
 
 
-@pytest.mark.parametrize("withdraw", [False, True, "prompt"])
-async def test_full_turn_interrupt_finalizer_fences_next_turn(tmp_path, withdraw):
+async def test_full_turn_interrupt_finalizer_fences_next_turn(tmp_path):
     tool = history_protocol._Work("promoted", True)
     provider = history_protocol._Provider("promoted")
     async with Terrarium() as engine:
@@ -359,50 +358,100 @@ async def test_full_turn_interrupt_finalizer_fences_next_turn(tmp_path, withdraw
                 tool_format="native",
             ),
             llm=provider,
+            session=tmp_path / "fence.kohakutr",
             tools=[tool],
             io="headless",
             pwd=tmp_path,
             start=True,
         )
         agent = creature.agent
+        await creature.run("original branch", timeout=8)
+        assert await agent.edit_and_rerun(1, "edited branch")
+        assert live_branch_path(agent)[1] == 2
         turn = asyncio.create_task(
             creature.run("launch-model-job", timeout=15, raise_on_error=False)
         )
-        next_turn = None
+        tasks = [turn]
+
+        async def wait_claim(text):
+            await wait_until(
+                lambda: agent._active_event_run
+                and agent._active_event_run[0].event.content == text,
+                timeout=3,
+            )
+
+        async def streamed(text):
+            async for event in creature.run_stream(text, timeout=8):
+                if isinstance(event, TurnEnded):
+                    return event.result
+
         try:
             await asyncio.wait_for(tool.started.wait(), 8)
             agent.interrupt()
             await asyncio.wait_for(tool.cleanup.wait(), 8)
             await asyncio.wait_for(turn, 8)
-            next_turn = asyncio.create_task(
-                creature.run("next request", timeout=15, raise_on_error=False)
-            )
-            for _ in range(20):
-                await asyncio.sleep(0)
-            assert not next_turn.done(), "next turn ran before interrupted tool settled"
-            if withdraw:
+            (finalizer,) = agent._interrupt_finalizers
+            before = provider.call_count
+            outcomes = []
+            for text, request in (
+                ("discard run", creature.run),
+                ("discard stream", streamed),
+            ):
+                task = asyncio.create_task(request(text))
+                tasks.append(task)
+                await wait_claim(text)
                 agent.interrupt()
-            if withdraw == "prompt":
-                next_result = await asyncio.wait_for(asyncio.shield(next_turn), 1)
-                assert next_result.status == "interrupted"
+                result = await asyncio.wait_for(task, 3)
+                outcomes.append((result.status, result.interrupted_by_user))
+            assert outcomes == [("interrupted", True)] * 2
+
+            batched = [
+                asyncio.create_task(agent.inject_input(text))
+                for text in ("discard primary", "discard folded")
+            ]
+            tasks.extend(batched)
+            await wait_claim("discard primary")
+            assert [env.event.content for env in agent._active_event_run] == [
+                "discard primary",
+                "discard folded",
+            ]
+            agent.interrupt()
+            assert await asyncio.wait_for(asyncio.gather(*batched), 3) == [True, False]
+            assert provider.call_count == before
+            assert not finalizer.done()
+
+            next_turn = asyncio.create_task(creature.run("next request", timeout=8))
+            tasks.append(next_turn)
+            await wait_claim("next request")
+
+            async def switch_after_settlement():
+                await finalizer
+                assert not agent._interrupt_finalizers
+                return await agent.inject_input("switch", branch_view={1: 1})
+
+            switch = asyncio.create_task(switch_after_settlement())
+            tasks.append(switch)
             tool.release.set()
-            next_result = await asyncio.wait_for(next_turn, 8)
-            if not withdraw:
-                assert not any(
-                    a.kind in {"tool_done", "tool_error"}
-                    for a in next_result.activities
-                )
-            if withdraw:
-                assert next_result.status == "interrupted"
-                assert not any(
-                    m.get("content") == "next request"
-                    for m in agent.controller.conversation.to_messages()
-                )
+            with pytest.raises(ConflictError, match="while a turn is active"):
+                await asyncio.wait_for(switch, 8)
+            next_result = await next_turn
+            assert next_result.ok
+            assert not any(
+                a.kind in {"tool_done", "tool_error"} for a in next_result.activities
+            )
+            users = [
+                m.get("content")
+                for m in provider.call_log[-1]
+                if m.get("role") == "user"
+            ]
+            assert "edited branch" in users and "original branch" not in users
+            assert "next request" in users
+            assert not any("discard " in str(content) for content in users)
+            assert await agent.inject_input("switch after turn", branch_view={1: 1})
+            assert live_branch_path(agent)[1] == 1
         finally:
             tool.release.set()
-            await asyncio.gather(
-                turn, *([next_turn] if next_turn else []), return_exceptions=True
-            )
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 @pytest.mark.parametrize("first", [0, 1])

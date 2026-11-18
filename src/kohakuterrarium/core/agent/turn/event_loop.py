@@ -210,7 +210,11 @@ class AgentEventLoopMixin:
                 any(env.withdrawn for env in run)
                 or primary.context.get("interrupted_by_user")
             ):
-                self._reject_run(run, status="interrupted")
+                self._resolve_run(
+                    run,
+                    status="interrupted",
+                    interrupted=bool(primary.context.get("interrupted_by_user")),
+                )
                 return
             for cap in captures:
                 self.output_router.add_secondary(cap)
