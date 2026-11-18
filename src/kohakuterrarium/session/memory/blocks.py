@@ -228,16 +228,28 @@ def _extract_blocks(
             and type(branch) is int
             and branch > 0
         )
-        if scoped:
+        scope_key = f"{turn}:{branch}" if scoped else None
+        if (
+            scope_key is None
+            and all_branches
+            and not in_round
+            and len(open_branches) == 1
+            and etype
+            in ("text", "text_chunk", "tool_call", "tool_result", "processing_end")
+        ):
+            # Some migrated sessions stamp their turn opener but not its
+            # subsequent text/tools. Only associate an unstamped continuation
+            # when exactly one scoped round is open; never guess between siblings.
+            scope_key = next(iter(open_branches))
+        if scope_key is not None:
             legacy_state = (round_num, block_num, in_round)
-            scope_key = f"{turn}:{branch}"
             scoped_state = open_branches.get(scope_key, {})
             scoped_path = (
                 _coerce_path(scoped_state["parent_branch_path"])
                 if "parent_branch_path" in scoped_state
                 else None
             )
-            round_num = turn
+            round_num = turn if scoped else int(scope_key.split(":", 1)[0])
             block_num = scoped_state.get("block", 0)
             in_round = scoped_state.get("in_round", False)
 
@@ -356,14 +368,19 @@ def _extract_blocks(
             block.part_index = part
             block.turn_index = turn if type(turn) is int and turn > 0 else None
             block.branch_id = branch if type(branch) is int and branch > 0 else None
-            if "parent_branch_path" in evt:
+            if evt.get("parent_branch_path") is not None:
                 block.parent_branch_path = _coerce_path(evt["parent_branch_path"])
-            elif scoped:
+            elif scoped and etype not in ("user_input", "trigger_fired"):
+                # A missing/null continuation inherits its opener's lineage;
+                # a new opener must be inferred from physical order instead
+                # of reusing an earlier sibling's (turn, branch) scope.
                 block.parent_branch_path = scoped_path
 
-        if scoped:
-            if "parent_branch_path" in evt:
+        if scope_key is not None:
+            if scoped and evt.get("parent_branch_path") is not None:
                 scoped_path = _coerce_path(evt["parent_branch_path"])
+            elif scoped and etype in ("user_input", "trigger_fired"):
+                scoped_path = None
             if in_round:
                 next_scope = {"block": block_num, "in_round": True}
                 if scoped_path is not None:

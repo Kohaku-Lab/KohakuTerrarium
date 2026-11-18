@@ -292,3 +292,212 @@ def test_all_branch_checkpoint_reopens_with_stable_identity(tmp_path):
         assert found["second needle"].parent_branch_path == ((1, 2),)
     finally:
         later.close()
+
+
+def test_null_missing_and_explicit_empty_parent_paths_keep_distinct_meanings(
+    tmp_path,
+):
+    from kohakuterrarium.session.memory.visibility import resolve_search_view
+
+    for marker in ("null", "absent", "empty"):
+
+        def child(content, event_id):
+            row = {
+                "type": "user_input",
+                "content": content,
+                "event_id": event_id,
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+            if marker != "absent":
+                row["parent_branch_path"] = None if marker == "null" else []
+            return row
+
+        rows = [
+            {
+                "type": "user_input",
+                "content": "root old",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            child("needle old child", 2),
+            {
+                "type": "user_input",
+                "content": "root new",
+                "event_id": 3,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [],
+            },
+            child("needle new child", 4),
+        ]
+        view = resolve_search_view(rows, {1: 2, 2: 1})
+        assert view == {1: 2, 2: 1}
+        memory = SessionMemory(
+            str(tmp_path / f"{marker}-ancestry.kohakutr"),
+            index_all_branches=True,
+        )
+        try:
+            # A later root can re-use the same child (turn, branch) pair.
+            # The incremental cursor must not retain the old child's ancestry.
+            memory.index_events("alice", rows[:2])
+            memory.index_events("alice", rows)
+            hits = memory.search("needle", mode="fts", branch_view=view)
+            expected = (
+                {"needle old child", "needle new child"}
+                if marker == "empty"
+                else {"needle new child"}
+            )
+            assert {hit.content for hit in hits} == expected
+            if marker == "empty":
+                assert all(hit.parent_branch_path == () for hit in hits)
+            else:
+                assert {hit.parent_branch_path for hit in hits} == {((1, 2),)}
+        finally:
+            memory.close()
+
+
+def test_null_continuations_follow_each_reopened_child_lineage(tmp_path):
+    from kohakuterrarium.session.history.branch_paths import (
+        index_parent_paths_by_position,
+    )
+
+    rows = [
+        {
+            "type": "user_input",
+            "content": "root old",
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "content": "old child",
+            "event_id": 2,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "type": "text",
+            "content": "needle old continuation",
+            "event_id": 3,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": None,
+        },
+        {
+            "type": "user_input",
+            "content": "root new",
+            "event_id": 4,
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "content": "new child",
+            "event_id": 5,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 2]],
+        },
+        {
+            "type": "text",
+            "content": "needle new continuation",
+            "event_id": 6,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": None,
+        },
+    ]
+    projected = index_parent_paths_by_position(rows)
+    extracted, _ = extract_batch("alice", rows, all_branches=True)
+    texts = [b for b in extracted if "continuation" in b.content]
+    assert [b.parent_branch_path for b in texts] == [projected[2], projected[5]]
+    assert [b.parent_branch_path for b in texts] == [((1, 1),), ((1, 2),)]
+
+
+def test_mixed_stamped_opener_and_unscoped_legacy_tail_stays_in_round(tmp_path):
+    rows = [
+        {
+            "type": "user_input",
+            "content": "needle prompt",
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {"type": "text", "content": "needle reply", "event_id": 2},
+        {
+            "type": "tool_call",
+            "name": "bash",
+            "event_id": 3,
+            "args": {"command": "echo needle"},
+        },
+        {
+            "type": "tool_result",
+            "name": "bash",
+            "event_id": 4,
+            "output": "needle result that is long enough to be indexed",
+        },
+        {"type": "processing_end", "event_id": 5},
+        {"type": "text", "content": "orphan outside round", "event_id": 6},
+    ]
+    expected = [
+        "needle prompt",
+        "needle reply",
+        "[tool:bash] command=echo needle",
+        "[result:bash] needle result that is long enough to be indexed",
+    ]
+    full, _ = extract_batch("alice", rows, all_branches=True)
+    assert [block.content for block in full] == expected
+    assert [(b.round_num, b.block_num) for b in full] == [
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+    ]
+    # Unscoped legacy records remain unscoped, as in replay.
+    assert all(b.turn_index is None and b.branch_id is None for b in full[1:])
+    checkpoint, incremental = None, []
+    for end in range(1, len(rows) + 1):
+        batch, checkpoint = extract_batch(
+            "alice", rows[:end], checkpoint, all_branches=True
+        )
+        incremental.extend(batch)
+    assert incremental == full
+
+    memory = SessionMemory(str(tmp_path / "mixed.kohakutr"), index_all_branches=True)
+    try:
+        memory.index_events("alice", rows)
+        assert memory.get_stats()["fts_blocks"] == 4
+    finally:
+        memory.close()
+
+
+def test_ambiguous_unscoped_tail_is_not_assigned_to_a_random_open_branch():
+    rows = [
+        {
+            "type": "user_input",
+            "content": "branch one",
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "content": "branch two",
+            "event_id": 2,
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+        },
+        {"type": "text", "content": "ambiguous unscoped reply", "event_id": 3},
+    ]
+    blocks, _ = extract_batch("alice", rows, all_branches=True)
+    assert [block.content for block in blocks] == ["branch one", "branch two"]
