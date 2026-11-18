@@ -27,6 +27,18 @@ from kohakuterrarium.session.memory.async_search import (
 SEARCH_RESULT_DISPLAY_CHARS = 2000
 
 
+def _navigation_integer(value: Any) -> Any:
+    """Bracket/XML arguments are text; normalize plain decimal integers only."""
+    if (
+        isinstance(value, str)
+        and len(value) <= 18
+        and value.isascii()
+        and value.isdecimal()
+    ):
+        return int(value)
+    return value
+
+
 @register_builtin("search_memory")
 class SearchMemoryTool(BaseTool):
     """Search indexed session events by keyword or semantic similarity."""
@@ -80,9 +92,9 @@ class SearchMemoryTool(BaseTool):
             try:
                 window = await memory.read_context(
                     anchor,
-                    before=args.get("before", 3),
-                    after=args.get("after", 3),
-                    offset=args.get("offset"),
+                    before=_navigation_integer(args.get("before", 3)),
+                    after=_navigation_integer(args.get("after", 3)),
+                    offset=_navigation_integer(args.get("offset")),
                 )
                 return ToolResult(
                     output=self._format_window(window),

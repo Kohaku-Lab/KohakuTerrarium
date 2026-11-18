@@ -63,7 +63,7 @@ def resolve_selected_branches(
             continue
         path = _event_path(evt, position, parent_paths)
         bucket = branches_by_turn.setdefault(ti, [])
-        if not any(b == bi for _, b in bucket):
+        if (path, bi) not in bucket:
             bucket.append((path, bi))
 
     selected: dict[int, int] = {}
@@ -345,7 +345,7 @@ def compact_replacement_rules(
     events: list[dict[str, Any]],
     branch_view: dict[int, int] | None = None,
     *,
-    parent_paths: dict[int, tuple[tuple[int, int], ...]] | None = None,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
 ) -> list[CompactRule]:
     """Select summary ranges; supplied paths must match unchanged events and order."""
     if parent_paths is None:
@@ -418,6 +418,10 @@ def replay_conversation(
         for event in events_list
         if isinstance(event.get("event_id"), int)
     ]
+    # Keep compaction records from the unprojected event stream: a summary
+    # can remain reusable on another tail branch when its source lineage is
+    # still selected, even if its completion record is not in the live tail.
+    rules_source = events_list
     if len(logical_ids) != len(set(logical_ids)):
         live_positions = select_live_event_positions(
             events_list, branch_view=branch_view
@@ -441,7 +445,13 @@ def replay_conversation(
         and (not isinstance(evt.get("event_id"), int) or evt["event_id"] in live_ids)
     }
     replaced_rules = compact_replacement_rules(
-        events_list, branch_view, parent_paths=parent_paths
+        rules_source,
+        branch_view,
+        parent_paths=(
+            index_parent_paths_by_position(rules_source)
+            if rules_source is not events_list
+            else parent_paths
+        ),
     )
     # Summaries are emitted where the replaced content sat, not at the
     # compact_replace event's own stream position (a compact runs after the

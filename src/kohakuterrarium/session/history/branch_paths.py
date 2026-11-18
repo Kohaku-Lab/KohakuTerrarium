@@ -33,6 +33,10 @@ def index_parent_paths_by_position(
     """
     paths: list[tuple[tuple[int, int], ...]] = []
     latest_by_turn: dict[int, int] = {}
+    # Persisted parent paths on a turn opener remain authoritative for
+    # unstamped continuation records even when another root branch interleaves.
+    # This mirrors the memory indexer's per-(turn, branch) open-round state.
+    open_paths: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
     shared: dict[tuple, tuple] = {}
     legacy: dict[int, tuple] = {}
     latest_cached_turn: int | None = None
@@ -46,10 +50,17 @@ def index_parent_paths_by_position(
             canonical = False
             legacy.clear()
         explicit = _coerce_path(evt.get("parent_branch_path"))
-        if explicit:
-            if all(type(t) is int and type(b) is int for t, b in explicit):
+        kind = evt.get("type")
+        scope = (ti, bi) if type(ti) is int and type(bi) is int else None
+        opener = kind in ("user_input", "user_message", "trigger_fired")
+        if explicit or (kind is not None and evt.get("parent_branch_path") in ([], ())):
+            # A modern explicit empty path is still authoritative: it denotes
+            # an independent turn, not an unstamped legacy continuation.
+            if explicit and all(type(t) is int and type(b) is int for t, b in explicit):
                 explicit = shared.setdefault(explicit, explicit)
             path = explicit
+        elif kind is not None and scope in open_paths and not opener:
+            path = open_paths[scope]
         elif isinstance(ti, int):
             path = legacy.get(ti) if canonical else None
             if path is None:
@@ -70,6 +81,11 @@ def index_parent_paths_by_position(
         else:
             path = ()
         paths.append(path)
+        if scope is not None and kind is not None and ti > 0 and bi > 0:
+            if evt.get("type") == "processing_end":
+                open_paths.pop(scope, None)
+            elif opener or scope in open_paths or explicit:
+                open_paths[scope] = path
         if isinstance(ti, int) and isinstance(bi, int):
             prev = latest_by_turn.get(ti, 0)
             if bi > prev:
@@ -157,7 +173,7 @@ def resolve_branch_view_strict(
     parent_paths = index_parent_paths_by_position(events_list)
 
     pairs: set[tuple[int, int]] = set()
-    pair_paths: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
+    pair_paths: dict[tuple[int, int], list[tuple[tuple[int, int], ...]]] = {}
     candidates: dict[int, list[tuple[tuple[tuple[int, int], ...], int]]] = {}
     seen_pairs: set[tuple[Any, Any]] = set()
     for position, evt in enumerate(events_list):
@@ -174,7 +190,9 @@ def resolve_branch_view_strict(
             else _coerce_path(evt.get("parent_branch_path"))
         )
         pairs.add(pair)
-        pair_paths.setdefault(pair, path)
+        alternatives = pair_paths.setdefault(pair, [])
+        if path not in alternatives:
+            alternatives.append(path)
         candidate = (path, pair[1])
         if candidate not in candidates.setdefault(pair[0], []):
             candidates[pair[0]].append(candidate)
@@ -190,33 +208,83 @@ def resolve_branch_view_strict(
                 f"branch {pair[1]} does not exist for turn {pair[0]}"
             )
 
-    constraints = dict(requested)
-    pending = list(requested.items())
-    visited: set[tuple[int, int]] = set()
-    while pending:
-        pair = pending.pop()
-        if pair in visited:
-            continue
-        visited.add(pair)
-        for parent_turn, parent_branch in pair_paths.get(pair, ()):
-            if parent_turn in userless:
+    def compatible_path(
+        pair: tuple[int, int], selected: dict[int, int]
+    ) -> tuple[tuple[int, int], ...] | None:
+        # Mirrored child pairs can have multiple ancestral lineages. Choose a
+        # consistent recorded path; never let the first occurrence override
+        # a later compatible copy.
+        for path in reversed(pair_paths.get(pair, [()])):
+            if not _path_matches(path, selected):
                 continue
-            existing = constraints.get(parent_turn)
-            if existing is not None and existing != parent_branch:
-                raise InvalidBranchViewError(
-                    f"branch {pair[1]} at turn {pair[0]} is incompatible with "
-                    f"branch {existing} at turn {parent_turn}"
-                )
-            parent_pair = (parent_turn, parent_branch)
-            if parent_pair not in pairs:
-                raise InvalidBranchViewError(
-                    f"branch {pair[1]} at turn {pair[0]} references missing "
-                    f"branch {parent_branch} at turn {parent_turn}"
-                )
-            if existing is None:
-                constraints[parent_turn] = parent_branch
-                pending.append(parent_pair)
+            if all(
+                (t, b) in pairs if t not in userless else (t, b) in seen_pairs
+                for t, b in path
+            ):
+                return path
+        return None
 
+    # A repeated (turn, branch) pair can have several recorded ancestries.
+    # Resolve the requested pairs together rather than committing to the first
+    # compatible path, which may conflict with a later requested descendant.
+    # The common unique-path case stays iterative and does not branch.
+    work = [(dict(requested), list(requested.items()), set())]
+    constraints = None
+    while work:
+        chosen, pending, visited = work.pop()
+        while pending:
+            pair = pending.pop()
+            if pair in visited:
+                continue
+            options = [
+                path
+                for path in pair_paths.get(pair, [()])
+                if _path_matches(path, chosen)
+                and all(
+                    (t, b) in pairs if t not in userless else (t, b) in seen_pairs
+                    for t, b in path
+                )
+            ]
+            if not options:
+                break
+
+            def extend(
+                path: tuple[tuple[int, int], ...],
+                selected: dict[int, int],
+                queue: list[tuple[int, int]],
+                checked: set[tuple[int, int]],
+            ) -> bool:
+                for parent_turn, parent_branch in path:
+                    existing = selected.get(parent_turn)
+                    if existing is not None and existing != parent_branch:
+                        return False
+                    if existing is None:
+                        selected[parent_turn] = parent_branch
+                        if parent_turn not in userless:
+                            queue.append((parent_turn, parent_branch))
+                checked.add(pair)
+                return True
+
+            # Prefer the most recently recorded compatible path; keep other
+            # possibilities for backtracking if a descendant rules it out.
+            for alternative in options[:-1]:
+                other, other_pending, other_visited = (
+                    chosen.copy(),
+                    pending.copy(),
+                    visited.copy(),
+                )
+                if extend(alternative, other, other_pending, other_visited):
+                    work.append((other, other_pending, other_visited))
+            if not extend(options[-1], chosen, pending, visited):
+                break
+        else:
+            constraints = chosen
+            break
+
+    if constraints is None:
+        raise InvalidBranchViewError(
+            "Requested branches are incompatible or reference missing ancestry"
+        )
     selected = dict(constraints)
     for turn_index in sorted(candidates):
         required = selected.get(turn_index)
@@ -233,7 +301,10 @@ def resolve_branch_view_strict(
         if compatible:
             selected[turn_index] = max(compatible)
     for pair in list(selected.items()):
-        for parent_turn, parent_branch in pair_paths.get(pair, ()):
+        path = compatible_path(pair, selected)
+        if path is None:
+            continue
+        for parent_turn, parent_branch in path:
             if parent_turn not in userless:
                 continue
             if passthrough.setdefault(parent_turn, parent_branch) != parent_branch:

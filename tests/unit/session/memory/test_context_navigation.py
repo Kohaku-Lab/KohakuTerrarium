@@ -659,3 +659,91 @@ async def test_neighbor_text_anchor_keeps_whole_event_offset_range(tmp_path):
         assert "content_slice=900:1800/" in page.output
     finally:
         store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_unstamped_text_uses_opener_ancestry_across_interleaved_root(tmp_path):
+    from kohakuterrarium.session.history.branch_paths import (
+        index_parent_paths_by_position,
+    )
+    from kohakuterrarium.session.memory.blocks import extract_batch
+
+    store = SessionStore(tmp_path / "inherited-ancestry.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    for turn, branch, kind, content, path in [
+        (1, 1, "user_input", "root old", []),
+        (2, 1, "user_input", "child opener needle", [[1, 1]]),
+        (1, 2, "user_input", "root sibling", []),
+        (2, 1, "text", "child continuation", None),
+    ]:
+        store.append_event(
+            "alice",
+            kind,
+            {"content": content},
+            turn_index=turn,
+            branch_id=branch,
+            parent_branch_path=path,
+        )
+    store.state["alice:branch_view"] = {"1": 1, "2": 1}
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        events = store.get_memory_events("alice")
+        paths = index_parent_paths_by_position(events)
+        blocks, _ = extract_batch("alice", events, all_branches=True)
+        assert paths[-1] == ((1, 1),)
+        assert (
+            next(
+                b for b in blocks if b.content == "child continuation"
+            ).parent_branch_path
+            == paths[-1]
+        )
+
+        found = await tool.execute(
+            {"query": "child opener needle", "mode": "fts"}, context=ctx
+        )
+        assert found.error is None
+        expanded = await tool.execute(
+            {"anchor": _anchor(found.output), "before": 0, "after": 3},
+            context=ctx,
+        )
+        assert expanded.error is None
+        assert "child continuation" in expanded.output
+        assert "root sibling" not in expanded.output
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_navigation_accepts_decimal_text_from_bracket_or_xml_tools(tmp_path):
+    store = SessionStore(tmp_path / "text-args.kohakutr")
+    _seed_two_turns(store)
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        search = await tool.execute(
+            {"query": "traceback-needle", "mode": "fts"}, context=ctx
+        )
+        assert search.error is None
+        token = _anchor(search.output)
+        same = await tool.execute(
+            {"anchor": token, "before": "2", "after": "3", "offset": "0"},
+            context=ctx,
+        )
+        assert same.error is None
+        assert "original request" in same.output
+        assert "traceback-needle" in same.output
+
+        for invalid in (
+            {"before": True},
+            {"before": "2.0"},
+            {"before": "-1"},
+            {"after": "11"},
+            {"offset": "not-a-number"},
+        ):
+            result = await tool.execute({"anchor": token, **invalid}, context=ctx)
+            assert result.error is not None, invalid
+            assert (
+                "INVALID_WINDOW" in result.error
+                or "INVALID_CONTENT_OFFSET" in result.error
+            )
+    finally:
+        store.close(update_status=False)

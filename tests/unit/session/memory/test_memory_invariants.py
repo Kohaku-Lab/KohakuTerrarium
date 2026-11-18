@@ -328,3 +328,194 @@ def test_replay_conversation_does_not_merge_reused_ids_from_siblings():
             assert text in contents, (view, contents)
         for text in excluded:
             assert text not in contents, (view, contents)
+
+
+def test_reused_child_branch_pair_keeps_distinct_ancestor_candidates():
+    from kohakuterrarium.session.history.branch_paths import (
+        index_parent_paths_by_position,
+        resolve_branch_view_strict,
+    )
+    from kohakuterrarium.session.history.replay import resolve_selected_branches
+    from kohakuterrarium.session.memory.visibility import resolve_search_view
+
+    rows = [
+        {
+            "type": "user_input",
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+            "content": "old root",
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "event_id": 2,
+            "turn_index": 2,
+            "branch_id": 1,
+            "content": "old child",
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "type": "user_input",
+            "event_id": 3,
+            "turn_index": 1,
+            "branch_id": 2,
+            "content": "new root",
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "event_id": 4,
+            "turn_index": 2,
+            "branch_id": 1,
+            "content": "new child",
+            "parent_branch_path": [[1, 2]],
+        },
+    ]
+    paths = index_parent_paths_by_position(rows)
+    assert resolve_selected_branches(rows, paths, {1: 2, 2: 1}) == {1: 2, 2: 1}
+    assert resolve_search_view(rows, {1: 2, 2: 1}) == {1: 2, 2: 1}
+    assert resolve_branch_view_strict(rows, {1: 2, 2: 1}) == {1: 2, 2: 1}
+    assert resolve_branch_view_strict(rows, {1: 1, 2: 1}) == {1: 1, 2: 1}
+
+
+def test_replayed_compaction_rule_survives_duplicate_id_projection():
+    base = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "ROOT QUESTION",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 2,
+            "type": "text",
+            "content": "RAW PREFIX",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 30,
+            "type": "user_message",
+            "content": "old child",
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 4,
+            "type": "compact_complete",
+            "summary": "REUSABLE SUMMARY",
+            "round": 1,
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": [[1, 1]],
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 3,
+            "type": "user_message",
+            "content": "selected child",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 5,
+            "type": "text",
+            "content": "TAIL ANSWER",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+    ]
+    duplicate = [dict(row) for row in base]
+    duplicate[2]["event_id"] = 3
+    for events in (base, duplicate):
+        messages = replay.replay_conversation(events, branch_view={1: 1, 2: 2})
+        texts = [str(item.get("content", "")) for item in messages]
+        assert any("REUSABLE SUMMARY" in body for body in texts)
+        assert not any("RAW PREFIX" in body for body in texts)
+        assert "selected child" in texts
+        assert "TAIL ANSWER" in texts
+
+
+def test_repeated_pair_ancestry_resolution_is_order_independent():
+    from kohakuterrarium.session.history.branch_paths import resolve_branch_view_strict
+
+    events = [
+        {
+            "type": "user_input",
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "event_id": 2,
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "event_id": 3,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "type": "user_input",
+            "event_id": 4,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 2]],
+        },
+        {
+            "type": "user_input",
+            "event_id": 5,
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+    ]
+    assert resolve_branch_view_strict(events, {3: 1, 2: 1}) == {1: 1, 2: 1, 3: 1}
+    assert resolve_branch_view_strict(events, {2: 1, 3: 1}) == {1: 1, 2: 1, 3: 1}
+
+
+def test_explicit_empty_parent_path_is_not_inferred_from_previous_root():
+    from kohakuterrarium.session.history.branch_paths import (
+        index_parent_paths_by_position,
+    )
+
+    events = [
+        {
+            "type": "user_input",
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "event_id": 2,
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+        },
+        {
+            "type": "user_input",
+            "event_id": 3,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+    ]
+    assert index_parent_paths_by_position(events)[2] == ()
