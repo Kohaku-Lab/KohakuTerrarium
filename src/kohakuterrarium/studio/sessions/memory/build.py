@@ -9,7 +9,10 @@ HTTP and WebSocket adapters to forward.
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    create_embedder,
+    effective_embedding_config,
+)
 from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.memory.query import _ALL_BRANCH_INDEX_FORMAT
 from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
@@ -218,14 +221,11 @@ def build_index(
                 info["blocks"] for info in indexed_per_agent.values()
             )
             if total_blocks_indexed > 0:
-                try:
-                    store.state["embedding_config"] = {
-                        "provider": resolved_provider,
-                        "model": model,
-                        "dimensions": dimensions,
-                    }
-                except Exception as e:  # pragma: no cover - state vault corruption
-                    logger.warning("embedding_config persist failed", error=str(e))
+                # A successful build must not silently publish an unrestorable
+                # model identity if writing its effective spec fails.
+                store.state["embedding_config"] = effective_embedding_config(
+                    embed_config, embedder
+                )
 
             stats = memory.get_stats()
             emit(

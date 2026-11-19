@@ -261,6 +261,58 @@ def list_embedding_presets() -> dict[str, dict[str, dict[str, Any]]]:
     return {"model2vec": MODEL2VEC_PRESETS, "sentence-transformer": ST_PRESETS}
 
 
+def effective_embedding_config(
+    config: dict[str, Any] | None,
+    embedder: BaseEmbedder | None = None,
+) -> dict[str, Any]:
+    """Resolve a restorable embedding spec, not just the optional user input.
+
+    Drop unset fields before any consumer constructs a model. Freeze provider,
+    model defaults and presets at persistence time so future default changes
+    cannot silently redirect an already-built index to a different model.
+    A built-in embedder supplies its actual selected provider/model.
+    """
+    if not config:
+        return {}
+    result = {key: value for key, value in config.items() if value is not None}
+    provider = result.get("provider", "auto")
+    if provider == "auto" and isinstance(embedder, Model2VecEmbedder):
+        provider = "model2vec"
+    elif provider == "auto" and isinstance(embedder, SentenceTransformerEmbedder):
+        provider = "sentence-transformer"
+    elif provider == "auto" and isinstance(embedder, APIEmbedder):
+        provider = "api"
+    elif provider == "auto" and isinstance(embedder, NullEmbedder):
+        provider = "none"
+    elif provider == "auto":
+        provider = _detect_best_provider()
+    result["provider"] = provider
+
+    if provider in ("model2vec", "sentence-transformer"):
+        default = DEFAULT_M2V_MODEL if provider == "model2vec" else DEFAULT_ST_MODEL
+        presets = MODEL2VEC_PRESETS if provider == "model2vec" else ST_PRESETS
+        model = getattr(embedder, "_model_name", None) or result.get("model") or default
+        if not isinstance(model, str):
+            raise ValueError("Embedding model must be a string")
+        preset = _resolve_preset(model, presets)
+        if preset:
+            model = preset["model"]
+            if provider == "sentence-transformer" and "dimensions" not in result:
+                dimensions = preset.get("dimensions")
+                if dimensions is not None:
+                    result["dimensions"] = dimensions
+        result["model"] = model
+    elif provider == "api":
+        result["model"] = getattr(embedder, "_model", None) or result.get(
+            "model", "text-embedding-3-small"
+        )
+        if isinstance(embedder, APIEmbedder):
+            result["base_url"] = embedder._base_url
+            if embedder._request_dims is not None:
+                result["dimensions"] = embedder._request_dims
+    return result
+
+
 def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
     """Create an embedder from provider, model, dimension, and device settings.
 
@@ -270,30 +322,18 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
     """
     if not config:
         return NullEmbedder()
-
-    provider = config.get("provider", "auto")
-
-    if provider == "auto":
-        provider = _detect_best_provider()
+    config = effective_embedding_config(config)
+    provider = config["provider"]
 
     match provider:
         case "model2vec":
-            model = config.get("model", DEFAULT_M2V_MODEL)
-            preset = _resolve_preset(model, MODEL2VEC_PRESETS)
-            if preset:
-                model = preset["model"]
-            return Model2VecEmbedder(model_name=model)
+            return Model2VecEmbedder(model_name=config["model"])
 
         case "sentence-transformer":
-            model = config.get("model", DEFAULT_ST_MODEL)
-            dims = config.get("dimensions")
-            device = config.get("device", "cpu")
-            preset = _resolve_preset(model, ST_PRESETS)
-            if preset:
-                model = preset["model"]
-                dims = dims or preset.get("dimensions")
             return SentenceTransformerEmbedder(
-                model_name=model, dimensions=dims, device=device
+                model_name=config["model"],
+                dimensions=config.get("dimensions"),
+                device=config.get("device", "cpu"),
             )
 
         case "api":

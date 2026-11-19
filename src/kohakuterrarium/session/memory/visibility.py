@@ -112,8 +112,18 @@ def resolve_search_view(
     Keep this consistent with conversation replay; callers compute it when
     reading source events, not by interpreting only ranked search candidates.
     """
+    # Replay intentionally accepts some noncanonical legacy coordinates for
+    # backwards compatibility. Strict Memory selection must exclude invalid
+    # events *before* they can influence branch choices or inferred ancestry,
+    # not merely delete invalid values from the selected mapping afterwards.
+    eligible = [
+        event
+        for event in events
+        if classify_branch_scope(event.get("turn_index"), event.get("branch_id"))
+        is not BranchScope.INVALID
+    ]
     selected = resolve_selected_branches(
-        events, index_parent_paths_by_position(events), requested_view
+        eligible, index_parent_paths_by_position(eligible), requested_view
     )
     # Resolved history can contain (0, 0) bookkeeping rows. Explicit
     # selections remain strictly positive, but these unscoped coordinates

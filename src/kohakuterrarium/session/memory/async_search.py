@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+from contextlib import asynccontextmanager
 from concurrent.futures import Future
 from typing import Any, Callable
 
@@ -77,6 +78,19 @@ class LiveSessionMemory:
         self._closed = False
         store.register_companion_closer(self.close)
 
+    @asynccontextmanager
+    async def _semantic_operation(self):
+        """Serialize live model work and abort owned builds on any exit error."""
+        async with self._semantic_lock:
+            try:
+                yield
+            except BaseException:
+                try:
+                    await self._store.run(self._memory._abort_vector_build)
+                except Exception:
+                    logger.exception("Failed to abort memory vector build")
+                raise
+
     def close(self) -> None:
         if not self._closed:
             self._closed = True
@@ -136,7 +150,7 @@ class LiveSessionMemory:
         warning = None
         if mode != "fts":
             try:
-                async with self._semantic_lock:
+                async with self._semantic_operation():
                     if self._embedder is None:
                         embedder = await self._worker.run(create_embedder, config)
                         await self._store.run(self._memory._set_embedder, embedder)
@@ -144,7 +158,11 @@ class LiveSessionMemory:
                     if isinstance(self._embedder, NullEmbedder):
                         if mode != "semantic":
                             results = await self._store.run(
-                                self._memory._search_fts, query, k, agent, scope=scope
+                                self._memory._search_fts,
+                                query,
+                                k,
+                                agent,
+                                scope=scope,
                             )
                             return await self._with_anchors(results, views, None, query)
                         raise ValueError("semantic search needs an embedding model")

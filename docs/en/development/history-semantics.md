@@ -57,3 +57,12 @@ A stale index must fail closed until rebuilt.
 
 R1 owns when physical materializations are safely invalidated and published;
 R2 owns what the raw source events mean before materialization.
+
+## Selection eligibility contract
+
+Strict Memory branch resolution excludes INVALID coordinate records **before**
+calling the legacy Replay branch resolver or inferring ancestry. This is
+different from filtering ranked hits after selection: invalid booleans,
+partial coordinates or malformed openers must not change which of the valid
+events is selected. The public Replay API retains its historical compatibility
+semantics; this stricter input boundary is specific to Memory search.

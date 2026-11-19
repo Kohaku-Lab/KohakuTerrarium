@@ -72,3 +72,25 @@ path lock contention, and interrupted partial vector builds.
 Not promised: zero-downtime rebuilding, instantaneous freshness after every
 append, a globally atomic snapshot across live writers, or cross-model
 vector ranking fusion.
+
+## End-to-end contract closure
+
+- **Restorable embedding specification:** the model factory normalizes unset
+  optional configuration values and resolves provider, model defaults and
+  presets. Offline builds persist the effective model specification obtained
+  after constructing the embedder, not optional user inputs containing null.
+  Search and resume pass saved specifications through the same factory; the
+  stored vector identity still gates search if the loaded model differs. A
+  failure to persist the model specification fails the build explicitly.
+- **Aborted build ownership:** a live semantic operation keeps its build
+  ownership across encoding. Failure, timeout and cancellation route through
+  one abort operation on the store affinity thread, which increments the
+  vector generation, leaves the manifest unreadable and releases the long
+  build lock. Detached model workers may finish later, but an old prepared
+  vector batch cannot commit against the new generation. An independent
+  builder may recover the Session immediately.
+- **Strict search lineage:** Memory projects only events with canonical,
+  eligible coordinates when deriving a selected branch and its inferred
+  ancestry. The source event log and public Replay compatibility are not
+  changed. Filtering invalid hits only after branch selection is insufficient:
+  a malformed opener must not influence selection of valid siblings.

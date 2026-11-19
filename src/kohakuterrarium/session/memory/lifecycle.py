@@ -53,6 +53,24 @@ class MemoryIndexLifecycle:
         self._release_build("vector")
         self._release_build("fts")
 
+    def _abort_vector_build(self) -> None:
+        """Abandon owned vector work, fence late results and release ownership.
+
+        Physical rows may be partial; keep the manifest unreadable. A later
+        builder starts a fresh generation and clears them before publishing.
+        """
+        if self._vector_build_lock is None:
+            return
+        with self._mutation():
+            manifest = dict(self._manifest() or {})
+            if manifest and manifest.get("vector") != "ready":
+                manifest["vector"] = "building"
+                manifest["vector_needs_clear"] = True
+                manifest["vector_generation"] = manifest.get("vector_generation", 0) + 1
+                manifest["vector_revision"] = manifest.get("vector_revision", 0) + 1
+                self._save_manifest(manifest)
+            self._release_build("vector")
+
     def _manifest(self) -> dict | None:
         value = self._state.get("memory:index_manifest")
         return value if isinstance(value, dict) else None
