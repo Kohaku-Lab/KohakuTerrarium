@@ -8,6 +8,10 @@ with those captured events and never discover other Agents themselves.
 from dataclasses import dataclass
 from typing import Any
 
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
 from kohakuterrarium.session.memory.visibility import (
     requested_store_view,
     resolve_search_view,
@@ -134,11 +138,21 @@ class SessionIndexReconciler:
         progress=None,
     ) -> dict[str, int]:
         """Materialize every captured Agent, including empty namespaces."""
-        if force:
-            self._memory.force_rebuild(list(source.agents))
-        results = {}
-        for name, events in source.events.items():
-            results[name] = self._memory.index_events(name, events)
-            if progress is not None:
-                progress(name, len(events), results[name])
-        return results
+        try:
+            if force:
+                self._memory.force_rebuild(list(source.agents))
+            results = {}
+            for name, events in source.events.items():
+                results[name] = self._memory.index_events(name, events)
+                if progress is not None:
+                    progress(name, len(events), results[name])
+            return results
+        except BaseException:
+            # A callback may fail between Agents while the shared index is
+            # legitimately BUILDING. End that logical build, not only the
+            # individual materializer that happened to run last.
+            try:
+                self._memory._abort_builds()
+            except BaseException:
+                logger.exception("Session reconciliation abort failed")
+            raise

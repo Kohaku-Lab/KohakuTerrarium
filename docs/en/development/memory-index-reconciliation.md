@@ -61,6 +61,34 @@ calls merely because new source events exist.
 - Old vector tables at other dimensions may remain physically present, but
   are ineligible for search under the active Session manifest.
 
+
+### Build ownership termination
+
+Long FTS/vector build locks represent **one logical Session-wide build**,
+not one Agent call. An Agent can successfully materialize its partial batch
+while the Manifest still lists other pending Agents; the current builder
+keeps ownership until the final checkpoint is validated and published.
+
+For abnormal exits, MemoryIndexLifecycle owns termination. A build
+mutation catches failures while holding the short mutation lock, marks any
+owned FTS/vector builds unreadable, and releases their long locks even if a
+second manifest write fails. The FTS recovery path resets the full index
+epoch on the next independent builder; vector recovery also advances its
+generation and rejects late encoding commits.
+
+Synchronous vector encoding runs outside the short mutation lock, and
+cross-Agent progress callbacks run outside an individual materializer.
+Those outer boundaries delegate exceptional termination to the same
+Lifecycle abort operation. Live semantic cancellation continues to use the
+affinity-thread vector abort after detached embedding has been fenced.
+No successful *partial* Agent call releases a long build lock prematurely.
+
+Regression probes inject FTS insert/clear, forced reset, model encoding,
+vector insertion, multi-Agent callback errors, and abort-persistence failure.
+They verify the original error survives, invalid indexes remain unreadable,
+both owned locks are released, and an independent SessionMemory can recover
+without waiting for the original object to close.
+
 ## Regression contract
 
 Every query must **either read an internally consistent published snapshot

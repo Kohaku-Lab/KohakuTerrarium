@@ -289,20 +289,29 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
         ``start_from`` supports incremental indexing and is advanced past the
         persisted per-agent watermark when necessary.
         """
-        count = self._index_keywords(agent, events, start_from)
-        if self._has_vectors and self._vec is not None:
-            start, blocks = self._vector_batch(agent, events, start_from)
-            vectors = (
-                self._embedder.encode([b.content for b in blocks]) if blocks else []
-            )
-            self._commit_vectors(agent, start, len(events), blocks, vectors)
-            count = max(count, len(blocks))
-        return count
+        try:
+            count = self._index_keywords(agent, events, start_from)
+            if self._has_vectors and self._vec is not None:
+                start, blocks = self._vector_batch(agent, events, start_from)
+                vectors = (
+                    self._embedder.encode([b.content for b in blocks]) if blocks else []
+                )
+                self._commit_vectors(agent, start, len(events), blocks, vectors)
+                count = max(count, len(blocks))
+            return count
+        except BaseException:
+            # Encoding runs outside the short mutation lock. The sync caller
+            # must still terminate any build it owns after encoder failure.
+            try:
+                self._abort_builds()
+            except BaseException:
+                logger.exception("Memory index build abort failed")
+            raise
 
     def _index_keywords(
         self, agent: str, events: list[dict], start_from: int = 0
     ) -> int:
-        with self._mutation():
+        with self._build_mutation():
             self._ensure_index_format(agent)
             batch, blocks = self._prepare(agent, events, "keywords", start_from)
             changed = batch.reset or batch.start != len(events) or bool(blocks)
@@ -335,7 +344,7 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
             self._state["vec_dimensions"] = embedder.dimensions
 
     def _vector_batch(self, agent: str, events: list[dict], start_from: int = 0):
-        with self._mutation():
+        with self._build_mutation():
             self._ensure_index_format(agent)
             kind = f"vectors:{self._embedder.dimensions}"
             manifest = self._manifest()
@@ -356,7 +365,7 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
     def _commit_vectors(
         self, agent, start: _IndexBatch, count, blocks, vectors
     ) -> None:
-        with self._mutation():
+        with self._build_mutation():
             kind = f"vectors:{self._embedder.dimensions}"
             key = f"{agent}:cursor:{kind}"
             if (

@@ -11,6 +11,9 @@ from kohakuvault import TextVault
 from kohakuterrarium.session.memory.query import _ALL_BRANCH_INDEX_FORMAT
 from kohakuterrarium.session.vault.io import key_text, scan_keys
 from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class MemoryIndexLifecycle:
@@ -29,6 +32,24 @@ class MemoryIndexLifecycle:
         finally:
             lock.release()
 
+    @contextmanager
+    def _build_mutation(self):
+        """Terminate all owned builds if any mutation fails before publication.
+
+        The short mutation lock is held while marking indexes unready and
+        releasing long build ownership. Successful partial multi-Agent
+        materialization intentionally retains build ownership.
+        """
+        with self._mutation():
+            try:
+                yield
+            except BaseException:
+                try:
+                    self._abort_owned_builds_unlocked()
+                except BaseException:
+                    logger.exception("Memory build abort failed")
+                raise
+
     def _claim_build(self, kind: str) -> None:
         attr = f"_{kind}_build_lock"
         if getattr(self, attr) is not None:
@@ -46,30 +67,59 @@ class MemoryIndexLifecycle:
         attr = f"_{kind}_build_lock"
         lock = getattr(self, attr)
         if lock is not None:
-            lock.release()
-            setattr(self, attr, None)
+            try:
+                lock.release()
+            finally:
+                setattr(self, attr, None)
 
     def _release_build_locks(self) -> None:
         self._release_build("vector")
         self._release_build("fts")
 
-    def _abort_vector_build(self) -> None:
-        """Abandon owned vector work, fence late results and release ownership.
+    def _abandon_owned_build_unlocked(self, kind: str) -> None:
+        """Persist an unreadable build, then release the matching long lock.
 
-        Physical rows may be partial; keep the manifest unreadable. A later
-        builder starts a fresh generation and clears them before publishing.
+        Called with the short mutation lock already held. A failed native
+        write cannot strand the long lock; publication always requires a
+        prior durable BUILDING barrier.
         """
-        if self._vector_build_lock is None:
+        if getattr(self, f"_{kind}_build_lock") is None:
             return
-        with self._mutation():
+        try:
             manifest = dict(self._manifest() or {})
-            if manifest and manifest.get("vector") != "ready":
-                manifest["vector"] = "building"
-                manifest["vector_needs_clear"] = True
-                manifest["vector_generation"] = manifest.get("vector_generation", 0) + 1
-                manifest["vector_revision"] = manifest.get("vector_revision", 0) + 1
+            if manifest:
+                manifest[kind] = "building"
+                if kind == "fts":
+                    # Recovery resets the entire FTS epoch on the next owner.
+                    manifest["fts_revision"] = manifest.get("fts_revision", 0) + 1
+                else:
+                    manifest["vector_needs_clear"] = True
+                    manifest["vector_generation"] = (
+                        manifest.get("vector_generation", 0) + 1
+                    )
+                    manifest["vector_revision"] = manifest.get("vector_revision", 0) + 1
                 self._save_manifest(manifest)
-            self._release_build("vector")
+        finally:
+            self._release_build(kind)
+
+    def _abort_owned_builds_unlocked(self) -> None:
+        # Either cleanup can fail independently; both locks must be released.
+        try:
+            self._abandon_owned_build_unlocked("vector")
+        finally:
+            self._abandon_owned_build_unlocked("fts")
+
+    def _abort_builds(self) -> None:
+        """Abort unfinished session-wide work outside a mutation transaction."""
+        if self._fts_build_lock is not None or self._vector_build_lock is not None:
+            with self._mutation():
+                self._abort_owned_builds_unlocked()
+
+    def _abort_vector_build(self) -> None:
+        """Abort an async vector operation after its detached encoder exits."""
+        if self._vector_build_lock is not None:
+            with self._mutation():
+                self._abandon_owned_build_unlocked("vector")
 
     def _manifest(self) -> dict | None:
         value = self._state.get("memory:index_manifest")
@@ -137,7 +187,7 @@ class MemoryIndexLifecycle:
 
     def force_rebuild(self, agents: list[str]) -> None:
         """Invalidate both indexes globally before a forced re-embedding."""
-        with self._mutation():
+        with self._build_mutation():
             self._claim_build("fts")
             self._reset_session_indexes(set(agents), self._manifest())
 
