@@ -66,3 +66,27 @@ different from filtering ranked hits after selection: invalid booleans,
 partial coordinates or malformed openers must not change which of the valid
 events is selected. The public Replay API retains its historical compatibility
 semantics; this stricter input boundary is specific to Memory search.
+
+
+## Modern writes versus legacy fallback
+
+Ordinary accepted user input is stamped before persistence: the Agent event
+consumer allocates (turn_index, branch_id, parent_branch_path) and then
+writes the canonical user_input / user_message pair. Regeneration and
+editing likewise persist their selected turn/branch. Queued ingress need not
+have a branch until the consuming turn is chosen. The generic low-level
+SessionStore.append_event() intentionally retains optional coordinates for
+legacy imports and non-conversation bookkeeping.
+
+An unstamped user_input in a modern-format file is therefore *not* a new
+normal-writing convention. Memory's existing legacy compatibility parser
+may see a stamped turn followed by an unstamped historical opener; the
+completed stamped opener advances the legacy round high-water so a later
+unambiguous stamped continuation can hand off without losing text/tools.
+No second global/sibling round-state machine is introduced.
+
+For strict Memory search, illegal coordinate pairs are ineligible **both**
+for branch selection and for inferred lineage. The canonical eligibility
+projection retains original physical positions and feeds one ancestry
+inference shared by Index and Context Navigation. The permissive public
+Replay behavior for noncanonical historical records remains unchanged.

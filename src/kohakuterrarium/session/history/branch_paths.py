@@ -3,6 +3,9 @@
 from typing import Any, Iterable
 
 
+from kohakuterrarium.session.history.semantics import eligible_branch_history
+
+
 def _coerce_path(raw: Any) -> tuple[tuple[int, int], ...]:
     """Normalize a parent_branch_path payload into a tuple of pairs.
 
@@ -98,6 +101,20 @@ def index_parent_paths_by_position(
                     legacy = {t: p for t, p in legacy.items() if t <= ti}
                     latest_cached_turn = max(legacy, default=None)
     return paths
+
+
+def index_eligible_parent_paths_by_position(
+    events_list: list[dict[str, Any]],
+) -> dict[int, tuple[tuple[int, int], ...]]:
+    """Strict Memory ancestry, keyed by original event position.
+
+    Exclude invalid source coordinates before inferring ancestry; retain
+    original physical positions so Index and Context navigation can resolve
+    refs correctly without modifying Replay's compatibility projection.
+    """
+    eligible = eligible_branch_history(events_list)
+    inferred = index_parent_paths_by_position([event for _, event in eligible])
+    return {position: path for (position, _), path in zip(eligible, inferred)}
 
 
 def index_parent_paths(

@@ -109,3 +109,44 @@ def test_concurrent_creatures_cannot_race_to_replace_one_session_model(tmp_path)
         assert store.state["embedding_config"]["model"] in {"embed-A", "embed-B"}
     finally:
         store.close(update_status=False)
+
+
+@pytest.mark.parametrize(
+    "requested, built",
+    [
+        (
+            {"provider": "model2vec"},
+            {
+                "provider": "model2vec",
+                "model": "sentence-transformers/static-similarity-mrl-multilingual-v1",
+            },
+        ),
+        (
+            {"provider": "model2vec", "model": "@base"},
+            {"provider": "model2vec", "model": "minishlab/potion-base-8M"},
+        ),
+    ],
+)
+def test_same_creature_can_resume_after_offline_effective_model_persist(
+    tmp_path, monkeypatch, requested, built
+):
+    monkeypatch.setattr(session_module, "context_window", lambda agent: (4096, 3000))
+    path = tmp_path / "effective-resume.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.state["embedding_config"] = built
+    finally:
+        store.close(update_status=False)
+    reopened = SessionStore(path)
+    try:
+        _publish("alice", reopened, requested)
+        assert reopened.state["embedding_config"] == built
+        with pytest.raises(ValueError, match="conflicting"):
+            _publish(
+                "alice",
+                reopened,
+                {"provider": "model2vec", "model": "not-the-same-model"},
+            )
+    finally:
+        reopened.close(update_status=False)

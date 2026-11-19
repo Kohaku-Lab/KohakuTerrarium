@@ -251,3 +251,89 @@ def test_invalid_coordinates_cannot_open_or_close_a_legacy_round():
         "valid legacy opener",
         "still in valid legacy round",
     ]
+
+
+def test_completed_stamped_turn_advances_legacy_round_cursor():
+    """Legacy fallbacks must not restart at round one after a stamped turn."""
+    rows = [
+        _event(1, "user_input", "first stamped", coords=(1, 1), parent_branch_path=[]),
+        _event(2, "processing_end", coords=(1, 1)),
+        _event(3, "user_input", "second legacy"),
+        _event(4, "text", "second stamped reply", coords=(2, 1), parent_branch_path=[]),
+        _event(
+            5, "tool_call", coords=(2, 1), name="bash", args={"command": "echo second"}
+        ),
+        _event(
+            6,
+            "tool_result",
+            coords=(2, 1),
+            name="bash",
+            output="second tool output long enough",
+        ),
+        _event(7, "processing_end", coords=(2, 1)),
+    ]
+    expected = [
+        "first stamped",
+        "second legacy",
+        "second stamped reply",
+        "[tool:bash] command=echo second",
+        "[result:bash] second tool output long enough",
+    ]
+    selected, _ = extract_batch("alice", rows, all_branches=False)
+    all_blocks, _ = extract_batch("alice", rows, all_branches=True)
+    assert [b.content for b in selected] == expected
+    assert [b.content for b in all_blocks] == expected
+    assert [b.round_num for b in all_blocks] == [1, 2, 2, 2, 2]
+    state, partial = None, []
+    for end in range(1, len(rows) + 1):
+        batch, state = extract_batch("alice", rows[:end], state, all_branches=True)
+        partial.extend(batch)
+    assert partial == all_blocks
+    assert state["round"] == 2
+
+
+def test_invalid_event_does_not_poison_index_or_navigation_ancestry(tmp_path):
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+    from kohakuterrarium.session.memory.visibility import resolve_search_view
+    from kohakuterrarium.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "ancestry-eligibility.kohakutr")
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        for kind, content, turn, branch, path in [
+            ("user_input", "invalid bool opener", True, 2, None),
+            ("user_input", "valid first", 1, 1, []),
+            ("user_input", "valid second", 2, 1, None),
+            ("text", "needle valid descendant", 2, 1, None),
+        ]:
+            store.append_event(
+                "alice",
+                kind,
+                {"content": content},
+                turn_index=turn,
+                branch_id=branch,
+                parent_branch_path=path,
+            )
+        rows = store.get_memory_events("alice")
+        view = resolve_search_view(rows)
+        assert view == {1: 1, 2: 1}
+        with closing(SessionMemory(str(store.path), index_all_branches=True)) as memory:
+            memory.index_events("alice", rows)
+            hits = memory.search("needle", mode="fts", branch_view=view)
+            assert [hit.content for hit in hits] == ["needle valid descendant"]
+            assert hits[0].event_position == 3
+            assert hits[0].parent_branch_path == ((1, 1),)
+        navigator = MemoryContextNavigator(store)
+        assert navigator._legacy_paths("alice")[rows[3].source_ref] == ((1, 1),)
+        # An invalid coordinate must be rejected before missing ancestry is
+        # interpreted as corrupted source history.
+        from kohakuterrarium.session.memory.visibility import BranchVisibility
+
+        assert not navigator._visible(
+            {"type": "user_input", "turn_index": 2, "branch_id": -1},
+            "invalid-source-ref",
+            BranchVisibility(view),
+            navigator._legacy_paths("alice"),
+        )
+    finally:
+        store.close(update_status=False)

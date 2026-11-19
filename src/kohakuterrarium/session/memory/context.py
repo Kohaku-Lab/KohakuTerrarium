@@ -9,7 +9,10 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from kohakuterrarium.session.history.branch_paths import index_parent_paths_by_position
+from kohakuterrarium.session.history.branch_paths import (
+    index_eligible_parent_paths_by_position,
+)
+from kohakuterrarium.session.history.semantics import BranchScope, classify_branch_scope
 from kohakuterrarium.session.history.paging import _ordered_event_refs
 from kohakuterrarium.session.memory.blocks import _anchor, _content_to_text
 from kohakuterrarium.session.memory.preview import (
@@ -272,6 +275,8 @@ class MemoryContextNavigator:
             return False
         record = event
         turn, branch = event.get("turn_index"), event.get("branch_id")
+        if classify_branch_scope(turn, branch) is BranchScope.INVALID:
+            return False
         if (
             type(turn) is int
             and turn > 1
@@ -289,8 +294,12 @@ class MemoryContextNavigator:
     def _legacy_paths(self, agent: str) -> dict[str, tuple]:
         """Resolve each legacy event's ancestry by its unique physical ref."""
         events = self._store.get_memory_events(agent)
-        paths = index_parent_paths_by_position(events)
-        return {event.source_ref: path for event, path in zip(events, paths)}
+        paths = index_eligible_parent_paths_by_position(events)
+        return {
+            event.source_ref: paths[position]
+            for position, event in enumerate(events)
+            if position in paths
+        }
 
     def expand(
         self,

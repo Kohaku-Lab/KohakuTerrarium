@@ -4,6 +4,7 @@ import platform
 from datetime import datetime, timezone
 from typing import Any
 
+from kohakuterrarium.session.memory.embedding_spec import canonical_embedding_spec
 from kohakuterrarium.session.store.identity import (
     legacy_conversation_id,
     new_conversation_id,
@@ -79,9 +80,12 @@ class StoreMetaMixin:
             saved = self.state.get("embedding_config")
             if saved is None:
                 self.state["embedding_config"] = dict(config)
-            elif not isinstance(saved, dict) or {
-                key: value for key, value in saved.items() if value is not None
-            } != {key: value for key, value in config.items() if value is not None}:
+            elif not isinstance(saved, dict) or (
+                canonical_embedding_spec(saved)
+                != canonical_embedding_spec(
+                    config, anchor=canonical_embedding_spec(saved)
+                )
+            ):
                 raise ValueError(
                     f"Creature {creature!r} has a conflicting session embedding "
                     "configuration; all Creatures sharing a SessionStore must "

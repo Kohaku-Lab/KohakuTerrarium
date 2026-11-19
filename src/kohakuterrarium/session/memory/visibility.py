@@ -8,7 +8,11 @@ closed: returning fewer hits would silently misreport a valid branch as empty.
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from kohakuterrarium.session.history.semantics import BranchScope, classify_branch_scope
+from kohakuterrarium.session.history.semantics import (
+    BranchScope,
+    classify_branch_scope,
+    eligible_branch_history,
+)
 from kohakuterrarium.session.history.branch_paths import _coerce_branch_view
 from kohakuterrarium.session.history.selection import SelectionCompatibility
 from kohakuterrarium.session.history.replay import (
@@ -116,12 +120,7 @@ def resolve_search_view(
     # backwards compatibility. Strict Memory selection must exclude invalid
     # events *before* they can influence branch choices or inferred ancestry,
     # not merely delete invalid values from the selected mapping afterwards.
-    eligible = [
-        event
-        for event in events
-        if classify_branch_scope(event.get("turn_index"), event.get("branch_id"))
-        is not BranchScope.INVALID
-    ]
+    eligible = [event for _, event in eligible_branch_history(events)]
     selected = resolve_selected_branches(
         eligible, index_parent_paths_by_position(eligible), requested_view
     )

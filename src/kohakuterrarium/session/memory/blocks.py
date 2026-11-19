@@ -5,6 +5,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from kohakuterrarium.session.history.branch_paths import (
+    index_eligible_parent_paths_by_position,
+)
 from kohakuterrarium.session.history.semantics import (
     BranchScope,
     can_continue_legacy_round,
@@ -13,7 +16,6 @@ from kohakuterrarium.session.history.semantics import (
 from kohakuterrarium.session.history.replay import (
     _coerce_path,
     index_parent_paths,
-    index_parent_paths_by_position,
     resolve_selected_branches,
     select_live_event_ids,
 )
@@ -115,9 +117,9 @@ def extract_batch(
             and block.parent_branch_path is None
         ]
         if missing:
-            inferred = index_parent_paths_by_position(events)
+            inferred = index_eligible_parent_paths_by_position(events)
             for block in missing:
-                if block.event_position is not None:
+                if block.event_position in inferred:
                     block.parent_branch_path = inferred[block.event_position]
     if start_from > count:
         blocks = [
@@ -430,7 +432,14 @@ def _extract_blocks(
                 open_branches[scope_key] = next_scope
             else:
                 open_branches.pop(scope_key, None)
+            # A stamped opener owns its explicit turn number. Advance only
+            # the legacy fallback clock, never assign a sibling's block state.
+            # This prevents a later legacy opener from restarting at round 1.
+            completed_turn = (
+                round_num if scoped and etype in ("user_input", "trigger_fired") else 0
+            )
             round_num, block_num, in_round = legacy_state
+            round_num = max(round_num, completed_turn)
         if before_invalid is not None:
             round_num, block_num, in_round = before_invalid
 

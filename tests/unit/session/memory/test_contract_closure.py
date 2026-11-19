@@ -11,6 +11,7 @@ import pytest
 from kohakuterrarium.cli import memory as cli_mod
 from kohakuterrarium.session.memory import async_search as async_memory
 from kohakuterrarium.session.memory import embedding as emb_mod
+from kohakuterrarium.session.memory import embedding_spec as spec_mod
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.memory.embedding import (
     BaseEmbedder,
@@ -76,7 +77,7 @@ def test_default_persisted_embedding_spec_restores_same_model(
 
     # Even if a future release changes the factory's default, the stored
     # effective spec must still reconstruct the original index model.
-    monkeypatch.setattr(emb_mod, "DEFAULT_M2V_MODEL", "future-changed-default")
+    monkeypatch.setattr(spec_mod, "DEFAULT_M2V_MODEL", "future-changed-default")
     restored = emb_mod.create_embedder(saved)
     assert isinstance(restored, FakeLocalModel)
     assert restored._model_name == DEFAULT_M2V_MODEL

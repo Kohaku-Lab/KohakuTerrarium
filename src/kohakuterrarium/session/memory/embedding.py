@@ -9,6 +9,15 @@ from typing import Any
 import httpx
 import numpy as np
 
+from kohakuterrarium.session.memory.embedding_spec import (
+    DEFAULT_M2V_MODEL as DEFAULT_M2V_MODEL,
+    DEFAULT_ST_MODEL as DEFAULT_ST_MODEL,
+    MODEL2VEC_PRESETS,
+    ST_PRESETS,
+    _resolve_preset as _resolve_preset,
+    canonical_embedding_spec,
+)
+
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -181,61 +190,6 @@ class NullEmbedder(BaseEmbedder):
         )
 
 
-MODEL2VEC_PRESETS: dict[str, dict[str, Any]] = {
-    # Compact static models trade retrieval quality for size and latency.
-    "tiny": {"model": "minishlab/potion-base-2M"},  # 64 dimensions, about 2 MB
-    "base": {"model": "minishlab/potion-base-8M"},  # 256 dimensions, about 8 MB
-    "retrieval": {"model": "minishlab/potion-retrieval-32M"},  # 512 dimensions
-    # Matryoshka dimensions support smaller indexes without changing models.
-    "best": {
-        "model": "sentence-transformers/static-retrieval-mrl-en-v1",
-    },
-    "multilingual": {
-        "model": "minishlab/potion-multilingual-128M",  # 101 languages
-    },
-    "multilingual-best": {
-        "model": "sentence-transformers/static-similarity-mrl-multilingual-v1",
-    },  # 51 languages
-    "science": {"model": "minishlab/potion-science-32M"},  # arXiv and PubMed
-}
-
-ST_PRESETS: dict[str, dict[str, Any]] = {
-    "tiny": {
-        "model": "ibm-granite/granite-embedding-30m-english",  # 512-token context
-    },
-    "small": {
-        "model": "ibm-granite/granite-embedding-small-english-r2",  # 8K context
-    },
-    "base": {
-        "model": "Alibaba-NLP/gte-modernbert-base",  # 8K context
-    },
-    "nomic": {
-        "model": "nomic-ai/nomic-embed-text-v1.5",  # 8K Matryoshka model
-    },
-    "gemma": {
-        "model": "google/embeddinggemma-300m",  # multilingual, 2K context
-    },
-    "multilingual": {
-        "model": "Alibaba-NLP/gte-multilingual-base",  # 70+ languages, 8K context
-    },
-}
-
-DEFAULT_M2V_MODEL = "sentence-transformers/static-similarity-mrl-multilingual-v1"
-DEFAULT_ST_MODEL = "Alibaba-NLP/gte-modernbert-base"
-
-
-def _resolve_preset(
-    model: str, presets: dict[str, dict[str, Any]]
-) -> dict[str, Any] | None:
-    """Resolve an ``@preset`` reference, returning ``None`` when unknown."""
-    if model.startswith("@"):
-        name = model[1:]
-        if name in presets:
-            return presets[name]
-        logger.warning("Unknown embedding preset", preset=name)
-    return None
-
-
 def _detect_best_provider() -> str:
     """Detect the best available embedding provider.
 
@@ -265,52 +219,35 @@ def effective_embedding_config(
     config: dict[str, Any] | None,
     embedder: BaseEmbedder | None = None,
 ) -> dict[str, Any]:
-    """Resolve a restorable embedding spec, not just the optional user input.
-
-    Drop unset fields before any consumer constructs a model. Freeze provider,
-    model defaults and presets at persistence time so future default changes
-    cannot silently redirect an already-built index to a different model.
-    A built-in embedder supplies its actual selected provider/model.
-    """
+    """Persist concrete model identity while sharing pure spec normalization."""
     if not config:
         return {}
-    result = {key: value for key, value in config.items() if value is not None}
-    provider = result.get("provider", "auto")
-    if provider == "auto" and isinstance(embedder, Model2VecEmbedder):
-        provider = "model2vec"
-    elif provider == "auto" and isinstance(embedder, SentenceTransformerEmbedder):
-        provider = "sentence-transformer"
-    elif provider == "auto" and isinstance(embedder, APIEmbedder):
-        provider = "api"
-    elif provider == "auto" and isinstance(embedder, NullEmbedder):
-        provider = "none"
-    elif provider == "auto":
-        provider = _detect_best_provider()
-    result["provider"] = provider
-
-    if provider in ("model2vec", "sentence-transformer"):
-        default = DEFAULT_M2V_MODEL if provider == "model2vec" else DEFAULT_ST_MODEL
-        presets = MODEL2VEC_PRESETS if provider == "model2vec" else ST_PRESETS
-        model = getattr(embedder, "_model_name", None) or result.get("model") or default
-        if not isinstance(model, str):
-            raise ValueError("Embedding model must be a string")
-        preset = _resolve_preset(model, presets)
-        if preset:
-            model = preset["model"]
-            if provider == "sentence-transformer" and "dimensions" not in result:
-                dimensions = preset.get("dimensions")
-                if dimensions is not None:
-                    result["dimensions"] = dimensions
-        result["model"] = model
-    elif provider == "api":
-        result["model"] = getattr(embedder, "_model", None) or result.get(
-            "model", "text-embedding-3-small"
-        )
-        if isinstance(embedder, APIEmbedder):
-            result["base_url"] = embedder._base_url
-            if embedder._request_dims is not None:
-                result["dimensions"] = embedder._request_dims
-    return result
+    provider = config.get("provider", "auto")
+    if provider == "auto":
+        if isinstance(embedder, Model2VecEmbedder):
+            provider = "model2vec"
+        elif isinstance(embedder, SentenceTransformerEmbedder):
+            provider = "sentence-transformer"
+        elif isinstance(embedder, APIEmbedder):
+            provider = "api"
+        elif isinstance(embedder, NullEmbedder):
+            provider = "none"
+        else:
+            provider = _detect_best_provider()
+    spec = canonical_embedding_spec(
+        config,
+        selected_provider=provider,
+        selected_model=(
+            embedder._model
+            if isinstance(embedder, APIEmbedder)
+            else getattr(embedder, "_model_name", None)
+        ),
+    )
+    if isinstance(embedder, APIEmbedder):
+        spec["base_url"] = embedder._base_url
+        if embedder._request_dims is not None:
+            spec["dimensions"] = embedder._request_dims
+    return spec
 
 
 def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:

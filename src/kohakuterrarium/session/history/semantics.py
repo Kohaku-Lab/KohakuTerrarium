@@ -31,6 +31,23 @@ def classify_branch_scope(turn: Any, branch: Any) -> BranchScope:
     return BranchScope.INVALID
 
 
+def eligible_branch_history(
+    events: list[dict[str, Any]],
+) -> list[tuple[int, dict[str, Any]]]:
+    """Retain eligible events and *original* physical positions.
+
+    Memory-only strict projection; raw Replay continues accepting historical
+    noncanonical coordinates. Consumer-specific filters must not independently
+    invent which events can influence ancestry or branch selection.
+    """
+    return [
+        (position, event)
+        for position, event in enumerate(events)
+        if classify_branch_scope(event.get("turn_index"), event.get("branch_id"))
+        is not BranchScope.INVALID
+    ]
+
+
 _CONTINUATIONS = frozenset(
     {"text", "text_chunk", "tool_call", "tool_result", "processing_end"}
 )

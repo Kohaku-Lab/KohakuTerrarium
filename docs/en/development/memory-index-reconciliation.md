@@ -94,3 +94,16 @@ vector ranking fusion.
   ancestry. The source event log and public Replay compatibility are not
   changed. Filtering invalid hits only after branch selection is insufficient:
   a malformed opener must not influence selection of valid siblings.
+
+
+### Effective config equivalence after offline builds
+
+SessionStore.claim_embedding_config() serializes competing Creature claims
+without importing a model runtime. A lightweight embedding-spec normalizer
+compares the saved concrete model against the incoming default/preset/explicit
+configuration. An omitted model inherits the stored model for that provider;
+a genuinely different explicit model remains a conflict. The Embedder factory
+shares the same pure normalization rules before loading any model, while
+offline index builds persist the concrete identity after construction.
+This prevents a successful offline build from blocking an unchanged Creature
+configuration on resume.
