@@ -306,6 +306,51 @@ async def test_full_turn_interrupt_preserves_suppressed_direct_success(tmp_path)
             await asyncio.gather(turn, return_exceptions=True)
 
 
+@pytest.mark.parametrize("ephemeral", [False, True])
+async def test_late_text_result_respects_interaction_reset(tmp_path, ephemeral):
+    tool = history_protocol._Work("promoted", True)
+    provider = ScriptedLLM(["[/model_work][model_work/]", "next reply"])
+    async with Terrarium(session_dir=tmp_path) as engine:
+        creature = await engine.add_creature(
+            AgentConfig(
+                name="late-text",
+                system_prompt="plain",
+                tool_format="bracket",
+                ephemeral=ephemeral,
+            ),
+            llm=provider,
+            tools=[tool],
+            io="headless",
+            pwd=tmp_path,
+            start=True,
+        )
+        agent = creature.agent
+        turn = asyncio.create_task(creature.run("first", timeout=10))
+        try:
+            await asyncio.wait_for(tool.started.wait(), 5)
+            (job_id,) = agent._active_handles
+            agent.interrupt()
+            await asyncio.wait_for(tool.cleanup.wait(), 5)
+            assert (await asyncio.wait_for(turn, 5)).interrupted_by_user
+            agent.controller.config.ephemeral = not ephemeral
+        finally:
+            tool.release.set()
+            await asyncio.gather(turn, return_exceptions=True)
+        assert (await creature.run("unrelated", timeout=5)).text == "next reply"
+        assert provider.call_count == 2
+        assert ("RESULT_BRANCH_B" in str(provider.call_log[-1])) == (not ephemeral)
+        assert agent.executor.get_status(job_id).state == JobState.DONE
+        assert (
+            job_id not in agent._direct_job_meta and job_id not in agent._active_handles
+        )
+        recorded = [
+            e
+            for e in agent.session_store.get_events(agent.config.name)
+            if e["type"] == "tool_result" and e.get("call_id") == job_id
+        ]
+        assert len(recorded) == 1 and "RESULT_BRANCH_B" in str(recorded[0])
+
+
 async def test_stop_during_direct_interrupt_does_not_duplicate_result(tmp_path):
     tool = history_protocol._Work("promoted", True)
     provider = history_protocol._Provider("promoted")

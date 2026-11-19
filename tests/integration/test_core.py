@@ -2630,7 +2630,9 @@ class TestCoreIntegration:
                 assert agent.cancel_pending(queued["event_id"])
             finally:
                 agent.resume()
+            agent.controller.config.ephemeral = True
             block.started.clear()
+            block.release_cleanup.clear()
             owner = asyncio.create_task(agent.run("owned blocking"))
             try:
                 await asyncio.wait_for(block.started.wait(), 5)
@@ -2644,17 +2646,23 @@ class TestCoreIntegration:
                 with pytest.raises(asyncio.CancelledError):
                     await owner
                 assert not agent.is_processing
+                block.release_cleanup.set()
                 one, two = await asyncio.gather(
                     agent.run("owned input one"), agent.run("owned input two")
                 )
                 assert (one.text, two.text) == ("owned answer one", "owned answer two")
                 assert owned_llm.call_count == 3
+                assert sorted(
+                    [m["content"] for m in call if m["role"] == "user"]
+                    for call in owned_llm.call_log[1:]
+                ) == [["owned input one"], ["owned input two"]]
                 assert all(
                     "withdrawn request" not in str(message.get("content", ""))
                     for call in owned_llm.call_log
                     for message in call
                 )
             finally:
+                block.release_cleanup.set()
                 if not owner.done():
                     owner.cancel()
                 await asyncio.gather(owner, return_exceptions=True)

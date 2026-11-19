@@ -406,7 +406,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         else:
             self._emit_interrupted_activity(job_id, result)
             self._append_interrupted_tool_message(job_id, meta, result)
-        if not meta.get("tool_call_id"):
+        if not meta.get("tool_call_id") and not meta.get("conversation_flushed"):
             text = self._format_text_results([job_id], {job_id: result})
             if text:
                 self.controller.conversation.append(
