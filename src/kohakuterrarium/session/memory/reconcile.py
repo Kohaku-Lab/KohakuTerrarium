@@ -53,6 +53,28 @@ class SessionIndexReconciler:
             {name: self._store.get_memory_events(name) for name in names}
         )
 
+    def _needs_keyword_roster(self, source: IndexSourceSnapshot) -> bool:
+        """Avoid rebuilding a READY roster when every captured source is current.
+
+        All checks are pure planning; mutations and revalidation remain under
+        Lifecycle's short lock. A single Agent already gets an atomic
+        BUILDING barrier from its own _index_keywords operation.
+        """
+        if len(source.agents) < 2:
+            return False
+        manifest = self._memory._manifest()
+        if (
+            manifest is None
+            or manifest.get("format") != self._memory._index_format
+            or manifest.get("fts") != "ready"
+        ):
+            return True
+        for name, events in source.events.items():
+            batch, blocks = self._memory._prepare(name, events, "keywords", 0)
+            if batch.reset or batch.start != len(events) or blocks:
+                return True
+        return False
+
     def refresh_keywords(
         self, source: IndexSourceSnapshot, *, existing_only: bool = False
     ) -> dict[str, int]:
@@ -65,10 +87,21 @@ class SessionIndexReconciler:
         ):
             # SessionReader preserves its historical explicit-index contract.
             return {}
-        return {
-            name: self._memory._index_keywords(name, events)
-            for name, events in source.events.items()
-        }
+        try:
+            if self._needs_keyword_roster(source):
+                self._memory._enroll_build_agents(source.agents, with_vectors=False)
+            return {
+                name: self._memory._index_keywords(name, events)
+                for name, events in source.events.items()
+            }
+        except BaseException:
+            # Like explicit build(), a cross-Agent keyword reconciliation
+            # must abandon its incomplete Session-wide roster on failure.
+            try:
+                self._memory._abort_builds()
+            except BaseException:
+                logger.exception("Keyword reconciliation abort failed")
+            raise
 
     def selected_views(
         self,
@@ -141,6 +174,9 @@ class SessionIndexReconciler:
         try:
             if force:
                 self._memory.force_rebuild(list(source.agents))
+            # Reserve the entire captured roster *before* Alice can publish
+            # the Session-wide FTS/vector index while Bob is still pending.
+            self._memory._enroll_build_agents(source.agents)
             results = {}
             for name, events in source.events.items():
                 results[name] = self._memory.index_events(name, events)

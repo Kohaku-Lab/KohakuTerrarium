@@ -348,3 +348,396 @@ def test_release_error_does_not_leave_a_phantom_build_owner(tmp_path, monkeypatc
         with closing(SessionMemory(str(path), index_all_branches=True)) as peer:
             peer._claim_build("fts")
             assert peer._fts_build_lock is not None
+
+
+@pytest.mark.parametrize("second_has_events", [False, True])
+def test_nonforced_reconciliation_enrolls_complete_source_roster(
+    tmp_path, second_has_events
+):
+    """No partial FTS/vector corpus may be published after the first Agent."""
+    path = tmp_path / "nonforce-roster.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "alice needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        if second_has_events:
+            store.append_event(
+                "bob",
+                "user_input",
+                {"content": "bob needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as owner:
+            reconciler = SessionIndexReconciler(store, owner)
+            source = reconciler.capture(["alice", "bob"], all_agents=True)
+            assert source.agents == ("alice", "bob")
+
+            def interrupt_after_first(name, count, indexed):
+                assert name == "alice"
+                manifest = owner._manifest()
+                assert manifest["agents"] == ["alice", "bob"]
+                assert manifest["fts"] == manifest["vector"] == "building"
+                assert manifest["fts_pending"] == ["bob"]
+                assert manifest["vector_pending"] == ["bob"]
+                assert owner._fts_build_lock is not None
+                assert owner._vector_build_lock is not None
+                with closing(
+                    SessionMemory(str(path), _Embedder(), index_all_branches=True)
+                ) as reader:
+                    with pytest.raises(ValueError, match="invalid|building"):
+                        reader.search("needle", mode="fts")
+                    with pytest.raises(ValueError, match="stale|invalid"):
+                        reader.search("needle", mode="semantic")
+                raise OSError("injected progress stop")
+
+            with pytest.raises(OSError, match="progress stop"):
+                reconciler.build(source, force=False, progress=interrupt_after_first)
+            assert owner._fts_build_lock is None
+            assert owner._vector_build_lock is None
+            assert owner._manifest()["fts"] != "ready"
+            assert owner._manifest()["vector"] != "ready"
+
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as peer:
+            assert SessionIndexReconciler(store, peer).build(source) == {
+                "alice": 1,
+                "bob": int(second_has_events),
+            }
+            assert peer._manifest()["fts"] == peer._manifest()["vector"] == "ready"
+            assert peer._manifest()["agents"] == ["alice", "bob"]
+            hits = peer.search("needle", mode="semantic")
+            assert {hit.agent for hit in hits} == (
+                {"alice", "bob"} if second_has_events else {"alice"}
+            )
+    finally:
+        store.close(update_status=False)
+
+
+def test_vector_abort_with_contended_mutation_lock_releases_owner(tmp_path):
+    """A competing short FTS mutation cannot strand the vector build lock."""
+    from kohakuterrarium.utils.file.lock import FileLock
+
+    path = tmp_path / "vector-abort-contention.kohakutr"
+    rows = _rows("alice")
+    with closing(
+        SessionMemory(str(path), _Embedder(), index_all_branches=True)
+    ) as owner:
+        owner._index_keywords("alice", rows)
+        start, blocks = owner._vector_batch("alice", rows)
+        vectors = owner._embedder.encode([b.content for b in blocks])
+        assert owner._vector_build_lock is not None
+        assert owner._manifest()["vector"] == "building"
+
+        blocker = FileLock(f"{path}.memory-index.lock")
+        blocker.acquire()
+        try:
+            with pytest.raises(RuntimeError, match="being modified"):
+                owner._commit_vectors("alice", start, len(rows), blocks, vectors)
+            # This cleanup used to raise the same lock contention and leave
+            # the long build lock held in this still-live SessionMemory.
+            owner._abort_vector_build()
+            assert owner._vector_build_lock is None
+            assert owner._manifest()["vector"] != "ready"
+        finally:
+            blocker.release()
+
+        with pytest.raises(RuntimeError, match="ownership|changed|retry"):
+            owner._commit_vectors("alice", start, len(rows), blocks, vectors)
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as peer:
+            peer.index_events("alice", rows)
+            assert peer._manifest()["vector"] == "ready"
+            assert len(peer.search("needle", mode="semantic")) == 1
+
+
+def test_cross_index_abort_under_mutation_contention_frees_both_locks(tmp_path):
+    """Shared abnormal-exit cleanup must not depend on reacquiring short lock."""
+    from kohakuterrarium.utils.file.lock import FileLock
+
+    path = tmp_path / "both-abort-contention.kohakutr"
+    with closing(
+        SessionMemory(str(path), _Embedder(), index_all_branches=True)
+    ) as owner:
+        owner.force_rebuild(["alice", "bob"])
+        owner.index_events("alice", _rows("alice"))
+        assert owner._fts_build_lock is not None
+        assert owner._vector_build_lock is not None
+        blocker = FileLock(f"{path}.memory-index.lock")
+        blocker.acquire()
+        try:
+            owner._abort_builds()
+            assert owner._fts_build_lock is None
+            assert owner._vector_build_lock is None
+            assert owner._manifest()["fts"] == "building"
+            assert owner._manifest()["vector"] == "building"
+        finally:
+            blocker.release()
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as peer:
+            peer.index_events("alice", _rows("alice"))
+            peer.index_events("bob", _rows("bob"))
+            assert peer._manifest()["fts"] == peer._manifest()["vector"] == "ready"
+
+
+def test_nonforced_reconciliation_from_ready_retains_all_participants(tmp_path):
+    """A previously READY corpus is also staged as one indivisible build."""
+    path = tmp_path / "ready-roster.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        for name in ("alice", "bob"):
+            store.append_event(
+                name,
+                "user_input",
+                {"content": f"{name} initial needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as owner:
+            reconciler = SessionIndexReconciler(store, owner)
+            initial = reconciler.capture(["alice", "bob"], all_agents=True)
+            reconciler.build(initial)
+            manifest = owner._manifest()
+            assert manifest["fts"] == manifest["vector"] == "ready"
+
+            store.append_event(
+                "bob",
+                "text",
+                {"content": "bob later needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            changed = reconciler.capture(["alice", "bob"], all_agents=True)
+            statuses = []
+
+            def monitor(name, count, indexed):
+                current = owner._manifest()
+                statuses.append((name, current["fts"], current["vector"]))
+                if name == "alice":
+                    assert current["fts_pending"] == ["bob"]
+                    assert current["vector_pending"] == ["bob"]
+                    assert owner._fts_build_lock is not None
+                    assert owner._vector_build_lock is not None
+
+            reconciler.build(changed, progress=monitor)
+            assert statuses == [
+                ("alice", "building", "building"),
+                ("bob", "ready", "ready"),
+            ]
+            assert owner._fts_build_lock is owner._vector_build_lock is None
+            assert {hit.content for hit in owner.search("needle", mode="semantic")} == {
+                "alice initial needle",
+                "bob initial needle",
+                "bob later needle",
+            }
+    finally:
+        store.close(update_status=False)
+
+
+def test_keyword_refresh_roster_failure_stays_unreadable(tmp_path, monkeypatch):
+    """Live/Reader keyword reconciliation cannot publish Alice without Bob."""
+    path = tmp_path / "keyword-roster.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        for name in ("alice", "bob"):
+            store.append_event(
+                name,
+                "user_input",
+                {"content": f"{name} needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(SessionMemory(str(path), index_all_branches=True)) as owner:
+            reconcile = SessionIndexReconciler(store, owner)
+            source = reconcile.capture(["alice", "bob"], all_agents=True)
+            real_index = owner._index_keywords
+
+            def fail_on_bob(name, rows):
+                if name == "bob":
+                    manifest = owner._manifest()
+                    assert manifest["fts"] == "building"
+                    assert manifest["agents"] == ["alice", "bob"]
+                    assert manifest["fts_pending"] == ["bob"]
+                    assert owner._fts_build_lock is not None
+                    raise OSError("bob keyword refresh failed")
+                return real_index(name, rows)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(owner, "_index_keywords", fail_on_bob)
+                with pytest.raises(OSError, match="bob keyword refresh failed"):
+                    reconcile.refresh_keywords(source)
+            assert owner._fts_build_lock is None
+            assert owner._manifest()["fts"] != "ready"
+            with pytest.raises(ValueError, match="invalid|building"):
+                owner.search("needle", mode="fts")
+
+        with closing(SessionMemory(str(path), index_all_branches=True)) as peer:
+            assert SessionIndexReconciler(store, peer).refresh_keywords(source) == {
+                "alice": 1,
+                "bob": 1,
+            }
+            assert peer._manifest()["fts"] == "ready"
+            assert {hit.agent for hit in peer.search("needle", mode="fts")} == {
+                "alice",
+                "bob",
+            }
+    finally:
+        store.close(update_status=False)
+
+
+def test_unchanged_keyword_refresh_does_not_restart_published_build(tmp_path):
+    """Fully current source must not churn a READY index on every search."""
+    path = tmp_path / "keyword-noop.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        for name in ("alice", "bob"):
+            store.append_event(
+                name,
+                "user_input",
+                {"content": f"{name} needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as owner:
+            reconcile = SessionIndexReconciler(store, owner)
+            source = reconcile.capture(["alice", "bob"], all_agents=True)
+            reconcile.build(source)
+            baseline = dict(owner._manifest())
+            assert baseline["fts"] == baseline["vector"] == "ready"
+            assert reconcile.refresh_keywords(source) == {"alice": 0, "bob": 0}
+            assert owner._manifest() == baseline
+            assert owner._fts_build_lock is owner._vector_build_lock is None
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_live_semantic_abort_recovers_after_short_lock_conflict(tmp_path):
+    """The real Store Affinity cleanup path must release long ownership."""
+    from kohakuterrarium.utils.file.lock import FileLock
+
+    path = tmp_path / "live-vector-contention.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "alice needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        live = await store.run(live_memory_for_store, store)
+        rows = await store.run(store.get_memory_events, "alice")
+        await store.run(live._memory._index_keywords, "alice", rows)
+        await store.run(live._memory._set_embedder, _Embedder())
+        batch, blocks = await store.run(live._memory._vector_batch, "alice", rows)
+        vectors = _Embedder().encode([block.content for block in blocks])
+        assert live._memory._vector_build_lock is not None
+
+        blocker = FileLock(f"{path}.memory-index.lock")
+        blocker.acquire()
+        try:
+            with pytest.raises(RuntimeError, match="being modified"):
+                async with live._semantic_operation():
+                    await store.run(
+                        live._memory._commit_vectors,
+                        "alice",
+                        batch,
+                        len(rows),
+                        blocks,
+                        vectors,
+                    )
+            assert live._memory._vector_build_lock is None
+            assert live._memory._manifest()["vector"] == "building"
+        finally:
+            blocker.release()
+
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as peer:
+            peer.index_events("alice", rows)
+            assert peer._manifest()["vector"] == "ready"
+            assert len(peer.search("needle", mode="semantic")) == 1
+    finally:
+        store.close(update_status=False)
+
+
+def test_new_full_build_does_not_adopt_stale_vector_building_rows(tmp_path):
+    """An independent builder must clear orphan vectors from a prior owner."""
+    path = tmp_path / "stale-building-vector.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "first needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        rows = store.get_memory_events("alice")
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as old:
+            old.index_events("alice", rows)
+            store.append_event(
+                "alice",
+                "text",
+                {"content": "second needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            newer = store.get_memory_events("alice")
+            old._index_keywords("alice", newer)
+            old._vector_batch("alice", newer)
+            assert old._manifest()["vector"] == "building"
+            assert old._manifest()["vector_needs_clear"] is False
+            old._vec.insert(
+                np.ones(3, dtype=np.float32),
+                {"agent": "orphan", "content": "ghost needle", "block_id": "orphan"},
+            )
+        # The previous process/owner is gone but its partial native rows
+        # and vector=building manifest remain.
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as peer:
+            source = SessionIndexReconciler(store, peer).capture(
+                ["alice", "bob"], all_agents=True
+            )
+            SessionIndexReconciler(store, peer).build(source, force=False)
+            assert peer._manifest()["fts"] == peer._manifest()["vector"] == "ready"
+            assert peer.get_stats()["vec_blocks"] == 2
+            assert {hit.content for hit in peer.search("needle", mode="semantic")} == {
+                "first needle",
+                "second needle",
+            }
+    finally:
+        store.close(update_status=False)

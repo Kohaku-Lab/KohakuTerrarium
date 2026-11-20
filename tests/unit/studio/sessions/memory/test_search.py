@@ -130,6 +130,9 @@ class TestBuildEmbeddings:
             def _manifest(self):
                 return None
 
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
+
             def force_rebuild(self, agents):
                 pass
 
@@ -176,6 +179,9 @@ class TestBuildEmbeddings:
 
             def _manifest(self):
                 return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
 
             def force_rebuild(self, agents):
                 pass
@@ -260,6 +266,9 @@ class TestSearchSessionMemory:
 
             def _manifest(self):
                 return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
 
             def search(self, query, mode, k, agent, branch_views=None):
                 return [
@@ -423,6 +432,9 @@ class TestSearchSessionMemory:
 
             def _manifest(self):
                 return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
 
             def search(self, query, mode, k, agent, branch_views=None):
                 return [

@@ -109,17 +109,43 @@ class MemoryIndexLifecycle:
         finally:
             self._abandon_owned_build_unlocked("fts")
 
+    def _abort_while_mutation_contended(self, *, vector_only: bool) -> None:
+        """Release long ownership when another writer holds the short lock.
+
+        The durable BUILDING barrier precedes *every* native row mutation.
+        Thus a still-BUILDING index is unreadable until a new builder resets
+        it, and a READY index cannot have suffered a partial mutation from
+        this owner. We cannot write a new generation without the short lock,
+        so abandoned vector commits must also check live build ownership.
+        """
+        if vector_only:
+            self._release_build("vector")
+        else:
+            self._release_build_locks()
+
     def _abort_builds(self) -> None:
         """Abort unfinished session-wide work outside a mutation transaction."""
-        if self._fts_build_lock is not None or self._vector_build_lock is not None:
+        if self._fts_build_lock is None and self._vector_build_lock is None:
+            return
+        try:
             with self._mutation():
                 self._abort_owned_builds_unlocked()
+        except RuntimeError as exc:
+            if not isinstance(exc.__cause__, FileLockBusy):
+                raise
+            self._abort_while_mutation_contended(vector_only=False)
 
     def _abort_vector_build(self) -> None:
         """Abort an async vector operation after its detached encoder exits."""
-        if self._vector_build_lock is not None:
+        if self._vector_build_lock is None:
+            return
+        try:
             with self._mutation():
                 self._abandon_owned_build_unlocked("vector")
+        except RuntimeError as exc:
+            if not isinstance(exc.__cause__, FileLockBusy):
+                raise
+            self._abort_while_mutation_contended(vector_only=True)
 
     def _manifest(self) -> dict | None:
         value = self._state.get("memory:index_manifest")
@@ -190,6 +216,51 @@ class MemoryIndexLifecycle:
         with self._build_mutation():
             self._claim_build("fts")
             self._reset_session_indexes(set(agents), self._manifest())
+
+    def _enroll_build_agents(
+        self, agents: tuple[str, ...], *, with_vectors: bool = True
+    ) -> None:
+        """Reserve a full source roster before any Agent is materialized.
+
+        A keyword-only refresh enrolls only FTS, so FTS searches do not
+        spuriously start or retain a vector rebuild. Explicit full builds
+        enroll both indexes, including an empty Agent's pending checkpoint.
+        """
+        if not agents:
+            return
+        with self._build_mutation():
+            manifest = dict(self._ensure_index_format(agents[0]))
+            self._claim_build("fts")
+            if manifest["fts"] == "ready":
+                manifest["fts_revision"] = manifest.get("fts_revision", 0) + 1
+            manifest["fts"] = "building"
+            manifest["agents"] = sorted(set(manifest.get("agents", ())) | set(agents))
+            manifest["fts_pending"] = sorted(
+                set(manifest.get("fts_pending", ())) | set(agents)
+            )
+            if with_vectors and self._has_vectors and self._vec is not None:
+                abandoned_vector = (
+                    manifest["vector"] == "building" and self._vector_build_lock is None
+                )
+                self._claim_build("vector")
+                if abandoned_vector:
+                    # Reacquiring a crashed owner's long lock does not prove
+                    # its vector rows or checkpoints complete. Force the
+                    # first _begin_vector() to clear all native rows and
+                    # advance its generation, even with ownership now held.
+                    manifest["vector_needs_clear"] = True
+                if manifest["vector"] in ("ready", "dirty", "building"):
+                    if manifest["vector"] != "building":
+                        manifest["vector_revision"] = (
+                            manifest.get("vector_revision", 0) + 1
+                        )
+                    manifest["vector"] = "building"
+                # _begin_vector() will transition an invalid old corpus to
+                # BUILDING and reset it, using this complete participant set.
+                manifest["vector_pending"] = sorted(
+                    set(manifest.get("vector_pending", ())) | set(agents)
+                )
+            self._save_manifest(manifest)
 
     def _begin_fts_append(self, agent: str, *, changed: bool) -> None:
         """Enter BUILDING for every planned mutation, including source resets.

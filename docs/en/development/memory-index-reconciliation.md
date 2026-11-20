@@ -158,3 +158,34 @@ publish indexes, infer Memory lineage, or rewrite events. Job settlement
 remains separate evidence correlation: a result recorded on another branch
 may still finalize a selected live call when provider/job identity proves
 ownership. This split prevents both sibling leakage and late-result loss.
+
+
+## Session-wide participant enrollment and contended abort
+
+An explicit `SessionIndexReconciler.build(source)` enrolls the **whole captured
+Agent roster** in the FTS and (when configured) Vector pending sets under
+`MemoryIndexLifecycle`'s short mutation lock **before the first Agent write**,
+including non-forced builds against an already READY corpus. The final
+checkpoint alone can publish READY; an empty Agent is still a participant.
+
+`refresh_keywords(source)` uses the same lifecycle enrollment for multi-Agent
+FTS mutations. A pure batch preflight skips the redundant BUILDING transition
+when every captured source is already current; an FTS-only request does not
+claim a Vector build. Both operations abort any owned Session-wide builds
+when a later Agent or progress callback fails.
+
+An abort normally takes the short mutation lock to record an incremented
+generation/revision and release long ownership. If another writer already
+holds that short lock, termination still releases this instance's long build
+locks: every native index mutation was preceded by a durable BUILDING
+barrier, so a partially written corpus is not readable. A detached Vector
+commit additionally checks that it still owns the long build lock whenever
+the manifest is BUILDING; a lost owner cannot publish a stale batch before
+the next builder's generation bump.
+
+When a new owner sees an orphaned `vector=building` manifest, claiming its
+long lock must **not** adopt the prior owner's unfinished native rows.
+The existing `vector_needs_clear` flag forces a full table clear and
+generation restart before the new participant batch can be published.
+No new persisted fields, background retry manager or SessionStore source
+format change are introduced.

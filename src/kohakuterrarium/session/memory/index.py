@@ -369,6 +369,16 @@ class SessionMemory(MemoryIndexLifecycle, MemorySearchMixin):
             kind = f"vectors:{self._embedder.dimensions}"
             key = f"{agent}:cursor:{kind}"
             if (
+                self._manifest()["vector"] == "building"
+                and self._vector_build_lock is None
+            ):
+                # A short-lock contention may have forced this builder to
+                # release its long lock without writing a new generation.
+                # Its detached old encoder has no authority to publish.
+                raise RuntimeError(
+                    "Memory vector index changed: build ownership lost; retry"
+                )
+            if (
                 start.checkpoint.get("index_epoch") != self._manifest()["epoch"]
                 or start.checkpoint.get("vector_generation")
                 != self._manifest()["vector_generation"]

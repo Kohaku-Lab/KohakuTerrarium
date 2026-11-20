@@ -57,6 +57,9 @@ class TestBuildEmbeddingsConfigOverrides:
             def _manifest(self):
                 return None
 
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
+
             def force_rebuild(self, agents):
                 pass
 
@@ -107,6 +110,9 @@ class TestSearchSessionMemoryEmbedderFallback:
 
             def _manifest(self):
                 return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
 
             def search(self, query, mode, k, agent, branch_views=None):
                 return []
