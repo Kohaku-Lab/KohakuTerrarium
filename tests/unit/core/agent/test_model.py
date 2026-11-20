@@ -5,6 +5,7 @@ import types
 
 import httpx
 import pytest
+from openai import AsyncOpenAI
 
 from kohakuterrarium.core.agent import model as am
 from kohakuterrarium import Agent, Terrarium
@@ -27,7 +28,7 @@ async def test_go_session_header_survives_model_switches(
     )
     requests = []
 
-    async def capture(_transport, request):
+    def capture(request):
         assert (
             str(request.url)
             == "https://opencode.ai/inference/go/openai/v1/chat/completions"
@@ -51,8 +52,13 @@ async def test_go_session_header_survives_model_switches(
             },
         )
 
-    # Capture the real SDK's outgoing HTTP requests for every new provider.
-    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", capture)
+    def capturing_client(**options):
+        client = httpx.AsyncClient(transport=httpx.MockTransport(capture))
+        return AsyncOpenAI(**options, http_client=client)
+
+    monkeypatch.setattr(
+        "kohakuterrarium.llm.openai.provider.AsyncOpenAI", capturing_client
+    )
     saved_ids = []
     async with Terrarium(session_dir=tmp_path) as engine:
         service = LocalTerrariumService(engine)
