@@ -7,6 +7,7 @@ the ``validate_backend_type`` accept/reject contract. The profiles
 file is isolated to a per-test tmp dir via ``KT_CONFIG_DIR``.
 """
 
+import os
 import shutil
 import sys
 
@@ -56,6 +57,53 @@ class TestNormalizeBackendType:
 
 
 class TestYamlStore:
+    @pytest.mark.parametrize("winerror", [5, 32, 33])
+    def test_save_retries_a_windows_file_in_use(self, monkeypatch, winerror):
+        save_yaml_store({"default_model": "old"})
+        replace = os.replace
+        error = PermissionError("file is in use")
+        error.winerror = winerror
+        attempts = 0
+
+        def release_after_first_replace(source, destination):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise error
+            assert load_yaml_store() == {"default_model": "old"}
+            replace(source, destination)
+
+        monkeypatch.setattr(os, "replace", release_after_first_replace)
+        save_yaml_store({"default_model": "new"})
+        assert attempts == 2
+        assert load_yaml_store() == {"default_model": "new"}
+
+    @pytest.mark.parametrize("winerror", [5, None], ids=["still-in-use", "other-error"])
+    def test_failed_replace_preserves_the_store(
+        self, isolated_store, monkeypatch, winerror
+    ):
+        save_yaml_store({"default_model": "old"})
+        original = isolated_store.read_bytes()
+        error = PermissionError("cannot replace file")
+        error.winerror = winerror
+        attempts = 0
+
+        def deny_replace(source, destination):
+            nonlocal attempts
+            attempts += 1
+            raise error
+
+        monkeypatch.setattr(os, "replace", deny_replace)
+        with pytest.raises(PermissionError) as caught:
+            save_yaml_store({"default_model": "new"})
+        assert caught.value is error
+        if winerror is None:
+            assert attempts == 1
+        else:
+            assert attempts > 1
+        assert isolated_store.read_bytes() == original
+        assert not list(isolated_store.parent.glob(".llm_profiles.yaml.*"))
+
     def test_missing_file_returns_empty_dict(self, isolated_store):
         assert not isolated_store.exists()
         assert load_yaml_store() == {}

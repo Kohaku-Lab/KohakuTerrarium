@@ -40,6 +40,7 @@ logger = get_logger(__name__)
 # Preserve the display constant while live I/O resolves the current config root.
 PROFILES_PATH = KT_DIR / "llm_profiles.yaml"
 _SCHEMA_VERSION = 3
+_REPLACE_ATTEMPTS = 6
 
 
 def _profiles_path() -> Path:
@@ -95,11 +96,12 @@ def _normalize_backend_type(value: str) -> str:
 def load_yaml_store() -> dict[str, Any]:
     """Read the shared ``llm_profiles.yaml`` — returns ``{}`` on missing/bad file."""
     path = _profiles_path()
-    if not path.exists():
-        return {}
     try:
-        with open(path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+        # Release the handle before parsing so a Windows writer can replace it.
+        content = path.read_text(encoding="utf-8")
+        return yaml.safe_load(content) or {}
+    except FileNotFoundError:
+        return {}
     except Exception as e:
         logger.warning("Failed to load LLM profiles", error=str(e))
         return {}
@@ -131,7 +133,18 @@ def write_profile_bytes(path: Path, content: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(content)
-        os.replace(staging, path)
+        # Windows can refuse replacement while a reader still holds the destination.
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(staging, path)
+                break
+            except OSError as exc:
+                if (
+                    getattr(exc, "winerror", None) not in {5, 32, 33}
+                    or attempt + 1 == _REPLACE_ATTEMPTS
+                ):
+                    raise
+                time.sleep(0.025 * 2**attempt)
     finally:
         Path(staging).unlink(missing_ok=True)
 
