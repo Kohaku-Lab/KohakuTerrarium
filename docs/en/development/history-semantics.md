@@ -119,3 +119,32 @@ the subsequent missing-path tail inherits that stamped ancestry. All of these
 decisions are recomputed from eligible original positions when required.
 Incremental and full materialization must return identical blocks, and neither
 a malformed coordinate nor an ambiguous completion may mutate a valid round.
+
+
+## Consumer authority audit (mainline integration)
+
+Branch visibility, physical event identity and conversational Round ownership
+are related but not interchangeable. Consumers share the **projection
+primitive**, while preserving their established compatibility policies:
+
+| Consumer | Projection authority | Identity and recovery contract |
+| --- | --- | --- |
+| Memory Search / Index / Anchor navigation | `eligible_branch_history` + `index_eligible_parent_paths_by_position` | Strict coordinates and composite (turn, branch, ancestry) Round ownership; invalid or ambiguous events fail closed |
+| Public Replay and branch metadata | `index_parent_paths_by_position` + `select_live_event_positions` | Retain legacy Replay permissiveness; never rewrite source data |
+| SessionReader turns; stdout, TUI, Rich CLI, ktui and headless Terrarium resume display | `project_live_event_stream` | Consume physical selected events, not an `event_id` membership set; presentation grouping remains local |
+| Edit/Rerun raw prefix; user-turn content lookup; snapshot user metadata backfill | Positional Replay projection and existing target validity checks | Reused (turn, branch, event_id) cannot borrow another ancestry; raw edit still validates original source and ambiguous IDs |
+| Checkpoint resume, tool settlement, history image repair | Physical source membership plus provider/job identity | A tool result may settle a live call from another turn or branch; retain verified settlement evidence but no foreign content |
+| Canonical assistant start/end projection | Shared `_coerce_path` over recorded ancestry | Compare persisted (turn, branch, path) equality; no inferred lineage or new error policy |
+| `select_live_event_ids` and selected-only v1 indexes | Existing logical-ID contract | Do not use an ID set to filter source event streams where logical IDs may collide |
+
+One global `round_id` or universally strict Replay rule is intentionally not
+introduced: `user_input` opens the Memory extraction Round, `user_message`
+is normally its paired continuation, `assistant_round_start` and
+`assistant_message` form provider-response correlation, while delayed job
+settlement follows call identity. They share recorded coordinates, not one
+interchangeable lifecycle.
+
+Cross-consumer tests cover mirrored duplicate logical IDs across Reader,
+resume surfaces, edit targeting, Memory, and settled tool calls, alongside
+late-result repair and full/incremental Memory extraction parity. The
+source format, public Replay interfaces, and Memory v7 contract remain intact.

@@ -102,7 +102,9 @@ def test_prepare_snapshot_targeted_index_budget(checkpoint, monkeypatch, supplie
         )
         is None
     )
-    assert calls == ([] if supplied else [(1, 2, 3), (1, 2, 3)])
+    # Physical event projection eliminates one redundant legacy ID-based
+    # ancestry pass; a supplied cache still avoids both rebuilds.
+    assert calls == ([] if supplied else [(1, 2, 3)])
     assert paths == original
 
 
@@ -312,7 +314,9 @@ def test_snapshot_tail_never_receives_raw_parent_index(checkpoint, monkeypatch):
         needs_replay=snapshot_needs_settled_tool_replay,
     )
     assert result == baseline
-    assert baseline_calls == [(1, 3), (1, 3), *calls]
+    # The new positional projection does not require the second full
+    # legacy ID-based index pass, and tail replay stays uncached.
+    assert baseline_calls == [(1, 3), *calls]
     assert calls.count((1, 3)) == 1
     assert calls.count((3,)) == 3
     assert paths[3] == ((1, 1),)

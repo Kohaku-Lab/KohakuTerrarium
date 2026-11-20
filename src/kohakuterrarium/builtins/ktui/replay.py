@@ -13,7 +13,7 @@ from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.session.history.replay import (
     collect_branch_metadata,
     dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 
 if TYPE_CHECKING:
@@ -35,16 +35,11 @@ def replay(
     if not events:
         return
     events = dedupe_adjacent_duplicate_events(events)
-    live = select_live_event_ids(events, branch_view=branch_view)
     view.versions = _versions(events, branch_view)
     state = _Replay(view)
     if dividers:
         view.render("divider", "resumed session")
-    events = [
-        e
-        for e in events
-        if not (isinstance(e.get("event_id"), int) and e["event_id"] not in live)
-    ]
+    events = project_live_event_stream(events, branch_view=branch_view)
     # a long history starts with its last turns; the older ones load on demand
     starts = [i for i, e in enumerate(events) if (e.get("type") or "") in USER_KINDS]
     if last_turns is not None and len(starts) > last_turns:

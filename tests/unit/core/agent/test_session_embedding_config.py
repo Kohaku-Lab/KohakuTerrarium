@@ -7,12 +7,17 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.core.agent import session as session_module
+from kohakuterrarium.core.agent.model import AgentModelMixin
 from kohakuterrarium.core.agent.session import AgentSessionMixin
 from kohakuterrarium.session.store import SessionStore
 
 
+class _SessionTestAgent(AgentSessionMixin, AgentModelMixin):
+    """Compose the real model/session contracts without booting a Creature."""
+
+
 def _publish(agent_name, store, embedding):
-    agent = AgentSessionMixin()
+    agent = _SessionTestAgent()
     agent.session_store = store
     agent.config = SimpleNamespace(
         name=agent_name,
@@ -21,6 +26,7 @@ def _publish(agent_name, store, embedding):
     )
     agent._llm_selector = ""
     agent.llm = SimpleNamespace(model="test")
+    agent._init_model_state(agent.llm)
     agent.llm_identifier = lambda: ""
     agent.output_router = SimpleNamespace(notify_activity=lambda *a, **kw: None)
     agent._publish_session_info()

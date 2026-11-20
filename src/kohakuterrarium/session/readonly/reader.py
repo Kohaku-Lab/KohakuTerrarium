@@ -9,7 +9,7 @@ from typing import Any
 
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 from kohakuterrarium.session.memory.index import SearchResult, SessionMemory
 from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
@@ -94,14 +94,11 @@ class SessionReader:
         if not raw:
             return []
         raw = dedupe_adjacent_duplicate_events(raw)
-        live_ids = select_live_event_ids(raw)
+        raw = project_live_event_stream(raw)
 
         turns: list[TurnView] = []
         current: TurnView | None = None
         for evt in raw:
-            eid = evt.get("event_id")
-            if isinstance(eid, int) and eid not in live_ids:
-                continue
             etype = evt.get("type", "")
             if etype in ("user_input", "trigger_fired"):
                 if current is not None and (

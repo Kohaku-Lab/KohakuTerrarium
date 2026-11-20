@@ -146,3 +146,15 @@ ancestor path; late completion of an older mirror must not close a newer one.
 Internal memory-index format **7** invalidates earlier v6 checkpoints and
 derived rows before materializing them again. This is a derived-index upgrade,
 not a SessionStore source-format migration.
+
+
+## Replay event projection relationship
+
+SessionIndexReconciler and strict Memory lineage are unchanged by this
+consumer-wide Replay audit. Event-stream readers select source rows through
+`project_live_event_stream()` (physical positions), not the legacy
+`select_live_event_ids()` result. This does not give them authority to
+publish indexes, infer Memory lineage, or rewrite events. Job settlement
+remains separate evidence correlation: a result recorded on another branch
+may still finalize a selected live call when provider/job identity proves
+ownership. This split prevents both sibling leakage and late-result loss.

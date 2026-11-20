@@ -12,7 +12,7 @@ from kohakuterrarium.core.conversation.continuation import (
     require_no_running_jobs,
 )
 from kohakuterrarium.llm.media.reference import file_reference_path
-from kohakuterrarium.session.history.replay import select_live_event_ids
+from kohakuterrarium.session.history.replay import project_live_event_stream
 from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store.records.snapshot import (
     save_agent_snapshot,
@@ -47,11 +47,11 @@ def missing_history_images(
     messages: list[dict], events: list[dict], branch: dict[int, int], current_turn: int
 ) -> list[MissingHistoryImage]:
     """Scan absent files in completed older live turns (requires blocking I/O)."""
-    live_ids = select_live_event_ids(events, branch_view=branch)
     ended, rejected = set(), set()
     origins: dict[str, set[tuple[int, int]]] = {}
-    for event in events:
-        if event.get("event_id") not in live_ids:
+    for event in project_live_event_stream(events, branch_view=branch):
+        # As before, missing logical IDs cannot prove a completed tool turn.
+        if not isinstance(event.get("event_id"), int):
             continue
         key = (event.get("turn_index"), event.get("branch_id"))
         if event.get("type") == "tool_call" and _pair(event):

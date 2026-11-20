@@ -6,7 +6,7 @@ from datetime import datetime
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 
 
@@ -99,15 +99,12 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
         return []
 
     events = dedupe_adjacent_duplicate_events(events)
-    live_ids = select_live_event_ids(events)
+    events = project_live_event_stream(events)
     turns: list[dict] = []
     current: dict = {"user": "", "text": "", "tools": []}
 
     for evt in events:
         etype = evt.get("type", "")
-        eid = evt.get("event_id")
-        if isinstance(eid, int) and eid not in live_ids:
-            continue
         if etype == "user_input":
             if current["user"] or current["text"]:
                 turns.append(current)

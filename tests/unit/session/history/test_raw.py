@@ -213,3 +213,21 @@ def test_malformed_explicit_target_ancestry_is_rejected():
 
     with pytest.raises(TargetUserMessageLineageError, match="parent_branch_path"):
         _select(events)
+
+
+def test_mirrored_child_is_excluded_from_raw_prefix_under_other_root():
+    """Editing a mirrored child must not inherit an older child's raw events."""
+    events = [
+        _event(1, "user_message", turn=1, branch=1, path=[], content="old root"),
+        _event(2, "user_message", turn=2, branch=1, path=[[1, 1]], content="old child"),
+        _event(3, "text", turn=2, branch=1, path=[[1, 1]], content="old reply"),
+        _event(4, "user_message", turn=1, branch=2, path=[], content="new root"),
+        _event(5, "text", turn=1, branch=2, path=[], content="new reply"),
+        _event(6, "user_message", turn=2, branch=1, path=[[1, 2]], content="new child"),
+    ]
+    prefix = select_raw_history_prefix(
+        events,
+        selector=UserMessageSelector(6, 2, 1),
+        branch_view={1: 2, 2: 1},
+    )
+    assert [e["event_id"] for e in prefix.events] == [4, 5]

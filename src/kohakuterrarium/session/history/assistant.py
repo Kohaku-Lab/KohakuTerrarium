@@ -11,6 +11,7 @@ from copy import deepcopy
 from typing import Any
 
 from kohakuterrarium.llm.antigravity.format import replay_target
+from kohakuterrarium.session.history.branch_paths import _coerce_path
 from kohakuterrarium.llm.message import ASSISTANT_STATE_KEYS, ImagePart
 
 _DISPLAY_TYPES = frozenset(
@@ -34,17 +35,16 @@ def _positive_id(value: Any) -> int | None:
 
 
 def _lineage(event: dict[str, Any]) -> tuple[Any, Any, tuple[tuple[int, int], ...]]:
-    raw_path = event.get("parent_branch_path") or ()
-    path: list[tuple[int, int]] = []
-    try:
-        for item in raw_path:
-            if isinstance(item, (list, tuple)) and len(item) == 2:
-                turn, branch = item
-                if isinstance(turn, int) and isinstance(branch, int):
-                    path.append((turn, branch))
-    except TypeError:
-        path = []
-    return (event.get("turn_index"), event.get("branch_id"), tuple(path))
+    """Pair canonical assistant start/end using the shared raw path parser.
+
+    The assistant projection compares recorded identity; it must not infer
+    missing ancestry or adopt strict Memory search eligibility.
+    """
+    return (
+        event.get("turn_index"),
+        event.get("branch_id"),
+        _coerce_path(event.get("parent_branch_path")),
+    )
 
 
 def _eligible(event_id: int, eligible_ids: set[int] | None) -> bool:

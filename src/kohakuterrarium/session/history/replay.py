@@ -190,12 +190,18 @@ def collect_user_groups(
     parent_paths = index_parent_paths_by_position(events_list)
     selected = resolve_selected_branches(events_list, parent_paths, branch_view)
     contents: dict[int, dict[int, str]] = {}
-    for evt in events_list:
+    for position, evt in enumerate(events_list):
         if evt.get("type") not in ("user_message", "user_input"):
             continue
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
         if not isinstance(ti, int) or not isinstance(bi, int):
+            continue
+        # A mirrored child may reuse (turn, branch) under a different root.
+        # Choose content from the same ancestor view as branch metadata,
+        # not the first matching pair in the unfiltered event stream.
+        prior_selected = {t: b for t, b in selected.items() if t < ti}
+        if not _path_matches(parent_paths[position], prior_selected):
             continue
         contents.setdefault(ti, {})
         if bi not in contents[ti]:
@@ -247,6 +253,36 @@ def select_live_event_positions(
             continue
         live.add(position)
     return live
+
+
+def project_live_event_stream(
+    events: Iterable[dict[str, Any]],
+    *,
+    branch_view: dict[int, int] | None = None,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
+) -> list[dict[str, Any]]:
+    """Project a Replay-compatible branch by *physical position*.
+
+    Consumer-facing event streams must never filter with the public logical
+    ID set: imported/mirrored siblings can reuse the same event_id. This is
+    the single branch-selection entry point for Reader and resume displays.
+    Strict Memory retrieval deliberately uses its own eligible projection.
+    """
+    ordered = list(events)
+    if isinstance(parent_paths, dict):
+        ids = [
+            event.get("event_id")
+            for event in ordered
+            if type(event.get("event_id")) is int
+        ]
+        if len(ids) != len(set(ids)):
+            # An ID-keyed map cannot describe mirrored copies of the same
+            # logical event. Recompute physical ancestry for this source.
+            parent_paths = None
+    visible = select_live_event_positions(
+        ordered, branch_view=branch_view, parent_paths=parent_paths
+    )
+    return [event for position, event in enumerate(ordered) if position in visible]
 
 
 def select_live_event_ids(

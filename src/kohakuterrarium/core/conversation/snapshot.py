@@ -8,7 +8,8 @@ from kohakuterrarium.core.compact.branch import compact_source_path_from_event
 from kohakuterrarium.core.conversation.settled_identity import delivered_jobs
 from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
-    select_live_event_ids,
+    project_live_event_stream,
+    select_live_event_positions,
 )
 from kohakuterrarium.session.store.records.snapshot import load_records
 
@@ -167,21 +168,30 @@ def _replay_context(
     before_turn: int | None,
     replay: Callable,
 ) -> list[dict]:
-    live_ids = select_live_event_ids(events, branch_view=selected)
+    live_positions = select_live_event_positions(events, branch_view=selected)
+    live_events = [
+        event for position, event in enumerate(events) if position in live_positions
+    ]
     ancestor_jobs = {
         str(event.get("call_id") or event.get("job_id") or "")
-        for event in events
+        for event in live_events
         if event.get("type") == "tool_call"
-        and event.get("event_id") in live_ids
         and (before_turn is None or event.get("turn_index", before_turn) < before_turn)
     }
+    # A final result may be recorded *after* its call in another physical
+    # branch/turn. Preserve that settlement evidence when it matches a live
+    # ancestor call, while withholding unrelated foreign content. Event IDs
+    # alone cannot distinguish mirrored/imported source rows.
     retained = [
         event
-        for event in events
+        for position, event in enumerate(events)
         if event.get("event_id", 0) > cutoff
         and (
-            before_turn is None
-            or event.get("turn_index", before_turn) < before_turn
+            position in live_positions
+            and (
+                before_turn is None
+                or event.get("turn_index", before_turn) < before_turn
+            )
             or event.get("type") == "tool_result"
             and str(event.get("call_id") or event.get("job_id") or "") in ancestor_jobs
         )
@@ -193,7 +203,7 @@ def _replay_context(
     }
     calls = [
         event
-        for event in events
+        for event in live_events
         if event.get("event_id", 0) <= cutoff
         and event.get("type") == "tool_call"
         and str(event.get("call_id") or event.get("job_id") or "") in jobs
@@ -233,7 +243,9 @@ def prepare_snapshot(
         for event in events
         if type(event.get("turn_index")) is int and type(event.get("branch_id")) is int
     }
-    live_ids = select_live_event_ids(
+    # This is a source-event selection, not a set-membership test over
+    # logical IDs; mirrored/imported histories may reuse those IDs.
+    live_events = project_live_event_stream(
         events, branch_view=selected, parent_paths=parent_paths
     )
     covered = compact_covered_event_ids(events, selected, parent_paths=parent_paths)
@@ -284,22 +296,19 @@ def prepare_snapshot(
         if whole:
             tail = [
                 event
-                for event in events
+                for event in live_events
                 if event.get("event_id", 0) > record["watermark"]
-                and event.get("event_id") in live_ids
             ]
         else:
             tail = [
                 event
-                for event in events
-                if event.get("event_id") in live_ids
-                and type(event.get("turn_index")) is int
+                for event in live_events
+                if type(event.get("turn_index")) is int
                 and event["turn_index"] > last_turn
                 and (before_turn is None or event["turn_index"] < before_turn)
             ]
         if any(
             event.get("event_id", 0) > record["watermark"]
-            and event.get("event_id") in live_ids
             and event.get("type")
             in {
                 "text_chunk",
@@ -315,7 +324,7 @@ def prepare_snapshot(
                 "context_cleared",
             }
             and event.get("turn_index", last_turn) <= last_turn
-            for event in events
+            for event in live_events
         ):
             continue
         if any(
@@ -354,12 +363,11 @@ def prepare_snapshot(
             }
             if any(
                 event.get("type") == "tool_call"
-                and event.get("event_id") in live_ids
                 and event.get("event_id") not in covered
                 and event.get("event_id", 0) > cutoff
                 and event.get("turn_index", before_turn) < before_turn
                 and (event.get("tool_call_id") or event.get("call_id")) not in call_ids
-                for event in events
+                for event in live_events
             ):
                 continue
         checked_events = [
