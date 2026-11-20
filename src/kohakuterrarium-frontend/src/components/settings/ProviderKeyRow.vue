@@ -37,7 +37,7 @@ import ProviderRow from "./ProviderRow.vue"
 const props = defineProps({ backend: { type: Object, required: true }, editing: Boolean, modelValue: { type: String, default: "" } })
 const emit = defineEmits(["update:modelValue", "edit", "save", "cancel", "delete"])
 const { t } = useI18n()
-const displayName = computed(() => (props.backend.built_in ? { openai: "OpenAI", openrouter: "OpenRouter", anthropic: "Anthropic", gemini: "Gemini", mimo: "MiMo", "kimi-code": "Kimi Code", "glm-coding": "GLM Coding" }[props.backend.name] || props.backend.name : props.backend.name))
+const displayName = computed(() => (props.backend.built_in ? { deepseek: "DeepSeek", qwen: "Qwen · DashScope", "opencode-go": "OpenCode Go", minimax: "MiniMax", openai: "OpenAI", openrouter: "OpenRouter", anthropic: "Anthropic", gemini: "Gemini", mimo: "MiMo", "kimi-code": "Kimi Code", "glm-coding": "GLM Coding" }[props.backend.name] || props.backend.name : props.backend.name))
 async function confirmRemove() {
   try {
     await ElMessageBox.confirm(t("settings.keys.deleteConfirm", { provider: props.backend.name }), { type: "warning", confirmButtonText: t("common.delete"), cancelButtonText: t("common.cancel") })

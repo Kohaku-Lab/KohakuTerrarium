@@ -51,6 +51,46 @@ Or override at the command line for one run:
 kt run path/to/creature --llm gpt-5.4
 ```
 
+### Browse a provider’s models and save a preset
+
+In **Settings → Providers**, configure the key or login for the service you use.
+OpenAI- and Anthropic-compatible backends read from their configured endpoint.
+Gemini, Codex, Grok, OpenRouter, DeepSeek, MiMo, Qwen, and OpenCode Go use
+the catalog and credentials for their own service. MiniMax is available as a
+built-in OpenAI-compatible provider. Packages can supply their own catalog hook.
+For Qwen (Alibaba Cloud Model Studio), select the region that issued your key
+and save its endpoint. Virginia is the default. The other regions also need
+the workspace ID from Model Studio. OpenCode Go offers a public catalog before
+sign-in and a workspace catalog when a Go key is configured. OpenRouter
+uses its public catalog before sign-in and its user-filtered catalog with a key.
+
+Open **Settings → Models → Browse provider models**, choose a provider, and
+search by name or model ID. Pick a model to review its context and output
+limits in the preset editor, then save it. Selecting a model with an existing
+preset opens that preset. Opening the picker, choosing a provider, or pressing
+**Refresh** reads only the selected provider. Paginated catalogs are fetched
+one page at a time. If the endpoint rejects listing, the picker shows the error.
+Saved presets stay local and can be selected by their full `provider/name`
+even when the catalog is offline.
+
+In the desktop or web chat model switcher, select a provider to see its
+current catalog by display name and API model ID. **Refresh** checks that
+provider again. **Save & switch** creates a preset for the chosen model and
+applies it to the selected creature. **Saved presets** includes your existing
+profiles and their custom settings, including when the provider is offline.
+
+In `kt-cli` or `kt-tui`, open `/config`, choose **Browse provider models**,
+filter the provider’s catalog, and confirm the preset. Open `/model` to select it.
+
+The same workflow is available from the CLI. Replace `MODEL_ID` with an ID
+from the first command.
+
+```sh
+kt config provider models deepseek
+kt config provider models deepseek --save MODEL_ID
+kt config llm show deepseek/MODEL_ID
+```
+
 ### GPT-6 through Codex OAuth
 
 After `kt login codex`, select `codex/gpt-6.1-sol`, `codex/gpt-6-sol`,

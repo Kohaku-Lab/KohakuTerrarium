@@ -6,7 +6,7 @@ import { _resetModelInventoryForTests } from "@/composables/useModelInventory"
 import { useChatStore } from "@/stores/chat"
 import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
-import { configAPI, sessionAPI, terrariumAPI } from "@/utils/api"
+import { configAPI, sessionAPI, settingsAPI, terrariumAPI } from "@/utils/api"
 import ModelSwitcher from "./ModelSwitcher.vue"
 vi.mock("vue-router", () => ({ useRoute: () => ({ params: {} }) }))
 function deferred() {
@@ -84,6 +84,7 @@ beforeEach(() => {
     { provider: "codex", name: "current", model: "current", available: true },
     { provider: "codex", name: "other", model: "other", available: true },
   ])
+  vi.spyOn(settingsAPI, "getBackends").mockResolvedValue({ backends: [] })
   vi.spyOn(sessionAPI, "listActive").mockResolvedValue([summary(), summary("b")])
   detailAPI = vi
     .spyOn(sessionAPI, "getActive")

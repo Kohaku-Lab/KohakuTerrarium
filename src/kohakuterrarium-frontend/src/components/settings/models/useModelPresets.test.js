@@ -48,6 +48,19 @@ describe("useModelPresets", () => {
     expect(models.open.value).toBe(true)
   })
 
+  it("opens the same provider's saved model without replacing its budget", async () => {
+    const existing = { ...user, name: "custom", model: "new", max_context: 12000 }
+    configAPI.getModels.mockResolvedValue([existing, { ...existing, provider: "qwen" }])
+    const models = useModelPresets()
+    await models.load()
+    models.startDiscovered({ provider: "openai", model: "new", max_context: 99999 })
+    expect(models.editing.value).toEqual(existing)
+    expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
+    models.startDiscovered({ provider: "qwen", name: "custom", model: "different" })
+    expect(models.editing.value.name).toBe("custom-custom")
+    expect(models.mode.value).toBe("new")
+  })
+
   it("sets the default with the provider-qualified id and refreshes the open preset", async () => {
     const refreshed = { ...builtin, is_default: true }
     configAPI.getModels.mockResolvedValueOnce([builtin]).mockResolvedValueOnce([refreshed])
@@ -90,6 +103,11 @@ describe("useModelPresets", () => {
     const models = useModelPresets()
 
     await models.save({ name: "kept", provider: "openai" })
+    expect(settingsAPI.saveProfile).toHaveBeenCalledWith({
+      name: "kept",
+      provider: "openai",
+      create_only: true,
+    })
     expect(models.selectedKey.value).toBe("openai/kept")
     expect(models.editing.value).toEqual(saved)
 

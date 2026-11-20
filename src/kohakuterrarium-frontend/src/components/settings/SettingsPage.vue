@@ -19,7 +19,10 @@
             <section class="card p-4 provider-section" data-provider-section="keys">
               <h3 class="provider-section-title">{{ t("settings.providers.keysTitle") }}</h3>
               <p class="provider-section-hint">{{ t("settings.keys.storageHint") }}</p>
-              <ProviderKeyRow v-for="backend in keyBackends" :key="backend.name" v-model="keyInput" :backend="backend" :editing="editingKey === backend.name" @edit="startEditKey(backend.name)" @save="saveKey(backend.name)" @cancel="editingKey = ''" @delete="deleteKey(backend.name)" />
+              <template v-for="backend in keyBackends" :key="backend.name">
+                <ProviderKeyRow v-model="keyInput" :backend="backend" :editing="editingKey === backend.name" @edit="startEditKey(backend.name)" @save="saveKey(backend.name)" @cancel="editingKey = ''" @delete="deleteKey(backend.name)" />
+                <QwenEndpoint v-if="backend.built_in && backend.name === 'qwen' && providerNode === '_host'" :backend="backend" @saved="loadBackends" />
+              </template>
             </section>
             <section v-if="packageBackends.length" class="card p-4 provider-section" data-provider-section="package">
               <h3 class="provider-section-title">{{ t("settings.providers.packageTitle") }}</h3>
@@ -60,7 +63,7 @@
         </SectionShell>
 
         <!-- ════════════════════════ Models ════════════════════════ -->
-        <ModelsSection v-if="section.id === 'models'" :title="sectionTitle(section)" :hint="sectionHint(section)" :backends="backends" />
+        <ModelsSection v-if="section.id === 'models'" :title="sectionTitle(section)" :hint="sectionHint(section)" :backends="backends" @configure="configureDiscovery" />
 
         <!-- ════════════════════════ MCP Servers ════════════════════════ -->
         <SectionShell v-if="section.id === 'mcp'" :title="sectionTitle(section)" :hint="sectionHint(section)" bare>
@@ -192,6 +195,7 @@ import { useHostsStore } from "@/stores/hosts"
 import DriveSettingsPanel from "@/components/settings/DriveSettingsPanel.vue"
 import OAuthProviderRow from "@/components/settings/OAuthProviderRow.vue"
 import PackageProviderRow from "@/components/settings/PackageProviderRow.vue"
+import QwenEndpoint from "@/components/settings/QwenEndpoint.vue"
 import ProviderKeyRow from "@/components/settings/ProviderKeyRow.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import SectionShell from "@/components/session-v2/settings/SectionShell.vue"
@@ -280,6 +284,12 @@ const keyInput = ref("")
 // tokens stay process-local and api_keys.yaml lives in the worker's
 // own ``--home-dir`` instead of the host's.
 const providerNode = ref("_host")
+
+function configureDiscovery(name) {
+  providerNode.value = "_host"
+  selectSection("providers")
+  if (keyBackends.value.some((backend) => backend.name === name)) startEditKey(name)
+}
 
 async function loadKeys() {
   try {

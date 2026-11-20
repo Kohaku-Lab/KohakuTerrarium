@@ -88,6 +88,169 @@ async function openDrawer(wrapper) {
 }
 
 describe("shared ModelSwitcher host context", () => {
+  it("keeps long catalogs in their own scroll area and lets the last model be selected", async () => {
+    const context = makeContext({ hostKey: ref("long-catalog") })
+    const rows = Array.from({ length: 65 }, (_, i) => {
+      const id = `model-${i + 1}`
+      return { id, name: `Model ${i + 1}`, preset: { name: id, model: id, provider: "codex" } }
+    })
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", available: true, model_discovery: true }],
+      }),
+      discoverModels: async () => ({ models: rows }),
+    }
+    const wrapper = mountShared(context)
+    await openDrawer(wrapper)
+    const list = wrapper.get('[role="region"][aria-label="Provider models"]')
+    expect(list.findAll(".model-row")).toHaveLength(50)
+    expect(list.element.contains(buttonByText(wrapper, "Saved presets").element)).toBe(false)
+    await buttonByText(list, "Show more models (15)").trigger("click")
+    const last = list.findAll(".model-row").at(-1)
+    expect(last.text()).toContain("Model 65")
+    await last.trigger("click")
+    expect(wrapper.get("code").text()).toBe("codex/model-65")
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    expect(
+      wrapper.get('[role="region"][aria-label="Saved presets"]').findAll(".model-row"),
+    ).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it("lists provider model names first, keeps saved presets separate and creates only on switch", async () => {
+    const context = makeContext({
+      hostKey: ref("catalog-host"),
+      models: [
+        { provider: "deepseek", name: "flash-fast", model: "deepseek-v4-flash", available: true },
+        { provider: "deepseek", name: "flash-think", model: "deepseek-v4-flash", available: true },
+      ],
+    })
+    context.currentModel.value = "deepseek/flash-fast"
+    const preset = {
+      provider: "deepseek",
+      name: "deepseek-flash",
+      model: "deepseek-flash",
+      max_context: 1048576,
+    }
+    const api = {
+      getBackends: vi.fn(async () => ({
+        backends: [{ name: "deepseek", available: true, model_discovery: true }],
+      })),
+      discoverModels: vi.fn(async () => ({
+        models: [{ id: "deepseek-flash", name: "DeepSeek-V4.1-Flash", preset }],
+      })),
+      saveProfile: vi.fn(async () => ({})),
+    }
+    context.inventory.catalog = api
+    const wrapper = mountShared(context)
+    await flushPromises()
+    expect(api.discoverModels).not.toHaveBeenCalled()
+    await openDrawer(wrapper)
+    expect(wrapper.findAll(".model-row").map((r) => r.text())).toEqual([
+      "DeepSeek-V4.1-Flashdeepseek-flash",
+    ])
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    expect(wrapper.findAll(".model-row").map((r) => r.text())).toEqual([
+      "flash-fastdeepseek-v4-flash",
+      "flash-thinkdeepseek-v4-flash",
+    ])
+    await buttonByText(wrapper, "Provider models").trigger("click")
+    await flushPromises()
+    await wrapper.find(".model-row").trigger("click")
+    expect(api.saveProfile).not.toHaveBeenCalled()
+    await buttonByText(wrapper, "Save & switch").trigger("click")
+    await flushPromises()
+    expect(api.saveProfile).toHaveBeenCalledWith({ ...preset, create_only: true })
+    expect(context.switchModel).toHaveBeenCalledWith({
+      target: "beta",
+      selector: "deepseek/deepseek-flash",
+    })
+  })
+
+  it("refreshes only the selected provider, drops stale results and keeps presets usable offline", async () => {
+    const context = makeContext({ hostKey: ref("catalog-race") })
+    const refreshPresets = vi.spyOn(context.inventory, "refresh")
+    const providers = ["mimo", "qwen"].map((name) => ({
+      name,
+      model_discovery: true,
+      available: true,
+    }))
+    let finishMimo
+    const api = {
+      getBackends: vi.fn(async () => ({ backends: providers })),
+      discoverModels: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishMimo = resolve
+            }),
+        )
+        .mockResolvedValueOnce({
+          models: [
+            {
+              id: "v1",
+              name: "Version one",
+              preset: { name: "v1", model: "v1", provider: "qwen" },
+            },
+          ],
+        })
+        .mockRejectedValueOnce({ response: { data: { detail: "Provider is offline" } } }),
+    }
+    context.inventory.catalog = api
+    const wrapper = mountShared(context)
+    await flushPromises()
+    await openDrawer(wrapper)
+    await buttonByText(wrapper, "mimo").trigger("click")
+    await buttonByText(wrapper, "qwen").trigger("click")
+    await flushPromises()
+    finishMimo({ models: [{ id: "stale", name: "Wrong provider" }] })
+    await flushPromises()
+    expect(wrapper.text()).toContain("Version one")
+    expect(wrapper.text()).not.toContain("Wrong provider")
+    await buttonByText(wrapper, "Refresh").trigger("click")
+    await flushPromises()
+    expect(api.discoverModels.mock.calls).toEqual([["mimo"], ["qwen"], ["qwen"]])
+    expect(api.getBackends).toHaveBeenCalledTimes(1)
+    expect(refreshPresets).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain("Provider is offline")
+    expect(wrapper.text()).not.toContain("Version one")
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    expect(wrapper.text()).toContain("No matching presets.")
+  })
+
+  it("does not switch a different creature after a pending preset save", async () => {
+    const context = makeContext({ hostKey: ref("catalog-save-target") })
+    let finishSave
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", model_discovery: true, available: true }],
+      }),
+      discoverModels: async () => ({
+        models: [
+          {
+            id: "new",
+            name: "New model",
+            preset: { name: "new", model: "new", provider: "codex" },
+          },
+        ],
+      }),
+      saveProfile: () =>
+        new Promise((resolve) => {
+          finishSave = resolve
+        }),
+    }
+    const wrapper = mountShared(context)
+    await flushPromises()
+    await openDrawer(wrapper)
+    await wrapper.find(".model-row").trigger("click")
+    await buttonByText(wrapper, "Save & switch").trigger("click")
+    context.selectedTarget.value = "root"
+    finishSave({})
+    await flushPromises()
+    expect(context.switchModel).not.toHaveBeenCalled()
+  })
+
   it("renders the pill, loads the host-keyed inventory and switches through the context", async () => {
     const context = makeContext()
     const wrapper = mountShared(context)
