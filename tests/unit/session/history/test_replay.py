@@ -542,6 +542,61 @@ class TestReplayConversation:
             }
         ]
 
+    @pytest.mark.parametrize(
+        "flag",
+        [
+            {"cancelled": True},
+            {"interrupted": True},
+            {"final_state": "cancelled"},
+            {"final_state": "INTERRUPTED"},
+        ],
+    )
+    def test_empty_cancelled_tool_result_preserves_outcome(self, flag):
+        event = {
+            "type": "tool_result",
+            "call_id": "job1",
+            "name": "work",
+            "output": "",
+            **flag,
+        }
+        out = replay_conversation([event])
+        assert out[0]["content"] == "[Tool job1 cancelled]"
+
+    @pytest.mark.parametrize(
+        "output", ["partial", [{"type": "text", "text": "partial"}]]
+    )
+    @pytest.mark.parametrize(
+        "flag",
+        [{"cancelled": True}, {"interrupted": True}, {"final_state": "INTERRUPTED"}],
+    )
+    def test_cancelled_tool_result_retains_partial_output(self, output, flag):
+        event = {
+            "type": "tool_result",
+            "call_id": "job1",
+            "name": "work",
+            "output": output,
+            **flag,
+        }
+        content = replay_conversation([event])[0]["content"]
+        expected = "[Tool job1 cancelled]"
+        if isinstance(output, list):
+            assert content == [{"type": "text", "text": expected}, *output]
+        else:
+            assert content == f"{expected}\n{output}"
+
+    def test_successful_structured_tool_result_unchanged(self):
+        output = [
+            {"type": "text", "text": "hello"},
+            {"type": "image", "url": "file://a"},
+        ]
+        event = {
+            "type": "tool_result",
+            "call_id": "job1",
+            "name": "work",
+            "output": output,
+        }
+        assert replay_conversation([event])[0]["content"] == output
+
     def test_tool_result_strips_job_label_suffix(self):
         # Resume replay must not pass the UI job label ("bash[ff6427]")
         # through as the tool message name — providers reject names that
@@ -1641,6 +1696,52 @@ class TestDedupe:
 
 
 # ── normalize_tool_call_events / normalize_resumable_events ──────
+
+
+def test_replay_reuses_each_call_provider_id_in_order():
+    events = [
+        {
+            "type": "tool_call",
+            "call_id": "job1",
+            "tool_call_id": "shared",
+            "name": "first",
+        },
+        {
+            "type": "assistant_tool_calls",
+            "tool_calls": [
+                {
+                    "id": "shared",
+                    "type": "function",
+                    "function": {"name": "first", "arguments": "{}"},
+                }
+            ],
+        },
+        {"type": "tool_result", "call_id": "job1", "output": "one"},
+        {
+            "type": "tool_call",
+            "call_id": "job2",
+            "tool_call_id": "shared",
+            "name": "second",
+        },
+        {
+            "type": "assistant_tool_calls",
+            "tool_calls": [
+                {
+                    "id": "shared",
+                    "type": "function",
+                    "function": {"name": "second", "arguments": "{}"},
+                }
+            ],
+        },
+        {"type": "tool_result", "call_id": "job2", "output": "two"},
+    ]
+    messages = replay_conversation(events)
+    assert [
+        message["content"] for message in messages if message["role"] == "tool"
+    ] == [
+        "one",
+        "two",
+    ]
 
 
 class TestNormalizeToolCallEvents:

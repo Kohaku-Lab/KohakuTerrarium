@@ -4,6 +4,7 @@ Provide model switching and canonical LLM identifiers for agents.
 """
 
 from typing import Any
+from uuid import uuid4
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.agent.turn.budget_recovery import attach_recovery_hooks
@@ -29,10 +30,13 @@ class AgentModelMixin:
     compact_manager: Any
     output_router: Any
     config: Any
+    session_store: Any
     _llm_selector: str | None
     _llm_identifier: str
 
     def _init_model_state(self, llm: Any) -> None:
+        # A chat without a SessionStore still owns one routing ID across switches.
+        self._ephemeral_model_session_id = uuid4().hex
         # Raw llm= argument (instance | selector string | profile | None).
         self._llm_spec = llm
         # Selector string, when one was given — feeds llm_identifier()
@@ -40,6 +44,22 @@ class AgentModelMixin:
         self._llm_selector = llm if isinstance(llm, str) else None
         # Canonical provider/name[@variations] id; lazy via llm_identifier().
         self._llm_identifier = ""
+
+    def _bind_model_session(self, provider: Any) -> str:
+        """Bind the main provider to this chat, including after a model switch."""
+        session_id = ""
+        if self.session_store is not None:
+            try:
+                session_id = self.session_store.meta.get("session_id", "")
+            except Exception:
+                logger.warning(
+                    "Failed to read session ID for model routing", exc_info=True
+                )
+        if session_id and hasattr(provider, "prompt_cache_key"):
+            provider.prompt_cache_key = session_id
+        elif bind_ephemeral := getattr(provider, "bind_ephemeral_session", None):
+            bind_ephemeral(self._ephemeral_model_session_id)
+        return session_id
 
     def switch_model(self, profile_name: str) -> str:
         """Switch the LLM provider to a different model profile.
@@ -59,6 +79,7 @@ class AgentModelMixin:
             raise ValueError(f"Model profile not found: {profile_name}")
         new_llm = create_llm_from_profile_name(profile_name)
         identifier = profile_to_identifier(profile)
+        session_id = self._bind_model_session(new_llm)
 
         retired = getattr(self, "_retired_llms", None)
         if retired is None:
@@ -119,7 +140,7 @@ class AgentModelMixin:
                 "model": model_name,
                 "llm_name": identifier,
                 "agent_name": self.config.name,
-                "session_id": getattr(self, "_session_id", ""),
+                "session_id": session_id,
                 "max_context": new_max,
                 "compact_threshold": compact_at,
             },

@@ -57,6 +57,7 @@ from kohakuterrarium.mcp.client import (
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.runtime_prompt import apply_managed_section
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
@@ -629,12 +630,19 @@ class TestMcpIntegration:
                 "greet",
                 "shout",
             ]
-            # init_mcp injected the discovered tools into the live system
-            # prompt (the conversation's system message, via
-            # ``Agent.update_system_prompt``).
+            # The MCP-owned section includes the connected server's catalog.
             sys_prompt = agent.get_system_prompt()
             assert "## Available MCP Tools" in sys_prompt
             assert "**greet**" in sys_prompt
+            agent.update_system_prompt("PUBLIC-RUNTIME-CONTEXT")
+            apply_managed_section(agent, "CURRENT-GRAPH")
+            agent._inject_mcp_tools_into_prompt()
+            agent.refresh_system_prompt()
+            refreshed = agent.get_system_prompt()
+            assert refreshed.count("## Available MCP Tools") == 1
+            assert refreshed.count("**greet**") == 1
+            assert "CURRENT-GRAPH" in refreshed
+            assert "PUBLIC-RUNTIME-CONTEXT" in refreshed
 
             # --- drive a turn: LLM emits [/mcp_call] -> Executor runs it
             chunks: list[str] = []
@@ -653,6 +661,14 @@ class TestMcpIntegration:
                 for m in agent.controller.conversation.get_messages()
             )
             assert "Hello, Kohaku!" in convo_text
+            prompt = agent.get_system_prompt()
+            assert prompt.count("## Available MCP Tools") == 1
+            assert prompt.count("PUBLIC-RUNTIME-CONTEXT") == 1
+            assert "CURRENT-GRAPH" not in prompt
+            await agent._mcp_manager.disconnect("greeter")
+            agent._inject_mcp_tools_into_prompt()
+            assert "## Available MCP Tools" not in agent.get_system_prompt()
+            assert "PUBLIC-RUNTIME-CONTEXT" in agent.get_system_prompt()
 
         # Engine __aexit__ stopped the creature; the manager's servers
         # were connected for the whole run.

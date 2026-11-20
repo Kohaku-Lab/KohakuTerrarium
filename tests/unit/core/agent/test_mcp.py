@@ -35,7 +35,7 @@ def _agent_with_mcp(*, mcp_configs=None):
         config=types.SimpleNamespace(mcp_servers=mcp_configs or []),
         _mcp_manager=None,
         prompts=prompts,
-        update_system_prompt=prompts.append,
+        set_system_prompt_section=lambda owner, content: prompts.append(content),
     )
 
 

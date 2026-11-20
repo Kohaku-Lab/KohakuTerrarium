@@ -5,8 +5,10 @@ Read and write provider-scoped presets while accepting legacy flat layouts.
 
 from typing import Any
 
+from kohakuterrarium.llm.catalog_endpoints import CATALOG_ENDPOINTS
 from kohakuterrarium.llm.profiles.backends import (
     _BUILTIN_PROVIDER_NAMES,
+    catalog_backend,
     _SCHEMA_VERSION,
 )
 from kohakuterrarium.llm.profiles.backends import (
@@ -63,7 +65,10 @@ def _load_flat_presets_legacy(stored: Any) -> dict[tuple[str, str], LLMPreset]:
     for name, pdata in stored.items():
         if not isinstance(pdata, dict):
             continue
-        preset = preset_from_data(name, pdata)
+        inferred = _legacy_provider_from_data(pdata)
+        preset = preset_from_data(
+            name, pdata, inferred if inferred in CATALOG_ENDPOINTS else ""
+        )
         if not preset.provider:
             continue
         presets[(preset.provider, preset.name)] = preset
@@ -109,8 +114,8 @@ def get_child_models() -> dict[str, str]:
     return _string_mapping(_load_yaml().get("child_models", {}))
 
 
-def load_presets() -> dict[tuple[str, str], LLMPreset]:
-    """Load nested or legacy presets, with host-resolved worker entries authoritative."""
+def load_presets(*, include_remote: bool = True) -> dict[tuple[str, str], LLMPreset]:
+    """Load nested or legacy presets, with worker-local entries overriding host fallbacks."""
     data = _load_yaml()
     stored = data.get("presets", {})
     if isinstance(stored, dict) and _looks_nested(stored):
@@ -121,8 +126,8 @@ def load_presets() -> dict[tuple[str, str], LLMPreset]:
         if isinstance(legacy, dict) and not _looks_nested(legacy):
             for key, preset in _load_flat_presets_legacy(legacy).items():
                 presets.setdefault(key, preset)
-    if _remote_presets:
-        presets.update(_remote_presets)
+    if include_remote and _remote_presets:
+        return {**_remote_presets, **presets}
     return presets
 
 
@@ -145,7 +150,11 @@ def serialize_user_data(
     user_backends = {
         name: backend.to_dict()
         for name, backend in backends.items()
-        if name not in _BUILTIN_PROVIDER_NAMES and backend != package_records.get(name)
+        if (
+            name not in _BUILTIN_PROVIDER_NAMES
+            or (name in CATALOG_ENDPOINTS and backend != catalog_backend(name))
+        )
+        and backend != package_records.get(name)
     }
     if user_backends:
         data["backends"] = user_backends

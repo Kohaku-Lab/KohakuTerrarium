@@ -56,6 +56,7 @@ def _mock_backend_layer(monkeypatch):
 
     monkeypatch.setattr(mod, "load_backends", load_backends)
     monkeypatch.setattr(mod, "get_api_key", get_api_key)
+    monkeypatch.setattr(mod, "backend_api_key", lambda name, env: get_api_key(name))
     monkeypatch.setattr(mod, "save_api_key", save_api_key)
     monkeypatch.setattr(mod, "list_api_keys", list_api_keys)
     monkeypatch.setattr(mod, "_is_available", is_available)

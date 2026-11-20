@@ -10,6 +10,9 @@ from kohakuterrarium.llm.anthropic.pairing import (
     fix_anthropic_tool_block_pairing,
 )
 from kohakuterrarium.llm.media.artifacts import resolve_message_image_urls
+from kohakuterrarium.llm.catalog_endpoints import (
+    looks_like_bearer_endpoint as looks_like_bearer_endpoint,
+)
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
 
 # Preserve the historical import path; pairing logic lives in anthropic_pairing.
@@ -51,11 +54,6 @@ def model_accepts_sampling(model: str | None) -> bool:
     if family == "sonnet":
         return version[0] < 5
     return True
-
-
-def looks_like_bearer_endpoint(base_url: str) -> bool:
-    lowered = (base_url or "").lower()
-    return "minimax" in lowered or "minimaxi" in lowered
 
 
 def is_anthropic_api_endpoint(base_url: str) -> bool:

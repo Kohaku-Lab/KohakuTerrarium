@@ -210,7 +210,7 @@ class TestCoerceLLMProvider:
         profile = LLMProfile(
             name="p", model="gpt-4", provider="openai", backend_type="openai"
         )
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "fake-key")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "fake-key")
         provider = llm_mod.coerce_llm_provider(profile, AgentConfig(name="a"))
         assert isinstance(provider, OpenAIProvider)
 
@@ -239,7 +239,7 @@ class TestCreateLLMFromProfileName:
             name="p", model="gpt-4", provider="openai", backend_type="openai"
         )
         monkeypatch.setattr(llm_mod, "resolve_controller_llm", lambda *a, **kw: profile)
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "fake-key")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "fake-key")
         provider = create_llm_from_profile_name("p")
         assert isinstance(provider, OpenAIProvider)
         assert provider.config.model == "gpt-4"
@@ -254,10 +254,10 @@ class TestCreateFromProfile:
     ):
         install_backend_package(kt_home, "p", [echo_backend(credentials="external")])
 
-        def _no_key(_provider):
+        def _no_key(*args):
             raise AssertionError("a package backend must not look up an API key")
 
-        monkeypatch.setattr(llm_mod, "get_api_key", _no_key)
+        monkeypatch.setattr(llm_mod, "backend_api_key", _no_key)
         profile = LLMProfile(
             name="echo-1",
             model="echo-model",
@@ -301,7 +301,7 @@ class TestCreateFromProfile:
         assert provider._profile_max_context == 256000
 
     def test_openai_backend_builds_openai_provider(self, monkeypatch):
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "k")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "k")
         profile = LLMProfile(
             name="p",
             model="gpt-4o",
@@ -317,7 +317,7 @@ class TestCreateFromProfile:
         assert provider.config.model == "gpt-4o"
 
     def test_anthropic_backend_builds_anthropic_provider(self, monkeypatch):
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "k")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "k")
         profile = LLMProfile(
             name="p",
             model="claude-x",
@@ -329,7 +329,7 @@ class TestCreateFromProfile:
         assert provider.config.model == "claude-x"
 
     def test_litellm_backend_imports_provider_lazily(self, monkeypatch):
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "k")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "k")
 
         class _StubLiteLLMProvider:
             def __init__(self, **kwargs):
@@ -362,13 +362,7 @@ class TestCreateFromProfile:
 
     def test_api_key_from_env_fallback(self, monkeypatch):
         # provider lookup misses, api_key_env hits.
-        seen = []
-
-        def fake_get_api_key(key):
-            seen.append(key)
-            return "" if key == "openai" else "env-key"
-
-        monkeypatch.setattr(llm_mod, "get_api_key", fake_get_api_key)
+        monkeypatch.setenv("MY_KEY_ENV", "env-key")
         profile = LLMProfile(
             name="p",
             model="gpt-4",
@@ -378,11 +372,10 @@ class TestCreateFromProfile:
         )
         provider = _create_from_profile(profile)
         assert isinstance(provider, OpenAIProvider)
-        # Both the provider name and the env-var name were consulted.
-        assert seen == ["openai", "MY_KEY_ENV"]
+        assert provider._api_key == "env-key"
 
     def test_missing_api_key_raises_with_login_hint(self, monkeypatch):
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda key: "")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "")
         monkeypatch.setattr(llm_mod._api_keys, "_resolver", None)
         profile = LLMProfile(
             name="needy", model="gpt-4", provider="openai", backend_type="openai"
@@ -393,7 +386,7 @@ class TestCreateFromProfile:
     def test_missing_api_key_worker_mode_raises_identity_hint(self, monkeypatch):
         # When a resolver is installed (worker mode), the error names the
         # host identity store, NOT the generic kt-login hint.
-        monkeypatch.setattr(llm_mod, "get_api_key", lambda key: "")
+        monkeypatch.setattr(llm_mod, "backend_api_key", lambda *args: "")
         monkeypatch.setattr(llm_mod._api_keys, "_resolver", lambda *a: None)
         profile = LLMProfile(
             name="worker", model="gpt-4", provider="openai", backend_type="openai"
@@ -521,7 +514,7 @@ class TestFakeTestBackend:
         from kohakuterrarium.llm.profiles.types import LLMProfile
         from kohakuterrarium.testing.fake_llm_provider import FakeLLMProvider
 
-        monkeypatch.setattr(boot_llm, "get_api_key", lambda provider: "sk-real")
+        monkeypatch.setattr(boot_llm, "backend_api_key", lambda *args: "sk-real")
         script = tmp_path / "script.json"
         script.write_text('{"script": ["hi from fake"]}', encoding="utf-8")
 
@@ -544,7 +537,7 @@ class TestFakeTestBackend:
         from kohakuterrarium.bootstrap import llm as boot_llm
         from kohakuterrarium.llm.profiles.types import LLMProfile
 
-        monkeypatch.setattr(boot_llm, "get_api_key", lambda provider: "")
+        monkeypatch.setattr(boot_llm, "backend_api_key", lambda *args: "")
         profile = LLMProfile(
             name="fake_test/echo",
             model="fake-echo",
@@ -733,3 +726,25 @@ def test_antigravity_inline_claude_limits():
     assert provider.config.max_tokens == 128000
     assert provider._profile_max_context == 256000
     assert provider._settings.wire_model == "claude-sonnet-5-5-medium"
+
+
+@pytest.mark.parametrize("transport", ["openai", "anthropic"])
+async def test_catalog_chat_and_reload_use_configured_key(monkeypatch, transport):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "official")
+    monkeypatch.setenv("TEAM_KEY", "team")
+    profile = LLMProfile(
+        name="work",
+        model="ds",
+        provider="deepseek",
+        backend_type=transport,
+        base_url="http://localhost:9/v1",
+        api_key_env="TEAM_KEY",
+    )
+    provider = _create_from_profile(profile)
+    try:
+        assert provider._api_key == "team"
+        monkeypatch.setenv("TEAM_KEY", "rotated")
+        assert provider.reload_credentials()
+        assert provider._api_key == "rotated"
+    finally:
+        await provider.close()

@@ -1,5 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.laboratory.adapters.studio.identity`."""
 
+from kohakuterrarium.llm.profiles.resolve import LLMPreset, save_profile
 from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory.adapters.studio import identity as mod
 from kohakuterrarium.laboratory.adapters.studio.identity import StudioIdentityAdapter
@@ -67,19 +68,37 @@ class TestGetApiKey:
 
 
 class TestGetProfile:
-    async def test_known_profile(self, monkeypatch):
-        monkeypatch.setattr(
-            mod, "list_profiles_payload", lambda: [{"name": "p1", "model": "x"}]
-        )
+    async def test_provider_qualified_profile(self):
+        for provider in ("deepseek", "qwen"):
+            save_profile(LLMPreset("shared", f"{provider}-model", provider))
+        adapter = StudioIdentityAdapter(_FakeNode())
+
+        async def fetch(name):
+            return await adapter._dispatch(_msg("get_profile", {"name": name}))
+
+        assert (await fetch("qwen/shared"))["profile"]["model"] == "qwen-model"
+        assert (await fetch("shared"))["error"]["kind"] == "invalid"
+        assert (await fetch("other/shared"))["error"]["kind"] == "not_found"
+
+    async def test_known_profile(self):
+        save_profile(LLMPreset("p1", "x", "openai"))
         adapter = StudioIdentityAdapter(_FakeNode())
         out = await adapter._dispatch(_msg("get_profile", {"name": "p1"}))
-        assert out == {"profile": {"name": "p1", "model": "x"}}
+        assert out["profile"]["name"] == "p1" and out["profile"]["model"] == "x"
 
-    async def test_missing(self, monkeypatch):
-        monkeypatch.setattr(mod, "list_profiles_payload", lambda: [])
+    async def test_missing(self):
         adapter = StudioIdentityAdapter(_FakeNode())
         out = await adapter._dispatch(_msg("get_profile", {"name": "p1"}))
         assert out["error"]["kind"] == "not_found"
+
+    async def test_builtin_profile_can_prewarm_worker_credentials(self):
+        adapter = StudioIdentityAdapter(_FakeNode())
+        out = await adapter._dispatch(
+            _msg("get_profile", {"provider": "codex", "name": "gpt-5.5"})
+        )
+        assert out["profile"]["backend_type"] == "codex"
+        assert out["profile"]["provider"] == "codex"
+        assert out["profile"]["variation_groups"]
 
     async def test_missing_name(self):
         adapter = StudioIdentityAdapter(_FakeNode())

@@ -6,6 +6,7 @@ import { routes } from "vue-router/auto-routes"
 import App from "./App.vue"
 
 import { startUiExtensions } from "@/ext/loader"
+import { startMainNavigation } from "@/ext/mainNavigation"
 import OverlayWindowApp from "@/ext/OverlayWindowApp.vue"
 import { registerHud } from "@/ext/hud"
 import { overlayKeyFromSearch, startOverlayWindows } from "@/ext/overlayWindows"
@@ -111,7 +112,10 @@ async function bootstrap() {
   }
   app.mount("#app")
   startUiExtensions()
-  if (!secondary) startOverlayWindows()
+  if (!secondary) {
+    startMainNavigation()
+    startOverlayWindows()
+  }
 }
 
 bootstrap()

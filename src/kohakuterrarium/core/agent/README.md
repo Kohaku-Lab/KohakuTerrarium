@@ -51,6 +51,13 @@ agent/
 
 `AgentInitMixin` (component construction) lives in `bootstrap/agent_init.py`.
 
+Runtime prompt refreshes compose the generated base, owner-managed sections
+(including MCP and graph context), and public `update_system_prompt()` appends.
+Updating an owner replaces its section without duplicating it. A public
+`replace=True` replaces the whole prompt and clears existing sections/appends;
+subsequent owner updates and appends compose with that replacement. Both the
+active conversation and the configuration used for new controllers stay in sync.
+
 ## Rules
 
 1. **One part, one concern**, named `Agent<Concern>Mixin`.

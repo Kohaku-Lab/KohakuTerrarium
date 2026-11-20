@@ -131,6 +131,21 @@ class TestLlmBackendsRoutes:
 
 
 class TestLlmProfilesRoutes:
+    def test_new_draft_cannot_replace_a_preset_saved_in_another_window(self):
+        client = TestClient(_app(llm_mod.router))
+        original = {
+            "provider": "deepseek",
+            "model": "tuned",
+            "name": "flash",
+            "max_context": 8000,
+        }
+        assert client.post("/profiles", json=original).is_success
+        response = client.post(
+            "/profiles", json={**original, "model": "new", "create_only": True}
+        )
+        assert response.status_code == 409
+        assert profiles.get_profile("flash", "deepseek").model == "tuned"
+
     def test_get_profiles(self, monkeypatch):
         monkeypatch.setattr(llm_mod, "list_profiles_payload", lambda: [{"name": "p"}])
         client = TestClient(_app(llm_mod.router))

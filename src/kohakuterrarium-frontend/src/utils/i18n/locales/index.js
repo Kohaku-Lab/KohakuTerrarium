@@ -1,3 +1,4 @@
+import overlays from "./overlays"
 import en from "./en"
 import zhTW from "./zh-TW"
 import zhCN from "./zh-CN"
@@ -21,6 +22,7 @@ import settingsModules from "./settingsModules"
 export const messages = {
   en: {
     ...en,
+    ...overlays.en,
     ...media.en,
     ...links.en,
     ...slash.en,
@@ -33,6 +35,7 @@ export const messages = {
   },
   "zh-TW": {
     ...zhTW,
+    ...overlays["zh-TW"],
     ...media["zh-TW"],
     ...links["zh-TW"],
     ...slash["zh-TW"],
@@ -45,6 +48,7 @@ export const messages = {
   },
   "zh-CN": {
     ...zhCN,
+    ...overlays["zh-CN"],
     ...media["zh-CN"],
     ...links["zh-CN"],
     ...slash["zh-CN"],
@@ -55,7 +59,7 @@ export const messages = {
     ...settingsModules["zh-CN"],
     "settings.imageContext.title": "Codex 图片上下文数量（默认 50）",
   },
-  ja: { ...ja, ...settingsModules.ja },
-  de: { ...de, ...settingsModules.de },
-  ko: { ...ko, ...settingsModules.ko },
+  ja: { ...ja, ...overlays.ja, ...settingsModules.ja },
+  de: { ...de, ...overlays.de, ...settingsModules.de },
+  ko: { ...ko, ...overlays.ko, ...settingsModules.ko },
 }

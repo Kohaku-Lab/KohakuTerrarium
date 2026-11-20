@@ -3,8 +3,8 @@
 import asyncio
 from typing import Any
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.event_inbox import TurnOutcome
-from kohakuterrarium.core.jobs.job import JobState
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +22,9 @@ class AgentInterruptMixin:
         self._branch_execution_error: tuple[str | None, str] | None = None
 
         self._active_handles: dict[str, Any] = {}
+        self._interrupt_finalizers: set[asyncio.Task] = set()
+        self._interrupt_finalizer_error: str | None = None
+        self._interrupt_fence_wakeup = asyncio.Event()
         self._direct_job_meta: dict[str, dict[str, Any]] = {}
         self._bg_controller_notify: dict[str, bool] = {}
         # Deliverable background jobs (notify=True, non-stateful/-interactive)
@@ -67,9 +70,10 @@ class AgentInterruptMixin:
         already_requested = self._interrupt_requested
         self._interrupt_requested = True
         self.controller._interrupted = True
+        self._interrupt_fence_wakeup.set()
         processing = getattr(self, "_processing_task", None)
         if processing and not processing.done() and not already_requested:
-            processing.cancel()
+            request_cancellation(processing)
         for job_id in list(self._active_handles.keys()):
             self._interrupt_direct_job(job_id)
 
@@ -84,8 +88,7 @@ class AgentInterruptMixin:
             # Try executor (tools) first
             task = self.executor._tasks.get(job_id)
             if task and not task.done():
-                task.cancel()
-                self.executor.job_store.update_status(job_id, state=JobState.CANCELLED)
+                request_cancellation(task)
                 cancelled = True
 
             # Try sub-agent manager. Use cooperative cancellation so
@@ -97,7 +100,7 @@ class AgentInterruptMixin:
                     job = self.subagent_manager._jobs.get(job_id)
                     if job and hasattr(job, "subagent"):
                         job.subagent.cancel()
-                    sa_task.cancel()
+                    request_cancellation(sa_task)
                     cancelled = True
 
         if cancelled:
@@ -109,8 +112,8 @@ class AgentInterruptMixin:
             )
             # Notify output so the running panel updates
             self.output_router.notify_activity(
-                "job_cancelled",
-                f"Cancelled: {job_name}",
+                "job_cancel_requested",
+                f"Cancellation requested: {job_name}",
                 metadata={"job_id": job_id, "job_name": job_name},
             )
 
@@ -120,13 +123,27 @@ class AgentInterruptMixin:
         if not handle:
             return False
 
+        def promote_if_unclaimed() -> bool:
+            if (
+                self._active_handles.get(job_id) is not handle
+                or self._direct_job_meta.get(job_id, {}).get("settlement_owner")
+                == "finalizer"
+            ):
+                return False
+            if not handle.promote():
+                return False
+            self.output_router.notify_activity(
+                "task_promoted",
+                f"[{job_id}] Moved to background",
+                metadata={"job_id": job_id},
+            )
+            logger.info("Task promoted via UI", job_id=job_id)
+            return True
+
         # Thread-safe promotion: asyncio.Event.set() must run on the
         # event loop thread. TUI calls this from Textual's thread.
         try:
             asyncio.get_running_loop()
-            # Already on the event loop (API handler) — promote directly
-            if not handle.promote():
-                return False
         except RuntimeError:
             # TUI thread — schedule on the loop captured at ``start()``.
             # ``asyncio.get_event_loop()`` is unsafe on Python 3.14+.
@@ -136,12 +153,6 @@ class AgentInterruptMixin:
                     loop = asyncio.get_event_loop()
                 except RuntimeError:
                     return False
-            loop.call_soon_threadsafe(handle.promote)
-
-        self.output_router.notify_activity(
-            "task_promoted",
-            f"[{job_id}] Moved to background",
-            metadata={"job_id": job_id},
-        )
-        logger.info("Task promoted via UI", job_id=job_id)
-        return True
+            loop.call_soon_threadsafe(promote_if_unclaimed)
+            return True
+        return promote_if_unclaimed()

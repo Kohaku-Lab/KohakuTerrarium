@@ -6,6 +6,7 @@ Centralizes warm-pause and orderly shutdown behavior for agents.
 import asyncio
 from typing import Any
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.jobs.job import JobState, JobType
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.utils.logging import get_logger
@@ -50,7 +51,9 @@ class AgentLifecycleMixin:
         lock = getattr(self, "_processing_lock", None)
         inbox = getattr(self, "_event_inbox", None)
         return bool(
-            (lock is not None and lock.locked()) or (inbox is not None and len(inbox))
+            getattr(self, "_active_event_run", None)
+            or (lock is not None and lock.locked())
+            or (inbox is not None and len(inbox))
         )
 
     async def interrupt_and_wait(self, *, timeout: float = 10.0) -> None:
@@ -103,7 +106,7 @@ class AgentLifecycleMixin:
             await self.plugins.unload_all()
 
         # Job terminals require both the running state and output router to remain live.
-        self._finalize_inflight_jobs_for_stop()
+        had_direct_jobs = self._finalize_inflight_jobs_for_stop()
 
         self._running = False
         self._shutdown_event.set()
@@ -124,7 +127,7 @@ class AgentLifecycleMixin:
             and not processing.done()
             and processing is not asyncio.current_task()
         ):
-            processing.cancel()
+            request_cancellation(processing)
             await asyncio.gather(processing, return_exceptions=True)
         # The processing lock also covers output, wiring, and session finalization.
         turn_lock = getattr(self, "_processing_lock", None)
@@ -156,6 +159,16 @@ class AgentLifecycleMixin:
 
         await self._cancel_executor_tasks()
         await self.subagent_manager.cancel_all()
+        settlement_error = None
+        try:
+            await self._await_interrupt_finalizers()
+        except RuntimeError as exc:
+            settlement_error = exc
+        if had_direct_jobs and settlement_error is None:
+            session_output = getattr(self, "_session_output", None)
+            persist_snapshot = getattr(session_output, "on_processing_end", None)
+            if callable(persist_snapshot):
+                await persist_snapshot()
         controller = getattr(self, "controller", None)
         cleanup_inline_files = getattr(controller, "cleanup_inline_files", None)
         if callable(cleanup_inline_files):
@@ -186,14 +199,30 @@ class AgentLifecycleMixin:
                 failed.append(provider)
                 first_error = first_error or exc
         self._retired_llms = failed
+        if settlement_error is not None:
+            raise settlement_error
         if first_error is not None:
             raise first_error
 
-    def _finalize_inflight_jobs_for_stop(self) -> None:
+    def _finalize_inflight_jobs_for_stop(self) -> bool:
         """Finalize each running job as interrupted exactly once during shutdown."""
+        direct_jobs = getattr(self, "_direct_job_meta", {})
+        active_direct_jobs = [
+            job_id
+            for job_id, meta in direct_jobs.items()
+            if not meta.get("background")
+            and meta.get("interruptible", True)
+            and not getattr(
+                getattr(self, "_active_handles", {}).get(job_id), "promoted", False
+            )
+        ]
+        for job_id in active_direct_jobs:
+            meta = direct_jobs[job_id]
+            meta["stop_requested"] = True
+            self._start_interrupt_finalizer(job_id)
         router = getattr(self, "output_router", None)
         if router is None or not hasattr(router, "notify_activity"):
-            return
+            return bool(active_direct_jobs)
         jobs: list[tuple[Any, Any]] = []
         executor = getattr(self, "executor", None)
         if executor is not None and hasattr(executor, "get_running_jobs"):
@@ -203,10 +232,13 @@ class AgentLifecycleMixin:
         if manager is not None and hasattr(manager, "get_running_jobs"):
             store = getattr(manager, "job_store", None)
             jobs.extend((status, store) for status in manager.get_running_jobs())
+        had_jobs = bool(active_direct_jobs or jobs)
         seen: set[str] = set()
         for status, store in jobs:
             job_id = getattr(status, "job_id", None)
             if not job_id or job_id in seen:
+                continue
+            if job_id in active_direct_jobs:
                 continue
             seen.add(job_id)
             is_subagent = getattr(status, "job_type", None) == JobType.SUBAGENT
@@ -228,14 +260,9 @@ class AgentLifecycleMixin:
             tool_call_id = meta.get("tool_call_id")
             controller = getattr(self, "controller", None)
             if tool_call_id and controller is not None:
-                announced = any(
-                    any(
-                        tc.get("id") == tool_call_id
-                        for tc in (getattr(m, "tool_calls", None) or [])
-                    )
-                    for m in controller.conversation.get_messages()
-                )
-                if announced:
+                if controller.conversation.owes_tool_response(
+                    tool_call_id, meta.get("announcement")
+                ):
                     metadata["tool_call_id"] = tool_call_id
                     try:
                         controller.conversation.append(
@@ -243,6 +270,7 @@ class AgentLifecycleMixin:
                             error,
                             tool_call_id=tool_call_id,
                             name=meta.get("name") or name,
+                            metadata={"job_id": job_id, "tool_result_phase": "final"},
                         )
                     except Exception:  # pragma: no cover - defensive
                         logger.warning(
@@ -260,14 +288,30 @@ class AgentLifecycleMixin:
                 job_id=job_id,
                 kind="subagent" if is_subagent else "tool",
             )
+        return had_jobs
+
+    async def _await_interrupt_finalizers(self) -> None:
+        """Wait for interrupted direct jobs before closing result sinks."""
+        finalizers = tuple(getattr(self, "_interrupt_finalizers", ()))
+        if finalizers:
+            await asyncio.gather(*finalizers, return_exceptions=True)
+        if getattr(self, "_interrupt_finalizer_error", None):
+            raise RuntimeError(
+                f"Interrupted job settlement failed: {self._interrupt_finalizer_error}"
+            )
 
     async def _cancel_executor_tasks(self) -> None:
         executor = getattr(self, "executor", None)
         if executor is None:
             return
-        tasks = [task for task in executor._tasks.values() if not task.done()]
+        tasks = [
+            task
+            for task in executor._tasks.values()
+            if not task.done()
+            and task not in getattr(self, "_interrupt_finalizers", ())
+        ]
         if not tasks:
             return
         for task in tasks:
-            task.cancel()
+            request_cancellation(task)
         await asyncio.gather(*tasks, return_exceptions=True)

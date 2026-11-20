@@ -154,9 +154,7 @@ class TestRequests:
             fresh.save()
             return fresh
 
-        monkeypatch.setattr(
-            "kohakuterrarium.llm.codex.image.client.refresh_tokens", refresh
-        )
+        monkeypatch.setattr("kohakuterrarium.llm.codex.auth.refresh_tokens", refresh)
 
         def handler(request):
             calls.append(request.headers["authorization"])

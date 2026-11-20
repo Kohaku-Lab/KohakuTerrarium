@@ -5,8 +5,9 @@
 import asyncio
 import types
 from contextlib import closing
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 
 from kohakuterrarium.core.agent.turn.budget_recovery import (
     _message_to_conversation_json,
@@ -18,6 +19,9 @@ from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
 from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
+from kohakuterrarium.core.agent.tools.dispatch import AgentToolsMixin
+from kohakuterrarium.core.agent.turn.interrupt import AgentInterruptMixin
+from kohakuterrarium.core.jobs.job import JobState, JobStatus, JobStore, JobType
 from kohakuterrarium.core.conversation.conversation import (
     Conversation,
     ConversationConfig,
@@ -81,6 +85,55 @@ def _build_lifecycle_agent(*, has_mcp=False, has_compact=True, compact_llm=None)
 
 
 class TestAgentLifecycle:
+    @pytest.mark.parametrize("legacy", [False, True])
+    async def test_stop_joins_processing_cleanup_after_interrupt(self, legacy):
+        agent = _build_lifecycle_agent()
+        agent.controller = types.SimpleNamespace(_interrupted=False)
+        agent._active_handles = {}
+        agent._interrupt_requested = False
+        agent._interrupt_fence_wakeup = asyncio.Event()
+        started, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        outcomes = []
+
+        class CountingTask(asyncio.Task):
+            cancelling = None if legacy else getattr(asyncio.Task, "cancelling", None)
+            requests = 0
+
+            def cancel(self, *args, **kwargs):
+                self.requests += 1
+                return super().cancel(*args, **kwargs)
+
+        async def processing():
+            started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                cleaning.set()
+                await release.wait()
+                outcomes.append("settled")
+
+        task = CountingTask(processing())
+        agent._processing_task = task
+        stop = None
+        try:
+            await started.wait()
+            AgentInterruptMixin._interrupt_active_turn(agent)
+            await cleaning.wait()
+            AgentInterruptMixin._interrupt_active_turn(agent)
+            stop = asyncio.create_task(agent.stop())
+            await agent._shutdown_event.wait()
+            assert task.requests == 1
+            assert not stop.done()
+            release.set()
+            await asyncio.wait_for(stop, 2)
+            assert outcomes == ["settled"]
+            assert task.requests == 1
+        finally:
+            release.set()
+            await asyncio.gather(
+                task, *([stop] if stop else []), return_exceptions=True
+            )
+
     async def test_full_stop_cascade(self):
         a = _build_lifecycle_agent()
         await a.stop()
@@ -128,6 +181,168 @@ class TestAgentLifecycle:
         await a.stop()
         assert a._running is False
         assert a.llm.close.await_count == 1
+
+    async def test_stop_does_not_cancel_existing_direct_finalizer_twice(self):
+        a = _build_lifecycle_agent()
+        gate = asyncio.Event()
+
+        async def finalizer():
+            await gate.wait()
+
+        task = asyncio.create_task(finalizer())
+        a._interrupt_finalizers = {task}
+        a._direct_job_meta = {"job": {}}
+        await a._cancel_executor_tasks()
+        assert not task.cancelled()
+        gate.set()
+        await task
+
+    def test_stop_hands_direct_jobs_to_settlement_owner(self):
+        a = _build_lifecycle_agent()
+        a._direct_job_meta = {"direct": {"kind": "tool"}}
+        a._active_handles = {"direct": types.SimpleNamespace(promoted=False)}
+        a._start_interrupt_finalizer = MagicMock()
+
+        a.executor.get_running_jobs = MagicMock(
+            return_value=[types.SimpleNamespace(job_id="direct", job_type="tool")]
+        )
+        a._finalize_inflight_jobs_for_stop()
+
+        a._start_interrupt_finalizer.assert_called_once_with("direct")
+
+    @pytest.mark.parametrize("failure", ["finalizer failed", "finalizer cancelled"])
+    async def test_settlement_failure_still_closes_resources(self, failure):
+        a = _build_lifecycle_agent()
+        a._interrupt_finalizer_error = failure
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match=failure):
+                await a.stop()
+        assert a._interrupt_finalizer_error == failure
+        assert not a._running
+        for cleanup in (
+            a.trigger_manager.stop_all,
+            a.input.stop,
+            a.compact_manager.cancel,
+            a.output_router.stop,
+            a.llm.close,
+        ):
+            assert cleanup.await_count >= 1
+
+    @pytest.mark.parametrize("job_type", [JobType.TOOL, JobType.SUBAGENT])
+    @pytest.mark.parametrize("retained_meta", [False, True])
+    def test_stop_emits_promoted_terminal(self, job_type, retained_meta):
+        a = _build_lifecycle_agent()
+        store = JobStore()
+        status = JobStatus("promoted", job_type, "worker", state=JobState.RUNNING)
+        store.register(status)
+        a.output_router.notify_activity = MagicMock()
+        manager = a.executor if job_type == JobType.TOOL else a.subagent_manager
+        manager.job_store = store
+        manager.get_running_jobs = lambda: [status] if status.is_running else []
+        a._active_handles = {"promoted": types.SimpleNamespace(promoted=True)}
+        conversation = Conversation()
+        conversation.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "native_promoted",
+                    "type": "function",
+                    "function": {"name": "worker", "arguments": "{}"},
+                }
+            ],
+        )
+        conversation.append("tool", "pending", tool_call_id="native_promoted")
+        a.controller = types.SimpleNamespace(conversation=conversation)
+        a._direct_job_meta = (
+            {
+                "promoted": {
+                    "background": True,
+                    "interruptible": False,
+                    "tool_call_id": "native_promoted",
+                }
+            }
+            if retained_meta
+            else {}
+        )
+        a._start_interrupt_finalizer = MagicMock()
+        a._finalize_inflight_jobs_for_stop()
+        a._finalize_inflight_jobs_for_stop()
+        a._start_interrupt_finalizer.assert_not_called()
+        a.output_router.notify_activity.assert_called_once()
+        call = a.output_router.notify_activity.call_args
+        assert call.args[0] == (
+            "tool_error" if job_type == JobType.TOOL else "subagent_error"
+        )
+        assert call.kwargs["metadata"]["final_state"] == "interrupted"
+        assert status.state == JobState.CANCELLED
+        assert [m.content for m in conversation.get_messages() if m.role == "tool"] == [
+            "pending"
+        ]
+
+    @pytest.mark.parametrize("first", ["collector", "stop"])
+    @pytest.mark.parametrize(
+        "slot", ["unannounced", "open", "pending", "final", "closed", "stale_owner"]
+    )
+    def test_promotion_and_stop_share_current_response_slot(self, first, slot):
+        a = _build_lifecycle_agent()
+        a.plugins = None
+        a.output_router.notify_activity = MagicMock()
+        store = a.executor.job_store = JobStore()
+        status = JobStatus("job", JobType.TOOL, "work", state=JobState.RUNNING)
+        store.register(status)
+        a.executor.get_running_jobs = lambda: [status] if status.is_running else []
+        a._active_handles = {"job": types.SimpleNamespace(promoted=True)}
+        a._direct_job_meta = {}
+        conv = Conversation()
+        a.controller = types.SimpleNamespace(conversation=conv)
+        calls = [
+            {
+                "id": "id",
+                "type": "function",
+                "function": {"name": "work", "arguments": "{}"},
+            }
+        ]
+        conv.append("assistant", "", tool_calls=calls)
+        if slot == "stale_owner":
+            AgentToolsMixin._register_direct_job(
+                a, "job", kind="tool", name="work", tool_call_id="id"
+            )
+        conv.append("tool", "previous occurrence", tool_call_id="id")
+        conv.append("user", "next")
+        if slot != "unannounced":
+            conv.append("assistant", "", tool_calls=calls)
+        if slot != "stale_owner":
+            AgentToolsMixin._register_direct_job(
+                a, "job", kind="tool", name="work", tool_call_id="id"
+            )
+        if slot in ("pending", "final"):
+            conv.append("tool", slot, tool_call_id="id")
+        if slot == "closed":
+            conv.append("assistant", "new round")
+
+        def collect():
+            AgentToolsMixin._handle_promotion(
+                a, "job", a.controller, {"job": "id"}, True
+            )
+
+        if first == "collector":
+            collect()
+            a._finalize_inflight_jobs_for_stop()
+        else:
+            a._finalize_inflight_jobs_for_stop()
+            collect()
+        replies = [m.content for m in conv.get_messages() if m.role == "tool"]
+        expected = ["previous occurrence"]
+        if slot in ("pending", "final"):
+            expected.append(slot)
+        elif slot == "open":
+            expected.append(
+                "[job] Promoted to background. Result arrives in a later turn."
+                if first == "collector"
+                else "Agent stopped while this job was still running."
+            )
+        assert replies == expected
 
     async def test_cancel_executor_tasks_no_executor(self):
         a = _build_lifecycle_agent()

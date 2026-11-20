@@ -1,14 +1,13 @@
 """OpenAI-compatible chat provider backed by reusable Grok OAuth access tokens."""
 
 import asyncio
-import hashlib
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
 
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.llm.base import ToolSchema
-from kohakuterrarium.llm.grok.auth import GROK_CLI_SOURCE, GrokToken, GrokTokens
+from kohakuterrarium.llm.grok.auth import GrokToken, GrokTokens
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
 from kohakuterrarium.llm.recovery.errors import RetryPolicy
 from kohakuterrarium.utils.logging import get_logger
@@ -50,7 +49,7 @@ class GrokSubscriptionProvider(OpenAIProvider):
             retry_policy=retry_policy,
         )
         self._active_source = token.source
-        self._active_fingerprint = _fingerprint(token)
+        self._active_fingerprint = token.fingerprint
         self._rejected_fingerprints: set[str] = set()
 
     @property
@@ -66,19 +65,8 @@ class GrokSubscriptionProvider(OpenAIProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Try ordered local credentials only before any response is emitted."""
-        await GrokTokens.ensure_fresh_cli()
-        pending = [
-            token
-            for token in GrokTokens.load_candidates()
-            if _fingerprint(token) not in self._rejected_fingerprints
-        ]
-        if not pending:
-            raise _missing_login_error()
-
-        last_error: Exception | None = None
-        refresh_attempted = False
-        while pending:
-            token = pending.pop(0)
+        last_error = None
+        async for token in GrokTokens.request_candidates(self._rejected_fingerprints):
             self._activate(token)
             emitted = False
             try:
@@ -92,29 +80,14 @@ class GrokSubscriptionProvider(OpenAIProvider):
                 last_error = exc
                 if emitted or _status_code(exc) != 401:
                     raise
-                self._rejected_fingerprints.add(_fingerprint(token))
-                if token.source == GROK_CLI_SOURCE and not refresh_attempted:
-                    refresh_attempted = True
-                    refreshed = await GrokTokens.ensure_fresh_cli(force=True)
-                    if (
-                        refreshed is not None
-                        and _fingerprint(refreshed) not in self._rejected_fingerprints
-                    ):
-                        pending.insert(0, refreshed)
-                if not pending:
-                    raise
-                logger.warning(
-                    "Grok credential rejected; trying next local source",
-                    source=token.source,
-                    status=_status_code(exc),
-                )
-        if last_error is not None:  # pragma: no cover - loop always returns/raises
+        if last_error is not None:
             raise last_error
+        raise _missing_login_error()
 
     def reload_credentials(self) -> bool:
         """Reread owner-managed auth files and activate a changed valid token."""
         for token in GrokTokens.load_candidates():
-            fingerprint = _fingerprint(token)
+            fingerprint = token.fingerprint
             if fingerprint in self._rejected_fingerprints:
                 continue
             if fingerprint == self._active_fingerprint:
@@ -154,7 +127,7 @@ class GrokSubscriptionProvider(OpenAIProvider):
         self._rejected_fingerprints = set(self._rejected_fingerprints)
 
     def _activate(self, token: GrokToken) -> None:
-        fingerprint = _fingerprint(token)
+        fingerprint = token.fingerprint
         if fingerprint == self._active_fingerprint:
             return
         old_client = self._client
@@ -183,17 +156,6 @@ class GrokSubscriptionProvider(OpenAIProvider):
                 loop.create_task(old_client.close())
         except RuntimeError:
             pass
-
-
-def _fingerprint(token: GrokToken) -> str:
-    headers = "\0".join(
-        f"{name}={value}" for name, value in sorted(token.extra_headers.items())
-    )
-    raw = (
-        f"{token.source}\0{token.access_token}\0{token.base_url}\0"
-        f"{token.media_base_url}\0{headers}"
-    ).encode()
-    return hashlib.sha256(raw).hexdigest()
 
 
 def _chat_headers(token: GrokToken, model: str) -> dict[str, str]:

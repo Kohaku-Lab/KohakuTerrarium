@@ -1196,6 +1196,10 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/backends")
     return data
   },
+  async discoverModels(name) {
+    const { data } = await api.post(`/settings/backends/${encodeURIComponent(name)}/models`)
+    return data
+  },
   async getBackendTypes() {
     const { data } = await api.get("/settings/backend-types")
     return data

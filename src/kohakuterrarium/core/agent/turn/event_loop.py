@@ -183,10 +183,34 @@ class AgentEventLoopMixin:
         self._turn_completion = completion
         self._active_event_run = run
         self._active_event_captures = captures
-        for cap in captures:
-            self.output_router.add_secondary(cap)
         interrupted = False
+        attached = False
         try:
+            if getattr(self, "_interrupt_finalizers", ()):
+                wakeup = self._interrupt_fence_wakeup
+                while not self._interrupt_finalizer_error:
+                    interrupted_by_user = bool(
+                        primary.context.get("interrupted_by_user")
+                    )
+                    if interrupted_by_user or any(env.withdrawn for env in run):
+                        self._resolve_run(
+                            run, status="interrupted", interrupted=interrupted_by_user
+                        )
+                        return
+                    if not self._interrupt_finalizers:
+                        break
+                    wakeup.clear()
+                    await wakeup.wait()
+            error = getattr(self, "_interrupt_finalizer_error", None)
+            if error:
+                reason = f"Interrupted job settlement failed: {error}"
+                for env in run:
+                    if env.future is not None and env.event.type == "user_input":
+                        env.event.context["settlement_error"] = reason
+                raise RuntimeError(reason)
+            for cap in captures:
+                self.output_router.add_secondary(cap)
+            attached = True
             async with self._processing_lock:
                 self._turn_lock_holder = asyncio.current_task()
                 self._active_turn_stackable = primary.stackable
@@ -205,8 +229,9 @@ class AgentEventLoopMixin:
                 if interrupted:
                     self._flush_trigger_backlog_stash()
         finally:
-            for cap in captures:
-                self.output_router.remove_secondary(cap)
+            if attached:
+                for cap in captures:
+                    self.output_router.remove_secondary(cap)
             self._active_event_run = None
             self._active_event_captures = None
             if self._turn_completion is completion:
@@ -526,6 +551,7 @@ class AgentEventLoopMixin:
             )
             metrics.observe_error("controller")
         finally:
+            self._release_direct_collectors()
             self._processing_task = None
         if self._interrupt_requested and not any(
             env.withdrawn for env in getattr(self, "_active_event_run", None) or []

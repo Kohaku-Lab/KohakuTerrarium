@@ -4,6 +4,7 @@ from typing import Any
 
 from kohakuterrarium.laboratory._internal.app.app import AppMessage
 from kohakuterrarium.laboratory.protocols import LabRegistrar
+from kohakuterrarium.laboratory.profile_record import profile_record
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.studio.identity.api_keys import (
     get_existing_key,
@@ -123,9 +124,10 @@ class StudioIdentityAdapter:
         name = body.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("name is required")
-        for profile in list_profiles_payload():
-            if profile.get("name") == name:
-                return {"profile": profile}
+        provider = body.get("provider")
+        profile = profile_record(f"{provider}/{name}" if provider else name)
+        if profile is not None:
+            return {"profile": profile}
         raise KeyError(f"no LLM profile named {name!r}")
 
     def _op_save_key(self, body: dict[str, Any]) -> dict[str, Any]:

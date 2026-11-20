@@ -16,6 +16,7 @@ from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.llm.profiles.backends import set_remote_backend
 from kohakuterrarium.llm.presets.store import preset_from_data, set_remote_preset
 from kohakuterrarium.llm.profiles.types import LLMBackend
+from kohakuterrarium.llm.profiles.variations import parse_variation_selector
 from kohakuterrarium.session.history.raw import UserMessageSelector
 from kohakuterrarium.terrarium.creature.ops import (
     agent_command_inventory,
@@ -170,24 +171,9 @@ class TerrariumRuntimeAdapter:
                 config = load_agent_config(config)
             except Exception:  # pragma: no cover - best-effort
                 return
-        # Identity lookup accepts bare profile names rather than provider/name selectors.
-        profile_name = getattr(config, "llm_profile", "") or ""
-        if profile_name:
-            bare_name = (
-                profile_name.split("/", 1)[1] if "/" in profile_name else profile_name
-            )
-            try:
-                profile = await cache.get_profile(bare_name)
-            except Exception:  # pragma: no cover - best-effort
-                profile = None
-            if isinstance(profile, dict):
-                self._stash_remote_preset(profile_name, profile)
-                prov = profile.get("provider") or ""
-                if prov:
-                    await cache.prefetch_for_provider(prov)
-                # Codex providers resolve OAuth tokens outside the API-key cache.
-                if (profile.get("backend_type") or "") == "codex":
-                    await cache.prefetch_for_codex_if_needed()
+        await self._prewarm_profile_by_selector(
+            getattr(config, "llm_profile", "") or ""
+        )
         # Model prefixes supply the provider when inline configs omit it.
         prov = getattr(config, "provider", "") or ""
         if not prov:
@@ -202,14 +188,14 @@ class TerrariumRuntimeAdapter:
         cache = self._identity_cache
         if cache is None or not selector:
             return
-        bare = selector.split("/", 1)[1] if "/" in selector else selector
         try:
-            profile = await cache.get_profile(bare)
+            base, _ = parse_variation_selector(selector)
+            profile = await cache.get_profile(base)
         except Exception:  # pragma: no cover - best-effort
             return
         if not isinstance(profile, dict):
             return
-        self._stash_remote_preset(selector, profile)
+        self._stash_remote_preset(base, profile)
         prov = profile.get("provider") or ""
         if prov:
             await cache.prefetch_for_provider(prov)
@@ -236,6 +222,8 @@ class TerrariumRuntimeAdapter:
                 backend_type=backend_type,
                 base_url=profile.get("base_url", "") or "",
                 api_key_env=profile.get("api_key_env", "") or "",
+                provider_name=profile.get("backend_provider_name") or "",
+                provider_native_tools=list(profile.get("backend_native_tools") or []),
             )
         )
         try:

@@ -235,16 +235,23 @@ def include_settled_tool_results(
         if not isinstance(event.get("event_id"), int)
         or event["event_id"] in live_event_ids
     ]
+    identities = {id(event): _tool_identity(event) for event in live_events}
     live_call_turns: dict[str, Any] = {}
+    live_call_provider_ids: dict[str, Any] = {}
     for event in live_events:
-        if event.get("type") == "tool_call" and (identity := _tool_identity(event)):
+        if event.get("type") == "tool_call" and (identity := identities[id(event)]):
             if identity not in live_call_turns:
                 live_call_turns[identity] = event.get("turn_index")
+                live_call_provider_ids[identity] = event.get("tool_call_id")
     live_result_ids: set[str] = {
         identity
         for event in live_events
-        if event.get("type") == "tool_result" and (identity := _tool_identity(event))
+        if event.get("type") == "tool_result" and (identity := identities[id(event)])
     }
+    all_call_counts: dict[str, int] = {}
+    for event in events:
+        if event.get("type") == "tool_call" and (identity := _tool_identity(event)):
+            all_call_counts[identity] = all_call_counts.get(identity, 0) + 1
     late_results: dict[str, dict[str, Any]] = {}
     for event in events:
         if event.get("type") != "tool_result":
@@ -255,8 +262,13 @@ def include_settled_tool_results(
             continue
         if (
             identity
+            and all_call_counts.get(identity) == 1
             and identity in live_call_turns
             and identity not in live_result_ids
+            and (
+                event.get("tool_call_id") is None
+                or event.get("tool_call_id") == live_call_provider_ids.get(identity)
+            )
             and identity not in late_results
         ):
             projected = dict(event)
@@ -268,6 +280,10 @@ def include_settled_tool_results(
             and identity in live_call_turns
             and isinstance(eid, int)
             and eid in live_event_ids
+            and (
+                event.get("tool_call_id") is None
+                or event.get("tool_call_id") == live_call_provider_ids.get(identity)
+            )
             and identity not in late_results
         ):
             # Live results recorded in later turns are paired at their call.
@@ -282,14 +298,176 @@ def include_settled_tool_results(
                 projected["_source_event_id"] = projected.pop("event_id", None)
                 projected["_settled_from_call"] = True
                 late_results[identity] = projected
-    replay_events: list[dict[str, Any]] = []
+    identity_counts: dict[str, tuple[int, int]] = {}
     for event in live_events:
-        identity = _tool_identity(event)
-        if event.get("type") == "tool_result" and identity in late_results:
+        etype = event.get("type")
+        if etype not in {"tool_call", "tool_result"}:
+            continue
+        identity = identities[id(event)]
+        calls, results = identity_counts.get(identity, (0, 0))
+        identity_counts[identity] = (
+            calls + int(etype == "tool_call"),
+            results + int(etype == "tool_result"),
+        )
+    rounds: dict[int, int] = {}
+    round_index = 0
+    boundary_index = 0
+    boundaries: dict[int, int] = {}
+    call_info: dict[str, tuple[int, int, str]] = {}
+    for index, event in enumerate(live_events):
+        if event.get("type") == "assistant_round_start":
+            round_index += 1
+        if event.get("type") in {
+            "user_message",
+            "user_input_injected",
+            "compact_complete",
+            "compact_replace",
+        }:
+            boundary_index += 1
+        rounds[index] = round_index
+        boundaries[index] = boundary_index
+        if event.get("type") == "tool_call":
+            identity = identities[id(event)]
+            if identity and identity_counts.get(identity) == (1, 1):
+                call_info[identity] = (
+                    index,
+                    round_index,
+                    str(event.get("tool_call_id") or identity),
+                )
+    provider_owners: dict[tuple[int, str], set[str]] = {}
+    for index, event in enumerate(live_events):
+        if event.get("type") == "tool_call":
+            identity = identities[id(event)]
+            provider_id = str(event.get("tool_call_id") or identity)
+            provider_owners.setdefault((boundaries[index], provider_id), set()).add(
+                identity
+            )
+    candidates: dict[str, int] = {}
+    for index, event in enumerate(live_events):
+        if event.get("type") != "tool_result" or event.get("event_id") in (
+            covered_event_ids or ()
+        ):
+            continue
+        identity = identities[id(event)]
+        call = call_info.get(identity)
+        if (
+            call is None
+            or identity in late_results
+            or len(provider_owners[(boundaries[call[0]], call[2])]) != 1
+        ):
+            continue
+        call_index, call_round, _ = call
+        result_provider_id = event.get("tool_call_id")
+        call_provider_id = live_events[call_index].get("tool_call_id")
+        if result_provider_id is not None and result_provider_id != call_provider_id:
+            continue
+        if (
+            index > call_index
+            and boundaries[index] == boundaries[call_index]
+            and rounds[index] > call_round
+            and event.get("turn_index") == live_events[call_index].get("turn_index")
+            and isinstance(event.get("turn_index"), int)
+        ):
+            candidates[identity] = index
+    starts: dict[int, list[str]] = {}
+    for identity in candidates:
+        starts.setdefault(call_info[identity][0], []).append(identity)
+    anchor_for: dict[str, int] = {}
+    invalid: set[str] = set()
+    pending: dict[str, str] = {}
+    call_group: list[int] = []
+    for index, event in enumerate(live_events):
+        etype = event.get("type")
+        canonical = event.get("message") if etype == "assistant_message" else None
+        is_announcement = etype == "assistant_tool_calls" or (
+            isinstance(canonical, dict) and canonical.get("tool_calls")
+        )
+        if etype == "tool_call":
+            call_group.append(index)
+        elif etype == "subagent_call":
+            pass
+        elif not is_announcement:
+            if pending and len(call_group) > 1:
+                invalid.update(pending.values())
+                pending.clear()
+            if pending and etype not in {
+                "assistant_round_start",
+                "assistant_message",
+                "plugin_hook_timing",
+                "processing_start",
+                "processing_end",
+                "background_result",
+                "tool_result",
+                "user_message",
+                "user_input_injected",
+                "compact_complete",
+                "compact_replace",
+            }:
+                invalid.update(pending.values())
+                pending.clear()
+            call_group.clear()
+        for identity in starts.get(index, ()):
+            pending[call_info[identity][2]] = identity
+        if is_announcement and pending:
+            calls = (
+                canonical.get("tool_calls") if canonical else event.get("tool_calls")
+            )
+            announced = {str(call.get("id") or "") for call in calls or []}
+            matched = announced & pending.keys()
+            group_provider_ids = {
+                str(
+                    live_events[pos].get("tool_call_id")
+                    or identities[id(live_events[pos])]
+                )
+                for pos in call_group
+            }
+            if not matched or (
+                not pending.keys() <= announced or not group_provider_ids <= announced
+            ):
+                invalid.update(pending.values())
+                pending.clear()
+            else:
+                for provider_id in matched:
+                    identity = pending.pop(provider_id)
+                    anchor_for[identity] = index
+            call_group.clear()
+        if (
+            event.get("type")
+            in {
+                "assistant_round_start",
+                "user_message",
+                "user_input_injected",
+                "compact_complete",
+                "compact_replace",
+            }
+            and pending
+        ):
+            for identity in pending.values():
+                anchor_for[identity] = call_info[identity][0]
+            pending.clear()
+    for identity in pending.values():
+        anchor_for[identity] = call_info[identity][0]
+    for identity in invalid:
+        candidates.pop(identity, None)
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    remove: set[int] = set()
+    for identity, result_index in candidates.items():
+        projected = dict(live_events[result_index])
+        projected["_source_event_id"] = projected.pop("event_id", None)
+        projected["_settled_from_call"] = True
+        grouped.setdefault(anchor_for[identity], []).append(projected)
+        remove.add(result_index)
+    replay_events: list[dict[str, Any]] = []
+    for index, event in enumerate(live_events):
+        identity = identities[id(event)]
+        if index in remove or (
+            event.get("type") == "tool_result" and identity in late_results
+        ):
             continue
         replay_events.append(event)
         if event.get("type") == "tool_call" and identity in late_results:
             replay_events.append(late_results[identity])
+        replay_events.extend(grouped.get(index, ()))
     return replay_events
 
 

@@ -28,8 +28,8 @@ monitoring or conversational creature it is a product defect.
 - **Hand off to a separate agent.** Overkill for what is essentially
   "rewrite the old turns into a paragraph."
 - **Background task + atomic splice.** Summarise in parallel with the
-  controller; swap the conversation in between turns. This is what
-  the framework does.
+  controller; apply the result in a synchronous splice once its captured
+  prefix has been validated. This is what the framework does.
 
 ## What we actually do
 
@@ -54,16 +54,20 @@ Flow:
      strings, and other high-signal tokens verbatim.
 4. Meanwhile the controller keeps processing events: tools run,
    sub-agents spawn, the user can keep typing.
-5. When the summary is ready, the manager waits for the current turn
-   to end, then **atomically** rewrites the conversation:
-   - old compact zone replaced by `{system prompt, prior summaries,
-     new summary, live zone raw messages}`,
-   - emits a `compact_complete` event.
+5. When the summary is ready, the manager checks that the conversation
+   object and captured prefix still match, then **synchronously** splices
+   the new summary in front of the current live zone. It does not wait for
+   the current controller turn to end. A changed prefix aborts the attempt
+   instead of overwriting newer history.
+6. The manager emits `compact_complete`, flushes queued session events,
+   and persists the compacted checkpoint. Completion reports the in-memory
+   result, not a guarantee that persistence has finished.
 
 ## Invariants preserved
 
-- **No mid-turn swap.** Conversation is only replaced between turns,
-  so the controller never sees messages vanish during an LLM call.
+- **Validated mid-turn splice.** The prefix check and splice have no
+  intervening `await`. The live tail can contain tool calls whose results
+  are still pending; their announcements are retained for those results.
 - **Live zone never shrinks during compaction.** New turns accrete
   onto the live zone while the summary is in flight; the splice
   accounts for that.
@@ -72,6 +76,26 @@ Flow:
   than getting lost.
 - **Opt-out per creature.** `compact.enabled: false` disables automatic
   triggers while leaving the explicit `/compact` command available.
+
+## Cancellation and terminal events
+
+When an output router is configured, every dispatched attempt emits
+`compact_start` followed by one terminal: `compact_complete` or
+`compact_skipped`. Cancellation before the task first runs still emits
+`compact_skipped` and releases that task's single-flight
+lease. Once `compact_complete` has been emitted, cancellation or a flush
+failure must not emit a second terminal or relabel the applied summary as
+skipped. The task remains active through its post-completion work.
+
+`CompactManager.cancel()` cancels and waits for the task it observed. Its
+cleanup cannot release a successor task's lease. It does not roll back an
+already-applied summary or promise to finish an interrupted checkpoint.
+
+The `round` field is a successful-compaction ordinal, not a unique attempt
+ID: skipped attempts do not increment the counter, so a retry can use the
+same number. The one-terminal rule applies per dispatched attempt. A
+`too_short` pre-check can report `compact_skipped` without dispatching a
+new task or emitting `compact_start`.
 
 ## Where it lives in the code
 

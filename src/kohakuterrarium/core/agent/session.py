@@ -36,6 +36,9 @@ class AgentSessionMixin:
         self.session_store: Any = None
         self._session_output: Any = None
         self._pending_resume_events: list[dict] | None = None
+        self._system_prompt_override: str | None = None
+        self._system_prompt_appends: list[str] = []
+        self._managed_prompt_sections: dict[str, str] = {}
 
     def _publish_session_info(self) -> None:
         """Publish session info to output (for TUI session panel).
@@ -43,17 +46,7 @@ class AgentSessionMixin:
         Handles session ID retrieval, LLM profile persistence,
         prompt cache key, embedding config, and session_info notification.
         """
-        session_id = ""
-        if self.session_store:
-            try:
-                meta = self.session_store.load_meta()
-                session_id = meta.get("session_id", "")
-            except Exception as e:
-                logger.warning(
-                    "Failed to load session meta for session_id",
-                    error=str(e),
-                    exc_info=True,
-                )
+        session_id = self._bind_model_session(self.llm)
 
         # Save selected preset/profile name to session state for resume
         selected_llm_name = self._llm_selector or self.config.llm_profile or ""
@@ -61,11 +54,6 @@ class AgentSessionMixin:
             self.session_store.state[f"{self.config.name}:llm_profile"] = (
                 selected_llm_name
             )
-
-        # Set prompt_cache_key on LLM provider for cache routing
-        if session_id and hasattr(self.llm, "prompt_cache_key"):
-            self.llm.prompt_cache_key = session_id
-            logger.info("Prompt cache key set", cache_key=session_id[:16])
 
         # Save embedding config to session state for search_memory tool and resume
         if self.session_store:
@@ -115,7 +103,12 @@ class AgentSessionMixin:
         Wires scratchpad + plugin-hook observers so Wave B
         ``scratchpad_write`` / ``plugin_hook_timing`` events flow.
         """
-        self.session_store = store
+        if self.session_store is not store:
+            # The engine can attach its store after start, before the first turn.
+            if self.session_store is not None and hasattr(self.llm, "prompt_cache_key"):
+                self.llm.prompt_cache_key = None
+            self.session_store = store
+            self._bind_model_session(self.llm)
         # Controller needs direct access for artifact writes.
         if hasattr(self, "controller") and self.controller is not None:
             self.controller.session_store = store
@@ -203,10 +196,19 @@ class AgentSessionMixin:
             return
 
         if replace:
+            self._system_prompt_override = content
+            self._managed_prompt_sections = {}
+            self._system_prompt_appends = []
             sys_msg.content = content
+        elif isinstance(sys_msg.content, str):
+            self._system_prompt_appends = [
+                *getattr(self, "_system_prompt_appends", []),
+                content,
+            ]
+            sys_msg.content += "\n\n" + content
         else:
-            if isinstance(sys_msg.content, str):
-                sys_msg.content = sys_msg.content + "\n\n" + content
+            return
+        self._controller_config.system_prompt = sys_msg.content
 
         logger.info("System prompt updated", replace=replace, added_length=len(content))
 

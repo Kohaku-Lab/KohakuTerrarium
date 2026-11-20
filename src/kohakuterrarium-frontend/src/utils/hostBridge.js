@@ -8,6 +8,8 @@
  * Callers test capabilities, never the shell kind.
  */
 
+import { shallowRef } from "vue"
+
 export const DESKTOP_PROTOCOL = 1
 
 const KIND_PYWEBVIEW = "pywebview"
@@ -51,18 +53,38 @@ export function hostSupports(name) {
   }
 }
 
-/** Shell capabilities for this protocol version, or ``null`` when unavailable. */
-export async function desktopCapabilities() {
-  if (!hostSupports("get_desktop_capabilities")) return null
-  try {
-    const capabilities = await call("get_desktop_capabilities")
-    if (capabilities?.surface === "desktop" && capabilities.protocol === DESKTOP_PROTOCOL) {
-      return capabilities
-    }
-  } catch {
-    // A shell that cannot answer is treated as having no native features.
+let capabilitiesBridge, capabilitiesPromise
+const nativeCapabilities = shallowRef(null)
+
+/** Shell capabilities cached for the current native bridge. Missing fields mean unsupported. */
+export function desktopCapabilities({ refresh = false } = {}) {
+  const bridge = window.pywebview?.api || window.__TAURI_INTERNALS__?.invoke
+  if (!bridge) return Promise.resolve(null)
+  if (capabilitiesBridge !== bridge) {
+    capabilitiesBridge = bridge
+    nativeCapabilities.value = null
+    capabilitiesPromise = null
   }
-  return null
+  if (!hostSupports("get_desktop_capabilities")) return Promise.resolve(null)
+  if (refresh || !capabilitiesPromise) {
+    const pending = (async () => {
+      try {
+        const value = await call("get_desktop_capabilities")
+        const result =
+          value?.surface === "desktop" && value.protocol === DESKTOP_PROTOCOL ? value : null
+        if (capabilitiesBridge === bridge && capabilitiesPromise === pending)
+          nativeCapabilities.value = result
+        return result
+      } catch {
+        return null
+      }
+    })()
+    capabilitiesPromise = pending
+    void pending.then((result) => {
+      if (!result && capabilitiesPromise === pending) capabilitiesPromise = null
+    })
+  }
+  return capabilitiesPromise
 }
 
 /** Ask the shell to flash or bounce its window. Resolves ``false`` when it cannot. */
@@ -369,7 +391,12 @@ export async function installShellUpdate() {
 
 /** Whether the shell can draw an extension overlay in its own native window. */
 export function overlayWindowsSupported() {
-  return hostKind() === KIND_TAURI && hostSupports("open_overlay_window")
+  const caps = nativeCapabilities.value
+  return (
+    hostKind() === KIND_TAURI &&
+    capabilitiesBridge === window.__TAURI_INTERNALS__?.invoke &&
+    caps?.overlayWindows === true
+  )
 }
 
 async function callBoolean(name, ...args) {
@@ -384,6 +411,16 @@ async function callBoolean(name, ...args) {
 /** Bring the main window forward showing the running session `scope`; called by the HUD window. */
 export function focusSession(scope) {
   return callBoolean("focus_session", String(scope))
+}
+
+export async function desktopWindowFocused() {
+  if (!(await desktopCapabilities())?.desktopContextFocus) return document.hasFocus()
+  return callBoolean("desktop_window_focused")
+}
+
+export async function navigateMain(target) {
+  if (!(await desktopCapabilities())?.mainNavigation) return false
+  return callBoolean("navigate_main", target)
 }
 
 /** Open (or show) a native overlay window: `{ label, key, width, height, anchor, alwaysOnTop }`. */
@@ -424,6 +461,56 @@ export function startOverlayDrag() {
 /** Move and resize the calling overlay window (logical screen pixels). */
 export function setOverlayBounds(x, y, width, height) {
   return callBoolean("overlay_set_bounds", x, y, width, height)
+}
+
+/** Resize in place; WebView screen coordinates are not authoritative. */
+export async function resizeOverlayWindow(width, height) {
+  const capabilities = await desktopCapabilities()
+  if (capabilities?.overlayResize) return callBoolean("overlay_resize", width, height)
+  const bounds = await getOverlayBounds()
+  return setOverlayBounds(
+    bounds?.[0] ?? window.screenX,
+    bounds?.[1] ?? window.screenY,
+    width,
+    height,
+  )
+}
+
+/** Native placement snapshot/restore; never compare these coordinates with WebView screen values. */
+export async function overlayPlacement(operation = "read", placement = null) {
+  if (!(await desktopCapabilities())?.overlayPlacementV1) return null
+  try {
+    return await call("overlay_placement", operation, placement)
+  } catch {
+    return null
+  }
+}
+
+export async function getOverlayBounds() {
+  try {
+    const bounds = await call("overlay_get_bounds")
+    return Array.isArray(bounds) && bounds.length === 4 && bounds.every(Number.isFinite)
+      ? bounds
+      : null
+  } catch {
+    return null
+  }
+}
+
+/** Visible monitor work area in overlay-relative CSS pixels. */
+export async function getOverlayViewport(x, y) {
+  try {
+    const rect = await call("overlay_get_viewport", x, y)
+    return Array.isArray(rect) &&
+      rect.length === 4 &&
+      rect.every(Number.isFinite) &&
+      rect[2] >= 0 &&
+      rect[3] >= 0
+      ? rect
+      : null
+  } catch {
+    return null
+  }
 }
 
 /** Report the `[x, y, width, height]` rectangles of the calling overlay that catch the mouse. */

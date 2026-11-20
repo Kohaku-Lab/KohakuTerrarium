@@ -6,11 +6,23 @@ Backend types select OpenAI-compatible, Anthropic-compatible, or Codex OAuth
 transport. Legacy ``codex-oauth`` values normalize to ``codex``.
 """
 
+import os
+import tempfile
+import time
+from contextlib import contextmanager
+from dataclasses import replace
+from itertools import chain
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from kohakuterrarium.llm.catalog_endpoints import (
+    CATALOG_ENDPOINTS,
+    CATALOG_KEY_ENVS,
+    MIMO_ENDPOINT,
+    catalog_kind,
+)
 from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.llm.profiles.api_keys import KT_DIR, PROVIDER_KEY_MAP
 from kohakuterrarium.llm.profiles.backend_registry import (
@@ -20,6 +32,7 @@ from kohakuterrarium.llm.profiles.backend_registry import (
 )
 from kohakuterrarium.llm.profiles.types import LLMBackend
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.file.lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -27,6 +40,7 @@ logger = get_logger(__name__)
 # Preserve the display constant while live I/O resolves the current config root.
 PROFILES_PATH = KT_DIR / "llm_profiles.yaml"
 _SCHEMA_VERSION = 3
+_REPLACE_ATTEMPTS = 6
 
 
 def _profiles_path() -> Path:
@@ -34,7 +48,17 @@ def _profiles_path() -> Path:
     return config_dir() / "llm_profiles.yaml"
 
 
+def catalog_backend(name: str) -> LLMBackend:
+    return LLMBackend(
+        name=name,
+        backend_type="openai",
+        base_url=CATALOG_ENDPOINTS[name],
+        api_key_env=CATALOG_KEY_ENVS[name],
+    )
+
+
 _BUILTIN_PROVIDER_NAMES: set[str] = {
+    *CATALOG_ENDPOINTS,
     "codex",
     "grok-subscription",
     "google-antigravity",
@@ -46,6 +70,17 @@ _BUILTIN_PROVIDER_NAMES: set[str] = {
     "kimi-code",
     "glm-coding",
 }
+
+
+def is_builtin_backend(backend: LLMBackend) -> bool:
+    """Whether settings should present this record as a managed built-in."""
+    if backend.name not in CATALOG_ENDPOINTS:
+        return backend.name in _BUILTIN_PROVIDER_NAMES
+    default = catalog_backend(backend.name)
+    return catalog_kind(backend.base_url) == backend.name and backend == replace(
+        default, base_url=backend.base_url
+    )
+
 
 # Legacy presets sometimes placed transport types in the provider field.
 _LEGACY_BACKEND_TYPE_VALUES: set[str] = {"openai", "codex", "codex-oauth", "anthropic"}
@@ -61,27 +96,74 @@ def _normalize_backend_type(value: str) -> str:
 def load_yaml_store() -> dict[str, Any]:
     """Read the shared ``llm_profiles.yaml`` — returns ``{}`` on missing/bad file."""
     path = _profiles_path()
-    if not path.exists():
-        return {}
     try:
-        with open(path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
+        # Release the handle before parsing so a Windows writer can replace it.
+        content = path.read_text(encoding="utf-8")
+        return yaml.safe_load(content) or {}
+    except FileNotFoundError:
+        return {}
     except Exception as e:
         logger.warning("Failed to load LLM profiles", error=str(e))
         return {}
 
 
-def save_yaml_store(data: dict[str, Any]) -> None:
-    """Overwrite the shared ``llm_profiles.yaml``."""
-    path = _profiles_path()
+@contextmanager
+def profile_transaction():
+    """Serialize the whole profile read/modify/write operation across processes."""
+    lock = FileLock(_profiles_path().with_suffix(".yaml.lock"))
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            lock.acquire()
+            break
+        except FileLockBusy:
+            if time.monotonic() >= deadline:
+                raise ValueError("Model settings are busy. Retry saving.") from None
+            time.sleep(0.025)
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def write_profile_bytes(path: Path, content: bytes) -> None:
+    """Replace the file under the caller's transaction; readers see complete YAML."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    fd, staging = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+        # Windows can refuse replacement while a reader still holds the destination.
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(staging, path)
+                break
+            except OSError as exc:
+                if (
+                    getattr(exc, "winerror", None) not in {5, 32, 33}
+                    or attempt + 1 == _REPLACE_ATTEMPTS
+                ):
+                    raise
+                time.sleep(0.025 * 2**attempt)
+    finally:
+        Path(staging).unlink(missing_ok=True)
+
+
+def write_yaml_locked(data: dict[str, Any]) -> None:
+    content = yaml.safe_dump(data, default_flow_style=False, sort_keys=False)
+    write_profile_bytes(_profiles_path(), content.encode("utf-8"))
+
+
+def save_yaml_store(data: dict[str, Any]) -> None:
+    """Atomically replace the complete profile store."""
+    with profile_transaction():
+        write_yaml_locked(data)
 
 
 def _built_in_providers() -> dict[str, LLMBackend]:
     """Return built-in provider transports and native-tool compatibility metadata."""
     return {
+        **{name: catalog_backend(name) for name in CATALOG_ENDPOINTS},
         "codex": LLMBackend(
             name="codex",
             backend_type="codex",
@@ -126,7 +208,7 @@ def _built_in_providers() -> dict[str, LLMBackend]:
         "mimo": LLMBackend(
             name="mimo",
             backend_type="openai",
-            base_url="https://api.xiaomimimo.com/v1",
+            base_url=MIMO_ENDPOINT,
             api_key_env="MIMO_API_KEY",
         ),
         "kimi-code": LLMBackend(
@@ -155,6 +237,9 @@ def legacy_provider_from_data(data: dict[str, Any]) -> str:
     base_url = data.get("base_url", "")
     api_key_env = data.get("api_key_env", "")
 
+    inferred = catalog_kind(base_url)
+    if inferred in CATALOG_ENDPOINTS:
+        return inferred
     if backend_type == "codex":
         return "codex"
     if backend_type == "grok-subscription":
@@ -200,45 +285,64 @@ def clear_remote_backends() -> None:
     _remote_backends.clear()
 
 
-def load_backends() -> dict[str, LLMBackend]:
-    """Merge providers while preserving environment templates for consume-time expansion."""
+def _legacy_entries(section):
+    if isinstance(section, dict):
+        for entry in section.values():
+            if isinstance(entry, dict) and isinstance(entry.get("model"), str):
+                yield entry
+
+
+def load_backends(*, include_remote: bool = True) -> dict[str, LLMBackend]:
+    """Resolve explicit transports before falling back to new catalog defaults."""
     data = load_yaml_store()
     backends = _built_in_providers()
+    # These names used to be user-defined. Apply their defaults last so an
+    # upgrade cannot redirect an existing profile, including on lab workers.
+    defaults = {name: backends.pop(name) for name in CATALOG_ENDPOINTS}
     for name, backend in package_provider_records().items():
         backends.setdefault(name, backend)
-
     user_backends = data.get("backends") or data.get("providers") or {}
     if isinstance(user_backends, dict):
         for name, bdata in user_backends.items():
             if isinstance(bdata, dict):
                 backends[name] = LLMBackend.from_dict(name, bdata)
 
-    # Local definitions override host-fetched entries with the same name.
-    for name, backend in _remote_backends.items():
-        backends.setdefault(name, backend)
-
-    # Custom providers default their native-tool compatibility key to their own name.
-    for name, backend in backends.items():
-        if name not in _BUILTIN_PROVIDER_NAMES and not backend.provider_name:
-            backend.provider_name = name
-
-    # Synthesize missing providers for legacy presets with inline transport fields.
-    legacy = data.get("profiles", {})
-    if isinstance(legacy, dict):
-        for _name, pdata in legacy.items():
-            if not isinstance(pdata, dict):
+    # Both flat schemas carried transport settings inline. A nested provider
+    # bucket has preset dictionaries rather than a string model ID.
+    for pdata in chain(
+        _legacy_entries(data.get("presets")), _legacy_entries(data.get("profiles"))
+    ):
+        name = legacy_provider_from_data(pdata)
+        if name and name not in backends:
+            default = defaults.get(name)
+            if default and not (pdata.get("base_url") or pdata.get("api_key_env")):
                 continue
-            inferred = legacy_provider_from_data(pdata)
-            if inferred and inferred not in backends:
-                backends[inferred] = LLMBackend(
-                    name=inferred,
-                    backend_type=_normalize_backend_type(
-                        pdata.get("backend_type") or pdata.get("provider", "openai")
-                    ),
-                    base_url=pdata.get("base_url", ""),
-                    api_key_env=pdata.get("api_key_env", ""),
-                )
-    return backends
+            endpoint = pdata.get("base_url") or (default.base_url if default else "")
+            official_env = (
+                default.api_key_env
+                if default and catalog_kind(endpoint) == name
+                else ""
+            )
+            legacy_type = (
+                default.backend_type if default else pdata.get("provider", "openai")
+            )
+            backends[name] = LLMBackend(
+                name=name,
+                backend_type=_normalize_backend_type(
+                    pdata.get("backend_type") or legacy_type
+                ),
+                base_url=endpoint,
+                api_key_env=pdata.get("api_key_env") or official_env,
+            )
+    if include_remote:
+        for name, backend in _remote_backends.items():
+            backends.setdefault(name, replace(backend))
+    for name, default in defaults.items():
+        backends.setdefault(name, default)
+    for name, backend in backends.items():
+        if not is_builtin_backend(backend) and not backend.provider_name:
+            backend.provider_name = name
+    return {**defaults, **backends}
 
 
 def package_provider_records() -> dict[str, LLMBackend]:

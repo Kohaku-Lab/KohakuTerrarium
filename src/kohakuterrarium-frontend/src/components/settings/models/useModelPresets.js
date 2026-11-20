@@ -1,7 +1,12 @@
 import { computed, ref } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
-import { cloneOf, groupPresets, presetKey } from "@/components/settings/models/presetModel"
+import {
+  cloneOf,
+  freeName,
+  groupPresets,
+  presetKey,
+} from "@/components/settings/models/presetModel"
 import { configAPI, settingsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
@@ -57,6 +62,18 @@ export function useModelPresets() {
     ElMessage.info(t("settings.models.cloned", { name: base.name }))
   }
 
+  function startDiscovered(draft) {
+    const sameProvider = presets.value.filter((p) => p.provider === draft.provider)
+    const matches = sameProvider.filter((p) => p.model === draft.model)
+    const existing = matches.find((p) => p.source === "user") || matches[0]
+    if (existing) return select(existing)
+    startBlank()
+    const name = sameProvider.some((p) => p.name === draft.name)
+      ? freeName(draft.name, draft.provider, presets.value)
+      : draft.name
+    editing.value = { ...draft, name }
+  }
+
   function close() {
     open.value = false
     selectedKey.value = ""
@@ -70,7 +87,9 @@ export function useModelPresets() {
 
   async function save(payload) {
     try {
-      await settingsAPI.saveProfile(payload)
+      await settingsAPI.saveProfile(
+        mode.value === "new" ? { ...payload, create_only: true } : payload,
+      )
       ElMessage.success(t("settings.models.saved", { name: payload.name }))
       selectedKey.value = `${payload.provider}/${payload.name}`
       await load()
@@ -133,6 +152,7 @@ export function useModelPresets() {
     load,
     select,
     startBlank,
+    startDiscovered,
     startFrom,
     close,
     back,

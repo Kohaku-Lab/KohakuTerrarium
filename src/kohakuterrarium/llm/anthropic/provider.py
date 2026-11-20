@@ -40,7 +40,7 @@ from kohakuterrarium.llm.anthropic.images import (
     prepare_anthropic_images,
     prepare_anthropic_request,
 )
-from kohakuterrarium.llm.profiles.api_keys import get_api_key
+from kohakuterrarium.llm.profiles.api_keys import backend_api_key, get_api_key
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -198,6 +198,8 @@ class AnthropicProvider(BaseLLMProvider):
         credential_provider = getattr(self, "_credential_provider", "")
         if credential_provider:
             clone._credential_provider = credential_provider
+            if hasattr(self, "_credential_env"):
+                clone._credential_env = self._credential_env
         if hasattr(self, "_profile_max_context"):
             clone._profile_max_context = self._profile_max_context
         return clone
@@ -207,7 +209,11 @@ class AnthropicProvider(BaseLLMProvider):
         lookup_key = getattr(self, "_credential_provider", "") or self.provider_name
         if not lookup_key:
             return False
-        new_key = get_api_key(lookup_key)
+        new_key = (
+            backend_api_key(lookup_key, self._credential_env)
+            if hasattr(self, "_credential_env")
+            else get_api_key(lookup_key)
+        )
         if not new_key or new_key == self._api_key:
             return False
         old = self._client

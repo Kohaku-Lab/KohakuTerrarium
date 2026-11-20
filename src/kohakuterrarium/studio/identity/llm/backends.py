@@ -7,34 +7,24 @@ this module validates and orchestrates Studio operations.
 
 from typing import Any
 
-from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP
+from kohakuterrarium.llm.discovery import supports_discovery
+from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP, backend_api_key
 from kohakuterrarium.llm.profiles.backend_registry import (
     BUILTIN_BACKEND_TYPES,
     package_backend,
     package_backends,
 )
-from kohakuterrarium.llm.profiles.backends import package_provider_records
+from kohakuterrarium.llm.profiles.backends import (
+    is_builtin_backend,
+    package_provider_records,
+)
 from kohakuterrarium.llm.profiles.resolve import (
     LLMBackend,
     _is_available,
     delete_backend,
-    get_api_key,
     load_backends,
     save_backend,
 )
-
-_BUILT_IN_BACKEND_NAMES = {
-    "codex",
-    "grok-subscription",
-    "google-antigravity",
-    "openai",
-    "openrouter",
-    "anthropic",
-    "gemini",
-    "mimo",
-    "kimi-code",
-    "glm-coding",
-}
 
 
 def list_backend_types() -> list[dict[str, Any]]:
@@ -68,11 +58,12 @@ def list_backends() -> list[dict[str, Any]]:
     """Return built-in and user-configured backends as Studio records."""
     rows = []
     package_records = package_provider_records()
-    for name, backend in load_backends().items():
+    backends = load_backends()
+    for name, backend in backends.items():
         descriptor = package_backend(backend.backend_type)
         if backend == package_records.get(name):
             source = "package"
-        elif name in _BUILT_IN_BACKEND_NAMES:
+        elif is_builtin_backend(backend):
             source = "builtin"
         else:
             source = "user"
@@ -84,12 +75,13 @@ def list_backends() -> list[dict[str, Any]]:
                 "api_key_env": backend.api_key_env or "",
                 "provider_name": backend.provider_name or "",
                 "provider_native_tools": list(backend.provider_native_tools),
-                "built_in": name in _BUILT_IN_BACKEND_NAMES,
+                "model_discovery": supports_discovery(backend),
+                "built_in": source == "builtin",
                 "source": source,
                 "package": descriptor.package if descriptor else "",
                 "credentials": descriptor.credentials if descriptor else "api_key",
-                "has_token": bool(get_api_key(name)),
-                "available": _is_available(name),
+                "has_token": bool(backend_api_key(name, backend.api_key_env)),
+                "available": _is_available(name, backends),
             }
         )
     return rows

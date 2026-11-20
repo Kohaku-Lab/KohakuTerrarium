@@ -95,7 +95,9 @@ ALIASES: dict[str, tuple[str, str]] = {
     "kimi-coder": ("openrouter", "kimi-k2.7-code"),
     "kimi-code": ("kimi-code", "kimi-for-coding"),
     "minimax": ("openrouter", "minimax-m3"),
-    "mimo": ("mimo", "mimo-v2.5-pro"),
+    "mimo": ("mimo", "mimo-v2.6-pro"),
+    # The unqualified model id previously resolved to OpenRouter alone.
+    "mimo-v2.6-pro": ("openrouter", "mimo-v2.6-pro"),
     "glm": ("openrouter", "glm-5.3"),
     "glm-code": ("glm-coding", "glm-5.2"),
     "glm-coding": ("glm-coding", "glm-5.2"),

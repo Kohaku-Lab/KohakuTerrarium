@@ -7,6 +7,7 @@ from kohakuterrarium.cli.identity.backend import (
 )
 from kohakuterrarium.cli.identity.backend import delete_cli as _backend_delete_cli
 from kohakuterrarium.cli.identity.backend import list_cli as _backend_list_cli
+from kohakuterrarium.cli.identity.discovery import models_cli
 from kohakuterrarium.cli.identity.keys import delete_cli as _keys_delete_cli
 from kohakuterrarium.cli.identity.keys import list_cli as _keys_list_cli
 from kohakuterrarium.cli.identity.keys import set_cli as _keys_set_cli
@@ -48,6 +49,11 @@ def add_config_subparser(subparsers):
     )
     provider_sub = provider_parser.add_subparsers(dest="config_provider_command")
     provider_sub.add_parser("list", help="List providers")
+    catalog = provider_sub.add_parser("models", help="Discover models from a provider")
+    catalog.add_argument("name")
+    catalog.add_argument(
+        "--save", metavar="MODEL_ID", help="Create a preset for this model"
+    )
     p_add = provider_sub.add_parser("add", help="Add or update a provider")
     p_add.add_argument("name", nargs="?", default=None)
     p_edit = provider_sub.add_parser("edit", help="Edit an existing provider")
@@ -125,6 +131,8 @@ def _dispatch_provider(args):
     sub = getattr(args, "config_provider_command", None) or "list"
     name = getattr(args, "name", None)
     match sub:
+        case "models":
+            return models_cli(name, args.save)
         case "list":
             return _backend_list_cli()
         case "add" | "edit":

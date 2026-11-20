@@ -154,6 +154,355 @@ def test_identity_aliases_preserve_first_match(
     assert events == before
 
 
+def test_same_turn_result_after_assistant_round_is_projected_to_call():
+    events = [
+        _event(1, "tool_call", "job", 3),
+        _event(2, "assistant_round_start", "", 3),
+        _event(3, "assistant_message", "", 3, content="intermediate"),
+        _event(4, "tool_result", "job", 3, output="done"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4})
+    assert actual == [events[0], _projected(events[3]), events[1], events[2]]
+
+
+def test_same_turn_projection_preserves_single_explicit_announcement():
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(
+            2,
+            "tool_call",
+            "job",
+            3,
+            branch_id=1,
+            name="work",
+            tool_call_id="call1",
+            args={},
+        ),
+        _event(
+            3,
+            "assistant_tool_calls",
+            "",
+            3,
+            branch_id=1,
+            tool_calls=[
+                {
+                    "id": "call1",
+                    "type": "function",
+                    "function": {"name": "work", "arguments": "{}"},
+                }
+            ],
+        ),
+        _event(4, "assistant_round_start", "", 3, branch_id=1),
+        _event(5, "tool_result", "job", 3, branch_id=1, output="done"),
+    ]
+    messages = history.replay_with_settled_tools(events, branch_view={3: 1})
+    announcements = [
+        call["id"] for message in messages for call in message.get("tool_calls", [])
+    ]
+    assert announcements == ["call1"]
+    call_index = next(
+        i for i, message in enumerate(messages) if message.get("tool_calls")
+    )
+    assert messages[call_index + 1]["role"] == "tool"
+    assert messages[call_index + 1]["content"] == "done"
+
+
+@pytest.mark.parametrize("canonical", [False, True])
+def test_same_turn_grouped_late_results_keep_one_announcement_and_text(canonical):
+    calls = [
+        {
+            "id": f"call{i}",
+            "type": "function",
+            "function": {"name": "work", "arguments": "{}"},
+        }
+        for i in (1, 2)
+    ]
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(9, "assistant_round_start", "", 3, branch_id=1),
+        _event(
+            2, "tool_call", "job1", 3, branch_id=1, name="work", tool_call_id="call1"
+        ),
+        _event(
+            3, "tool_call", "job2", 3, branch_id=1, name="work", tool_call_id="call2"
+        ),
+        _event(
+            4,
+            "assistant_message" if canonical else "assistant_tool_calls",
+            "",
+            3,
+            branch_id=1,
+            **(
+                {
+                    "round_start_event_id": 9,
+                    "message": {
+                        "role": "assistant",
+                        "content": "preserve this",
+                        "tool_calls": calls,
+                    },
+                }
+                if canonical
+                else {"content": "preserve this", "tool_calls": calls}
+            ),
+        ),
+        _event(5, "assistant_round_start", "", 3, branch_id=1),
+        _event(
+            6,
+            "assistant_message",
+            "",
+            3,
+            branch_id=1,
+            round_start_event_id=5,
+            message={"role": "assistant", "content": "intermediate"},
+        ),
+        _event(7, "tool_result", "job2", 3, branch_id=1, output="second"),
+        _event(8, "tool_result", "job1", 3, branch_id=1, output="first"),
+    ]
+    messages = history.replay_with_settled_tools(events, branch_view={3: 1})
+    announcements = [m for m in messages if m.get("tool_calls")]
+    assert len(announcements) == 1
+    assert announcements[0]["content"] == "preserve this"
+    assert [c["id"] for c in announcements[0]["tool_calls"]] == ["call1", "call2"]
+    idx = messages.index(announcements[0])
+    assert {
+        (m.get("tool_call_id"), m["content"]) for m in messages[idx + 1 : idx + 3]
+    } == {("call1", "first"), ("call2", "second")}
+    assert any(m.get("content") == "intermediate" for m in messages)
+
+
+def test_mismatched_canonical_announcement_is_not_projected():
+    calls = [
+        {
+            "id": "other",
+            "type": "function",
+            "function": {"name": "work", "arguments": "{}"},
+        }
+    ]
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(2, "assistant_round_start", "", 3, branch_id=1),
+        _event(3, "tool_call", "job1", 3, branch_id=1, tool_call_id="call1"),
+        _event(
+            4,
+            "assistant_message",
+            "",
+            3,
+            branch_id=1,
+            round_start_event_id=2,
+            message={"role": "assistant", "content": "canonical", "tool_calls": calls},
+        ),
+        _event(5, "assistant_round_start", "", 3, branch_id=1),
+        _event(6, "tool_result", "job1", 3, branch_id=1, output="late"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4, 5, 6})
+    assert [e["type"] for e in actual] == [e["type"] for e in events]
+    assert actual[-1]["output"] == "late"
+
+
+def test_same_turn_result_with_mismatched_provider_id_is_not_projected():
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(
+            2,
+            "tool_call",
+            "job1",
+            3,
+            branch_id=1,
+            name="work",
+            tool_call_id="call1",
+        ),
+        _event(
+            3,
+            "assistant_tool_calls",
+            "",
+            3,
+            branch_id=1,
+            tool_calls=[
+                {
+                    "id": "call1",
+                    "type": "function",
+                    "function": {"name": "work", "arguments": "{}"},
+                }
+            ],
+        ),
+        _event(4, "assistant_round_start", "", 3, branch_id=1),
+        _event(
+            5,
+            "tool_result",
+            "job1",
+            3,
+            branch_id=1,
+            tool_call_id="other",
+            output="late",
+        ),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4, 5})
+    assert actual == events
+
+
+def test_same_turn_canonical_announcement_preserves_text_and_result():
+    calls = [
+        {
+            "id": "call1",
+            "type": "function",
+            "function": {"name": "work", "arguments": "{}"},
+        }
+    ]
+    events = [
+        _event(1, "user_message", "", 3, branch_id=1, content="go"),
+        _event(2, "assistant_round_start", "", 3, branch_id=1),
+        _event(
+            3, "tool_call", "job1", 3, branch_id=1, name="work", tool_call_id="call1"
+        ),
+        _event(
+            4,
+            "assistant_message",
+            "",
+            3,
+            branch_id=1,
+            round_start_event_id=2,
+            message={
+                "role": "assistant",
+                "content": "canonical text",
+                "tool_calls": calls,
+            },
+        ),
+        _event(5, "assistant_round_start", "", 3, branch_id=1),
+        _event(
+            6,
+            "assistant_message",
+            "",
+            3,
+            branch_id=1,
+            round_start_event_id=5,
+            message={"role": "assistant", "content": "later text"},
+        ),
+        _event(7, "tool_result", "job1", 3, branch_id=1, output="done"),
+    ]
+    messages = history.replay_with_settled_tools(events, branch_view={3: 1})
+    index = next(i for i, m in enumerate(messages) if m.get("tool_calls"))
+    assert messages[index]["content"] == "canonical text"
+    assert messages[index + 1]["role"] == "tool"
+    assert messages[index + 1]["content"] == "done"
+    assert any(m.get("content") == "later text" for m in messages)
+
+
+def test_same_turn_reused_provider_id_in_later_turn_is_not_suppressed():
+    calls = [
+        {
+            "id": "shared",
+            "type": "function",
+            "function": {"name": "work", "arguments": "{}"},
+        }
+    ]
+    events = [
+        _event(1, "user_message", "", 1, branch_id=1, content="one"),
+        _event(
+            2, "tool_call", "job1", 1, branch_id=1, name="work", tool_call_id="shared"
+        ),
+        _event(3, "assistant_tool_calls", "", 1, branch_id=1, tool_calls=calls),
+        _event(4, "assistant_round_start", "", 1, branch_id=1),
+        _event(
+            10,
+            "assistant_message",
+            "",
+            1,
+            branch_id=1,
+            round_start_event_id=4,
+            message={"role": "assistant", "content": "intermediate"},
+        ),
+        _event(5, "tool_result", "job1", 1, branch_id=1, output="first"),
+        _event(6, "user_message", "", 2, branch_id=1, content="two"),
+        _event(
+            7, "tool_call", "job2", 2, branch_id=1, name="work", tool_call_id="shared"
+        ),
+        _event(8, "assistant_tool_calls", "", 2, branch_id=1, tool_calls=calls),
+        _event(9, "tool_result", "job2", 2, branch_id=1, output="second"),
+    ]
+    messages = history.replay_with_settled_tools(events, branch_view={1: 1, 2: 1})
+    assert len([m for m in messages if m.get("tool_calls")]) == 2
+    first = next(i for i, m in enumerate(messages) if m.get("tool_calls"))
+    assert messages[first + 1]["role"] == "tool"
+    assert messages[first + 1]["content"] == "first"
+    assert [m["content"] for m in messages if m["role"] == "tool"] == [
+        "first",
+        "second",
+    ]
+
+
+def test_same_turn_repeated_job_identity_keeps_each_original_result():
+    events = [
+        _event(1, "tool_call", "same", 3),
+        _event(2, "tool_result", "same", 3, output="first"),
+        _event(3, "assistant_round_start", "", 3),
+        _event(4, "tool_call", "same", 3),
+        _event(5, "assistant_round_start", "", 3),
+        _event(6, "tool_result", "same", 3, output="second"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4, 5, 6})
+    assert [e["output"] for e in actual if e["type"] == "tool_result"] == [
+        "first",
+        "second",
+    ]
+    assert len([e for e in actual if e["type"] == "tool_call"]) == 2
+
+
+def test_reused_job_id_does_not_attach_discarded_earlier_result():
+    events = [
+        _event(1, "tool_call", "same", 1, branch_id=1),
+        _event(2, "tool_result", "same", 1, branch_id=1, output="old"),
+        _event(3, "tool_call", "same", 2, branch_id=1),
+    ]
+    actual = history.include_settled_tool_results(events, {3})
+    assert [event["type"] for event in actual] == ["tool_call"]
+
+
+def test_same_turn_multiple_results_do_not_disappear():
+    events = [
+        _event(1, "tool_call", "job", 3),
+        _event(2, "assistant_round_start", "", 3),
+        _event(3, "tool_result", "job", 3, output="first"),
+        _event(4, "tool_result", "job", 3, output="second"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4})
+    assert [e["output"] for e in actual if e["type"] == "tool_result"] == [
+        "first",
+        "second",
+    ]
+
+
+def test_same_turn_projection_does_not_cross_compaction_boundary():
+    events = [
+        _event(1, "tool_call", "job", 3),
+        _event(2, "compact_complete", "", 3),
+        _event(3, "assistant_round_start", "", 3),
+        _event(4, "tool_result", "job", 3, output="done"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4})
+    assert actual == events
+
+
+def test_same_turn_unidentified_result_is_not_projected():
+    events = [
+        _event(1, "tool_call", "", 3),
+        _event(2, "assistant_round_start", "", 3),
+        _event(3, "tool_result", "", 3, output="done"),
+    ]
+    assert history.include_settled_tool_results(events, {1, 2, 3}) == events
+
+
+def test_same_turn_unannounced_group_does_not_split_calls():
+    events = [
+        _event(1, "tool_call", "a", 3),
+        _event(2, "tool_call", "b", 3),
+        _event(3, "tool_result", "b", 3, output="b"),
+        _event(4, "assistant_round_start", "", 3),
+        _event(5, "tool_result", "a", 3, output="a"),
+    ]
+    actual = history.include_settled_tool_results(events, {1, 2, 3, 4, 5})
+    assert actual[:2] == events[:2]
+
+
 def test_live_call_membership_and_result_coverage_are_distinct():
     stale = _event(1, "tool_call", "same", None)
     unrelated = _event(2, "assistant_message", "same", None)

@@ -69,7 +69,10 @@ import { useTabsStore } from "@/stores/tabs"
 import { installDeepLinks } from "@/utils/deepLink"
 import { installExternalLinkGuard } from "@/utils/externalLinks"
 
-useDesktopPublisher(() => useWorkContext())
+useDesktopPublisher(
+  () => useWorkContext({ local: true, retainLast: true, includeSpeech: true }),
+  () => useTabsStore().activeTab?.kind === "attach",
+)
 const openOverlaySettings = (event) => {
   const section = event.detail?.section
   if (section === "ext:virtual-pet/pets" || section === "overlays") useTabsStore().openTab({ kind: "settings", id: "settings", section })

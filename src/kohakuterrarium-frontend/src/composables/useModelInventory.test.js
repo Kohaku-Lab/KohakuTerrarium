@@ -10,6 +10,7 @@ import { useHostsStore } from "@/stores/hosts"
 import { configAPI } from "@/utils/api"
 
 vi.mock("@/utils/api", () => ({
+  settingsAPI: {},
   configAPI: {
     getModels: vi.fn(),
   },

@@ -251,6 +251,14 @@ Manage LLM providers (backends).
 
 Show Name, Backend Type, Provider identity, Native tools, and Base URL for each provider.
 
+#### `kt config provider models`
+
+`kt config provider models <provider>` fetches the current catalog and prints
+its inference IDs. Add `--save <model-id>` to create a local preset with the
+reported limits. If a preset for that model already exists under the provider,
+the command prints its name. Providers with catalog support also appear in
+the model browser in Settings.
+
 #### `kt config provider add`
 
 Interactive. Prompts for backend type, base URL, `api_key_env`, a

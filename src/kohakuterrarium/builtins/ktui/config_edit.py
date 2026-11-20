@@ -18,7 +18,8 @@ from kohakutui.ui import Confirm, Picker
 
 from kohakuterrarium.builtins.ktui.format import one_line
 from kohakuterrarium.cli.auth import login_cli
-from kohakuterrarium.llm.profiles.backends import _BUILTIN_PROVIDER_NAMES
+from kohakuterrarium.llm.discovery import discover_models, supports_discovery
+from kohakuterrarium.llm.profiles.backends import is_builtin_backend
 from kohakuterrarium.llm.profiles.resolve import (
     delete_backend,
     delete_profile,
@@ -29,6 +30,7 @@ from kohakuterrarium.llm.profiles.resolve import (
 )
 from kohakuterrarium.llm.profiles.types import LLMBackend, LLMPreset
 from kohakuterrarium.studio.identity.llm.default import resolve_and_set_default
+from kohakuterrarium.studio.identity.llm.profiles import save_discovered_model
 from kohakuterrarium.studio.identity.mcp.servers import load_servers, save_servers
 from kohakuterrarium.terrarium.drive.goal import build_goal_spec
 from kohakuterrarium.terrarium.drive.models import ActorRef
@@ -49,7 +51,7 @@ EFFORTS = ["", "minimal", "low", "medium", "high", "xhigh"]
 def provider_rows() -> list[dict]:
     rows = []
     for name, b in sorted(load_backends().items()):
-        built_in = name in _BUILTIN_PROVIDER_NAMES
+        built_in = is_builtin_backend(b)
         rows.append(
             {
                 "label": name,
@@ -78,6 +80,9 @@ def model_rows() -> list[dict]:
         }
         for (provider, name), preset in sorted(load_presets().items())
     ]
+    rows.append(
+        {"label": "Browse provider models", "value": "cfg:catalog:", "tone": "info"}
+    )
     rows.append({"label": "+ add a model", "value": "cfg:model:", "tone": "info"})
     return rows
 
@@ -110,6 +115,8 @@ class ConfigEdit:
             match kind:
                 case "provider":
                     await self.provider(name)
+                case "catalog":
+                    await self.browse_models()
                 case "model":
                     await self.model(name)
                 case "mcp":
@@ -131,7 +138,7 @@ class ConfigEdit:
         shell = self.shell
         backend = load_backends().get(name) if name else None
         if backend is not None:
-            built_in = name in _BUILTIN_PROVIDER_NAMES
+            built_in = is_builtin_backend(backend)
             actions = [("login", "sign in / set the key")]
             if not built_in:
                 actions += [("edit", "edit"), ("delete", "delete")]
@@ -228,6 +235,49 @@ class ConfigEdit:
             app.resume()
 
     # -- models ---------------------------------------------------------
+
+    async def browse_models(self) -> None:
+        shell = self.shell
+        backends = await asyncio.to_thread(load_backends)
+        choices = [
+            (name, name)
+            for name, backend in backends.items()
+            if supports_discovery(backend)
+        ]
+        provider = await self._menu("Browse provider models · choose provider", choices)
+        if not provider:
+            return
+        models = await discover_models(provider)
+        if not models:
+            shell.app.notify(f"{provider} returned no models", "info")
+            return
+        by_id = {model.id: model for model in models}
+        items = [
+            {
+                "label": f"{m.name} · {m.id}" if m.name and m.name != m.id else m.id,
+                "value": m.id,
+            }
+            for m in models
+        ]
+        selected = await shell.panel(
+            Picker(
+                items=items,
+                title=f"Models · {provider}",
+                placeholder="Filter by name or ID",
+            )
+        )
+        if selected not in by_id:
+            return
+        if await shell.panel(
+            Confirm(question=f"Save preset for {provider}/{selected}?")
+        ):
+            preset, created = await asyncio.to_thread(
+                save_discovered_model, provider, by_id[selected]
+            )
+            shell.app.notify(
+                f"{'Saved' if created else 'Existing preset:'} {provider}/{preset.name}",
+                "success",
+            )
 
     async def model(self, key: str) -> None:
         shell = self.shell

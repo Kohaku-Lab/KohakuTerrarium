@@ -914,11 +914,22 @@ PRESETS: dict[str, dict[str, Any]] = {
         "variation_groups": {"reasoning": _GLM_EFFORT_GROUP},
     },
     # ═══════════════════════════════════════════════════════
-    #  Xiaomi MiMo 2.5 Direct API (primary — ``kt login mimo``).
-    #  MiMo-V2 was deprecated by the official API on 2026-06-30.
-    #  Model ids are lowercase on the platform; thinking is a
-    #  binary toggle (default disabled — we enable it).
+    #  Xiaomi MiMo direct API. Retain explicit 2.5 preset references.
     # ═══════════════════════════════════════════════════════
+    "mimo-v2.6-pro": {
+        "provider": "mimo",
+        "model": "mimo-v2.6-pro",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "variation_groups": {"thinking": _MIMO_THINKING_GROUP},
+    },
+    "mimo-v2.6-flash": {
+        "provider": "mimo",
+        "model": "mimo-v2.6-flash",
+        "max_context": 1048576,
+        "max_output": 131072,
+        "variation_groups": {"thinking": _MIMO_THINKING_GROUP},
+    },
     "mimo-v2.5-pro": {
         "provider": "mimo",
         "model": "mimo-v2.5-pro",

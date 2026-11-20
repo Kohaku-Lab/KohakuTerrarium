@@ -3,8 +3,14 @@
 import os
 from typing import Any
 
-from kohakuterrarium.llm.profiles.api_keys import KEYS_PATH, list_api_keys
+from kohakuterrarium.llm.catalog_endpoints import CATALOG_KEY_ENVS
+from kohakuterrarium.llm.profiles.api_keys import (
+    KEYS_PATH,
+    backend_api_key,
+    list_api_keys,
+)
 from kohakuterrarium.llm.profiles.backend_registry import package_backend
+from kohakuterrarium.llm.profiles.backends import is_builtin_backend
 from kohakuterrarium.llm.profiles.resolve import (
     PROVIDER_KEY_MAP,
     _is_available,
@@ -43,7 +49,7 @@ def list_keys_payload() -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     backends = load_backends()
     for name, (backend_type, env_var) in _provider_credentials(backends).items():
-        has_key = bool(get_api_key(name))
+        has_key = bool(backend_api_key(name, env_var))
         entries.append(
             {
                 "provider": name,
@@ -52,7 +58,11 @@ def list_keys_payload() -> list[dict[str, Any]]:
                 "has_key": has_key,
                 "masked_key": masked.get(name, ""),
                 "available": _is_available(name) if name in backends else has_key,
-                "built_in": name in {"codex", *PROVIDER_KEY_MAP.keys()},
+                "built_in": (
+                    is_builtin_backend(backends[name])
+                    if name in CATALOG_KEY_ENVS and name in backends
+                    else name in {"codex", *PROVIDER_KEY_MAP}
+                ),
             }
         )
     return entries
@@ -104,4 +114,7 @@ def remove_key(provider: str) -> None:
 
 def get_existing_key(provider: str) -> str:
     """Return the resolved provider key for masked display workflows."""
+    backend = load_backends().get(provider)
+    if backend:
+        return backend_api_key(provider, backend.api_key_env)
     return get_api_key(provider)

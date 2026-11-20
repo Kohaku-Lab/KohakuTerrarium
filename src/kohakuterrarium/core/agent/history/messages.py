@@ -438,7 +438,7 @@ class AgentMessagesMixin:
         inbox = getattr(self, "_event_inbox", None)
         turn_active = processing_lock is not None and processing_lock.locked()
         input_pending = inbox is not None and len(inbox) > 0
-        if turn_active or input_pending:
+        if getattr(self, "_active_event_run", None) or turn_active or input_pending:
             raise ConflictError(
                 "Cannot mutate conversation history while a turn is active"
             )

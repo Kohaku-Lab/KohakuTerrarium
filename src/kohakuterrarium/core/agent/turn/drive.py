@@ -3,6 +3,7 @@
 import asyncio
 from typing import Any
 
+from kohakuterrarium.errors import TurnError
 from kohakuterrarium.core.agent.turn.budget_recovery import (
     sync_emergency_drop_conversation,
 )
@@ -119,6 +120,7 @@ class AgentDriveMixin:
         Returns True when the event ran; False when buffered for
         mid-turn drain — callers (WS attach) skip the post-call
         ``idle`` frame on False so KohakUwUing stays visible.
+        Raises ``TurnError`` if failed job settlement prevents admission.
 
         ``pending_id`` lets a shell mint the queued-message id up front
         (UXI-08a) so it can target the message with ``edit_pending`` /
@@ -137,8 +139,12 @@ class AgentDriveMixin:
         if pending_id:
             event.context["pending_id"] = pending_id
         if view:
-            return await continue_on_branch(self, event, view)
-        return await self._process_event(event)
+            processed = await continue_on_branch(self, event, view)
+        else:
+            processed = await self._process_event(event)
+        if error := event.context.get("settlement_error"):
+            raise TurnError(error)
+        return processed
 
     async def inject_event(self, event: TriggerEvent) -> bool:
         """Inject a custom TriggerEvent programmatically.

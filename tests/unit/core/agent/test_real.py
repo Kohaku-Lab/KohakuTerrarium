@@ -18,7 +18,7 @@ and using a `OutputRecorder` as the default output module.
 
 import asyncio
 import time
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -3117,7 +3117,9 @@ class TestInitPluginsFreshFromConfig:
 
 
 class TestPublishSessionInfo:
-    async def test_publishes_with_store_metadata_error(self, make_agent, tmp_path):
+    async def test_publishes_with_store_metadata_error(
+        self, make_agent, tmp_path, monkeypatch
+    ):
         from kohakuterrarium.session.store import SessionStore
 
         store = SessionStore(str(tmp_path / "s.kohakutr.v2"))
@@ -3132,12 +3134,13 @@ class TestPublishSessionInfo:
         agent.attach_session_store(store)
         await agent.start()
         try:
-            # Make load_meta raise to cover the defensive path.
-            def boom():
-                raise RuntimeError("disk")
-
-            store.load_meta = boom
-            agent._publish_session_info()
+            with monkeypatch.context() as patch:
+                broken_meta = Mock(wraps=store.meta)
+                broken_meta.get.side_effect = OSError("disk")
+                patch.setattr(store, "meta", broken_meta)
+                agent._recorder.clear_all()
+                agent._publish_session_info()
+                agent._recorder.assert_activity_count("session_info", 1)
         finally:
             await agent.stop()
 

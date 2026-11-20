@@ -159,6 +159,7 @@ llm_backends:
     display_name: My transport      # optional, shown in Settings
     description: One line for the settings page.
     credentials: api_key            # api_key (default) | external | none
+    model_discovery: true           # optional, exposes the catalog hook below
 
 llm_presets:
   - name: my-model
@@ -172,6 +173,7 @@ classmethod that builds it from a resolved profile:
 
 ```python
 from kohakuterrarium.llm.base import BaseLLMProvider, LLMConfig
+from kohakuterrarium.llm.discovery import DiscoveredModel
 
 
 class MyProvider(BaseLLMProvider):
@@ -181,6 +183,11 @@ class MyProvider(BaseLLMProvider):
 
     async def _stream_chat(self, messages, *, tools=None, **kwargs):
         yield "..."
+
+    @classmethod
+    async def discover_models(cls, backend) -> list[DiscoveredModel]:
+        rows = await fetch_catalog(backend)  # your transport and credentials
+        return [DiscoveredModel(id=row["id"], name=row.get("name", "")) for row in rows]
 
     @classmethod
     def doctor(cls) -> str:          # optional: shown by `kt doctor`
@@ -195,8 +202,12 @@ class MyProvider(BaseLLMProvider):
 - `credentials: external` (or `none`) means the backend handles its own
   sign-in: KohakuTerrarium never asks for, stores or checks an API key for
   it, and `kt login <name>` only prints a notice.
-- Discovery reads the manifest only; the module is imported the first time a
-  profile on that backend is built.
+- Listing installed backend types reads the manifest. Requesting a model catalog
+  loads the provider class and calls the optional async hook with its configured
+  `LLMBackend`. It needs no chat instance. Return stable inference IDs and any
+  known `max_context`, `max_output`, modalities, and reasoning levels. An empty
+  list represents a successful query with zero models. Raise an exception if
+  the catalog could not be read. Packages that omit the hook can use static presets.
 - A name equal to a built-in backend type is ignored. Two packages declaring
   the same name is an error.
 
