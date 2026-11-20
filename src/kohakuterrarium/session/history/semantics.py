@@ -48,6 +48,11 @@ def eligible_branch_history(
     ]
 
 
+# A modern user_message accompanies its user_input; it does not reopen
+# an existing Round or reset ancestry when its own path is missing.
+MEMORY_ROUND_OPENERS = frozenset({"user_input", "trigger_fired"})
+
+
 _CONTINUATIONS = frozenset(
     {"text", "text_chunk", "tool_call", "tool_result", "processing_end"}
 )

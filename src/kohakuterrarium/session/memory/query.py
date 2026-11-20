@@ -16,9 +16,11 @@ from kohakuterrarium.session.memory.visibility import (
 # Format 1 indexes the selected lineage; format 2 staged all branches;
 # format 3 added legacy ancestry, format 4 a source fingerprint, and
 # format 5 records physical source refs and disambiguates mirrored IDs;
-# format 6 preserves raw branch coordinates and strict scoped visibility.
+# format 6 preserves raw branch coordinates and strict scoped visibility;
+# format 7 additionally keys open rounds by ancestry and aligns strict
+# Search/Index/Navigation lineage inference. Old v6 rows must be rebuilt.
 _SELECTED_INDEX_FORMAT = 1
-_ALL_BRANCH_INDEX_FORMAT = 6
+_ALL_BRANCH_INDEX_FORMAT = 7
 
 
 @dataclass

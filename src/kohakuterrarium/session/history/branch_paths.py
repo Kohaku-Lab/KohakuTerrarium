@@ -3,7 +3,10 @@
 from typing import Any, Iterable
 
 
-from kohakuterrarium.session.history.semantics import eligible_branch_history
+from kohakuterrarium.session.history.semantics import (
+    MEMORY_ROUND_OPENERS,
+    eligible_branch_history,
+)
 
 
 def _coerce_path(raw: Any) -> tuple[tuple[int, int], ...]:
@@ -105,16 +108,91 @@ def index_parent_paths_by_position(
 
 def index_eligible_parent_paths_by_position(
     events_list: list[dict[str, Any]],
-) -> dict[int, tuple[tuple[int, int], ...]]:
-    """Strict Memory ancestry, keyed by original event position.
+) -> dict[int, tuple[tuple[int, int], ...] | None]:
+    """Strict Memory ancestry by physical position, independent of Replay.
 
-    Exclude invalid source coordinates before inferring ancestry; retain
-    original physical positions so Index and Context navigation can resolve
-    refs correctly without modifying Replay's compatibility projection.
+    An open round is identified by (turn, branch, ancestry), not just by its
+    turn/branch pair. A stamped completion closes only its own lineage. For
+    missing ancestry, continuations (including paired user_message records)
+    follow the latest opened lineage; an ambiguous missing-path completion
+    cannot terminate either mirror.
     """
     eligible = eligible_branch_history(events_list)
-    inferred = index_parent_paths_by_position([event for _, event in eligible])
-    return {position: path for (position, _), path in zip(eligible, inferred)}
+    paths: dict[int, tuple[tuple[int, int], ...] | None] = {}
+    latest_by_turn: dict[int, int] = {}
+    inferred_by_turn: dict[int, tuple[tuple[int, int], ...]] = {}
+    # Keep reopen order for historical missing-path continuations. Explicit
+    # completions still target their exact lineage, not this latest hint.
+    open_rounds: dict[tuple[int, int], list[tuple[tuple[int, int], ...]]] = {}
+
+    for position, event in eligible:
+        turn, branch = event.get("turn_index"), event.get("branch_id")
+        scoped = type(turn) is int and turn > 0 and type(branch) is int and branch > 0
+        kind = event.get("type")
+        raw_path = event.get("parent_branch_path")
+        inferred = False
+
+        if raw_path is not None:
+            path = _coerce_path(raw_path)
+        elif scoped and kind not in MEMORY_ROUND_OPENERS:
+            active = open_rounds.get((turn, branch), [])
+            if kind == "processing_end" and len(active) > 1:
+                # Without a parent path, completion cannot safely identify
+                # which of two mirrored rounds it terminates.
+                path = None
+            elif active:
+                # Historical null-path continuations follow the most
+                # recently (re)opened child of this exact turn/branch.
+                path = active[-1]
+            else:
+                inferred = True
+        elif scoped:
+            inferred = True
+        else:
+            path = ()
+
+        if inferred:
+            path = inferred_by_turn.get(turn)
+            if path is None:
+                path = tuple(
+                    (parent_turn, parent_branch)
+                    for parent_turn, parent_branch in sorted(latest_by_turn.items())
+                    if parent_turn < turn
+                )
+                inferred_by_turn[turn] = path
+        paths[position] = path
+
+        if scoped:
+            pair = (turn, branch)
+            if kind in MEMORY_ROUND_OPENERS and path is not None:
+                active = open_rounds.setdefault(pair, [])
+                if path in active:
+                    active.remove(path)
+                active.append(path)
+            elif kind == "processing_end" and path is not None:
+                active = open_rounds.get(pair)
+                if active is not None and path in active:
+                    active.remove(path)
+                    if not active:
+                        open_rounds.pop(pair)
+            elif (
+                raw_path is not None
+                and kind in ("text", "text_chunk", "tool_call", "tool_result")
+                and path is not None
+                and pair not in open_rounds
+            ):
+                # Legacy unscoped opener -> stamped continuation handoff:
+                # later null-path tools must retain this explicit ancestry.
+                open_rounds[pair] = [path]
+            if branch > latest_by_turn.get(turn, 0):
+                latest_by_turn[turn] = branch
+                # A newly recorded earlier sibling can change inferred
+                # ancestry for subsequent missing-path openers.
+                inferred_by_turn = {
+                    t: known for t, known in inferred_by_turn.items() if t <= turn
+                }
+
+    return paths
 
 
 def index_parent_paths(

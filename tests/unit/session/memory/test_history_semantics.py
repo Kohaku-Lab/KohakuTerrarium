@@ -1,6 +1,7 @@
 """R2 invariants: round handoffs, source coordinates, and safe index migration."""
 
 from contextlib import closing
+from pathlib import Path
 
 import pytest
 
@@ -226,7 +227,7 @@ def test_pre_r2_index_is_invalidated_before_recovering_original_coordinates(tmp_
         with pytest.raises(ValueError, match="index.*(invalid|building|rebuild)"):
             upgraded.search("needle", mode="fts", branch_view={1: 1})
         upgraded.index_events("alice", events)
-        assert upgraded._manifest()["format"] == 6
+        assert upgraded._manifest()["format"] == 7
         assert upgraded.get_stats()["fts_blocks"] == len(events)
         assert {
             h.content for h in upgraded.search("needle", mode="fts", branch_view={1: 1})
@@ -337,3 +338,244 @@ def test_invalid_event_does_not_poison_index_or_navigation_ancestry(tmp_path):
         )
     finally:
         store.close(update_status=False)
+
+
+def _mirrored_child_rounds():
+    return [
+        _event(1, "user_input", "old root", coords=(1, 1), parent_branch_path=[]),
+        _event(
+            2,
+            "user_input",
+            "old child",
+            coords=(2, 1),
+            parent_branch_path=[[1, 1]],
+        ),
+        _event(3, "user_input", "new root", coords=(1, 2), parent_branch_path=[]),
+        _event(
+            4,
+            "user_input",
+            "new child",
+            coords=(2, 1),
+            parent_branch_path=[[1, 2]],
+        ),
+        _event(5, "processing_end", coords=(2, 1), parent_branch_path=[[1, 1]]),
+        _event(
+            6,
+            "text",
+            "new child needle reply",
+            coords=(2, 1),
+            parent_branch_path=[[1, 2]],
+        ),
+        _event(
+            7,
+            "tool_call",
+            coords=(2, 1),
+            name="bash",
+            args={"command": "echo newer"},
+            parent_branch_path=[[1, 2]],
+        ),
+        _event(8, "processing_end", coords=(2, 1), parent_branch_path=[[1, 2]]),
+    ]
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 4, 8])
+def test_mirrored_round_completion_is_ancestry_scoped(batch_size):
+    """An older completion cannot close a newer mirrored (turn, branch)."""
+    events = _mirrored_child_rounds()
+    full, _ = extract_batch("alice", events, all_branches=True)
+    assert [block.content for block in full] == [
+        "old root",
+        "old child",
+        "new root",
+        "new child",
+        "new child needle reply",
+        "[tool:bash] command=echo newer",
+    ]
+    assert [(block.round_num, block.block_num) for block in full[-2:]] == [
+        (2, 1),
+        (2, 2),
+    ]
+    assert [block.parent_branch_path for block in full[-2:]] == [
+        ((1, 2),),
+        ((1, 2),),
+    ]
+
+    cursor, incremental = None, []
+    for end in range(batch_size, len(events) + batch_size, batch_size):
+        batch, cursor = extract_batch("alice", events[:end], cursor, all_branches=True)
+        incremental.extend(batch)
+    assert incremental == full
+    assert set(cursor["open_branches"]) == {"1:1:[]", "1:2:[]"}
+
+
+def _persist_rows(store, rows):
+    store.init_meta("s", "agent", "", str(Path(store.path).parent), ["alice"])
+    for event in rows:
+        data = {
+            key: val
+            for key, val in event.items()
+            if key
+            not in {
+                "type",
+                "event_id",
+                "turn_index",
+                "branch_id",
+                "parent_branch_path",
+            }
+        }
+        store.append_event(
+            "alice",
+            event["type"],
+            data,
+            turn_index=event.get("turn_index"),
+            branch_id=event.get("branch_id"),
+            parent_branch_path=event.get("parent_branch_path"),
+        )
+    return store.get_memory_events("alice")
+
+
+def test_mirrored_round_search_and_navigation_agree(tmp_path):
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+    from kohakuterrarium.session.memory.visibility import resolve_search_view
+    from kohakuterrarium.session.store import SessionStore
+
+    store = SessionStore(tmp_path / "mirrored-rounds.kohakutr")
+    try:
+        rows = _persist_rows(store, _mirrored_child_rounds())
+        selected = {1: 2, 2: 1}
+        assert resolve_search_view(rows, selected) == selected
+        with closing(SessionMemory(str(store.path), index_all_branches=True)) as memory:
+            memory.index_events("alice", rows)
+            hits = memory.search("needle", mode="fts", branch_view=selected)
+            assert [hit.content for hit in hits] == ["new child needle reply"]
+            assert hits[0].parent_branch_path == ((1, 2),)
+            assert memory.search("needle", mode="fts", branch_view={1: 1, 2: 1}) == []
+            navigator = MemoryContextNavigator(store)
+            navigator.register_results(hits, {"alice": selected})
+            window = navigator.expand(hits[0].anchor, before=2, after=2)
+            contents = [event.content for event in window.events]
+            assert "new child" in contents
+            assert "new child needle reply" in contents
+            assert "old child" not in contents
+    finally:
+        store.close(update_status=False)
+
+
+def test_user_message_without_path_continues_existing_scoped_opener(tmp_path):
+    """A paired user_message must not reopen the child under a newer root."""
+    from kohakuterrarium.session.history.branch_paths import (
+        index_eligible_parent_paths_by_position,
+    )
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+    from kohakuterrarium.session.memory.visibility import (
+        BranchVisibility,
+        resolve_search_view,
+    )
+    from kohakuterrarium.session.store import SessionStore
+
+    events = [
+        _event(1, "user_input", "first root", coords=(1, 1), parent_branch_path=[]),
+        _event(
+            2,
+            "user_input",
+            "first child",
+            coords=(2, 1),
+            parent_branch_path=[[1, 1]],
+        ),
+        _event(3, "user_input", "other root", coords=(1, 2), parent_branch_path=[]),
+        _event(4, "user_message", "paired input", coords=(2, 1)),
+        _event(5, "text", "needle reply after pair", coords=(2, 1)),
+    ]
+    paths = index_eligible_parent_paths_by_position(events)
+    assert paths[3] == paths[4] == ((1, 1),)
+    full, _ = extract_batch("alice", events, all_branches=True)
+    assert full[-1].content == "needle reply after pair"
+    assert full[-1].parent_branch_path == ((1, 1),)
+    cursor, pieces = None, []
+    for end in range(1, len(events) + 1):
+        part, cursor = extract_batch("alice", events[:end], cursor, all_branches=True)
+        pieces.extend(part)
+    assert pieces == full
+
+    store = SessionStore(tmp_path / "paired-message.kohakutr")
+    try:
+        rows = _persist_rows(store, events)
+        old, other = {1: 1, 2: 1}, {1: 2, 2: 1}
+        assert resolve_search_view(rows, old) == old
+        with closing(SessionMemory(str(store.path), index_all_branches=True)) as memory:
+            memory.index_events("alice", rows)
+            hits = memory.search("needle", mode="fts", branch_view=old)
+            assert [hit.content for hit in hits] == ["needle reply after pair"]
+            assert memory.search("needle", mode="fts", branch_view=other) == []
+            navigator = MemoryContextNavigator(store)
+            ancestry = navigator._legacy_paths("alice")
+            assert ancestry[rows[3].source_ref] == ((1, 1),)
+            assert ancestry[rows[4].source_ref] == ((1, 1),)
+            assert navigator._visible(
+                rows[4], rows[4].source_ref, BranchVisibility(old), ancestry
+            )
+            assert not navigator._visible(
+                rows[4], rows[4].source_ref, BranchVisibility(other), ancestry
+            )
+            navigator.register_results(hits, {"alice": old})
+            window = navigator.expand(hits[0].anchor, before=2, after=0)
+            contents = [event.content for event in window.events]
+            assert "paired input" in contents
+            assert "other root" not in contents
+    finally:
+        store.close(update_status=False)
+
+
+def test_missing_mirrored_completion_cannot_close_latest_child():
+    from kohakuterrarium.session.history.branch_paths import (
+        index_eligible_parent_paths_by_position,
+    )
+
+    events = _mirrored_child_rounds()[:4] + [
+        _event(9, "processing_end", coords=(2, 1)),
+        _event(10, "text", "new child survives missing end", coords=(2, 1)),
+    ]
+    paths = index_eligible_parent_paths_by_position(events)
+    assert paths[4] is None
+    assert paths[5] == ((1, 2),)
+    blocks, cursor = extract_batch("alice", events, all_branches=True)
+    assert blocks[-1].content == "new child survives missing end"
+    assert blocks[-1].parent_branch_path == ((1, 2),)
+    assert "2:1:[[1,1]]" in cursor["open_branches"]
+    assert "2:1:[[1,2]]" in cursor["open_branches"]
+
+
+def test_pre_v7_index_rebuilds_mirrored_lineage(tmp_path):
+    """The old v6 scoped-round cursor cannot authorize new v7 reads."""
+    rows = _mirrored_child_rounds()
+    path = str(tmp_path / "old-mirror-index.kohakutr")
+    with closing(SessionMemory(path, index_all_branches=True)) as previous:
+        previous.index_events("alice", rows)
+        previous._fts.insert(
+            "ghost mirrored needle",
+            {
+                "agent": "alice",
+                "round": 2,
+                "block": 9,
+                "type": "text",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [[1, 2]],
+            },
+        )
+        previous._state["memory:index_manifest"] = {
+            **previous._manifest(),
+            "format": 6,
+        }
+
+    with closing(SessionMemory(path, index_all_branches=True)) as upgraded:
+        with pytest.raises(ValueError, match="(invalid|building|rebuild)"):
+            upgraded.search("needle", mode="fts", branch_view={1: 2, 2: 1})
+        upgraded.index_events("alice", rows)
+        assert upgraded._manifest()["format"] == 7
+        assert upgraded.get_stats()["fts_blocks"] == 6
+        assert [
+            hit.content
+            for hit in upgraded.search("needle", mode="fts", branch_view={1: 2, 2: 1})
+        ] == ["new child needle reply"]
+        assert upgraded.search("ghost", mode="fts") == []

@@ -13,10 +13,12 @@ from kohakuterrarium.session.history.semantics import (
     classify_branch_scope,
     eligible_branch_history,
 )
-from kohakuterrarium.session.history.branch_paths import _coerce_branch_view
+from kohakuterrarium.session.history.branch_paths import (
+    _coerce_branch_view,
+    index_eligible_parent_paths_by_position,
+)
 from kohakuterrarium.session.history.selection import SelectionCompatibility
 from kohakuterrarium.session.history.replay import (
-    index_parent_paths_by_position,
     resolve_selected_branches,
 )
 
@@ -121,8 +123,17 @@ def resolve_search_view(
     # events *before* they can influence branch choices or inferred ancestry,
     # not merely delete invalid values from the selected mapping afterwards.
     eligible = [event for _, event in eligible_branch_history(events)]
+    ancestries = index_eligible_parent_paths_by_position(eligible)
+    # Ambiguous missing ancestry cannot introduce a branch candidate.
+    projected = [
+        (event, ancestries[position])
+        for position, event in enumerate(eligible)
+        if ancestries[position] is not None
+    ]
     selected = resolve_selected_branches(
-        eligible, index_parent_paths_by_position(eligible), requested_view
+        [event for event, _ in projected],
+        [path for _, path in projected],
+        requested_view,
     )
     # Resolved history can contain (0, 0) bookkeeping rows. Explicit
     # selections remain strictly positive, but these unscoped coordinates

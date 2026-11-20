@@ -50,9 +50,11 @@ or appended in arbitrarily sized batches.
 ## Index migration
 
 Pre-R2 all-branch indexes (internal format 5) can contain irreversible lossy
-normalizations. R2 advances the internal **memory index** contract to format
-6 and rebuilds derived FTS/vector rows before scoped retrieval; it does **not**
-change the SessionStore .kohakutr physical format or rewrite the event log.
+normalizations. R2 originally advanced the derived memory-index contract to
+format 6; the mirrored-lineage closure advances it to **format 7** because v6
+round cursors and indexed ancestry can conflate different ancestral paths.
+The Session-wide lifecycle rebuilds old FTS/vector rows before scoped retrieval.
+The SessionStore .kohakutr physical format and original event log do not change.
 A stale index must fail closed until rebuilt.
 
 R1 owns when physical materializations are safely invalidated and published;
@@ -90,3 +92,30 @@ for branch selection and for inferred lineage. The canonical eligibility
 projection retains original physical positions and feeds one ancestry
 inference shared by Index and Context Navigation. The permissive public
 Replay behavior for noncanonical historical records remains unchanged.
+
+
+## Strict Memory round ancestry (mirrored-lineage closure)
+
+Memory Index, Search branch selection and Context Navigation use one strict
+physical-position-preserving ancestry projection. Replay continues using its
+existing public compatibility inference; this does not rewrite source events.
+
+An open scoped round is identified by **(turn, branch, ancestry)**. Mirrored
+or imported children can reuse the same (turn, branch) under different roots;
+a fully stamped processing_end must close only its own lineage, even when an
+older completion arrives after a newer child has opened. The persisted
+open_branches cursor encodes this composite identity without a new field.
+
+A user_message paired with an already open user_input is a **continuation**,
+not a second opener. Missing/null parent paths on such paired messages and on
+ordinary tool/text continuations inherit the most recently reopened matching
+(turn, branch) lineage, preserving existing legacy physical-order behavior.
+A processing_end with no ancestry and multiple matching live lineages cannot
+safely choose which one to close; it is left unassigned. Explicit ancestry
+wins over the physical-order fallback.
+
+An unstamped legacy opener handing off to stamped text/tools remains supported;
+the subsequent missing-path tail inherits that stamped ancestry. All of these
+decisions are recomputed from eligible original positions when required.
+Incremental and full materialization must return identical blocks, and neither
+a malformed coordinate nor an ambiguous completion may mutate a valid round.

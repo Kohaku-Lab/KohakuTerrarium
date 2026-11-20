@@ -10,6 +10,7 @@ from kohakuterrarium.session.history.branch_paths import (
 )
 from kohakuterrarium.session.history.semantics import (
     BranchScope,
+    MEMORY_ROUND_OPENERS,
     can_continue_legacy_round,
     classify_branch_scope,
 )
@@ -95,6 +96,30 @@ def extract_batch(
         state["previous"] = {
             k: v for k, v in events[count - 1].items() if k not in {"event_id", "ts"}
         }
+    event_paths = None
+    if all_branches:
+        # Fully stamped modern events need no whole-history inference. Legacy
+        # missing-path continuations use the same strict lineage projection
+        # as Search selection and Context Navigation before round assignment.
+        suffix = events[count:]
+        if any(
+            event.get("parent_branch_path") is None
+            and type(event.get("turn_index")) is int
+            and event["turn_index"] > 1
+            and classify_branch_scope(event.get("turn_index"), event.get("branch_id"))
+            is BranchScope.EXPLICIT
+            for event in suffix
+        ):
+            event_paths = index_eligible_parent_paths_by_position(events)
+        else:
+            event_paths = {
+                count + pos: _coerce_path(event.get("parent_branch_path"))
+                for pos, event in enumerate(suffix)
+                if classify_branch_scope(
+                    event.get("turn_index"), event.get("branch_id")
+                )
+                is BranchScope.EXPLICIT
+            }
     blocks = _extract_blocks(
         agent,
         events[count:],
@@ -102,25 +127,8 @@ def extract_batch(
         cursor=state,
         live_ids=None if all_branches else live_ids,
         all_branches=all_branches,
+        event_paths=event_paths,
     )
-    if all_branches:
-        # Older stored turns may omit an explicit parent path. Replay infers
-        # their ancestry from physical event order; use the same derivation
-        # for indexed blocks so sibling branches cannot pass filtering by
-        # matching the child turn/branch alone. Fully stamped modern events
-        # avoid this extra history projection.
-        missing = [
-            block
-            for block in blocks
-            if type(block.turn_index) is int
-            and block.turn_index > 1
-            and block.parent_branch_path is None
-        ]
-        if missing:
-            inferred = index_eligible_parent_paths_by_position(events)
-            for block in missing:
-                if block.event_position in inferred:
-                    block.parent_branch_path = inferred[block.event_position]
     if start_from > count:
         blocks = [
             b
@@ -203,9 +211,15 @@ def _extract_blocks(
     cursor: dict | None = None,
     live_ids: set[int] | None = None,
     all_branches: bool = False,
+    event_paths: dict[int, tuple[tuple[int, int], ...] | None] | None = None,
 ) -> list[Block]:
     """Extract searchable blocks from session events."""
     state = cursor if cursor is not None else {}
+    if all_branches and event_paths is None:
+        event_paths = {
+            event_offset + pos: path
+            for pos, path in index_eligible_parent_paths_by_position(events).items()
+        }
     if live_ids is None and cursor is None and not all_branches:
         live_ids = select_live_event_ids(events)
     blocks: list[Block] = []
@@ -248,7 +262,16 @@ def _extract_blocks(
             else None
         )
         scoped = all_branches and coordinate_scope is BranchScope.EXPLICIT
-        scope_key = f"{turn}:{branch}" if scoped else None
+        ancestry = event_paths.get(event_offset + i) if scoped else None
+        if scoped and ancestry is None:
+            # Missing ancestry with multiple open mirrored rounds is
+            # ambiguous. It cannot continue or terminate either round.
+            continue
+        scope_key = (
+            f"{turn}:{branch}:{json.dumps(ancestry, separators=(',', ':'))}"
+            if scoped
+            else None
+        )
         if (
             scope_key is None
             and all_branches
@@ -410,19 +433,14 @@ def _extract_blocks(
             # of the provenance that branch projection must validate.
             block.turn_index = turn
             block.branch_id = branch
-            if evt.get("parent_branch_path") is not None:
+            if scoped:
+                block.parent_branch_path = ancestry
+            elif evt.get("parent_branch_path") is not None:
                 block.parent_branch_path = _coerce_path(evt["parent_branch_path"])
-            elif scoped and etype not in ("user_input", "trigger_fired"):
-                # A missing/null continuation inherits its opener's lineage;
-                # a new opener must be inferred from physical order instead
-                # of reusing an earlier sibling's (turn, branch) scope.
-                block.parent_branch_path = scoped_path
 
         if scope_key is not None:
-            if scoped and evt.get("parent_branch_path") is not None:
-                scoped_path = _coerce_path(evt["parent_branch_path"])
-            elif scoped and etype in ("user_input", "trigger_fired"):
-                scoped_path = None
+            if scoped:
+                scoped_path = ancestry
             if in_round:
                 next_scope = {"block": block_num, "in_round": True}
                 if scoped_path is not None:
@@ -436,7 +454,7 @@ def _extract_blocks(
             # the legacy fallback clock, never assign a sibling's block state.
             # This prevents a later legacy opener from restarting at round 1.
             completed_turn = (
-                round_num if scoped and etype in ("user_input", "trigger_fired") else 0
+                round_num if scoped and etype in MEMORY_ROUND_OPENERS else 0
             )
             round_num, block_num, in_round = legacy_state
             round_num = max(round_num, completed_turn)

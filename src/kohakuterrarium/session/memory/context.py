@@ -283,7 +283,11 @@ class MemoryContextNavigator:
             and type(branch) is int
             and event.get("parent_branch_path") is None
         ):
-            if legacy_paths is None or ref not in legacy_paths:
+            if (
+                legacy_paths is None
+                or ref not in legacy_paths
+                or legacy_paths[ref] is None
+            ):
                 raise MemoryContextError(
                     "LINEAGE_UNAVAILABLE",
                     "Cannot establish the ancestry of this historical event.",

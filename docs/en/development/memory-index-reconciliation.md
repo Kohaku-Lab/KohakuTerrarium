@@ -135,3 +135,14 @@ shares the same pure normalization rules before loading any model, while
 offline index builds persist the concrete identity after construction.
 This prevents a successful offline build from blocking an unchanged Creature
 configuration on resume.
+
+
+## Mirrored history and index format
+
+Memory's strict source projection uses the same original-position ancestry
+authority in Search selection, FTS/vector extraction, and Anchor navigation.
+Unlike public Replay compatibility, its scoped round identity includes the
+ancestor path; late completion of an older mirror must not close a newer one.
+Internal memory-index format **7** invalidates earlier v6 checkpoints and
+derived rows before materializing them again. This is a derived-index upgrade,
+not a SessionStore source-format migration.
