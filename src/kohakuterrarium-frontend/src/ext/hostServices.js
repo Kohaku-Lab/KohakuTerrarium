@@ -5,6 +5,7 @@
  */
 
 import { ElMessage } from "element-plus"
+import { getHybridPref, setHybridPref, removeHybridPref } from "@/utils/uiPrefs"
 
 import { hostKind, openExternalViaHost, showDesktopNotification } from "@/utils/hostBridge"
 
@@ -66,5 +67,15 @@ export function createPackageStorage(pkg) {
         // Nothing stored to remove.
       }
     },
+  }
+}
+
+/** Durable, infrequently changed preferences; distinct from local-only extension storage. */
+export function createPackagePreferences(pkg) {
+  const name = (key) => `${STORAGE_PREFIX}${pkg}.preferences.${key}`
+  return {
+    get: (key, fallback = null) => getHybridPref(name(key), fallback, { json: true }),
+    set: (key, value) => setHybridPref(name(key), value, { json: true }),
+    remove: (key) => removeHybridPref(name(key)),
   }
 }

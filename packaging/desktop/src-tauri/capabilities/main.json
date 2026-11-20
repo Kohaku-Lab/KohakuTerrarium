@@ -9,6 +9,7 @@
   "permissions": [
     "core:event:default",
     "allow-get-desktop-capabilities",
+    "allow-desktop-window-focused",
     "allow-request-desktop-attention",
     "allow-open-external",
     "allow-show-notification",

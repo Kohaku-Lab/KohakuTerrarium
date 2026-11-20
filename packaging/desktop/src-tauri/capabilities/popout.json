@@ -9,6 +9,7 @@
   "permissions": [
     "core:event:default",
     "allow-get-desktop-capabilities",
+    "allow-desktop-window-focused",
     "allow-open-external",
     "allow-set-desktop-theme",
     "allow-set-window-chrome",

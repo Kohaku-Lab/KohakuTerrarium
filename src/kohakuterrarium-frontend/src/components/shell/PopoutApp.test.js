@@ -1,12 +1,20 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
+import { markRaw } from "vue"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const store = vi.hoisted(() => ({ current: null, list: [], fetchAll: vi.fn(async () => []) }))
+const store = vi.hoisted(() => ({
+  current: null,
+  list: [],
+  fetchAll: vi.fn(async () => []),
+  fetchOne: vi.fn(async () => null),
+}))
 vi.mock("@/stores/instances", () => ({ useInstancesStore: () => store }))
 
 import PopoutApp from "@/components/shell/PopoutApp.vue"
 import { useChatStore } from "@/stores/chat"
+import { useHostsStore } from "@/stores/hosts"
+import { _resetForTests } from "@/composables/useScope"
 
 const AuthGate = { template: "<div><slot /></div>" }
 const AttachTab = {
@@ -28,10 +36,44 @@ beforeEach(() => {
   store.list = []
 })
 afterEach(() => {
+  _resetForTests()
   delete window.__TAURI_INTERNALS__
 })
 
 describe("PopoutApp", () => {
+  it("owns its visible chat while the observation reconnects and releases it on close", async () => {
+    const chat = useChatStore("graph-7")
+    const socket = { close: vi.fn() }
+    chat._ws = markRaw(socket)
+    chat._instanceId = "graph-7"
+    chat._instanceType = "terrarium"
+    chat.tabs = ["alice", "bob"]
+    chat.activeTab = "alice"
+    store.fetchOne.mockResolvedValueOnce({
+      id: "graph-7",
+      type: "terrarium",
+      creatures: [
+        { creature_id: "a", name: "alice" },
+        { creature_id: "b", name: "bob" },
+      ],
+    })
+    const wrapper = mountApp()
+    try {
+      await flushPromises()
+      chat.activeTab = "bob"
+      await flushPromises()
+      expect(chat.activeTab).toBe("bob")
+      expect(socket.close).not.toHaveBeenCalled()
+      expect(useChatStore("graph-7")).toBe(chat)
+      useHostsStore().activeHostId = "other-host"
+      await flushPromises()
+      expect(socket.close).not.toHaveBeenCalled()
+      expect(useChatStore("graph-7")).toBe(chat)
+    } finally {
+      wrapper.unmount()
+    }
+    expect(socket.close).toHaveBeenCalledTimes(1)
+  })
   it("shows the one session it was opened for and tells the shell the page is running", async () => {
     const invoke = vi.fn(async () => true)
     window.__TAURI_INTERNALS__ = { invoke }
