@@ -37,7 +37,7 @@ import pytest
 from PIL import Image
 
 import kohakuterrarium.core.agent.history.message_history as branch_history
-from kohakuterrarium.errors import ConflictError
+from kohakuterrarium.errors import ConflictError, ShutdownIncompleteError
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
@@ -2913,6 +2913,52 @@ class TestCoreIntegration:
         finally:
             await resumed.stop()
             store.close()
+
+        # Bounded stop: a cooperative cleanup that never finishes returns at
+        # the deadline, reports honestly, and cannot write history late.
+        hang_tool = _BlockingTool("hang")
+        hang_tool.release_cleanup.clear()
+        async with Terrarium() as engine:
+            hung = await engine.add_creature(
+                AgentConfig(
+                    name="bounded_stop", system_prompt="plain", tool_format="native"
+                ),
+                llm=_HistoryReplayLLM(
+                    True, plan=[[NativeToolCall("hang_call", "hang", "{}")], "after"]
+                ),
+                tools=[hang_tool],
+                io="headless",
+                start=True,
+            )
+            hung_agent = hung.agent
+            hung_turn = asyncio.create_task(
+                hung.run("hang now", timeout=30, raise_on_error=False)
+            )
+            await asyncio.wait_for(hang_tool.started.wait(), 5)
+            started = time.monotonic()
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await hung_agent.stop(grace=0.3)
+            assert time.monotonic() - started < 5
+            report = info.value.report
+            assert report.timed_out and not report.forced
+            assert not report.settled and not report.terminated
+            assert report.abandoned
+            history_at_return = hung_agent.controller.conversation.to_messages()
+            assert hung_agent.controller.conversation.sealed
+            assert hung_agent.output_router.revoked
+            with pytest.raises(ShutdownIncompleteError):
+                await hung_agent.stop()
+            with pytest.raises(ConflictError):
+                await hung_agent.start()
+            hang_tool.release_cleanup.set()
+            await asyncio.gather(hung_turn, return_exceptions=True)
+            await wait_until(
+                lambda: not hung_agent._shutdown_state.live_abandoned(), timeout=5
+            )
+            assert hung_agent.controller.conversation.to_messages() == history_at_return
+            with pytest.raises(ShutdownIncompleteError) as again:
+                await hung_agent.stop()
+            assert again.value.report.terminated
 
     @pytest.mark.timeout(120)
     async def test_history_ops(self, make_creature, tmp_path, monkeypatch):
