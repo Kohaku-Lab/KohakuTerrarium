@@ -1,16 +1,87 @@
 """Unit tests for :mod:`kohakuterrarium.core.agent.model`."""
 
+import json
 import types
 
+import httpx
 import pytest
 
 from kohakuterrarium.core.agent import model as am
-from kohakuterrarium import Agent
+from kohakuterrarium import Agent, Terrarium
 from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.core.agent.history.compact import AgentCompactMixin
 from kohakuterrarium.core.agent.model import AgentModelMixin
 from kohakuterrarium.llm.profiles.backends import save_yaml_store
 from kohakuterrarium.llm.openai.provider import OpenAIProvider
+from kohakuterrarium.terrarium.service.service import LocalTerrariumService
+
+
+@pytest.mark.real_llm_provider
+@pytest.mark.parametrize("persisted", [True, False], ids=["saved", "temporary"])
+async def test_go_session_header_survives_model_switches(
+    tmp_path, monkeypatch, persisted
+):
+    monkeypatch.setenv("OPENCODE_GO_API_KEY", "local-request-capture")
+    save_yaml_store(
+        {"presets": {"opencode-go": {"a": {"model": "a"}, "b": {"model": "b"}}}}
+    )
+    requests = []
+
+    async def capture(_transport, request):
+        assert (
+            str(request.url)
+            == "https://opencode.ai/inference/go/openai/v1/chat/completions"
+        )
+        model = json.loads(request.content)["model"]
+        requests.append((model, request.headers["x-opencode-session"]))
+        return httpx.Response(
+            200,
+            json={
+                "id": "reply",
+                "object": "chat.completion",
+                "created": 0,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    # Capture the real SDK's outgoing HTTP requests for every new provider.
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", capture)
+    saved_ids = []
+    async with Terrarium(session_dir=tmp_path) as engine:
+        service = LocalTerrariumService(engine)
+        for _ in range(2):
+            creature = await engine.add_creature(
+                AgentConfig(name="chat"),
+                llm="opencode-go/a",
+                pwd=str(tmp_path),
+                session=persisted,
+                io="headless",
+            )
+            if persisted:
+                saved_ids.append(creature.agent.session_store.session_id)
+            for model in (None, "b", "a"):
+                if model:
+                    await service.switch_model(
+                        creature.creature_id, f"opencode-go/{model}"
+                    )
+                await creature.agent.controller.llm.chat_complete(
+                    [{"role": "user", "content": "hello"}]
+                )
+
+    models, ids = zip(*requests)
+    assert models == ("a", "b", "a", "a", "b", "a")
+    assert ids[0] == ids[1] == ids[2]
+    assert ids[3] == ids[4] == ids[5]
+    assert ids[0] and ids[3] and ids[0] != ids[3]
+    if persisted:
+        assert [ids[0], ids[3]] == saved_ids
 
 
 @pytest.mark.real_llm_provider
@@ -131,7 +202,7 @@ def _build_agent(
     )
     a._llm_selector = None
     a._llm_identifier = ""
-    a._session_id = "sess"
+    a.session_store = None
     a._new_llm = new_llm
     return a
 

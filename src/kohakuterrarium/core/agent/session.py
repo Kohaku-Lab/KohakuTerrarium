@@ -43,17 +43,7 @@ class AgentSessionMixin:
         Handles session ID retrieval, LLM profile persistence,
         prompt cache key, embedding config, and session_info notification.
         """
-        session_id = ""
-        if self.session_store:
-            try:
-                meta = self.session_store.load_meta()
-                session_id = meta.get("session_id", "")
-            except Exception as e:
-                logger.warning(
-                    "Failed to load session meta for session_id",
-                    error=str(e),
-                    exc_info=True,
-                )
+        session_id = self._bind_model_session(self.llm)
 
         # Save selected preset/profile name to session state for resume
         selected_llm_name = self._llm_selector or self.config.llm_profile or ""
@@ -61,11 +51,6 @@ class AgentSessionMixin:
             self.session_store.state[f"{self.config.name}:llm_profile"] = (
                 selected_llm_name
             )
-
-        # Set prompt_cache_key on LLM provider for cache routing
-        if session_id and hasattr(self.llm, "prompt_cache_key"):
-            self.llm.prompt_cache_key = session_id
-            logger.info("Prompt cache key set", cache_key=session_id[:16])
 
         # Save embedding config to session state for search_memory tool and resume
         if self.session_store:
@@ -115,7 +100,12 @@ class AgentSessionMixin:
         Wires scratchpad + plugin-hook observers so Wave B
         ``scratchpad_write`` / ``plugin_hook_timing`` events flow.
         """
-        self.session_store = store
+        if self.session_store is not store:
+            # The engine can attach its store after start, before the first turn.
+            if self.session_store is not None and hasattr(self.llm, "prompt_cache_key"):
+                self.llm.prompt_cache_key = None
+            self.session_store = store
+            self._bind_model_session(self.llm)
         # Controller needs direct access for artifact writes.
         if hasattr(self, "controller") and self.controller is not None:
             self.controller.session_store = store

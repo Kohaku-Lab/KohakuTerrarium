@@ -5,10 +5,32 @@ from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium import Terrarium
+from kohakuterrarium.core.config.types import AgentConfig
 from kohakuterrarium.terrarium.recipe.transaction import (
     RecipeApplyTransaction,
     rollback_shielded,
 )
+from kohakuterrarium.testing.llm import ScriptedLLM
+
+
+async def test_rollback_restores_temporary_chat_routing(tmp_path):
+    provider = ScriptedLLM(["ok"])
+    provider.prompt_cache_key = None
+    async with Terrarium() as engine:
+        creature = await engine.add_creature(
+            AgentConfig(name="chat"),
+            llm=provider,
+            session=False,
+            io="headless",
+        )
+        transaction = RecipeApplyTransaction(engine)
+        transaction.snapshot_existing_members(creature.graph_id)
+        await engine.attach_session(creature.graph_id, tmp_path / "candidate.kohakutr")
+        assert provider.prompt_cache_key == creature.agent.session_store.session_id
+        await transaction.rollback()
+        assert creature.agent.session_store is None
+        assert provider.prompt_cache_key is None
 
 
 class _Engine:

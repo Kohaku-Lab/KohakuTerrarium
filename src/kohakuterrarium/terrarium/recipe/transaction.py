@@ -222,14 +222,13 @@ class RecipeApplyTransaction:
             if agent is None or previous_store is _NO_STORE:
                 continue
             try:
-                if previous_store is None:
+                attach = getattr(agent, "attach_session_store", None)
+                if callable(attach):
+                    attach(previous_store)
+                elif previous_store is None:
                     _detach_agent_store(agent)
                 else:
-                    attach = getattr(agent, "attach_session_store", None)
-                    if callable(attach):
-                        attach(previous_store)
-                    else:
-                        agent.session_store = previous_store
+                    agent.session_store = previous_store
             except BaseException:
                 logger.exception(
                     "recipe rollback failed to restore agent session store",
@@ -318,7 +317,7 @@ async def _close_store(store: Any, graph_id: str) -> None:
 
 
 def _detach_agent_store(agent: Any) -> None:
-    """Undo Agent.attach_session_store without constructing a sink for None."""
+    """Clear session wiring on adapters without an attachment hook."""
     agent.session_store = None
     controller = getattr(agent, "controller", None)
     if controller is not None:
