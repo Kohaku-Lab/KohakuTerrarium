@@ -23,10 +23,13 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
+from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+_refresh_lock = asyncio.Lock()
 
 ISSUER = "https://auth.openai.com"
 AUTH_URL = f"{ISSUER}/oauth/authorize"
@@ -484,3 +487,33 @@ async def refresh_tokens(tokens: CodexTokens) -> CodexTokens:
     new_tokens.save()
     logger.info("Tokens refreshed")
     return new_tokens
+
+
+async def valid_subscription_tokens() -> CodexTokens:
+    """Read the current subscription login without starting an interactive flow."""
+    tokens = await asyncio.to_thread(CodexTokens.load)
+    if tokens is None:
+        raise LLMNotConfiguredError(
+            "Codex subscription is not connected. Run: kt login codex"
+        )
+    if tokens.is_expired():
+        tokens = await refresh_subscription_tokens(tokens)
+    return tokens
+
+
+async def refresh_subscription_tokens(stale: CodexTokens) -> CodexTokens:
+    """Adopt a newer login another process saved, else refresh ``stale``."""
+    async with _refresh_lock:
+        current = await asyncio.to_thread(CodexTokens.load)
+        if (
+            current is not None
+            and not current.is_expired()
+            and current.access_token != stale.access_token
+        ):
+            return current
+        try:
+            return await refresh_tokens(stale)
+        except Exception as exc:
+            raise LLMNotConfiguredError(
+                "Codex subscription login expired. Run: kt login codex"
+            ) from exc

@@ -688,6 +688,10 @@ class TestProgStudioJourney:
                 "mimo",
                 "kimi-code",
                 "glm-coding",
+                "qwen",
+                "deepseek",
+                "opencode-go",
+                "minimax",
             }
             studio.identity.llm.save_backend(
                 "acme",

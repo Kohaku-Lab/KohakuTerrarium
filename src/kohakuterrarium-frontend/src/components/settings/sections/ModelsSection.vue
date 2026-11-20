@@ -7,7 +7,7 @@
     <div class="flex-1 min-h-0 px-8 pb-6 max-md:px-3 max-md:pb-3 max-md:pt-3">
       <div class="kt-v2-card h-full flex overflow-hidden">
         <aside v-if="!isCompact || !models.open.value" class="kt-v2-edge min-h-0" :class="isCompact ? 'w-full' : 'w-80 shrink-0 border-r'">
-          <ModelList v-model:query="models.query.value" v-model:filter="models.filter.value" :groups="models.groups.value" :total="models.presets.value.length" :shown-count="models.shownCount.value" :selected-key="models.selectedKey.value" @select="models.select" @new-blank="models.startBlank" @new-existing="pickerOpen = true" @clone="(preset) => models.startFrom(preset)" @set-default="models.setDefault" @delete="models.remove" />
+          <ModelList v-model:query="models.query.value" v-model:filter="models.filter.value" :groups="models.groups.value" :total="models.presets.value.length" :shown-count="models.shownCount.value" :selected-key="models.selectedKey.value" @select="models.select" @discover="discoveryOpen = true" @new-blank="models.startBlank" @new-existing="pickerOpen = true" @clone="(preset) => models.startFrom(preset)" @set-default="models.setDefault" @delete="models.remove" />
         </aside>
 
         <section v-if="!isCompact || models.open.value" class="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -16,8 +16,9 @@
           <div v-else class="flex-1 overflow-y-auto p-5 flex flex-col items-center justify-center gap-3 text-center" data-model-empty>
             <span class="i-carbon-model-alt text-4xl text-warm-300 dark:text-warm-600" />
             <p class="kt-text-body text-warm-600 dark:text-warm-300">{{ t("settings.models.empty") }}</p>
-            <div class="flex items-center gap-2">
-              <KButton variant="primary" @click="models.startBlank"><span class="i-carbon-add" />{{ t("settings.models.newBlank") }}</KButton>
+            <div class="flex flex-wrap justify-center items-center gap-2">
+              <KButton variant="primary" @click="discoveryOpen = true"><span class="i-carbon-search" />{{ t("discovery.title") }}</KButton>
+              <KButton @click="models.startBlank"><span class="i-carbon-add" />{{ t("settings.models.newBlank") }}</KButton>
               <KButton @click="pickerOpen = true">{{ t("settings.models.newFromExisting") }}</KButton>
             </div>
             <p class="kt-text-caption text-warm-500">{{ t("settings.models.storageHint") }}</p>
@@ -26,6 +27,7 @@
       </div>
     </div>
 
+    <DiscoveryPicker v-model="discoveryOpen" :backends="backends" @pick="models.startDiscovered" @configure="(name) => emit('configure', name)" />
     <ExistingPicker v-model="pickerOpen" :presets="models.presets.value" :backends="backends" @pick="({ preset, provider }) => models.startFrom(preset, provider)" />
   </div>
 </template>
@@ -34,6 +36,7 @@
 import { onMounted, ref, watch } from "vue"
 
 import KButton from "@/components/common/ActionButton.vue"
+import DiscoveryPicker from "@/components/settings/models/DiscoveryPicker.vue"
 import ExistingPicker from "@/components/settings/models/ExistingPicker.vue"
 import ModelEditor from "@/components/settings/models/ModelEditor.vue"
 import ModelList from "@/components/settings/models/ModelList.vue"
@@ -51,6 +54,8 @@ const props = defineProps({
 const { t } = useI18n()
 const { isCompact } = useDensity()
 const models = useModelPresets()
+const emit = defineEmits(["configure"])
+const discoveryOpen = ref(false)
 const pickerOpen = ref(false)
 
 onMounted(models.load)

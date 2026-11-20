@@ -79,6 +79,31 @@ def _success(streaming):
     )
 
 
+async def test_go_session_identity_on_stream_complete_and_fork():
+    headers = []
+
+    async def respond(request):
+        assert request.url.path == "/inference/go/openai/v1/chat/completions"
+        assert request.headers["user-agent"].startswith("KohakuTerrarium/")
+        headers.append(request.headers["x-opencode-session"])
+        return _success(json.loads(request.content).get("stream", False))
+
+    async with OpenAIProvider(
+        api_key="go",
+        model="test",
+        base_url="https://opencode.ai/inference/go/openai/v1",
+    ) as provider:
+        await _attach_transport(provider, respond)
+        provider.prompt_cache_key = "saved-session"
+        assert await _turn(provider, False) == "ok"
+        assert await _turn(provider, True) == "ok"
+        async with provider.fork() as fork:
+            assert await _turn(fork, False) == "ok"
+            assert await _turn(fork, True) == "ok"
+        assert headers[:2] == ["saved-session", "saved-session"]
+        assert headers[2] == headers[3] and headers[2] != headers[0]
+
+
 class TestContentRejection:
     @pytest.mark.parametrize("streaming", [False, True])
     @pytest.mark.parametrize("filename", ["missing.png", "invalid_image.png"])

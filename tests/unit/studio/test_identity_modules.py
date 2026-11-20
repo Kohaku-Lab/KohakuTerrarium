@@ -37,8 +37,7 @@ class TestLlmBackends:
             provider_native_tools=("web_search",),
         )
         monkeypatch.setattr(backends_mod, "load_backends", lambda: {"openai": backend})
-        monkeypatch.setattr(backends_mod, "get_api_key", lambda n: "secret")
-        monkeypatch.setattr(backends_mod, "_is_available", lambda n: True)
+        monkeypatch.setenv("OPENAI_API_KEY", "test-credential")
         out = backends_mod.list_backends()
         assert out[0]["name"] == "openai"
         assert out[0]["built_in"] is True

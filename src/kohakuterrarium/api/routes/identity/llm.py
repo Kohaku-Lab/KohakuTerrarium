@@ -1,11 +1,19 @@
 """Manage LLM backends, profiles, model defaults, and native-tool metadata."""
 
+import asyncio
+from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from kohakuterrarium.api.auth import verify_admin_token
+from kohakuterrarium.llm.profiles.resolve import PresetAlreadyExists
+from kohakuterrarium.llm.discovery import (
+    ModelDiscoveryError,
+    discover_models,
+    suggested_presets,
+)
 from kohakuterrarium.studio.identity.llm.backends import (
     list_backend_types,
     list_backends,
@@ -45,6 +53,7 @@ class ProfileRequest(BaseModel):
     name: str
     model: str
     provider: str = ""
+    create_only: bool = False
     max_context: int = 128000
     max_output: int = 16384
     temperature: float | None = None
@@ -70,6 +79,21 @@ async def get_backends():
     return {"backends": list_backends()}
 
 
+@router.post("/backends/{name}/models", dependencies=[Depends(verify_admin_token)])
+async def discover_backend_models(name: str):
+    """Read the named host provider's catalog without saving presets."""
+    try:
+        models = await discover_models(name)
+    except ModelDiscoveryError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    drafts = await asyncio.to_thread(suggested_presets, name, models)
+    return {
+        "models": [
+            {**asdict(model), "preset": draft} for model, draft in zip(models, drafts)
+        ]
+    }
+
+
 @router.get("/backend-types")
 async def get_backend_types():
     """Return every backend type a backend record may use."""
@@ -80,7 +104,8 @@ async def get_backend_types():
 async def create_backend(req: BackendRequest):
     """Validate and persist an LLM backend record."""
     try:
-        save_backend_record(
+        await asyncio.to_thread(
+            save_backend_record,
             name=req.name,
             backend_type=req.backend_type,
             base_url=req.base_url,
@@ -97,7 +122,7 @@ async def create_backend(req: BackendRequest):
 async def delete_backend_route(name: str):
     """Delete an LLM backend unless configuration invariants reject it."""
     try:
-        deleted = remove_backend(name)
+        deleted = await asyncio.to_thread(remove_backend, name)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     if not deleted:
@@ -121,7 +146,9 @@ async def get_profiles():
 async def create_profile(req: ProfileRequest):
     """Validate and persist a model profile for an existing provider."""
     try:
-        save_profile_record(
+        await asyncio.to_thread(
+            save_profile_record,
+            create_only=req.create_only,
             name=req.name,
             model=req.model,
             provider=req.provider,
@@ -133,6 +160,8 @@ async def create_profile(req: ProfileRequest):
             extra_body=req.extra_body or {},
             variation_groups=req.variation_groups or {},
         )
+    except PresetAlreadyExists as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as e:
         msg = str(e)
         if msg.startswith("Provider not found"):
@@ -146,7 +175,7 @@ async def create_profile(req: ProfileRequest):
 )
 async def delete_profile_route(provider: str, name: str):
     """Delete a provider-qualified model profile."""
-    if not remove_profile(name, provider):
+    if not await asyncio.to_thread(remove_profile, name, provider):
         raise HTTPException(404, f"Profile not found: {provider}/{name}")
     return {"status": "deleted", "name": name, "provider": provider}
 
@@ -166,9 +195,9 @@ async def set_default_model_route(req: DefaultModelRequest):
     instead of silently binding to the wrong one.
     """
     if not req.name:
-        set_default("")
+        await asyncio.to_thread(set_default, "")
         return {"status": "set", "default_model": ""}
-    identifier, error = resolve_and_set_default(req.name)
+    identifier, error = await asyncio.to_thread(resolve_and_set_default, req.name)
     if error:
         if error.startswith("Preset not found"):
             raise HTTPException(404, error)

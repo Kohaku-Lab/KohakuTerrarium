@@ -1604,12 +1604,21 @@ class TestStudioIntegration:
                 "mimo",
                 "kimi-code",
                 "glm-coding",
+                "qwen",
+                "deepseek",
+                "opencode-go",
+                "minimax",
             }
             assert (
                 baseline_backends["google-antigravity"]["backend_type"]
                 == "google-antigravity"
             )
             grok = baseline_backends["grok-subscription"]
+            assert {
+                name
+                for name, row in baseline_backends.items()
+                if row["model_discovery"]
+            } == set(baseline_backends) - {"google-antigravity"}
             assert grok["backend_type"] == "grok-subscription"
             assert grok["provider_native_tools"] == [
                 "grok_image_gen",

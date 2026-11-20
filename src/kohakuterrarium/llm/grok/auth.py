@@ -6,6 +6,8 @@ then rereads the access token written by the CLI.
 """
 
 import asyncio
+import hashlib
+from collections.abc import AsyncIterator
 import json
 import os
 import re
@@ -58,6 +60,18 @@ class GrokToken:
     media_base_url: str = XAI_BASE_URL
     extra_headers: dict[str, str] = field(default_factory=dict)
 
+    @property
+    def fingerprint(self) -> str:
+        """Identify this credential and its owner without retaining the raw key."""
+        headers = "\0".join(
+            f"{name}={value}" for name, value in sorted(self.extra_headers.items())
+        )
+        raw = (
+            f"{self.source}\0{self.access_token}\0{self.base_url}\0"
+            f"{self.media_base_url}\0{headers}"
+        ).encode()
+        return hashlib.sha256(raw).hexdigest()
+
     def is_expired(self, now: float | None = None) -> bool:
         """Return whether the token is expired or too close to expiry to use."""
         if self.expires_at is None:
@@ -77,6 +91,27 @@ class GrokTokens:
             _load_opencode_token(),
         ]
         return [token for token in candidates if token and not token.is_expired()]
+
+    @classmethod
+    async def request_candidates(cls, rejected: set[str]) -> AsyncIterator[GrokToken]:
+        """Advance only after a 401. Refresh the CLI once before changing owners."""
+        try:
+            await cls.ensure_fresh_cli()
+        except GrokAuthError:
+            pass
+        for token in await asyncio.to_thread(cls.load_candidates):
+            if token.fingerprint in rejected:
+                continue
+            yield token
+            rejected.add(token.fingerprint)
+            if token.source == GROK_CLI_SOURCE:
+                try:
+                    refreshed = await cls.ensure_fresh_cli(force=True)
+                except GrokAuthError:
+                    continue
+                if refreshed and refreshed.fingerprint not in rejected:
+                    yield refreshed
+                    rejected.add(refreshed.fingerprint)
 
     @classmethod
     def load_bootstrap_candidates(cls) -> list[GrokToken]:

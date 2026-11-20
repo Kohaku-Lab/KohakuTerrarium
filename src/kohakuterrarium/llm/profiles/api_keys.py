@@ -10,6 +10,7 @@ import yaml
 
 from kohakuterrarium.llm.profiles import secret_store
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.env_interp import interpolate_env_vars
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -163,6 +164,19 @@ def has_api_key(provider_or_env: str) -> bool:
         return True
     env_var = PROVIDER_KEY_MAP.get(provider, provider_or_env)
     return bool(os.environ.get(env_var, ""))
+
+
+def local_backend_key(name: str, env_var: str) -> str:
+    """Resolve the stored provider key or the exact environment setting it declares."""
+    key = _load_api_keys().get(name) or os.environ.get(env_var, "")
+    return interpolate_env_vars(key)
+
+
+def backend_api_key(name: str, env_var: str) -> str:
+    """Use the same scoped credential for discovery, chat and credential rotation."""
+    if _resolver is not None:
+        return get_api_key(name) or (get_api_key(env_var) if env_var else "")
+    return local_backend_key(name, env_var)
 
 
 def list_api_keys() -> dict[str, str]:

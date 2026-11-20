@@ -6,13 +6,15 @@ subscription login. The backend takes the prompt, background, GIF controls and
 input images; it chooses size, quality and the still-image format itself.
 """
 
-import asyncio
 from typing import Any
 
 import httpx
 
-from kohakuterrarium.errors import LLMNotConfiguredError
-from kohakuterrarium.llm.codex.auth import CodexTokens, refresh_tokens
+from kohakuterrarium.llm.codex.auth import (
+    CodexTokens,
+    valid_subscription_tokens,
+    refresh_subscription_tokens,
+)
 from kohakuterrarium.llm.codex.image.budget import CODEX_BASE_URL
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.utils.logging import get_logger
@@ -24,9 +26,6 @@ MAX_EDIT_IMAGES = 5
 GIF_FRAMES = (2, 16)
 GIF_FRAME_MS = (20, 2000)
 IMAGEGEN_REQUEST_ID_HEADER = "x-codex-imagegen-request-id"
-_LOGIN_HINT = "Codex subscription is not connected. Run: kt login codex"
-
-_refresh_lock = asyncio.Lock()
 
 
 class CodexImageError(RuntimeError):
@@ -130,13 +129,13 @@ class CodexImageClient:
     async def _post(
         self, path: str, body: dict[str, Any], operation: str
     ) -> list[ImagePart]:
-        tokens = None if self.api_key else await _valid_tokens()
+        tokens = None if self.api_key else await valid_subscription_tokens()
         async with httpx.AsyncClient(
             timeout=self.timeout, transport=self.transport, follow_redirects=False
         ) as client:
             response = await self._send(client, path, body, tokens)
             if response.status_code == 401 and tokens is not None:
-                tokens = await _refreshed_tokens(tokens)
+                tokens = await refresh_subscription_tokens(tokens)
                 response = await self._send(client, path, body, tokens)
         if response.status_code >= 400:
             raise CodexImageError(_failure(operation, response))
@@ -165,33 +164,6 @@ def _required_prompt(prompt: str) -> str:
     if not text:
         raise ValueError("prompt is required")
     return text
-
-
-async def _valid_tokens() -> CodexTokens:
-    tokens = CodexTokens.load()
-    if tokens is None:
-        raise LLMNotConfiguredError(_LOGIN_HINT)
-    if tokens.is_expired():
-        tokens = await _refreshed_tokens(tokens)
-    return tokens
-
-
-async def _refreshed_tokens(stale: CodexTokens) -> CodexTokens:
-    """Adopt a newer login another process saved, else refresh ``stale``."""
-    async with _refresh_lock:
-        current = CodexTokens.load()
-        if (
-            current is not None
-            and not current.is_expired()
-            and current.access_token != stale.access_token
-        ):
-            return current
-        try:
-            return await refresh_tokens(stale)
-        except Exception as exc:
-            raise LLMNotConfiguredError(
-                "Codex subscription login expired. Run: kt login codex"
-            ) from exc
 
 
 def _failure(operation: str, response: httpx.Response) -> str:

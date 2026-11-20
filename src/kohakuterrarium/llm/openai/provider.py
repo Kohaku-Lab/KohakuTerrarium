@@ -6,15 +6,18 @@ import asyncio
 from contextlib import aclosing
 from copy import deepcopy
 from typing import Any, AsyncIterator
+from uuid import uuid4
 
 from openai import AsyncOpenAI
 
+from kohakuterrarium import __version__
+from kohakuterrarium.llm.catalog_endpoints import CATALOG_ENDPOINTS
 from kohakuterrarium.llm.responses import ws_options
 from kohakuterrarium.llm.anthropic.cache import (
     apply_anthropic_cache_markers,
     is_anthropic_endpoint,
 )
-from kohakuterrarium.llm.profiles.api_keys import get_api_key
+from kohakuterrarium.llm.profiles.api_keys import backend_api_key, get_api_key
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -134,6 +137,11 @@ class OpenAIProvider(BaseLLMProvider):
                 "Set OPENROUTER_API_KEY or OPENAI_API_KEY environment variable."
             )
 
+        self._go_session = (
+            uuid4().hex
+            if self.base_url.rstrip("/") == CATALOG_ENDPOINTS["opencode-go"]
+            else None
+        )
         self._client = self._new_client()
 
         # Report caching once at construction rather than on every request.
@@ -179,8 +187,16 @@ class OpenAIProvider(BaseLLMProvider):
         if not self._borrowed_client:
             await self._client.close()
 
+    def bind_ephemeral_session(self, session_id: str) -> None:
+        """Use the owning chat's ID when Go needs routing without a saved session."""
+        if self._go_session:
+            self._go_session = session_id
+
     def _reset_fork_state(self) -> None:
         self._ws_session = None
+        if self._go_session:
+            self._go_session = uuid4().hex
+            self.prompt_cache_key = None
 
     def with_model(self, name: str) -> "OpenAIProvider":
         """Return a sibling provider using the same SDK client."""
@@ -214,6 +230,7 @@ class OpenAIProvider(BaseLLMProvider):
         clone._last_tool_calls = []
         clone._last_assistant_extra_fields = {}
         clone._emergency_drop_callbacks = list(self._emergency_drop_callbacks)
+        clone._go_session = self._go_session
         clone.prompt_cache_key = self.prompt_cache_key
         clone.base_url = self.base_url
         clone._client = self._client
@@ -224,6 +241,8 @@ class OpenAIProvider(BaseLLMProvider):
         credential_provider = getattr(self, "_credential_provider", "")
         if credential_provider:
             clone._credential_provider = credential_provider
+            if hasattr(self, "_credential_env"):
+                clone._credential_env = self._credential_env
         if hasattr(self, "_profile_max_context"):
             clone._profile_max_context = self._profile_max_context
         return clone
@@ -234,7 +253,11 @@ class OpenAIProvider(BaseLLMProvider):
         lookup_key = getattr(self, "_credential_provider", "") or self.provider_name
         if not lookup_key:
             return False
-        new_key = get_api_key(lookup_key)
+        new_key = (
+            backend_api_key(lookup_key, self._credential_env)
+            if hasattr(self, "_credential_env")
+            else get_api_key(lookup_key)
+        )
         if not new_key or new_key == self._api_key:
             return False
         old = self._client
@@ -266,6 +289,7 @@ class OpenAIProvider(BaseLLMProvider):
                 # Late-bound so credential reloads pick up the rebuilt client.
                 return self._open_client().responses.connect(
                     max_retries=0,
+                    **(self._prompt_cache_request_kwargs() if self._go_session else {}),
                     websocket_connection_options=dict(self._ws_connection_options),
                 )
 
@@ -301,6 +325,13 @@ class OpenAIProvider(BaseLLMProvider):
 
     def _prompt_cache_request_kwargs(self) -> dict[str, Any]:
         """Return provider-specific request fields for stable cache routing."""
+        if self._go_session:
+            return {
+                "extra_headers": {
+                    "User-Agent": f"KohakuTerrarium/{__version__}",
+                    "x-opencode-session": self.prompt_cache_key or self._go_session,
+                }
+            }
         if not self.prompt_cache_key:
             return {}
         return {"prompt_cache_key": self.prompt_cache_key}

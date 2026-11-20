@@ -541,6 +541,25 @@ class TestKtuiWorkflow:
                 lambda: KtuiConfig.load().verbosity == "high", "the saved verbosity"
             )
 
+            await _type(app, "/config")
+            await _until(
+                lambda: "type to filter settings" in "\n".join(app.screen()),
+                "the settings picker",
+            )
+            await _type(app, "Browse provider models")
+            await _until(
+                lambda: "choose provider" in "\n".join(app.screen()),
+                "the provider catalog picker",
+            )
+            screen = "\n".join(app.screen())
+            for provider in ("deepseek", "opencode-go", "qwen"):
+                assert provider in screen, screen
+            app.inject({"key": "esc"})
+            await _until(
+                lambda: "message · / commands" in "\n".join(app.screen()),
+                "the input box after cancelling discovery",
+            )
+
             await _type(app, "/exit")
             await asyncio.wait_for(run, 10)
             assert (

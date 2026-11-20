@@ -1,4 +1,5 @@
 import { useHostsStore } from "@/stores/hosts"
+import { settingsAPI } from "@/utils/api"
 
 import {
   MODEL_INVENTORY_FRESH_MS,
@@ -14,5 +15,8 @@ export { MODEL_INVENTORY_FRESH_MS, _resetModelInventoryForTests }
 
 export function useModelInventory() {
   const hosts = useHostsStore()
-  return createModelInventory({ getHostKey: () => hosts.activeHostId || "_same_origin" })
+  return {
+    ...createModelInventory({ getHostKey: () => hosts.activeHostId || "_same_origin" }),
+    catalog: settingsAPI,
+  }
 }

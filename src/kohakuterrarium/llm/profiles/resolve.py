@@ -10,12 +10,12 @@ from typing import Any
 from kohakuterrarium.llm.profiles.api_keys import KEYS_PATH as KEYS_PATH
 from kohakuterrarium.llm.profiles.api_keys import KT_DIR as KT_DIR
 from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP as PROVIDER_KEY_MAP
-from kohakuterrarium.llm.profiles.api_keys import get_api_key
+from kohakuterrarium.llm.profiles.api_keys import backend_api_key, get_api_key
 from kohakuterrarium.llm.profiles.api_keys import list_api_keys as list_api_keys
 from kohakuterrarium.llm.profiles.api_keys import save_api_key
 from kohakuterrarium.llm.profiles.backend_registry import package_backend
 from kohakuterrarium.llm.profiles.backends import (
-    _BUILTIN_PROVIDER_NAMES,
+    is_builtin_backend,
 )
 from kohakuterrarium.llm.profiles.backends import (
     _LEGACY_BACKEND_TYPE_VALUES as _LEGACY_BACKEND_TYPE_VALUES,
@@ -32,7 +32,10 @@ from kohakuterrarium.llm.profiles.backends import (
     load_backends,
 )
 from kohakuterrarium.llm.profiles.backends import load_yaml_store as _load_yaml
-from kohakuterrarium.llm.profiles.backends import save_yaml_store as _save_yaml
+from kohakuterrarium.llm.profiles.backends import (
+    profile_transaction,
+    write_yaml_locked as _save_yaml,
+)
 from kohakuterrarium.llm.profiles.backends import (
     validate_backend_type,
 )
@@ -71,6 +74,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+@profile_transaction()
 def save_backend(backend: LLMBackend) -> None:
     """Persist a user provider after normalizing its backend type."""
     backend.backend_type = validate_backend_type(backend.backend_type)
@@ -80,8 +84,8 @@ def save_backend(backend: LLMBackend) -> None:
     ):
         raise ValueError("Antigravity is a fixed built-in local provider")
     data = _load_yaml()
-    backends = load_backends()
-    presets = load_presets()
+    backends = load_backends(include_remote=False)
+    presets = load_presets(include_remote=False)
     backends[backend.name] = backend
     _save_yaml(
         _serialize_user_data(
@@ -94,17 +98,19 @@ def save_backend(backend: LLMBackend) -> None:
     )
 
 
+@profile_transaction()
 def delete_backend(name: str) -> bool:
-    if name in _BUILTIN_PROVIDER_NAMES:
+    backend = load_backends(include_remote=False).get(name)
+    if backend and is_builtin_backend(backend):
         raise ValueError(f"Cannot delete built-in provider: {name}")
     data = _load_yaml()
     existing = data.get("backends", {}) or data.get("providers", {})
     if name not in existing:
         return False
-    presets = load_presets()
+    presets = load_presets(include_remote=False)
     if any(provider == name for provider, _ in presets):
         raise ValueError(f"Provider still in use by one or more presets: {name}")
-    backends = load_backends()
+    backends = load_backends(include_remote=False)
     backends.pop(name, None)
     _save_yaml(
         _serialize_user_data(
@@ -179,7 +185,7 @@ _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
     ("anthropic", "claude-opus-4.8"),
     ("openai", "gpt-5.6-sol"),
     ("gemini", "gemini-4-argon"),
-    ("mimo", "mimo-v2.5-pro"),
+    ("mimo", "mimo-v2.6-pro"),
     ("kimi-code", "kimi-for-coding"),
     ("glm-coding", "glm-5.3"),
 ]
@@ -227,11 +233,12 @@ def _upgrade_bare_default(bare: str) -> str:
     return f"{sorted(hits)[0]}/{bare}"
 
 
+@profile_transaction()
 def set_default_model(model_name: str) -> None:
     _save_yaml(
         _serialize_user_data(
-            load_presets(),
-            load_backends(),
+            load_presets(include_remote=False),
+            load_backends(include_remote=False),
             model_name,
             get_subagent_models(),
             get_child_models(),
@@ -239,12 +246,48 @@ def set_default_model(model_name: str) -> None:
     )
 
 
+@profile_transaction()
 def save_profile(profile: LLMProfile | LLMPreset) -> None:
     """Persist a provider-scoped preset while preserving existing variations."""
+    _write_profile(profile)
+
+
+class PresetAlreadyExists(ValueError):
+    """A create-only operation collided with a provider-scoped preset."""
+
+
+@profile_transaction()
+def create_preset(
+    preset: LLMPreset, *, reuse_model: bool = False
+) -> tuple[LLMPreset, bool]:
+    definitions = _all_preset_definitions()
+    if reuse_model:
+        matches = [
+            p
+            for (owner, _), p in definitions.items()
+            if owner == preset.provider and p.model == preset.model
+        ]
+        if matches:
+            user = load_presets()
+            return (
+                next((p for p in matches if (p.provider, p.name) in user), matches[0]),
+                False,
+            )
+    if _get_preset_definition(preset.name, preset.provider, definitions=definitions):
+        raise PresetAlreadyExists(
+            "A preset with this name already exists. Choose another name or open the existing preset."
+        )
+    _write_profile(preset)
+    return preset, True
+
+
+def _write_profile(profile: LLMProfile | LLMPreset) -> None:
     if isinstance(profile, LLMPreset):
         preset = profile
     else:
-        existing_preset = load_presets().get((profile.provider, profile.name))
+        existing_preset = load_presets(include_remote=False).get(
+            (profile.provider, profile.name)
+        )
         preset = LLMPreset(
             name=profile.name,
             model=profile.model,
@@ -270,10 +313,10 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
         raise ValueError("Preset provider is required")
 
     data = _load_yaml()
-    backends = load_backends()
+    backends = load_backends(include_remote=False)
     if preset.provider not in backends:
         raise ValueError(f"Provider not found: {preset.provider}")
-    presets = load_presets()
+    presets = load_presets(include_remote=False)
     presets[(preset.provider, preset.name)] = preset
     _save_yaml(
         _serialize_user_data(
@@ -286,10 +329,11 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
     )
 
 
+@profile_transaction()
 def delete_profile(name: str, provider: str = "") -> bool:
     """Delete one user preset, refusing ambiguous bare-name matches."""
     data = _load_yaml()
-    presets = load_presets()
+    presets = load_presets(include_remote=False)
     if provider:
         key = (provider, name)
         if key not in presets:
@@ -303,7 +347,7 @@ def delete_profile(name: str, provider: str = "") -> bool:
     _save_yaml(
         _serialize_user_data(
             presets,
-            load_backends(),
+            load_backends(include_remote=False),
             data.get("default_model", ""),
             get_subagent_models(),
             get_child_models(),
@@ -322,14 +366,16 @@ def _builtin_preset_to_runtime(
     return _resolve_preset(preset, load_backends(), selections)
 
 
+def _builtin_preset_definitions() -> dict[tuple[str, str], LLMPreset]:
+    return {
+        (provider, name): _preset_from_data(name, data, provider)
+        for (provider, name), data in get_all_presets().items()
+    }
+
+
 def _all_preset_definitions() -> dict[tuple[str, str], LLMPreset]:
     """Merge user presets over built-ins only on exact provider/name matches."""
-    presets: dict[tuple[str, str], LLMPreset] = {}
-    for key, data in get_all_presets().items():
-        provider, name = key
-        presets[key] = _preset_from_data(name, data, provider)
-    presets.update(load_presets())
-    return presets
+    return {**_builtin_preset_definitions(), **load_presets()}
 
 
 def _split_provider_prefix(name: str) -> tuple[str, str]:
@@ -371,7 +417,12 @@ def _deprecated_successor(
     return definitions.get((successor_provider, successor))
 
 
-def _get_preset_definition(name: str, provider: str = "") -> LLMPreset | None:
+def _get_preset_definition(
+    name: str,
+    provider: str = "",
+    *,
+    definitions: dict[tuple[str, str], LLMPreset] | None = None,
+) -> LLMPreset | None:
     """Resolve qualified names, aliases, or uniquely matched bare preset names."""
     base_name, _ = parse_variation_selector(name)
     qualified_provider, bare_name = _split_provider_prefix(base_name)
@@ -383,7 +434,8 @@ def _get_preset_definition(name: str, provider: str = "") -> LLMPreset | None:
         if aliased is not None:
             qualified_provider, bare_name = aliased
 
-    definitions = _all_preset_definitions()
+    if definitions is None:
+        definitions = _all_preset_definitions()
 
     if qualified_provider:
         preset = definitions.get((qualified_provider, bare_name))
@@ -565,9 +617,7 @@ def _is_available(
     if backend and backend.backend_type == "codex":
         if backend.base_url:
             # A custom Responses endpoint uses API-key auth instead of OAuth.
-            if get_api_key(provider_name):
-                return True
-            return bool(backend.api_key_env and get_api_key(backend.api_key_env))
+            return bool(backend_api_key(provider_name, backend.api_key_env))
         # The built-in Codex endpoint requires a cached OAuth token.
         return CodexTokens.load() is not None
     if provider_name == "codex":
@@ -582,11 +632,7 @@ def _is_available(
         descriptor = package_backend(backend.backend_type)
         if descriptor is not None and descriptor.manages_own_credentials:
             return True
-        if get_api_key(provider_name):
-            return True
-        if backend.api_key_env and get_api_key(backend.api_key_env):
-            return True
-        return False
+        return bool(backend_api_key(provider_name, backend.api_key_env))
     if provider_name in PROVIDER_KEY_MAP:
         return bool(get_api_key(provider_name))
     return False

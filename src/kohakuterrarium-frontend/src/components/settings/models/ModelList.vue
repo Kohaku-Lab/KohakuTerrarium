@@ -9,6 +9,7 @@
           <KButton variant="primary" size="sm" data-model-new><span class="i-carbon-add" />{{ t("settings.models.new") }}<span class="i-carbon-chevron-down" /></KButton>
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="discover"><span class="i-carbon-search mr-2" />{{ t("discovery.title") }}</el-dropdown-item>
               <el-dropdown-item command="blank">{{ t("settings.models.newBlank") }}</el-dropdown-item>
               <el-dropdown-item command="existing" data-model-from-existing>{{ t("settings.models.newFromExisting") }}</el-dropdown-item>
             </el-dropdown-menu>
@@ -69,7 +70,7 @@ defineProps({
   query: { type: String, default: "" },
   filter: { type: String, default: "all" },
 })
-const emit = defineEmits(["update:query", "update:filter", "select", "new-blank", "new-existing", "clone", "set-default", "delete"])
+const emit = defineEmits(["update:query", "update:filter", "select", "new-blank", "discover", "new-existing", "clone", "set-default", "delete"])
 
 const { t } = useI18n()
 
@@ -85,6 +86,7 @@ function meta(preset) {
 }
 
 function onNew(command) {
+  if (command === "discover") return emit("discover")
   emit(command === "blank" ? "new-blank" : "new-existing")
 }
 

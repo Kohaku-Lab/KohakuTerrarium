@@ -36,6 +36,7 @@ The journey, in one method:
 from collections.abc import Iterator
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -157,12 +158,44 @@ class TestApiSettingsJourney:
         client: TestClient,
         creature_dir: Path,
         scripted_llm: ScriptedLLM,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         config_url = "/api/settings/config-files/image-context/content"
         for content, status in (('{"count":75}', 200), ('{"count":0}', 422)):
             resp = client.put(config_url, json={"content": content})
             assert resp.status_code == status
         assert client.get(config_url).json()["content"] == '{"count":75}'
+
+        async def upstream_request(transport, request):
+            assert request.url.host == "api.deepseek.com"
+            assert request.headers["authorization"] == "Bearer test-key"
+            return httpx.Response(
+                200, json={"data": [{"id": "ds-preview", "context_window": 96000}]}
+            )
+
+        with monkeypatch.context() as http:
+            http.setattr(
+                httpx.AsyncHTTPTransport, "handle_async_request", upstream_request
+            )
+            path = "/api/settings/backends/deepseek/models"
+            assert client.post(path).status_code == 409
+            assert client.post(
+                "/api/settings/keys", json={"provider": "deepseek", "key": "test-key"}
+            ).is_success
+            (row,) = client.post(path).json()["models"]
+            assert row["id"] == "ds-preview"
+            assert client.post("/api/settings/profiles", json=row["preset"]).is_success
+            catalog = client.get("/api/settings/models").json()
+            found = next(
+                p
+                for p in catalog
+                if p["provider"] == "deepseek" and p["name"] == "ds-preview"
+            )
+            assert found["source"] == "user" and found["max_context"] == 96000
+            assert client.delete(
+                "/api/settings/profiles/deepseek/ds-preview"
+            ).is_success
+            assert client.delete("/api/settings/keys/deepseek").is_success
 
         # ── 1. Identity: LLM backend CRUD ─────────────────────────────
         # Baseline: only the built-in backends, no user backends.
@@ -180,6 +213,10 @@ class TestApiSettingsJourney:
             "mimo",
             "kimi-code",
             "glm-coding",
+            "deepseek",
+            "qwen",
+            "opencode-go",
+            "minimax",
             "google-antigravity",
         }
         grok = next(b for b in baseline if b["name"] == "grok-subscription")
