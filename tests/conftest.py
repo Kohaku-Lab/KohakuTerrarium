@@ -68,6 +68,7 @@ if sys.platform == "win32":
 
     subprocess.Popen.__init__ = _popen_init_hidden
 
+from kohakuterrarium.llm.catalog_endpoints import CATALOG_KEY_ENVS  # noqa: E402
 from kohakuterrarium.llm.profiles.api_keys import PROVIDER_KEY_MAP  # noqa: E402
 from kohakuterrarium.testing.llm_seam import (  # noqa: E402
     forbid_real_providers,
@@ -377,7 +378,7 @@ def _no_inherited_provider_keys(monkeypatch):
     ``get_api_key`` falls back to these variables, so an operator shell with a
     real key changes results. A test that needs a key sets it itself.
     """
-    for name in PROVIDER_KEY_MAP.values():
+    for name in set(PROVIDER_KEY_MAP.values()) | set(CATALOG_KEY_ENVS.values()):
         monkeypatch.delenv(name, raising=False)
 
 

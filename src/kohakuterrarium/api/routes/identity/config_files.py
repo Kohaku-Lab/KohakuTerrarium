@@ -5,6 +5,7 @@ persistence, writes support optimistic concurrency, and affected in-process
 caches are invalidated when possible so subsequent reads observe the edit.
 """
 
+from contextlib import nullcontext
 import hashlib
 import json
 from pathlib import Path
@@ -24,6 +25,10 @@ from kohakuterrarium.studio.identity.llm import profiles as _llm_profiles_mod
 from kohakuterrarium.terrarium.drive.errors import (
     DriveSettingsConflictError,
     DriveValidationError,
+)
+from kohakuterrarium.llm.profiles.backends import (
+    profile_transaction,
+    write_profile_bytes,
 )
 from kohakuterrarium.llm.codex.image.budget import valid_image_count
 from kohakuterrarium.utils.config_dir import config_dir
@@ -244,15 +249,23 @@ def _write_sync(name: str, body: ConfigFileWrite) -> dict:
         raise HTTPException(413, "file too large to write via editor (>1 MiB)")
     if name == "drive-settings":
         return _write_drive_settings(path, body, new_bytes)
-    if body.sha256_expected is not None and path.exists():
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != body.sha256_expected:
-            raise HTTPException(409, "file changed externally since you opened it")
-    _validate_and_reload(name, path, body.content)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".kt-tmp")
-    tmp.write_bytes(new_bytes)
-    tmp.replace(path)
+    with profile_transaction() if name == "llm_profiles" else nullcontext():
+        if body.sha256_expected is not None and (
+            path.exists() or name == "llm_profiles"
+        ):
+            actual = hashlib.sha256(
+                path.read_bytes() if path.exists() else b""
+            ).hexdigest()
+            if actual != body.sha256_expected:
+                raise HTTPException(409, "file changed externally since you opened it")
+        _validate_and_reload(name, path, body.content)
+        if name == "llm_profiles":
+            write_profile_bytes(path, new_bytes)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(path.suffix + ".kt-tmp")
+            tmp.write_bytes(new_bytes)
+            tmp.replace(path)
     return {
         "status": "ok",
         "name": name,

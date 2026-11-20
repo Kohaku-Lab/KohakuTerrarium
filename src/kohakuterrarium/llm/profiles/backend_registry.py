@@ -42,6 +42,7 @@ class PackageBackendDescriptor:
     description: str = ""
     credentials: str = "api_key"
     provider_native_tools: tuple[str, ...] = ()
+    model_discovery: bool = False
 
     @classmethod
     def from_manifest(
@@ -75,6 +76,7 @@ class PackageBackendDescriptor:
             display_name=str(entry.get("display_name") or ""),
             description=str(entry.get("description") or ""),
             credentials=credentials,
+            model_discovery=entry.get("model_discovery") is True,
             provider_native_tools=tuple(str(t) for t in native if t),
         )
 

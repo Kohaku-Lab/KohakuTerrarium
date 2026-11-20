@@ -9,6 +9,7 @@ from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.profiles import api_keys as _api_keys
+from kohakuterrarium.llm.profiles.api_keys import backend_api_key, PROVIDER_KEY_MAP
 from kohakuterrarium.llm.profiles.backend_registry import (
     BUILTIN_BACKEND_TYPES,
     INTERNAL_BACKEND_TYPES,
@@ -18,7 +19,6 @@ from kohakuterrarium.llm.profiles.backend_registry import (
 )
 from kohakuterrarium.llm.profiles.resolve import (
     LLMProfile,
-    get_api_key,
     profile_to_identifier,
     resolve_controller_llm,
 )
@@ -171,11 +171,12 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             "is not built in and no installed package provides it"
         )
 
+    key_env = profile.api_key_env or (
+        PROVIDER_KEY_MAP.get(profile.provider, "") if not profile.base_url else ""
+    )
     if profile.backend_type == "fake_test":
         # This backend validates the full credential path without network access.
-        api_key = get_api_key(profile.provider) if profile.provider else ""
-        if not api_key and profile.api_key_env:
-            api_key = get_api_key(profile.api_key_env)
+        api_key = backend_api_key(profile.provider, key_env)
         if not api_key:
             raise ValueError(
                 f"API key not found for fake_test profile '{profile.name}' "
@@ -201,10 +202,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         codex_base_url = _resolved_base_url(profile)
         codex_key: str | None = None
         if codex_base_url:
-            resolved = get_api_key(profile.provider) if profile.provider else ""
-            if not resolved and profile.api_key_env:
-                resolved = get_api_key(profile.api_key_env)
-            codex_key = interpolate_env_vars(resolved or "") or None
+            codex_key = backend_api_key(profile.provider, key_env) or None
             if not codex_key:
                 raise LLMNotConfiguredError(
                     f"API key required for the custom OpenAI Responses "
@@ -260,11 +258,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         _apply_backend_native_identity(provider, profile)
         return provider
 
-    api_key = get_api_key(profile.provider) if profile.provider else ""
-    if not api_key and profile.api_key_env:
-        api_key = get_api_key(profile.api_key_env)
-    # Stored credentials may themselves reference environment variables.
-    api_key = interpolate_env_vars(api_key or "")
+    api_key = backend_api_key(profile.provider, key_env)
     if not api_key:
         # Workers use the controller's identity store as the canonical key source.
         if _api_keys._resolver is not None:
@@ -330,6 +324,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
     # Retain the credential lookup key independently of native-tool identity.
     if profile.provider:
         provider._credential_provider = profile.provider
+        provider._credential_env = key_env
     _apply_backend_native_identity(provider, profile)
     return provider
 

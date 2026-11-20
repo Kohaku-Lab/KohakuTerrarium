@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 
+from kohakuterrarium.llm.profiles.resolve import LLMPreset, save_profile
+from kohakuterrarium.llm.presets.store import set_remote_preset, clear_remote_presets
 from kohakuterrarium.laboratory.identity_cache import (
     DEFAULT_KEY_TTL_SECONDS,
     IdentityCache,
@@ -115,6 +117,30 @@ class TestGetProfileAndMCP:
         c = IdentityCache(sender)
         out = await c.get_profile("p")
         assert out == {"name": "p", "model": "x"}
+
+    async def test_expired_host_profile_refetches_and_local_edit_wins(self):
+        remote = dict(name="shared", provider="qwen", model="fresh")
+        sender = _FakeSender(responses={"get_profile": {"profile": remote}})
+        cache = IdentityCache(sender, profile_ttl=0)
+        set_remote_preset("qwen", "shared", LLMPreset("shared", "old", "qwen"))
+        try:
+            assert (await cache.get_profile("qwen/shared"))["model"] == "fresh"
+            save_profile(LLMPreset("shared", "local", "qwen"))
+            assert (await cache.get_profile("qwen/shared"))["model"] == "local"
+            assert len(sender.calls) == 1
+        finally:
+            clear_remote_presets()
+
+    async def test_old_hosts_can_omit_builtin_and_cannot_supply_another_provider(self):
+        cache = IdentityCache(
+            _FakeSender(error={"kind": "not_found", "message": "missing"})
+        )
+        assert (await cache.get_profile("codex/gpt-5.5"))["backend_type"] == "codex"
+        wrong = IdentityCache(
+            _FakeSender(responses={"get_profile": {"profile": {"provider": "other"}}})
+        )
+        with pytest.raises(IdentityNotFound):
+            await wrong.get_profile("qwen/shared")
 
     async def test_get_mcp_server(self):
         sender = _FakeSender(

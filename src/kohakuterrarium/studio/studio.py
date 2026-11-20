@@ -53,6 +53,7 @@ from kohakuterrarium.studio.identity import (
 )
 from kohakuterrarium.studio.identity.codex import oauth as _identity_codex
 from kohakuterrarium.studio.identity.drive_settings import settings as _identity_drives
+from kohakuterrarium.llm.discovery import discover_models
 from kohakuterrarium.studio.identity.llm import backends as _identity_backends
 from kohakuterrarium.studio.identity.llm import default as _identity_default
 from kohakuterrarium.studio.identity.llm import native_tools as _identity_native_tools
@@ -316,6 +317,9 @@ class _IdentityNS:
 
 class _IdentityLLM:
     """LLM backends + profiles + default-model + native-tools."""
+
+    async def discover_models(self, backend_name: str):
+        return await discover_models(backend_name)
 
     def list_backends(self) -> list[dict[str, Any]]:
         return _identity_backends.list_backends()

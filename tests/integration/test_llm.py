@@ -77,6 +77,8 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
+from kohakuterrarium.llm.discovery import discover_models, suggested_presets
+from kohakuterrarium.studio.identity.llm.profiles import save_profile_record
 from kohakuterrarium.llm.codex.auth import CodexTokens
 from kohakuterrarium.llm.codex.provider import CodexOAuthProvider
 from kohakuterrarium.llm.grok.auth import GROK_CLI_BASE_URL, GrokToken, GrokTokens
@@ -350,6 +352,37 @@ class TestLlmIntegration:
         preset as the default model and assert no-args resolution finds
         it.
         """
+        # Set a key, discover a new model, then save and resolve it offline.
+        ak.save_api_key("deepseek", "test-discovery-key")
+
+        def catalog(request):
+            assert str(request.url) == "https://api.deepseek.com/models"
+            assert request.headers["Authorization"] == "Bearer test-discovery-key"
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "id": "deepseek-new",
+                            "context_window": 64000,
+                            "effort": {"supported_levels": ["high"]},
+                        }
+                    ]
+                },
+            )
+
+        (found,) = asyncio.run(
+            discover_models("deepseek", transport=httpx.MockTransport(catalog))
+        )
+        assert get_profile("deepseek-new", "deepseek") is None
+        (draft,) = suggested_presets("deepseek", [found])
+        save_profile_record(**draft)
+        selected = resolve_controller_llm({}, "deepseek/deepseek-new@reasoning=high")
+        assert (selected.model, selected.max_context) == ("deepseek-new", 64000)
+        assert selected.extra_body == {"reasoning_effort": "high"}
+        assert delete_profile("deepseek-new", provider="deepseek")
+        ak.save_api_key("deepseek", "")
+
         # 1. Define a custom OpenAI-compatible backend + a preset on it.
         backend = LLMBackend(
             name="acme",

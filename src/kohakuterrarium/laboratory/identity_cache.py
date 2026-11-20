@@ -6,19 +6,20 @@ the same record share one underlying fetch.
 """
 
 import asyncio
-import os
 import time
 import weakref
-from dataclasses import asdict
 from typing import Any
 
 from kohakuterrarium.laboratory.protocols import LabSender
 from kohakuterrarium.llm.profiles.api_keys import (
     PROVIDER_KEY_MAP,
-    _load_api_keys,
+    local_backend_key,
 )
+from kohakuterrarium.llm.presets.store import load_presets
+from kohakuterrarium.llm.profiles.backends import load_backends
 from kohakuterrarium.llm.codex.auth import CodexTokens, _default_token_path
-from kohakuterrarium.llm.profiles.resolve import get_profile as _local_get_profile
+from kohakuterrarium.llm.profiles.resolve import _builtin_preset_definitions
+from kohakuterrarium.laboratory.profile_record import profile_record
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -234,11 +235,23 @@ class IdentityCache:
 
     async def _fetch_profile(self, name: str) -> dict[str, Any]:
         # Worker-local profiles intentionally override host profiles.
-        local = _read_local_profile(name)
+        local = profile_record(name, definitions=load_presets(include_remote=False))
         if local is not None:
             return local
-        body = await self._request("get_profile", {"name": name})
-        return body["profile"]
+        provider, sep, bare = name.partition("/")
+        query = {"name": bare, "provider": provider} if sep else {"name": name}
+        try:
+            body = await self._request("get_profile", query)
+        except IdentityNotFound:
+            # Older hosts only serve user presets. Retain the worker's built-ins.
+            fallback = profile_record(name, definitions=_builtin_preset_definitions())
+            if fallback is None:
+                raise
+            return fallback
+        profile = body["profile"]
+        if sep and profile.get("provider") != provider:
+            raise IdentityNotFound(name)
+        return profile
 
     async def _fetch_mcp(self, name: str) -> dict[str, Any]:
         body = await self._request("get_mcp_server", {"name": name})
@@ -280,13 +293,9 @@ class IdentityCache:
 
 def _read_local_api_key(provider: str) -> str:
     """Read a worker-local API key without invoking the resolver."""
-    keys = _load_api_keys()
-    if provider in keys and keys[provider]:
-        return keys[provider]
-    env_var = PROVIDER_KEY_MAP.get(provider, "")
-    if env_var:
-        return os.environ.get(env_var, "")
-    return ""
+    backend = load_backends().get(provider)
+    env = backend.api_key_env if backend else PROVIDER_KEY_MAP.get(provider, "")
+    return local_backend_key(provider, env)
 
 
 def _read_local_codex_tokens():
@@ -295,17 +304,6 @@ def _read_local_codex_tokens():
     if tokens is not None and tokens.access_token:
         return tokens
     return None
-
-
-def _read_local_profile(name: str) -> dict[str, Any] | None:
-    """Return a worker-local profile as a wire dictionary, if present."""
-    profile = _local_get_profile(name)
-    if profile is None:
-        return None
-    try:
-        return asdict(profile)
-    except TypeError:  # pragma: no cover - defensive
-        return None
 
 
 __all__ = [

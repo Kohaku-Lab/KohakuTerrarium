@@ -482,6 +482,13 @@ class TestDefaultModel:
         save_api_key("kimi-code", "sk-kimi")
         assert get_default_model() == "kimi-code/kimi-for-coding"
 
+    def test_mimo_key_uses_current_direct_model_and_preserves_openrouter_name(self):
+        ak.save_api_key("mimo", "example")
+        assert get_default_model() == "mimo/mimo-v2.6-pro"
+        assert get_profile("mimo").model == "mimo-v2.6-pro"
+        assert get_profile("mimo-v2.6-pro").provider == "openrouter"
+        assert get_profile("mimo-v2.6-pro", "mimo").provider == "mimo"
+
     def test_default_picks_glm_coding_when_only_glm_key_available(self):
         from kohakuterrarium.llm.profiles.api_keys import save_api_key
 
@@ -750,9 +757,9 @@ class TestLoadProfilesAndListAll:
         load = profiles_mod.load_backends
         available = profiles_mod._is_available
 
-        def observed_backends():
+        def observed_backends(**kwargs):
             backend_reads.append(True)
-            return load()
+            return load(**kwargs)
 
         def observed_available(provider, *args, **kwargs):
             availability_reads[provider] += 1

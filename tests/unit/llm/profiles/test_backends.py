@@ -20,8 +20,13 @@ from kohakuterrarium.llm.profiles.backends import (
     load_yaml_store,
     package_provider_records,
     save_yaml_store,
+    set_remote_backend,
+    clear_remote_backends,
     validate_backend_type,
 )
+
+from kohakuterrarium.llm.profiles.resolve import get_profile, set_default_model
+from kohakuterrarium.llm.profiles.types import LLMBackend
 
 from tests.unit._fakes.package_backend import echo_backend, install_backend_package
 
@@ -331,3 +336,106 @@ class TestPackageBackends:
         assert "echo" not in load_backends()
         with pytest.raises(ValueError):
             validate_backend_type("echo")
+
+
+def test_catalog_legacy_transport_survives_migration():
+    url = "https://team.example/v1"
+    save_yaml_store(
+        {
+            "profiles": {
+                "team": {
+                    "provider": "deepseek",
+                    "model": "ds",
+                    "backend_type": "openai",
+                    "base_url": url,
+                    "api_key_env": "TEAM_DS",
+                }
+            }
+        }
+    )
+    for _ in range(2):
+        profile = get_profile("team", "deepseek")
+        assert (profile.base_url, profile.api_key_env) == (url, "TEAM_DS")
+        set_default_model("deepseek/team")
+
+
+def test_catalog_worker_prefers_host_region_without_overriding_local_config():
+    regional = "https://team.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    remote = LLMBackend("qwen", "openai", regional, "TEAM_QWEN")
+    try:
+        set_remote_backend(remote)
+        assert load_backends()["qwen"].base_url == regional
+        set_default_model("qwen/team")
+        assert "qwen" not in load_yaml_store().get("backends", {})
+        save_yaml_store(
+            {
+                "backends": {
+                    "qwen": {
+                        "backend_type": "openai",
+                        "base_url": "http://localhost:9000/v1",
+                    }
+                }
+            }
+        )
+        assert load_backends()["qwen"].base_url == "http://localhost:9000/v1"
+    finally:
+        clear_remote_backends()
+
+
+def test_catalog_legacy_key_only_uses_named_endpoint():
+    save_yaml_store(
+        {
+            "profiles": {
+                "team": {
+                    "provider": "deepseek",
+                    "model": "ds",
+                    "api_key_env": "TEAM_DS",
+                }
+            }
+        }
+    )
+    profile = get_profile("deepseek/team")
+    assert profile.base_url == _built_in_providers()["deepseek"].base_url
+    assert profile.api_key_env == "TEAM_DS"
+
+
+@pytest.mark.parametrize("section", ["profiles", "presets"])
+@pytest.mark.parametrize("owner", [{"provider": "openai"}, {"backend_type": "openai"}])
+def test_legacy_catalog_endpoint_identifies_transport_and_preserves_its_key(
+    section, owner
+):
+    endpoint = "https://api.deepseek.com/v1"
+    save_yaml_store(
+        {
+            section: {
+                "team": {
+                    **owner,
+                    "model": "ds",
+                    "base_url": endpoint,
+                    "api_key_env": "TEAM_DS",
+                }
+            }
+        }
+    )
+    for _ in range(2):
+        profile = get_profile("deepseek/team")
+        assert profile and (profile.base_url, profile.api_key_env) == (
+            endpoint,
+            "TEAM_DS",
+        )
+        set_default_model("deepseek/team")
+
+
+def test_legacy_endpoint_only_inherits_credentials_only_for_official_host():
+    for url, expected in (
+        ("https://api.deepseek.com/v1", "DEEPSEEK_API_KEY"),
+        ("https://team.example/v1", ""),
+    ):
+        save_yaml_store(
+            {
+                "profiles": {
+                    "team": {"provider": "deepseek", "base_url": url, "model": "ds"}
+                }
+            }
+        )
+        assert get_profile("deepseek/team").api_key_env == expected

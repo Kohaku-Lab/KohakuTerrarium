@@ -519,9 +519,11 @@ class _RecordingIdentityCache:
 
     def __init__(self, profile=None):
         self._profile = profile
+        self.names = []
         self.providers: list[str] = []
 
     async def get_profile(self, name):
+        self.names.append(name)
         return self._profile
 
     async def prefetch_for_provider(self, provider):
@@ -538,6 +540,19 @@ class TestPrewarmIdentity:
             await adapter._prewarm_identity(config)
             # The profile's provider is pre-warmed.
             assert "openai" in cache.providers
+        finally:
+            await engine.shutdown()
+
+    async def test_qualified_prewarm_keeps_provider_on_launch_and_switch(self):
+        engine = await TestTerrariumBuilder().build()
+        cache = _RecordingIdentityCache()
+        adapter = TerrariumRuntimeAdapter(engine, _FakeNode(), identity_cache=cache)
+        try:
+            selector = "qwen/shared@thinking=on"
+            config = SimpleNamespace(llm_profile=selector, provider="", model="")
+            await adapter._prewarm_identity(config)
+            await adapter._prewarm_profile_by_selector(selector)
+            assert cache.names == ["qwen/shared", "qwen/shared"]
         finally:
             await engine.shutdown()
 

@@ -23,6 +23,9 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.laboratory.identity_cache import IdentityNotFound
+from kohakuterrarium.llm.profiles.resolve import LLMPreset, save_profile
+
 from kohakuterrarium.testing.llm import ScriptEntry
 
 from tests.e2e._lab_harness import (
@@ -2704,17 +2707,13 @@ async def test_identity_sync_host_to_worker(tmp_path, monkeypatch):
     monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "host-sessions"))
     install_scripted_llm(monkeypatch)
 
-    # The host's StudioIdentityAdapter reads profiles via
-    # ``list_profiles_payload`` — seam it to a known host-side profile
-    # so the test doesn't depend on the operator's real identity files.
-    synced_profile = {
-        "name": "synced-profile",
-        "model": "gpt-4-test",
-        "provider": "openai",
-    }
+    # The host and worker in this harness share a process. Give the worker
+    # an empty local preset store and let the host resolve its real YAML.
+    for provider in ("deepseek", "qwen"):
+        save_profile(LLMPreset("synced-profile", f"{provider}-test", provider))
     monkeypatch.setattr(
-        "kohakuterrarium.laboratory.adapters.studio.identity.list_profiles_payload",
-        lambda: [synced_profile],
+        "kohakuterrarium.laboratory.identity_cache.load_presets",
+        lambda *, include_remote: {},
     )
 
     async with RealLabHost(tmp_path) as host:
@@ -2729,17 +2728,20 @@ async def test_identity_sync_host_to_worker(tmp_path, monkeypatch):
 
             # The worker fetches the host-defined profile over the wire.
             got = await asyncio.wait_for(
-                worker.identity_cache.get_profile("synced-profile"),
+                worker.identity_cache.get_profile("qwen/synced-profile"),
                 timeout=OP_TIMEOUT,
             )
-            assert got == synced_profile, (
-                f"worker IdentityCache did not sync the host profile: "
-                f"got {got!r}, expected {synced_profile!r}"
+            assert (got["provider"], got["name"], got["model"]) == (
+                "qwen",
+                "synced-profile",
+                "qwen-test",
             )
+            with pytest.raises(ValueError, match="multiple providers"):
+                await worker.identity_cache.get_profile("synced-profile")
 
             # A profile the host doesn't have surfaces as a clean miss,
             # not a hang and not a wrong record.
-            with pytest.raises(Exception):
+            with pytest.raises(IdentityNotFound):
                 await asyncio.wait_for(
                     worker.identity_cache.get_profile("does-not-exist"),
                     timeout=OP_TIMEOUT,
