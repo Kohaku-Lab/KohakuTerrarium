@@ -49,8 +49,10 @@ compaction pauses the agent while it summarises, which in an agent
 framework means "the controller is frozen while 50k tokens get turned
 into 2k." That is unacceptable for ambient agents.
 
-Non-blocking compaction summarises in a background task and splices
-the result in atomically between turns. The controller never stops.
+Non-blocking compaction summarises in a background task and synchronously
+splices the result after validating the captured prefix. The splice can
+occur during a controller turn and retains pending tool-call announcements
+in the live tail; summarisation does not pause the controller.
 
 ## How we define it
 
@@ -77,6 +79,13 @@ never summarised), optional `compact_model` (cheaper summariser).
 
 At the end of every turn, if `prompt_tokens >= threshold * max_tokens`,
 the compact manager kicks off a background task.
+
+With an output router configured, each dispatched attempt has one terminal
+event, including cancellation before its task starts. `compact_complete`
+reports the in-memory splice; checkpoint persistence follows it and may
+still be pending. See the
+[cancellation and terminal-event contract](../impl-notes/non-blocking-compaction.md#cancellation-and-terminal-events)
+for cancellation, retry, and round-number semantics.
 
 ## How we implement it
 

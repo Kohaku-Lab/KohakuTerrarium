@@ -750,6 +750,8 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
 
         if controller.is_ephemeral:
             controller.flush()
+            for meta in self._direct_job_meta.values():
+                meta["conversation_flushed"] = True
 
         # Check if auto-compact should trigger at turn end
         self._maybe_trigger_compact(controller)

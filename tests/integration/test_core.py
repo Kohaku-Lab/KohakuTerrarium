@@ -37,6 +37,7 @@ import pytest
 from PIL import Image
 
 import kohakuterrarium.core.agent.history.message_history as branch_history
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
@@ -81,6 +82,7 @@ from kohakuterrarium.session.resume.build import build_conversation
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.skills.registry import Skill
+from kohakuterrarium.studio.attach.input_ops import _process_input
 from kohakuterrarium.terrarium.service.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
@@ -97,6 +99,13 @@ from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 from kohakuterrarium.testing.output import OutputRecorder
 
+from tests.helpers.compact_protocol import exercise_compact_trace
+from tests.helpers.waiting import wait_until
+from tests.helpers.history_protocol import exercise_history_trace
+from tests.helpers.two_job_protocol import (
+    exercise_mid_turn_fold,
+    exercise_two_job_trace,
+)
 from tests.helpers.stable_compact_history import exercise_compact_media_history
 
 # ---------------------------------------------------------------------------
@@ -236,8 +245,11 @@ class _SlowBackgroundTool(BaseTool):
     """BACKGROUND tool: yields after a short sleep so the controller
     must promote it and pick the result up on a later turn."""
 
-    def __init__(self, *, gated=False, output=None, error=None):
+    def __init__(
+        self, *, gated=False, output=None, error=None, mode=ExecutionMode.BACKGROUND
+    ):
         super().__init__()
+        self.mode = mode
         self.calls = 0
         self.output = output
         self.error = error
@@ -255,7 +267,7 @@ class _SlowBackgroundTool(BaseTool):
 
     @property
     def execution_mode(self) -> ExecutionMode:
-        return ExecutionMode.BACKGROUND
+        return self.mode
 
     async def _execute(self, args, **kwargs):
         self.calls += 1
@@ -438,13 +450,16 @@ class _HugeOutputTool(BaseTool):
 class _BlockingTool(BaseTool):
     """DIRECT tool that blocks forever — used to test interrupt()."""
 
-    def __init__(self) -> None:
+    def __init__(self, name="block") -> None:
         super().__init__()
+        self.name = name
         self.started = asyncio.Event()
+        self.release_cleanup = asyncio.Event()
+        self.release_cleanup.set()
 
     @property
     def tool_name(self) -> str:
-        return "block"
+        return self.name
 
     @property
     def description(self) -> str:
@@ -456,7 +471,10 @@ class _BlockingTool(BaseTool):
 
     async def _execute(self, args, **kwargs):
         self.started.set()
-        await asyncio.sleep(3600)
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            await self.release_cleanup.wait()
         return ToolResult(output="never")
 
 
@@ -2062,7 +2080,7 @@ class TestCoreIntegration:
             # Turn 4 round (1) + turn 4b round (1) = 2 more parent calls.
             assert agent.llm.call_count == calls_before_veto + 2
 
-    async def test_compaction_and_termination(self, make_creature):
+    async def test_compaction_and_termination(self, make_creature, monkeypatch):
         """One workflow exercising context compaction AND a termination
         condition: a turn pushes token usage past the compact threshold,
         the compact manager splices the conversation, and on the next
@@ -2158,6 +2176,35 @@ class TestCoreIntegration:
             assert agent.is_running is True
             assert "answer four" in _assistant_text(agent)
 
+            manager = agent.compact_manager
+            store = agent.session_store
+            compact_kinds = {"compact_start", "compact_complete", "compact_skipped"}
+
+            def compact_events():
+                return [
+                    event
+                    for event in store.get_events(agent.config.name)
+                    if event["type"] in compact_kinds
+                ]
+
+            await store.run(lambda: None)
+            event_offset = len(compact_events())
+            next_round = manager._compact_count + 1
+            before_cancel = conversation.snapshot_messages()
+            summaries_before = len(summarizer_inputs)
+            assert manager.trigger_compact()
+            await manager.cancel()
+            await store.run(lambda: None)
+            cancelled_events = compact_events()[event_offset:]
+            assert [(e["type"], e["round"]) for e in cancelled_events] == [
+                ("compact_start", next_round),
+                ("compact_skipped", next_round),
+            ]
+            assert cancelled_events[-1]["reason"] == "cancelled"
+            assert conversation.snapshot_messages() == before_cancel
+            assert len(summarizer_inputs) == summaries_before
+            assert not manager.is_compacting
+
             # Force the controller's recorded usage above the 50-token
             # compact threshold, then fire the turn-end hook.
             agent.controller._last_usage = {"prompt_tokens": 5000}
@@ -2183,8 +2230,38 @@ class TestCoreIntegration:
             # proving the compact path is re-entrant within a session.
             agent.controller._last_usage = {"prompt_tokens": 5000}
             count_after_first = agent.compact_manager._compact_count
-            agent._maybe_trigger_compact(agent.controller)
-            await agent.compact_manager.wait_for_current()
+            event_offset = len(compact_events())
+            entered, release = asyncio.Event(), asyncio.Event()
+            real_run = store.run
+
+            async def gated_flush(function, *args, **kwargs):
+                if (
+                    asyncio.current_task() is manager._compact_task
+                    and manager._compact_count == count_after_first + 1
+                ):
+                    entered.set()
+                    await release.wait()
+                return await real_run(function, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(store, "run", gated_flush)
+                agent._maybe_trigger_compact(agent.controller)
+                compact_task = manager._compact_task
+                try:
+                    await asyncio.wait_for(entered.wait(), 3)
+                    assert manager.is_compacting
+                    await manager.cancel()
+                finally:
+                    release.set()
+                    await asyncio.gather(compact_task, return_exceptions=True)
+            await store.run(lambda: None)
+            assert [
+                (e["type"], e["round"]) for e in compact_events()[event_offset:]
+            ] == [
+                ("compact_start", count_after_first + 1),
+                ("compact_complete", count_after_first + 1),
+            ]
+            assert not manager.is_compacting
             assert agent.compact_manager._compact_count == count_after_first + 1
             assert agent.compact_rounds == agent.compact_manager._compact_count
 
@@ -2242,6 +2319,31 @@ class TestCoreIntegration:
             assert "ALL DONE" in (agent._termination_checker.reason or "")
             # After termination the engine reports the creature stopped.
             assert creature.is_running is False
+            await store.run(lambda: None)
+            session_path = store.path
+            expected_compact_events = compact_events()
+
+        with SessionReader(session_path) as reader:
+            assert [
+                event
+                for event in reader.events(agent.config.name)
+                if event["type"] in compact_kinds
+            ] == expected_compact_events
+
+        for mode, prefix in (
+            ("pre-entry", ("start", "cancel_handoff")),
+            ("summarizing", ("start", "enter", "cancel_handoff")),
+            ("flushing", ("start", "enter", "apply", "cancel_handoff")),
+            ("two-waiters", ("start", "enter", "apply", "cancel_pair_handoff")),
+        ):
+            await exercise_compact_trace(
+                agent.config.agent_path / f"ownership-{mode}",
+                monkeypatch,
+                prefix
+                + (() if mode == "two-waiters" else ("enter",))
+                + ("apply", "flush"),
+                resume=True,
+            )
 
         # --- A second creature: max_turns termination -------------------
         # ``max_turns`` is the simplest termination condition — the
@@ -2299,7 +2401,7 @@ class TestCoreIntegration:
             assert b_agent.is_running is False
         assert budget_creature.is_running is False
 
-    async def test_interrupt_mid_turn(self, make_creature):
+    async def test_interrupt_mid_turn(self, make_creature, tmp_path, monkeypatch):
         """A turn dispatches a blocking DIRECT tool; ``interrupt()`` is
         called while the controller is waiting on it; the processing
         task is cancelled cleanly and the agent stays alive for the
@@ -2310,7 +2412,10 @@ class TestCoreIntegration:
         """
         creature, recorder = make_creature(
             script=[
-                ScriptEntry("[/block][block/]", match="start blocking"),
+                ScriptEntry(
+                    "[/echo]saved-before-interrupt[echo/][/block][block/]",
+                    match="start blocking",
+                ),
                 # After the interrupt, a fresh input runs normally.
                 ScriptEntry("recovered fine", match="are you ok"),
                 # A turn that dispatches the blocking tool again, this
@@ -2335,7 +2440,7 @@ class TestCoreIntegration:
         block = _BlockingTool()
         stop_task = StopTaskTool()
         bgboom = _BackgroundRaisingTool()
-        for tool in (block, stop_task, bgboom):
+        for tool in (block, stop_task, bgboom, _EchoTool()):
             agent.registry.register_tool(tool)
             agent.executor.register_tool(tool)
 
@@ -2343,18 +2448,61 @@ class TestCoreIntegration:
             await engine.add_creature(creature)
 
             # Drive a turn that will hang on the blocking tool.
+            first_frames = asyncio.Queue()
             inject_task = asyncio.create_task(
-                agent.inject_input("start blocking", source="chat")
+                _process_input(
+                    agent, "start blocking", first_frames, "test", "first-id"
+                )
+            )
+            following = asyncio.create_task(
+                agent.run("discard following", timeout=10, raise_on_error=False)
             )
             # Wait until the blocking tool is actually executing.
             await asyncio.wait_for(block.started.wait(), timeout=5.0)
 
+            await wait_until(
+                lambda: not any(
+                    job.startswith("echo_") for job in agent._direct_job_meta
+                )
+                and any(
+                    job.job_id.startswith("echo_")
+                    for job in agent.executor.job_store.get_all_statuses()
+                ),
+                timeout=5,
+            )
             # Interrupt: cancels the processing task + the direct job.
+            block.release_cleanup.clear()
             agent.interrupt()
             # inject_input awaits the processing cycle; the cancellation
             # is caught inside ``_process_event_with_controller`` so
             # inject_input itself returns without raising.
-            await asyncio.wait_for(inject_task, timeout=5.0)
+            try:
+                await asyncio.wait_for(inject_task, timeout=5.0)
+                assert agent._active_event_run[0].event.content == "discard following"
+                assert first_frames.empty(), "Previous input marked a claimed run idle"
+                assert agent.is_processing
+                agent.interrupt()
+                assert (await following).interrupted_by_user
+                assert not agent.is_processing
+                frames = asyncio.Queue()
+                web = asyncio.create_task(
+                    _process_input(
+                        agent, "discard web input", frames, "test", "fenced-id"
+                    )
+                )
+                await wait_until(
+                    lambda: agent._active_event_run
+                    and agent._active_event_run[0].event.content == "discard web input",
+                    timeout=5,
+                )
+                agent.interrupt()
+                await asyncio.wait_for(web, 5)
+                assert [frames.get_nowait()["type"] for _ in range(frames.qsize())] == [
+                    "idle"
+                ]
+            finally:
+                block.release_cleanup.set()
+                await asyncio.gather(following, return_exceptions=True)
 
             # The agent survived the interrupt and is still running.
             assert agent.is_running is True
@@ -2368,10 +2516,29 @@ class TestCoreIntegration:
             out = await _drain_chat(creature, "are you ok")
             assert "recovered fine" in out
             assert agent.llm.call_count == 2
+            assert (
+                sum(
+                    "echoed:saved-before-interrupt" in str(message.get("content", ""))
+                    for message in agent.llm.call_log[-1]
+                )
+                == 1
+            )
+            assert any(
+                "User manually interrupted" in str(message.get("content", ""))
+                for message in agent.llm.call_log[-1]
+            )
+
+            feedback = [
+                message
+                for message in agent.controller.conversation.get_messages()
+                if "User manually interrupted" in message.get_text_content()
+            ]
+            assert len(feedback) == 1
+            assert feedback[0].metadata["kind"] == "tool_results"
 
             # --- _cancel_job: cancel one running job by id -------------
             # ``_cancel_job`` is the TUI running-panel click handler. It
-            # cancels a tracked direct job and emits a ``job_cancelled``
+            # cancels a tracked direct job and emits a cancellation-request
             # activity. Drive a turn that hangs on the blocking tool,
             # then cancel that exact job by id mid-flight.
             block.started.clear()
@@ -2389,8 +2556,8 @@ class TestCoreIntegration:
             # script entry is keyed on the interruption message.
             await asyncio.wait_for(cancel_task, timeout=5.0)
             assert "job was cancelled" in _assistant_text(agent)
-            # A job_cancelled activity was surfaced.
-            assert len(recorder.activities_of_type("job_cancelled")) >= 1
+            # A cancellation request activity was surfaced.
+            assert len(recorder.activities_of_type("job_cancel_requested")) >= 1
             assert agent.is_running is True
 
             # --- stop_task builtin on a non-existent job ---------------
@@ -2449,11 +2616,23 @@ class TestCoreIntegration:
                     ScriptEntry("must not execute", match="withdrawn request"),
                     ScriptEntry("owned answer one", match="owned input one"),
                     ScriptEntry("owned answer two", match="owned input two"),
+                    ScriptEntry("[/block][block/]", match="launch failed settlement"),
                 ]
             )
             agent.llm = owned_llm
             agent.controller.llm = owned_llm
+            frames = asyncio.Queue()
+            agent.pause()
+            try:
+                await _process_input(agent, "paused", frames, "test", "paused-id")
+                queued = frames.get_nowait()
+                assert queued["type"] == "input_queued"
+                assert agent.cancel_pending(queued["event_id"])
+            finally:
+                agent.resume()
+            agent.controller.config.ephemeral = True
             block.started.clear()
+            block.release_cleanup.clear()
             owner = asyncio.create_task(agent.run("owned blocking"))
             try:
                 await asyncio.wait_for(block.started.wait(), 5)
@@ -2467,20 +2646,273 @@ class TestCoreIntegration:
                 with pytest.raises(asyncio.CancelledError):
                     await owner
                 assert not agent.is_processing
+                block.release_cleanup.set()
                 one, two = await asyncio.gather(
                     agent.run("owned input one"), agent.run("owned input two")
                 )
                 assert (one.text, two.text) == ("owned answer one", "owned answer two")
                 assert owned_llm.call_count == 3
+                assert sorted(
+                    [m["content"] for m in call if m["role"] == "user"]
+                    for call in owned_llm.call_log[1:]
+                ) == [["owned input one"], ["owned input two"]]
                 assert all(
                     "withdrawn request" not in str(message.get("content", ""))
                     for call in owned_llm.call_log
                     for message in call
                 )
             finally:
+                block.release_cleanup.set()
                 if not owner.done():
                     owner.cancel()
                 await asyncio.gather(owner, return_exceptions=True)
+
+            block.started.clear()
+            block.release_cleanup.clear()
+            owner = asyncio.create_task(
+                agent.run("launch failed settlement", timeout=8, raise_on_error=False)
+            )
+            try:
+                await asyncio.wait_for(block.started.wait(), 5)
+                agent.interrupt()
+                await asyncio.wait_for(owner, 5)
+                (finalizer,) = agent._interrupt_finalizers
+                finalizer.cancel()
+                await asyncio.gather(finalizer, return_exceptions=True)
+                before = owned_llm.call_count
+                await _process_input(agent, "not queued", frames, "test", "failed-id")
+                error = frames.get_nowait()
+                assert (
+                    error["type"] == "error" and "settlement failed" in error["content"]
+                )
+                assert frames.empty() and not agent.cancel_pending("failed-id")
+                assert owned_llm.call_count == before
+            finally:
+                block.release_cleanup.set()
+                await asyncio.gather(owner, return_exceptions=True)
+
+        for launch in ("declared", "requested"):
+            background_arg = (
+                "@@run_in_background=true\n" if launch == "requested" else ""
+            )
+            cancelled_llm = ScriptedLLM(
+                [
+                    "seed answer",
+                    "rerun answer",
+                    f"launched [/slowbg]{background_arg}[slowbg/]",
+                    "cancellation observed",
+                    "switched answer",
+                ],
+            )
+            gated = _SlowBackgroundTool(
+                gated=True,
+                mode=(
+                    ExecutionMode.BACKGROUND
+                    if launch == "declared"
+                    else ExecutionMode.DIRECT
+                ),
+            )
+            async with Terrarium(session_dir=tmp_path / launch) as engine:
+                cancelled_creature = await engine.add_creature(
+                    AgentConfig(
+                        name=f"cancel_{launch}",
+                        system_prompt="plain",
+                        tool_format="bracket",
+                    ),
+                    llm=cancelled_llm,
+                    tools=[gated],
+                    io="headless",
+                    start=True,
+                )
+                cancelled_agent = cancelled_creature.agent
+                service = LocalTerrariumService(engine)
+                await cancelled_creature.run("seed", timeout=5)
+                await cancelled_agent.regenerate_last_response()
+                assert live_branch_path(cancelled_agent)[1] == 2
+                await cancelled_creature.run("launch background", timeout=5)
+                await asyncio.wait_for(gated.started.wait(), 3)
+                job_id = cancelled_agent.executor.get_running_jobs()[0].job_id
+                task = cancelled_agent.executor.get_task(job_id)
+                assert await service.stop_job(cancelled_creature.creature_id, job_id)
+                assert not task.done()
+                assert [
+                    job["job_id"]
+                    for job in await service.list_jobs(cancelled_creature.creature_id)
+                ] == [job_id]
+                with pytest.raises(ConflictError):
+                    await cancelled_agent.inject_input(
+                        "premature switch", branch_view={1: 1}
+                    )
+                assert live_branch_path(cancelled_agent)[1] == 2
+                await cancelled_agent.inject_input(
+                    "observe cancellation",
+                    branch_view=live_branch_path(cancelled_agent),
+                )
+                assert cancelled_agent.executor.get_result(job_id).cancelled is True
+                assert await service.list_jobs(cancelled_creature.creature_id) == []
+                results = [
+                    event
+                    for event in cancelled_agent.session_store.get_events(
+                        cancelled_agent.config.name
+                    )
+                    if event["type"] == "tool_result" and event.get("call_id") == job_id
+                ]
+                assert len(results) == 1
+                assert results[0]["final_state"] == "cancelled"
+                assert results[0]["cancelled"] is True
+                feedback = f"[Tool {job_id} cancelled]"
+                assert (
+                    sum(
+                        str(message.get("content", "")).count(feedback)
+                        for message in cancelled_agent.llm.call_log[-1]
+                    )
+                    == 1
+                )
+                await cancelled_agent.inject_input("settled switch", branch_view={1: 1})
+                assert live_branch_path(cancelled_agent)[1] == 1
+                assert job_id not in str(cancelled_agent.llm.call_log[-1])
+                session_path = cancelled_agent.session_store.path
+                selected = selected_branch_view(cancelled_agent)
+
+            resumed_llm = ScriptedLLM(["resumed original"])
+            resumed, store = resume_agent(
+                session_path, io_mode="plain", llm=resumed_llm
+            )
+            try:
+                assert selected_branch_view(resumed) == selected
+                await resumed.start()
+                await resumed.inject_input("after cancelled-branch resume")
+                assert job_id not in str(resumed_llm.call_log[-1])
+                assert "rerun answer" not in str(resumed_llm.call_log[-1])
+                assert "seed answer" in str(resumed_llm.call_log[-1])
+            finally:
+                await resumed.stop()
+                store.close()
+
+        promoted_tool = _BlockingTool()
+        late_tool = _BlockingTool("late")
+        async with Terrarium(session_dir=tmp_path / "promoted_stop") as engine:
+            promoted = await engine.add_creature(
+                AgentConfig(
+                    name="promoted_stop", system_prompt="plain", tool_format="native"
+                ),
+                llm=_HistoryReplayLLM(
+                    True,
+                    plan=[
+                        [
+                            NativeToolCall("first_call", "block", "{}"),
+                            NativeToolCall("late_call", "late", "{}"),
+                        ],
+                        "both settled",
+                        [NativeToolCall("promoted_call", "block", "{}")],
+                        "background pending",
+                    ],
+                ),
+                tools=[promoted_tool, late_tool],
+                io="headless",
+                start=True,
+            )
+            promoted_agent = promoted.agent
+            output = promoted_agent.output_router.default_output
+            flush = output.flush
+
+            async def fail_after_dispatch():
+                if len(promoted_agent._direct_job_meta) == 2:
+                    raise OSError("post-dispatch flush failed")
+                await flush()
+
+            with monkeypatch.context() as patch:
+                patch.setattr(output, "flush", fail_after_dispatch)
+                await promoted.run("start both", timeout=5, raise_on_error=False)
+            jobs = {
+                meta["name"]: jid
+                for jid, meta in promoted_agent._direct_job_meta.items()
+            }
+            assert set(jobs) == {"block", "late"}
+            await asyncio.wait_for(
+                asyncio.gather(promoted_tool.started.wait(), late_tool.started.wait()),
+                5,
+            )
+            pending = None
+            try:
+                promoted_tool.release_cleanup.clear()
+                late_tool.release_cleanup.clear()
+                promoted_agent._cancel_job(jobs["block"], "block")
+                (first,) = promoted_agent._interrupt_finalizers
+                first_wait, second_wait = asyncio.Event(), asyncio.Event()
+                wakeup = promoted_agent._interrupt_fence_wakeup
+                wait = wakeup.wait
+
+                async def observe_wait():
+                    (second_wait if first.done() else first_wait).set()
+                    return await wait()
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(wakeup, "wait", observe_wait)
+                    pending = asyncio.create_task(
+                        promoted.run("continue after both", timeout=8)
+                    )
+                    await asyncio.wait_for(first_wait.wait(), 5)
+                    promoted_agent._cancel_job(jobs["late"], "late")
+                    promoted_tool.release_cleanup.set()
+                    await wait_until(
+                        lambda: second_wait.is_set() or pending.done(), timeout=5
+                    )
+                assert second_wait.is_set() and not pending.done()
+                assert promoted_agent.llm.call_count == 1
+                late_tool.release_cleanup.set()
+                assert (await pending).text == "both settled"
+                assert [
+                    m.get("tool_call_id")
+                    for m in promoted_agent.llm.call_log[-1]
+                    if m.get("role") == "tool"
+                ] == ["first_call", "late_call"]
+            finally:
+                promoted_tool.release_cleanup.set()
+                late_tool.release_cleanup.set()
+                if pending is not None:
+                    await asyncio.gather(pending, return_exceptions=True)
+            promoted_tool.started.clear()
+            turn = asyncio.create_task(
+                promoted.run("launch", timeout=5, raise_on_error=False)
+            )
+            await asyncio.wait_for(promoted_tool.started.wait(), 5)
+            job_id, handle = next(iter(promoted_agent._active_handles.items()))
+            assert handle.promote()
+            await promoted_agent.stop()
+            await turn
+            paired = [
+                m
+                for m in promoted_agent.controller.conversation.to_messages()
+                if m.get("tool_call_id") == "promoted_call"
+            ]
+            assert len(paired) == 1
+            assert "Agent stopped" in paired[0]["content"]
+            results = [
+                event
+                for event in promoted_agent.session_store.get_events("promoted_stop")
+                if event["type"] == "tool_result" and event.get("call_id") == job_id
+            ]
+            assert len(results) == 1
+            assert results[0]["final_state"] == "interrupted"
+            assert "Agent stopped" in results[0]["error"]
+            session_path = promoted_agent.session_store.path
+        resumed, store = resume_agent(
+            session_path, io_mode="plain", llm=ScriptedLLM(["resumed"])
+        )
+        try:
+            terminals = [
+                event
+                for event in store.get_events("promoted_stop")
+                if event["type"] == "tool_result" and event.get("call_id") == job_id
+            ]
+            assert len(terminals) == 1
+            assert terminals[0]["final_state"] == "interrupted"
+            await resumed.start()
+            await resumed.run("continue", timeout=5)
+        finally:
+            await resumed.stop()
+            store.close()
 
     @pytest.mark.timeout(120)
     async def test_history_ops(self, make_creature, tmp_path, monkeypatch):
@@ -3458,6 +3890,45 @@ class TestCoreIntegration:
         await _exercise_direct_media_history(tmp_path, monkeypatch)
         await _exercise_assistant_media_history(tmp_path)
         await _exercise_settled_media_history(tmp_path)
+        for launch in ("declared", "requested", "promoted"):
+            await exercise_history_trace(
+                tmp_path / f"model-{launch}",
+                monkeypatch,
+                launch,
+                (
+                    "start_compact",
+                    "cancel_job",
+                    "finish_job",
+                    *(("deliver_job",) if launch != "declared" else ()),
+                    "begin_consumption",
+                    "apply_summary",
+                    "cancel_compact",
+                    "end_consumption",
+                ),
+                suppress_cancel=True,
+                resume=True,
+            )
+
+        for label, trace in (
+            ("batched", ("finish_1", "finish_0", "begin", "end")),
+            (
+                "separate",
+                ("cancel_1", "finish_1", "begin", "end", "finish_0", "begin", "end"),
+            ),
+        ):
+            await exercise_two_job_trace(
+                tmp_path / f"two-job-{label}", monkeypatch, trace, resume=True
+            )
+
+        for first in (0, 1):
+            for cancelled in (False, True):
+                await exercise_mid_turn_fold(
+                    tmp_path / f"fold-{first}-{cancelled}",
+                    monkeypatch,
+                    first,
+                    cancelled,
+                    resume=True,
+                )
 
     async def _exercise_compact_tail(
         self, tmp_path, monkeypatch, compact_origin, prefix

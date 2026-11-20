@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.tools.execution_context import (
     ExecutionBinding,
     ExecutorContextMixin,
@@ -321,7 +322,7 @@ class Executor(ExecutorContextMixin):
                 error=error_msg,
             )
 
-            job_result = JobResult(job_id=job_id, error=error_msg)
+            job_result = JobResult(job_id=job_id, error=error_msg, cancelled=True)
             self.job_store.store_result(job_result)
             if not is_direct:
                 event = create_tool_complete_event(
@@ -375,7 +376,7 @@ class Executor(ExecutorContextMixin):
             state=JobState.CANCELLED,
             error=error_msg,
         )
-        result = JobResult(job_id=job_id, error=error_msg)
+        result = JobResult(job_id=job_id, error=error_msg, cancelled=True)
         self.job_store.store_result(result)
         if is_direct:
             return
@@ -437,14 +438,17 @@ class Executor(ExecutorContextMixin):
         return self._retained_results()
 
     async def cancel(self, job_id: str) -> bool:
-        """Cancel a running job and report whether cancellation was requested."""
+        """Request cancellation without waiting for execution or result delivery.
+
+        Status stays RUNNING until execution settles. A tool that suppresses
+        cancellation retains its actual success or error outcome.
+        """
         task = self._tasks.get(job_id)
         if task is None or task.done():
             return False
 
-        task.cancel()
-        self.job_store.update_status(job_id, state=JobState.CANCELLED)
-        logger.debug("Cancelled job", job_id=job_id)
+        request_cancellation(task)
+        logger.debug("Job cancellation requested", job_id=job_id)
         return True
 
     def get_status(self, job_id: str) -> JobStatus | None:

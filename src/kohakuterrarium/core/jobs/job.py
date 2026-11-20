@@ -124,11 +124,16 @@ class JobResult:
     exit_code: int | None = None
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    cancelled: bool = False
 
     @property
     def success(self) -> bool:
-        """Return whether the job has no error or nonzero exit code."""
-        return self.error is None and (self.exit_code is None or self.exit_code == 0)
+        """Return whether the job completed without cancellation or error."""
+        return (
+            not self.cancelled
+            and self.error is None
+            and (self.exit_code is None or self.exit_code == 0)
+        )
 
     def get_text_output(self) -> str:
         """Render output to safe text for commands/logging."""

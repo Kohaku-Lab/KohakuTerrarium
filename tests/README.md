@@ -231,6 +231,251 @@ public tree; `temp/` is gitignored). It records every bug the suite
 surfaced, its fix, the regression guard, and the per-tier coverage
 audit with each sub-95% file's justification.
 
+## Bounded async-history conformance model
+
+`tests/helpers/history_protocol.py` contains a finite specification and a
+real-runtime adapter. The continuation unit module executes the generated
+transition witnesses. The existing `test_history_ops` integration workflow
+also carries one overlap trace per launch mode through branch return,
+stop/close, cold resume, and another request.
+
+### Bound and invariants
+
+The fixed setup creates sibling branch views A/B, starts one tool on B, and
+accepts one same-view input while it is running. The generated suffix has at
+most one job cancellation and one compaction. Tools are tested as declared
+background, caller-requested background, and promoted direct executions.
+
+The independent model distinguishes:
+
+- Job execution: running -> cancellation cleanup (optional) -> completed.
+- Delivery: completed but handoff parked -> queued -> consuming -> settled.
+  Declared background execution enqueues synchronously from its completion
+  callback; it has no separate asynchronous handoff edge in this model.
+- Compaction: idle -> summarizing -> complete-but-flushing -> settled.
+  Cancellation before task entry or during summary emits `skipped`;
+  cancellation during flush retains the already emitted `complete`.
+
+Expected transitions are constructed from immutable specification state,
+not inferred from runtime fields. After every transition the adapter checks:
+
+1. Cancellation requests do not publish terminal job state before execution
+   and cleanup settle. Suppressed cancellation can finish successfully.
+2. A final result is persisted once, queued once, and consumed by one provider
+   request; completion feedback is not fabricated twice.
+3. Every started compaction has at most one terminal, with the same round.
+   Applying a summary closes its event stream before checkpoint flush ends.
+4. History changes are rejected while execution, handoff, queued input,
+   consumption, or compaction is active. Rejection leaves conversation,
+   selected/live branch views, persisted events, provider calls, and inbox
+   count unchanged.
+5. Once all fences settle, the public branch continuation succeeds and its
+   provider request contains A, not B's inputs, result, or summary.
+
+The single compact attempt always uses round 1. This does **not** redefine
+round as a unique attempt ID; unsuccessful attempts can reuse a round in the
+real implementation.
+
+### Coverage and replay
+
+Breadth-first traversal finds a shortest prefix to each model state, then
+adds each outgoing edge. A witness that is a strict prefix of another is
+removed; replaying the remaining traces still covers every model edge.
+
+| Launch mode | Reachable states | Edges | Runtime witnesses | Longest generated suffix |
+|---|---:|---:|---:|---:|
+| Declared background | 40 | 83 | 48 | 7 |
+| Requested background | 50 | 105 | 60 | 8 |
+| Promoted direct | 50 | 105 | 60 | 8 |
+
+Counts are per launch mode, not 140 distinct unlabelled shapes. Graph tests
+verify that the generated witnesses cover its states and edges. Three
+additional traces exercise suppressed cancellation. Three sensitivity
+tests inject historical fault classes in memory: premature cancelled job
+state, a missing pre-entry compact terminal, and a duplicate post-complete
+terminal. Each must fail with the expected invariant diagnostic, not a
+timeout or unrelated assertion. These are targeted mutations, not runs of
+entire old revisions, and normal conformance tests do not apply them.
+Three adapter regressions additionally require detection of an extra provider
+request and a leaked B-only tail, and preservation of the primary divergence
+when cleanup also fails. These were red on the initial adapter before its
+oracles and failure handling were corrected. The cleanup injection raises
+only after real cleanup succeeds; it checks diagnostic preservation, not
+resource recovery from a genuinely stuck cleanup.
+
+```bash
+python -m pytest tests/unit/core/conversation/test_continuation.py -k history_model -n 0
+python -m pytest tests/integration/test_core.py -k history_ops -n 0
+```
+
+Each generated case includes its launch/action sequence in the pytest ID.
+Generated-step failures report the first divergent prefix for that witness
+and retain the underlying assertion or runtime exception as the cause.
+A second cleanup failure is appended to the diagnostic without replacing
+the primary failure. Replay one case with its full node ID. This is not a
+global counterexample minimizer.
+
+### Runtime seams and limits
+
+The adapter uses `asyncio.Event` barriers around real operations: tool
+execution/cleanup, the promoted-result callback, inbox wake-up, a scripted
+provider response, summarizer output, and the session call after compact
+completion. Each wrapper eventually delegates to the original method. It
+installs the inbox wrapper before agent start so the single consumer cannot
+race its first wait. Setup and cleanup are not included in graph counts.
+There are no sleeps, external model checkers, new dependencies, production
+hooks, or CI changes.
+
+This is **finite-model transition conformance**, not exhaustive runtime
+model checking. Different histories that reach the same abstract state can
+have different concrete data; only the generated witnesses are executed,
+not every path through the graph or every asyncio interleaving. Private
+runtime fields are observed and used as barriers, not replaced as behavior
+in the passing runs. A guard probe is non-mutating at admitted intermediate
+states; the actual public branch switch is exercised after orderly release.
+
+Out of this slice: tool cancellation before its first instruction, multiple
+jobs or compactions, stale-cancel successor leases, repeated branch
+mutations, summary provenance variations, merge/split remapping, checkpoint
+eviction, crash durability, error outcomes other than cancellation, and
+fairness/unbounded liveness. Existing targeted tests still cover several of
+these, but this model does not claim that coverage. Orderly cold restore is
+not a crash-recovery proof.
+
+## Two-generation compaction ownership model
+
+`tests/helpers/compact_protocol.py` adds a separate finite specification for
+two compaction attempts. It keeps the job/history model above unchanged;
+these are complementary bounds, not a Cartesian product of both models.
+The compact-manager unit module executes all **64 complete model paths**
+through **25 reachable states and 41 transitions** (at most eight actions).
+The graph check pins these counts and confirms state/edge coverage.
+
+An attempt can be created but unentered, summarizing, complete but flushing,
+settled successfully, or skipped before/after entry. Its position identifies
+the attempt; emitted `round` numbers still count successful compactions.
+Thus two cancelled attempts can both be round 1, and a cancellation after
+`complete(1)` is followed by a new attempt at round 2. Assertions check the
+whole ordered terminal stream, successful count, coroutine/summary-call
+counts, and the complete provider-facing prompt. Its expected system and
+user/assistant tail come from the pre-compaction fixture; summary text and
+round come from the model, not from a post-splice runtime snapshot.
+
+The cancellation operations cover ordinary settlement, two callers that
+cancel the same entered task, and successor creation from an old task's done
+callback. Both cancel callers must retain the successor's task reference,
+lease identity, and single-flight admission. Every active state also rejects
+a busy trigger without changing task/lease, lifecycle events, or prompt.
+The terminal state receives another idle `cancel()` to check idempotence.
+
+### The schedulable handoff window
+
+The runtime wrapper only records coroutine entry before delegating; it does
+not pause a synchronous finalizer. A done callback, registered before the
+old cancellation waiter, starts the successor after the old execution has
+settled and released its lease. On the default cooperative asyncio loop,
+that successor owns the new lease but has **not entered its coroutine** when
+each old waiter returns. The adapter explicitly asserts this entry order.
+A one-caller handoff transition ends at successor-created. The two-caller
+transition additionally joins the other caller and waits for the successor's
+summarizer, ending at successor-summarizing. It makes no claim that the
+successor entered while either old waiter was still suspended.
+
+The adapter delegates real manager, output-router, session-store, and LLM
+operations behind Event barriers. It does not replace task scheduling,
+release leases, clear manager fields, or call finalizers in passing runs.
+There is no eager/custom task-factory coverage. Alternative event-loop
+ordering and pauses inside synchronous cleanup are not implied by these
+paths.
+
+Nine negative cases inject stale cleanup after real cancellation: force
+release, task-reference clearing, and lease-reference clearing, each at the
+old attempt's three cancellation boundaries. Every case must fail at the
+handoff with its specific ownership diagnostic. These mutations reproduce
+fault classes, not complete historical revisions. Six adapter regressions
+corrupt the system message, latest assistant text, or tail order, both after
+applying attempt 1 and after cancelling attempt 2. All six escaped the first
+substring-based oracle; each now fails with the full-prompt diagnostic.
+
+The existing `test_compaction_and_termination` integration workflow extends
+four representative paths through persistence, stop/close, cold resume,
+round/event readback, and another provider request. An ordinary request
+checkpoints the settled history before closing; this is not a crash during
+flush or a new durability guarantee.
+
+```bash
+python -m pytest tests/unit/core/compact/test_manager.py -k compact_model -n 0
+python -m pytest tests/integration/test_core.py -k compaction_and_termination -n 0
+```
+
+Path IDs and first-divergent-prefix diagnostics work as in the first model.
+Enumerating every path **inside this small model** does not enumerate every
+runtime instruction interleaving. More than two attempts, summary failures,
+vetoes, graph changes, concurrent history mutation, provenance-metadata
+variations, arbitrary task factories, and stuck-cleanup recovery remain
+outside this slice.
+
+## Two-job result ownership model
+
+`tests/helpers/two_job_protocol.py` specifies two independently identified,
+declared-background tools on sibling branch B. The initial model state is
+**after both tools have started**. Each can be cancelled or completed in
+either order; the single consumer may claim both results together or in
+separate batches. The model tracks job outcome, ordered delivery, batch
+membership, consumption and the history-switch fence. Its breadth-first
+edge witnesses cover **76 states and 88 transitions with 29 runtime traces**;
+this is edge coverage of the specified finite graph, not all paths or all
+runtime schedules. The graph test pins the counts and checks edge coverage.
+
+Independent barriers gate the actual tools and the real inbox consumer;
+completion events are delivered by the real executor. Assertions check
+per-job status, result and persisted payload, ordered result events, exact
+batch identities and provider input, cancellation attribution, rejected
+branch-switch atomicity, and branch isolation after settlement. Targeted
+provider-input mutations check detection of swapped, extra and repeated
+results, reversed batch order and an extra request. The existing history
+integration workflow additionally cold-restores one combined batch and one
+separate cancellation/success sequence after an orderly branch switch, then
+switches back to B to check the reconstructed result identities and outcomes.
+Replay represents results as tool messages in original call order rather
+than preserving the live feedback-batch grouping or delivery order.
+
+This workflow exposed a replay defect: a cancelled job with empty output
+was reconstructed as an empty tool result even though the stored event
+retained the cancellation outcome. Replay now includes the cancellation
+marker, preserving any partial text or structured output. Unit regressions
+cover cancellation/interruption flags and successful structured output.
+
+The first attempted model permitted job 2 to finish while job 1's provider
+response was blocked. The real runtime may fold that completion into the
+active turn (`core/agent/turn/mid_turn.py`), so a model expecting a later
+inbox batch timed out. This is a model mismatch, not an established product
+failure. This slice excludes completion during active consumption; cancellation
+requests can still occur in that window. Four separate deterministic fold
+witnesses cover either job arriving first and a successful or cancelled
+second completion while the first provider request is blocked. Each checks
+live fold attribution, rejects branch switching until the turn settles,
+switches B→A→B, and verifies each outcome once; the existing integration
+workflow also closes and cold-resumes all four. A targeted mutation disables
+the same-turn projection and must fail at the folded-outcome assertion.
+These examples are not a model of every fold schedule.
+
+The replay fix only projects same-turn results when job and provider identity
+are unambiguous, an assistant round intervenes, and no user/injected or
+compaction boundary is crossed. It retains explicit/canonical announcements
+and assistant text; repeated or ambiguous identities, partial group
+announcements, and unsupported boundaries are conservatively left in their
+original order. The prior later-turn projection behavior is separate. This
+is not a guarantee that all ambiguous legacy histories can be repaired.
+Requested/promoted launches, more than two jobs, crash recovery, and arbitrary
+event-loop schedules remain outside this model. Orderly cold restore is not a
+crash test.
+
+```bash
+python -m pytest tests/unit/core/conversation/test_continuation.py -k two_job_model -n 0
+python -m pytest tests/integration/test_core.py -k history_ops -n 0
+```
+
 ## Out-of-scope (deterministic test is impractical)
 
 Excluded from coverage targets; covered by e2e where possible, manual

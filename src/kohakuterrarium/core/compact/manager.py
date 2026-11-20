@@ -234,6 +234,9 @@ class CompactManager:
 
         self._last_skip_reason = ""
         self._compact_task = asyncio.create_task(self._run_compact(lease))
+        self._compact_task.add_done_callback(
+            lambda task: self._finalize_cancelled_task(task, lease)
+        )
         logger.info(
             "Auto-compact triggered",
             agent=self._agent_name,
@@ -255,6 +258,20 @@ class CompactManager:
                     "round": self._compact_count + 1,
                 },
             )
+
+    def _finalize_cancelled_task(
+        self, task: asyncio.Task, lease: SingleFlightLease
+    ) -> None:
+        """Settle cancellation before the compaction coroutine entered."""
+        if not task.cancelled() or self._active_lease is not lease:
+            return
+        try:
+            self._emit_compact_skipped("cancelled", "Compaction cancelled")
+        finally:
+            self._dispatch.release(lease)
+            self._active_lease = None
+            if self._compact_task is task:
+                self._compact_task = None
 
     async def _run_compact(self, lease: SingleFlightLease | None = None) -> None:
         """Background compaction task."""
@@ -436,8 +453,8 @@ class CompactManager:
             # persisted below must observe queued turn events and the
             # compact_complete event queued by the notify, or resume
             # tail-replays events the compacted snapshot already contains.
+            run = getattr(self._session_store, "run", None)
             if self._output_router:
-                run = getattr(self._session_store, "run", None)
                 metadata["summary"] = summary
                 metadata["context_tokens"] = 0
                 self._output_router.notify_activity(
@@ -445,9 +462,9 @@ class CompactManager:
                     f"Context auto-compact done (round {self._compact_count})",
                     metadata=metadata,
                 )
-                if callable(run):
-                    await run(lambda: None)
             terminal_sent = True
+            if self._output_router and callable(run):
+                await run(lambda: None)
 
             # Save conversation snapshot with post-compact version
             # (The compact_complete event is already recorded by SessionOutput
@@ -496,7 +513,7 @@ class CompactManager:
             self._dispatch.release(lease)
             if self._active_lease is lease:
                 self._active_lease = None
-            self._compact_task = None
+                self._compact_task = None
 
     def _compact_boundary(self, messages: list) -> int:
         usage = getattr(self._controller, "_last_usage", {}) or {}
@@ -589,13 +606,17 @@ class CompactManager:
                 pass
 
     async def cancel(self) -> None:
-        """Cancel any running compaction."""
-        if self._compact_task and not self._compact_task.done():
-            self._compact_task.cancel()
+        """Cancel and settle the currently tracked compaction task."""
+        task, lease = self._compact_task, self._active_lease
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
             try:
-                await self._compact_task
+                await task
             except (asyncio.CancelledError, Exception):
                 pass
-        self._dispatch.force_release()
-        self._active_lease = None
-        self._compact_task = None
+        if lease is not None:
+            self._finalize_cancelled_task(task, lease)
+        if self._compact_task is task:
+            self._compact_task = None

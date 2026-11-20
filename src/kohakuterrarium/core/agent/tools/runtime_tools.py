@@ -5,6 +5,7 @@ from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.pending_input import stamp_pending_id
 from kohakuterrarium.core.jobs.label import make_job_label
 from kohakuterrarium.core.token_ledger import ledger_for
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.tools.output import render_content_text
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.parsing import CommandResultEvent, SubAgentCallEvent, ToolCallEvent
@@ -125,7 +126,7 @@ class AgentRuntimeToolsMixin:
                 logger.debug("Skipping promoted handle", job_id=job_id)
                 continue
             if not handle.done:
-                handle.task.cancel()
+                request_cancellation(handle.task)
                 logger.debug("Cancelled direct handle", job_id=job_id)
 
     def _reset_output_state(self) -> None:

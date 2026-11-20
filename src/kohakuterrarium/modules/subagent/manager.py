@@ -5,6 +5,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
+from kohakuterrarium.core.asyncio_compat import request_cancellation
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.conversation.context_snapshot import ContextSnapshot
 from kohakuterrarium.modules.subagent.side import SideConversationMixin, side_title
@@ -457,6 +458,10 @@ class SubAgentManager(SideConversationMixin, InteractiveManagerMixin):
             else:
                 await release_forked_llm(job.subagent.llm)
 
+    def get_task(self, job_id: str) -> asyncio.Task | None:
+        """Return the task tracking ``job_id``, if present."""
+        return self._tasks.get(job_id)
+
     async def wait_for(
         self,
         job_id: str,
@@ -508,7 +513,7 @@ class SubAgentManager(SideConversationMixin, InteractiveManagerMixin):
             if not task.done():
                 if (job := self._jobs.get(job_id)) and hasattr(job, "subagent"):
                     job.subagent.cancel()
-                task.cancel()
+                request_cancellation(task)
                 pending.append(task)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
@@ -525,7 +530,7 @@ class SubAgentManager(SideConversationMixin, InteractiveManagerMixin):
         if job and hasattr(job, "subagent"):
             job.subagent.cancel()
 
-        task.cancel()
+        request_cancellation(task)
         logger.debug("Cancelled sub-agent", job_id=job_id)
         return True
 

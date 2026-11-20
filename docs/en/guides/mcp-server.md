@@ -202,7 +202,7 @@ Passing `run_in_background: true` to `bash` / `python` immediately returns **the
 | --- | --- |
 | `job_status` | Read one job; without `job_id`, list the jobs retained in that workspace and its `instance_id` |
 | `job_wait` | Wait 0–60 seconds, default 10; return the current state on timeout |
-| `job_cancel` | Cancel an owned running job; Creature delegations have a wider cancellation scope, see [Supplementary input and cancellation](#supplementary-input-and-cancellation) |
+| `job_cancel` | Request cancellation of an owned running direct-tool job; delegation cancellation follows the scope and waiting rules in [Supplementary input and cancellation](#supplementary-input-and-cancellation) |
 | `job_promote` | Release a foreground call into the background, keeping its job ID without rerunning it |
 
 Jobs are never promoted to the background merely because time has passed. A wait timing out, a waiting request disconnecting, or a waiting request being cancelled never cancels the owned job; use `job_cancel` explicitly to stop execution.
@@ -212,6 +212,8 @@ Jobs are never promoted to the background merely because time has passed. A wait
 ### Cancellation, retries and retention
 
 A job's outcome and the success of the MCP query are two different things. Reading or waiting for a retained record is a successful MCP call even when the job failed or was cancelled; `state`, `error` and `exit_code` describe the job outcome. Unknown jobs, invalid query arguments and foreground execution failures remain MCP errors.
+
+For direct-tool jobs, `job_cancel` returning `cancelled: true` acknowledges a cancellation request, not completed execution or cleanup. While the tool or its cancellation cleanup is still running, `job_status` reports `state: running`; use `job_wait` to observe settlement. A tool that suppresses cancellation retains its actual success or error outcome. Delegation cancellation follows the separate scope and waiting rules below.
 
 A `job_id` or `session_id` belongs only to the workspace runtime that created it. **Never retry an unknown or expired ID under another `workspace_id`**, and if the HTTP reply to a mutating operation is lost, do not resubmit immediately. Query with `job_status` under the same `workspace_id` first; for delegation, also check the session state, so that a lost reply is not mistaken for work that never ran.
 

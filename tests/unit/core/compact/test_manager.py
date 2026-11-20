@@ -36,6 +36,14 @@ from kohakuterrarium.core.token_ledger import ledger_for
 from kohakuterrarium.llm.message import create_message
 from kohakuterrarium.session.store import SessionStore
 
+import tests.helpers.compact_protocol as compact_protocol
+from tests.helpers.compact_protocol import (
+    CompactState,
+    compact_successors,
+    compact_traces,
+    exercise_compact_trace,
+)
+
 # ── stubs ────────────────────────────────────────────────────────
 
 
@@ -118,6 +126,116 @@ def _build_mgr(*, conversation=None, llm=None, router=None, store=None, plugins=
     mgr._plugins = plugins
     mgr._agent_name = "alice"
     return mgr
+
+
+def test_compact_model_complete_paths_cover_reachable_graph():
+    pending, reachable, edges = [CompactState()], {CompactState()}, set()
+    while pending:
+        source = pending.pop()
+        for action, target in compact_successors(source).items():
+            edges.add((source, action, target))
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+    seen, exercised = {CompactState()}, set()
+    traces = compact_traces()
+    assert len(traces) == len(set(traces))
+    assert (len(reachable), len(edges), len(traces)) == (25, 41, 64)
+    for trace in traces:
+        state = CompactState()
+        for action in trace:
+            target = compact_successors(state)[action]
+            exercised.add((state, action, target))
+            seen.add(target)
+            state = target
+        assert len(state.attempts) == 2 and not state.active
+        assert not compact_successors(state)
+        assert len(state.lifecycle) == 4
+    assert seen == reachable
+    assert exercised == edges
+    assert any(state.completed == 2 for state in seen)
+    assert any(
+        state.lifecycle
+        == [
+            ("compact_start", 1),
+            ("compact_skipped", 1),
+            ("compact_start", 1),
+            ("compact_complete", 1),
+        ]
+        for state in seen
+    )
+    assert compact_traces() == traces
+
+
+@pytest.mark.parametrize(
+    "trace", [pytest.param(trace, id="-".join(trace)) for trace in compact_traces()]
+)
+async def test_compact_model_conformance(tmp_path, monkeypatch, trace):
+    await exercise_compact_trace(tmp_path, monkeypatch, trace)
+
+
+@pytest.mark.parametrize(
+    "prefix", [("start",), ("start", "enter"), ("start", "enter", "apply")]
+)
+@pytest.mark.parametrize(
+    "fault,diagnostic",
+    [
+        ("release", "active single-flight ownership"),
+        ("task", "active task ownership"),
+        ("lease", "active lease ownership"),
+    ],
+)
+async def test_compact_model_rejects_stale_cleanup(
+    tmp_path, monkeypatch, prefix, fault, diagnostic
+):
+    original = CompactManager.cancel
+
+    async def stale_cleanup(self):
+        await original(self)
+        match fault:
+            case "release":
+                self._dispatch.force_release()
+            case "task":
+                self._compact_task = None
+            case "lease":
+                self._active_lease = None
+
+    monkeypatch.setattr(CompactManager, "cancel", stale_cleanup)
+    trace = prefix + ("cancel_handoff", "enter", "apply", "flush")
+    with pytest.raises(AssertionError, match="compact divergent prefix") as caught:
+        await exercise_compact_trace(tmp_path, monkeypatch, trace)
+    assert " -> ".join(prefix + ("cancel_handoff",)) in str(caught.value)
+    assert isinstance(caught.value.__cause__, AssertionError)
+    assert diagnostic in str(caught.value.__cause__)
+
+
+@pytest.mark.parametrize("fault", ["system", "assistant", "order"])
+@pytest.mark.parametrize("window", ["apply", "cancel_second"])
+async def test_compact_model_prompt_oracle(tmp_path, monkeypatch, fault, window):
+    original = compact_protocol._CompactRuntime.act
+
+    async def corrupt_prompt(self, action):
+        await original(self, action)
+        if (window == "apply" and action == "apply") or (
+            window == "cancel_second" and action == "cancel"
+        ):
+            messages = self.agent.controller.conversation._messages
+            match fault:
+                case "system":
+                    messages[0].content = "wrong system"
+                case "assistant":
+                    messages[-1].content = "wrong assistant"
+                case "order":
+                    messages[-2:] = reversed(messages[-2:])
+
+    monkeypatch.setattr(compact_protocol._CompactRuntime, "act", corrupt_prompt)
+    trace = ("start", "enter", "apply", "flush", "start", "cancel")
+    with pytest.raises(AssertionError, match="compact divergent prefix") as caught:
+        await exercise_compact_trace(tmp_path, monkeypatch, trace)
+    prefix = trace[:3] if window == "apply" else trace
+    assert " -> ".join(prefix) in str(caught.value)
+    assert isinstance(caught.value.__cause__, AssertionError)
+    assert "system/summary/live-tail prompt" in str(caught.value.__cause__)
 
 
 # ── CompactConfig defaults ───────────────────────────────────────
@@ -1173,6 +1291,155 @@ class TestCompactTerminalGuarantee:
             for k, _msg, m in router.calls
             if k in ("compact_complete", "compact_skipped")
         ]
+
+    @staticmethod
+    def _lifecycle(router):
+        return [
+            (kind, metadata["round"])
+            for kind, _message, metadata in router.calls
+            if kind in ("compact_start", "compact_complete", "compact_skipped")
+        ]
+
+    @pytest.mark.parametrize("via_manager", [False, True])
+    async def test_cancel_before_entry_closes_start_and_allows_retry(self, via_manager):
+        conv = _build_conversation(n_user=10)
+        original = conv.get_messages()
+        router, llm = _Router(), _LLM(chunks=["summary"])
+        mgr = _build_mgr(conversation=conv, llm=llm, router=router)
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        if via_manager:
+            await mgr.cancel()
+        else:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        assert self._lifecycle(router) == [
+            ("compact_start", 1),
+            ("compact_skipped", 1),
+        ]
+        assert self._terminals(router) == [("compact_skipped", "cancelled")]
+        assert conv.get_messages() == original
+        assert llm.calls == []
+        assert not mgr.is_compacting
+        assert mgr._active_lease is None
+        assert mgr._compact_task is None
+        await mgr.cancel()
+        assert len(self._terminals(router)) == 1
+        assert mgr.trigger_compact()
+        await mgr.wait_for_current()
+        assert self._lifecycle(router) == [
+            ("compact_start", 1),
+            ("compact_skipped", 1),
+            ("compact_start", 1),
+            ("compact_complete", 1),
+        ]
+        assert mgr._compact_count == 1
+        assert len(llm.calls) == 1
+        assert not mgr.is_compacting
+
+    @pytest.mark.parametrize("outcome", ["cancel", "error"])
+    async def test_complete_is_terminal_before_flush_settles(self, outcome):
+        entered, release = asyncio.Event(), asyncio.Event()
+        router = _Router()
+
+        class FlushStore(_Store):
+            async def run(self, function, *args, **kwargs):
+                if any(kind == "compact_complete" for kind, _, _ in router.calls):
+                    entered.set()
+                    await release.wait()
+                    if outcome == "error":
+                        raise OSError("flush failed")
+                return function(*args, **kwargs)
+
+        conv = _build_conversation(n_user=10)
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(chunks=["summary"]),
+            router=router,
+            store=FlushStore(),
+        )
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            assert self._lifecycle(router) == [
+                ("compact_start", 1),
+                ("compact_complete", 1),
+            ]
+            assert mgr.is_compacting
+            assert mgr._compact_count == 1
+            if outcome == "cancel":
+                await mgr.cancel()
+            else:
+                release.set()
+                await task
+            assert self._terminals(router) == [("compact_complete", None)]
+            assert self._lifecycle(router) == [
+                ("compact_start", 1),
+                ("compact_complete", 1),
+            ]
+            assert "summary" in str(conv.get_messages()[1].content)
+            assert not mgr.is_compacting
+            assert mgr._active_lease is None
+            assert mgr._compact_task is None
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    @pytest.mark.parametrize("started", [False, True])
+    async def test_cancel_does_not_release_a_successor_started_before_it_resumes(
+        self, started
+    ):
+        entered, release = asyncio.Event(), asyncio.Event()
+        router = _Router()
+
+        class BlockingLLM(_LLM):
+            async def chat(self, messages, **kwargs):
+                entered.set()
+                await release.wait()
+                yield "summary"
+
+        mgr = _build_mgr(
+            conversation=_build_conversation(n_user=10),
+            llm=BlockingLLM(),
+            router=router,
+        )
+        assert mgr.trigger_compact()
+        task = mgr._compact_task
+        successors = []
+
+        def start_successor(_task):
+            accepted = mgr.trigger_compact()
+            successors.append((accepted, mgr._compact_task, mgr._active_lease))
+
+        try:
+            if started:
+                await asyncio.wait_for(entered.wait(), 3)
+            task.add_done_callback(start_successor)
+            await mgr.cancel()
+            accepted, successor, lease = successors[0]
+            assert accepted
+            assert mgr.is_compacting
+            assert mgr._compact_task is successor
+            assert mgr._active_lease is lease
+            assert not mgr.trigger_compact()
+            release.set()
+            await successor
+            assert self._lifecycle(router) == [
+                ("compact_start", 1),
+                ("compact_skipped", 1),
+                ("compact_start", 1),
+                ("compact_complete", 1),
+            ]
+            assert not mgr.is_compacting
+            assert mgr._compact_count == 1
+        finally:
+            release.set()
+            await asyncio.gather(
+                task,
+                *(entry[1] for entry in successors if entry[0]),
+                return_exceptions=True,
+            )
 
     async def test_success_emits_single_complete_terminal(self):
         conv = _build_conversation(n_user=10)

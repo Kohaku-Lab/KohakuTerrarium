@@ -61,19 +61,26 @@ class StopTaskTool(BaseTool):
 
         # Direct jobs must finalize interruption state before other registries are tried.
         if agent._interrupt_direct_job(job_id):
-            logger.info("Direct task cancelled", job_id=job_id)
-            return ToolResult(output=f"Cancelled task: {job_id}", exit_code=0)
+            logger.info("Direct task cancellation requested", job_id=job_id)
+            return ToolResult(
+                output=f"Cancellation requested for task: {job_id}", exit_code=0
+            )
 
         cancelled = await agent.executor.cancel(job_id)
         if cancelled:
-            logger.info("Tool task cancelled", job_id=job_id)
-            return ToolResult(output=f"Cancelled tool: {job_id}", exit_code=0)
+            logger.info("Tool task cancellation requested", job_id=job_id)
+            return ToolResult(
+                output=f"Cancellation requested for tool: {job_id}", exit_code=0
+            )
 
         if hasattr(agent, "subagent_manager") and agent.subagent_manager:
             cancelled = await agent.subagent_manager.cancel(job_id)
             if cancelled:
-                logger.info("Sub-agent cancelled", job_id=job_id)
-                return ToolResult(output=f"Cancelled sub-agent: {job_id}", exit_code=0)
+                logger.info("Sub-agent cancellation requested", job_id=job_id)
+                return ToolResult(
+                    output=f"Cancellation requested for sub-agent: {job_id}",
+                    exit_code=0,
+                )
 
         status = agent.executor.get_status(job_id)
         if not status and hasattr(agent, "subagent_manager") and agent.subagent_manager:

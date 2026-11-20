@@ -135,8 +135,18 @@ def require_no_active_compact(agent: Any) -> None:
         )
 
 
+def interruption_settlement_failed(agent: Any) -> bool:
+    """Return whether an interrupted-job finalizer failed or remains pending."""
+    finalizers = getattr(agent, "_interrupt_finalizers", ())
+    return bool(finalizers) or bool(getattr(agent, "_interrupt_finalizer_error", None))
+
+
 def require_no_running_jobs(agent: Any) -> None:
     """Reject history changes until running jobs and promoted handoffs settle."""
+    if interruption_settlement_failed(agent):
+        raise ConflictError(
+            "Cannot continue a selected branch while interruption settlement is pending"
+        )
     promoted = any(
         handle.promoted for handle in getattr(agent, "_active_handles", {}).values()
     )
