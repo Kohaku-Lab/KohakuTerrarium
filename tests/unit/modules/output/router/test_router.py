@@ -449,3 +449,27 @@ class TestAssistantImageRouting:
                 payload={"url": "http://x/y.png", "detail": "auto"},
             )
         )
+
+
+class TestRevocation:
+    async def test_revoked_router_drops_typed_and_activity_events(self):
+        router, default = _router()
+        secondary = OutputRecorder()
+        router.add_secondary(secondary)
+        router.revoke()
+        assert router.revoked
+        router.notify_activity("tool_done", "late", {"job_id": "j1"})
+        await router.emit(OutputEvent(type="text", content="late text"))
+        await router.emit(OutputEvent(type="trigger_fired", content="timer"))
+        assert default.activity_types() == []
+        assert secondary.activity_types() == []
+        assert default.all_text == ""
+
+    async def test_restored_router_delivers_again(self):
+        router, default = _router()
+        router.revoke()
+        router.notify_activity("tool_done", "dropped")
+        router.restore()
+        assert not router.revoked
+        router.notify_activity("tool_done", "kept")
+        assert [a.detail for a in default.activities] == ["kept"]

@@ -506,15 +506,20 @@ class SubAgentManager(SideConversationMixin, InteractiveManagerMixin):
                 for job_id in self._tasks.keys()
             }
 
-    async def cancel_all(self) -> int:
-        """Cancel and join all children before owner resources can close."""
-        pending: list[asyncio.Task] = []
+    def request_cancel_all(self) -> dict[str, asyncio.Task]:
+        """Request cancellation of every running child once, without joining."""
+        pending: dict[str, asyncio.Task] = {}
         for job_id, task in list(self._tasks.items()):
             if not task.done():
                 if (job := self._jobs.get(job_id)) and hasattr(job, "subagent"):
                     job.subagent.cancel()
                 request_cancellation(task)
-                pending.append(task)
+                pending[job_id] = task
+        return pending
+
+    async def cancel_all(self) -> int:
+        """Cancel and join all children before owner resources can close."""
+        pending = list(self.request_cancel_all().values())
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         await self.stop_all_interactive()
