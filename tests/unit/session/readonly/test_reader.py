@@ -152,3 +152,88 @@ def test_legacy_index_migrates_on_search_but_never_indexes_an_empty_reader(tmp_p
         assert upgraded.get_stats()["fts_blocks"] == 2
     finally:
         upgraded.close()
+
+
+def test_indexed_reader_search_reuses_source_proof_without_discovery(
+    tmp_path, monkeypatch
+):
+    """Reader.search() must not bypass Source Prefix Closure through .agents."""
+    from contextlib import closing
+
+    from kohakuterrarium.session.memory.index import SessionMemory
+    from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
+
+    path = tmp_path / "reader-steady.kohakutr"
+    with closing(SessionStore(path)) as writer:
+        writer.init_meta("s", "terrarium", "", str(tmp_path), ["alice"])
+        writer.append_event(
+            "alice",
+            "user_input",
+            {"content": "alice first-needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            reconciler = SessionIndexReconciler(writer, memory)
+            reconciler.build(reconciler.capture([], all_agents=True))
+
+    with SessionReader(path) as reader:
+
+        def cannot_discover():
+            raise AssertionError("Reader stable query scanned all source keys")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(reader._store, "_event_key_names", cannot_discover)
+            for _ in range(3):
+                assert [hit.content for hit in reader.search("first-needle")] == [
+                    "alice first-needle"
+                ]
+        # An undeclared Agent added through the supported writer API must be
+        # discovered after physical-growth conservation fails, not hidden.
+        with closing(SessionStore(path)) as writer:
+            writer.append_event(
+                "charlie",
+                "user_input",
+                {"content": "charlie new-needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        hits = reader.search("new-needle")
+        assert {hit.content for hit in hits} == {"charlie new-needle"}
+
+
+def test_explicit_reader_index_discovers_dynamic_roster_once(tmp_path, monkeypatch):
+    """Full index admits undeclared KT Agents, without duplicate pre-discovery."""
+    from contextlib import closing
+
+    path = tmp_path / "reader-explicit-index.kohakutr"
+    with closing(SessionStore(path)) as writer:
+        writer.init_meta("s", "terrarium", "", str(tmp_path), ["alice"])
+        for name in ("alice", "charlie"):
+            writer.append_event(
+                name,
+                "user_input",
+                {"content": f"{name} source-marker"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+
+    with SessionReader(path) as reader:
+        original = reader._store._event_key_names
+        scans = []
+
+        def tracked():
+            scans.append(True)
+            return original()
+
+        monkeypatch.setattr(reader._store, "_event_key_names", tracked)
+        assert reader.index() == 2
+        assert len(scans) == 1
+        assert {hit.content for hit in reader.search("source-marker")} == {
+            "alice source-marker",
+            "charlie source-marker",
+        }
+        assert len(scans) == 1

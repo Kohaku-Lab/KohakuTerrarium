@@ -44,13 +44,19 @@ def index_status(path: Path) -> dict[str, Any]:
     - ``vec_blocks``     — vector-index block count
     - ``agents``         — list of agent names that have events to index
     """
-    store = SessionStore(path)
+    store = SessionStore.open_memory_reader(path)
     try:
-        meta = store.load_meta()
-        agents = list(meta.get("agents", []))
         # Search-only mode reports persisted index state without loading an embedder.
-        memory = SessionMemory(str(path), embedder=None)
+        memory = SessionMemory(str(path), embedder=None, index_all_branches=True)
         try:
+            # Reuse the same Source Prefix Closure proof as search. Full
+            # status still discovers undeclared Agents if that proof fails.
+            proven = SessionIndexReconciler(store, memory).probe_source_prefix([])
+            agents = (
+                list(proven.agents)
+                if proven is not None
+                else list(store.load_meta().get("agents", []))
+            )
             stats = memory.get_stats()
             saved_provider = None
             saved_model = None
@@ -92,7 +98,7 @@ def index_status_quick(path: Path) -> bool:
     Opens the store, reads only the ``vec_dimensions`` state key,
     closes.
     """
-    store = SessionStore(path)
+    store = SessionStore.open_memory_reader(path)
     try:
         memory = SessionMemory(str(path), embedder=None)
         try:

@@ -287,31 +287,46 @@ class SessionIndexReconciler:
                 views[name] = resolve_search_view(source.events[name], requested_view)
         return views
 
+    def probe_source_prefix(
+        self, requested: list[str] | tuple[str, ...]
+    ) -> IndexSourceSnapshot | None:
+        """Prove a published, complete Agent source prefix without discovery.
+
+        Used by both searches and read-only status. It does not materialize,
+        mutate, or re-enumerate the event keyspace; failure means the caller
+        must choose its own full discovery/reconciliation behavior.
+        """
+        manifest = self._memory._manifest()
+        if (
+            manifest is None
+            or manifest.get("format") != self._memory._index_format
+            or manifest.get("fts") != "ready"
+        ):
+            return None
+        names = list(
+            dict.fromkeys(
+                [
+                    *(self._store.meta.get("agents") or []),
+                    *manifest.get("agents", ()),
+                    *requested,
+                ]
+            )
+        )
+        return self._published_catalogs(names, manifest)
+
     def capture_or_reuse(
         self, requested: list[str] | tuple[str, ...], *, all_agents: bool = False
     ) -> IndexSourceSnapshot:
         """One source authority for both saved and live search."""
+        reused = self.probe_source_prefix(requested)
+        if reused is not None:
+            return reused
         manifest = self._memory._manifest()
         migration = (
             manifest is None
             or manifest.get("format") != self._memory._index_format
             or manifest.get("fts") != "ready"
         )
-        if not migration:
-            names = list(
-                dict.fromkeys(
-                    [
-                        # Persisted declarations are cheap and may include
-                        # a newly registered, still-empty Agent.
-                        *(self._store.meta.get("agents") or []),
-                        *manifest.get("agents", ()),
-                        *requested,
-                    ]
-                )
-            )
-            cached = self._published_catalogs(names, manifest)
-            if cached is not None:
-                return cached
         return self.capture(
             requested,
             all_agents=all_agents

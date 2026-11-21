@@ -595,3 +595,107 @@ def test_legacy_ready_vector_manifest_without_generation_must_rebuild(tmp_path):
         } == {"needle alice 1"}
     finally:
         reopened.close()
+
+
+def test_studio_quick_status_does_not_restore_event_counters(tmp_path, monkeypatch):
+    """Listing a saved-session index is a read, not event allocator recovery."""
+    from contextlib import closing
+
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.studio.sessions.memory.build import index_status_quick
+
+    path = tmp_path / "status-cheap.kohakutr"
+    with closing(SessionStore(path)) as store:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError(
+            "Index quick status restored counters or enumerated events"
+        )
+
+    monkeypatch.setattr(SessionStore, "_restore_counters", forbidden)
+    monkeypatch.setattr(SessionStore, "_event_key_names", forbidden)
+    assert index_status_quick(path) is False
+
+
+def test_studio_full_index_status_retains_namespace_discovery(tmp_path, monkeypatch):
+    """Full Agent census can scan; it must not restore writer counters first."""
+    from contextlib import closing
+
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.studio.sessions.memory.build import index_status
+
+    path = tmp_path / "index-status-census.kohakutr"
+    with closing(SessionStore(path)) as store:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "charlie",
+            "user_input",
+            {"content": "undeclared"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+
+    def cannot_restore(*args, **kwargs):
+        raise AssertionError("Index status restored unnecessary writer counters")
+
+    monkeypatch.setattr(SessionStore, "_restore_counters", cannot_restore)
+    assert set(index_status(path)["agents"]) == {"alice", "charlie"}
+
+
+def test_studio_full_status_reuses_certified_roster_until_source_changes(
+    tmp_path, monkeypatch
+):
+    """Status honors source proof or discovers a hot-plugged Agent; never restores counters."""
+    from contextlib import closing
+
+    from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.studio.sessions.memory.build import index_status
+
+    path = tmp_path / "status-roster.kohakutr"
+    with closing(SessionStore(path)) as writer:
+        writer.init_meta("s", "terrarium", "", str(tmp_path), ["alice"])
+        writer.append_event(
+            "alice",
+            "user_input",
+            {"content": "alice needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            reconcile = SessionIndexReconciler(writer, memory)
+            reconcile.build(reconcile.capture([], all_agents=True))
+
+        def forbid(*args, **kwargs):
+            raise AssertionError("valid source proof unexpectedly scanned events")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(SessionStore, "_restore_counters", forbid)
+            patch.setattr(SessionStore, "_event_key_names", forbid)
+            assert index_status(path)["agents"] == ["alice"]
+            assert index_status(path)["agents"] == ["alice"]
+
+        writer.append_event(
+            "charlie",
+            "user_input",
+            {"content": "undeclared Agent"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        writer.flush()
+        original_keys = SessionStore._event_key_names
+        observed = []
+
+        def count_discovery(self):
+            observed.append(True)
+            return original_keys(self)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(SessionStore, "_restore_counters", forbid)
+            patch.setattr(SessionStore, "_event_key_names", count_discovery)
+            assert set(index_status(path)["agents"]) == {"alice", "charlie"}
+            assert observed

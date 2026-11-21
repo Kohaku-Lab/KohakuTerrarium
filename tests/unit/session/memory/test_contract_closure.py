@@ -276,3 +276,25 @@ def test_saved_index_build_reports_effective_config_persistence_errors(
     monkeypatch.setattr(build_mod, "effective_embedding_config", fail_spec)
     with pytest.raises(OSError, match="spec persistence error"):
         build_mod.build_index(path, provider="model2vec")
+
+
+def test_cli_unchanged_search_uses_reconciler_roster_without_key_discovery(
+    tmp_path, monkeypatch, capsys
+):
+    """CLI, Reader and Saved Studio share one source-roster authority."""
+    from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
+
+    path = tmp_path / "cli-ready.kohakutr"
+    with closing(_store(path, tmp_path)) as writer:
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            reconciler = SessionIndexReconciler(writer, memory)
+            reconciler.build(reconciler.capture([], all_agents=True))
+    monkeypatch.setattr(cli_mod, "_resolve_session", lambda _: path)
+
+    def cannot_discover(*args, **kwargs):
+        raise AssertionError("CLI stable search scanned full Agent keyspace")
+
+    monkeypatch.setattr(SessionStore, "_event_key_names", cannot_discover)
+    monkeypatch.setattr(SessionStore, "load_meta", cannot_discover)
+    assert cli_mod.search_cli("s", "needle", mode="fts") == 0
+    assert "Found 1 result(s)" in capsys.readouterr().out

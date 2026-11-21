@@ -109,7 +109,7 @@ def search_cli(
         # FTS migration and the selected per-Agent visibility projection.
         reconciler = SessionIndexReconciler(store, memory)
         _, branch_views = reconciler.prepare_keywords(
-            store.load_meta().get("agents", []), all_agents=True, project_all=True
+            [], all_agents=True, project_all=True
         )
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:

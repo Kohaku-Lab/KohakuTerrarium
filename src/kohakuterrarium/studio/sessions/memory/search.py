@@ -137,9 +137,7 @@ def _search_session_sync(
             reconciler = SessionIndexReconciler(store, memory)
             # The Reconciler checks physical-append coverage and falls back
             # to full Agent discovery only when it cannot prove completeness.
-            source = reconciler.capture_or_reuse(
-                store.meta.get("agents", []), all_agents=True
-            )
+            source = reconciler.capture_or_reuse([], all_agents=True)
             branch_views = reconciler.selected_views(source, source.agents)
             reconciler.build(source)
 

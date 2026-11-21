@@ -145,8 +145,11 @@ class SessionReader:
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
             reconciler = SessionIndexReconciler(self._store, memory)
+            # Reconciler alone proves the complete Agent roster. Resolving
+            # self.agents here would invoke load_meta()'s full event-key scan
+            # even when the published source is unchanged.
             _, views = reconciler.prepare_keywords(
-                self.agents, all_agents=True, existing_only=True, project_all=True
+                [], all_agents=True, existing_only=True, project_all=True
             )
             return memory.search(query, mode=mode, k=k, agent=agent, branch_views=views)
         finally:
@@ -157,7 +160,8 @@ class SessionReader:
         memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
             reconciler = SessionIndexReconciler(self._store, memory)
-            source = reconciler.capture(self.agents, all_agents=True)
+            # Full indexing discovers all persisted Agent namespaces once.
+            source = reconciler.capture([], all_agents=True)
             return sum(reconciler.refresh_keywords(source).values())
         finally:
             memory.close()

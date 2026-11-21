@@ -248,7 +248,11 @@ not, an unknown Agent, excluded framework event, or broken prefix may have
 appeared, and full Agent Discovery + Reconciliation is required. This
 allows newly registered but still-empty Agent names from the lightweight
 metadata roster without scanning the event keyspace per unchanged query.
-A normal append uses the existing incremental extraction cursor.
+A normal append uses the existing incremental extraction cursor. The
+Live Search, Saved Studio Search, CLI Search, SessionReader Search and
+published-index status paths share this Reconciler proof rather than each
+pre-discovering the Agent roster. Explicit full indexing and raw-history
+or complete-Agent-census views retain full discovery when required.
 A DIRTY vector corpus with unchanged model/generation and matching pre-append
 Agent checkpoints can embed this suffix without reloading full history.
 Missing or incomplete vector checkpoints, model changes and interrupted builds
