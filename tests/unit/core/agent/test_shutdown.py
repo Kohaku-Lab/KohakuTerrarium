@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+import types
 
 import pytest
 
@@ -73,15 +74,20 @@ class TestShutdownDeadline:
         await task
 
     async def test_force_window_opens_once_after_deadline(self, monkeypatch):
+        now = [100.0]
+        monkeypatch.setattr(
+            shutdown_mod, "time", types.SimpleNamespace(monotonic=lambda: now[0])
+        )
         monkeypatch.setattr(shutdown_mod, "FORCE_SETTLE_SECONDS", 0.05)
         deadline = ShutdownDeadline(0)
         assert deadline.remaining(force=True) is None
         deadline.open_force_window()
-        first = deadline.remaining(force=True)
-        assert 0 < first <= 0.05
-        await asyncio.sleep(0.02)
+        assert deadline.remaining(force=True) == pytest.approx(0.05)
+        now[0] += 0.02
         deadline.open_force_window()
-        assert deadline.remaining(force=True) < first
+        assert deadline.remaining(force=True) == pytest.approx(0.03)
+        now[0] += 0.05
+        assert deadline.remaining(force=True) == 0.0
 
     async def test_join_consumes_failed_task_exceptions(self):
         async def boom():
