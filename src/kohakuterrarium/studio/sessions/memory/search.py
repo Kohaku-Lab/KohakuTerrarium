@@ -135,8 +135,10 @@ def _search_session_sync(
             # The Reconciler captures one source snapshot for all Agent
             # materializers and resolves the selected search projections.
             reconciler = SessionIndexReconciler(store, memory)
+            # The Reconciler checks physical-append coverage and falls back
+            # to full Agent discovery only when it cannot prove completeness.
             source = reconciler.capture_or_reuse(
-                store.load_meta().get("agents", []), all_agents=True
+                store.meta.get("agents", []), all_agents=True
             )
             branch_views = reconciler.selected_views(source, source.agents)
             reconciler.build(source)

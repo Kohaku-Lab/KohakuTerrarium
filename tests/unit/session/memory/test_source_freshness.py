@@ -751,3 +751,266 @@ async def test_saved_semantic_search_uses_vector_suffix_after_append(
     assert "bob saved-semantic-tail" in {item["content"] for item in result["results"]}
     with closing(SessionMemory(str(path), _Vectors(), index_all_branches=True)) as mem:
         assert mem._manifest()["fts"] == mem._manifest()["vector"] == "ready"
+
+
+def test_numeric_physical_frontier_indexes_only_the_new_tail(tmp_path):
+    """Index cursor and sorted source order agree across e999999 -> e1000000."""
+    path = tmp_path / "millionth-source.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store._event_seq["alice"] = 999_999
+        for number in range(999_999, 1_000_002):
+            store.append_event(
+                "alice",
+                "user_input",
+                {"content": f"needle-{number}"},
+                turn_index=number - 999_998,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            reconciler = SessionIndexReconciler(store, memory)
+            first = reconciler.capture(["alice"], all_agents=True)
+            assert first.catalogs["alice"]["next_seq"] == 1_000_002
+            assert [row.source_ref for row in first.events["alice"]] == [
+                "alice:e999999",
+                "alice:e1000000",
+                "alice:e1000001",
+            ]
+            assert reconciler.build(first)["alice"] == 3
+            store.append_event(
+                "alice",
+                "user_input",
+                {"content": "needle-1000002"},
+                turn_index=4,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            second = reconciler.capture_or_reuse(["alice"])
+            assert len(second.events["alice"].suffix) == 1
+            assert second.events["alice"].suffix[0].source_ref == "alice:e1000002"
+            assert reconciler.refresh_keywords(second) == {"alice": 1}
+            assert {
+                hit.content
+                for hit in memory.search(
+                    "needle",
+                    mode="fts",
+                    branch_views={"alice": {i: 1 for i in range(1, 5)}},
+                )
+            } == {"needle-999999", "needle-1000000", "needle-1000001", "needle-1000002"}
+    finally:
+        store.close(update_status=False)
+
+
+def test_steady_source_never_discovers_event_keys_but_accounts_for_new_agents(
+    tmp_path, monkeypatch
+):
+    """A hot-plugged Agent is discovered only when physical growth is unexplained."""
+    path = tmp_path / "hot-plugged-agent.kohakutr"
+    store = SessionStore(path)
+    try:
+        _seed(store, count=2)
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            rec.build(rec.capture(["alice", "bob"], all_agents=True))
+            original_keys = store._event_key_names
+            scans = []
+
+            def tracked_keys():
+                scans.append(1)
+                return original_keys()
+
+            monkeypatch.setattr(store, "_event_key_names", tracked_keys)
+            for _ in range(3):
+                current, _ = rec.prepare_keywords(["alice"])
+                assert current.published
+            assert scans == []
+
+            # Appended event identity can be reused; coverage is physical.
+            store.append_event(
+                "charlie",
+                "user_input",
+                {"content": "charlie new-needle", "event_id": 1},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            changed, views = rec.prepare_keywords(["alice"])
+            assert not changed.published
+            assert "charlie" in changed.agents
+            assert scans
+            charlie_view = rec.selected_views(changed, ["charlie"])
+            assert [
+                hit.content
+                for hit in memory.search(
+                    "new-needle", mode="fts", branch_views=charlie_view
+                )
+            ] == ["charlie new-needle"]
+            scans.clear()
+            stable, _ = rec.prepare_keywords(["alice"])
+            assert stable.published
+            assert scans == []
+    finally:
+        store.close(update_status=False)
+
+
+def test_metadata_only_new_agent_and_excluded_event_namespaces_are_accounted(
+    tmp_path, monkeypatch
+):
+    """A declared empty Agent changes roster; framework events are not indexed."""
+    path = tmp_path / "metadata-roster.kohakutr"
+    store = SessionStore(path)
+    try:
+        _seed(store, count=1, agents=("alice",))
+        store.append_event(
+            "terrarium",
+            "text",
+            {"content": "framework bookkeeping"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            rec.build(rec.capture(["alice"], all_agents=True))
+            assert rec.capture_or_reuse(["alice"], all_agents=True).published
+            store.meta["agents"] = ["alice", "empty"]
+            source = rec.capture_or_reuse(["alice"], all_agents=True)
+            assert not source.published
+            assert "empty" in source.agents
+            assert rec.build(source)["empty"] == 0
+            assert rec.capture_or_reuse(["alice"], all_agents=True).published
+    finally:
+        store.close(update_status=False)
+
+
+def test_incomplete_decoded_source_does_not_certify_complete_prefix(
+    tmp_path, monkeypatch
+):
+    """Skipped unreadable physical source rows cannot establish readiness proof."""
+    path = tmp_path / "missing-decoded-tail.kohakutr"
+    store = SessionStore(path)
+    try:
+        _seed(store, count=2, agents=("alice",))
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            original = store.get_memory_events
+
+            def skip_tail(name):
+                return original(name)[:-1]
+
+            monkeypatch.setattr(store, "get_memory_events", skip_tail)
+            partial = rec.capture(["alice"], all_agents=True)
+            assert partial.catalogs == {}
+            rec.build(partial)
+            assert not rec.capture_or_reuse(["alice"]).published
+    finally:
+        store.close(update_status=False)
+
+
+def test_legacy_lexical_source_catalog_falls_back_and_is_recertified(tmp_path):
+    """An existing v2 catalogue with no numeric-order proof cannot be reused."""
+    path = tmp_path / "unsealed-source-order.kohakutr"
+    store = SessionStore(path)
+    try:
+        _seed(store, count=2, agents=("alice",))
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            rec.build(rec.capture(["alice"], all_agents=True))
+            catalog = dict(memory._state["alice:memory_source_catalog"])
+            assert catalog["source_order"] == "numeric-physical"
+            del catalog["source_order"]
+            memory._state["alice:memory_source_catalog"] = catalog
+
+            source = rec.capture_or_reuse(["alice"])
+            assert not source.published
+            assert rec.build(source) == {"alice": 0}
+            assert rec.capture_or_reuse(["alice"]).published
+            assert memory._state["alice:memory_source_catalog"]["source_order"] == (
+                "numeric-physical"
+            )
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_live_and_saved_stable_queries_never_enumerate_event_keys(
+    tmp_path, monkeypatch
+):
+    """Both public search routes use the same bounded metadata frontier."""
+    from kohakuterrarium.session.memory.async_search import live_memory_for_store
+    from kohakuterrarium.studio.sessions.memory.search import search_session_memory
+
+    path = tmp_path / "stable-route-keyscan.kohakutr"
+    store = SessionStore(path)
+    try:
+        _seed(store, count=3, agents=("alice",))
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            rec.build(rec.capture(["alice"], all_agents=True))
+        with monkeypatch.context() as patch:
+
+            def forbid_keys(_self):
+                raise AssertionError("stable Memory query enumerated the event keys")
+
+            patch.setattr(SessionStore, "_event_key_names", forbid_keys)
+            for _ in range(2):
+                saved = await search_session_memory(
+                    path, q="needle", mode="fts", agent="alice", k=3
+                )
+                assert saved["count"] == 3
+            live = await store.run(live_memory_for_store, store)
+            for _ in range(2):
+                hits, warning = await live.search(
+                    "needle",
+                    names=["alice"],
+                    config={},
+                    create_embedder=lambda _: None,
+                    mode="fts",
+                    agent="alice",
+                    k=3,
+                )
+                assert warning is None
+                assert len(hits) == 3
+    finally:
+        store.close(update_status=False)
+
+
+def test_unindexed_framework_append_forces_one_reconciliation_then_reuses(
+    tmp_path, monkeypatch
+):
+    """Physical growth outside indexed Agent roster invalidates only that snapshot."""
+    path = tmp_path / "framework-event.kohakutr"
+    store = SessionStore(path)
+    try:
+        _seed(store, count=2, agents=("alice",))
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            rec.build(rec.capture(["alice"], all_agents=True))
+            store.append_event(
+                "terrarium",
+                "text",
+                {"content": "framework-only"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            discovered = []
+            real = store._event_key_names
+
+            def counted():
+                discovered.append(True)
+                return real()
+
+            monkeypatch.setattr(store, "_event_key_names", counted)
+            source = rec.capture_or_reuse(["alice"])
+            assert not source.published
+            assert source.agents == ("alice",)
+            assert discovered
+            assert rec.build(source) == {"alice": 0}
+            discovered.clear()
+            assert rec.capture_or_reuse(["alice"]).published
+            assert not discovered
+    finally:
+        store.close(update_status=False)

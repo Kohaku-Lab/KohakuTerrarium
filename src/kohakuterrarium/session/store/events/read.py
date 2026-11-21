@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from kohakuterrarium.session.store.events.key_index import EventKeyIndex
+from kohakuterrarium.session.history.paging import _ordered_event_refs
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
     normalize_resumable_events,
@@ -56,7 +57,7 @@ class EventReadMixin:
         the physical locator of subsequent readable events.
         """
         self._flush_events_cache()
-        keys = scan_keys(self.events, f"{agent}:e")
+        keys = _ordered_event_refs(self, agent, preserve_noncanonical=True)
         return [
             MemoryEvent(event, key_text(key))
             for key, event in read_values(self.events, keys, what="memory event")
@@ -68,7 +69,7 @@ class EventReadMixin:
     ) -> Iterator[dict]:
         """Iterate values in physical-key order inside the owning store operation."""
         self._flush_events_cache()
-        keys = scan_keys(self.events, f"{agent}:e")
+        keys = _ordered_event_refs(self, agent, preserve_noncanonical=True)
         return _iter_event_values(self.events, keys, since_event_id)
 
     def max_event_id(self, agent: str) -> int:

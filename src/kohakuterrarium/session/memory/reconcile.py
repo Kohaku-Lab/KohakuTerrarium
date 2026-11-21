@@ -5,9 +5,11 @@ chooses the participants; the index planner and FTS/vector materializers work
 with those captured events and never discover other Agents themselves.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from kohakuterrarium.session.store.events.discovery import discover_agents
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -53,19 +55,47 @@ class SessionIndexReconciler:
         self, requested: list[str] | tuple[str, ...], *, all_agents: bool = False
     ) -> IndexSourceSnapshot:
         names = list(requested)
+        frontier = source_frontier(self._store)
+        # Full capture is the authorized place for physical-key discovery.
+        # The same key snapshot establishes the roster and certifies that
+        # *every* indexed Agent row was decoded (not only the final row).
+        keys = None
         if all_agents:
             manifest = self._memory._manifest()
+            if hasattr(self._store, "_event_key_names"):
+                keys = self._store._event_key_names()
+                declared = self._store.meta.get("agents") or []
+                discovered = discover_agents(keys)
+                known = [*declared, *discovered]
+            else:
+                known = self._store.load_meta().get("agents", [])
             names = [
-                *self._store.load_meta().get("agents", []),
+                *known,
                 *sorted(self._memory._known_agents()),
                 *((manifest or {}).get("agents", ())),
                 *names,
             ]
         names = list(dict.fromkeys(names))
-        frontier = source_frontier(self._store)
         events = {name: self._store.get_memory_events(name) for name in names}
         if frontier != source_frontier(self._store):
             frontier = None  # Writer crossed the capture boundary; never seal.
+        if frontier is not None and keys is not None:
+            per_agent = Counter()
+            for key in keys:
+                namespace, separator, suffix = key.rpartition(":e")
+                if separator and suffix.isascii() and suffix.isdecimal():
+                    per_agent[namespace] += 1
+            if len(keys) != frontier.physical_count or any(
+                len(events[name]) != per_agent[name] for name in names
+            ):
+                # Skipped/unreadable physical records cannot certify a complete
+                # prefix. Framework/attached namespaces need not be indexed,
+                # but their records remain covered by the global frontier.
+                frontier = None
+        else:
+            # Partial captures and Store adapters without a full physical-key
+            # snapshot cannot publish a Session-wide source certificate.
+            frontier = None
         catalogs = (
             {
                 name: catalog
@@ -75,6 +105,9 @@ class SessionIndexReconciler:
             if frontier is not None
             else {}
         )
+        # Do not seal a partially-decoded or noncanonical source catalogue.
+        if len(catalogs) != len(names):
+            catalogs = {}
         return IndexSourceSnapshot(events, tuple(names), frontier, catalogs)
 
     def _catalog_state(self):
@@ -94,6 +127,8 @@ class SessionIndexReconciler:
         views: dict[str, list[dict] | TailHistory] = {}
         catalogs: dict[str, dict] = {}
         changed = False
+        before_count = None
+        total_suffix = 0
         for name in names:
             catalog = state.get(f"{name}:memory_source_catalog")
             checkpoint = state.get(f"{name}:cursor:keywords")
@@ -111,13 +146,30 @@ class SessionIndexReconciler:
                 or not isinstance(catalog.get("default_view"), dict)
             ):
                 return None
+            saved_frontier = catalog.get("frontier")
+            if (
+                not isinstance(saved_frontier, list)
+                or len(saved_frontier) != 2
+                or type(saved_frontier[1]) is not int
+                or (before_count is not None and before_count != saved_frontier[1])
+            ):
+                return None
+            before_count = saved_frontier[1]
             result = read_appended(self._store, name, catalog, frontier)
             if result is None:
                 return None
             view, latest = result
+            total_suffix += len(view.suffix)
             changed |= bool(view.suffix)
             views[name] = view
             catalogs[name] = latest
+        if before_count is None or (
+            total_suffix != frontier.physical_count - before_count
+        ):
+            # Known per-Agent physical suffixes must account for every new
+            # source row. Otherwise a hot-plugged/unknown namespace or a
+            # broken sequence was not captured: discover the whole roster.
+            return None
         # The source can advance while multiple Agent catalogues are being
         # consulted. A single initial frontier does not certify their shared
         # snapshot; fail closed to one full capture on a concurrent append.
@@ -249,11 +301,9 @@ class SessionIndexReconciler:
             names = list(
                 dict.fromkeys(
                     [
-                        *(
-                            self._store.load_meta().get("agents", [])
-                            if all_agents
-                            else []
-                        ),
+                        # Persisted declarations are cheap and may include
+                        # a newly registered, still-empty Agent.
+                        *(self._store.meta.get("agents") or []),
                         *manifest.get("agents", ()),
                         *requested,
                     ]

@@ -3,10 +3,17 @@
 import threading
 from typing import Any
 
-from kohakuterrarium.session.vault.io import read_values, scan_keys
+from kohakuterrarium.session.history.paging import physical_refs
+from kohakuterrarium.session.vault.io import read_values
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _sequence(key: bytes) -> int | None:
+    """KT's numeric physical sequence, if the legacy key has one."""
+    suffix = key.rsplit(b":e", 1)[-1]
+    return int(suffix) if suffix.isascii() and suffix.isdigit() else None
 
 
 class EventKeyIndex:
@@ -30,9 +37,20 @@ class EventKeyIndex:
             self._generation += 1
             for agent, index in self._agents.items():
                 if key.startswith(f"{agent}:e"):
-                    # Preserve the first key in native lexical scan order,
-                    # including imported duplicate ids and long sequence keys.
-                    index[event_id] = min(index.get(event_id, encoded), encoded)
+                    # Reused logical IDs resolve to the first *physical*
+                    # event, including across the six-digit key-width boundary.
+                    previous = index.get(event_id)
+                    if previous is None:
+                        index[event_id] = encoded
+                        continue
+                    old_seq, new_seq = _sequence(previous), _sequence(encoded)
+                    if (
+                        old_seq is not None
+                        and new_seq is not None
+                        and new_seq < old_seq
+                    ) or ((old_seq is None or new_seq is None) and encoded < previous):
+                        # Preserve lexical behavior for malformed legacy keys.
+                        index[event_id] = encoded
 
     def get(self, table: Any, agent: str, event_id: int) -> dict | None:
         """Read one current payload on a hit; scan once per cold namespace."""
@@ -56,7 +74,7 @@ class EventKeyIndex:
             generation = self._generation
         built = {}
         found = None
-        keys = scan_keys(table, f"{agent}:e")
+        keys = physical_refs(table, agent, "e", preserve_noncanonical=True)
         rows = list(read_values(table, keys, what="event"))
         complete = len(rows) == len(keys)
         for key, event in rows:

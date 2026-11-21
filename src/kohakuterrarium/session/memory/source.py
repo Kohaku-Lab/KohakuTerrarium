@@ -26,6 +26,10 @@ from kohakuterrarium.session.history.semantics import (
 from kohakuterrarium.session.memory.blocks import _anchor
 from kohakuterrarium.session.store.events.read import MemoryEvent
 
+# Certification of the derived catalogue's tail cursor, not a new memory
+# index format. Pre-fix catalogues could have used lexical key order.
+NUMERIC_SOURCE_ORDER = "numeric-physical"
+
 
 @dataclass(frozen=True)
 class SourceFrontier:
@@ -66,8 +70,10 @@ class TailHistory(Sequence):
 
 def source_frontier(store: Any) -> SourceFrontier | None:
     """Read a cheap committed source marker under KT's append-only contract."""
-    meta = store.load_meta()
-    identity = meta.get("session_id")
+    # load_meta() also discovers Agent namespaces by scanning every event
+    # key. The frontier needs only the persisted identity; coverage of
+    # namespaces belongs to the Reconciler's prefix-closure proof.
+    identity = store.meta.get("session_id")
     if not isinstance(identity, str) or not identity:
         return None
     store._flush_events_cache()
@@ -119,6 +125,19 @@ def selected_from_entries(entries: list[list], requested: dict[int, int] | None)
 
 def catalog_for_full(events: list[dict], frontier: SourceFrontier) -> dict | None:
     """Produce a compact, payload-free branch summary after full capture."""
+    # A raw Store reader preserves legacy malformed key order for viewing.
+    # That view cannot certify a *numeric* append cursor: never seal it.
+    for event in events:
+        ref = getattr(event, "source_ref", "")
+        prefix, separator, suffix = ref.rpartition(":e")
+        if (
+            not separator
+            or not prefix
+            or not suffix.isascii()
+            or not suffix.isdecimal()
+            or suffix != f"{int(suffix):06d}"
+        ):
+            return None
     entries = _entries(events)
     last = getattr(events[-1], "source_ref", "") if events else ""
     prefix = ""
@@ -133,6 +152,7 @@ def catalog_for_full(events: list[dict], frontier: SourceFrontier) -> dict | Non
     # exist; direct event-list tests retain the usual full-rebuild path.
     return {
         "frontier": [frontier.session_id, frontier.physical_count],
+        "source_order": NUMERIC_SOURCE_ORDER,
         "count": len(events),
         "next_seq": next_seq,
         "anchor": _anchor(events[-1]) if events else "",
@@ -147,7 +167,8 @@ def read_appended(
     """Read only sequential physical suffix keys, or request full fallback."""
     old_frontier = catalog.get("frontier")
     if (
-        not isinstance(old_frontier, list)
+        catalog.get("source_order") != NUMERIC_SOURCE_ORDER
+        or not isinstance(old_frontier, list)
         or len(old_frontier) != 2
         or old_frontier[0] != frontier.session_id
     ):
@@ -157,7 +178,7 @@ def read_appended(
     next_seq = catalog.get("next_seq")
     if (
         type(old_total) is not int
-        or old_total > frontier.physical_count
+        or not 0 <= old_total <= frontier.physical_count
         or type(count) is not int
         or count < 0
         or type(next_seq) is not int

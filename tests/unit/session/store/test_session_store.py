@@ -1665,3 +1665,30 @@ def test_event_lookup_reuses_keys_and_tracks_appends(tmp_path):
         assert store.get_event_by_id("bob", 42)["content"] == "other"
     finally:
         store.close()
+
+
+def test_physical_event_order_uses_numeric_sequence_not_lexicographic_keys(tmp_path):
+    """The width-6 encoding is a minimum, not a lexical ordering guarantee."""
+    with closing(SessionStore(tmp_path / "numeric-order.kohakutr")) as store:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        # Reach the physical-key width boundary without allocating 1M rows.
+        store._event_seq["alice"] = 999_999
+        for number in range(999_999, 1_000_002):
+            key, _ = store.append_event(
+                "alice",
+                "user_input",
+                {"content": f"physical-{number}"},
+                turn_index=number - 999_998,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            assert key == f"alice:e{number:06d}"
+        expected = ["physical-999999", "physical-1000000", "physical-1000001"]
+        assert [event["content"] for event in store.get_events("alice")] == expected
+        rows = store.get_memory_events("alice")
+        assert [row["content"] for row in rows] == expected
+        assert [row.source_ref for row in rows] == [
+            "alice:e999999",
+            "alice:e1000000",
+            "alice:e1000001",
+        ]

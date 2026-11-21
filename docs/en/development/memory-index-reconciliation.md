@@ -233,12 +233,22 @@ contract, the memory index records a derived, compact source catalogue
 (index epoch, FTS revision, physical event row count, Session ID, last
 source fingerprint, and branch candidates) after a complete publication.
 
-A stable query checks the small published catalogue and physical row count
-**before and after** projecting the whole Agent roster, then reads the
-FTS/vector index directly. If an append crosses that snapshot boundary, the
-cache is discarded and a full source reconciliation is required. A normal
-append adds new physical keys sequentially; the reconciler reads only the
-newly appended suffix and uses the existing incremental extraction cursor.
+A stable query reads the Session ID, explicitly declared Agent roster and
+KVault physical row count without calling full metadata discovery. The
+catalogue is valid only for the **numeric physical event-key order**, not
+KVault's lexical order (which differs after e999999). The full capture
+verifies the Agent roster and successfully decoded physical key counts once.
+Old catalogues without this ordering proof are rebuilt as *derived cache
+metadata*, not a new v2 index format.
+
+The fast path compares the physical frontier **before and after** projecting
+the whole known Agent roster. Every newly inserted physical row must be
+accounted for by an indexed Agent's consecutive physical append suffix; if
+not, an unknown Agent, excluded framework event, or broken prefix may have
+appeared, and full Agent Discovery + Reconciliation is required. This
+allows newly registered but still-empty Agent names from the lightweight
+metadata roster without scanning the event keyspace per unchanged query.
+A normal append uses the existing incremental extraction cursor.
 A DIRTY vector corpus with unchanged model/generation and matching pre-append
 Agent checkpoints can embed this suffix without reloading full history.
 Missing or incomplete vector checkpoints, model changes and interrupted builds

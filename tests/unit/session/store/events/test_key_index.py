@@ -121,7 +121,7 @@ def test_reopen_and_counter_restore_rebuild_index(tmp_path):
         reopened.close()
 
 
-def test_duplicate_ids_keep_native_key_order_across_sequence_width(tmp_path):
+def test_duplicate_ids_keep_physical_sequence_order_across_key_width(tmp_path):
     store = SessionStore(tmp_path / "s.kohakutr")
     try:
         store._event_seq["a"] = 999999
@@ -129,8 +129,23 @@ def test_duplicate_ids_keep_native_key_order_across_sequence_width(tmp_path):
         assert store.get_event_by_id("a", 42)["content"] == "first"
         store.append_event("a", "text", {"event_id": 42, "content": "second"})
         expected = next(e for e in store.get_events("a") if e["event_id"] == 42)
+        assert expected["content"] == "first"
         assert store.get_event_by_id("a", 42) == expected
         store._event_keys.clear()
         assert store.get_event_by_id("a", 42) == expected
+    finally:
+        store.close()
+
+
+def test_legacy_non_numeric_source_key_does_not_break_duplicate_append(tmp_path):
+    """Noncanonical raw rows retain lexical lookup fallback; writer remains usable."""
+    store = SessionStore(tmp_path / "raw-legacy.kohakutr")
+    try:
+        store.events["a:ez"] = {"event_id": 42, "content": "legacy"}
+        assert store.get_event_by_id("a", 42)["content"] == "legacy"
+        store.append_event("a", "text", {"event_id": 42, "content": "new"})
+        assert store.get_event_by_id("a", 42)["content"] == "new"
+        store._event_keys.clear()
+        assert store.get_event_by_id("a", 42)["content"] == "new"
     finally:
         store.close()
