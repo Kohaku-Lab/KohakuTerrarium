@@ -7,8 +7,13 @@ module is strictly the rich-CLI presentation layer.
 """
 
 from kohakuterrarium.cli.run import _resolve_session
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    EmbeddingAuthenticationError,
+    create_embedder,
+    resolve_session_embedding_config,
+)
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import build_index
 from kohakuterrarium.utils.logging import get_logger
@@ -79,20 +84,33 @@ def search_cli(
         return 1
 
     # Read-only: searching must not bump the session's last_active.
-    store = SessionStore.open_readonly(path)
+    store = SessionStore.open_memory_reader(path)
+    memory = None
     try:
-        # Semantic modes can fall back when no query embedder is available.
+        # Query vectors must come from the same configured model that
+        # produced the persisted index, never the CLI's own auto default.
         embedder = None
         if mode in ("semantic", "hybrid", "auto"):
             try:
-                embedder = create_embedder({"provider": "auto"})
+                embedder = create_embedder(resolve_session_embedding_config(store))
+            except EmbeddingAuthenticationError as e:
+                print(f"Embedding authentication unavailable: {e}")
+                if mode == "semantic":
+                    return 1
+                # Auto and hybrid can still use FTS after warning the user.
             except Exception as e:
                 logger.warning(
                     "Failed to create embedder for search", error=str(e), exc_info=True
                 )
 
         # Saved dimensions let SessionMemory discover existing vector tables.
-        memory = SessionMemory(str(path), embedder=embedder)
+        memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
+        # CLI search never writes vectors. Reconciler owns source discovery,
+        # FTS migration and the selected per-Agent visibility projection.
+        reconciler = SessionIndexReconciler(store, memory)
+        _, branch_views = reconciler.prepare_keywords(
+            store.load_meta().get("agents", []), all_agents=True, project_all=True
+        )
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:
             print("No vector index found. Run 'kt embedding' first, or use --mode fts")
@@ -100,7 +118,18 @@ def search_cli(
                 return 1
             mode = "fts"
 
-        results = memory.search(query, mode=mode, k=k, agent=agent)
+        try:
+            results = memory.search(
+                query, mode=mode, k=k, agent=agent, branch_views=branch_views
+            )
+        except ValueError as exc:
+            if mode not in ("auto", "hybrid") or "vector index stale" not in str(exc):
+                raise
+            print("Vector index requires a rebuild; using FTS instead.")
+            mode = "fts"
+            results = memory.search(
+                query, mode=mode, k=k, agent=agent, branch_views=branch_views
+            )
 
         if not results:
             print("No results found.")
@@ -132,4 +161,6 @@ def search_cli(
         print(f"Error: {e}")
         return 1
     finally:
-        store.close()
+        if memory is not None:
+            memory.close()
+        store.close(update_status=False)

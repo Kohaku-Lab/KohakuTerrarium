@@ -15,8 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    EmbeddingAuthenticationError,
+    create_embedder,
+    resolve_session_embedding_config,
+)
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import (
@@ -76,21 +81,8 @@ def build_embeddings(
 
 
 def _resolve_embed_config(store: SessionStore, live_agent: Any) -> dict[str, Any]:
-    """Mirror ``builtins/tools/search_memory.py`` config resolution."""
-    embed_config: dict[str, Any] | None = None
-    try:
-        saved = store.state.get("embedding_config")
-        if isinstance(saved, dict):
-            embed_config = saved
-    except (KeyError, Exception):
-        pass
-    if embed_config is None and live_agent and hasattr(live_agent, "config"):
-        memory_cfg = getattr(live_agent.config, "memory", None)
-        if isinstance(memory_cfg, dict) and "embedding" in memory_cfg:
-            embed_config = memory_cfg["embedding"]
-    if embed_config is None:
-        embed_config = {"provider": "auto"}
-    return embed_config
+    """Use the same model and authentication resolver as live memory tools."""
+    return resolve_session_embedding_config(store, live_agent)
 
 
 def _search_session_sync(
@@ -115,7 +107,7 @@ def _search_session_sync(
                 store = live_store
                 store.flush()
             else:
-                store = SessionStore(path)
+                store = SessionStore.open_memory_reader(path)
                 # Close owned SQLite handles promptly so Windows can delete stopped sessions;
                 # a live creature retains ownership of its shared SessionStore.
                 stack.callback(store.close, update_status=False)
@@ -127,19 +119,29 @@ def _search_session_sync(
                 embed_config = _resolve_embed_config(store, live_agent)
                 try:
                     embedder = create_embedder(embed_config)
+                except EmbeddingAuthenticationError:
+                    # Do not silently downgrade an explicitly configured API
+                    # model when no current credential can authenticate it.
+                    raise
                 except Exception as e:
-                    _ = e  # Search can fall back to FTS when embedding is unavailable.
+                    _ = e  # Other embedder failures retain the historical FTS fallback.
                     embedder = None
 
-            memory = SessionMemory(str(path), embedder=embedder)
+            memory = SessionMemory(
+                str(path), embedder=embedder, index_all_branches=True
+            )
             stack.callback(memory.close)
 
-            # Incremental indexing skips events already represented in memory.
-            meta = store.load_meta()
-            for agent_name in meta.get("agents", []):
-                events = store.get_events(agent_name)
-                if events:
-                    memory.index_events(agent_name, events)
+            # The Reconciler captures one source snapshot for all Agent
+            # materializers and resolves the selected search projections.
+            reconciler = SessionIndexReconciler(store, memory)
+            # The Reconciler checks physical-append coverage and falls back
+            # to full Agent discovery only when it cannot prove completeness.
+            source = reconciler.capture_or_reuse(
+                store.meta.get("agents", []), all_agents=True
+            )
+            branch_views = reconciler.selected_views(source, source.agents)
+            reconciler.build(source)
 
             # Preserve the adapter contract by degrading unsupported semantic requests to FTS.
             effective_mode = mode
@@ -152,7 +154,13 @@ def _search_session_sync(
                 logger.warning("No embedding model, falling back to FTS")
                 effective_mode = "fts"
 
-            results = memory.search(query=q, mode=effective_mode, k=k, agent=agent)
+            results = memory.search(
+                query=q,
+                mode=effective_mode,
+                k=k,
+                agent=agent,
+                branch_views=branch_views,
+            )
     except Exception as e:
         # Callers receive a concise typed error while logs retain the traceback.
         logger.exception(

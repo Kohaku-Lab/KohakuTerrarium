@@ -9,9 +9,10 @@ from typing import Any
 
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 from kohakuterrarium.session.memory.index import SearchResult, SessionMemory
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -42,7 +43,10 @@ class SessionReader:
         if not path.exists():
             raise FileNotFoundError(f"Session file not found: {path}")
         self._path = path
-        self._store = SessionStore.open_readonly(path)
+        # High-level session views do not need append/fork counters. Their
+        # read-only source handles must not enumerate every event key just
+        # to perform an indexed search.
+        self._store = SessionStore.open_memory_reader(path)
 
     def __enter__(self) -> "SessionReader":
         return self
@@ -93,14 +97,11 @@ class SessionReader:
         if not raw:
             return []
         raw = dedupe_adjacent_duplicate_events(raw)
-        live_ids = select_live_event_ids(raw)
+        raw = project_live_event_stream(raw)
 
         turns: list[TurnView] = []
         current: TurnView | None = None
         for evt in raw:
-            eid = evt.get("event_id")
-            if isinstance(eid, int) and eid not in live_ids:
-                continue
             etype = evt.get("type", "")
             if etype in ("user_input", "trigger_fired"):
                 if current is not None and (
@@ -141,19 +142,22 @@ class SessionReader:
         Sessions without an existing memory index return no hits; call
         :meth:`index` first for ad-hoc keyword search.
         """
-        memory = SessionMemory(str(self._path))
+        memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
-            return memory.search(query, mode=mode, k=k, agent=agent)
+            reconciler = SessionIndexReconciler(self._store, memory)
+            _, views = reconciler.prepare_keywords(
+                self.agents, all_agents=True, existing_only=True, project_all=True
+            )
+            return memory.search(query, mode=mode, k=k, agent=agent, branch_views=views)
         finally:
             memory.close()
 
     def index(self) -> int:
         """Index this session's events for :meth:`search` (FTS only)."""
-        memory = SessionMemory(str(self._path))
+        memory = SessionMemory(str(self._path), index_all_branches=True)
         try:
-            total = 0
-            for name in self.agents:
-                total += memory.index_events(name, self._store.get_events(name))
-            return total
+            reconciler = SessionIndexReconciler(self._store, memory)
+            source = reconciler.capture(self.agents, all_agents=True)
+            return sum(reconciler.refresh_keywords(source).values())
         finally:
             memory.close()

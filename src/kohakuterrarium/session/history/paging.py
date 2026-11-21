@@ -94,21 +94,42 @@ def _stream_identity(session_id: str, stream: str, target: str) -> str:
     ]
 
 
-def physical_refs(vault: Any, target: str, kind: str) -> list[str]:
-    """Enumerate exact target records in numeric storage order, without values."""
+def physical_refs(
+    vault: Any, target: str, kind: str, *, preserve_noncanonical: bool = False
+) -> list[str]:
+    """Enumerate physical source keys by numeric sequence, without values.
+
+    The raw Store reader can preserve old lexical ordering when a manually
+    imported/legacy key violates KT's canonical numeric key encoding. Strict
+    History Paging ignores such keys as before.
+    """
     vault.flush_cache()
     prefix = f"{target}:{kind}"
     refs = []
+    all_refs = [] if preserve_noncanonical else None
+    noncanonical = False
     for key in scan_keys(vault, prefix):
         ref = key.decode("utf-8") if isinstance(key, bytes) else key
+        if all_refs is not None:
+            all_refs.append(ref)
         suffix = ref[len(prefix) :]
         if suffix and suffix.isascii() and suffix.isdigit():
             refs.append(ref)
+            if preserve_noncanonical and suffix != f"{int(suffix):06d}":
+                noncanonical = True
+        else:
+            noncanonical = True
+    if all_refs is not None and noncanonical:
+        return all_refs
     return sorted(refs, key=lambda ref: int(ref[len(prefix) :]))
 
 
-def _ordered_event_refs(store: Any, agent: str) -> list[str]:
-    return physical_refs(store.events, agent, "e")
+def _ordered_event_refs(
+    store: Any, agent: str, *, preserve_noncanonical: bool = False
+) -> list[str]:
+    return physical_refs(
+        store.events, agent, "e", preserve_noncanonical=preserve_noncanonical
+    )
 
 
 def _history_key(stream: str, target: str, ref: str) -> str:

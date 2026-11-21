@@ -58,7 +58,11 @@ class SessionStore(
         writer_lock: bool = False,
         read_only: bool = False,
         table_policy: Mapping[str, TablePolicy] | None = None,
+        _defer_counter_restore: bool = False,
     ) -> None:
+        if _defer_counter_restore and not read_only:
+            raise ValueError("Deferred counters require a read-only source view")
+        self._defer_counter_restore = _defer_counter_restore
         self._init_affinity()
         self._init_handle(
             path,
@@ -73,7 +77,13 @@ class SessionStore(
         # Construction failures must not strand tables or the writer lock.
         try:
             self._open_tables()
-            self._restore_counters()
+            if self._defer_counter_restore:
+                # Memory search reads source events and metadata, but never
+                # appends, forks or resumes. Avoid a full key scan on every
+                # saved-session query; counters remain lazy/uninitialized.
+                self._global_event_id = None
+            else:
+                self._restore_counters()
             open_point(self)
         except BaseException:
             self._discard_failed_open()
@@ -93,6 +103,11 @@ class SessionStore(
                 event_agents=list(self._event_seq.keys()),
                 channel_count=len(self._channel_seq),
             )
+
+    @classmethod
+    def open_memory_reader(cls, path: "str | Path") -> "SessionStore":
+        """Read-only memory query source; event counters are not needed."""
+        return cls(path, read_only=True, _defer_counter_restore=True)
 
     @classmethod
     def open_readonly(cls, path: "str | Path") -> "SessionStore":

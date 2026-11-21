@@ -22,6 +22,7 @@ from kohakuterrarium.session.history.branch_paths import (  # noqa: F401 - re-ex
     _coerce_path,
     _path_matches,
     index_parent_paths,
+    index_parent_paths_by_position,
     resolve_branch_view_strict,
 )
 from kohakuterrarium.session.history.selection import SelectionCompatibility
@@ -30,9 +31,20 @@ from kohakuterrarium.session.history.selection import SelectionCompatibility
 # derive this ancestry from event order when no explicit path was persisted.
 
 
+def _event_path(
+    event: dict,
+    position: int,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple],
+) -> tuple:
+    if isinstance(parent_paths, list):
+        return parent_paths[position]
+    eid = event.get("event_id")
+    return parent_paths.get(eid, ()) if isinstance(eid, int) else ()
+
+
 def resolve_selected_branches(
     events_list: list[dict[str, Any]],
-    parent_paths: dict[int, tuple[tuple[int, int], ...]],
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple],
     branch_view: dict[int, int] | None,
 ) -> dict[int, int]:
     """Pick a live branch for each turn while respecting nested paths.
@@ -44,15 +56,14 @@ def resolve_selected_branches(
     restore.
     """
     branches_by_turn: dict[int, list[tuple[int, int]]] = {}
-    for evt in events_list:
+    for position, evt in enumerate(events_list):
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
-        eid = evt.get("event_id")
         if not isinstance(ti, int) or not isinstance(bi, int):
             continue
-        path = parent_paths.get(eid, ()) if isinstance(eid, int) else ()
+        path = _event_path(evt, position, parent_paths)
         bucket = branches_by_turn.setdefault(ti, [])
-        if not any(b == bi for _, b in bucket):
+        if (path, bi) not in bucket:
             bucket.append((path, bi))
 
     selected: dict[int, int] = {}
@@ -84,10 +95,10 @@ def project_branch_metadata(
     """Project branch choices, ancestry, and the selected coherent path."""
     events_list = list(events)
     selected = resolve_branch_view_strict(events_list, branch_view)
-    parent_paths = index_parent_paths(events_list)
+    parent_paths = index_parent_paths_by_position(events_list)
     branches: dict[int, dict[int, set[tuple[tuple[int, int], ...]]]] = {}
 
-    for evt in events_list:
+    for position, evt in enumerate(events_list):
         if evt.get("type") not in ("user_message", "user_input"):
             continue
         try:
@@ -95,12 +106,7 @@ def project_branch_metadata(
             branch_id = int(evt.get("branch_id"))
         except (TypeError, ValueError):
             continue
-        event_id = evt.get("event_id")
-        path = (
-            parent_paths.get(event_id, ())
-            if isinstance(event_id, int)
-            else _coerce_path(evt.get("parent_branch_path"))
-        )
+        path = _event_path(evt, position, parent_paths)
         branches.setdefault(turn_index, {}).setdefault(branch_id, set()).add(path)
 
     return {
@@ -138,17 +144,17 @@ def collect_branch_metadata(
     navigator counts reflect the visible subtree.
     """
     events_list = list(events)
-    parent_paths = index_parent_paths(events_list)
+    parent_paths = index_parent_paths_by_position(events_list)
     selected = resolve_selected_branches(events_list, parent_paths, branch_view)
 
     out: dict[int, dict[str, Any]] = {}
-    for evt in events_list:
+    for position, evt in enumerate(events_list):
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
         eid = evt.get("event_id")
         if not isinstance(ti, int) or not isinstance(bi, int):
             continue
-        path = parent_paths.get(eid, ()) if isinstance(eid, int) else ()
+        path = _event_path(evt, position, parent_paths)
         # Navigator counts must remain local to the selected ancestry.
         prior_selected = {t: b for t, b in selected.items() if t < ti}
         if not _path_matches(path, prior_selected):
@@ -181,15 +187,21 @@ def collect_user_groups(
     """
     events_list = list(events)
     meta = collect_branch_metadata(events_list, branch_view=branch_view)
-    parent_paths = index_parent_paths(events_list)
+    parent_paths = index_parent_paths_by_position(events_list)
     selected = resolve_selected_branches(events_list, parent_paths, branch_view)
     contents: dict[int, dict[int, str]] = {}
-    for evt in events_list:
+    for position, evt in enumerate(events_list):
         if evt.get("type") not in ("user_message", "user_input"):
             continue
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
         if not isinstance(ti, int) or not isinstance(bi, int):
+            continue
+        # A mirrored child may reuse (turn, branch) under a different root.
+        # Choose content from the same ancestor view as branch metadata,
+        # not the first matching pair in the unfiltered event stream.
+        prior_selected = {t: b for t, b in selected.items() if t < ti}
+        if not _path_matches(parent_paths[position], prior_selected):
             continue
         contents.setdefault(ti, {})
         if bi not in contents[ti]:
@@ -211,42 +223,93 @@ def collect_user_groups(
     return out
 
 
+def select_live_event_positions(
+    events: Iterable[dict[str, Any]],
+    *,
+    branch_view: dict[int, int] | None = None,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
+) -> set[int]:
+    """Return physical input positions belonging to one coherent branch view.
+
+    Unlike a set of logical event IDs, positions remain unique for mirrored
+    events which reuse event_id in distinct branches.
+    """
+    events_list = list(events)
+    if parent_paths is None:
+        parent_paths = index_parent_paths_by_position(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
+    compatibility = SelectionCompatibility(selected)
+    live: set[int] = set()
+    for position, evt in enumerate(events_list):
+        ti = evt.get("turn_index")
+        bi = evt.get("branch_id")
+        if not isinstance(ti, int) or not isinstance(bi, int):
+            live.add(position)
+            continue
+        if selected.get(ti) != bi:
+            continue
+        path = _event_path(evt, position, parent_paths)
+        if path and not compatibility.matches(path, ti):
+            continue
+        live.add(position)
+    return live
+
+
+def project_live_event_stream(
+    events: Iterable[dict[str, Any]],
+    *,
+    branch_view: dict[int, int] | None = None,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
+) -> list[dict[str, Any]]:
+    """Project a Replay-compatible branch by *physical position*.
+
+    Consumer-facing event streams must never filter with the public logical
+    ID set: imported/mirrored siblings can reuse the same event_id. This is
+    the single branch-selection entry point for Reader and resume displays.
+    Strict Memory retrieval deliberately uses its own eligible projection.
+    """
+    ordered = list(events)
+    if isinstance(parent_paths, dict):
+        ids = [
+            event.get("event_id")
+            for event in ordered
+            if type(event.get("event_id")) is int
+        ]
+        if len(ids) != len(set(ids)):
+            # An ID-keyed map cannot describe mirrored copies of the same
+            # logical event. Recompute physical ancestry for this source.
+            parent_paths = None
+    visible = select_live_event_positions(
+        ordered, branch_view=branch_view, parent_paths=parent_paths
+    )
+    return [event for position, event in enumerate(ordered) if position in visible]
+
+
 def select_live_event_ids(
     events: Iterable[dict[str, Any]],
     *,
     branch_view: dict[int, int] | None = None,
-    parent_paths: dict[int, tuple[tuple[int, int], ...]] | None = None,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
 ) -> set[int]:
-    """Return the event_ids that belong to the live subtree.
+    """Return live logical event IDs, preserving the existing public contract.
 
-    Live events belong to the selected branch and compatible prior ancestry.
-    Legacy or non-state events without branch metadata remain live. Without an
-    override, the latest compatible branch is selected at every turn.
-    Supplied parent paths must describe the same unchanged events in the same order.
+    Logical IDs cannot distinguish repeated IDs across mirrors. Use
+    select_live_event_positions when positional identity is needed.
     """
     events_list = list(events)
     if parent_paths is None:
+        # Preserve the established event_id-based contract. Legacy callers
+        # deliberately collapse duplicate IDs; positional callers opt in to
+        # the stronger physical event identity with the new API.
         parent_paths = index_parent_paths(events_list)
-    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
-
-    compatibility = SelectionCompatibility(selected)
-    live: set[int] = set()
-    for evt in events_list:
-        ti = evt.get("turn_index")
-        bi = evt.get("branch_id")
-        eid = evt.get("event_id")
-        if not isinstance(eid, int):
-            continue
-        if not isinstance(ti, int) or not isinstance(bi, int):
-            live.add(eid)
-            continue
-        if selected.get(ti) != bi:
-            continue
-        path = parent_paths.get(eid, ())
-        if path and not compatibility.matches(path, ti):
-            continue
-        live.add(eid)
-    return live
+    positions = select_live_event_positions(
+        events_list, branch_view=branch_view, parent_paths=parent_paths
+    )
+    return {
+        evt["event_id"]
+        for position, evt in enumerate(events_list)
+        if position in positions and isinstance(evt.get("event_id"), int)
+    }
 
 
 def _event_signature_value(value: Any) -> Hashable:
@@ -318,7 +381,7 @@ def compact_replacement_rules(
     events: list[dict[str, Any]],
     branch_view: dict[int, int] | None = None,
     *,
-    parent_paths: dict[int, tuple[tuple[int, int], ...]] | None = None,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
 ) -> list[CompactRule]:
     """Select summary ranges; supplied paths must match unchanged events and order."""
     if parent_paths is None:
@@ -383,6 +446,27 @@ def replay_conversation(
     Unknown observability events are ignored.
     """
     events_list = dedupe_adjacent_duplicate_events(events)
+    # Mirrored/imported rows can reuse logical IDs across sibling branches.
+    # The ordinary ID-based replay cannot distinguish those rows, so project
+    # the physical lineage first only when a collision is actually present.
+    logical_ids = [
+        event["event_id"]
+        for event in events_list
+        if isinstance(event.get("event_id"), int)
+    ]
+    # Keep compaction records from the unprojected event stream: a summary
+    # can remain reusable on another tail branch when its source lineage is
+    # still selected, even if its completion record is not in the live tail.
+    rules_source = events_list
+    if len(logical_ids) != len(set(logical_ids)):
+        live_positions = select_live_event_positions(
+            events_list, branch_view=branch_view
+        )
+        events_list = [
+            event
+            for position, event in enumerate(events_list)
+            if position in live_positions or not isinstance(event.get("event_id"), int)
+        ]
     parent_paths = index_parent_paths(events_list)
     # Nested branch ancestry determines the live event set and the selected
     # branch projection compaction rules are validated against.
@@ -414,7 +498,13 @@ def replay_conversation(
             str(evt["tool_call_id"])
         )
     replaced_rules = compact_replacement_rules(
-        events_list, branch_view, parent_paths=parent_paths
+        rules_source,
+        branch_view,
+        parent_paths=(
+            index_parent_paths_by_position(rules_source)
+            if rules_source is not events_list
+            else parent_paths
+        ),
     )
     # Summaries are emitted where the replaced content sat, not at the
     # compact_replace event's own stream position (a compact runs after the

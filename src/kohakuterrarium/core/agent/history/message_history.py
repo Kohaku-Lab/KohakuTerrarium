@@ -29,7 +29,9 @@ from kohakuterrarium.session.history.replay import (
     normalize_tool_call_events,
     replay_conversation,
     resolve_branch_view_strict,
+    project_live_event_stream,
     select_live_event_ids,
+    select_live_event_positions,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -122,17 +124,16 @@ def live_user_turns(
             exc_info=True,
         )
         return []
-    live_ids = select_live_event_ids(events, branch_view=branch_view)
     seen_turns: set[int] = set()
     turns: list[tuple[int, int]] = []
-    for event in events:
+    for event in project_live_event_stream(events, branch_view=branch_view):
         if event.get("type") != "user_message":
             continue
         event_id = event.get("event_id")
         turn_index = event.get("turn_index")
         if not isinstance(event_id, int) or not isinstance(turn_index, int):
             continue
-        if event_id not in live_ids or turn_index in seen_turns:
+        if turn_index in seen_turns:
             continue
         seen_turns.add(turn_index)
         turns.append((turn_index, event_id))
@@ -208,7 +209,7 @@ def user_message_content_for_turn(
     target_branch = selected.get(turn_index)
     if target_branch is None:
         return None
-    for event in events:
+    for event in project_live_event_stream(events, branch_view=selected):
         if (
             event.get("type") == "user_message"
             and event.get("turn_index") == turn_index
@@ -227,14 +228,25 @@ def include_settled_tool_results(
     live_event_ids: set[int],
     *,
     covered_event_ids: set[int] | None = None,
+    live_positions: set[int] | None = None,
 ) -> list[dict[str, Any]]:
-    """Attach completed results to retained calls without rewriting settled pairs."""
-    live_events = [
-        event
-        for event in events
-        if not isinstance(event.get("event_id"), int)
-        or event["event_id"] in live_event_ids
-    ]
+    """Attach completed results to retained calls without rewriting settled pairs.
+
+    Position-aware Replay callers supply live_positions so mirrored events
+    with reused logical IDs cannot borrow each other's tool-call ownership.
+    The ID-set fallback preserves the historical low-level API contract.
+    """
+    if live_positions is None:
+        live_events = [
+            event
+            for event in events
+            if not isinstance(event.get("event_id"), int)
+            or event["event_id"] in live_event_ids
+        ]
+    else:
+        live_events = [
+            event for index, event in enumerate(events) if index in live_positions
+        ]
     identities = {id(event): _tool_identity(event) for event in live_events}
     live_call_turns: dict[str, Any] = {}
     live_call_provider_ids: dict[str, Any] = {}
@@ -253,11 +265,16 @@ def include_settled_tool_results(
         if event.get("type") == "tool_call" and (identity := _tool_identity(event)):
             all_call_counts[identity] = all_call_counts.get(identity, 0) + 1
     late_results: dict[str, dict[str, Any]] = {}
-    for event in events:
+    for position, event in enumerate(events):
         if event.get("type") != "tool_result":
             continue
         identity = _tool_identity(event)
         eid = event.get("event_id")
+        physically_live = (
+            position in live_positions
+            if live_positions is not None
+            else isinstance(eid, int) and eid in live_event_ids
+        )
         if eid in (covered_event_ids or ()):
             continue
         if (
@@ -278,8 +295,7 @@ def include_settled_tool_results(
         elif (
             identity
             and identity in live_call_turns
-            and isinstance(eid, int)
-            and eid in live_event_ids
+            and physically_live
             and (
                 event.get("tool_call_id") is None
                 or event.get("tool_call_id") == live_call_provider_ids.get(identity)
@@ -487,7 +503,10 @@ def replay_with_settled_tools(
         events, branch_view, parent_paths=parent_paths
     )
     replay_events = include_settled_tool_results(
-        events, live_event_ids, covered_event_ids=covered_ids
+        events,
+        live_event_ids,
+        covered_event_ids=covered_ids,
+        live_positions=select_live_event_positions(events, branch_view=branch_view),
     )
     if resumable:
         replay_events = normalize_resumable_events(
@@ -520,7 +539,10 @@ def snapshot_needs_settled_tool_replay(
         events, branch_view, parent_paths=parent_paths
     )
     projected = include_settled_tool_results(
-        events, live_ids, covered_event_ids=covered_ids
+        events,
+        live_ids,
+        covered_event_ids=covered_ids,
+        live_positions=select_live_event_positions(events, branch_view=branch_view),
     )
     needed: dict[str, set[str]] = {}
     provider_ids: dict[str, str] = {}
@@ -609,7 +631,10 @@ def reload_conversation_under_branch_view(
         live_event_ids = select_live_event_ids(events, branch_view=branch_view)
         covered_ids = compact_covered_event_ids(events, branch_view)
         replay_events = include_settled_tool_results(
-            events, live_event_ids, covered_event_ids=covered_ids
+            events,
+            live_event_ids,
+            covered_event_ids=covered_ids,
+            live_positions=select_live_event_positions(events, branch_view=branch_view),
         )
         messages = replay(
             normalize_tool_call_events(replay_events, covered_event_ids=covered_ids),

@@ -610,3 +610,49 @@ def test_already_settled_same_turn_and_unidentified_results_stay_in_order():
     assert actual == events
     assert all(left is right for left, right in zip(actual, events))
     assert history.include_settled_tool_results([], set()) == []
+
+
+def test_settled_tool_result_selection_preserves_mirrored_source_identity():
+    from kohakuterrarium.session.history.replay import (
+        select_live_event_ids,
+        select_live_event_positions,
+    )
+
+    def evt(event_id, kind, turn, branch, ancestry, **payload):
+        return {
+            "event_id": event_id,
+            "type": kind,
+            "turn_index": turn,
+            "branch_id": branch,
+            "parent_branch_path": ancestry,
+            **payload,
+        }
+
+    events = [
+        evt(1, "user_message", 1, 1, [], content="old root"),
+        evt(20, "user_message", 2, 1, [[1, 1]], content="old child"),
+        evt(30, "tool_call", 2, 1, [[1, 1]], call_id="oldjob"),
+        evt(31, "tool_result", 2, 1, [[1, 1]], call_id="oldjob", output="old"),
+        evt(2, "user_message", 1, 2, [], content="new root"),
+        evt(20, "user_message", 2, 1, [[1, 2]], content="new child"),
+        evt(30, "tool_call", 2, 1, [[1, 2]], call_id="newjob"),
+        evt(31, "tool_result", 2, 1, [[1, 2]], call_id="newjob", output="new"),
+    ]
+    selected = {1: 2, 2: 1}
+    ids = select_live_event_ids(events, branch_view=selected)
+    positions = select_live_event_positions(events, branch_view=selected)
+    # Event IDs 20/30/31 collide in the imported mirrors. The ID-only
+    # compatibility API cannot identify the selected physical tool calls.
+    assert {20, 30, 31} <= ids
+    assert positions == {4, 5, 6, 7}
+    projected = history.include_settled_tool_results(
+        events, ids, live_positions=positions
+    )
+    assert [
+        (event["type"], event.get("call_id"), event.get("output"))
+        for event in projected
+        if event["type"] in {"tool_call", "tool_result"}
+    ] == [
+        ("tool_call", "newjob", None),
+        ("tool_result", "newjob", "new"),
+    ]

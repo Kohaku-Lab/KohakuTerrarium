@@ -9,8 +9,14 @@ HTTP and WebSocket adapters to forward.
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    create_embedder,
+    effective_embedding_config,
+)
+from kohakuterrarium.session.memory.embedding_spec import persisted_embedding_config
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.query import _ALL_BRANCH_INDEX_FORMAT
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -56,8 +62,15 @@ def index_status(path: Path) -> dict[str, Any]:
             except (KeyError, Exception):
                 pass
             vec_blocks = int(stats.get("vec_blocks") or 0)
+            manifest = memory._manifest()
+            ready = bool(
+                manifest
+                and manifest.get("format") == _ALL_BRANCH_INDEX_FORMAT
+                and manifest.get("vector") == "ready"
+                and manifest.get("fts") == "ready"
+            )
             return {
-                "indexed": vec_blocks > 0,
+                "indexed": ready and vec_blocks > 0,
                 "embedder": saved_provider,
                 "model": saved_model,
                 "dimensions": stats.get("dimensions"),
@@ -83,8 +96,14 @@ def index_status_quick(path: Path) -> bool:
     try:
         memory = SessionMemory(str(path), embedder=None)
         try:
-            return (
-                memory.has_vectors and (memory.get_stats().get("vec_blocks") or 0) > 0
+            manifest = memory._manifest()
+            return bool(
+                manifest
+                and manifest.get("format") == _ALL_BRANCH_INDEX_FORMAT
+                and manifest.get("vector") == "ready"
+                and manifest.get("fts") == "ready"
+                and memory.has_vectors
+                and (memory.get_stats().get("vec_blocks") or 0) > 0
             )
         finally:
             memory.close()
@@ -166,49 +185,22 @@ def build_index(
         if dimensions:
             embed_config["dimensions"] = dimensions
         embedder = create_embedder(embed_config)
-        memory = SessionMemory(str(path), embedder=embedder)
+        memory = SessionMemory(str(path), embedder=embedder, index_all_branches=True)
         try:
-            # Reset both indexes so a forced build starts from event zero.
-            if force:
-                for agent_name in agents:
-                    try:
-                        memory._set_indexed_count(agent_name, 0)
-                        memory._clear_fts(agent_name)
-                    except Exception as e:  # pragma: no cover - defensive
-                        logger.warning(
-                            "force-rebuild clear failed",
-                            agent=agent_name,
-                            error=str(e),
-                            exc_info=True,
-                        )
-
+            reconciler = SessionIndexReconciler(store, memory)
+            source = reconciler.capture(agents, all_agents=True)
+            total_events_seen = sum(len(source.events[name]) for name in agents)
             indexed_per_agent: dict[str, dict[str, int]] = {}
-            total_events_seen = 0
-            # Count first so indexing progress has a stable denominator.
-            agent_events: dict[str, list[dict]] = {}
-            for agent_name in agents:
-                events = store.get_events(agent_name) or []
-                agent_events[agent_name] = events
-                total_events_seen += len(events)
-            emit(
-                "scan",
-                10,
-                blocks_indexed=0,
-                blocks_total=total_events_seen,
-            )
+            emit("scan", 10, blocks_indexed=0, blocks_total=total_events_seen)
 
             done_events = 0
-            for agent_name in agents:
-                events = agent_events[agent_name]
-                if not events:
-                    indexed_per_agent[agent_name] = {"events": 0, "blocks": 0}
-                    continue
-                blocks_count = memory.index_events(agent_name, events)
-                indexed_per_agent[agent_name] = {
-                    "events": len(events),
-                    "blocks": blocks_count,
-                }
-                done_events += len(events)
+
+            def on_agent(name: str, count: int, blocks: int) -> None:
+                nonlocal done_events
+                if name not in agents:
+                    return  # Retired Agent namespaces still need empty checkpoints.
+                indexed_per_agent[name] = {"events": count, "blocks": blocks}
+                done_events += count
                 percent = (
                     10 + int(80 * done_events / max(1, total_events_seen))
                     if total_events_seen
@@ -217,10 +209,12 @@ def build_index(
                 emit(
                     "embed",
                     percent,
-                    agent=agent_name,
+                    agent=name,
                     blocks_indexed=done_events,
                     blocks_total=total_events_seen,
                 )
+
+            reconciler.build(source, force=force, progress=on_agent)
 
             # Persist configuration only for a non-empty vector index; otherwise
             # status must continue to present the session as needing its first build.
@@ -228,14 +222,11 @@ def build_index(
                 info["blocks"] for info in indexed_per_agent.values()
             )
             if total_blocks_indexed > 0:
-                try:
-                    store.state["embedding_config"] = {
-                        "provider": resolved_provider,
-                        "model": model,
-                        "dimensions": dimensions,
-                    }
-                except Exception as e:  # pragma: no cover - state vault corruption
-                    logger.warning("embedding_config persist failed", error=str(e))
+                # A successful build must not silently publish an unrestorable
+                # model identity if writing its effective spec fails.
+                store.state["embedding_config"] = persisted_embedding_config(
+                    effective_embedding_config(embed_config, embedder)
+                )
 
             stats = memory.get_stats()
             emit(

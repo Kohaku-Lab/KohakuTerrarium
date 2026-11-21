@@ -1752,6 +1752,70 @@ class TestSessionIntegration:
         finally:
             reopened.close()
 
+        # Extend the existing real session workflow across a saved reload:
+        # Search -> Anchor -> Expand -> Append sibling -> Branch Switch.
+        resumed_store = SessionStore(session_path)
+        try:
+            navigator = await resumed_store.run(live_memory_for_store, resumed_store)
+            hits, warning = await navigator.search(
+                "authentication subsystem",
+                names=["seeker"],
+                config=None,
+                create_embedder=lambda _: _HashEmbedder(),
+                mode="fts",
+                selected_branch_view={1: 1},
+                selected_agent="seeker",
+            )
+            assert warning is None
+            original = next(
+                hit for hit in hits if "authentication subsystem" in hit.content
+            )
+            assert original.anchor
+            context_before = await navigator.read_context(
+                original.anchor, before=0, after=2
+            )
+            assert "authentication subsystem" in str(context_before.events)
+
+            await resumed_store.run(
+                resumed_store.append_event,
+                "seeker",
+                "user_input",
+                {"content": "sibling branch needle"},
+                turn_index=1,
+                branch_id=2,
+                parent_branch_path=[],
+            )
+            switched, warning = await navigator.search(
+                "authentication subsystem",
+                names=["seeker"],
+                config=None,
+                create_embedder=lambda _: _HashEmbedder(),
+                mode="fts",
+                selected_branch_view={1: 2},
+                selected_agent="seeker",
+            )
+            assert warning is None
+            assert all("authentication subsystem" not in h.content for h in switched)
+            sibling, warning = await navigator.search(
+                "sibling branch needle",
+                names=["seeker"],
+                config=None,
+                create_embedder=lambda _: _HashEmbedder(),
+                mode="fts",
+                selected_branch_view={1: 2},
+                selected_agent="seeker",
+            )
+            assert warning is None and any(
+                h.content == "sibling branch needle" for h in sibling
+            )
+            context_after = await navigator.read_context(
+                original.anchor, before=0, after=3
+            )
+            assert "authentication subsystem" in str(context_after.events)
+            assert "sibling branch needle" not in str(context_after.events)
+        finally:
+            resumed_store.close(update_status=False)
+
     async def test_fork_at_event_copies_lineage(
         self, patched_llm, tmp_path, monkeypatch
     ):

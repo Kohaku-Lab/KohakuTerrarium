@@ -67,7 +67,27 @@ kt embedding swe.kohakutr \
 
 `--dimensions` 是 Matryoshka truncation：如果模型支持，可用它在执行时直接缩小向量维度。
 
-增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
+增量建立：通常再次执行 `kt embedding` 时，只处理新增事件。
+当会话的记忆索引格式或 Embedding 模型发生变化时，整个 Session 会开启新的索引代际：
+旧 FTS 和向量记录会先失效，不能继续参与检索。FTS 可在不加载 Embedding 模型时重建；
+Semantic/Hybrid 检索则需要所有已索引 Agent 的向量完成重建。
+中断或失败的重建会保持不可用，待安全重试，不会误用旧版本的向量。
+
+Terrarium Session 可以包含多个 Creature 的事件，但共享同一个 SessionStore 的
+Creature 必须使用相同的 Embedding 配置。配置冲突会在 Creature 启动时报错，
+不会静默覆盖其他 Creature 的模型。需要切换 Session 模型时，应明确重建向量索引，
+并同步调整各 Creature 的配置。
+
+KT 比较的是**声明的向量空间配置**（Provider、模型、Endpoint、维度以及 KT 实际支持并传给
+Embedding 实现的相关参数），并不验证远端服务是否在相同模型名称下更换权重或路由；
+这类变化由服务提供方或用户负责，必要时应显式重建索引。API Key 和环境变量名
+不属于向量索引身份，轮换凭据无需重新计算向量。
+
+SessionStore 的 embedding_config 记录不再保存明文 API Key。离线 CLI / Studio 检索从当前环境变量
+解析认证信息；持久化的环境变量名仅是非敏感的查找提示。旧版本保存在 SessionStore
+中的 API Key 不会被再次用于认证；无法获取当前有效凭据时，应明确报告认证问题，
+或者使用不需要 Embedding 的 FTS 模式。
+
 
 ## 从 CLI 搜索
 
@@ -106,6 +126,8 @@ memory:
 
 当 LLM 调用 `search_memory` 时，工具会对 *目前* 会话的索引执行搜索。这是 seamless-memory 的基本原语：agent 不需要额外搭 RAG 架构，就能查出自己（或队友）在前几轮说过什么。
 
+记忆索引会保留**所有分支**的可检索内容，但普通搜索只返回各 Agent 当前选定的祖先链（未显式选择时使用最新兼容分支）。切换分支无需重新计算旧分支的 embedding。检索先按祖先链过滤，再截取 Top-K；当底层 Vault 无法在有界候选预算内证明结果完整时，工具会明确报错，而不会误报“没有结果”。
+
 工具参数（形状；实际语法取决于你的 `tool_format`，下面示范默认 bracket 格式）：
 
 ```
@@ -116,6 +138,25 @@ memory:
 @@agent=swe
 [search_memory/]
 ```
+
+### 根据搜索命中展开上下文
+
+Creature 的搜索结果会为每条命中返回一个不透明的 `anchor`。无需猜测下一组关键词，可以直接读取命中事件前后的时间线：
+
+```text
+[/search_memory]
+@@anchor=<复制上一条搜索结果中的 anchor>
+@@before=4
+@@after=6
+[search_memory/]
+```
+
+返回内容按事件时间排序，包括用户输入、工具调用与结果等相关事件。每条上下文事件也带有可继续导航的 Anchor，`has_before` / `has_after` 表示窗口两端是否仍有可读历史。`before` / `after` 各为 0～10（默认 3），单事件预览和扫描量也有限制。Anchor 固定其创建时的祖先链，后续切换分支不会把不同分支的事件混在一起。
+
+长工具输出优先展示命中词附近的片段，而非只截取开头。对被截断的事件，可以根据 content_slice / next_offset 使用 search_memory(anchor=..., offset=..., before=0, after=0) 在事件内部继续分页读取。
+
+Anchor 仅在当前附加的 SessionStore 生命周期内有效。普通追加和保留源事件的压缩不会使其失效；重启、Anchor 被淘汰或源记录变化会返回明确错误。上下文读取不加载 embedding 模型。
+
 
 如果你要对 *外部* 数据源做 RAG，请自己做一个 custom tool，或做一个会调用向量数据库的 [插件指南](plugins.md)。
 

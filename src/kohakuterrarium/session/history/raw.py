@@ -5,6 +5,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
+from kohakuterrarium.session.history.replay import select_live_event_positions
+
 BranchView: TypeAlias = Mapping[int | str, int | str]
 
 
@@ -171,18 +173,18 @@ def select_raw_history_prefix(
             )
     selected.update(required)
 
-    prefix: list[dict[str, Any]] = []
-    for event in raw[:position]:
+    original_prefix = raw[:position]
+    for event in original_prefix:
         turn, branch = _coordinates(event)
         if (turn is None) != (branch is None):
             raise MissingRawHistoryError(
                 f"raw event_id {event['event_id']} has incomplete turn/branch metadata"
             )
-        if turn is not None:
-            selected_branch = selected.get(turn)
-            if selected_branch is not None and selected_branch != branch:
-                continue
-        prefix.append(event)
+    # Validate the complete raw prefix *before* filtering. Then select by
+    # physical position plus ancestry, not just matching turn/branch pairs:
+    # imported mirrors can reuse both under different parent paths.
+    visible = select_live_event_positions(original_prefix, branch_view=selected)
+    prefix = [event for index, event in enumerate(original_prefix) if index in visible]
 
     return RawHistoryPrefix(
         events=prefix,

@@ -135,7 +135,7 @@ class TestOwnedStoreCleanupOnFailure:
         capture = _CaptureMemory()
         monkeypatch.setattr(mem_mod, "SessionMemory", capture)
 
-        def boom(self, query, mode, k, agent):
+        def boom(self, query, mode, k, agent, branch_views=None):
             raise RuntimeError("synthetic search failure")
 
         monkeypatch.setattr(SessionMemory, "search", boom)

@@ -67,7 +67,32 @@ kt embedding swe.kohakutr \
 
 `--dimensions` is Matryoshka truncation; use it to shrink vectors on the fly when the model supports it.
 
-Incremental: running `kt embedding` again only indexes new events.
+Incremental: running `kt embedding` again normally indexes only new events.
+When the session's memory index format or embedding model changes, a session-wide
+index epoch replaces the previous index. Old FTS and vector rows become
+unqueryable before rebuilding starts. FTS can be rebuilt without loading an
+embedding model; semantic/hybrid searches require the vector rebuild to finish
+for all indexed agents. A failed or interrupted rebuild remains unavailable
+until safely retried; it never serves stale vectors from an earlier version.
+
+A Terrarium session can contain events from multiple Creatures, but all
+Creatures sharing that SessionStore must use the same embedding configuration.
+A conflicting Creature configuration is rejected on startup instead of
+silently changing another Creature's model. To change the session model,
+explicitly rebuild the embedding index and align the Creatures' configurations.
+
+KT compares the **declared** embedding space (provider, model, endpoint,
+dimensions and supported vector-affecting options). This does not prove that a
+remote provider keeps the same weights or account routing behind a model name;
+the provider/user is responsible for such changes and for explicitly
+rebuilding the index. API credentials and the environment-variable name are
+not part of the vector identity: rotating them does not require re-embedding.
+The dedicated SessionStore embedding_config record no longer persists
+inline API keys. Saved-session CLI and Studio searches resolve credentials
+from the current environment (an
+optional saved key-environment name is only a lookup hint); an expired key
+saved by an older version is not used. Provide current credentials for
+semantic search, or use FTS without an embedder.
 
 ## Search from the CLI
 
@@ -106,6 +131,8 @@ memory:
 
 When the LLM calls `search_memory`, the tool runs over the *current* session's index. This is the seamless-memory primitive: agents can look up what they (or their teammates) said in earlier rounds without explicit RAG scaffolding.
 
+The index retains searchable blocks from **all branches**. Normal searches use each agent's selected lineage (or the latest compatible lineage when no explicit selection exists). Switching branches changes retrieval scope without re-embedding previous branches. Ranked candidates are filtered before top-k truncation. When the vault cannot prove a complete filtered result within its bounded candidate budget, search reports an explicit error instead of a misleading empty result.
+
 Live searches keep model loading and encoding off the session's storage thread,
 so a stalled embedder does not prevent history reads, event persistence, or graph
 shutdown. `fts` never loads or calls an embedder. `auto` and `hybrid` fall back to
@@ -131,6 +158,25 @@ Tool args (shape; concrete syntax depends on your `tool_format`; default bracket
 @@agent=swe
 [search_memory/]
 ```
+
+### Explore context around a search hit
+
+A successful Creature-side search returns an opaque `anchor` for each hit. Use it to inspect the nearby event timeline without guessing another search query:
+
+```text
+[/search_memory]
+@@anchor=<paste anchor from the search result>
+@@before=4
+@@after=6
+[search_memory/]
+```
+
+The tool returns chronological user messages, tool calls/results and other relevant events, each with another anchor for continued navigation. `has_before` and `has_after` indicate whether more matching-lineage context exists beyond the window. Set `before` and `after` independently from 0 to 10 (default 3); individual event previews and the scan are also bounded. The anchor captures the branch lineage selected when it was created, so later branch switches do not mix histories.
+
+Long tool outputs show the matching excerpt rather than only their beginning. For a truncated event, use the displayed content_slice / next_offset with search_memory(anchor=..., offset=..., before=0, after=0) to page through its text.
+
+Anchors are valid only for the current attached SessionStore lifetime. They survive ordinary appends and compaction when the source is unchanged, but expire on restart, eviction or source-record changes. Invalid or expired anchors return explicit errors. Anchor reads do not load an embedding model.
+
 
 For RAG over *external* sources, build a custom tool or a [plugin](plugins.md) that calls your vector store.
 

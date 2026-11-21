@@ -2,11 +2,22 @@
 
 import asyncio
 import threading
+from contextlib import asynccontextmanager
 from concurrent.futures import Future
 from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
+from kohakuterrarium.session.memory.context import (
+    MemoryContextError,
+    MemoryContextNavigator,
+)
+from kohakuterrarium.session.memory.visibility import (
+    AgentBranchVisibility,
+    MemoryCandidateLimitError,
+    MemoryLineageUnavailableError,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -58,27 +69,58 @@ class LiveSessionMemory:
 
     def __init__(self, store):
         self._store = store
-        self._memory = SessionMemory(store.path)
+        self._memory = SessionMemory(store.path, index_all_branches=True)
+        self._reconciler = SessionIndexReconciler(store, self._memory)
+        self._context = MemoryContextNavigator(store)
         self._worker = _EmbeddingWorker()
         self._semantic_lock = asyncio.Lock()
         self._embedder: BaseEmbedder | None = None
         self._closed = False
         store.register_companion_closer(self.close)
 
+    @asynccontextmanager
+    async def _semantic_operation(self):
+        """Serialize live model work and abort owned builds on any exit error."""
+        async with self._semantic_lock:
+            try:
+                yield
+            except BaseException:
+                try:
+                    await self._store.run(self._memory._abort_vector_build)
+                except Exception:
+                    logger.exception("Failed to abort memory vector build")
+                raise
+
     def close(self) -> None:
         if not self._closed:
             self._closed = True
             self._worker.close()
+            self._context.close()
             self._memory.close()
 
-    def _index_keywords(self, names: list[str]) -> None:
-        for name in names:
-            self._memory._index_keywords(name, self._store.get_events(name))
+    async def _with_anchors(self, results, views, warning, query):
+        if self._closed:
+            raise RuntimeError("Session memory is closed")
+        if results:
+            results = await self._store.run(
+                self._context.register_results, results, views, query
+            )
+        return results, warning
 
-    def _vector_batch(self, name: str):
-        events = self._store.get_events(name)
-        start, blocks = self._memory._vector_batch(name, events)
-        return start, len(events), blocks
+    async def read_context(
+        self,
+        anchor: str,
+        *,
+        before: int = 3,
+        after: int = 3,
+        offset: int | None = None,
+    ):
+        """Read a verified history window without loading an embedder."""
+        if self._closed:
+            raise RuntimeError("Session memory is closed")
+        return await self._store.run(
+            self._context.expand, anchor, before, after, offset
+        )
 
     async def search(
         self,
@@ -91,14 +133,24 @@ class LiveSessionMemory:
         k: int = 10,
         agent: str | None = None,
         semantic_fallback: bool = False,
+        selected_branch_view: dict[int, int] | None = None,
+        selected_agent: str | None = None,
     ):
         if mode not in ("auto", "fts", "hybrid", "semantic"):
             raise ValueError(f"Unknown search mode {mode!r}")
-        await self._store.run(self._index_keywords, names)
+        overrides = (
+            {selected_agent: selected_branch_view}
+            if selected_branch_view is not None and selected_agent in names
+            else None
+        )
+        source, views = await self._store.run(
+            self._reconciler.prepare_keywords, names, overrides
+        )
+        scope = AgentBranchVisibility(views)
         warning = None
         if mode != "fts":
             try:
-                async with self._semantic_lock:
+                async with self._semantic_operation():
                     if self._embedder is None:
                         embedder = await self._worker.run(create_embedder, config)
                         await self._store.run(self._memory._set_embedder, embedder)
@@ -106,14 +158,28 @@ class LiveSessionMemory:
                     if isinstance(self._embedder, NullEmbedder):
                         if mode != "semantic":
                             results = await self._store.run(
-                                self._memory._search_fts, query, k, agent
+                                self._memory._search_fts,
+                                query,
+                                k,
+                                agent,
+                                scope=scope,
                             )
-                            return results, None
+                            return await self._with_anchors(results, views, None, query)
                         raise ValueError("semantic search needs an embedding model")
-                    for name in names:
-                        start, count, blocks = await self._store.run(
-                            self._vector_batch, name
+                    source, vector_names = await self._store.run(
+                        self._reconciler.prepare_vectors, source, names
+                    )
+                    # Source capture can advance during lazy model creation;
+                    # visibility must correspond to the vector batch snapshot.
+                    views = await self._store.run(
+                        self._reconciler.selected_views, source, names, overrides
+                    )
+                    scope = AgentBranchVisibility(views)
+                    for name in vector_names:
+                        start, blocks = await self._store.run(
+                            self._memory._vector_batch, name, source.events[name]
                         )
+                        count = len(source.events[name])
                         vectors = (
                             await self._worker.run(
                                 self._embedder.encode, [b.content for b in blocks]
@@ -135,23 +201,38 @@ class LiveSessionMemory:
                         vector,
                         k if mode == "semantic" else k * 2,
                         agent,
+                        scope=scope,
                     )
                     if mode == "semantic":
-                        return results, None
+                        return await self._with_anchors(results, views, None, query)
                     keywords = await self._store.run(
-                        self._memory._search_fts, query, k * 2, agent
+                        self._memory._search_fts, query, k * 2, agent, scope=scope
                     )
-                    return self._memory._fuse_results(keywords, results, k), None
+                    fused = self._memory._fuse_results(keywords, results, k)
+                    return await self._with_anchors(fused, views, None, query)
             except Exception as exc:
-                if self._closed or (mode == "semantic" and not semantic_fallback):
+                if (
+                    self._closed
+                    or isinstance(
+                        exc,
+                        (
+                            MemoryCandidateLimitError,
+                            MemoryLineageUnavailableError,
+                            MemoryContextError,
+                        ),
+                    )
+                    or (mode == "semantic" and not semantic_fallback)
+                ):
                     raise
                 warning = f"Embedding unavailable; using keyword search: {str(exc) or type(exc).__name__}"
                 logger.warning(
                     "Memory search using FTS fallback",
                     error=str(exc) or type(exc).__name__,
                 )
-        results = await self._store.run(self._memory._search_fts, query, k, agent)
-        return results, warning
+        results = await self._store.run(
+            self._memory._search_fts, query, k, agent, scope=scope
+        )
+        return await self._with_anchors(results, views, warning, query)
 
 
 def live_memory_for_store(store) -> LiveSessionMemory:

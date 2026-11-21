@@ -366,3 +366,41 @@ class TestAPIEmbedderEncode:
         vecs = emb.encode(["x"])
         assert vecs.shape == (1, 4)
         assert emb.dimensions == 4
+
+
+def test_api_credentials_do_not_change_vector_identity():
+    from kohakuterrarium.session.memory.embedding import embedder_identity
+
+    one = APIEmbedder(
+        api_key="first-key",
+        model="same-model",
+        base_url="https://embedding.example/v1",
+        dimensions=64,
+    )
+    two = APIEmbedder(
+        api_key="rotated-key",
+        model="same-model",
+        base_url="https://embedding.example/v1",
+        dimensions=64,
+    )
+    changed = APIEmbedder(
+        api_key="rotated-key",
+        model="different-model",
+        base_url="https://embedding.example/v1",
+        dimensions=64,
+    )
+    try:
+        assert embedder_identity(one) == embedder_identity(two)
+        assert embedder_identity(one) != embedder_identity(changed)
+    finally:
+        one._client.close()
+        two._client.close()
+        changed._client.close()
+
+
+def test_api_provider_missing_key_has_typed_authentication_error(monkeypatch):
+    from kohakuterrarium.session.memory.embedding import EmbeddingAuthenticationError
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(EmbeddingAuthenticationError, match="api_key"):
+        create_embedder({"provider": "api", "model": "same"})

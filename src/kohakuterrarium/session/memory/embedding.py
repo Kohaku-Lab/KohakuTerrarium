@@ -1,11 +1,24 @@
 """Create local or API embedding providers for session memory search."""
 
+import hashlib
+import json
 import os
 from abc import ABC, abstractmethod
 from typing import Any
 
 import httpx
 import numpy as np
+
+from kohakuterrarium.session.memory.embedding_spec import (
+    DEFAULT_API_EMBEDDING_URL,
+    DEFAULT_M2V_MODEL as DEFAULT_M2V_MODEL,
+    DEFAULT_ST_MODEL as DEFAULT_ST_MODEL,
+    MODEL2VEC_PRESETS,
+    ST_PRESETS,
+    _resolve_preset as _resolve_preset,
+    canonical_embedding_spec,
+    persisted_embedding_config,
+)
 
 from kohakuterrarium.utils.logging import get_logger
 
@@ -27,6 +40,33 @@ class BaseEmbedder(ABC):
         return self.encode([text])[0]
 
 
+def embedder_identity(embedder: BaseEmbedder) -> str:
+    """Stable model identity for vector index checkpoints.
+
+    Include the concrete class and its initialized scalar configuration, not
+    mutable runtime buffers or HTTP clients. Custom embedders with opaque
+    configuration may supply an explicit index_identity string.
+    """
+    explicit = getattr(embedder, "index_identity", None)
+    config = (
+        {"identity": explicit}
+        if isinstance(explicit, str) and explicit
+        else {
+            key: value
+            for key, value in vars(embedder).items()
+            if type(value) in (str, int, float, bool, type(None))
+        }
+    )
+    descriptor = {
+        "class": f"{type(embedder).__module__}.{type(embedder).__qualname__}",
+        "dimensions": embedder.dimensions,
+        "config": config,
+    }
+    return hashlib.sha256(
+        json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 class Model2VecEmbedder(BaseEmbedder):
     """Provide lightweight CPU-only static embeddings through Model2Vec."""
 
@@ -40,6 +80,7 @@ class Model2VecEmbedder(BaseEmbedder):
             )
 
         logger.info("Loading Model2Vec", model=model_name)
+        self._model_name = model_name
         self._model = StaticModel.from_pretrained(model_name)
         self.dimensions = self._model.dim
         logger.info("Model2Vec loaded", model=model_name, dimensions=self.dimensions)
@@ -66,6 +107,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             )
 
         logger.info("Loading SentenceTransformer", model=model_name)
+        self._model_name = model_name
         # Retrieval-capable Jina models require a default task; others ignore it.
         self._model = SentenceTransformer(
             model_name,
@@ -103,7 +145,7 @@ class APIEmbedder(BaseEmbedder):
         self,
         api_key: str,
         model: str = "text-embedding-3-small",
-        base_url: str = "https://api.openai.com/v1",
+        base_url: str = DEFAULT_API_EMBEDDING_URL,
         dimensions: int | None = None,
     ):
         self._client = httpx.Client(
@@ -112,6 +154,7 @@ class APIEmbedder(BaseEmbedder):
             timeout=30.0,
         )
         self._model = model
+        self._base_url = base_url
         self.dimensions = dimensions or 1536
         self._request_dims = dimensions
 
@@ -137,6 +180,10 @@ class APIEmbedder(BaseEmbedder):
         return result
 
 
+class EmbeddingAuthenticationError(ValueError):
+    """A configured API embedding service has no current credentials."""
+
+
 class NullEmbedder(BaseEmbedder):
     """Represent sessions where only keyword search is available."""
 
@@ -147,61 +194,6 @@ class NullEmbedder(BaseEmbedder):
             "No embedding model configured. "
             "Use keyword search (mode='fts') or configure an embedding provider."
         )
-
-
-MODEL2VEC_PRESETS: dict[str, dict[str, Any]] = {
-    # Compact static models trade retrieval quality for size and latency.
-    "tiny": {"model": "minishlab/potion-base-2M"},  # 64 dimensions, about 2 MB
-    "base": {"model": "minishlab/potion-base-8M"},  # 256 dimensions, about 8 MB
-    "retrieval": {"model": "minishlab/potion-retrieval-32M"},  # 512 dimensions
-    # Matryoshka dimensions support smaller indexes without changing models.
-    "best": {
-        "model": "sentence-transformers/static-retrieval-mrl-en-v1",
-    },
-    "multilingual": {
-        "model": "minishlab/potion-multilingual-128M",  # 101 languages
-    },
-    "multilingual-best": {
-        "model": "sentence-transformers/static-similarity-mrl-multilingual-v1",
-    },  # 51 languages
-    "science": {"model": "minishlab/potion-science-32M"},  # arXiv and PubMed
-}
-
-ST_PRESETS: dict[str, dict[str, Any]] = {
-    "tiny": {
-        "model": "ibm-granite/granite-embedding-30m-english",  # 512-token context
-    },
-    "small": {
-        "model": "ibm-granite/granite-embedding-small-english-r2",  # 8K context
-    },
-    "base": {
-        "model": "Alibaba-NLP/gte-modernbert-base",  # 8K context
-    },
-    "nomic": {
-        "model": "nomic-ai/nomic-embed-text-v1.5",  # 8K Matryoshka model
-    },
-    "gemma": {
-        "model": "google/embeddinggemma-300m",  # multilingual, 2K context
-    },
-    "multilingual": {
-        "model": "Alibaba-NLP/gte-multilingual-base",  # 70+ languages, 8K context
-    },
-}
-
-DEFAULT_M2V_MODEL = "sentence-transformers/static-similarity-mrl-multilingual-v1"
-DEFAULT_ST_MODEL = "Alibaba-NLP/gte-modernbert-base"
-
-
-def _resolve_preset(
-    model: str, presets: dict[str, dict[str, Any]]
-) -> dict[str, Any] | None:
-    """Resolve an ``@preset`` reference, returning ``None`` when unknown."""
-    if model.startswith("@"):
-        name = model[1:]
-        if name in presets:
-            return presets[name]
-        logger.warning("Unknown embedding preset", preset=name)
-    return None
 
 
 def _detect_best_provider() -> str:
@@ -229,6 +221,82 @@ def list_embedding_presets() -> dict[str, dict[str, dict[str, Any]]]:
     return {"model2vec": MODEL2VEC_PRESETS, "sentence-transformer": ST_PRESETS}
 
 
+def effective_embedding_config(
+    config: dict[str, Any] | None,
+    embedder: BaseEmbedder | None = None,
+) -> dict[str, Any]:
+    """Persist concrete model identity while sharing pure spec normalization."""
+    if not config:
+        return {}
+    provider = config.get("provider", "auto")
+    if provider == "auto":
+        if isinstance(embedder, Model2VecEmbedder):
+            provider = "model2vec"
+        elif isinstance(embedder, SentenceTransformerEmbedder):
+            provider = "sentence-transformer"
+        elif isinstance(embedder, APIEmbedder):
+            provider = "api"
+        elif isinstance(embedder, NullEmbedder):
+            provider = "none"
+        else:
+            provider = _detect_best_provider()
+    spec = canonical_embedding_spec(
+        config,
+        selected_provider=provider,
+        selected_model=(
+            embedder._model
+            if isinstance(embedder, APIEmbedder)
+            else getattr(embedder, "_model_name", None)
+        ),
+    )
+    if isinstance(embedder, APIEmbedder):
+        spec["base_url"] = embedder._base_url
+        if embedder._request_dims is not None:
+            spec["dimensions"] = embedder._request_dims
+    return spec
+
+
+def resolve_session_embedding_config(store: Any, agent: Any = None) -> dict[str, Any]:
+    """Use saved model declarations, but current runtime authentication.
+
+    Legacy SessionStores may contain an inline key. Never recover it as
+    authentication: live sessions use a current Creature claim / config,
+    while offline sessions resolve non-secret environment-variable hints.
+    """
+    saved = None
+    try:
+        value = store.state.get("embedding_config")
+        if isinstance(value, dict):
+            saved = persisted_embedding_config(value)
+    except (KeyError, Exception):
+        pass
+
+    active = None
+    if agent is not None:
+        memory = getattr(getattr(agent, "config", None), "memory", None)
+        if isinstance(memory, dict):
+            candidate = memory.get("embedding")
+            if isinstance(candidate, dict):
+                active = candidate
+
+    base = dict(saved or active or {"provider": "auto"})
+    runtime_auth = getattr(store, "_embedding_runtime_auth", None)
+    auth_source = (
+        active
+        if active and any(active.get(k) for k in ("api_key", "api_key_env"))
+        else runtime_auth
+    )
+    if isinstance(auth_source, dict):
+        # An explicit current key supersedes a potentially stale saved env
+        # locator; the locator itself is safe to keep only as a fallback.
+        if auth_source.get("api_key"):
+            base.pop("api_key_env", None)
+            base["api_key"] = auth_source["api_key"]
+        elif auth_source.get("api_key_env"):
+            base["api_key_env"] = auth_source["api_key_env"]
+    return base
+
+
 def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
     """Create an embedder from provider, model, dimension, and device settings.
 
@@ -238,30 +306,18 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
     """
     if not config:
         return NullEmbedder()
-
-    provider = config.get("provider", "auto")
-
-    if provider == "auto":
-        provider = _detect_best_provider()
+    config = effective_embedding_config(config)
+    provider = config["provider"]
 
     match provider:
         case "model2vec":
-            model = config.get("model", DEFAULT_M2V_MODEL)
-            preset = _resolve_preset(model, MODEL2VEC_PRESETS)
-            if preset:
-                model = preset["model"]
-            return Model2VecEmbedder(model_name=model)
+            return Model2VecEmbedder(model_name=config["model"])
 
         case "sentence-transformer":
-            model = config.get("model", DEFAULT_ST_MODEL)
-            dims = config.get("dimensions")
-            device = config.get("device", "cpu")
-            preset = _resolve_preset(model, ST_PRESETS)
-            if preset:
-                model = preset["model"]
-                dims = dims or preset.get("dimensions")
             return SentenceTransformerEmbedder(
-                model_name=model, dimensions=dims, device=device
+                model_name=config["model"],
+                dimensions=config.get("dimensions"),
+                device=config.get("device", "cpu"),
             )
 
         case "api":
@@ -270,11 +326,13 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
                 api_key_env = config.get("api_key_env", "OPENAI_API_KEY")
                 api_key = os.environ.get(api_key_env, "")
             if not api_key:
-                raise ValueError("API embedding requires api_key or api_key_env")
+                raise EmbeddingAuthenticationError(
+                    "API embedding authentication requires api_key or api_key_env"
+                )
             return APIEmbedder(
                 api_key=api_key,
                 model=config.get("model", "text-embedding-3-small"),
-                base_url=config.get("base_url", "https://api.openai.com/v1"),
+                base_url=config.get("base_url", DEFAULT_API_EMBEDDING_URL),
                 dimensions=config.get("dimensions"),
             )
 

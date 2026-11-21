@@ -23,7 +23,7 @@ from kohakuterrarium.builtins.outputs.stdout import _write_safe
 from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -227,12 +227,9 @@ class SessionReplay:
 
         events = dedupe_adjacent_duplicate_events(events)
         # Resume displays only the live branch after regeneration or edit-and-rerun.
-        live_ids = select_live_event_ids(events)
+        events = project_live_event_stream(events)
 
         for event in events:
-            eid = event.get("event_id")
-            if isinstance(eid, int) and eid not in live_ids:
-                continue
             self._handle_event(event)
 
         self._flush_text_buffer()

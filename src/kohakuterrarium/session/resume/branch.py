@@ -17,7 +17,7 @@ from kohakuterrarium.core.conversation.snapshot import prepare_snapshot
 from kohakuterrarium.session.history.replay import (
     index_parent_paths,
     resolve_selected_branches,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 from kohakuterrarium.session.store.records.snapshot import load_records
 
@@ -93,14 +93,14 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
     summarizes the prefix and keeps only the live zone), so they map to the
     LAST ``user_message`` events, not the first ones.
     """
-    live_ids = set(select_live_event_ids(events))
+    # Backfill chooses the visible *physical* user event; mirrored imports
+    # can reuse event_id and (turn, branch) under different ancestry.
+    visible_events = project_live_event_stream(events)
     meta_by_pos: list[dict] = []
     pos_by_key: dict[tuple[int, int], int] = {}
     type_by_key: dict[tuple[int, int], str] = {}
-    for evt in events:
+    for evt in visible_events:
         if evt.get("type") not in ("user_message", "user_input"):
-            continue
-        if isinstance(evt.get("event_id"), int) and evt["event_id"] not in live_ids:
             continue
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")

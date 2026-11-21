@@ -7,6 +7,8 @@ from types import SimpleNamespace
 import pytest
 
 from kohakuterrarium.session.memory.embedding import NullEmbedder
+from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.readonly.reader import SessionReader
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory import build as build_mod
 from kohakuterrarium.studio.sessions.memory import search as mem_mod
@@ -122,10 +124,16 @@ class TestBuildEmbeddings:
             def get_stats(self):
                 return {"fts": 1}
 
-            def _set_indexed_count(self, *a, **kw):
+            def _known_agents(self):
+                return set()
+
+            def _manifest(self):
+                return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
                 pass
 
-            def _clear_fts(self, *a, **kw):
+            def force_rebuild(self, agents):
                 pass
 
         monkeypatch.setattr(build_mod, "SessionMemory", _FakeMemory)
@@ -166,10 +174,16 @@ class TestBuildEmbeddings:
             def get_stats(self):
                 return {}
 
-            def _set_indexed_count(self, *a, **kw):
+            def _known_agents(self):
+                return set()
+
+            def _manifest(self):
+                return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
                 pass
 
-            def _clear_fts(self, *a, **kw):
+            def force_rebuild(self, agents):
                 pass
 
         monkeypatch.setattr(build_mod, "SessionMemory", _FakeMemory)
@@ -181,7 +195,71 @@ class TestBuildEmbeddings:
 # ── search_session_memory ────────────────────────────────────
 
 
+@pytest.mark.asyncio
+async def test_saved_expired_api_credentials_return_authentication_error(
+    tmp_path, monkeypatch
+):
+    from kohakuterrarium.errors import SessionError
+
+    path = tmp_path / "old-api-auth.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.state["embedding_config"] = {
+            "provider": "api",
+            "model": "embed-model",
+            "api_key": "expired-token",
+        }
+    finally:
+        store.close(update_status=False)
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(SessionError, match="authentication.*api_key") as caught:
+        await mem_mod.search_session_memory(path, q="needle", mode="semantic")
+    assert "expired-token" not in str(caught.value)
+
+
 class TestSearchSessionMemory:
+    async def test_saved_search_obeys_persisted_branch_selection(self, tmp_path):
+        path = tmp_path / "branch-search.kohakutr"
+        store = SessionStore(path)
+        try:
+            store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+            for branch, content in ((1, "needle-first"), (2, "needle-second")):
+                store.append_event(
+                    "alice",
+                    "user_input",
+                    {"content": content},
+                    turn_index=1,
+                    branch_id=branch,
+                    parent_branch_path=[],
+                )
+            store.state["alice:branch_view"] = {"1": 1}
+            store.flush()
+        finally:
+            store.close(update_status=False)
+
+        first = await mem_mod.search_session_memory(path, q="needle", mode="fts", k=5)
+        assert {item["content"] for item in first["results"]} == {"needle-first"}
+
+        store = SessionStore(path)
+        try:
+            store.state["alice:branch_view"] = {"1": 2}
+            store.flush()
+        finally:
+            store.close(update_status=False)
+
+        second = await mem_mod.search_session_memory(path, q="needle", mode="fts", k=5)
+        assert {item["content"] for item in second["results"]} == {"needle-second"}
+
     async def test_search_runs(self, tmp_path, monkeypatch):
         path = tmp_path / "s.kohakutr"
         store = SessionStore(str(path))
@@ -215,7 +293,16 @@ class TestSearchSessionMemory:
             def index_events(self, *a, **kw):
                 return 0
 
-            def search(self, query, mode, k, agent):
+            def _known_agents(self):
+                return set()
+
+            def _manifest(self):
+                return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
+
+            def search(self, query, mode, k, agent, branch_views=None):
                 return [
                     SearchResult(
                         content="hi",
@@ -320,14 +407,14 @@ class TestSearchSessionMemory:
         finally:
             store.close()
 
-        real_get_events = SessionStore.get_events
+        real_get_events = SessionStore.get_memory_events
         witness = LoopWitness(asyncio.get_running_loop())
 
         def observed_get_events(self, agent, **kwargs):
             witness.observe()
             return real_get_events(self, agent, **kwargs)
 
-        monkeypatch.setattr(SessionStore, "get_events", observed_get_events)
+        monkeypatch.setattr(SessionStore, "get_memory_events", observed_get_events)
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, None)
         )
@@ -349,14 +436,14 @@ class TestSearchSessionMemory:
             live_store.close()
             raise
 
-        real_get_events = live_store.get_events
+        real_get_events = live_store.get_memory_events
         witness = LoopWitness(asyncio.get_running_loop())
 
         def observed_get_events(agent, **kwargs):
             witness.observe()
             return real_get_events(agent, **kwargs)
 
-        live_store.get_events = observed_get_events
+        live_store.get_memory_events = observed_get_events
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, live_store)
         )
@@ -372,7 +459,16 @@ class TestSearchSessionMemory:
             def index_events(self, *a, **kw):
                 return 0
 
-            def search(self, query, mode, k, agent):
+            def _known_agents(self):
+                return set()
+
+            def _manifest(self):
+                return None
+
+            def _enroll_build_agents(self, agents, *, with_vectors=True):
+                pass
+
+            def search(self, query, mode, k, agent, branch_views=None):
                 return [
                     SearchResult(
                         content="needle",
@@ -403,3 +499,84 @@ class TestSearchSessionMemory:
             )
         # The audit defect: the lookup minted an empty .kohakutr.
         assert not ghost.exists()
+
+
+@pytest.mark.asyncio
+async def test_saved_search_with_zero_turn_injected_bookkeeping(tmp_path):
+    path = tmp_path / "zero-turn.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_input_injected",
+            {"content": "before first turn"},
+            turn_index=0,
+            branch_id=0,
+        )
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle selected"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.flush()
+    finally:
+        store.close(update_status=False)
+    result = await mem_mod.search_session_memory(path, q="needle", mode="fts")
+    assert {hit["content"] for hit in result["results"]} == {"needle selected"}
+
+
+@pytest.mark.asyncio
+async def test_studio_and_reader_recover_empty_agent_during_fts_migration(tmp_path):
+    path = tmp_path / "empty-pending.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "empty"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        rows = store.get_memory_events("alice")
+    finally:
+        store.close(update_status=False)
+
+    old = SessionMemory(str(path))
+    try:
+        old.index_events("alice", rows)
+    finally:
+        old.close()
+
+    upgraded = SessionMemory(str(path), index_all_branches=True)
+    try:
+        upgraded.force_rebuild(["alice", "empty"])
+        upgraded._index_keywords("alice", rows)
+        assert upgraded._manifest()["fts_pending"] == ["empty"]
+    finally:
+        upgraded.close()
+
+    result = await mem_mod.search_session_memory(path, q="needle", mode="fts", k=5)
+    assert {hit["content"] for hit in result["results"]} == {"needle"}
+
+    forced = SessionMemory(str(path), index_all_branches=True)
+    try:
+        forced.force_rebuild(["alice", "empty"])
+        assert forced._manifest()["fts_pending"] == ["alice", "empty"]
+    finally:
+        forced.close()
+
+    with SessionReader(path) as reader:
+        hits = reader.search("needle")
+        assert {hit.content for hit in hits} == {"needle"}
+    verified = SessionMemory(str(path), index_all_branches=True)
+    try:
+        assert verified._manifest()["fts"] == "ready"
+        assert not verified._manifest()["fts_pending"]
+    finally:
+        verified.close()

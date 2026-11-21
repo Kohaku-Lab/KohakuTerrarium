@@ -2364,6 +2364,10 @@ class TestSessionStoreUserInputAppend:
             ]
             assert all(event["pending_id"] == "c_primary" for event in user_events)
             assert all(isinstance(event["event_id"], int) for event in user_events)
+            # Modern Agent admission allocates branch identity *before*
+            # persisting either half of the canonical input pair.
+            assert {(e["turn_index"], e["branch_id"]) for e in user_events} == {(1, 1)}
+            assert all(e["parent_branch_path"] == [] for e in user_events)
             resumable_user_events = [
                 event
                 for event in store.get_resumable_events("test_agent")

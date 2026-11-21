@@ -580,8 +580,15 @@ async def test_two_job_mid_turn_fold(tmp_path, monkeypatch, first, cancel_second
 async def test_two_job_mid_turn_fold_detects_missing_projection(tmp_path, monkeypatch):
     original = message_history.include_settled_tool_results
 
-    def without_same_turn_projection(events, live_event_ids, *, covered_event_ids=None):
-        result = original(events, live_event_ids, covered_event_ids=covered_event_ids)
+    def without_same_turn_projection(
+        events, live_event_ids, *, covered_event_ids=None, live_positions=None
+    ):
+        result = original(
+            events,
+            live_event_ids,
+            covered_event_ids=covered_event_ids,
+            live_positions=live_positions,
+        )
         by_id = {event.get("event_id"): event for event in events}
         result_by_source = {
             event.get("_source_event_id"): event

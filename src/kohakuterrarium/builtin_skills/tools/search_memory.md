@@ -1,32 +1,37 @@
 ---
 name: search_memory
-description: 'Search this session''s earlier events by keyword or meaning. Use it to recall details dropped from context. Not for searching files - use grep.'
+description: 'Search earlier session events or inspect nearby history using an anchor. Use it to recover dropped context. Not for searching files - use grep.'
 category: builtin
 tags: [memory, search]
 ---
 
 # search_memory
 
-Searches the recorded event log of the current session.
+Search indexed session history and nearby events.
 
 ## Arguments
 
 | Arg | Type | Req | Description |
 | --- | --- | --- | --- |
-| query | string | yes | Search text |
-| k | integer | no | Maximum results (default 5) |
-| mode | string | no | `auto` (default), `fts`, `semantic`, or `hybrid` |
-| agent | string | no | Filter results by agent name |
+| query | string | search | Keyword or natural-language query |
+| anchor | string | navigate | Opaque token from search/context |
+| before | integer | no | Earlier events, 0–10 (default 3) |
+| after | integer | no | Later events, 0–10 (default 3) |
+| offset | integer | no | Character offset within anchored event |
+| k | integer | no | Search results (default 5) |
+| mode | string | no | `auto`, `fts`, `semantic`, `hybrid` |
+| agent | string | no | Search an agent in this session |
+
+Pass exactly one of `query` or `anchor`.
 
 ## Behavior
 
-- `fts` never initializes or calls an embedding model. `auto` and `hybrid`
-  fall back to keywords when embedding fails or exceeds its wait limit;
-  the result reports the fallback. Explicit `semantic` returns an error.
-- Model work does not block session history, persistence, or shutdown.
-- Only the current session is searched, and only what was recorded before now.
+- Hits include `anchor: ...`; call `search_memory(anchor="...", before=3, after=3)`. Context has anchors and `has_before`/`has_after` flags.
+- Anchors freeze lineage. Changed sources or expired anchors return errors.
+- `fts`/anchor reads do not load embeddings. `auto`/`hybrid` fall back to FTS on embedding errors; `semantic` errors instead.
+- Searches cover this session's selected lineage, not files. Use `grep` for files.
 
 ## Limits
 
-- Compaction summarizes rather than deletes, so older turns stay findable here
-  after they leave your context.
+- Each side has up to 10 events. Long text exposes content_slice and next_offset; use `search_memory(anchor="...", offset=N, before=0, after=0)`.
+- Compaction keeps raw history; valid anchors survive.

@@ -22,22 +22,19 @@ from kohakuterrarium.builtins.tui.widgets import (
 from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
+    project_live_event_stream,
 )
 
 
 def _group_into_turns(events: list[dict]) -> list[dict]:
     """Group events into turns while preserving step order."""
     events = dedupe_adjacent_duplicate_events(events)
-    live_ids = select_live_event_ids(events)
+    events = project_live_event_stream(events)
     turns: list[dict] = []
     current: dict | None = None
 
     for evt in events:
         etype = evt.get("type", "")
-        eid = evt.get("event_id")
-        if isinstance(eid, int) and eid not in live_ids:
-            continue
         if etype == "user_input":
             if current:
                 turns.append(current)

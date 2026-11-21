@@ -199,14 +199,14 @@ class TestEnsureIndexedOffLoop:
             store.init_meta("sess", "agent", "/p", "/w", ["alice"])
             store.append_event("alice", "user_input", {"content": "hi"})
             store.flush()
-            real_get_events = store.get_events
+            real_get_events = store.get_memory_events
             witness = LoopWitness(asyncio.get_running_loop())
 
             def observed_get_events(agent, **kwargs):
                 witness.observe()
                 return real_get_events(agent, **kwargs)
 
-            store.get_events = observed_get_events
+            store.get_memory_events = observed_get_events
 
             agent = type("A", (), {"session_store": store, "config": None})()
             ctx = ToolContext(
