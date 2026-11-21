@@ -26,6 +26,7 @@ class AgentStartupMixin:
     async def start(self) -> None:
         """Start all agent modules."""
         logger.info("Starting agent", agent_name=self.config.name)
+        self._prepare_restart()
 
         # Stash the running loop so cross-thread schedulers (TUI promote)
         # can ``call_soon_threadsafe`` on it without ``get_event_loop()``

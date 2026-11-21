@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.errors import ConversationSealedError
 from kohakuterrarium.llm.message import (
     ContentPart,
     ImagePart,
@@ -68,6 +69,26 @@ class Conversation:
         self.config = config or ConversationConfig()
         self._messages: MessageList = []
         self._metadata = ConversationMetadata()
+        self._sealed = False
+
+    @property
+    def sealed(self) -> bool:
+        """Whether writes are rejected after an incomplete agent shutdown."""
+        return getattr(self, "_sealed", False)
+
+    def seal(self) -> None:
+        """Reject every later mutation until :meth:`unseal`."""
+        self._sealed = True
+
+    def unseal(self) -> None:
+        """Accept mutations again once no abandoned writer is alive."""
+        self._sealed = False
+
+    def _check_writable(self) -> None:
+        if getattr(self, "_sealed", False):
+            raise ConversationSealedError(
+                "Conversation is sealed after an incomplete agent shutdown"
+            )
 
     def append(
         self,
@@ -86,6 +107,7 @@ class Conversation:
         Returns:
             The created Message object
         """
+        self._check_writable()
         content = normalize_content_parts(content)
         msg = create_message(role, content, **kwargs)  # type: ignore
         self._messages.append(msg)
@@ -115,6 +137,7 @@ class Conversation:
 
     def append_message(self, message: Message) -> None:
         """Append an existing Message object."""
+        self._check_writable()
         self._messages.append(message)
         self._metadata.message_count += 1
         self._metadata.total_chars += _get_content_text_length(message.content)
@@ -282,6 +305,7 @@ class Conversation:
         carries the system prompt. Returns the removed messages.
         Used by edit/regenerate/rewind features.
         """
+        self._check_writable()
         if index < 0 or index >= len(self._messages):
             return []
         leading_system = 0
@@ -315,6 +339,7 @@ class Conversation:
         Args:
             keep_system: If True, keep system messages
         """
+        self._check_writable()
         if keep_system:
             self._messages = [m for m in self._messages if m.role == "system"]
         else:
@@ -332,6 +357,7 @@ class Conversation:
         Identity and retention config stay, so holders of this object keep a
         live conversation.
         """
+        self._check_writable()
         self._messages = other._messages
         self._metadata = other._metadata
 

@@ -642,3 +642,26 @@ class TestLiveMessaging:
             await mgr.send_to_subagent("nobody", job_id="agent_ghost_deadbeef") is False
         )
         assert await mgr.send_to_subagent("nobody", name="ghost") is False
+
+
+class TestRequestCancelAll:
+    async def test_requests_cancellation_once_without_joining(self):
+        class _SlowLLM:
+            model = "slow"
+
+            async def chat(self, messages, *, stream=True, **kwargs):
+                await asyncio.sleep(5)
+                yield "late"
+
+        mgr = SubAgentManager(Registry(), _SlowLLM())
+        mgr.register(SubAgentConfig(name="explore", max_turns=2))
+        first = await mgr.spawn("explore", "t1", background=True)
+        await asyncio.sleep(0.05)
+        pending = mgr.request_cancel_all()
+        assert list(pending) == [first]
+        task = pending[first]
+        assert not task.done()
+        assert mgr.request_cancel_all()[first] is task
+        await asyncio.gather(task, return_exceptions=True)
+        assert task.done()
+        assert mgr.request_cancel_all() == {}

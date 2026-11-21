@@ -9,7 +9,7 @@ tags:
 
 # Impl notes
 
-Five specific implementation choices that deserve their own short
+Several specific implementation choices that deserve their own short
 concept doc, not because a user has to know them to use KT, but
 because they surface design decisions that recur elsewhere and are
 useful mental models in their own right.
@@ -29,6 +29,9 @@ useful mental models in their own right.
   engine computes connected components, mutates topology under
   hot-plug calls, and keeps the session store consistent across
   auto-merge and auto-split.
+- [Bounded shutdown](bounded-shutdown.md): how `Agent.stop` bounds
+  caller waiting, keeps ordinary cancellation idempotent, and reports
+  forced or abandoned work honestly.
 
 Each doc follows the same shape: *problem → options considered → what
 we do → invariants preserved → where it lives in the code.*

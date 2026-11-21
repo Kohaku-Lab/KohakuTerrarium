@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import pytest
 
-
+from kohakuterrarium.errors import ConversationSealedError
 from kohakuterrarium.core.conversation.conversation import (
     Conversation,
     ConversationConfig,
@@ -599,3 +599,39 @@ class TestMetadataDefaults:
         b = ConversationMetadata()
         a.message_count = 10
         assert b.message_count == 0
+
+
+class TestSealing:
+    def test_sealed_conversation_rejects_every_mutation(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append("user", "hello")
+        conv.seal()
+        assert conv.sealed
+        message = conv.get_messages()[-1]
+        with pytest.raises(ConversationSealedError):
+            conv.append("tool", "late result", tool_call_id="c1")
+        with pytest.raises(ConversationSealedError):
+            conv.append_message(message)
+        with pytest.raises(ConversationSealedError):
+            conv.truncate_from(1)
+        with pytest.raises(ConversationSealedError):
+            conv.clear()
+        with pytest.raises(ConversationSealedError):
+            conv.adopt_contents(Conversation())
+        assert [m.content for m in conv.get_messages()] == ["sys", "hello"]
+
+    def test_unsealed_conversation_accepts_writes_again(self):
+        conv = Conversation()
+        conv.seal()
+        conv.unseal()
+        assert not conv.sealed
+        conv.append("user", "again")
+        assert len(conv) == 1
+
+    def test_deserialized_conversation_starts_unsealed(self):
+        conv = Conversation()
+        conv.append("user", "x")
+        restored = Conversation.from_json(conv.to_json())
+        assert not restored.sealed
+        restored.append("user", "y")

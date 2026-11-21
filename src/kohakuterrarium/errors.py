@@ -182,6 +182,28 @@ class AgentNotRunningError(KTError, RuntimeError):
     """An operation needed a started agent but it isn't running."""
 
 
+class ShutdownIncompleteError(KTError, TimeoutError):
+    """``Agent.stop`` returned before every tracked task settled cooperatively.
+
+    ``report`` is the ``ShutdownReport`` describing forced and abandoned work.
+    """
+
+    def __init__(self, report: object) -> None:
+        self.report = report
+        abandoned = getattr(report, "abandoned", ())
+        forced = getattr(report, "forced", False)
+        stage = getattr(report, "expired_stage", None)
+        super().__init__(
+            "Agent shutdown did not settle"
+            f" (deadline expired at {stage or 'n/a'}, forced={forced},"
+            f" abandoned={list(abandoned)})"
+        )
+
+
+class ConversationSealedError(KTError, RuntimeError):
+    """A write reached a conversation that an incomplete shutdown sealed."""
+
+
 # ---------------------------------------------------------------------------
 # Output
 # ---------------------------------------------------------------------------
