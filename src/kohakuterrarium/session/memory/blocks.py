@@ -13,6 +13,7 @@ from kohakuterrarium.session.history.semantics import (
     MEMORY_ROUND_OPENERS,
     can_continue_legacy_round,
     classify_branch_scope,
+    strict_parent_branch_path,
 )
 from kohakuterrarium.session.history.replay import (
     _coerce_path,
@@ -126,7 +127,14 @@ def extract_batch(
             event_paths = index_eligible_parent_paths_by_position(events)
         else:
             event_paths = {
-                count + pos: _coerce_path(event.get("parent_branch_path"))
+                count
+                + pos: (
+                    strict_parent_branch_path(
+                        event["parent_branch_path"], turn=event.get("turn_index")
+                    )
+                    if event.get("parent_branch_path") is not None
+                    else ()
+                )
                 for pos, event in enumerate(suffix)
                 if classify_branch_scope(
                     event.get("turn_index"), event.get("branch_id")

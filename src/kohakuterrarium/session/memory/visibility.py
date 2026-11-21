@@ -12,6 +12,7 @@ from kohakuterrarium.session.history.semantics import (
     BranchScope,
     classify_branch_scope,
     eligible_branch_history,
+    strict_parent_branch_path,
 )
 from kohakuterrarium.session.history.branch_paths import (
     _coerce_branch_view,
@@ -58,11 +59,8 @@ class BranchVisibility:
                     "Rebuild its memory index before searching this branch."
                 )
             return True
-        try:
-            path = tuple(tuple(pair) for pair in raw_path)
-            return self._ancestry.matches(path, turn)
-        except (TypeError, ValueError):
-            return False
+        path = strict_parent_branch_path(raw_path, turn=turn)
+        return path is not None and self._ancestry.matches(path, turn)
 
 
 def ranked_filtered(

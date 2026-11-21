@@ -5,7 +5,7 @@ chooses the participants; the index planner and FTS/vector materializers work
 with those captured events and never discover other Agents themselves.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from kohakuterrarium.utils.logging import get_logger
@@ -16,17 +16,29 @@ from kohakuterrarium.session.memory.visibility import (
     requested_store_view,
     resolve_search_view,
 )
+from kohakuterrarium.session.memory.source import (
+    SourceFrontier,
+    TailHistory,
+    catalog_for_full,
+    read_appended,
+    selected_from_entries,
+    source_frontier,
+)
 
 
 @dataclass(frozen=True)
 class IndexSourceSnapshot:
     """Detached per-Agent history, shared by the FTS and vector passes."""
 
-    events: dict[str, list[dict]]
+    events: dict[str, list[dict] | TailHistory]
+    roster: tuple[str, ...] = ()
+    frontier: SourceFrontier | None = None
+    catalogs: dict[str, dict] = field(default_factory=dict)
+    published: bool = False
 
     @property
     def agents(self) -> tuple[str, ...]:
-        return tuple(self.events)
+        return self.roster or tuple(self.events)
 
 
 class SessionIndexReconciler:
@@ -49,9 +61,95 @@ class SessionIndexReconciler:
                 *names,
             ]
         names = list(dict.fromkeys(names))
-        return IndexSourceSnapshot(
-            {name: self._store.get_memory_events(name) for name in names}
+        frontier = source_frontier(self._store)
+        events = {name: self._store.get_memory_events(name) for name in names}
+        if frontier != source_frontier(self._store):
+            frontier = None  # Writer crossed the capture boundary; never seal.
+        catalogs = (
+            {
+                name: catalog
+                for name, rows in events.items()
+                if (catalog := catalog_for_full(rows, frontier)) is not None
+            }
+            if frontier is not None
+            else {}
         )
+        return IndexSourceSnapshot(events, tuple(names), frontier, catalogs)
+
+    def _catalog_state(self):
+        # Catalogs are a derived fast-path only. Minimal/legacy index adapters
+        # lacking this optional storage API retain the safe full capture path.
+        return getattr(self._memory, "_state", None)
+
+    def _published_catalogs(
+        self, names: list[str], manifest: dict
+    ) -> IndexSourceSnapshot | None:
+        state = self._catalog_state()
+        if state is None:
+            return None
+        frontier = source_frontier(self._store)
+        if frontier is None:
+            return None
+        views: dict[str, list[dict] | TailHistory] = {}
+        catalogs: dict[str, dict] = {}
+        changed = False
+        for name in names:
+            catalog = state.get(f"{name}:memory_source_catalog")
+            checkpoint = state.get(f"{name}:cursor:keywords")
+            if (
+                not isinstance(catalog, dict)
+                or not isinstance(checkpoint, dict)
+                or catalog.get("index_epoch") != manifest.get("epoch")
+                or catalog.get("fts_revision") != manifest.get("fts_revision")
+                or catalog.get("count") != checkpoint.get("count")
+                or catalog.get("anchor") != checkpoint.get("anchor")
+                or checkpoint.get("index_epoch") != manifest.get("epoch")
+                or checkpoint.get("generation") != self._memory._generation(name)
+                or state.get(f"{name}:cursor:keywords:pending", False)
+                or not isinstance(catalog.get("entries"), list)
+                or not isinstance(catalog.get("default_view"), dict)
+            ):
+                return None
+            result = read_appended(self._store, name, catalog, frontier)
+            if result is None:
+                return None
+            view, latest = result
+            changed |= bool(view.suffix)
+            views[name] = view
+            catalogs[name] = latest
+        return IndexSourceSnapshot(
+            views, tuple(names), frontier, catalogs, published=not changed
+        )
+
+    def _publish_source_catalogs(self, source: IndexSourceSnapshot) -> None:
+        if source.published or not source.catalogs or source.frontier is None:
+            return
+        state = self._catalog_state()
+        if state is None:
+            return
+        # Only KT-controlled append-only source mutations participate in this
+        # proof. Do not persist a frontier after a concurrent append.
+        if source_frontier(self._store) != source.frontier:
+            return
+        manifest = self._memory._manifest()
+        if not manifest or manifest.get("fts") != "ready":
+            return
+        for name, catalog in source.catalogs.items():
+            checkpoint = state.get(f"{name}:cursor:keywords")
+            if (
+                not isinstance(checkpoint, dict)
+                or checkpoint.get("count") != catalog.get("count")
+                or checkpoint.get("anchor") != catalog.get("anchor")
+            ):
+                continue
+            key = f"{name}:memory_source_catalog"
+            next_catalog = {
+                **catalog,
+                "index_epoch": manifest["epoch"],
+                "fts_revision": manifest["fts_revision"],
+            }
+            if state.get(key) != next_catalog:
+                state[key] = next_catalog
 
     def _needs_keyword_roster(self, source: IndexSourceSnapshot) -> bool:
         """Avoid rebuilding a READY roster when every captured source is current.
@@ -78,6 +176,8 @@ class SessionIndexReconciler:
     def refresh_keywords(
         self, source: IndexSourceSnapshot, *, existing_only: bool = False
     ) -> dict[str, int]:
+        if source.published:
+            return {name: 0 for name in source.agents}
         if (
             existing_only
             and self._memory._manifest() is None
@@ -90,10 +190,12 @@ class SessionIndexReconciler:
         try:
             if self._needs_keyword_roster(source):
                 self._memory._enroll_build_agents(source.agents, with_vectors=False)
-            return {
+            updated = {
                 name: self._memory._index_keywords(name, events)
                 for name, events in source.events.items()
             }
+            self._publish_source_catalogs(source)
+            return updated
         except BaseException:
             # Like explicit build(), a cross-Agent keyword reconciliation
             # must abandon its incomplete Session-wide roster on failure.
@@ -109,17 +211,57 @@ class SessionIndexReconciler:
         requested: list[str] | tuple[str, ...],
         overrides: dict[str, dict[int, int]] | None = None,
     ) -> dict[str, dict[int, int]]:
-        return {
-            name: resolve_search_view(
-                source.events[name],
-                (
-                    overrides[name]
-                    if overrides is not None and name in overrides
-                    else requested_store_view(self._store, name)
-                ),
+        views = {}
+        for name in dict.fromkeys(requested):
+            requested_view = (
+                overrides[name]
+                if overrides is not None and name in overrides
+                else requested_store_view(self._store, name)
             )
-            for name in dict.fromkeys(requested)
-        }
+            if name in source.catalogs:
+                catalog = source.catalogs[name]
+                views[name] = (
+                    dict(catalog["default_view"])
+                    if requested_view is None and "default_view" in catalog
+                    else selected_from_entries(catalog["entries"], requested_view)
+                )
+            else:
+                views[name] = resolve_search_view(source.events[name], requested_view)
+        return views
+
+    def capture_or_reuse(
+        self, requested: list[str] | tuple[str, ...], *, all_agents: bool = False
+    ) -> IndexSourceSnapshot:
+        """One source authority for both saved and live search."""
+        manifest = self._memory._manifest()
+        migration = (
+            manifest is None
+            or manifest.get("format") != self._memory._index_format
+            or manifest.get("fts") != "ready"
+        )
+        if not migration:
+            names = list(
+                dict.fromkeys(
+                    [
+                        *(
+                            self._store.load_meta().get("agents", [])
+                            if all_agents
+                            else []
+                        ),
+                        *manifest.get("agents", ()),
+                        *requested,
+                    ]
+                )
+            )
+            cached = self._published_catalogs(names, manifest)
+            if cached is not None:
+                return cached
+        return self.capture(
+            requested,
+            all_agents=all_agents
+            or migration
+            or bool(manifest and manifest.get("agents")),
+        )
 
     def prepare_keywords(
         self,
@@ -130,13 +272,7 @@ class SessionIndexReconciler:
         all_agents: bool = False,
         project_all: bool = False,
     ) -> tuple[IndexSourceSnapshot, dict[str, dict[int, int]]]:
-        manifest = self._memory._manifest()
-        migration = (
-            manifest is None
-            or manifest.get("format") != self._memory._index_format
-            or manifest.get("fts") != "ready"
-        )
-        source = self.capture(requested, all_agents=all_agents or migration)
+        source = self.capture_or_reuse(requested, all_agents=all_agents)
         self.refresh_keywords(source, existing_only=existing_only)
         return source, self.selected_views(
             source, source.agents if project_all else requested, overrides
@@ -157,11 +293,54 @@ class SessionIndexReconciler:
             or manifest.get("vector_identity") != self._memory._vector_identity
             or manifest.get("vector_dimensions") != self._memory._embedder.dimensions
         )
+        if not rebuild and source.published:
+            try:
+                for name in requested:
+                    self._memory._assert_vector_readable(name)
+            except ValueError:
+                rebuild = True
+            else:
+                return source, ()
         if rebuild:
             source = self.capture(requested, all_agents=True)
             self.refresh_keywords(source)
             return source, source.agents
         return source, tuple(dict.fromkeys(requested))
+
+    def _published_source_is_current(self, source: IndexSourceSnapshot) -> bool:
+        """Pure no-op preflight, never a publication/ownership decision.
+
+        A complete READY manifest and matching per-agent FTS/vector
+        checkpoints are required. Any doubt takes the normal build path;
+        this optimization cannot turn incomplete work into a published index.
+        """
+        manifest = self._memory._manifest()
+        if (
+            not manifest
+            or manifest.get("format") != self._memory._index_format
+            or manifest.get("fts") != "ready"
+            or (
+                self._memory._has_vectors
+                and (
+                    manifest.get("vector") != "ready"
+                    or manifest.get("vector_identity") != self._memory._vector_identity
+                    or manifest.get("vector_dimensions")
+                    != self._memory._embedder.dimensions
+                )
+            )
+            or not set(source.agents) <= set(manifest.get("agents", ()))
+        ):
+            return False
+        for name, events in source.events.items():
+            for kind in (
+                ["keywords", f"vectors:{self._memory._embedder.dimensions}"]
+                if self._memory._has_vectors
+                else ["keywords"]
+            ):
+                plan, blocks = self._memory._prepare(name, events, kind, 0)
+                if plan.reset or plan.start != len(events) or blocks:
+                    return False
+        return True
 
     def build(
         self,
@@ -172,6 +351,46 @@ class SessionIndexReconciler:
     ) -> dict[str, int]:
         """Materialize every captured Agent, including empty namespaces."""
         try:
+            if source.published:
+                manifest = self._memory._manifest() or {}
+                reuse_vectors = not self._memory._has_vectors or (
+                    manifest.get("vector") == "ready"
+                    and manifest.get("vector_identity") == self._memory._vector_identity
+                    and manifest.get("vector_dimensions")
+                    == self._memory._embedder.dimensions
+                )
+                if not force and reuse_vectors:
+                    try:
+                        if self._memory._has_vectors:
+                            for name in source.agents:
+                                self._memory._assert_vector_readable(name)
+                    except ValueError:
+                        reuse_vectors = False
+                    else:
+                        result = {name: 0 for name in source.agents}
+                        if progress is not None:
+                            for name in source.agents:
+                                progress(name, source.catalogs[name]["count"], 0)
+                        return result
+                # FTS can be published while vector rebuilding is still
+                # incomplete. Such a build needs the real source, not a
+                # virtual empty suffix.
+                if force or not reuse_vectors:
+                    source = self.capture(list(source.agents), all_agents=True)
+            if force and any(
+                isinstance(events, TailHistory) for events in source.events.values()
+            ):
+                source = self.capture(list(source.agents), all_agents=True)
+            if not force and self._published_source_is_current(source):
+                # An old v2 index may be fully current but predate the
+                # optional source catalogue. Seal it once without touching
+                # the published Manifest or interrupting any reader.
+                self._publish_source_catalogs(source)
+                result = {name: 0 for name in source.agents}
+                if progress is not None:
+                    for name, events in source.events.items():
+                        progress(name, len(events), 0)
+                return result
             if force:
                 self._memory.force_rebuild(list(source.agents))
             # Reserve the entire captured roster *before* Alice can publish
@@ -182,6 +401,7 @@ class SessionIndexReconciler:
                 results[name] = self._memory.index_events(name, events)
                 if progress is not None:
                     progress(name, len(events), results[name])
+            self._publish_source_catalogs(source)
             return results
         except BaseException:
             # A callback may fail between Agents while the shared index is

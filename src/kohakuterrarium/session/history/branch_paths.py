@@ -6,6 +6,7 @@ from typing import Any, Iterable
 from kohakuterrarium.session.history.semantics import (
     MEMORY_ROUND_OPENERS,
     eligible_branch_history,
+    strict_parent_branch_path,
 )
 
 
@@ -133,7 +134,12 @@ def index_eligible_parent_paths_by_position(
         inferred = False
 
         if raw_path is not None:
-            path = _coerce_path(raw_path)
+            path = strict_parent_branch_path(raw_path, turn=turn if scoped else None)
+            if path is None:
+                # Invalid explicit ancestry is not an implicit root and must
+                # not mutate Round or inferred-branch authority.
+                paths[position] = None
+                continue
         elif scoped and kind not in MEMORY_ROUND_OPENERS:
             active = open_rounds.get((turn, branch), [])
             if kind == "processing_end" and len(active) > 1:

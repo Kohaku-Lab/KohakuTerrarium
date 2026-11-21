@@ -5,6 +5,8 @@ keys. All lookups and reads run on the SessionStore's affinity executor.
 """
 
 import secrets
+from array import array
+from bisect import bisect_left
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
@@ -12,7 +14,11 @@ from typing import Any
 from kohakuterrarium.session.history.branch_paths import (
     index_eligible_parent_paths_by_position,
 )
-from kohakuterrarium.session.history.semantics import BranchScope, classify_branch_scope
+from kohakuterrarium.session.history.semantics import (
+    BranchScope,
+    classify_branch_scope,
+    strict_parent_branch_path,
+)
 from kohakuterrarium.session.history.paging import _ordered_event_refs
 from kohakuterrarium.session.memory.blocks import _anchor, _content_to_text
 from kohakuterrarium.session.memory.preview import (
@@ -46,6 +52,31 @@ CONTEXT_TYPES = frozenset(
         "compact_complete",
     }
 )
+
+
+class _PhysicalEventRefs:
+    """Compact numeric physical locators, not logical event IDs."""
+
+    def __init__(self, agent: str, numbers: array):
+        self.agent = agent
+        self.numbers = numbers
+
+    def __len__(self) -> int:
+        return len(self.numbers)
+
+    def __getitem__(self, position: int) -> str:
+        return f"{self.agent}:e{self.numbers[position]:06d}"
+
+    def index(self, ref: str) -> int:
+        prefix = f"{self.agent}:e"
+        suffix = ref[len(prefix) :] if ref.startswith(prefix) else ""
+        if not suffix.isascii() or not suffix.isdecimal():
+            raise ValueError("unknown physical event")
+        number = int(suffix)
+        at = bisect_left(self.numbers, number)
+        if at >= len(self.numbers) or self.numbers[at] != number:
+            raise ValueError("unknown physical event")
+        return at
 
 
 class MemoryContextError(ValueError):
@@ -138,8 +169,15 @@ class MemoryContextNavigator:
         # Track unique snapshots, not the number of anchors referring to them.
         self._view_refs: dict[int, tuple[tuple, int]] = {}
         self._view_pairs = 0
+        # One per-store, per-agent physical-key catalogue. Only KT-managed
+        # append-only event keys are assumed; arbitrary in-place SQL edits
+        # are outside the source-freshness contract.
+        self._physical_refs: dict[str, tuple[int, _PhysicalEventRefs]] = {}
+        self._legacy_cache: dict[str, tuple[int, dict[str, tuple]]] = {}
 
     def close(self) -> None:
+        self._physical_refs.clear()
+        self._legacy_cache.clear()
         self._anchors.clear()
         self._view_cache.clear()
         self._view_refs.clear()
@@ -277,6 +315,12 @@ class MemoryContextNavigator:
         turn, branch = event.get("turn_index"), event.get("branch_id")
         if classify_branch_scope(turn, branch) is BranchScope.INVALID:
             return False
+        raw_parent = event.get("parent_branch_path")
+        if (
+            raw_parent is not None
+            and strict_parent_branch_path(raw_parent, turn=turn) is None
+        ):
+            return False
         if (
             type(turn) is int
             and turn > 1
@@ -296,14 +340,57 @@ class MemoryContextNavigator:
         return visibility.matches(record)
 
     def _legacy_paths(self, agent: str) -> dict[str, tuple]:
-        """Resolve each legacy event's ancestry by its unique physical ref."""
+        """Cache old-history ancestry until the source's physical count changes."""
+        total = len(self._store.events)
+        cached = self._legacy_cache.get(agent)
+        if cached is not None and cached[0] == total:
+            return cached[1]
         events = self._store.get_memory_events(agent)
         paths = index_eligible_parent_paths_by_position(events)
-        return {
+        found = {
             event.source_ref: paths[position]
             for position, event in enumerate(events)
             if position in paths
         }
+        self._legacy_cache[agent] = (total, found)
+        return found
+
+    def _refs_for(self, agent: str) -> _PhysicalEventRefs:
+        """List keys once; subsequent appends extend the numeric suffix only.
+
+        A cheap physical row-count check observes normal KT append commits,
+        including imported mirrors with reused logical IDs. A changed count
+        does not authorize in-place history rewrites: those require an
+        explicit reindex/reopen under the documented append-only contract.
+        """
+        self._store._flush_events_cache()
+        total = len(self._store.events)
+        cached = self._physical_refs.get(agent)
+        if cached is not None:
+            old_count, refs = cached
+            if total == old_count:
+                return refs
+            if total > old_count:
+                # Normal append_event writes agent:e{seq:06d} consecutively.
+                # Probe at most the number of new physical records; writes
+                # from other agents require only one negative point lookup.
+                next_seq = (refs.numbers[-1] + 1) if refs.numbers else 0
+                for seq in range(next_seq, next_seq + total - old_count):
+                    ref = f"{agent}:e{seq:06d}"
+                    if ref not in self._store.events:
+                        break
+                    refs.numbers.append(seq)
+                self._physical_refs[agent] = (total, refs)
+                self._legacy_cache.pop(agent, None)
+                return refs
+        numbers = array("Q")
+        prefix = f"{agent}:e"
+        for ref in _ordered_event_refs(self._store, agent):
+            numbers.append(int(ref[len(prefix) :]))
+        refs = _PhysicalEventRefs(agent, numbers)
+        self._physical_refs[agent] = (total, refs)
+        self._legacy_cache.pop(agent, None)
+        return refs
 
     def expand(
         self,
@@ -337,7 +424,7 @@ class MemoryContextNavigator:
             )
         loc = self._anchors[anchor]
         self._anchors.move_to_end(anchor)
-        refs = _ordered_event_refs(self._store, loc.agent)
+        refs = self._refs_for(loc.agent)
         try:
             index = refs.index(loc.ref)
             match = self._store.events[loc.ref]

@@ -1,4 +1,4 @@
-# Canonical History Semantics Boundary (R2)
+# History Semantics: Strict Memory and Replay Compatibility
 
 The append-only SessionStore events are authoritative. An event's physical
 identity, conversation-round membership and branch visibility are **different
@@ -23,7 +23,7 @@ memory extraction apply the strict search policy.
 
 **Replay compatibility:** the long-standing public replay/selection methods
 retain their established compatibility behavior for historical, noncanonical
-records (including unusual branch mappings). R2 does not silently redefine
+records (including unusual branch mappings). This contract does not silently redefine
 their output: the canonical classifier is shared, while strict memory-search
 eligibility is a distinct policy. For *valid, unambiguous* histories, replay
 selection and indexed branch visibility must agree. Changing legacy Replay
@@ -61,8 +61,9 @@ The Session-wide lifecycle rebuilds old FTS/vector rows before scoped retrieval.
 The SessionStore .kohakutr physical format and original event log do not change.
 A stale index must fail closed until rebuilt.
 
-R1 owns when physical materializations are safely invalidated and published;
-R2 owns what the raw source events mean before materialization.
+Memory Index Lifecycle owns when physical materializations are safely invalidated
+and published. Strict History projection owns what the raw events mean before
+materialization.
 
 ## Selection eligibility contract
 
@@ -98,7 +99,7 @@ inference shared by Index and Context Navigation. The permissive public
 Replay behavior for noncanonical historical records remains unchanged.
 
 
-## Strict Memory round ancestry (mirrored-lineage closure)
+## Strict Memory round ancestry
 
 Memory Index, Search branch selection and Context Navigation use one strict
 physical-position-preserving ancestry projection. Replay continues using its
@@ -125,7 +126,7 @@ Incremental and full materialization must return identical blocks, and neither
 a malformed coordinate nor an ambiguous completion may mutate a valid round.
 
 
-## Consumer authority audit (mainline integration)
+## Consumer authority
 
 Branch visibility, physical event identity and conversational Round ownership
 are related but not interchangeable. Consumers share the **projection

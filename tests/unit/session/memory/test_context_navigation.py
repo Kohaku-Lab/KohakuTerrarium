@@ -775,3 +775,45 @@ def test_focus_preview_offsets_track_original_unicode_text(prefix, query, needle
     assert excerpt.end - excerpt.start <= 900
     next_page = preview_text(text, 900, offset=excerpt.end)
     assert next_page.start == excerpt.end
+
+
+@pytest.mark.asyncio
+async def test_repeated_anchor_expansion_reuses_physical_refs_and_appends_suffix(
+    tmp_path, monkeypatch
+):
+    from kohakuterrarium.session.memory import context as context_module
+
+    path = tmp_path / "ref-cache.kohakutr"
+    store = SessionStore(path)
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    for turn in range(1, 61):
+        _append(store, turn, "user_input", {"content": f"needle-{turn}"}, parent=[])
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        first = await tool.execute({"query": "needle-30", "mode": "fts"}, context=ctx)
+        assert first.error is None
+        token = _anchor(first.output)
+        real = context_module._ordered_event_refs
+        enumerations = []
+
+        def counted(*args):
+            enumerations.append(1)
+            return real(*args)
+
+        monkeypatch.setattr(context_module, "_ordered_event_refs", counted)
+        for _ in range(3):
+            expanded = await tool.execute(
+                {"anchor": token, "before": 2, "after": 2}, context=ctx
+            )
+            assert expanded.error is None
+            assert "needle-30" in expanded.output
+        assert len(enumerations) == 1
+
+        _append(store, 61, "user_input", {"content": "needle-61"}, parent=[])
+        again = await tool.execute(
+            {"anchor": token, "before": 2, "after": 2}, context=ctx
+        )
+        assert again.error is None
+        assert len(enumerations) == 1
+    finally:
+        store.close(update_status=False)

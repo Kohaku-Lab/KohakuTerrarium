@@ -222,3 +222,38 @@ the vector corpus. A different declared model, endpoint or dimensions
 remains a compatibility conflict and requires an explicit rebuild. This
 boundary does not add a Secret Manager, background drift detection, or a new
 persistent index identity format.
+
+
+## Bounded source-freshness responsibility
+
+**Supported contract:** KT's SessionStore.append_event uses append-only
+per-agent physical keys, including imported mirrors that reuse logical
+event_id. SessionStore Fork creates a different Session ID. For this
+contract, the memory index records a derived, compact source catalogue
+(index epoch, FTS revision, physical event row count, Session ID, last
+source fingerprint, and branch candidates) after a complete publication.
+
+A stable query checks the small published catalogue and physical row count,
+then reads the FTS/vector index directly. A normal append adds new physical
+keys sequentially; the reconciler reads only the newly appended suffix and
+uses the existing incremental extraction cursor. Repeated queries do not
+reload the full event log or recompute its ancestry. For saved searches,
+the read-only memory source avoids rebuilding unrelated event counters on
+every open. The navigator enumerates physical event keys once per active
+Store/Agent and extends its compact sequence after normal appends.
+
+**Explicit boundary:** This is not an arbitrary database mutation detector.
+Direct SQL / KVault edits, deleting or reusing old physical keys, replacing
+historical event content in place, modifying the SQLite file outside KT,
+or unannounced provider changes are not proven by a row-count frontier.
+Such unsupported changes require explicit source reindex/reopen. Existing
+fingerprint checks still protect individual Anchor source events. A missing,
+unverifiable, incompatible or stale derived catalogue falls back to full
+source reconciliation, never to unverified cached results. A legacy
+unstamped ancestry tail can still require full reconstruction on change;
+it is not the normal steady-state query path.
+
+The optional catalogue lives in the existing derived memory_state table
+under the **single v2** index format; it is not another writer, persistence
+format, sidecar, watcher, distributed lease or new invalidation state
+machine.

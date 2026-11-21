@@ -43,7 +43,10 @@ class SessionReader:
         if not path.exists():
             raise FileNotFoundError(f"Session file not found: {path}")
         self._path = path
-        self._store = SessionStore.open_readonly(path)
+        # High-level session views do not need append/fork counters. Their
+        # read-only source handles must not enumerate every event key just
+        # to perform an indexed search.
+        self._store = SessionStore.open_memory_reader(path)
 
     def __enter__(self) -> "SessionReader":
         return self

@@ -741,3 +741,53 @@ def test_new_full_build_does_not_adopt_stale_vector_building_rows(tmp_path):
             }
     finally:
         store.close(update_status=False)
+
+
+def test_complete_noop_reconciler_build_preserves_published_readability(tmp_path):
+    """A complete, unchanged source is a read, not another logical build."""
+    path = tmp_path / "noop-batch.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        for name in ("alice", "bob"):
+            store.append_event(
+                name,
+                "user_input",
+                {"content": f"{name} needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(
+            SessionMemory(str(path), _Embedder(), index_all_branches=True)
+        ) as owner:
+            reconcile = SessionIndexReconciler(store, owner)
+            source = reconcile.capture(["alice", "bob"], all_agents=True)
+            reconcile.build(source)
+            baseline = dict(owner._manifest())
+            writes = []
+            original = owner._save_manifest
+
+            def track(manifest):
+                writes.append((manifest["fts"], manifest["vector"]))
+                return original(manifest)
+
+            owner._save_manifest = track
+
+            def check_midway(name, count, indexed):
+                assert indexed == 0
+                assert owner._manifest() == baseline
+                assert owner._fts_build_lock is owner._vector_build_lock is None
+                assert {hit.agent for hit in owner.search("needle", mode="fts")} == {
+                    "alice",
+                    "bob",
+                }
+
+            assert reconcile.build(source, progress=check_midway) == {
+                "alice": 0,
+                "bob": 0,
+            }
+            assert writes == []
+            assert owner._manifest() == baseline
+    finally:
+        store.close(update_status=False)

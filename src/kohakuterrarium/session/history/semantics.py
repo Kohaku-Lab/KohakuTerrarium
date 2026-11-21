@@ -31,6 +31,36 @@ def classify_branch_scope(turn: Any, branch: Any) -> BranchScope:
     return BranchScope.INVALID
 
 
+def strict_parent_branch_path(
+    raw: Any, *, turn: int | None = None
+) -> tuple[tuple[int, int], ...] | None:
+    """Validate recorded ancestry without Replay's lossy coercion.
+
+    None denotes an absent or invalid path; callers distinguish a missing
+    field from malformed explicit input before inferring legacy ancestry.
+    No remote or external-history identity proof is attempted here.
+    """
+    if not isinstance(raw, (list, tuple)):
+        return None
+    path: list[tuple[int, int]] = []
+    previous_turn = 0
+    for pair in raw:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            return None
+        ancestor_turn, branch = pair
+        if (
+            type(ancestor_turn) is not int
+            or type(branch) is not int
+            or ancestor_turn <= previous_turn
+            or branch <= 0
+            or (type(turn) is int and ancestor_turn >= turn)
+        ):
+            return None
+        path.append((ancestor_turn, branch))
+        previous_turn = ancestor_turn
+    return tuple(path)
+
+
 def eligible_branch_history(
     events: list[dict[str, Any]],
 ) -> list[tuple[int, dict[str, Any]]]:

@@ -84,7 +84,7 @@ def search_cli(
         return 1
 
     # Read-only: searching must not bump the session's last_active.
-    store = SessionStore.open_readonly(path)
+    store = SessionStore.open_memory_reader(path)
     memory = None
     try:
         # Query vectors must come from the same configured model that

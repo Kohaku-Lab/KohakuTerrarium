@@ -107,7 +107,7 @@ def _search_session_sync(
                 store = live_store
                 store.flush()
             else:
-                store = SessionStore(path)
+                store = SessionStore.open_memory_reader(path)
                 # Close owned SQLite handles promptly so Windows can delete stopped sessions;
                 # a live creature retains ownership of its shared SessionStore.
                 stack.callback(store.close, update_status=False)
@@ -135,7 +135,7 @@ def _search_session_sync(
             # The Reconciler captures one source snapshot for all Agent
             # materializers and resolves the selected search projections.
             reconciler = SessionIndexReconciler(store, memory)
-            source = reconciler.capture(
+            source = reconciler.capture_or_reuse(
                 store.load_meta().get("agents", []), all_agents=True
             )
             branch_views = reconciler.selected_views(source, source.agents)

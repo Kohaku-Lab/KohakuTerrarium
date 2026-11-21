@@ -679,3 +679,53 @@ def test_invalid_dedup_predecessor_cannot_hide_scoped_search(tmp_path):
             hit.content
             for hit in memory.search("needle", mode="fts", branch_view={1: 1})
         } == {"needle prompt", "needle legitimate answer"}
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        [["corrupt", 2]],
+        [[True, 1]],
+        [[0, 2]],
+        [[1, -1]],
+        [[1, 1], [1, 2]],
+        [[2, 1]],
+        {"bad": "path"},
+        "malformed",
+    ],
+)
+def test_malformed_explicit_ancestry_cannot_match_both_roots(tmp_path, invalid):
+    from kohakuterrarium.session.history.branch_paths import (
+        index_eligible_parent_paths_by_position,
+    )
+    from kohakuterrarium.session.memory.visibility import resolve_search_view
+
+    events = [
+        _event(1, "user_input", "root one", coords=(1, 1), parent_branch_path=[]),
+        _event(2, "user_input", "root two", coords=(1, 2), parent_branch_path=[]),
+        _event(
+            3,
+            "user_input",
+            "untrusted-needle child",
+            coords=(2, 1),
+            parent_branch_path=invalid,
+        ),
+        _event(
+            4,
+            "text",
+            "untrusted-needle reply",
+            coords=(2, 1),
+            parent_branch_path=invalid,
+        ),
+    ]
+    assert index_eligible_parent_paths_by_position(events)[2] is None
+    assert index_eligible_parent_paths_by_position(events)[3] is None
+    with closing(
+        SessionMemory(str(tmp_path / "invalid-path.kohakutr"), index_all_branches=True)
+    ) as memory:
+        memory.index_events("alice", events)
+        for root in (1, 2):
+            view = {1: root, 2: 1}
+            assert memory.search("untrusted-needle", mode="fts", branch_view=view) == []
+            # The malformed opener cannot authorize a branch candidate.
+            assert 2 not in resolve_search_view(events, {1: root})
