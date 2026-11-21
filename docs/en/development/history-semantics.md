@@ -42,17 +42,21 @@ an unstamped orphan after it is *not* part of the completed round. The inverse
 transition (stamped opener, unstamped tail) continues to use only the uniquely
 open scoped round. Multiple open sibling scopes never authorize guessing.
 
-Incremental extraction stores only the existing round, block, in_round,
-and open_branches continuation cursor. No second persisted state machine is
+Incremental extraction stores the round, block, in_round, open_branches
+continuation cursor and a fixed-size digest of the last **eligible**
+deduplication predecessor. Invalid or unassignable events cannot update that
+digest, including at batch boundaries. No second persisted state machine is
 introduced. The same history must give the same blocks whether extracted once
 or appended in arbitrarily sized batches.
 
 ## Index migration
 
-Pre-R2 all-branch indexes (internal format 5) can contain irreversible lossy
-normalizations. R2 originally advanced the derived memory-index contract to
-format 6; the mirrored-lineage closure advances it to **format 7** because v6
-round cursors and indexed ancestry can conflate different ancestral paths.
+This PR introduces one derived memory-index format transition: the legacy
+selected-lineage index (format 1, or an unversioned pre-feature index) is
+replaced by the all-branch **format 2**. Format 2 includes strict source
+coordinates, physical references, ancestry-aware round state, and eligible
+adjacent-event deduplication in its bounded incremental cursor. Intermediate
+formats tested during development of this unmerged PR are not release formats.
 The Session-wide lifecycle rebuilds old FTS/vector rows before scoped retrieval.
 The SessionStore .kohakutr physical format and original event log do not change.
 A stale index must fail closed until rebuilt.
@@ -147,4 +151,4 @@ interchangeable lifecycle.
 Cross-consumer tests cover mirrored duplicate logical IDs across Reader,
 resume surfaces, edit targeting, Memory, and settled tool calls, alongside
 late-result repair and full/incremental Memory extraction parity. The
-source format, public Replay interfaces, and Memory v7 contract remain intact.
+source format, public Replay interfaces, and Memory v2 contract remain intact.

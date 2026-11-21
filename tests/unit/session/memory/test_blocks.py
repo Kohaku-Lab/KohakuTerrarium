@@ -401,3 +401,65 @@ class TestExtractBlocks:
 
 
 # ── SearchResult ─────────────────────────────────────────────────
+
+
+def test_dedup_distinguishes_bool_from_int_payload_and_bounds_cursor():
+    rows = [
+        {
+            "type": "user_input",
+            "content": "start",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "event_id": 1,
+        },
+        {
+            "type": "tool_call",
+            "name": "bash",
+            "args": {"limit": True},
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "event_id": 2,
+        },
+        {
+            "type": "tool_call",
+            "name": "bash",
+            "args": {"limit": 1},
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "event_id": 3,
+        },
+        {
+            "type": "tool_result",
+            "name": "bash",
+            "output": "x" * 100_000,
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "event_id": 4,
+        },
+    ]
+    blocks, state = extract_batch("alice", rows, all_branches=True)
+    assert [block.content for block in blocks[:3]] == [
+        "start",
+        "[tool:bash] limit=True",
+        "[tool:bash] limit=1",
+    ]
+    assert len(state["dedup_signature"]) == 64
+    assert "x" not in state["dedup_signature"]
+    assert extract_batch("alice", rows, state, all_branches=True)[0] == []
+    append = rows + [
+        {
+            "type": "tool_call",
+            "name": "bash",
+            "args": {"limit": False},
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "event_id": 5,
+        }
+    ]
+    tail, _ = extract_batch("alice", append, state, all_branches=True)
+    assert [block.content for block in tail] == ["[tool:bash] limit=False"]

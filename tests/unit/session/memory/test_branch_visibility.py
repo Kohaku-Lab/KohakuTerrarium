@@ -324,7 +324,7 @@ def test_unverifiable_legacy_ancestor_rejects_instead_of_leaking():
 
 @pytest.mark.parametrize("agent", ["alice", None])
 def test_singular_branch_view_rejects_unmigrated_corpus(tmp_path, agent):
-    """A v7 *instance* must not search persisted v1 rows using either scope."""
+    """A v2 *instance* must not search persisted v1 rows using either scope."""
     path = str(tmp_path / "legacy-singular.kohakutr")
     rows = [
         {

@@ -143,9 +143,11 @@ Memory's strict source projection uses the same original-position ancestry
 authority in Search selection, FTS/vector extraction, and Anchor navigation.
 Unlike public Replay compatibility, its scoped round identity includes the
 ancestor path; late completion of an older mirror must not close a newer one.
-Internal memory-index format **7** invalidates earlier v6 checkpoints and
-derived rows before materializing them again. This is a derived-index upgrade,
-not a SessionStore source-format migration.
+The single all-branch derived-index release format is **2**, replacing the
+legacy selected-lineage (format 1 / unversioned) materialization. Ancestry,
+physical provenance and deduplication semantics are all part of that one
+format contract; there is no compatibility promise for intermediate PR drafts.
+This is not a SessionStore source-format migration.
 
 
 ## Replay event projection relationship

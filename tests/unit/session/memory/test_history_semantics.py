@@ -202,11 +202,11 @@ def test_scoped_search_never_reveals_other_or_malformed_zero_branches(branch, tm
         } == {f"needle valid-{branch}"}
 
 
-def test_pre_r2_index_is_invalidated_before_recovering_original_coordinates(tmp_path):
-    """Old v5 indexes may contain irreversibly normalized physical rows."""
+def test_legacy_index_is_invalidated_before_recovering_original_coordinates(tmp_path):
+    """Legacy selected-lineage rows are never trusted as scoped provenance."""
     events = _zero_events()
-    path = str(tmp_path / "legacy-v5.kohakutr")
-    with closing(SessionMemory(path, index_all_branches=True)) as old:
+    path = str(tmp_path / "legacy-selected.kohakutr")
+    with closing(SessionMemory(path)) as old:
         old.index_events("alice", events)
         old._fts.insert(
             "needle old normalized orphan",
@@ -219,15 +219,14 @@ def test_pre_r2_index_is_invalidated_before_recovering_original_coordinates(tmp_
                 "branch_id": None,
             },
         )
-        manifest = dict(old._manifest(), format=5)
-        old._state["memory:index_manifest"] = manifest
-        assert old._fts.count() == len(events) + 1
+        assert old._manifest()["format"] == 1
+        assert old._fts.count() >= 2
 
     with closing(SessionMemory(path, index_all_branches=True)) as upgraded:
         with pytest.raises(ValueError, match="index.*(invalid|building|rebuild)"):
             upgraded.search("needle", mode="fts", branch_view={1: 1})
         upgraded.index_events("alice", events)
-        assert upgraded._manifest()["format"] == 7
+        assert upgraded._manifest()["format"] == 2
         assert upgraded.get_stats()["fts_blocks"] == len(events)
         assert {
             h.content for h in upgraded.search("needle", mode="fts", branch_view={1: 1})
@@ -545,11 +544,11 @@ def test_missing_mirrored_completion_cannot_close_latest_child():
     assert "2:1:[[1,2]]" in cursor["open_branches"]
 
 
-def test_pre_v7_index_rebuilds_mirrored_lineage(tmp_path):
-    """The old v6 scoped-round cursor cannot authorize new v7 reads."""
+def test_unversioned_index_rebuilds_mirrored_lineage(tmp_path):
+    """The pre-feature index had no manifest and cannot authorize v2 reads."""
     rows = _mirrored_child_rounds()
     path = str(tmp_path / "old-mirror-index.kohakutr")
-    with closing(SessionMemory(path, index_all_branches=True)) as previous:
+    with closing(SessionMemory(path)) as previous:
         previous.index_events("alice", rows)
         previous._fts.insert(
             "ghost mirrored needle",
@@ -563,19 +562,120 @@ def test_pre_v7_index_rebuilds_mirrored_lineage(tmp_path):
                 "parent_branch_path": [[1, 2]],
             },
         )
-        previous._state["memory:index_manifest"] = {
-            **previous._manifest(),
-            "format": 6,
-        }
+        # Mainline's pre-feature memory index had no session-wide manifest.
+        # Its physical rows remain until the new v2 builder invalidates them.
+        del previous._state["memory:index_manifest"]
+        assert previous._manifest() is None
 
     with closing(SessionMemory(path, index_all_branches=True)) as upgraded:
         with pytest.raises(ValueError, match="(invalid|building|rebuild)"):
             upgraded.search("needle", mode="fts", branch_view={1: 2, 2: 1})
         upgraded.index_events("alice", rows)
-        assert upgraded._manifest()["format"] == 7
+        assert upgraded._manifest()["format"] == 2
         assert upgraded.get_stats()["fts_blocks"] == 6
         assert [
             hit.content
             for hit in upgraded.search("needle", mode="fts", branch_view={1: 2, 2: 1})
         ] == ["new child needle reply"]
         assert upgraded.search("ghost", mode="fts") == []
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3, 5])
+def test_invalid_coordinates_do_not_poison_dedup_state(batch_size):
+    """Memory eligibility precedes both dedup and checkpoint restoration."""
+    events = [
+        _event(
+            1, "user_input", "needle prompt", coords=(True, 1), parent_branch_path=[]
+        ),
+        _event(2, "user_input", "needle prompt", coords=(1, 1), parent_branch_path=[]),
+        _event(3, "text", "needle valid reply", coords=(1, 1), parent_branch_path=[]),
+        _event(
+            4,
+            "tool_call",
+            coords=(1, 1),
+            parent_branch_path=[],
+            name="bash",
+            args={"command": "echo valid"},
+        ),
+        _event(5, "processing_end", coords=(1, 1), parent_branch_path=[]),
+    ]
+    full, _ = extract_batch("alice", events, all_branches=True)
+    assert [(b.content, type(b.turn_index)) for b in full] == [
+        ("needle prompt", bool),  # Kept as physical provenance, never visible in scope
+        ("needle prompt", int),
+        ("needle valid reply", int),
+        ("[tool:bash] command=echo valid", int),
+    ]
+
+    incremental, checkpoint = [], None
+    for end in range(batch_size, len(events) + batch_size, batch_size):
+        blocks, checkpoint = extract_batch(
+            "alice", events[:end], checkpoint, all_branches=True
+        )
+        incremental.extend(blocks)
+    assert incremental == full
+
+    # Selected-only compatibility also must not let a malformed opener
+    # suppress the only legitimate user event.
+    selected, _ = extract_batch("alice", events)
+    assert [b.content for b in selected] == [
+        "needle prompt",
+        "needle valid reply",
+        "[tool:bash] command=echo valid",
+    ]
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 4])
+def test_dedup_ignores_invalid_intervening_events_across_checkpoint(batch_size):
+    """Invalid rows do not become dedup predecessors or split eligible adjacency."""
+    events = [
+        _event(
+            1, "user_input", "first valid needle", coords=(1, 1), parent_branch_path=[]
+        ),
+        _event(
+            2,
+            "user_input",
+            "ignored invalid needle",
+            coords=(True, 1),
+            parent_branch_path=[],
+        ),
+        _event(
+            3, "user_input", "first valid needle", coords=(1, 1), parent_branch_path=[]
+        ),
+        _event(
+            4, "text", "valid followup needle", coords=(1, 1), parent_branch_path=[]
+        ),
+    ]
+    full, _ = extract_batch("alice", events, all_branches=True)
+    assert [b.content for b in full] == [
+        "first valid needle",
+        "ignored invalid needle",
+        "valid followup needle",
+    ]
+    checkpoint, incremental = None, []
+    for end in range(batch_size, len(events) + batch_size, batch_size):
+        blocks, checkpoint = extract_batch(
+            "alice", events[:end], checkpoint, all_branches=True
+        )
+        incremental.extend(blocks)
+    assert incremental == full
+
+
+def test_invalid_dedup_predecessor_cannot_hide_scoped_search(tmp_path):
+    events = [
+        _event(
+            1, "user_input", "needle prompt", coords=(True, 1), parent_branch_path=[]
+        ),
+        _event(2, "user_input", "needle prompt", coords=(1, 1), parent_branch_path=[]),
+        _event(
+            3, "text", "needle legitimate answer", coords=(1, 1), parent_branch_path=[]
+        ),
+    ]
+    with closing(
+        SessionMemory(str(tmp_path / "dedup-invalid.kohakutr"), index_all_branches=True)
+    ) as memory:
+        memory.index_events("alice", events)
+        assert {
+            hit.content
+            for hit in memory.search("needle", mode="fts", branch_view={1: 1})
+        } == {"needle prompt", "needle legitimate answer"}

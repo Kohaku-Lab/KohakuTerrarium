@@ -34,6 +34,18 @@ def _anchor(event: dict) -> str:
     ).hexdigest()
 
 
+def _dedup_signature(event: dict) -> str:
+    """Stable, type-sensitive identity excluding only transport metadata.
+
+    The JSON representation distinguishes boolean coordinates from integers;
+    a digest keeps incremental cursor state bounded even for large tool output.
+    """
+    payload = {k: v for k, v in event.items() if k not in {"event_id", "ts"}}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
 def extract_batch(
     agent: str,
     events: list[dict],
@@ -92,10 +104,11 @@ def extract_batch(
                 latest[turn] = max(latest.get(turn, 0), branch)
         legacy_conflicts = [t for t, b in latest.items() if branches.get(str(t)) != b]
         live_ids = select_live_event_ids(events)
-    if count:
-        state["previous"] = {
-            k: v for k, v in events[count - 1].items() if k not in {"event_id", "ts"}
-        }
+    if count and "dedup_signature" not in state:
+        # Compatibility for older selected-lineage cursors that predate the
+        # bounded signature. Fresh all-branch v2 checkpoints always persist
+        # the last eligible predecessor, not the last raw event.
+        state["dedup_signature"] = _dedup_signature(events[count - 1])
     event_paths = None
     if all_branches:
         # Fully stamped modern events need no whole-history inference. Legacy
@@ -226,15 +239,11 @@ def _extract_blocks(
     round_num = state.get("round", 0)
     block_num = state.get("block", 0)
     in_round = state.get("in_round", False)
-    previous = state.pop("previous", None)
+    previous = state.get("dedup_signature")
     # Keep only currently open modern turns; sibling branches may interleave.
     open_branches = dict(state.get("open_branches", {})) if all_branches else {}
 
     for i, evt in enumerate(events):
-        signature = {k: v for k, v in evt.items() if k not in {"event_id", "ts"}}
-        if signature == previous:
-            continue
-        previous = signature
         first_block = len(blocks)
         etype = evt.get("type", "")
         ts = evt.get("ts", 0)
@@ -267,6 +276,15 @@ def _extract_blocks(
             # Missing ancestry with multiple open mirrored rounds is
             # ambiguous. It cannot continue or terminate either round.
             continue
+        if coordinate_scope is not BranchScope.INVALID:
+            # Strict Memory eligibility and physical-lineage selection decide
+            # which events may influence deduplication. Malformed events may
+            # still be materialized for unscoped provenance, but cannot
+            # suppress a subsequent valid opener or poison the cursor.
+            signature = _dedup_signature(evt)
+            if signature == previous:
+                continue
+            previous = signature
         scope_key = (
             f"{turn}:{branch}:{json.dumps(ancestry, separators=(',', ':'))}"
             if scoped
@@ -461,7 +479,12 @@ def _extract_blocks(
         if before_invalid is not None:
             round_num, block_num, in_round = before_invalid
 
-    state.update(round=round_num, block=block_num, in_round=in_round)
+    state.update(
+        round=round_num,
+        block=block_num,
+        in_round=in_round,
+        dedup_signature=previous,
+    )
     if all_branches:
         state["open_branches"] = open_branches
     return blocks

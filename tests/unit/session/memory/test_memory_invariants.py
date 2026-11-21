@@ -145,7 +145,7 @@ def test_anchor_registry_shares_unchanged_lineage_snapshots():
 
 @pytest.mark.asyncio
 async def test_live_search_upgrades_same_version_index_without_source_refs(tmp_path):
-    """A direct caller may have indexed old-style row dictionaries at format 5."""
+    """Direct callers with missing source references must be reindexed."""
     from types import SimpleNamespace
 
     from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool

@@ -493,12 +493,12 @@ async def test_navigation_uses_physical_order_not_event_id_order(tmp_path):
         store.close(update_status=False)
 
 
-def test_m3_rebuilds_staged_m2_index_once(tmp_path):
-    """A previously deployed all-branch index must gain source fingerprints."""
+def test_v2_rebuilds_legacy_selected_index_once(tmp_path):
+    """A legacy selected-lineage index must be rebuilt for navigation."""
     from kohakuterrarium.session.memory.blocks import _anchor
     from kohakuterrarium.session.memory.index import SessionMemory
 
-    path = str(tmp_path / "m2-to-m3.kohakutr")
+    path = str(tmp_path / "legacy-to-v2.kohakutr")
     events = [
         {
             "type": "user_input",
@@ -508,15 +508,11 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
             "branch_id": 1,
         }
     ]
-    old = SessionMemory(path, index_all_branches=True)
+    old = SessionMemory(path)
     try:
         assert old.index_events("alice", events) == 1
         epoch = old._state["memory:index_manifest"]["epoch"]
-        # Represent a pre-v7 session-wide index (the migration input).
-        old._state["memory:index_manifest"] = {
-            **old._state["memory:index_manifest"],
-            "format": 3,
-        }
+        assert old._state["memory:index_manifest"]["format"] == 1
     finally:
         old.close()
 
@@ -524,7 +520,7 @@ def test_m3_rebuilds_staged_m2_index_once(tmp_path):
     try:
         assert upgraded.index_events("alice", events) == 1
         assert upgraded._state["memory:index_manifest"]["epoch"] > epoch
-        assert upgraded._state["memory:index_manifest"]["format"] == 7
+        assert upgraded._state["memory:index_manifest"]["format"] == 2
         hits = upgraded.search("needle", mode="fts")
         assert len(hits) == 1
         assert hits[0].source_fingerprint == _anchor(events[0])
