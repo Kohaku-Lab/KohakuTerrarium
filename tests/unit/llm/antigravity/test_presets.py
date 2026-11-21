@@ -12,6 +12,7 @@ LEVELS = ["low", "medium", "high"]
 @pytest.mark.parametrize(
     "model,context,output,efforts,contexts",
     [
+        ("gemini-4-neon", 256000, 262144, [*LEVELS, "xhigh"], ["256k", "1048k"]),
         ("gemini-4-hydrogen", 256000, 262144, [*LEVELS, "xhigh"], ["256k", "1048k"]),
         ("gemini-pro-orchestrator-g1-pro", 256000, 65536, [], ["256k", "1048k"]),
         ("gemini-4-argon", 256000, 65536, LEVELS, ["256k", "512k", "900k"]),
@@ -44,6 +45,7 @@ def test_catalog_is_exactly_the_agy_agent_list():
         for effort in spec.efforts
     }
     assert advertised == {
+        *(f"gemini-4-neon-{e}" for e in [*LEVELS, "xhigh"]),
         *(f"gemini-4-hydrogen-{e}" for e in [*LEVELS, "xhigh"]),
         "gemini-pro-orchestrator-g1-pro",
         *(f"gemini-4-carbon-{e}" for e in LEVELS),
@@ -167,6 +169,7 @@ def test_custom_model_passes_through_without_thinking():
             None,
             "unsupported_reasoning_effort",
         ),
+        ("gemini-4-neon-xhigh", "high", None, "conflicting_reasoning_effort"),
         ("gemini-4-hydrogen-xhigh", "high", None, "conflicting_reasoning_effort"),
         ("gemini-4-hydrogen", "max", None, "unsupported_reasoning_effort"),
         ("gemini-4-hydrogen", "", 262145, "invalid_max_output_tokens"),

@@ -10,8 +10,8 @@ import httpx
 from kohakuterrarium.llm.antigravity.auth import AgyCredentials, AntigravityError
 from kohakuterrarium.llm.recovery.errors import ErrorClass, RetryPolicy
 
-AGY_VERSION = "1.5.7"
-AGY_CHANGELIST = "1019769835"
+AGY_VERSION = "1.5.13"
+AGY_CHANGELIST = "1025641825"
 
 
 def user_agent(system: str | None = None, machine: str | None = None) -> str:

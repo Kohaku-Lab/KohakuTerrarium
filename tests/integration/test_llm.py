@@ -2645,6 +2645,15 @@ class TestLlmIntegration:
                 (4096, {"thinkingLevel": "MEDIUM"}),
             ),
             (
+                "google-antigravity/gemini-4-neon@reasoning=xhigh,context=1048k",
+                "gemini-4-neon-xhigh",
+                1048576,
+                False,
+                262144,
+                {"thinkingLevel": "XHIGH"},
+                (4096, {"thinkingLevel": "XHIGH"}),
+            ),
+            (
                 "google-antigravity/gemini-4-hydrogen@reasoning=xhigh,context=1048k",
                 "gemini-4-hydrogen-xhigh",
                 1048576,

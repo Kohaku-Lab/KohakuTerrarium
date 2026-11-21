@@ -29,10 +29,11 @@ LEVELS = {
     effort: {"thinkingLevel": effort.upper()} for effort in ("low", "medium", "high")
 }
 
+LEVELS_XHIGH = {**LEVELS, "xhigh": {"thinkingLevel": "XHIGH"}}
+
 MODELS = {
-    "gemini-4-hydrogen": ModelSpec(
-        (256000, 1048576), 262144, {**LEVELS, "xhigh": {"thinkingLevel": "XHIGH"}}
-    ),
+    "gemini-4-hydrogen": ModelSpec((256000, 1048576), 262144, LEVELS_XHIGH),
+    "gemini-4-neon": ModelSpec((256000, 1048576), 262144, LEVELS_XHIGH),
     "gemini-pro-orchestrator-g1-pro": ModelSpec(
         (256000, 1048576),
         65536,

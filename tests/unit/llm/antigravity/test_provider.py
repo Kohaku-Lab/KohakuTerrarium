@@ -243,6 +243,7 @@ async def test_account_change_during_project_discovery_never_uses_old_project(
 
 # Supported agy agent wire IDs.
 AGY_AGENT_MODELS = {
+    *(f"gemini-4-neon-{effort}" for effort in ("low", "medium", "high", "xhigh")),
     *(f"gemini-4-hydrogen-{effort}" for effort in ("low", "medium", "high", "xhigh")),
     "gemini-pro-orchestrator-g1-pro",
     *(f"gemini-4-argon-{effort}" for effort in ("low", "medium", "high")),
@@ -267,6 +268,7 @@ FLASH_BUDGETS = {"low": 1000, "medium": 4000, "high": -1}
         for family, limit in (
             ("gemini-4-argon", 65536),
             ("gemini-4-hydrogen", 262144),
+            ("gemini-4-neon", 262144),
             ("claude-opus-5-5", 128000),
             ("claude-sonnet-5-5", 128000),
         )

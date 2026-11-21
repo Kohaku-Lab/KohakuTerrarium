@@ -26,6 +26,7 @@ User-Agent 决定返回哪份列表，KT 发送与 agy 相同的 `antigravity/cl
 
 | `google-antigravity/` 下的预设 | 上下文选项 | 输出 | reasoning 档位 | 发送的 thinking |
 | --- | --- | ---: | --- | --- |
+| `gemini-4-neon` | 256k（默认）、1048k | 262,144 | low、medium、high、xhigh | `thinkingLevel` |
 | `gemini-4-hydrogen` | 256k（默认）、1048k | 262,144 | low、medium、high、xhigh | `thinkingLevel` |
 | `gemini-pro-orchestrator-g1-pro` | 256k（默认）、1048k | 65,536 | 仅 high | `thinkingLevel: HIGH`；固定实际 ID |
 | `gemini-4-argon` | 256k（默认）、512k、900k | 65,536 | low、medium、high | `thinkingLevel` |
@@ -35,14 +36,14 @@ User-Agent 决定返回哪份列表，KT 发送与 agy 相同的 `antigravity/cl
 | `gpt-oss-120b` | 80k（默认）、131k | 32,768 | 仅 medium | `thinkingBudget` 8,192 |
 
 模型系列的每个档位是独立的实际模型 `<预设>-<档位>`（如 `gemini-4-argon-high`），并发送目录中
-对应的 thinking 设置。模型系列默认档位为 **medium**，Hydrogen 还支持 `@reasoning=xhigh`。
+对应的 thinking 设置。模型系列默认档位为 **medium**，Hydrogen 和 Neon 还支持 `@reasoning=xhigh`。
 模型系列可用 `@reasoning=low|medium|high` 或 CLI/Web 模型选择器切换。
 Orchestrator 使用固定 ID 和 HIGH thinking，不追加档位后缀，也不提供 reasoning 选择器。也接受 `claude-opus-5-5-low` 等明确 ID，ID 与 effort 冲突会在
 读取凭据前报错。Gemini 4 Argon 需要 Google AI Ultra（或符合条件的 Enterprise）账号。
 目录标注 GPT-OSS 将于 2026-11-02 下线。
 
 `context` variation 设置 profile 的 `max_context`，即 KT 压缩历史所依据的预算。
-其他模型沿用 agy 的压缩上限；Hydrogen 和 Orchestrator 使用保守的 256k 默认值，
+其他模型沿用 agy 的压缩上限；Hydrogen、Neon 和 Orchestrator 使用保守的 256k 默认值，
 可选目录上限 1,048,576（`context=1048k`）。其他更大的选项分别来自 agy 的 Argon 上下文选择（512k / 900k）、
 agy 的 Claude 长上下文上限（840k）以及目录最大值（Flash 1048k、GPT-OSS 131k）。
 该选项不发送给服务端；窗口越大，每轮请求携带的输入越多，额度消耗也随之增加。
@@ -69,8 +70,8 @@ default alias，精确匹配 `service=gemini`、`username=antigravity`。
 只接受 consumer Bearer 凭据；access token 仅驻留内存，不进入日志。
 KT 通过有超时限制的 agy 子进程刷新，跨进程锁及进程内共享任务避免重复刷新。
 
-请求固定发往 `daily-cloudcode-pa.googleapis.com`，使用 agy 1.5.7
-请求头配置（changelist `1019769835`），OS 和架构跟随本机，不跟随重定向。项目发现与凭据代次绑定；账号切换期间会重新核验。
+请求固定发往 `daily-cloudcode-pa.googleapis.com`，使用 agy 1.5.13
+请求头配置（changelist `1025641825`），OS 和架构跟随本机，不跟随重定向。项目发现与凭据代次绑定；账号切换期间会重新核验。
 收到任何文本、思考、工具调用或签名后，不自动重发该推理。
 
 会话保存原始签名片段，同时绑定实际模型 ID、项目与当前消息内容。

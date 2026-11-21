@@ -33,6 +33,7 @@ and a 404 for models outside it. Limits are token limits, not account quota.
 
 | Preset under `google-antigravity/` | Context choices | Output | Reasoning | Thinking sent |
 | --- | --- | ---: | --- | --- |
+| `gemini-4-neon` | 256k (default), 1048k | 262,144 | low, medium, high, xhigh | `thinkingLevel` |
 | `gemini-4-hydrogen` | 256k (default), 1048k | 262,144 | low, medium, high, xhigh | `thinkingLevel` |
 | `gemini-pro-orchestrator-g1-pro` | 256k (default), 1048k | 65,536 | high only | `thinkingLevel: HIGH`; fixed wire ID |
 | `gemini-4-argon` | 256k (default), 512k, 900k | 65,536 | low, medium, high | `thinkingLevel` |
@@ -43,7 +44,7 @@ and a 404 for models outside it. Limits are token limits, not account quota.
 
 For model families, each effort is its own wire model, `<preset>-<effort>` (for example
 `gemini-4-argon-high`), with the thinking setting the catalog lists for it. The
-default family effort is **medium**. Hydrogen also accepts `@reasoning=xhigh`.
+default family effort is **medium**. Hydrogen and Neon also accept `@reasoning=xhigh`.
 Select family effort with `@reasoning=low|medium|high` or the CLI/Web model picker.
 Orchestrator uses its exact ID with HIGH thinking, without an effort suffix or
 reasoning selector. Explicit IDs such as `claude-opus-5-5-low` are
@@ -52,7 +53,7 @@ authentication. Gemini 4 Argon requires a Google AI Ultra (or eligible
 Enterprise) account. The catalog marks GPT-OSS for removal on 2026-11-02.
 
 The `context` variation sets the profile's `max_context`, the history budget KT
-compacts against. Hydrogen and Orchestrator use a conservative 256k default with the catalog's
+compacts against. Hydrogen, Neon and Orchestrator use a conservative 256k default with the catalog's
 1,048,576-token maximum available as `context=1048k`. Other defaults are agy's
 compaction limits; the larger
 choices are agy's Argon context picker (512k / 900k), agy's Claude long-context
@@ -88,7 +89,7 @@ lock serializes refreshes across KT processes, and concurrent callers share one
 refresh within a process.
 
 The transport is pinned to `https://daily-cloudcode-pa.googleapis.com`, using the
-agy 1.5.7 header profile (changelist `1019769835`), with host OS and architecture.
+agy 1.5.13 header profile (changelist `1025641825`), with host OS and architecture.
 Redirects are rejected.
 Each request rereads credentials. Project discovery is checked against the token
 used so that an account switch cannot silently combine a new token and an old

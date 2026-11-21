@@ -18,10 +18,10 @@ from kohakuterrarium.llm.antigravity.auth import AntigravityError
         ("win32", "ARM64", "os_type=windows; arch=arm64"),
     ],
 )
-def test_agy_157_header_profile(system, machine, expected):
+def test_agy_header_profile(system, machine, expected):
     assert user_agent(system, machine) == (
-        f"antigravity/cli/1.5.7 (aidev_client; {expected}; "
-        "cl=1019769835; auth_method=consumer)"
+        f"antigravity/cli/1.5.13 (aidev_client; {expected}; "
+        "cl=1025641825; auth_method=consumer)"
     )
 
 
@@ -43,7 +43,7 @@ async def test_discovery_uses_empty_body_and_one_401_refresh(monkeypatch, tmp_pa
         requests.append(request)
         assert json.loads(request.content) == {}
         assert request.url.path.endswith("fetchAvailableModels")
-        assert request.headers["user-agent"].startswith("antigravity/cli/1.5.7 (")
+        assert request.headers["user-agent"].startswith("antigravity/cli/1.5.13 (")
         assert "auth_method=consumer" in request.headers["user-agent"]
         assert "client-metadata" not in request.headers
         if len(requests) == 1:
