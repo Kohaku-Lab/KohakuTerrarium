@@ -16,6 +16,7 @@ from kohakuterrarium.session.memory.visibility import (
     requested_store_view,
     resolve_search_view,
 )
+from kohakuterrarium.session.memory.blocks import _anchor
 from kohakuterrarium.session.memory.source import (
     SourceFrontier,
     TailHistory,
@@ -117,6 +118,11 @@ class SessionIndexReconciler:
             changed |= bool(view.suffix)
             views[name] = view
             catalogs[name] = latest
+        # The source can advance while multiple Agent catalogues are being
+        # consulted. A single initial frontier does not certify their shared
+        # snapshot; fail closed to one full capture on a concurrent append.
+        if source_frontier(self._store) != frontier:
+            return None
         return IndexSourceSnapshot(
             views, tuple(names), frontier, catalogs, published=not changed
         )
@@ -278,6 +284,64 @@ class SessionIndexReconciler:
             source, source.agents if project_all else requested, overrides
         )
 
+    def _can_append_vectors(self, source: IndexSourceSnapshot, manifest: dict) -> bool:
+        """Incrementally encode only a proven appended suffix.
+
+        A READY/DIRTY vector corpus with unchanged model/generation can reuse the
+        prior Agent checkpoints. Missing, interrupted or rewritten prefixes
+        require full source capture; a virtual TailHistory cannot replay them.
+        """
+        if (
+            manifest.get("vector") not in ("ready", "dirty")
+            or manifest.get("vector_identity") != self._memory._vector_identity
+            or manifest.get("vector_dimensions") != self._memory._embedder.dimensions
+            or manifest.get("vector_needs_clear", False)
+            or type(manifest.get("vector_generation")) is not int
+            or source.frontier is None
+            or not set(manifest.get("agents", ())) <= set(source.agents)
+        ):
+            return False
+        dims = self._memory._embedder.dimensions
+        state = self._memory._state
+        for name in source.agents:
+            events = source.events[name]
+            if not isinstance(events, TailHistory):
+                return False
+            key = f"{name}:cursor:vectors:{dims}"
+            checkpoint = state.get(key)
+            if events.old_count == 0 and not checkpoint:
+                continue
+            if (
+                not isinstance(checkpoint, dict)
+                or checkpoint.get("count") != events.old_count
+                or checkpoint.get("index_epoch") != manifest.get("epoch")
+                or checkpoint.get("vector_generation")
+                != manifest.get("vector_generation")
+                or checkpoint.get("embedder_identity") != self._memory._vector_identity
+                or checkpoint.get("generation") != self._memory._generation(name)
+                or not checkpoint.get("source_refs_complete", False)
+                or not checkpoint.get("all_branches", False)
+                or state.get(f"{key}:pending", False)
+                or (
+                    events.old_count > 0
+                    and (
+                        events.previous is None
+                        or checkpoint.get("anchor") != _anchor(events.previous)
+                    )
+                )
+                or (
+                    events.old_count == 0 and checkpoint.get("anchor") not in ("", None)
+                )
+            ):
+                return False
+            # A same-length FTS rewrite (or an aborted keyword rebuild)
+            # cannot be proven compatible from an append cursor alone.
+            if not events.suffix and checkpoint.get("keyword_revision") != state.get(
+                f"{name}:cursor:keywords:revision", 0
+            ):
+                return False
+        return True
+
     def prepare_vectors(
         self, source: IndexSourceSnapshot, requested: list[str]
     ) -> tuple[IndexSourceSnapshot, tuple[str, ...]]:
@@ -302,6 +366,8 @@ class SessionIndexReconciler:
             else:
                 return source, ()
         if rebuild:
+            if manifest is not None and self._can_append_vectors(source, manifest):
+                return source, source.agents
             source = self.capture(requested, all_agents=True)
             self.refresh_keywords(source)
             return source, source.agents
@@ -380,6 +446,18 @@ class SessionIndexReconciler:
             if force and any(
                 isinstance(events, TailHistory) for events in source.events.values()
             ):
+                source = self.capture(list(source.agents), all_agents=True)
+            if (
+                not force
+                and not source.published
+                and any(
+                    isinstance(events, TailHistory) for events in source.events.values()
+                )
+                and self._memory._has_vectors
+                and not self._can_append_vectors(source, self._memory._manifest() or {})
+            ):
+                # Saved build() may skip prepare_vectors(), so its destructive
+                # vector recovery must recapture the complete source.
                 source = self.capture(list(source.agents), all_agents=True)
             if not force and self._published_source_is_current(source):
                 # An old v2 index may be fully current but predate the

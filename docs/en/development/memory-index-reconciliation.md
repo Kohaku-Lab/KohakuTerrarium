@@ -233,10 +233,16 @@ contract, the memory index records a derived, compact source catalogue
 (index epoch, FTS revision, physical event row count, Session ID, last
 source fingerprint, and branch candidates) after a complete publication.
 
-A stable query checks the small published catalogue and physical row count,
-then reads the FTS/vector index directly. A normal append adds new physical
-keys sequentially; the reconciler reads only the newly appended suffix and
-uses the existing incremental extraction cursor. Repeated queries do not
+A stable query checks the small published catalogue and physical row count
+**before and after** projecting the whole Agent roster, then reads the
+FTS/vector index directly. If an append crosses that snapshot boundary, the
+cache is discarded and a full source reconciliation is required. A normal
+append adds new physical keys sequentially; the reconciler reads only the
+newly appended suffix and uses the existing incremental extraction cursor.
+A DIRTY vector corpus with unchanged model/generation and matching pre-append
+Agent checkpoints can embed this suffix without reloading full history.
+Missing or incomplete vector checkpoints, model changes and interrupted builds
+still require full-source recovery. Repeated unchanged queries do not
 reload the full event log or recompute its ancestry. For saved searches,
 the read-only memory source avoids rebuilding unrelated event counters on
 every open. The navigator enumerates physical event keys once per active
