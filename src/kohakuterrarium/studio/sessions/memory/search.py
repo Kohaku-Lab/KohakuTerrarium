@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import SessionError, SessionNotFoundError
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    EmbeddingAuthenticationError,
+    create_embedder,
+    resolve_session_embedding_config,
+)
 from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.memory.async_search import live_memory_for_store
@@ -77,21 +81,8 @@ def build_embeddings(
 
 
 def _resolve_embed_config(store: SessionStore, live_agent: Any) -> dict[str, Any]:
-    """Mirror ``builtins/tools/search_memory.py`` config resolution."""
-    embed_config: dict[str, Any] | None = None
-    try:
-        saved = store.state.get("embedding_config")
-        if isinstance(saved, dict):
-            embed_config = saved
-    except (KeyError, Exception):
-        pass
-    if embed_config is None and live_agent and hasattr(live_agent, "config"):
-        memory_cfg = getattr(live_agent.config, "memory", None)
-        if isinstance(memory_cfg, dict) and "embedding" in memory_cfg:
-            embed_config = memory_cfg["embedding"]
-    if embed_config is None:
-        embed_config = {"provider": "auto"}
-    return embed_config
+    """Use the same model and authentication resolver as live memory tools."""
+    return resolve_session_embedding_config(store, live_agent)
 
 
 def _search_session_sync(
@@ -128,8 +119,12 @@ def _search_session_sync(
                 embed_config = _resolve_embed_config(store, live_agent)
                 try:
                     embedder = create_embedder(embed_config)
+                except EmbeddingAuthenticationError:
+                    # Do not silently downgrade an explicitly configured API
+                    # model when no current credential can authenticate it.
+                    raise
                 except Exception as e:
-                    _ = e  # Search can fall back to FTS when embedding is unavailable.
+                    _ = e  # Other embedder failures retain the historical FTS fallback.
                     embedder = None
 
             memory = SessionMemory(

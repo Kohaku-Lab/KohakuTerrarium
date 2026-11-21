@@ -13,6 +13,7 @@ from kohakuterrarium.session.memory.embedding import (
     create_embedder,
     effective_embedding_config,
 )
+from kohakuterrarium.session.memory.embedding_spec import persisted_embedding_config
 from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.memory.query import _ALL_BRANCH_INDEX_FORMAT
 from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
@@ -223,8 +224,8 @@ def build_index(
             if total_blocks_indexed > 0:
                 # A successful build must not silently publish an unrestorable
                 # model identity if writing its effective spec fails.
-                store.state["embedding_config"] = effective_embedding_config(
-                    embed_config, embedder
+                store.state["embedding_config"] = persisted_embedding_config(
+                    effective_embedding_config(embed_config, embedder)
                 )
 
             stats = memory.get_stats()

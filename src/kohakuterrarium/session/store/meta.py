@@ -4,7 +4,10 @@ import platform
 from datetime import datetime, timezone
 from typing import Any
 
-from kohakuterrarium.session.memory.embedding_spec import canonical_embedding_spec
+from kohakuterrarium.session.memory.embedding_spec import (
+    embedding_space_identity,
+    persisted_embedding_config,
+)
 from kohakuterrarium.session.store.identity import (
     legacy_conversation_id,
     new_conversation_id,
@@ -68,7 +71,7 @@ class StoreMetaMixin:
             self.meta["terrarium_creatures"] = terrarium_creatures
 
     def claim_embedding_config(self, creature: str, config: dict[str, Any]) -> None:
-        """Enforce one embedding configuration for a shared SessionStore.
+        """Enforce one declared embedding space for a shared SessionStore.
 
         Multiple Creatures can start concurrently in a Terrarium; the
         check-and-write must use the same store-wide gate as event appends.
@@ -78,20 +81,45 @@ class StoreMetaMixin:
             raise PermissionError("Cannot set embedding config on a read-only session")
         with self._flush.lock:
             saved = self.state.get("embedding_config")
-            if saved is None:
-                self.state["embedding_config"] = dict(config)
-            elif not isinstance(saved, dict) or (
-                canonical_embedding_spec(saved)
-                != canonical_embedding_spec(
-                    config, anchor=canonical_embedding_spec(saved)
-                )
+            anchor = embedding_space_identity(saved) if isinstance(saved, dict) else {}
+            if saved is not None and (
+                not isinstance(saved, dict)
+                or anchor != embedding_space_identity(config, anchor=anchor)
             ):
                 raise ValueError(
                     f"Creature {creature!r} has a conflicting session embedding "
                     "configuration; all Creatures sharing a SessionStore must "
-                    "use the same model. Rebuild the session embedding index "
-                    "explicitly to change it."
+                    "declare a compatible embedding space. Rebuild the session "
+                    "embedding index explicitly to change the model or its "
+                    "vector-producing settings."
                 )
+
+            # Model compatibility and runtime authentication have separate
+            # authority. Never write an inline API key to SessionStore state.
+            persisted = persisted_embedding_config(
+                saved if saved is not None else config
+            )
+            if "api_key_env" in config:
+                if config["api_key_env"]:
+                    persisted["api_key_env"] = config["api_key_env"]
+                else:
+                    persisted.pop("api_key_env", None)
+            elif config.get("api_key"):
+                persisted.pop("api_key_env", None)
+            if saved != persisted:
+                self.state["embedding_config"] = persisted
+
+            # Only this open SessionStore retains the current inline key.
+            # Saved-session operations in a later process must resolve their
+            # credentials from the current environment, never legacy state.
+            auth = {
+                key: config[key]
+                for key in ("api_key", "api_key_env")
+                if config.get(key)
+            }
+            # A subsequent compatible claim must not retain a previous
+            # Creature's inline key when it no longer supplies that key.
+            self._embedding_runtime_auth = auth
 
     def update_status(self, status: str) -> None:
         """Update session status (running, paused, completed, crashed)."""

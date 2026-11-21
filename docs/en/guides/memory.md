@@ -81,6 +81,19 @@ A conflicting Creature configuration is rejected on startup instead of
 silently changing another Creature's model. To change the session model,
 explicitly rebuild the embedding index and align the Creatures' configurations.
 
+KT compares the **declared** embedding space (provider, model, endpoint,
+dimensions and supported vector-affecting options). This does not prove that a
+remote provider keeps the same weights or account routing behind a model name;
+the provider/user is responsible for such changes and for explicitly
+rebuilding the index. API credentials and the environment-variable name are
+not part of the vector identity: rotating them does not require re-embedding.
+The dedicated SessionStore embedding_config record no longer persists
+inline API keys. Saved-session CLI and Studio searches resolve credentials
+from the current environment (an
+optional saved key-environment name is only a lookup hint); an expired key
+saved by an older version is not used. Provide current credentials for
+semantic search, or use FTS without an embedder.
+
 ## Search from the CLI
 
 ```bash

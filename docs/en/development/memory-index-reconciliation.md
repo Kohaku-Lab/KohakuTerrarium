@@ -189,3 +189,34 @@ The existing `vector_needs_clear` flag forces a full table clear and
 generation restart before the new participant batch can be published.
 No new persisted fields, background retry manager or SessionStore source
 format change are introduced.
+
+
+### Embedding-space compatibility is a declaration
+
+A shared SessionStore verifies **declared** embedding-space compatibility, not
+the behavior of a remote model service. The supported identity projection
+covers provider, normalized model name, API endpoint, requested dimensions,
+and other vector-affecting options KT actually passes to the embedder. Device
+selection, unknown options, the API key, and its environment-variable name
+are not evidence of a different embedding space. A model name or deployment
+alias can be silently remapped by a provider or behave differently between
+accounts; KT does not probe weights, fingerprint remote responses, or
+automatically repair these changes. Users/providers must change the declared
+identity and explicitly re-embed when the space changes.
+
+SessionStore's embedding_config retains the model declaration, but newly
+written records omit inline API secrets. A non-secret api_key_env hint may
+remain so saved-session CLI/Studio searches can use the **current** process
+environment. Live searches prefer authentication from the current Creature
+configuration or its open SessionStore's volatile claim. A legacy persisted
+api_key is never used to authenticate a new client and is scrubbed on a
+compatible Creature claim. Without current API credentials, explicit
+semantic search reports an authentication error instead of secretly
+reusing a historical key. A running API client does not automatically hot-swap
+credentials: a newly constructed client uses the current source.
+
+Neither credential rotation nor environment-variable renaming invalidates
+the vector corpus. A different declared model, endpoint or dimensions
+remains a compatibility conflict and requires an explicit rebuild. This
+boundary does not add a Secret Manager, background drift detection, or a new
+persistent index identity format.

@@ -14,7 +14,10 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    create_embedder,
+    resolve_session_embedding_config,
+)
 from kohakuterrarium.session.memory.context import MemoryContextError
 from kohakuterrarium.session.memory.preview import preview_text
 from kohakuterrarium.session.memory.async_search import (
@@ -223,19 +226,6 @@ class SearchMemoryTool(BaseTool):
             session._memory = memory
         return memory
 
-    def _load_embed_config(self, store: Any, agent: Any) -> dict[str, Any] | None:
-        """Resolve embedding configuration by persistence precedence."""
-        # Persisted state preserves the embedding model used by an existing index.
-        try:
-            saved = store.state.get("embedding_config")
-            if isinstance(saved, dict):
-                return saved
-        except (KeyError, Exception):
-            pass
-
-        if agent and hasattr(agent, "config"):
-            memory_cfg = getattr(agent.config, "memory", None)
-            if isinstance(memory_cfg, dict) and "embedding" in memory_cfg:
-                return memory_cfg["embedding"]
-
-        return {"provider": "auto"}
+    def _load_embed_config(self, store: Any, agent: Any) -> dict[str, Any]:
+        """Keep the persisted model while using current authentication."""
+        return resolve_session_embedding_config(store, agent)

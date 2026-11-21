@@ -195,6 +195,38 @@ class TestBuildEmbeddings:
 # ── search_session_memory ────────────────────────────────────
 
 
+@pytest.mark.asyncio
+async def test_saved_expired_api_credentials_return_authentication_error(
+    tmp_path, monkeypatch
+):
+    from kohakuterrarium.errors import SessionError
+
+    path = tmp_path / "old-api-auth.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_input",
+            {"content": "needle"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.state["embedding_config"] = {
+            "provider": "api",
+            "model": "embed-model",
+            "api_key": "expired-token",
+        }
+    finally:
+        store.close(update_status=False)
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(SessionError, match="authentication.*api_key") as caught:
+        await mem_mod.search_session_memory(path, q="needle", mode="semantic")
+    assert "expired-token" not in str(caught.value)
+
+
 class TestSearchSessionMemory:
     async def test_saved_search_obeys_persisted_branch_selection(self, tmp_path):
         path = tmp_path / "branch-search.kohakutr"

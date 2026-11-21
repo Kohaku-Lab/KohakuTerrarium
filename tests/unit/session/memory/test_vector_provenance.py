@@ -164,3 +164,28 @@ def test_cli_search_refreshes_keywords_without_writing_wrong_model_vectors(
         } == {"needle first", "needle later"}
     finally:
         check.close()
+
+
+def test_cli_saved_api_key_is_not_reused_for_semantic_search(
+    tmp_path, monkeypatch, capsys
+):
+    from kohakuterrarium.cli import memory as cli_memory
+
+    path = tmp_path / "old-api-credentials.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        store.state["embedding_config"] = {
+            "provider": "api",
+            "model": "m",
+            "api_key": "old-secret",
+        }
+    finally:
+        store.close(update_status=False)
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(cli_memory, "_resolve_session", lambda _: path)
+    assert cli_memory.search_cli("s", "needle", mode="semantic") == 1
+    output = capsys.readouterr().out
+    assert "Embedding authentication unavailable" in output
+    assert "old-secret" not in output

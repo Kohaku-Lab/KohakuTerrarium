@@ -10,12 +10,14 @@ import httpx
 import numpy as np
 
 from kohakuterrarium.session.memory.embedding_spec import (
+    DEFAULT_API_EMBEDDING_URL,
     DEFAULT_M2V_MODEL as DEFAULT_M2V_MODEL,
     DEFAULT_ST_MODEL as DEFAULT_ST_MODEL,
     MODEL2VEC_PRESETS,
     ST_PRESETS,
     _resolve_preset as _resolve_preset,
     canonical_embedding_spec,
+    persisted_embedding_config,
 )
 
 from kohakuterrarium.utils.logging import get_logger
@@ -143,7 +145,7 @@ class APIEmbedder(BaseEmbedder):
         self,
         api_key: str,
         model: str = "text-embedding-3-small",
-        base_url: str = "https://api.openai.com/v1",
+        base_url: str = DEFAULT_API_EMBEDDING_URL,
         dimensions: int | None = None,
     ):
         self._client = httpx.Client(
@@ -176,6 +178,10 @@ class APIEmbedder(BaseEmbedder):
         if self.dimensions == 0:
             self.dimensions = result.shape[1]
         return result
+
+
+class EmbeddingAuthenticationError(ValueError):
+    """A configured API embedding service has no current credentials."""
 
 
 class NullEmbedder(BaseEmbedder):
@@ -250,6 +256,47 @@ def effective_embedding_config(
     return spec
 
 
+def resolve_session_embedding_config(store: Any, agent: Any = None) -> dict[str, Any]:
+    """Use saved model declarations, but current runtime authentication.
+
+    Legacy SessionStores may contain an inline key. Never recover it as
+    authentication: live sessions use a current Creature claim / config,
+    while offline sessions resolve non-secret environment-variable hints.
+    """
+    saved = None
+    try:
+        value = store.state.get("embedding_config")
+        if isinstance(value, dict):
+            saved = persisted_embedding_config(value)
+    except (KeyError, Exception):
+        pass
+
+    active = None
+    if agent is not None:
+        memory = getattr(getattr(agent, "config", None), "memory", None)
+        if isinstance(memory, dict):
+            candidate = memory.get("embedding")
+            if isinstance(candidate, dict):
+                active = candidate
+
+    base = dict(saved or active or {"provider": "auto"})
+    runtime_auth = getattr(store, "_embedding_runtime_auth", None)
+    auth_source = (
+        active
+        if active and any(active.get(k) for k in ("api_key", "api_key_env"))
+        else runtime_auth
+    )
+    if isinstance(auth_source, dict):
+        # An explicit current key supersedes a potentially stale saved env
+        # locator; the locator itself is safe to keep only as a fallback.
+        if auth_source.get("api_key"):
+            base.pop("api_key_env", None)
+            base["api_key"] = auth_source["api_key"]
+        elif auth_source.get("api_key_env"):
+            base["api_key_env"] = auth_source["api_key_env"]
+    return base
+
+
 def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
     """Create an embedder from provider, model, dimension, and device settings.
 
@@ -279,11 +326,13 @@ def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
                 api_key_env = config.get("api_key_env", "OPENAI_API_KEY")
                 api_key = os.environ.get(api_key_env, "")
             if not api_key:
-                raise ValueError("API embedding requires api_key or api_key_env")
+                raise EmbeddingAuthenticationError(
+                    "API embedding authentication requires api_key or api_key_env"
+                )
             return APIEmbedder(
                 api_key=api_key,
                 model=config.get("model", "text-embedding-3-small"),
-                base_url=config.get("base_url", "https://api.openai.com/v1"),
+                base_url=config.get("base_url", DEFAULT_API_EMBEDDING_URL),
                 dimensions=config.get("dimensions"),
             )
 

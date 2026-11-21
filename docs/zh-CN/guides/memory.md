@@ -78,6 +78,17 @@ Creature 必须使用相同的 Embedding 配置。配置冲突会在 Creature �
 不会静默覆盖其他 Creature 的模型。需要切换 Session 模型时，应明确重建向量索引，
 并同步调整各 Creature 的配置。
 
+KT 比较的是**声明的向量空间配置**（Provider、模型、Endpoint、维度以及 KT 实际支持并传给
+Embedding 实现的相关参数），并不验证远端服务是否在相同模型名称下更换权重或路由；
+这类变化由服务提供方或用户负责，必要时应显式重建索引。API Key 和环境变量名
+不属于向量索引身份，轮换凭据无需重新计算向量。
+
+SessionStore 的 embedding_config 记录不再保存明文 API Key。离线 CLI / Studio 检索从当前环境变量
+解析认证信息；持久化的环境变量名仅是非敏感的查找提示。旧版本保存在 SessionStore
+中的 API Key 不会被再次用于认证；无法获取当前有效凭据时，应明确报告认证问题，
+或者使用不需要 Embedding 的 FTS 模式。
+
+
 ## 从 CLI 搜索
 
 ```bash

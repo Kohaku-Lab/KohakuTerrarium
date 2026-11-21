@@ -123,3 +123,56 @@ def canonical_embedding_spec(
         ):
             spec["base_url"] = anchor["base_url"]
     return spec
+
+
+# These are the known inputs KT actually passes to supported embedding
+# implementations. This identity is a declaration, not proof that a remote
+# server's weights or account-dependent routing remain unchanged.
+_IDENTITY_FIELDS = {
+    "model2vec": ("provider", "model"),
+    "sentence-transformer": ("provider", "model", "dimensions"),
+    "api": ("provider", "model", "base_url", "dimensions"),
+    # Even before auto resolution, explicitly requested generation options
+    # cannot be ignored: a different model name must remain a conflict.
+    "auto": ("provider", "model", "base_url", "dimensions"),
+    "none": ("provider",),
+}
+DEFAULT_API_EMBEDDING_URL = "https://api.openai.com/v1"
+
+
+def embedding_space_identity(
+    config: dict[str, Any] | None, *, anchor: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Compare supported vector-generation inputs, never authentication.
+
+    Credential values, environment-variable names, device selection and
+    unknown provider-specific fields are not evidence of embedding-space
+    changes. Remote providers own their model-name / deployment stability.
+    """
+    normalized = canonical_embedding_spec(config, anchor=anchor)
+    if not normalized:
+        return {}
+    provider = normalized["provider"]
+    if provider == "api":
+        normalized.setdefault("base_url", DEFAULT_API_EMBEDDING_URL)
+    fields = _IDENTITY_FIELDS.get(
+        provider, ("provider", "model", "base_url", "dimensions")
+    )
+    return {field: normalized[field] for field in fields if field in normalized}
+
+
+def persisted_embedding_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Copy a model declaration without storing an inline API secret.
+
+    The optional api_key_env is a non-secret runtime lookup hint for
+    saved-session CLI/Studio operations, not a model identity field.
+    """
+    supported = {
+        "provider",
+        "model",
+        "base_url",
+        "dimensions",
+        "device",
+        "api_key_env",
+    }
+    return {key: value for key, value in config.items() if key in supported}

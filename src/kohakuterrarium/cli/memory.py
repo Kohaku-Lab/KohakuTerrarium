@@ -7,7 +7,11 @@ module is strictly the rich-CLI presentation layer.
 """
 
 from kohakuterrarium.cli.run import _resolve_session
-from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.embedding import (
+    EmbeddingAuthenticationError,
+    create_embedder,
+    resolve_session_embedding_config,
+)
 from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.memory.reconcile import SessionIndexReconciler
 from kohakuterrarium.session.store import SessionStore
@@ -88,9 +92,12 @@ def search_cli(
         embedder = None
         if mode in ("semantic", "hybrid", "auto"):
             try:
-                saved = store.state.get("embedding_config")
-                config = saved if isinstance(saved, dict) else {"provider": "auto"}
-                embedder = create_embedder(config)
+                embedder = create_embedder(resolve_session_embedding_config(store))
+            except EmbeddingAuthenticationError as e:
+                print(f"Embedding authentication unavailable: {e}")
+                if mode == "semantic":
+                    return 1
+                # Auto and hybrid can still use FTS after warning the user.
             except Exception as e:
                 logger.warning(
                     "Failed to create embedder for search", error=str(e), exc_info=True
