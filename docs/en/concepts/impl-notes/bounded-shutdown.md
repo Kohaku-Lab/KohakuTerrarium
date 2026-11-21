@@ -38,6 +38,9 @@ work. Repeated `Task.cancel()` is not a termination guarantee.
 
 - **No `grace`:** the shutdown waits for cooperative settlement
   indefinitely. This is the previous behaviour and stays the default.
+  Cleanup stages are awaited inline, so stop yields to the event loop
+  at the same points as before and a live turn cannot progress further
+  before it is cancelled.
 - **`grace=<seconds>`:** sets one monotonic deadline shared by every
   stage (plugins, processing task, turn lock, consumer, MCP, tool jobs,
   sub-agents, interrupt finalizers, triggers, input, compaction,

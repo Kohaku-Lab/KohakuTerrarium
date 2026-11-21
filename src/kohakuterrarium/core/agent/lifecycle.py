@@ -167,8 +167,7 @@ class AgentLifecycleMixin:
             )
             woke = await state.deadline.wait_change(state.done, budget)
             if not woke and not state.done.done():
-                if state.expired_stage is None:
-                    state.expired_stage = "shutdown"
+                self._mark_expired(state, "shutdown")
                 raise ShutdownIncompleteError(state.build_report())
 
     def _shutdown_outcome(self, state: ShutdownState) -> ShutdownReport:
@@ -257,7 +256,13 @@ class AgentLifecycleMixin:
     async def _run_stage(
         self, state: ShutdownState, name: str, awaitable: Awaitable[Any]
     ) -> Any:
-        """Run one cleanup stage, abandoning it uncancelled at the deadline."""
+        """Run one cleanup stage, abandoning it uncancelled at the deadline.
+
+        An unbounded shutdown awaits the stage inline, so it never yields to
+        the loop before cancelling the live turn.
+        """
+        if not state.deadline.bounded:
+            return await awaitable
         task = spawn_stage(f"{self.config.name}:{name}", awaitable)
         pending = await state.deadline.join({task}, force=state.forced)
         if pending:

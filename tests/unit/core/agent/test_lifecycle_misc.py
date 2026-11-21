@@ -895,6 +895,40 @@ class TestBoundedShutdown:
         assert agent.input.stop.await_count == 1
         assert agent.trigger_manager.stop_all.await_count == 1
 
+    async def test_unbounded_stop_cancels_turn_before_it_can_progress(self):
+        agent = _shutdown_agent()
+        gate = asyncio.Event()
+        steps = []
+
+        async def turn():
+            await gate.wait()
+            steps.append("progressed")
+
+        task = asyncio.create_task(turn())
+        await asyncio.sleep(0)
+        agent._processing_task = task
+        gate.set()
+        report = await agent.stop()
+        assert report.settled
+        assert steps == [] and task.cancelled()
+
+    async def test_joiner_timeout_revokes_sinks_of_a_stuck_unbounded_stop(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        agent.trigger_manager.stop_all = release.wait
+        owner = asyncio.create_task(agent.stop())
+        await agent._shutdown_event.wait()
+        await asyncio.sleep(0.01)
+        try:
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await asyncio.wait_for(agent.stop(grace=0.02), 3)
+            assert info.value.report.timed_out
+            assert agent.output_router.revoked
+            assert agent.controller.conversation.sealed
+        finally:
+            release.set()
+            await asyncio.gather(owner, return_exceptions=True)
+
     async def test_invalid_requests_are_rejected(self):
         agent = _shutdown_agent()
         with pytest.raises(InvalidRequestError):
