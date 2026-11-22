@@ -178,3 +178,82 @@ def test_peer_append_does_not_rewrite_unmodified_branch_candidates(tmp_path):
             assert "_branches" not in source.catalogs["alice"]
             assert memory._state.get("alice:memory_branch_catalog") == alice
             assert memory._state.get("bob:memory_branch_catalog")["count"] == 2
+
+
+def test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads(
+    tmp_path, monkeypatch
+):
+    """A verified peer source needs only a small certificate refresh."""
+    path = tmp_path / "multi-agent-source-proof.kohakutr"
+    with closing(SessionStore(path)) as store:
+        agents = ("alice", "bob", "charlie")
+        store.init_meta("s", "terrarium", "", str(tmp_path), list(agents))
+        for name in agents:
+            store.append_event(
+                name,
+                "user_input",
+                {"content": f"{name} old needle"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
+            rec = SessionIndexReconciler(store, memory)
+            rec.build(rec.capture([], all_agents=True))
+            peer_cursor = memory._state["alice:cursor:keywords"]
+            store.append_event(
+                "bob",
+                "user_input",
+                {"content": "bob appended needle"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            source = rec.capture_or_reuse(["bob"])
+            assert source.unchanged_prefix_agents == {"alice", "charlie"}
+            assert len(source.events["bob"].suffix) == 1
+            original_get = memory._state.get
+            original_index = memory._index_keywords
+            calls = []
+
+            def no_peer_cursor_read(key, *args, **kwargs):
+                if key in ("alice:cursor:keywords", "charlie:cursor:keywords"):
+                    raise AssertionError("unmodified Agent cursor was deserialized")
+                return original_get(key, *args, **kwargs)
+
+            def only_changed_agent(name, events, *args, **kwargs):
+                calls.append(name)
+                assert name == "bob"
+                return original_index(name, events, *args, **kwargs)
+
+            with monkeypatch.context() as patch:
+                patch.setattr(memory._state, "get", no_peer_cursor_read)
+                patch.setattr(memory, "_index_keywords", only_changed_agent)
+                refreshed, _ = rec.prepare_keywords(["bob"])
+                assert not refreshed.published
+            assert calls == ["bob"]
+            assert memory._state["alice:cursor:keywords"] == peer_cursor
+            manifest = memory._manifest()
+            assert manifest["fts"] == "ready"
+            assert manifest["fts_pending"] == []
+            assert set(manifest["agents"]) == set(agents)
+            assert rec.probe_source_prefix(agents).published
+            for name in agents:
+                assert [
+                    hit.content
+                    for hit in memory.search(
+                        "old needle",
+                        mode="fts",
+                        agent=name,
+                        branch_views={name: {1: 1}},
+                    )
+                ] == [f"{name} old needle"]
+            assert [
+                hit.content
+                for hit in memory.search(
+                    "appended needle",
+                    mode="fts",
+                    agent="bob",
+                    branch_views={"bob": {1: 1, 2: 1}},
+                )
+            ] == ["bob appended needle"]

@@ -48,6 +48,21 @@ class IndexSourceSnapshot:
     def agents(self) -> tuple[str, ...]:
         return self.roster or tuple(self.events)
 
+    @property
+    def unchanged_prefix_agents(self) -> frozenset[str]:
+        """Agents whose READY keyword source was certified without new rows.
+
+        Full captures are deliberately excluded: they can be recovering an
+        incomplete index even when their event lists have not grown.
+        """
+        return frozenset(
+            name
+            for name, events in self.events.items()
+            if name in self.catalogs
+            and isinstance(events, TailHistory)
+            and not events.suffix
+        )
+
 
 class SessionIndexReconciler:
     """The single source-roster and cross-index refresh policy for a Session."""
@@ -215,18 +230,35 @@ class SessionIndexReconciler:
         if not manifest or manifest.get("fts") != "ready":
             return
         pending = []
+        unchanged = source.unchanged_prefix_agents
         for name, catalog in source.catalogs.items():
-            checkpoint = state.get(f"{name}:cursor:keywords")
-            if (
-                not isinstance(checkpoint, dict)
-                or checkpoint.get("count") != catalog.get("count")
-                or checkpoint.get("anchor") != catalog.get("anchor")
-                or checkpoint.get("index_epoch") != manifest["epoch"]
-                or checkpoint.get("generation") != self._memory._generation(name)
-                or not checkpoint.get("source_refs_complete", False)
-                or state.get(f"{name}:cursor:keywords:pending", False)
-            ):
-                continue
+            keyword_key = f"{name}:cursor:keywords"
+            revision = state.get(f"{keyword_key}:revision")
+            generation = self._memory._generation(name)
+            is_pending = state.get(f"{keyword_key}:pending", False)
+            # The prior Source Certificate already tied an unchanged Agent's
+            # full checkpoint to its revision, epoch and generation. Bob's
+            # append must not deserialize Alice's historical Round cursor.
+            unchanged_certified = (
+                name in unchanged
+                and type(revision) is int
+                and catalog.get("keyword_revision") == revision
+                and catalog.get("index_epoch") == manifest["epoch"]
+                and catalog.get("generation") == generation
+                and not is_pending
+            )
+            if not unchanged_certified:
+                checkpoint = state.get(keyword_key)
+                if (
+                    not isinstance(checkpoint, dict)
+                    or checkpoint.get("count") != catalog.get("count")
+                    or checkpoint.get("anchor") != catalog.get("anchor")
+                    or checkpoint.get("index_epoch") != manifest["epoch"]
+                    or checkpoint.get("generation") != generation
+                    or not checkpoint.get("source_refs_complete", False)
+                    or is_pending
+                ):
+                    continue
             key = f"{name}:memory_source_catalog"
             # Source proof is a small, independently readable derived value.
             # A candidate materialization belongs to that same accepted
@@ -244,8 +276,8 @@ class SessionIndexReconciler:
                 # revision. It proves that the large Round cursor is still
                 # the one accepted at publication, without decoding it on
                 # every stable query.
-                "keyword_revision": state.get(f"{name}:cursor:keywords:revision"),
-                "generation": self._memory._generation(name),
+                "keyword_revision": revision,
+                "generation": generation,
             }
             if state.get(key) != next_catalog:
                 pending.append((key, next_catalog))
@@ -278,7 +310,10 @@ class SessionIndexReconciler:
             or manifest.get("fts") != "ready"
         ):
             return True
+        unchanged = source.unchanged_prefix_agents
         for name, events in source.events.items():
+            if name in unchanged:
+                continue
             batch, blocks = self._memory._prepare(name, events, "keywords", 0)
             if batch.reset or batch.start != len(events) or blocks:
                 return True
@@ -299,10 +334,16 @@ class SessionIndexReconciler:
             # SessionReader preserves its historical explicit-index contract.
             return {}
         try:
+            unchanged = source.unchanged_prefix_agents
+            active = tuple(name for name in source.agents if name not in unchanged)
             if self._needs_keyword_roster(source):
-                self._memory._enroll_build_agents(source.agents, with_vectors=False)
+                self._memory._enroll_build_agents(active, with_vectors=False)
             updated = {
-                name: self._memory._index_keywords(name, events)
+                name: (
+                    0
+                    if name in unchanged
+                    else self._memory._index_keywords(name, events)
+                )
                 for name, events in source.events.items()
             }
             self._publish_source_catalogs(source)

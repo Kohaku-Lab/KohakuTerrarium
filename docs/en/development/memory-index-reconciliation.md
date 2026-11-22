@@ -409,3 +409,43 @@ long-lived open Rounds make the Keyword extraction Cursor about 881 KB at 320
 turns; ordinary Appends still have to read and update that cursor. This is a
 distinct Round-ownership/state-encoding problem, not a reason to weaken
 the source publication proof or build another durable source registry.
+
+### Multi-Agent append workset: verified peers are not refresh participants
+
+A second source of append cost is unrelated to shared ancestry. In a published
+multi-Agent index, an append to Bob previously enrolled and reprocessed every
+Agent, including Alice's unchanged Keyword Cursor. The Reconciler now derives
+the **unchanged certified Agent set** from the existing Source Prefix result:
+only Agents with an actual suffix participate in Keyword planning, FTS
+BUILDING/READY ownership and keyword writes. Unchanged Agents retain their
+previous Keyword Revision; their small source certificates advance to the
+new global frontier without loading Round cursors or Branch Candidates.
+The Source Prefix must have been certified first; a full capture, missing
+certificate, mismatch, or interrupted publication retains the complete
+reconciliation and recovery path. This adds no persistent state.
+
+A read-only survey of local SessionStore files identified representative
+multi-Agent shapes. Benchmarks operated only on temporary SQLite backups,
+and did not emit event contents or change the original sessions. These are
+one-off local measurements (Windows / Python 3.14.2), **not** an SLA or
+reproducible performance gate:
+
+| Snapshot | Agents / events | Append before | Append after | Gap recovery after |
+| --- | --- | --- | --- | --- |
+| 20.8 MiB | 7 / 7,150 | 55.7 / 51.6 ms | 19.3 / 20.5 ms | 190 ms |
+| 54.8 MiB | 7 / 14,733 | Not measured | 36.3 / 27.0 ms | 363 ms |
+
+The 20.8 MiB sample originally invoked `_index_keywords` for all seven
+Agents despite only one new physical suffix. Afterward, exactly one Agent
+was indexed in each normal Append. Both gap probes still executed one full
+physical-key enumeration and seven complete per-Agent source reads. Focused
+regression tests forbid opening an unchanged Agent's Keyword Cursor during
+a peer append and check that all Agents remain searchable after the
+Session-wide FTS publication.
+
+**Remaining independent cost:** a changed Agent's own long-lived Keyword
+Round Cursor may still require O(cursor size) decode/write/verification; the
+synthetic 320-turn fixture has an ~881 KiB Cursor, versus a 258-byte Source
+Certificate and ~12 KiB shared Branch Candidate materialization. This is a
+separate Round state-encoding and publication problem, not grounds to
+reintroduce a large source proof or expand the append participants.
