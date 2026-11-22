@@ -898,3 +898,153 @@ async def test_failed_append_gap_preserves_old_and_new_search_anchors(
         assert "initial-needle" in new_expansion.output
     finally:
         store.close(update_status=False)
+
+
+def test_peer_agent_appends_do_not_rescan_unmodified_reference_catalogue(
+    tmp_path,
+    monkeypatch,
+):
+    """Source Prefix Closure: local Bob appends cannot invalidate Alice refs."""
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+    from kohakuterrarium.session.memory import context as context_module
+
+    store = SessionStore(tmp_path / "peer-ref-proof.kohakutr")
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        _append(store, 1, "user_input", {"content": "alice anchor"})
+        navigator = MemoryContextNavigator(store)
+        real = context_module._ordered_event_refs
+        rescans = []
+
+        def counted(*args):
+            rescans.append(args[1])
+            return real(*args)
+
+        monkeypatch.setattr(context_module, "_ordered_event_refs", counted)
+        try:
+            initial = navigator._refs_for("alice")
+            assert len(initial) == 1
+            for i in range(3):
+                store.append_event(
+                    "bob",
+                    "user_input",
+                    {"content": f"bob event {i}"},
+                    turn_index=i + 1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+                current = navigator._refs_for("alice")
+                assert current is initial
+                assert [current[j] for j in range(len(current))] == ["alice:e000000"]
+            assert rescans == ["alice"]
+        finally:
+            navigator.close()
+    finally:
+        store.close(update_status=False)
+
+
+def test_peer_and_local_agent_append_extend_refs_without_scan(tmp_path, monkeypatch):
+    """Mixed, fully observed Agent appends can extend only Alice's suffix."""
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+    from kohakuterrarium.session.memory import context as context_module
+
+    store = SessionStore(tmp_path / "mixed-agent-ref-proof.kohakutr")
+    try:
+        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
+        _append(store, 1, "user_input", {"content": "alice first"})
+        navigator = MemoryContextNavigator(store)
+        real = context_module._ordered_event_refs
+        enumerations = []
+
+        def counted(*args):
+            enumerations.append(args[1])
+            return real(*args)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(context_module, "_ordered_event_refs", counted)
+            try:
+                baseline = navigator._refs_for("alice")
+                store.append_event(
+                    "bob",
+                    "user_input",
+                    {"content": "bob first"},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+                _append(store, 2, "text", {"content": "alice second"}, parent=[[1, 1]])
+                store.append_event(
+                    "bob",
+                    "text",
+                    {"content": "bob second"},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+                assert navigator._refs_for("alice") is baseline
+                assert [baseline[i] for i in range(len(baseline))] == [
+                    "alice:e000000",
+                    "alice:e000001",
+                ]
+                assert enumerations == ["alice"]
+            finally:
+                navigator.close()
+    finally:
+        store.close(update_status=False)
+
+
+def test_unobserved_other_store_append_forces_physical_ref_reconciliation(
+    tmp_path, monkeypatch
+):
+    """A peer Store handle is not a trusted local-append notification source."""
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+    from kohakuterrarium.session.memory import context as context_module
+
+    path = tmp_path / "unobserved-ref-proof.kohakutr"
+    writer = SessionStore(path)
+    reader = None
+    try:
+        writer.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        _append(writer, 1, "user_input", {"content": "first"})
+        writer.flush()
+        reader = SessionStore.open_memory_reader(path)
+        navigator = MemoryContextNavigator(reader)
+        real = context_module._ordered_event_refs
+        enumerations = []
+
+        def counted(*args):
+            enumerations.append(args[1])
+            return real(*args)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(context_module, "_ordered_event_refs", counted)
+            try:
+                assert len(navigator._refs_for("alice")) == 1
+                _append(writer, 2, "user_input", {"content": "second"}, parent=[[1, 1]])
+                writer.flush()
+                updated = navigator._refs_for("alice")
+                assert [updated[i] for i in range(len(updated))] == [
+                    "alice:e000000",
+                    "alice:e000001",
+                ]
+                assert enumerations == ["alice", "alice"]
+            finally:
+                navigator.close()
+    finally:
+        if reader is not None:
+            reader.close(update_status=False)
+        writer.close(update_status=False)
+
+
+def test_memory_navigator_detaches_existing_append_subscriber_on_close(tmp_path):
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+
+    store = SessionStore(tmp_path / "ref-listener-lifetime.kohakutr")
+    try:
+        original = list(store._event_subscribers)
+        navigator = MemoryContextNavigator(store)
+        assert len(store._event_subscribers) == len(original) + 1
+        navigator.close()
+        assert store._event_subscribers == original
+    finally:
+        store.close(update_status=False)

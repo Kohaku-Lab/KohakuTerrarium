@@ -260,11 +260,14 @@ still require full-source recovery. Repeated unchanged queries do not
 reload the full event log or recompute its ancestry. For saved searches,
 the read-only memory source avoids rebuilding unrelated event counters on
 every open. The navigator enumerates physical event keys once per active
-Store/Agent and extends its compact sequence after normal appends. If a
-failed Append consumes a sequence without publishing a row, the resulting
-physical gap invalidates the incremental extension; navigation re-enumerates
-that Agent's existing keys instead of treating the incomplete catalogue
-as current.
+Store/Agent and extends its compact sequence after normal appends.
+It observes the existing SessionStore accepted-append notifications: when
+those local notifications account for all new physical rows, an append to
+another Agent need not invalidate the current Agent's reference catalogue.
+A gap caused by a failed Append, or growth not explained by the local Store
+(e.g., a separate writer), invalidates that proof and forces physical
+re-enumeration. The navigator unsubscribes when closed. This is a
+process-local optimization, not a persisted source registry.
 
 **Explicit boundary:** This is not an arbitrary database mutation detector.
 Direct SQL / KVault edits, deleting or reusing old physical keys, replacing

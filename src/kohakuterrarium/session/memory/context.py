@@ -172,10 +172,35 @@ class MemoryContextNavigator:
         # One per-store, per-agent physical-key catalogue. Only KT-managed
         # append-only event keys are assumed; arbitrary in-place SQL edits
         # are outside the source-freshness contract.
-        self._physical_refs: dict[str, tuple[int, _PhysicalEventRefs]] = {}
+        # Cache proofs use the Store's existing accepted-append notifications:
+        # observed local writes must account for *all* global row growth
+        # before a peer-only change can be ignored. Foreign Store writers or
+        # failed/gapped appends always fall back to physical enumeration.
+        self._observed_appends = 0
+        self._observed_agent_appends: dict[str, int] = {}
+        self._append_subscriber = self._observe_append
+        subscribers = getattr(store, "_event_subscribers", None)
+        if isinstance(subscribers, list):
+            subscribers.append(self._append_subscriber)
+        self._physical_refs: dict[str, tuple[int, _PhysicalEventRefs, int, int]] = {}
         self._legacy_cache: dict[str, tuple[int, dict[str, tuple]]] = {}
 
+    def _observe_append(self, key: str, _data: dict) -> None:
+        # Called only after SessionStore has accepted the event write.
+        agent, marker, suffix = key.rpartition(":e")
+        if marker and agent and suffix.isascii() and suffix.isdecimal():
+            self._observed_appends += 1
+            self._observed_agent_appends[agent] = (
+                self._observed_agent_appends.get(agent, 0) + 1
+            )
+
     def close(self) -> None:
+        subscribers = getattr(self._store, "_event_subscribers", None)
+        if isinstance(subscribers, list):
+            try:
+                subscribers.remove(self._append_subscriber)
+            except ValueError:
+                pass
         self._physical_refs.clear()
         self._legacy_cache.clear()
         self._anchors.clear()
@@ -356,44 +381,53 @@ class MemoryContextNavigator:
         return found
 
     def _refs_for(self, agent: str) -> _PhysicalEventRefs:
-        """List keys once; subsequent appends extend the numeric suffix only.
+        """Reuse proven local append suffixes, else enumerate physical keys.
 
-        A cheap physical row-count check observes normal KT append commits,
-        including imported mirrors with reused logical IDs. A changed count
-        does not authorize in-place history rewrites: those require an
-        explicit reindex/reopen under the documented append-only contract.
+        Accepted KT appends are observed through SessionStore's existing
+        notification hook. Only when those observed appends explain *all*
+        global row growth is it safe to conclude no other writer affected
+        this namespace. Failed sequence allocations never send notifications,
+        so any resulting hole triggers enumeration rather than false closure.
         """
         self._store._flush_events_cache()
         total = len(self._store.events)
+        observed = self._observed_appends
+        observed_agent = self._observed_agent_appends.get(agent, 0)
         cached = self._physical_refs.get(agent)
         if cached is not None:
-            old_count, refs = cached
+            old_count, refs, old_observed, old_observed_agent = cached
             if total == old_count:
                 return refs
-            if total > old_count:
-                # Normal append_event writes agent:e{seq:06d} consecutively.
-                # Probe at most the number of new physical records; writes
-                # from other agents require only one negative point lookup.
-                next_seq = (refs.numbers[-1] + 1) if refs.numbers else 0
-                for seq in range(next_seq, next_seq + total - old_count):
-                    ref = f"{agent}:e{seq:06d}"
-                    if ref not in self._store.events:
-                        # A failed append can consume a physical sequence
-                        # without publishing the row. We cannot certify the
-                        # suffix through a hole: re-enumerate before caching
-                        # the new global count (which may include later rows).
-                        break
-                    refs.numbers.append(seq)
-                else:
-                    self._physical_refs[agent] = (total, refs)
-                    self._legacy_cache.pop(agent, None)
-                    return refs
+            if total > old_count and observed - old_observed == total - old_count:
+                # The Store itself saw every accepted physical append since
+                # this catalogue. No Alice changes means Bob-only appends
+                # cannot force a full Alice history scan.
+                agent_growth = observed_agent - old_observed_agent
+                if agent_growth >= 0:
+                    next_seq = (refs.numbers[-1] + 1) if refs.numbers else 0
+                    for seq in range(next_seq, next_seq + agent_growth):
+                        ref = f"{agent}:e{seq:06d}"
+                        if ref not in self._store.events:
+                            # A failed allocation left a hole; this source is
+                            # not a consecutive suffix, so enumerate instead.
+                            break
+                        refs.numbers.append(seq)
+                    else:
+                        self._physical_refs[agent] = (
+                            total,
+                            refs,
+                            observed,
+                            observed_agent,
+                        )
+                        if agent_growth:
+                            self._legacy_cache.pop(agent, None)
+                        return refs
         numbers = array("Q")
         prefix = f"{agent}:e"
         for ref in _ordered_event_refs(self._store, agent):
             numbers.append(int(ref[len(prefix) :]))
         refs = _PhysicalEventRefs(agent, numbers)
-        self._physical_refs[agent] = (total, refs)
+        self._physical_refs[agent] = (total, refs, observed, observed_agent)
         self._legacy_cache.pop(agent, None)
         return refs
 

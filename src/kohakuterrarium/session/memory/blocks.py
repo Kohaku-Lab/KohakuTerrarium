@@ -301,15 +301,16 @@ def _extract_blocks(
         if (
             scope_key is None
             and all_branches
-            and coordinate_scope is BranchScope.LEGACY
+            and coordinate_scope in (BranchScope.LEGACY, BranchScope.BOOKKEEPING)
             and not in_round
             and len(open_branches) == 1
             and etype
             in ("text", "text_chunk", "tool_call", "tool_result", "processing_end")
         ):
-            # Some migrated sessions stamp their turn opener but not its
-            # subsequent text/tools. Only associate an unstamped continuation
-            # when exactly one scoped round is open; never guess between siblings.
+            # Legacy missing coordinates and accepted (0, 0) bookkeeping
+            # continuations may belong to one stamped opener. Only inherit
+            # its Round when unambiguous; preserve the event's raw coordinates
+            # for strict visibility and source provenance.
             scope_key = next(iter(open_branches))
         if scope_key is not None:
             inherited = (

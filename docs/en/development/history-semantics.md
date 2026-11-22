@@ -37,6 +37,13 @@ When there is exactly one open legacy round, no competing scoped round, and
 the stamped turn matches that legacy round, the continuation inherits its
 round membership. The original branch coordinates of each event stay intact.
 
+Accepted (0, 0) bookkeeping text, tool calls/results and processing_end
+events follow this same unambiguous Round-continuation rule: one open
+scoped Round may own them, but several open sibling Rounds authorize no
+guess. Their recorded (0, 0) coordinates remain unchanged for visibility
+and provenance, and a bookkeeping completion closes only its matched
+Round. Full and incremental Memory extraction must agree.
+
 After ownership transfers, a stamped processing_end must close that round:
 an unstamped orphan after it is *not* part of the completed round. The inverse
 transition (stamped opener, unstamped tail) continues to use only the uniquely

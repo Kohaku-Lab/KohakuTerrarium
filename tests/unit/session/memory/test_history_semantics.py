@@ -729,3 +729,102 @@ def test_malformed_explicit_ancestry_cannot_match_both_roots(tmp_path, invalid):
             assert memory.search("untrusted-needle", mode="fts", branch_view=view) == []
             # The malformed opener cannot authorize a branch candidate.
             assert 2 not in resolve_search_view(events, {1: root})
+
+
+@pytest.mark.parametrize("batch_size", [1, 2, 3, 6])
+def test_bookkeeping_continuations_reuse_and_close_only_open_scoped_round(batch_size):
+    """Global (0,0) scope is visible, but not a separate conversational Round."""
+    events = [
+        _event(1, "user_input", "prompt", coords=(1, 1), parent_branch_path=[]),
+        _event(2, "text", "bookkeeping reply", coords=(0, 0)),
+        _event(
+            3, "tool_call", coords=(0, 0), name="bash", args={"command": "echo needle"}
+        ),
+        _event(
+            4,
+            "tool_result",
+            coords=(0, 0),
+            name="bash",
+            output="needle tool output is long enough",
+        ),
+        _event(5, "processing_end", coords=(0, 0)),
+        _event(6, "text", "must remain orphan after closure", coords=(0, 0)),
+    ]
+    expected = [
+        "prompt",
+        "bookkeeping reply",
+        "[tool:bash] command=echo needle",
+        "[result:bash] needle tool output is long enough",
+    ]
+    full, full_state = extract_batch("alice", events, all_branches=True)
+    selected, _ = extract_batch("alice", events)
+    assert [block.content for block in selected] == expected
+    assert [block.content for block in full] == expected
+    assert [(b.round_num, b.block_num) for b in full] == [
+        (1, 0),
+        (1, 1),
+        (1, 2),
+        (1, 3),
+    ]
+    assert [(b.turn_index, b.branch_id) for b in full] == [
+        (1, 1),
+        (0, 0),
+        (0, 0),
+        (0, 0),
+    ]
+    assert full_state["open_branches"] == {}
+    checkpoint, incremental = None, []
+    for stop in range(batch_size, len(events) + batch_size, batch_size):
+        new, checkpoint = extract_batch(
+            "alice", events[:stop], checkpoint, all_branches=True
+        )
+        incremental.extend(new)
+    assert incremental == full
+    assert checkpoint["open_branches"] == {}
+
+
+def test_bookkeeping_cannot_choose_between_open_sibling_rounds():
+    events = [
+        _event(1, "user_input", "branch one", coords=(1, 1), parent_branch_path=[]),
+        _event(2, "user_input", "branch two", coords=(1, 2), parent_branch_path=[]),
+        _event(3, "text", "ambiguous bookkeeping", coords=(0, 0)),
+        _event(4, "processing_end", coords=(0, 0)),
+    ]
+    blocks, cursor = extract_batch("alice", events, all_branches=True)
+    assert [b.content for b in blocks] == ["branch one", "branch two"]
+    assert len(cursor["open_branches"]) == 2
+
+
+def test_bookkeeping_continuations_are_searchable_in_published_index(tmp_path):
+    """Global event coordinates stay raw, but inherit an unambiguous Round."""
+    events = [
+        _event(1, "user_input", "prompt", coords=(1, 1), parent_branch_path=[]),
+        _event(2, "text", "bookkeeping-needle reply", coords=(0, 0)),
+        _event(
+            3,
+            "tool_result",
+            coords=(0, 0),
+            name="bash",
+            output="bookkeeping-needle tool result long enough",
+        ),
+        _event(4, "processing_end", coords=(0, 0)),
+        _event(5, "text", "bookkeeping-needle orphan", coords=(0, 0)),
+    ]
+    with closing(
+        SessionMemory(
+            str(tmp_path / "bookkeeping-memory.kohakutr"), index_all_branches=True
+        )
+    ) as memory:
+        memory.index_events("alice", events)
+        hits = memory.search(
+            "bookkeeping-needle",
+            mode="fts",
+            branch_view={1: 1},
+            k=10,
+        )
+        contents = {hit.content for hit in hits}
+        assert contents == {
+            "bookkeeping-needle reply",
+            "[result:bash] bookkeeping-needle tool result long enough",
+        }
+        assert all((hit.turn_index, hit.branch_id) == (0, 0) for hit in hits)
