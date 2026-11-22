@@ -24,12 +24,14 @@ from kohakuterrarium.core.conversation.snapshot import (
 )
 from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
+    event_compact_covered,
     index_parent_paths,
     normalize_resumable_events,
     normalize_tool_call_events,
     replay_conversation,
     resolve_branch_view_strict,
     project_live_event_stream,
+    project_compaction_coverage,
     select_live_event_ids,
     select_live_event_positions,
 )
@@ -229,6 +231,7 @@ def include_settled_tool_results(
     *,
     covered_event_ids: set[int] | None = None,
     live_positions: set[int] | None = None,
+    call_evidence: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Attach completed results to retained calls without rewriting settled pairs.
 
@@ -260,8 +263,11 @@ def include_settled_tool_results(
         for event in live_events
         if event.get("type") == "tool_result" and (identity := identities[id(event)])
     }
+    # Projected streams can omit conflicting sibling calls. Ownership
+    # uniqueness must be established against the complete source, not the
+    # already filtered stream passed to the final replay.
     all_call_counts: dict[str, int] = {}
-    for event in events:
+    for event in call_evidence if call_evidence is not None else events:
         if event.get("type") == "tool_call" and (identity := _tool_identity(event)):
             all_call_counts[identity] = all_call_counts.get(identity, 0) + 1
     late_results: dict[str, dict[str, Any]] = {}
@@ -275,7 +281,7 @@ def include_settled_tool_results(
             if live_positions is not None
             else isinstance(eid, int) and eid in live_event_ids
         )
-        if eid in (covered_event_ids or ()):
+        if event_compact_covered(event, covered_event_ids):
             continue
         if (
             identity
@@ -360,8 +366,8 @@ def include_settled_tool_results(
             )
     candidates: dict[str, int] = {}
     for index, event in enumerate(live_events):
-        if event.get("type") != "tool_result" or event.get("event_id") in (
-            covered_event_ids or ()
+        if event.get("type") != "tool_result" or event_compact_covered(
+            event, covered_event_ids
         ):
             continue
         identity = identities[id(event)]
@@ -493,7 +499,7 @@ def replay_with_settled_tools(
     branch_view: dict[int, int] | None = None,
     include_metadata: bool = False,
     resumable: bool = False,
-    compaction_evidence: list[dict[str, Any]] | None = None,
+    source_evidence: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Replay a branch, keeping completed results with their live calls."""
     parent_paths = index_parent_paths(events)
@@ -502,17 +508,22 @@ def replay_with_settled_tools(
     )
     # Settled-tool placement sees visible events; summary provenance is
     # independently evaluated against the complete original source.
-    rules_source = compaction_evidence if compaction_evidence is not None else events
+    rules_source = source_evidence if source_evidence is not None else events
+    # The public covered-ID set is compatible with legacy consumers but is
+    # insufficient for mirrored event_id collisions. Annotate the *physical*
+    # selected playback events before tool settlement/normalization.
+    replay_source = project_compaction_coverage(events, rules_source, branch_view)
     covered_ids = compact_covered_event_ids(
         rules_source,
         branch_view,
         parent_paths=parent_paths if rules_source is events else None,
     )
     replay_events = include_settled_tool_results(
-        events,
+        replay_source,
         live_event_ids,
         covered_event_ids=covered_ids,
         live_positions=select_live_event_positions(events, branch_view=branch_view),
+        **({"call_evidence": rules_source} if source_evidence is not None else {}),
     )
     if resumable:
         replay_events = normalize_resumable_events(
@@ -545,8 +556,9 @@ def snapshot_needs_settled_tool_replay(
     covered_ids = compact_covered_event_ids(
         events, branch_view, parent_paths=parent_paths
     )
+    physical_events = project_compaction_coverage(events, events, branch_view)
     projected = include_settled_tool_results(
-        events,
+        physical_events,
         live_ids,
         covered_event_ids=covered_ids,
         live_positions=select_live_event_positions(events, branch_view=branch_view),
@@ -566,7 +578,9 @@ def snapshot_needs_settled_tool_replay(
                 alias_owners.setdefault(provider_id, set()).add(job_id)
     pending_jobs = pending_snapshot_jobs(snapshot or [], alias_owners)
     for event in projected:
-        if event.get("type") != "tool_result" or event.get("event_id") in covered_ids:
+        if event.get("type") != "tool_result" or event_compact_covered(
+            event, covered_ids
+        ):
             continue
         job_id = str(event.get("call_id") or event.get("job_id") or "")
         if not job_id or job_id not in alias_owners:
@@ -637,8 +651,9 @@ def reload_conversation_under_branch_view(
     else:
         live_event_ids = select_live_event_ids(events, branch_view=branch_view)
         covered_ids = compact_covered_event_ids(events, branch_view)
+        physical_events = project_compaction_coverage(events, events, branch_view)
         replay_events = include_settled_tool_results(
-            events,
+            physical_events,
             live_event_ids,
             covered_event_ids=covered_ids,
             live_positions=select_live_event_positions(events, branch_view=branch_view),

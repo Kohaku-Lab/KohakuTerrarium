@@ -108,6 +108,12 @@ def compact_rule_from_event(evt: Mapping[str, Any]) -> CompactRule | None:
     replaced_to = evt.get("replaced_to_event_id")
     if not isinstance(replaced_from, int) or not isinstance(replaced_to, int):
         return None
+    source_path = compact_source_path_from_event(evt)
+    # Explicit null is the persisted legacy "unknown" sentinel. A present,
+    # non-null but invalid dependency list must never silently borrow the
+    # broader compact_path as an authorization to reuse the summary.
+    if evt.get("compact_source_path") is not None and source_path is None:
+        return None
     summary = evt.get("summary") or evt.get("summary_text") or ""
     compact_round = evt.get("round")
     if (
@@ -123,7 +129,7 @@ def compact_rule_from_event(evt: Mapping[str, Any]) -> CompactRule | None:
         replaced_to=replaced_to,
         path=compact_path_from_event(evt),
         summary=summary,
-        source_path=compact_source_path_from_event(evt),
+        source_path=source_path,
         source_recorded="compact_source_path" in evt,
         result_event_ids=frozenset(_result_ids(evt)),
     )

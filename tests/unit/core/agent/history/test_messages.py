@@ -1954,3 +1954,93 @@ def test_settled_replay_keeps_reusable_compaction_evidence_off_selected_tail(
     )
     assert [m["content"] for m in settled] == [m["content"] for m in direct]
     assert any("kept summary" in m["content"] for m in settled) is compatible
+
+
+@pytest.mark.parametrize("collision", ["call", "result"])
+@pytest.mark.parametrize("resumable", [False, True])
+def test_compaction_covered_mirror_id_does_not_hide_live_tool_pair(
+    collision,
+    resumable,
+):
+    """A selected tool pair cannot inherit another branch's compaction coverage."""
+    from kohakuterrarium.session.history.replay import replay_conversation
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "old prompt",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 2,
+            "type": "text",
+            "content": "old reply",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 1 if collision == "call" else 3,
+            "type": "tool_call",
+            "call_id": "job",
+            "tool_call_id": "T",
+            "name": "echo",
+            "args": {},
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 1 if collision == "result" else 4,
+            "type": "tool_result",
+            "call_id": "job",
+            "tool_call_id": "T",
+            "name": "echo",
+            "output": "LIVE RESULT",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 5,
+            "type": "compact_complete",
+            "summary": "old summary",
+            "round": 1,
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": [[1, 1]],
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+    ]
+    selected = {1: 1, 2: 2}
+    baseline = replay_conversation(events, branch_view=selected, include_metadata=True)
+    assert "old summary" in baseline[0]["content"]
+    result = replay_with_settled_tools(
+        events, branch_view=selected, include_metadata=True, resumable=resumable
+    )
+    assert (
+        sum(
+            any(call.get("id") == "T" for call in message.get("tool_calls") or [])
+            for message in result
+        )
+        == 1
+    )
+    assert (
+        sum(
+            message.get("role") == "tool" and message.get("content") == "LIVE RESULT"
+            for message in result
+        )
+        == 1
+    )
+    assert not any(
+        "cancelled" in str(message.get("content", "")).lower() for message in result
+    )
+    assert not any(
+        message.get("content") in ("old prompt", "old reply") for message in result
+    )

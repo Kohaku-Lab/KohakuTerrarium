@@ -8,7 +8,11 @@ from kohakuterrarium.core.compact.branch import compact_source_path_from_event
 from kohakuterrarium.core.conversation.settled_identity import delivered_jobs
 from kohakuterrarium.session.history.replay import (
     compact_covered_event_ids,
+    event_ids_follow_physical_order,
+    event_compact_covered,
+    project_compaction_coverage,
     project_live_event_stream,
+    selected_compaction_event_watermark,
     select_live_event_positions,
 )
 from kohakuterrarium.session.store.records.snapshot import load_records
@@ -208,20 +212,16 @@ def _replay_context(
         and event.get("type") == "tool_call"
         and str(event.get("call_id") or event.get("job_id") or "") in jobs
     ]
-    # Repair replays only the visible suffix, but summary eligibility may
-    # depend on a compact completion from a discarded tail. Keep the full
-    # source as rule evidence, never as visible user/tool events.
-    evidence = (
-        {"compaction_evidence": events}
-        if any(e.get("type") in {"compact_complete", "compact_replace"} for e in events)
-        else {}
-    )
+    # A repair replays only visible content plus narrowly admitted late
+    # settlements. The complete source supplies *evidence*, not additional
+    # messages: summary dependencies and tool-call ownership may both reside
+    # outside the projected suffix.
     return replay(
         [*calls, *retained],
         branch_view=selected,
         include_metadata=True,
         resumable=True,
-        **evidence,
+        source_evidence=events,
     )
 
 
@@ -248,6 +248,10 @@ def prepare_snapshot(
         records = load_records(store, namespace)
     if not records:
         return None
+    if not event_ids_follow_physical_order(events):
+        # An ID-based checkpoint watermark cannot certify a physical prefix
+        # containing imported/mirrored IDs that repeat, decrease or are absent.
+        return None
     # Every recorded turn counts: trigger- and background-opened turns have no
     # user_message yet still sit on a checkpoint's branch path.
     raw_pairs = {
@@ -261,6 +265,13 @@ def prepare_snapshot(
         events, branch_view=selected, parent_paths=parent_paths
     )
     covered = compact_covered_event_ids(events, selected, parent_paths=parent_paths)
+    physical_events = project_compaction_coverage(events, events, selected)
+    physical_live_events = project_compaction_coverage(live_events, events, selected)
+    # Checkpoint representations can be invalidated by later compatible
+    # summary evidence even when the completion sits on a discarded tail.
+    compact_watermark = selected_compaction_event_watermark(
+        events, selected, parent_paths=parent_paths
+    )
     # Checkpoint paths record only real turns; pre-turn events sit at (0, 0).
     path_view = {t: b for t, b in selected.items() if t > 0 and b > 0}
     user_pairs = {
@@ -289,6 +300,10 @@ def prepare_snapshot(
             if boundary_turn is None:
                 continue
             repairs.append((boundary_turn, record["watermark"], cutoff, record))
+        if compact_watermark is not None and compact_watermark > record["watermark"]:
+            # Keep cutoff repairs eligible; otherwise full replay must rebuild
+            # the representation with the complete Compaction evidence.
+            continue
         prefix = _prefix(
             record, path_view, before_turn, empty_boundary=boundary_turn is not None
         )
@@ -359,9 +374,9 @@ def prepare_snapshot(
             pending -= delivered_jobs(messages)
         if any(
             event.get("type") == "tool_result"
-            and event.get("event_id") not in covered
+            and not event_compact_covered(event, covered)
             and (event.get("call_id") or event.get("job_id")) in pending
-            for event in events
+            for event in physical_events
         ):
             continue
         messages.extend(
@@ -375,11 +390,11 @@ def prepare_snapshot(
             }
             if any(
                 event.get("type") == "tool_call"
-                and event.get("event_id") not in covered
+                and not event_compact_covered(event, covered)
                 and event.get("event_id", 0) > cutoff
                 and event.get("turn_index", before_turn) < before_turn
                 and (event.get("tool_call_id") or event.get("call_id")) not in call_ids
-                for event in live_events
+                for event in physical_live_events
             ):
                 continue
         checked_events = [

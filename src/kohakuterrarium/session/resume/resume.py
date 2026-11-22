@@ -22,9 +22,11 @@ from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.history.replay import (
     dedupe_adjacent_duplicate_events,
+    event_ids_follow_physical_order,
     index_parent_paths,
     normalize_resumable_events,
     resolve_selected_branches,
+    selected_compaction_event_watermark,
 )
 from kohakuterrarium.session.resume.open import (
     # Re-exported for callers that still import it from this module.
@@ -114,6 +116,16 @@ def _load_conversation_result(
     snapshot = store.load_conversation(agent_name)
     if events is None:
         events = store.get_events(agent_name)
+    if snapshot is not None and events and not event_ids_follow_physical_order(events):
+        # An imported/mirrored physical event can have an older logical ID
+        # than the cached watermark. Neither saved branch checkpoints nor
+        # legacy snapshot+tail can prove its representation is still current.
+        branch_view = load_persisted_branch_view(store, agent_name)
+        replayed = replay_with_settled_tools(
+            events, branch_view=branch_view, include_metadata=True, resumable=True
+        )
+        if replayed:
+            return _LoadedConversation(replayed, True, branch_view)
     if prepared is _UNPREPARED:
         prepared = prepare_saved_snapshot(store, agent_name, events)
     if prepared:
@@ -166,10 +178,15 @@ def _load_conversation_result(
             and (evt.get("turn_index"), evt["branch_id"]) not in pre_pairs
             for evt in tail
         )
-        if not tail_has_forks:
+        branch_view = load_persisted_branch_view(store, agent_name)
+        compaction_watermark = selected_compaction_event_watermark(events, branch_view)
+        stale_compaction = (
+            compaction_watermark is not None and compaction_watermark > cached_up_to
+        )
+        if not tail_has_forks and not stale_compaction:
             appended = replay_with_settled_tools(
                 tail,
-                branch_view=load_persisted_branch_view(store, agent_name),
+                branch_view=branch_view,
                 include_metadata=True,
                 resumable=True,
             )
@@ -192,9 +209,11 @@ def _load_conversation_result(
             )
             return _LoadedConversation(list(base) + appended)
         logger.info(
-            "Post-snapshot tail contains branch forks — full replay",
+            "Post-snapshot tail needs source replay",
             agent=agent_name,
             snapshot_event_id=cached_up_to,
+            new_forks=tail_has_forks,
+            stale_compaction=stale_compaction,
         )
     if snapshot is not None and cached_up_to is None:
         if snapshot_has_turn_metadata(snapshot):

@@ -656,3 +656,65 @@ def test_settled_tool_result_selection_preserves_mirrored_source_identity():
         ("tool_call", "newjob", None),
         ("tool_result", "newjob", "new"),
     ]
+
+
+def test_snapshot_settlement_does_not_confuse_compact_covered_id_with_live_result():
+    """A colliding logical ID does not mask a later live tool result."""
+    from kohakuterrarium.core.agent.history.message_history import (
+        snapshot_needs_settled_tool_replay,
+    )
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "old",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 2,
+            "type": "text",
+            "content": "old reply",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 3,
+            "type": "tool_call",
+            "call_id": "job",
+            "tool_call_id": "T",
+            "name": "echo",
+            "args": {},
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 1,
+            "type": "tool_result",
+            "call_id": "job",
+            "tool_call_id": "T",
+            "name": "echo",
+            "output": "LIVE RESULT",
+            "turn_index": 3,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1], [2, 2]],
+        },
+        {
+            "event_id": 5,
+            "type": "compact_complete",
+            "summary": "old summary",
+            "round": 1,
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": [[1, 1]],
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 2]],
+        },
+    ]
+    assert snapshot_needs_settled_tool_replay(events, {1: 1, 2: 2, 3: 2}, snapshot=[])

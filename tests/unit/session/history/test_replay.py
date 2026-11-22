@@ -2537,3 +2537,138 @@ def test_antigravity_state_replay_does_not_attach_empty_round_to_previous():
     )
     assert messages[1][STATE_KEY] == state1
     assert messages[3] == {**empty, STATE_KEY: state2}
+
+
+def test_selected_compaction_watermark_needs_monotonic_source_identity():
+    """A selected summary's logical ID can only date a proven source prefix."""
+    from kohakuterrarium.session.history.replay import (
+        event_ids_follow_physical_order,
+        selected_compaction_event_watermark,
+    )
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 2,
+            "type": "text",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 3,
+            "type": "compact_complete",
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+            "round": 1,
+            "summary": "summary",
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": [[1, 1]],
+        },
+    ]
+    assert event_ids_follow_physical_order(events)
+    assert selected_compaction_event_watermark(events, {1: 1, 2: 1}) == 3
+    events[-1]["compact_source_path"] = [[1, 2]]
+    assert selected_compaction_event_watermark(events, {1: 1, 2: 1}) is None
+    events[-1]["compact_source_path"] = [[1, 1]]
+    events[-1]["event_id"] = 2
+    assert not event_ids_follow_physical_order(events)
+    # The rule is still semantically eligible; callers must replay fully
+    # instead of using its ambiguous ID as a saved-prefix watermark.
+    assert selected_compaction_event_watermark(events, {1: 1, 2: 1}) == 2
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        [["corrupt", 2]],
+        [[True, 1]],
+        [["1", 1]],
+        [[1, -1]],
+        [1],
+        [],
+        {"path": [[1, 1]]},
+    ],
+)
+def test_malformed_explicit_compact_source_cannot_fallback_to_compact_path(malformed):
+    """An invalid explicit summary input proof is not a legacy unknown source."""
+    from kohakuterrarium.session.history.replay import (
+        compact_replacement_rules,
+        replay_conversation,
+    )
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "ORIGINAL",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 2,
+            "type": "text",
+            "content": "REPLY",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 3,
+            "type": "compact_complete",
+            "summary": "INVALID-SUMMARY",
+            "round": 1,
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": malformed,
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+    ]
+    assert compact_replacement_rules(events, {1: 1, 2: 1}) == []
+    assert [
+        m["content"] for m in replay_conversation(events, branch_view={1: 1, 2: 1})
+    ] == ["ORIGINAL", "REPLY"]
+
+    # Explicit null remains a supported legacy record without a source proof.
+    events[-1]["compact_source_path"] = None
+    assert compact_replacement_rules(events, {1: 1, 2: 1})
+
+
+@pytest.mark.parametrize(
+    ("identities", "proven"),
+    [
+        ([1, 2, 3], True),
+        ([50, 51, 10], False),
+        ([1, 2, 2], False),
+        ([1, None, 3], False),
+        ([1, True, 3], False),
+    ],
+)
+def test_id_watermark_authority_requires_strictly_increasing_physical_source(
+    identities, proven
+):
+    from kohakuterrarium.session.history.replay import event_ids_follow_physical_order
+
+    events = [{"event_id": value, "type": "text"} for value in identities]
+    assert event_ids_follow_physical_order(events) is proven
+
+
+def test_untrusted_source_field_cannot_forge_internal_compaction_coverage():
+    """An imported dict field is not a generated in-process coverage witness."""
+    from kohakuterrarium.session.history.replay import event_compact_covered
+
+    marked_false = {"event_id": 1, "_kt_replay_compact_covered": False}
+    marked_true = {"event_id": 2, "_kt_replay_compact_covered": True}
+    assert event_compact_covered(marked_false, {1})
+    assert not event_compact_covered(marked_true, set())

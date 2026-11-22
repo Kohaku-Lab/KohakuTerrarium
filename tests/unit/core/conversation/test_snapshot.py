@@ -768,3 +768,232 @@ def test_prepare_snapshot_cutoff_repair_preserves_reusable_compaction_summary(
     assert repaired["compact_state"]["compact_count"] == int(source_compatible)
     assert "new final result" in contents
     assert repaired["context_cutoff_event_id"] == 8
+
+
+def test_cutoff_repair_rejects_result_with_ambiguous_origins_from_unselected_branch():
+    """Cutoff projection must retain global tool-call ownership as evidence.
+
+    A sibling call may reuse internal/provider IDs. The final result from
+    that sibling cannot settle a selected call whose original result is absent.
+    """
+    from kohakuterrarium.core.conversation.snapshot import _replay_context
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "tool_call",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "call_id": "shared",
+            "tool_call_id": "same",
+            "name": "echo",
+            "args": {},
+        },
+        {
+            "event_id": 2,
+            "type": "tool_call",
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+            "call_id": "shared",
+            "tool_call_id": "same",
+            "name": "echo",
+            "args": {},
+        },
+        {
+            "event_id": 3,
+            "type": "tool_result",
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+            "call_id": "shared",
+            "tool_call_id": "same",
+            "name": "echo",
+            "output": "FOREIGN-RESULT-MUST-NOT-SETTLE",
+        },
+    ]
+    from kohakuterrarium.core.agent.history.message_history import (
+        replay_with_settled_tools,
+    )
+
+    full = replay_with_settled_tools(
+        events, branch_view={1: 1}, include_metadata=True, resumable=True
+    )
+    repair = _replay_context(events, {1: 1}, 1, None, replay_with_settled_tools)
+    # Equivalent to full source replay for tool ownership; branch-2 output
+    # may not leak into a branch-1 conversation.
+    assert repair == full
+    assert all("FOREIGN-RESULT" not in str(msg.get("content", "")) for msg in repair)
+
+
+def test_cutoff_repair_preserves_uniquely_owned_late_result_from_sibling_branch():
+    """A legitimate late result is still reusable when the source proves one caller."""
+    from kohakuterrarium.core.conversation.snapshot import _replay_context
+    from kohakuterrarium.core.agent.history.message_history import (
+        replay_with_settled_tools,
+    )
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "tool_call",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+            "call_id": "unique",
+            "tool_call_id": "same",
+            "name": "echo",
+            "args": {},
+        },
+        {
+            "event_id": 3,
+            "type": "tool_result",
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+            "call_id": "unique",
+            "tool_call_id": "same",
+            "name": "echo",
+            "output": "VALID-LATE-RESULT",
+        },
+    ]
+    repaired = _replay_context(events, {1: 1}, 1, None, replay_with_settled_tools)
+    assert any(
+        msg.get("role") == "tool" and msg.get("content") == "VALID-LATE-RESULT"
+        for msg in repaired
+    )
+
+
+@pytest.mark.parametrize("compatible", [True, False])
+def test_new_compatible_compaction_invalidates_old_snapshot_candidate(
+    tmp_path, compatible
+):
+    """A newer summary can replace the checkpoint's raw ancestor representation."""
+    from kohakuterrarium.session.resume.branch import replayed_messages_for
+
+    store = SessionStore(tmp_path / "snapshot-after-compaction.kohakutr")
+    try:
+        store.init_meta("sid", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_message",
+            {"content": "ORIGINAL-PROMPT"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.append_event(
+            "alice",
+            "text",
+            {"content": "ORIGINAL-REPLY"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.save_branch_snapshot(
+            "alice",
+            [
+                {
+                    "role": "user",
+                    "content": "ORIGINAL-PROMPT",
+                    "metadata": {"turn_index": 1, "branch_id": 1},
+                },
+                {"role": "assistant", "content": "ORIGINAL-REPLY"},
+            ],
+            branch={"turn_index": 1, "branch_id": 1, "parent_branch_path": []},
+            watermark=2,
+        )
+        store.append_event(
+            "alice",
+            "compact_complete",
+            {
+                "summary": "REUSABLE-SUMMARY",
+                "round": 1,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 2,
+                "compact_path": [[1, 1]],
+                "compact_source_path": [[1, 1]] if compatible else [[1, 2]],
+            },
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[[1, 1]],
+        )
+        store.append_event(
+            "alice",
+            "user_message",
+            {"content": "SELECTED-TARGET"},
+            turn_index=2,
+            branch_id=2,
+            parent_branch_path=[[1, 1]],
+        )
+        events = store.get_events("alice")
+        view = {1: 1, 2: 2}
+        checkpoint = _prepare(store, events, view)
+        direct = replay_with_settled_tools(
+            events, branch_view=view, include_metadata=True, resumable=True
+        )
+        if compatible:
+            assert (
+                checkpoint is None
+            ), "A newer selected compact invalidates raw snapshot"
+            loaded = replayed_messages_for(store, "alice", events, branch_view=view)
+            assert [m["content"] for m in loaded] == [m["content"] for m in direct]
+            assert "REUSABLE-SUMMARY" in loaded[0]["content"]
+        else:
+            assert (
+                checkpoint is not None
+            ), "Incompatible compaction must not force replay"
+            assert [m["content"] for m in checkpoint["messages"]] == [
+                m["content"] for m in direct
+            ]
+    finally:
+        store.close(update_status=False)
+
+
+def test_checkpoint_cannot_certify_nonmonotonic_physical_source_without_compaction(
+    store: SessionStore,
+):
+    """Late imported rows with low unique IDs cannot disappear behind a watermark."""
+    store.save_branch_snapshot(
+        "alice",
+        [
+            {
+                "role": "user",
+                "content": "cached",
+                "metadata": {"turn_index": 1, "branch_id": 1},
+            }
+        ],
+        branch={"turn_index": 1, "branch_id": 1, "parent_branch_path": []},
+        watermark=51,
+    )
+    events = [
+        {
+            "event_id": 50,
+            "type": "user_message",
+            "content": "cached",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 51,
+            "type": "text",
+            "content": "prior answer",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+        {
+            "event_id": 10,
+            "type": "text",
+            "content": "later imported answer",
+            "turn_index": 1,
+            "branch_id": 1,
+        },
+    ]
+    assert _prepare(store, events, selected={1: 1}) is None
+    assert any(
+        "later imported answer" in message["content"]
+        for message in replay_with_settled_tools(
+            events, branch_view={1: 1}, include_metadata=True, resumable=True
+        )
+    )

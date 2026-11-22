@@ -3596,3 +3596,159 @@ class TestDetectSessionTypeDefensive:
             assert meta1 is None or meta1.get("turn_index") is None
         finally:
             store.close()
+
+
+@pytest.mark.parametrize("compatible", [True, False])
+@pytest.mark.parametrize("mirrored_event_id", [False, True])
+def test_resume_tail_falls_back_when_compaction_changes_snapshot_prefix(
+    tmp_path, compatible, mirrored_event_id
+):
+    """Legacy snapshot+tail cannot silently discard a later valid summary."""
+    store = SessionStore(str(tmp_path / "compact-after-snapshot.kohakutr"))
+    try:
+        store.init_meta("sid", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_message",
+            {"content": "ORIGINAL-PROMPT"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.append_event(
+            "alice",
+            "text",
+            {"content": "ORIGINAL-REPLY"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.save_conversation(
+            "alice",
+            [
+                {
+                    "role": "user",
+                    "content": "ORIGINAL-PROMPT",
+                    "metadata": {"turn_index": 1, "branch_id": 1},
+                },
+                {"role": "assistant", "content": "ORIGINAL-REPLY"},
+            ],
+        )
+        store.state["alice:snapshot_event_id"] = 2
+        compact = {
+            "summary": "REUSABLE-SUMMARY",
+            "round": 1,
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": [[1, 1]] if compatible else [[1, 2]],
+        }
+        if mirrored_event_id:
+            compact["event_id"] = 2  # Imported mirror reuses logical ID.
+        store.append_event(
+            "alice",
+            "compact_complete",
+            compact,
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[[1, 1]],
+        )
+        store.append_event(
+            "alice",
+            "user_message",
+            {"content": "NEXT-TURN"},
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[[1, 1]],
+        )
+        events = store.get_events("alice")
+        loaded = resume_mod._load_conversation_result(store, "alice", events, None)
+        expected = replay_with_settled_tools(
+            events,
+            branch_view={1: 1, 2: 1},
+            include_metadata=True,
+            resumable=True,
+        )
+        assert [m["content"] for m in loaded.messages] == [
+            m["content"] for m in expected
+        ]
+        assert (
+            any("REUSABLE-SUMMARY" in m["content"] for m in loaded.messages)
+            is compatible
+        )
+    finally:
+        store.close(update_status=False)
+
+
+def test_unique_out_of_order_import_cannot_extend_legacy_snapshot_by_id(tmp_path):
+    """A later physical event may have a lower, unique logical event ID."""
+    store = SessionStore(str(tmp_path / "out-of-order-import.kohakutr"))
+    try:
+        store.init_meta("sid", "agent", "", str(tmp_path), ["alice"])
+        store.append_event(
+            "alice",
+            "user_message",
+            {"event_id": 50, "content": "old prompt"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.append_event(
+            "alice",
+            "text",
+            {"event_id": 51, "content": "old reply"},
+            turn_index=1,
+            branch_id=1,
+            parent_branch_path=[],
+        )
+        store.save_conversation(
+            "alice",
+            [
+                {
+                    "role": "user",
+                    "content": "old prompt",
+                    "metadata": {"turn_index": 1, "branch_id": 1},
+                },
+                {"role": "assistant", "content": "old reply"},
+            ],
+        )
+        store.state["alice:snapshot_event_id"] = 51
+        store.append_event(
+            "alice",
+            "compact_complete",
+            {
+                "event_id": 10,
+                "round": 1,
+                "summary": "later summary",
+                "replaced_from_event_id": 50,
+                "replaced_to_event_id": 51,
+                "compact_path": [[1, 1]],
+                "compact_source_path": [[1, 1]],
+            },
+            turn_index=2,
+            branch_id=1,
+            parent_branch_path=[[1, 1]],
+        )
+        store.append_event(
+            "alice",
+            "user_message",
+            {"event_id": 11, "content": "next turn"},
+            turn_index=2,
+            branch_id=2,
+            parent_branch_path=[[1, 1]],
+        )
+        events = store.get_events("alice")
+        assert [event["event_id"] for event in events] == [50, 51, 10, 11]
+        loaded = resume_mod._load_conversation_result(store, "alice", events, None)
+        direct = replay_with_settled_tools(
+            events,
+            branch_view={1: 1, 2: 2},
+            include_metadata=True,
+            resumable=True,
+        )
+        assert loaded.full_replay
+        assert [m["content"] for m in loaded.messages] == [m["content"] for m in direct]
+        assert "later summary" in loaded.messages[0]["content"]
+        assert "next turn" in loaded.messages[1]["content"]
+    finally:
+        store.close(update_status=False)

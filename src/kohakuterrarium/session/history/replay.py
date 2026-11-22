@@ -404,6 +404,53 @@ def compact_replacement_rules(
     )
 
 
+def event_ids_follow_physical_order(events: list[dict[str, Any]]) -> bool:
+    """Only strictly increasing positive IDs authorize ID-watermarked tails.
+
+    Native KT appends satisfy this. Imported/mirrored rows may repeat or
+    reorder otherwise valid logical IDs, so a saved watermark cannot then
+    certify which physical rows belong to the stored snapshot prefix.
+    """
+    previous = 0
+    for event in events:
+        current = event.get("event_id")
+        if type(current) is not int or current <= previous:
+            return False
+        previous = current
+    return True
+
+
+def selected_compaction_event_watermark(
+    events: list[dict[str, Any]],
+    branch_view: dict[int, int] | None,
+    *,
+    parent_paths: dict[int, tuple[tuple[int, int], ...]] | list[tuple] | None = None,
+) -> int | None:
+    """Latest selected compaction completion ID in a monotonic source.
+
+    The caller must first establish event_ids_follow_physical_order(events).
+    An ID watermark cannot certify prefixes of mirrored/imported histories
+    whose logical IDs repeat or decrease; those histories require full Replay.
+    """
+    if not any(
+        event.get("type") in {"compact_complete", "compact_replace"} for event in events
+    ):
+        return None
+    rules = compact_replacement_rules(events, branch_view, parent_paths=parent_paths)
+    if not rules:
+        return None
+    selected_rule = rules[0]
+    return max(
+        (
+            event["event_id"]
+            for event in events
+            if compact_rule_from_event(event) == selected_rule
+            and type(event.get("event_id")) is int
+        ),
+        default=None,
+    )
+
+
 def compact_covered_event_ids(
     events: list[dict[str, Any]],
     branch_view: dict[int, int] | None = None,
@@ -430,6 +477,101 @@ def compact_covered_event_ids(
         } and isinstance(event.get("event_id"), int):
             covered.add(event["event_id"])
     return covered
+
+
+# An ephemeral replay projection annotation, never stored in SessionStore.
+# The public compact_covered_event_ids() API deliberately retains its legacy
+# logical-ID result; internal Replay must not apply that set to mirrored rows.
+_COMPACT_COVERED_MARKER = "_kt_replay_compact_covered"
+_COMPACT_COVERED_TOKEN = object()
+
+
+def event_compact_covered(
+    event: dict[str, Any], covered_event_ids: set[int] | None = None
+) -> bool:
+    """Prefer physical source proof when present, else legacy logical-ID coverage."""
+    proof = event.get(_COMPACT_COVERED_MARKER)
+    if (
+        isinstance(proof, tuple)
+        and len(proof) == 2
+        and proof[0] is _COMPACT_COVERED_TOKEN
+        and type(proof[1]) is bool
+    ):
+        return proof[1]
+    # Never trust an event-supplied string field as a coverage certificate.
+    return event.get("event_id") in (covered_event_ids or ())
+
+
+def project_compaction_coverage(
+    events: list[dict[str, Any]],
+    source_events: list[dict[str, Any]],
+    branch_view: dict[int, int] | None,
+) -> list[dict[str, Any]]:
+    """Annotate coverage per physical record only when logical IDs collide.
+
+    Source identity is retained for events that survive a lossy branch/cutoff
+    projection. If a caller supplied a detached record, its own source/branch
+    coordinates are checked conservatively. No source event is mutated.
+    """
+    ids = [
+        event["event_id"]
+        for event in source_events
+        if type(event.get("event_id")) is int
+    ]
+    if len(ids) == len(set(ids)):
+        return events
+    rules = compact_replacement_rules(
+        source_events,
+        branch_view,
+        parent_paths=index_parent_paths_by_position(source_events),
+    )
+    # Even if no selected rule is eligible, each colliding physical event
+    # needs explicit negative coverage: a legacy ID-keyed helper can otherwise
+    # incorrectly authorize a different sibling rule.
+    positions: set[int] = set()
+    for index, event in enumerate(source_events):
+        if _covered_by_replace(
+            event.get("event_id"),
+            event.get("turn_index"),
+            event.get("branch_id"),
+            rules,
+        ):
+            positions.add(index)
+        elif (
+            index > 0
+            and index - 1 in positions
+            and event.get("type") == "tool_result"
+            and {
+                k: v
+                for k, v in source_events[index - 1].items()
+                if k not in {"event_id", "ts"}
+            }
+            == {k: v for k, v in event.items() if k not in {"event_id", "ts"}}
+        ):
+            # Preserve the legacy adjacent duplicate result-coverage rule,
+            # while identifying only this particular physical source record.
+            positions.add(index)
+    source_positions = {id(event): index for index, event in enumerate(source_events)}
+    output = []
+    for event in events:
+        position = source_positions.get(id(event))
+        covered = (
+            position in positions
+            if position is not None
+            else _covered_by_replace(
+                event.get("event_id"),
+                event.get("turn_index"),
+                event.get("branch_id"),
+                rules,
+            )
+        )
+        output.append(
+            {
+                **event,
+                _COMPACT_COVERED_MARKER: (_COMPACT_COVERED_TOKEN, covered),
+            }
+        )
+    return output
 
 
 def replay_conversation(
@@ -589,10 +731,12 @@ def replay_conversation(
             # the next rule; it may apply to this branch right now.
             i += 1
 
-    eligible_ids = live_ids - {
+    # Do not subtract a covered logical ID globally: a mirrored live event
+    # can reuse an ID from an earlier covered record on a different branch.
+    eligible_ids = live_ids & {
         evt.get("event_id")
         for evt in events_list
-        if _covered_by_replace(
+        if not _covered_by_replace(
             evt.get("event_id"),
             evt.get("turn_index"),
             evt.get("branch_id"),
@@ -816,7 +960,11 @@ def _inject_synthetic_announcements(
                 announced_ids.add(cid)
         pending.clear()
 
-    eligible = {evt.get("event_id") for evt in events} - (covered_event_ids or set())
+    eligible = {
+        evt.get("event_id")
+        for evt in events
+        if not event_compact_covered(evt, covered_event_ids)
+    }
     canonical = assistant_round_messages(events, eligible)
     for evt in events:
         etype = evt.get("type", "")
@@ -829,7 +977,7 @@ def _inject_synthetic_announcements(
         if etype in {"user_input", "user_message"}:
             _flush_pending()
             announced_ids.clear()
-        if evt.get("event_id") in (covered_event_ids or ()) and not (
+        if event_compact_covered(evt, covered_event_ids) and not (
             etype == "tool_call"
             and str(evt.get("call_id") or evt.get("job_id") or "") in uncovered_results
         ):
@@ -915,7 +1063,7 @@ def normalize_resumable_events(
     live = live_job_ids or set()
 
     for evt in normalized:
-        if evt.get("event_id") in (covered_event_ids or ()):
+        if event_compact_covered(evt, covered_event_ids):
             continue
         etype = evt.get("type", "")
         if etype == "tool_call":

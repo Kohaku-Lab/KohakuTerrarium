@@ -137,6 +137,32 @@ the full compaction-rule evidence therefore have separate inputs during
 settled-tool replay and context-cutoff snapshot repair; discarded tail
 messages must never be reintroduced just to recover a summary.
 
+**Checkpoint representation freshness:** a branch snapshot or legacy
+snapshot+tail resume cannot be reused when later compatible compaction
+evidence changes the represented prefix. Both paths consult one
+non-persistent Replay watermark query. ID-based checkpoints require
+**strictly increasing positive event IDs in physical source order**; repeated,
+missing, or out-of-order imported logical IDs require full source Replay,
+even when a saved summary appears to match. A matching summary alone cannot
+certify all other source events. The fallback is full source Replay, not silent
+raw-history expansion.
+
+**Physical coverage:** the public compact-covered ID set retains its
+legacy logical-ID contract. Internal selected Replay, settled-tool
+normalization and Snapshot checks use an ephemeral per-physical-event
+coverage decision when mirrors reuse an ID. A covered ancestor must not
+hide a selected sibling's tool call or result; provenance annotations are
+never persisted to the source event log. Strict raw-history mutations
+already reject ambiguous duplicate logical IDs rather than guessing.
+
+**Settlement ownership:** cross-branch late tool results require uniqueness
+of the issuing call over the original source, not merely the already
+projected tail. Snapshot cutoff repair passes source evidence separately
+for both summary dependencies and tool-call identity without admitting
+foreign messages. An explicit malformed non-null compact_source_path
+never downgrades to legacy compact_path authorization; explicit null
+retains its old unknown-source compatibility behavior.
+
 ## Consumer authority
 
 Branch visibility, physical event identity and conversational Round ownership
