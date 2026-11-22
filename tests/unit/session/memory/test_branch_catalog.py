@@ -150,38 +150,6 @@ def test_legacy_derived_catalogue_recovers_without_format_change(tmp_path):
             assert memory.search("needle", mode="fts", branch_views={"alice": {1: 1}})
 
 
-def test_peer_append_does_not_rewrite_unmodified_branch_candidates(tmp_path):
-    path = tmp_path / "two-agent-branches.kohakutr"
-    with closing(SessionStore(path)) as store:
-        store.init_meta("s", "terrarium", "", str(tmp_path), ["alice", "bob"])
-        for name in ("alice", "bob"):
-            store.append_event(
-                name,
-                "user_input",
-                {"content": f"{name} needle"},
-                turn_index=1,
-                branch_id=1,
-                parent_branch_path=[],
-            )
-        with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
-            rec = SessionIndexReconciler(store, memory)
-            rec.build(rec.capture([], all_agents=True))
-            alice = memory._state.get("alice:memory_branch_catalog")
-            store.append_event(
-                "bob",
-                "user_input",
-                {"content": "bob appended needle"},
-                turn_index=2,
-                branch_id=1,
-                parent_branch_path=[(1, 1)],
-            )
-            source, _ = rec.prepare_keywords(["alice"])
-            assert not source.matches_published_fts_prefix
-            assert "_branches" not in source.catalogs["alice"]
-            assert memory._state.get("alice:memory_branch_catalog") == alice
-            assert memory._state.get("bob:memory_branch_catalog")["count"] == 2
-
-
 def test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads(
     tmp_path, monkeypatch
 ):
@@ -203,6 +171,10 @@ def test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads(
             rec = SessionIndexReconciler(store, memory)
             rec.build(rec.capture([], all_agents=True))
             peer_cursor = memory._state["alice:cursor:keywords"]
+            peer_branches = {
+                name: memory._state.get(f"{name}:memory_branch_catalog")
+                for name in ("alice", "charlie")
+            }
             store.append_event(
                 "bob",
                 "user_input",
@@ -214,13 +186,21 @@ def test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads(
             source = rec.capture_or_reuse(["bob"])
             assert source.unchanged_prefix_agents == {"alice", "charlie"}
             assert len(source.events["bob"].suffix) == 1
+            assert all(
+                "_branches" not in source.catalogs[name] for name in peer_branches
+            )
             original_get = memory._state.get
             original_index = memory._index_keywords
             calls = []
 
             def no_peer_cursor_read(key, *args, **kwargs):
-                if key in ("alice:cursor:keywords", "charlie:cursor:keywords"):
-                    raise AssertionError("unmodified Agent cursor was deserialized")
+                if key in {
+                    "alice:cursor:keywords",
+                    "charlie:cursor:keywords",
+                    "alice:memory_branch_catalog",
+                    "charlie:memory_branch_catalog",
+                }:
+                    raise AssertionError("unmodified Agent's large state was loaded")
                 return original_get(key, *args, **kwargs)
 
             def only_changed_agent(name, events, *args, **kwargs):
@@ -235,6 +215,11 @@ def test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads(
                 assert not refreshed.matches_published_fts_prefix
             assert calls == ["bob"]
             assert memory._state["alice:cursor:keywords"] == peer_cursor
+            assert all(
+                memory._state.get(f"{name}:memory_branch_catalog") == before
+                for name, before in peer_branches.items()
+            )
+            assert memory._state.get("bob:memory_branch_catalog")["count"] == 2
             manifest = memory._manifest()
             assert manifest["fts"] == "ready"
             assert manifest["fts_pending"] == []

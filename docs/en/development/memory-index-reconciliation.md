@@ -452,3 +452,31 @@ synthetic 320-turn fixture has an ~881 KiB Cursor, versus a 258-byte Source
 Certificate and ~12 KiB shared Branch Candidate materialization. This is a
 separate Round state-encoding and publication problem, not grounds to
 reintroduce a large source proof or expand the append participants.
+
+
+## Protocol acceptance: evidence, completeness and cost
+
+The test unit is the *Source Prefix / FTS / Vector / Branch Projection*
+protocol, not the implementation method that last changed. Keep the
+following representative tests as independent oracles, and use the opt-in
+benchmark above for timing trends. Call counters are deterministic; elapsed
+milliseconds are **not** CI pass/fail thresholds.
+
+| Path | Soundness: reject unsafe reuse | Completeness: preserve eligible history | Cost: forbid irrelevant work |
+| --- | --- | --- | --- |
+| **Steady** | `test_steady_proof_never_loads_full_keyword_cursor_or_branch_candidates` rejects a changed Keyword Revision; `test_dirty_vector_rebuild_is_not_skipped_by_published_fts_source` separates vector readiness | `test_shared_prefix_projection_matches_replay_across_mirrors_and_overrides` is the Replay selection oracle; `test_branch_view_changes_reproject_summary_without_reading_source` preserves both branch views | Proof-only reads do not load Branch Candidates/Keyword Cursor; `test_steady_query_uses_published_catalog_without_source_reads` forbids full source reads |
+| **Incremental** | `test_append_crossing_catalog_projection_cannot_publish_stale_snapshot` fences concurrent changes; `test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads` retains FTS publication | `test_append_reads_only_physical_suffix_and_preserves_other_agent` preserves peer content; `test_mirrored_id_append_invalidates_physical_source_frontier` preserves repeated logical IDs | The combined peer-append test forbids loading unchanged peers' Branch/Keyword materialization and checks only the modified Agent is indexed |
+| **Recovery** | `test_incomplete_decoded_source_does_not_certify_complete_prefix` and `test_interrupted_vector_cannot_inherit_published_fts_catalog` reject incomplete publication | `test_legacy_derived_catalogue_recovers_without_format_change` and `test_saved_build_after_vector_abort_and_append_recaptures_full_source` restore valid data | The benchmark's failed-Append gap must trigger full key/source enumeration; the full recapture may scale with physical source size, while normal steady/append must not |
+
+The first two rows also cross-check live, saved-reader and CLI consumers
+through `test_live_and_saved_stable_queries_never_enumerate_event_keys`
+and `test_cli_unchanged_search_uses_reconciler_roster_without_key_discovery`.
+The physical-ref navigation cache is separately guarded by
+`test_failed_append_gap_cannot_poison_physical_ref_cache`.
+
+**Test entropy rule:** consolidate only genuinely identical setup and
+assertion domains. The peer-append Cursor and Branch tests now share one
+fixture and retain both sets of assertions. The larger navigation,
+lineage, ownership, and vector tests are not interchangeable: overlapping
+event fixtures do not imply equivalent failure or consumption contracts.
+Do not remove them based on file size or line counts alone.
