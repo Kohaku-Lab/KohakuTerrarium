@@ -284,3 +284,80 @@ The optional catalogue lives in the existing derived memory_state table
 under the **single v2** index format; it is not another writer, persistence
 format, sidecar, watcher, distributed lease or new invalidation state
 machine.
+
+## Proof ownership and invalidation matrix
+
+These are logical contracts, **not** additional database tables, leases or state
+machines. The source event log is authoritative; FTS, Vector and the source
+catalogue are derived.
+
+| Authority and evidence | Proves | Invalidated/rechecked by | Does not prove |
+| --- | --- | --- | --- |
+| SessionStore: numeric physical keys, Session ID, total event count | Source identity and existing physical rows within KT-managed append/fork semantics | Append, Fork, unexplained key growth, sequence gap | Arbitrary SQL/in-place edits or remote model identity |
+| Reconciler: Source Frontier and per-Agent Catalogue (count, next_seq, source_order, anchor) | All known Agent prefixes were captured; published index corresponds to one physical source prefix | Source growth not explained by known Agent suffixes, unreadable record, unknown Agent, changed Session ID | Vector readiness or an unchanged selected Branch View |
+| History: candidate entries and parent paths | Which physical branch nodes are eligible under a selected view | Branch selection changes or new branch nodes | FTS publication, source freshness, model identity |
+| Memory Lifecycle: Manifest, epoch, fts_revision, keyword cursors | Coordinated READY FTS publication for the complete enrolled Agent roster | Migration, source refresh, force rebuild, interrupted ownership, missing cursor | Vector publication and embedding-space validity |
+| Vector: embedding identity, dimension, generation, keyword revision | Published vector corpus matches its declared model and FTS prefix | Model change, destructive clear, aborted build, incompatible cursor | Remote provider drift or branch visibility |
+| Navigator: physical refs, fingerprint, accepted-append observations | Anchor source identity and locally verified append suffix | Gap, fingerprint mismatch, unobserved global growth, close/expiry | Distributed source registry or foreign writer lease |
+| Replay/Compaction: visible events plus source-path evidence | Correct visible messages and reusable summary eligibility | Selection change, new compaction evidence | Source Prefix or Vector readiness |
+
+**Separate lifetimes:** A valid Source Prefix does not make Vector READY.
+A selection change does not invalidate FTS. IndexSourceSnapshot.published
+currently means that the FTS Source Catalogue is unchanged, not that Vector
+is ready. TailHistory is a verified suffix facade, not an arbitrary full list.
+
+### Change impact
+
+| Change | Required action | Reusable state |
+| --- | --- | --- |
+| Unchanged source / view | Check small identity/count and publication state | Existing event rows, candidate projection, FTS/Vector |
+| Switch Branch View | Recalculate selection eligibility | Source proof, physical FTS/Vector data |
+| Accepted Bob Append | Verify global delta and Bob suffix; refresh affected index | Alice physical refs if locally observed writes account for all growth |
+| Failed Append creates key gap | Reject consecutive-suffix shortcut; enumerate physical keys | Previously committed rows |
+| New undeclared Agent event | Unexplained delta triggers full Agent discovery | Existing physical source, subject to coordinated publication |
+| Declared embedder identity change | Invalidate/rebuild Vector generation | Source, FTS, branch candidates |
+| New Compaction completion | Re-evaluate eligible summaries and snapshot freshness | Original physical source facts |
+| Fork changes Session ID | Invalidate source-derived certificates | Original independent session |
+| External in-place mutation, unchanged key count | Unsupported automatic freshness; require explicit reindex/reopen | No proof of unchanged source |
+
+## Opt-in Source Prefix performance baseline
+
+From the repository root run:
+
+    PYTHONDONTWRITEBYTECODE=1 python -B scripts/bench_memory_source.py --turns 48 144 320 --samples 5 --append-count 3
+
+The script uses throwaway SessionStore files in the OS temp directory and
+prints JSONL; it is **not a CI timing gate**. Each fixture contains one Agent,
+one event per turn and a canonical linear, *cumulative* parent path. Timings
+are warm in-process medians (except the single gap-recovery run). Source
+enumeration counts include explicit full key scans and full decoded-source
+reads, not the native KVault lookups reflected in timings.
+
+Baseline: Windows / Python 3.14.2, HEAD 5d7b271eb.
+
+| Turns | Catalogue KiB | Catalogue read p50 | Source proof p50 | Branch selection p50 | Steady prepare p50 | FTS query p50 | Append refresh p50 | Gap recovery single |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 48 | 10.7 | 0.12 ms | 0.76 ms | 0.17 ms | 1.04 ms | 1.02 ms | 20.32 ms | 17.56 ms |
+| 144 | 93.4 | 1.22 ms | 5.61 ms | 1.75 ms | 7.71 ms | 0.95 ms | 51.40 ms | 51.96 ms |
+| 320 | 476.5 | 5.96 ms | 29.65 ms | 5.53 ms | 36.66 ms | 1.04 ms | 177.18 ms | 201.11 ms |
+
+All steady and regular Append samples: **zero** full event-key scans and
+**zero** full source reads. The intentional failed-Append gap forced exactly
+**one** full key scan and **one** full source read in each fixture.
+
+On the 320-turn fixture, source proof verification costs about 30 ms
+while separate FTS retrieval costs about 1 ms. This is a synthetic stress
+case with cumulative ancestry, not production telemetry or an SLA.
+
+**Next-slice acceptance criteria:**
+
+- **Steady:** source proof verification must not deserialize or project
+  irrelevant complete ancestry; materialization proportional to actual
+  returned selection is separately justified.
+- **Append:** normal refresh should track affected Agent/source changes
+  rather than reserializing every past ancestor.
+- **Recovery:** uncertain source coverage must still trigger complete
+  recertification; this may cost O(source size) on the recovery path.
+
+The baseline does not authorize a new format, Source Registry or separate
+persistent proof state.
