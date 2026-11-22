@@ -94,7 +94,7 @@ def _run(turns, samples, append_count):
                     ),
                 }
                 source = reconciler.probe_source_prefix(["alice"])
-                assert source is not None and source.published
+                assert source is not None and source.matches_published_fts_prefix
                 steady["branch_projection_p50_ms"] = _p50(
                     lambda: reconciler.selected_views(
                         source, ["alice"], {"alice": selection}
@@ -106,7 +106,7 @@ def _run(turns, samples, append_count):
                     checked, views = reconciler.prepare_keywords(
                         ["alice"], {"alice": selection}
                     )
-                    assert checked.published and len(views["alice"]) == len(selection)
+                    assert checked.matches_published_fts_prefix and len(views["alice"]) == len(selection)
                     return views
 
                 steady["prepare_keywords_p50_ms"] = _p50(prepare, samples)
@@ -130,7 +130,7 @@ def _run(turns, samples, append_count):
                             ["alice"], {"alice": selection}
                         )
                     )
-                    assert not checked.published
+                    assert not checked.matches_published_fts_prefix
                     refreshes.append(duration)
                 incremental = {
                     "writer_append_p50_ms": round(statistics.median(appends), 3),
@@ -158,7 +158,7 @@ def _run(turns, samples, append_count):
                 duration, (checked, views) = _timed(
                     lambda: reconciler.prepare_keywords(["alice"], {"alice": selection})
                 )
-                assert not checked.published
+                assert not checked.matches_published_fts_prefix
                 assert memory.search("needle", mode="fts", k=3, branch_views=views)
                 recovery = {
                     "refresh_ms": round(duration, 3),

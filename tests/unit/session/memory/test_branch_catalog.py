@@ -102,7 +102,7 @@ def test_steady_proof_never_loads_full_keyword_cursor_or_branch_candidates(
             monkeypatch.setattr(memory._state, "get", counted)
             for _ in range(3):
                 stable = reconciler.probe_source_prefix(["alice"])
-                assert stable is not None and stable.published
+                assert stable is not None and stable.matches_published_fts_prefix
             assert opened == []
             views = reconciler.selected_views(
                 stable, ["alice"], {"alice": {t: 1 for t in range(1, 41)}}
@@ -141,10 +141,12 @@ def test_legacy_derived_catalogue_recovers_without_format_change(tmp_path):
             memory._state["alice:memory_source_catalog"] = proof
             memory._state.delete("alice:memory_branch_catalog")
             old = reconciler.capture_or_reuse(["alice"], all_agents=True)
-            assert not old.published
+            assert not old.matches_published_fts_prefix
             assert reconciler.build(old) == {"alice": 0}
             assert memory._manifest() == manifest
-            assert reconciler.probe_source_prefix(["alice"]).published
+            assert reconciler.probe_source_prefix(
+                ["alice"]
+            ).matches_published_fts_prefix
             assert memory.search("needle", mode="fts", branch_views={"alice": {1: 1}})
 
 
@@ -174,7 +176,7 @@ def test_peer_append_does_not_rewrite_unmodified_branch_candidates(tmp_path):
                 parent_branch_path=[(1, 1)],
             )
             source, _ = rec.prepare_keywords(["alice"])
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert "_branches" not in source.catalogs["alice"]
             assert memory._state.get("alice:memory_branch_catalog") == alice
             assert memory._state.get("bob:memory_branch_catalog")["count"] == 2
@@ -230,14 +232,14 @@ def test_peer_append_skips_unchanged_keyword_materialization_and_cursor_reads(
                 patch.setattr(memory._state, "get", no_peer_cursor_read)
                 patch.setattr(memory, "_index_keywords", only_changed_agent)
                 refreshed, _ = rec.prepare_keywords(["bob"])
-                assert not refreshed.published
+                assert not refreshed.matches_published_fts_prefix
             assert calls == ["bob"]
             assert memory._state["alice:cursor:keywords"] == peer_cursor
             manifest = memory._manifest()
             assert manifest["fts"] == "ready"
             assert manifest["fts_pending"] == []
             assert set(manifest["agents"]) == set(agents)
-            assert rec.probe_source_prefix(agents).published
+            assert rec.probe_source_prefix(agents).matches_published_fts_prefix
             for name in agents:
                 assert [
                     hit.content

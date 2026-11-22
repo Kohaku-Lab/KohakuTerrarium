@@ -42,7 +42,6 @@ class IndexSourceSnapshot:
     roster: tuple[str, ...] = ()
     frontier: SourceFrontier | None = None
     catalogs: dict[str, dict] = field(default_factory=dict)
-    published: bool = False
 
     @property
     def agents(self) -> tuple[str, ...]:
@@ -61,6 +60,19 @@ class IndexSourceSnapshot:
             if name in self.catalogs
             and isinstance(events, TailHistory)
             and not events.suffix
+        )
+
+    @property
+    def matches_published_fts_prefix(self) -> bool:
+        """A proved, unchanged FTS source prefix, not Vector readiness.
+
+        This relationship is derived from the certified per-Agent suffixes.
+        It cannot disagree with their changed/unchanged classification.
+        """
+        return (
+            self.frontier is not None
+            and bool(self.agents)
+            and len(self.unchanged_prefix_agents) == len(self.agents)
         )
 
 
@@ -146,7 +158,6 @@ class SessionIndexReconciler:
             return None
         views: dict[str, list[dict] | TailHistory] = {}
         catalogs: dict[str, dict] = {}
-        changed = False
         before_count = None
         total_suffix = 0
         for name in names:
@@ -197,7 +208,6 @@ class SessionIndexReconciler:
                 updated_branches["anchor"] = latest["anchor"]
                 latest["_branches"] = updated_branches
             total_suffix += len(view.suffix)
-            changed |= bool(view.suffix)
             views[name] = view
             catalogs[name] = latest
         if before_count is None or (
@@ -212,12 +222,14 @@ class SessionIndexReconciler:
         # snapshot; fail closed to one full capture on a concurrent append.
         if source_frontier(self._store) != frontier:
             return None
-        return IndexSourceSnapshot(
-            views, tuple(names), frontier, catalogs, published=not changed
-        )
+        return IndexSourceSnapshot(views, tuple(names), frontier, catalogs)
 
     def _publish_source_catalogs(self, source: IndexSourceSnapshot) -> None:
-        if source.published or not source.catalogs or source.frontier is None:
+        if (
+            source.matches_published_fts_prefix
+            or not source.catalogs
+            or source.frontier is None
+        ):
             return
         state = self._catalog_state()
         if state is None:
@@ -322,7 +334,7 @@ class SessionIndexReconciler:
     def refresh_keywords(
         self, source: IndexSourceSnapshot, *, existing_only: bool = False
     ) -> dict[str, int]:
-        if source.published:
+        if source.matches_published_fts_prefix:
             return {name: 0 for name in source.agents}
         if (
             existing_only
@@ -526,7 +538,7 @@ class SessionIndexReconciler:
             or manifest.get("vector_identity") != self._memory._vector_identity
             or manifest.get("vector_dimensions") != self._memory._embedder.dimensions
         )
-        if not rebuild and source.published:
+        if not rebuild and source.matches_published_fts_prefix:
             try:
                 for name in requested:
                     self._memory._assert_vector_readable(name)
@@ -586,7 +598,7 @@ class SessionIndexReconciler:
     ) -> dict[str, int]:
         """Materialize every captured Agent, including empty namespaces."""
         try:
-            if source.published:
+            if source.matches_published_fts_prefix:
                 manifest = self._memory._manifest() or {}
                 reuse_vectors = not self._memory._has_vectors or (
                     manifest.get("vector") == "ready"
@@ -618,7 +630,7 @@ class SessionIndexReconciler:
                 source = self.capture(list(source.agents), all_agents=True)
             if (
                 not force
-                and not source.published
+                and not source.matches_published_fts_prefix
                 and any(
                     isinstance(events, TailHistory) for events in source.events.values()
                 )

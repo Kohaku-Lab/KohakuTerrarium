@@ -302,9 +302,12 @@ catalogue are derived.
 | Replay/Compaction: visible events plus source-path evidence | Correct visible messages and reusable summary eligibility | Selection change, new compaction evidence | Source Prefix or Vector readiness |
 
 **Separate lifetimes:** A valid Source Prefix does not make Vector READY.
-A selection change does not invalidate FTS. IndexSourceSnapshot.published
-currently means that the FTS Source Catalogue is unchanged, not that Vector
-is ready. TailHistory is a verified suffix facade, not an arbitrary full list.
+A selection change does not invalidate FTS. The derived
+`IndexSourceSnapshot.matches_published_fts_prefix` predicate only means
+that the physical source still matches the published FTS prefix: it does not
+prove Vector readiness or the selected Branch View. `TailHistory` is a
+verified suffix facade, not a full-history `Sequence`; trying to iterate
+an omitted prefix fails explicitly.
 
 ### Change impact
 

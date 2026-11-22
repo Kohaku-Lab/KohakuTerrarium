@@ -59,7 +59,7 @@ def test_steady_query_uses_published_catalog_without_source_reads(
             monkeypatch.setattr(store, "get_memory_events", cannot_reenumerate)
             for _ in range(3):
                 src, views = reconciler.prepare_keywords(["alice"])
-                assert src.published
+                assert src.matches_published_fts_prefix
                 assert src.agents == ("alice", "bob")
                 if with_vectors:
                     src, pending = reconciler.prepare_vectors(src, ["alice"])
@@ -102,7 +102,7 @@ def test_append_reads_only_physical_suffix_and_preserves_other_agent(
 
             monkeypatch.setattr(store, "get_memory_events", cannot_reenumerate)
             source, views = reconcile.prepare_keywords(["alice"])
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert len(source.events["alice"].suffix) == 0
             assert len(source.events["bob"].suffix) == 1
             assert memory._manifest()["fts"] == "ready"
@@ -117,7 +117,7 @@ def test_append_reads_only_physical_suffix_and_preserves_other_agent(
             ] == ["new-bob-needle"]
             assert memory._manifest()["fts_revision"] > old["fts_revision"]
             again, _ = reconcile.prepare_keywords(["alice"])
-            assert again.published
+            assert again.matches_published_fts_prefix
     finally:
         store.close(update_status=False)
 
@@ -146,7 +146,7 @@ def test_saved_query_reuses_persisted_source_without_restoring_event_counters(
             source, views = SessionIndexReconciler(reader, memory).prepare_keywords(
                 ["alice"], all_agents=True
             )
-            assert source.published
+            assert source.matches_published_fts_prefix
             assert len(views["alice"]) == 40
             assert len(memory.search("needle", mode="fts", branch_views=views)) == 10
 
@@ -210,7 +210,7 @@ def test_dirty_vector_rebuild_is_not_skipped_by_published_fts_source(tmp_path):
             )
             source, _ = rec.prepare_keywords(["alice"])
             assert memory._manifest()["vector"] == "dirty"
-            assert rec.capture_or_reuse(["alice"]).published
+            assert rec.capture_or_reuse(["alice"]).matches_published_fts_prefix
             rec.build(rec.capture_or_reuse(["alice"]))
             assert memory._manifest()["vector"] == "ready"
             assert memory._manifest()["vector_generation"] == baseline
@@ -241,10 +241,10 @@ def test_source_identity_rejects_forked_catalog_with_unchanged_key_count(tmp_pat
         with closing(SessionMemory(str(child), index_all_branches=True)) as memory:
             rec = SessionIndexReconciler(forked, memory)
             source = rec.capture_or_reuse(["alice"])
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert len(source.events["alice"]) == 2
             rec.build(source)
-            assert rec.capture_or_reuse(["alice"]).published
+            assert rec.capture_or_reuse(["alice"]).matches_published_fts_prefix
 
 
 def test_mirrored_id_append_invalidates_physical_source_frontier(tmp_path):
@@ -266,7 +266,7 @@ def test_mirrored_id_append_invalidates_physical_source_frontier(tmp_path):
                 parent_branch_path=[],
             )
             source, views = rec.prepare_keywords(["alice"])
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert len(source.events["alice"].suffix) == 1
             assert [
                 h.content
@@ -294,7 +294,7 @@ def test_live_second_store_observes_committed_append_without_full_scan(
         with closing(SessionMemory(str(path), index_all_branches=True)) as second:
             rec = SessionIndexReconciler(reader, second)
             source = rec.capture_or_reuse(["alice"])
-            assert source.published
+            assert source.matches_published_fts_prefix
             writer.append_event(
                 "alice",
                 "user_input",
@@ -382,7 +382,7 @@ def test_append_crossing_catalog_projection_cannot_publish_stale_snapshot(
             monkeypatch.setattr(reconcile_mod, "read_appended", concurrent_append)
             snapshot = reconciler.capture_or_reuse(["alice"], all_agents=True)
             assert fired
-            assert not snapshot.published
+            assert not snapshot.matches_published_fts_prefix
             assert len(snapshot.events["bob"]) == 4
             reconciler.refresh_keywords(snapshot)
             views = reconciler.selected_views(snapshot, ["bob"])
@@ -392,7 +392,7 @@ def test_append_crossing_catalog_projection_cannot_publish_stale_snapshot(
                     "concurrent-needle", mode="fts", branch_views=views
                 )
             ] == ["bob concurrent-needle"]
-            assert reconciler.capture_or_reuse(["alice"]).published
+            assert reconciler.capture_or_reuse(["alice"]).matches_published_fts_prefix
     finally:
         store.close(update_status=False)
 
@@ -417,7 +417,7 @@ def test_abandoned_fts_catalog_does_not_override_building_barrier(tmp_path):
         with closing(SessionMemory(str(path), index_all_branches=True)) as peer:
             reconcile = SessionIndexReconciler(store, peer)
             staged = reconcile.capture_or_reuse(["alice"])
-            assert not staged.published
+            assert not staged.matches_published_fts_prefix
             with pytest.raises(ValueError, match="building|invalid"):
                 peer.search("needle", mode="fts")
             reconcile.build(staged)
@@ -502,7 +502,7 @@ def test_interrupted_vector_cannot_inherit_published_fts_catalog(tmp_path, monke
             rec.prepare_keywords(["alice"])
             assert first._manifest()["vector"] == "dirty"
             source = rec.capture_or_reuse(["alice"])
-            assert source.published
+            assert source.matches_published_fts_prefix
 
             # A detached encoder has begun but has not committed its batch.
             rows = store.get_memory_events("bob")
@@ -517,11 +517,11 @@ def test_interrupted_vector_cannot_inherit_published_fts_catalog(tmp_path, monke
 
             monkeypatch.setattr(store, "get_memory_events", count_full_source)
             guarded = rec.capture_or_reuse(["alice"])
-            assert guarded.published  # FTS is legitimately READY.
+            assert guarded.matches_published_fts_prefix  # FTS is legitimately READY.
             rebuilt, agents = rec.prepare_vectors(guarded, ["alice"])
             assert set(agents) == {"alice", "bob"}
             assert set(calls) == {"alice", "bob"}
-            assert not rebuilt.published
+            assert not rebuilt.matches_published_fts_prefix
             first._abort_vector_build()
 
         with closing(
@@ -630,7 +630,7 @@ def test_saved_build_after_vector_abort_and_append_recaptures_full_source(
                 parent_branch_path=[],
             )
             source = rec.capture_or_reuse(["alice"], all_agents=True)
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert isinstance(source.events["bob"], TailHistory)
             calls = []
             get = store.get_memory_events
@@ -824,7 +824,7 @@ def test_steady_source_never_discovers_event_keys_but_accounts_for_new_agents(
             monkeypatch.setattr(store, "_event_key_names", tracked_keys)
             for _ in range(3):
                 current, _ = rec.prepare_keywords(["alice"])
-                assert current.published
+                assert current.matches_published_fts_prefix
             assert scans == []
 
             # Appended event identity can be reused; coverage is physical.
@@ -837,7 +837,7 @@ def test_steady_source_never_discovers_event_keys_but_accounts_for_new_agents(
                 parent_branch_path=[],
             )
             changed, views = rec.prepare_keywords(["alice"])
-            assert not changed.published
+            assert not changed.matches_published_fts_prefix
             assert "charlie" in changed.agents
             assert scans
             charlie_view = rec.selected_views(changed, ["charlie"])
@@ -849,7 +849,7 @@ def test_steady_source_never_discovers_event_keys_but_accounts_for_new_agents(
             ] == ["charlie new-needle"]
             scans.clear()
             stable, _ = rec.prepare_keywords(["alice"])
-            assert stable.published
+            assert stable.matches_published_fts_prefix
             assert scans == []
     finally:
         store.close(update_status=False)
@@ -874,13 +874,17 @@ def test_metadata_only_new_agent_and_excluded_event_namespaces_are_accounted(
         with closing(SessionMemory(str(path), index_all_branches=True)) as memory:
             rec = SessionIndexReconciler(store, memory)
             rec.build(rec.capture(["alice"], all_agents=True))
-            assert rec.capture_or_reuse(["alice"], all_agents=True).published
+            assert rec.capture_or_reuse(
+                ["alice"], all_agents=True
+            ).matches_published_fts_prefix
             store.meta["agents"] = ["alice", "empty"]
             source = rec.capture_or_reuse(["alice"], all_agents=True)
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert "empty" in source.agents
             assert rec.build(source)["empty"] == 0
-            assert rec.capture_or_reuse(["alice"], all_agents=True).published
+            assert rec.capture_or_reuse(
+                ["alice"], all_agents=True
+            ).matches_published_fts_prefix
     finally:
         store.close(update_status=False)
 
@@ -904,7 +908,7 @@ def test_incomplete_decoded_source_does_not_certify_complete_prefix(
             partial = rec.capture(["alice"], all_agents=True)
             assert partial.catalogs == {}
             rec.build(partial)
-            assert not rec.capture_or_reuse(["alice"]).published
+            assert not rec.capture_or_reuse(["alice"]).matches_published_fts_prefix
     finally:
         store.close(update_status=False)
 
@@ -924,9 +928,9 @@ def test_legacy_lexical_source_catalog_falls_back_and_is_recertified(tmp_path):
             memory._state["alice:memory_source_catalog"] = catalog
 
             source = rec.capture_or_reuse(["alice"])
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert rec.build(source) == {"alice": 0}
-            assert rec.capture_or_reuse(["alice"]).published
+            assert rec.capture_or_reuse(["alice"]).matches_published_fts_prefix
             assert memory._state["alice:memory_source_catalog"]["source_order"] == (
                 "numeric-physical"
             )
@@ -1005,12 +1009,26 @@ def test_unindexed_framework_append_forces_one_reconciliation_then_reuses(
 
             monkeypatch.setattr(store, "_event_key_names", counted)
             source = rec.capture_or_reuse(["alice"])
-            assert not source.published
+            assert not source.matches_published_fts_prefix
             assert source.agents == ("alice",)
             assert discovered
             assert rec.build(source) == {"alice": 0}
             discovered.clear()
-            assert rec.capture_or_reuse(["alice"]).published
+            assert rec.capture_or_reuse(["alice"]).matches_published_fts_prefix
             assert not discovered
     finally:
         store.close(update_status=False)
+
+
+def test_tail_history_cannot_silently_iterate_a_missing_prefix():
+    previous = {"type": "user_input", "content": "previous"}
+    appended = {"type": "user_input", "content": "new"}
+    tail = TailHistory(2, previous, [appended])
+    assert len(tail) == 3
+    assert tail[1] is previous
+    assert tail[2:] == [appended]
+    with pytest.raises(IndexError, match="prefix not materialized"):
+        tail[0]
+    with pytest.raises(TypeError, match="unmaterialized source prefix"):
+        list(tail)
+    assert list(TailHistory(0, None, [appended])) == [appended]

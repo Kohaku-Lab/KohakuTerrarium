@@ -10,7 +10,6 @@ This is derived cache data in the existing memory_state table, not a new source
 format, writer protocol, watchdog or persistent state machine.
 """
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,12 +36,12 @@ class SourceFrontier:
     physical_count: int
 
 
-class TailHistory(Sequence):
-    """Virtual full event sequence exposing only a validated append suffix.
+class TailHistory:
+    """A validated append suffix, not an iterable full-history Sequence.
 
-    Extractor/indexer checkpoints access the old last event, the new suffix,
-    and the total count. Any unplanned historical access fails closed rather
-    than accidentally decoding the previous entire source.
+    Extractor/indexer checkpoints may access the old last event, the new
+    suffix and the total count. Unmaterialized historical access fails
+    closed rather than masquerading as a complete list.
     """
 
     def __init__(self, count: int, previous: dict | None, suffix: list[dict]):
@@ -52,6 +51,13 @@ class TailHistory(Sequence):
 
     def __len__(self) -> int:
         return self.old_count + len(self.suffix)
+
+    def __iter__(self):
+        if self.old_count:
+            raise TypeError(
+                "TailHistory cannot iterate an unmaterialized source prefix"
+            )
+        return iter(self.suffix)
 
     def __getitem__(self, index):
         if isinstance(index, slice):
