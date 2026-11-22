@@ -42,6 +42,15 @@ def _navigation_integer(value: Any) -> Any:
     return value
 
 
+def _include_search_history(value: Any) -> bool:
+    """Normalize booleans from native APIs and text tool-call formats."""
+    if type(value) is bool:
+        return value
+    if isinstance(value, str) and value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    raise ValueError("include_search_history must be true or false")
+
+
 @register_builtin("search_memory")
 class SearchMemoryTool(BaseTool):
     """Search indexed session events by keyword or semantic similarity."""
@@ -75,6 +84,12 @@ class SearchMemoryTool(BaseTool):
 
         mode = args.get("mode", "auto")
         agent = args.get("agent", None)
+        try:
+            include_search_history = _include_search_history(
+                args.get("include_search_history", False)
+            )
+        except ValueError as exc:
+            return ToolResult(error=str(exc))
 
         context: ToolContext | None = kwargs.get("context")
         if not context:
@@ -140,10 +155,16 @@ class SearchMemoryTool(BaseTool):
                     agent=agent,
                     selected_branch_view=current_view or None,
                     selected_agent=context.agent_name or "agent",
+                    include_search_history=include_search_history,
                 )
             else:
                 results = await asyncio.to_thread(
-                    memory.search, query, mode=mode, k=k, agent=agent
+                    memory.search,
+                    query,
+                    mode=mode,
+                    k=k,
+                    agent=agent,
+                    include_search_history=include_search_history,
                 )
         except MemoryContextError as exc:
             return ToolResult(error=f"{exc.code}: {exc}", metadata={"code": exc.code})

@@ -349,6 +349,13 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "type": "string",
                 "description": "Opaque anchor from a search/context result (instead of query)",
             },
+            "include_search_history": {
+                "type": "boolean",
+                "description": (
+                    "Include search_memory's own calls/results for debugging "
+                    "(default false; excluded before Top-K)"
+                ),
+            },
             "before": {
                 "type": "integer",
                 "minimum": 0,

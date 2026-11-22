@@ -135,6 +135,7 @@ class LiveSessionMemory:
         semantic_fallback: bool = False,
         selected_branch_view: dict[int, int] | None = None,
         selected_agent: str | None = None,
+        include_search_history: bool = False,
     ):
         if mode not in ("auto", "fts", "hybrid", "semantic"):
             raise ValueError(f"Unknown search mode {mode!r}")
@@ -163,6 +164,7 @@ class LiveSessionMemory:
                                 k,
                                 agent,
                                 scope=scope,
+                                include_search_history=include_search_history,
                             )
                             return await self._with_anchors(results, views, None, query)
                         raise ValueError("semantic search needs an embedding model")
@@ -202,11 +204,17 @@ class LiveSessionMemory:
                         k if mode == "semantic" else k * 2,
                         agent,
                         scope=scope,
+                        include_search_history=include_search_history,
                     )
                     if mode == "semantic":
                         return await self._with_anchors(results, views, None, query)
                     keywords = await self._store.run(
-                        self._memory._search_fts, query, k * 2, agent, scope=scope
+                        self._memory._search_fts,
+                        query,
+                        k * 2,
+                        agent,
+                        scope=scope,
+                        include_search_history=include_search_history,
                     )
                     fused = self._memory._fuse_results(keywords, results, k)
                     return await self._with_anchors(fused, views, None, query)
@@ -230,7 +238,12 @@ class LiveSessionMemory:
                     error=str(exc) or type(exc).__name__,
                 )
         results = await self._store.run(
-            self._memory._search_fts, query, k, agent, scope=scope
+            self._memory._search_fts,
+            query,
+            k,
+            agent,
+            scope=scope,
+            include_search_history=include_search_history,
         )
         return await self._with_anchors(results, views, warning, query)
 

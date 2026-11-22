@@ -128,7 +128,14 @@ class _FakeMemory:
     def __init__(self, results):
         self._results = results
 
-    def search(self, query, mode="auto", k=5, agent=None):
+    def search(
+        self,
+        query,
+        mode="auto",
+        k=5,
+        agent=None,
+        include_search_history=False,
+    ):
         return self._results
 
 

@@ -62,6 +62,20 @@ class SearchResult:
 class MemorySearchMixin:
     """Read the ranked indexes owned by SessionMemory."""
 
+    @staticmethod
+    def _candidate_visible(
+        metadata: dict,
+        agent: str | None,
+        scope: BranchVisibility | AgentBranchVisibility | None,
+        include_search_history: bool,
+    ) -> bool:
+        """One provenance/lineage filter for keyword and vector candidates."""
+        if agent and metadata.get("agent") != agent:
+            return False
+        if not include_search_history and metadata.get("tool_name") == "search_memory":
+            return False
+        return scope is None or scope.matches(metadata)
+
     def search(
         self,
         query: str,
@@ -71,6 +85,7 @@ class MemorySearchMixin:
         *,
         branch_view: dict[int, int] | None = None,
         branch_views: dict[str, dict[int, int]] | None = None,
+        include_search_history: bool = False,
     ) -> list[SearchResult]:
         """Search a ranked corpus, optionally constrained to branch views.
 
@@ -102,7 +117,13 @@ class MemorySearchMixin:
 
         match mode:
             case "fts":
-                return self._search_fts(query, k, agent, scope=scope)
+                return self._search_fts(
+                    query,
+                    k,
+                    agent,
+                    scope=scope,
+                    include_search_history=include_search_history,
+                )
             case "semantic":
                 if not self._has_vectors:
                     raise ValueError(
@@ -111,11 +132,29 @@ class MemorySearchMixin:
                         "create_embedder) or run kt embedding first; "
                         "use mode='auto'/'hybrid' for graceful fallback"
                     )
-                return self._search_semantic(query, k, agent, scope=scope)
+                return self._search_semantic(
+                    query,
+                    k,
+                    agent,
+                    scope=scope,
+                    include_search_history=include_search_history,
+                )
             case "hybrid":
                 if not self._has_vectors:
-                    return self._search_fts(query, k, agent, scope=scope)
-                return self._search_hybrid(query, k, agent, scope=scope)
+                    return self._search_fts(
+                        query,
+                        k,
+                        agent,
+                        scope=scope,
+                        include_search_history=include_search_history,
+                    )
+                return self._search_hybrid(
+                    query,
+                    k,
+                    agent,
+                    scope=scope,
+                    include_search_history=include_search_history,
+                )
             case _:
                 raise ValueError(
                     f"Unknown search mode {mode!r} — expected 'fts', "
@@ -129,16 +168,19 @@ class MemorySearchMixin:
         agent: str | None,
         *,
         scope: BranchVisibility | AgentBranchVisibility | None = None,
+        include_search_history: bool = False,
     ) -> list[SearchResult]:
         """FTS results ranked before branch and agent filtering."""
         revision = self._assert_fts_readable()
-        if scope is not None:
+        # Search calls and their echoed results are historical facts, but
+        # normally not evidence for the *next* search. Filter before Top-K:
+        # hiding them after ranking would silently discard genuine matches.
+        if scope is not None or not include_search_history:
             results = ranked_filtered(
                 lambda limit: self._fts.search(query, k=limit),
                 k=k,
-                matches=lambda hit: (
-                    (not agent or hit[2].get("agent") == agent)
-                    and scope.matches(hit[2])
+                matches=lambda hit: self._candidate_visible(
+                    hit[2], agent, scope, include_search_history
                 ),
             )
         else:
@@ -162,12 +204,19 @@ class MemorySearchMixin:
         agent: str | None,
         *,
         scope: BranchVisibility | AgentBranchVisibility | None = None,
+        include_search_history: bool = False,
     ) -> list[SearchResult]:
         """Vector semantic search."""
         if self._vec is None:
             return []
         query_vec = self._embedder.encode_one(query)
-        return self._search_vector(query_vec, k, agent, scope=scope)
+        return self._search_vector(
+            query_vec,
+            k,
+            agent,
+            scope=scope,
+            include_search_history=include_search_history,
+        )
 
     def _search_vector(
         self,
@@ -176,6 +225,7 @@ class MemorySearchMixin:
         agent: str | None,
         *,
         scope: BranchVisibility | AgentBranchVisibility | None = None,
+        include_search_history: bool = False,
     ) -> list[SearchResult]:
         # Never read ranked vectors while the session-wide manifest is
         # invalid/building, even if legacy agent counters are missing.
@@ -194,13 +244,12 @@ class MemorySearchMixin:
             agents = revision.get("agents", ())
         for name in agents:
             self._assert_vector_readable(name)
-        if scope is not None:
+        if scope is not None or not include_search_history:
             results = ranked_filtered(
                 lambda limit: self._vec.search(query_vec, k=limit),
                 k=k,
-                matches=lambda hit: (
-                    (not agent or hit[2].get("agent") == agent)
-                    and scope.matches(hit[2])
+                matches=lambda hit: self._candidate_visible(
+                    hit[2], agent, scope, include_search_history
                 ),
             )
         else:
@@ -225,10 +274,23 @@ class MemorySearchMixin:
         agent: str | None,
         *,
         scope: BranchVisibility | AgentBranchVisibility | None = None,
+        include_search_history: bool = False,
     ) -> list[SearchResult]:
         """Hybrid search: lineage-filtered candidates then RRF fusion."""
-        fts_results = self._search_fts(query, k=k * 2, agent=agent, scope=scope)
-        sem_results = self._search_semantic(query, k=k * 2, agent=agent, scope=scope)
+        fts_results = self._search_fts(
+            query,
+            k=k * 2,
+            agent=agent,
+            scope=scope,
+            include_search_history=include_search_history,
+        )
+        sem_results = self._search_semantic(
+            query,
+            k=k * 2,
+            agent=agent,
+            scope=scope,
+            include_search_history=include_search_history,
+        )
         return self._fuse_results(fts_results, sem_results, k)
 
     @staticmethod

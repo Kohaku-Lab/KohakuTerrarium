@@ -21,17 +21,18 @@ Search indexed session history and nearby events.
 | k | integer | no | Search results (default 5) |
 | mode | string | no | `auto`, `fts`, `semantic`, `hybrid` |
 | agent | string | no | Search an agent in this session |
+| include_search_history | boolean | no | Include own calls/results for debugging (default false) |
 
 Pass exactly one of `query` or `anchor`.
 
 ## Behavior
 
-- Hits include an `anchor`; expand only if needed with `search_memory(anchor="...", before=3, after=3)`. If `has_before`/`has_after` is true, navigate from the first/last event anchor.
+- Hits have anchors. Expand if needed; `has_before`/`has_after` permit navigation from the first/last event anchor.
 - Anchors freeze lineage. Changed sources or expired anchors return errors.
-- `fts`/anchor reads do not load embeddings. `auto`/`hybrid` fall back to FTS on embedding errors; `semantic` errors instead.
-- Searches cover this session's selected lineage, not files. Use `grep` for files.
+- FTS/anchor reads need no embeddings; `auto`/`hybrid` can fall back to FTS; `semantic` errors.
+- Search only this session's selected lineage, not files; use `grep` for files.
 
 ## Limits
 
 - Each side has up to 10 events. Long text exposes content_slice and next_offset; use `search_memory(anchor="...", offset=N, before=0, after=0)`.
-- Compaction keeps raw history; valid anchors survive.
+- Tool results index the first 50,000 chars; anchors read the full raw event.
