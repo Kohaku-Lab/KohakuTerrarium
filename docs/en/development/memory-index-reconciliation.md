@@ -361,3 +361,51 @@ case with cumulative ancestry, not production telemetry or an SLA.
 
 The baseline does not authorize a new format, Source Registry or separate
 persistent proof state.
+
+### Convergence: bounded proof reads and shared-prefix candidates
+
+The v2 Memory index format and its READY/BUILDING publication authority have
+**not** changed. Within the existing derived memory_state table, the per-Agent
+source materialization is now two values, published together using KVault
+put_many:
+
+- memory_source_catalog is a small source certificate: Session ID / global
+  physical frontier, Agent count, last-event fingerprint, numeric source
+  ordering, Index epoch, FTS revision, Keyword revision and generation.
+- memory_branch_catalog holds only the branch selection materialization.
+  Candidate ancestry uses immutable interned parent edges with references to
+  shared prefixes, not repeated full parent_branch_path lists. It is bound to
+  the same Agent count and last-event fingerprint as the certificate.
+
+Steady proof validation uses the **existing** Keyword revision, Cursor key
+existence, pending flag, generation and global Manifest/FTS revision; it does
+not deserialize the often much larger Keyword Round Cursor or Branch
+Candidate materialization. Full Cursor values are still verified once on
+publication. Keyword mutations always advance their existing revision,
+including destructive resets. The branch value is loaded only for actual
+branch selection or an appended suffix. A malformed/missing source binding
+fails closed; a legacy same-version catalogue is fully recertified once
+without changing the Memory index version. No independent writer, Registry,
+state machine, or new persistent lifecycle epoch is created.
+
+Run the **same** opt-in benchmark command above for the new HEAD, including
+the additional branch_candidates_bytes and keyword_cursor_bytes fields.
+Illustrative Windows / Python 3.14.2 measurements at the same sizes and
+sample count (warm process medians, not a performance budget):
+
+| Turns | Proof bytes | Shared branch bytes | Keyword cursor bytes | Proof p50 before -> after | Branch projection p50 before -> after | Steady prepare p50 before -> after | Append refresh p50 before -> after |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 48 | 255 | 1,784 | 20,764 | 0.76 -> 0.11 ms | 0.17 -> 0.06 ms | 1.04 -> 0.17 ms | 20.32 -> 14.23 ms |
+| 144 | 258 | 5,364 | 174,087 | 5.61 -> 0.18 ms | 1.75 -> 0.16 ms | 7.71 -> 0.29 ms | 51.40 -> 22.74 ms |
+| 320 | 258 | 12,404 | 881,255 | 29.65 -> 0.10 ms | 5.53 -> 0.42 ms | 36.66 -> 0.45 ms | 177.18 -> 81.92 ms |
+
+The 320-turn FTS-only query still takes about 1 ms, unchanged in order of
+magnitude. No normal steady/Append probe performed full source scans.
+The deliberate sequence gap still triggers exactly one complete key scan
+and one full source read (320-turn recovery: about 135 ms).
+
+**Residual, deliberately not included in this slice:** the artificial
+long-lived open Rounds make the Keyword extraction Cursor about 881 KB at 320
+turns; ordinary Appends still have to read and update that cursor. This is a
+distinct Round-ownership/state-encoding problem, not a reason to weaken
+the source publication proof or build another durable source registry.

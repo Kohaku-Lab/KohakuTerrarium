@@ -14,6 +14,11 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+from kohakuterrarium.session.memory.branch_catalog import (
+    append_candidates,
+    branch_candidates_valid,
+    project_candidates,
+)
 from kohakuterrarium.session.memory.visibility import (
     requested_store_view,
     resolve_search_view,
@@ -22,9 +27,9 @@ from kohakuterrarium.session.memory.blocks import _anchor
 from kohakuterrarium.session.memory.source import (
     SourceFrontier,
     TailHistory,
+    _merge_entries,
     catalog_for_full,
     read_appended,
-    selected_from_entries,
     source_frontier,
 )
 
@@ -131,19 +136,21 @@ class SessionIndexReconciler:
         total_suffix = 0
         for name in names:
             catalog = state.get(f"{name}:memory_source_catalog")
-            checkpoint = state.get(f"{name}:cursor:keywords")
+            keyword_key = f"{name}:cursor:keywords"
+            keyword_revision = state.get(f"{keyword_key}:revision")
             if (
                 not isinstance(catalog, dict)
-                or not isinstance(checkpoint, dict)
+                or keyword_key not in state
+                or type(keyword_revision) is not int
+                or catalog.get("keyword_revision") != keyword_revision
                 or catalog.get("index_epoch") != manifest.get("epoch")
                 or catalog.get("fts_revision") != manifest.get("fts_revision")
-                or catalog.get("count") != checkpoint.get("count")
-                or catalog.get("anchor") != checkpoint.get("anchor")
-                or checkpoint.get("index_epoch") != manifest.get("epoch")
-                or checkpoint.get("generation") != self._memory._generation(name)
-                or state.get(f"{name}:cursor:keywords:pending", False)
-                or not isinstance(catalog.get("entries"), list)
-                or not isinstance(catalog.get("default_view"), dict)
+                or catalog.get("generation") != self._memory._generation(name)
+                or state.get(f"{keyword_key}:pending", False)
+                # A separate derived branch value must exist; checking only
+                # its key avoids deserializing historical ancestry in a
+                # source-proof read. Its source binding is checked at use.
+                or f"{name}:memory_branch_catalog" not in state
             ):
                 return None
             saved_frontier = catalog.get("frontier")
@@ -159,6 +166,21 @@ class SessionIndexReconciler:
             if result is None:
                 return None
             view, latest = result
+            if view.suffix:
+                # The entire old branch materialization is accessed only for
+                # an actual Agent suffix, not for unchanged source proofs or
+                # peer-Agent appends.
+                branches = state.get(f"{name}:memory_branch_catalog")
+                if not branch_candidates_valid(
+                    branches, count=catalog["count"], anchor=catalog["anchor"]
+                ):
+                    return None
+                updated_branches = append_candidates(
+                    branches, _merge_entries([], view.suffix)
+                )
+                updated_branches["count"] = latest["count"]
+                updated_branches["anchor"] = latest["anchor"]
+                latest["_branches"] = updated_branches
             total_suffix += len(view.suffix)
             changed |= bool(view.suffix)
             views[name] = view
@@ -192,22 +214,53 @@ class SessionIndexReconciler:
         manifest = self._memory._manifest()
         if not manifest or manifest.get("fts") != "ready":
             return
+        pending = []
         for name, catalog in source.catalogs.items():
             checkpoint = state.get(f"{name}:cursor:keywords")
             if (
                 not isinstance(checkpoint, dict)
                 or checkpoint.get("count") != catalog.get("count")
                 or checkpoint.get("anchor") != catalog.get("anchor")
+                or checkpoint.get("index_epoch") != manifest["epoch"]
+                or checkpoint.get("generation") != self._memory._generation(name)
+                or not checkpoint.get("source_refs_complete", False)
+                or state.get(f"{name}:cursor:keywords:pending", False)
             ):
                 continue
             key = f"{name}:memory_source_catalog"
+            # Source proof is a small, independently readable derived value.
+            # A candidate materialization belongs to that same accepted
+            # source prefix; store both in one KVault batch for atomicity.
+            branches = catalog.get("_branches")
             next_catalog = {
-                **catalog,
+                **{
+                    field: value
+                    for field, value in catalog.items()
+                    if field != "_branches"
+                },
                 "index_epoch": manifest["epoch"],
                 "fts_revision": manifest["fts_revision"],
+                # Every successful keyword mutation advances this small
+                # revision. It proves that the large Round cursor is still
+                # the one accepted at publication, without decoding it on
+                # every stable query.
+                "keyword_revision": state.get(f"{name}:cursor:keywords:revision"),
+                "generation": self._memory._generation(name),
             }
             if state.get(key) != next_catalog:
-                state[key] = next_catalog
+                pending.append((key, next_catalog))
+            if branches is not None:
+                branches = {
+                    **branches,
+                    "count": catalog["count"],
+                    "anchor": catalog["anchor"],
+                }
+                branch_key = f"{name}:memory_branch_catalog"
+                # Full capture/changed Agent only: no heavy branch value
+                # lookup occurs when Bob appended but Alice did not.
+                pending.append((branch_key, branches))
+        if pending:
+            state.put_many(pending)
 
     def _needs_keyword_roster(self, source: IndexSourceSnapshot) -> bool:
         """Avoid rebuilding a READY roster when every captured source is current.
@@ -278,10 +331,20 @@ class SessionIndexReconciler:
             )
             if name in source.catalogs:
                 catalog = source.catalogs[name]
+                branches = catalog.get("_branches")
+                if branches is None:
+                    branches = self._memory._state.get(f"{name}:memory_branch_catalog")
+                if not branch_candidates_valid(
+                    branches, count=catalog["count"], anchor=catalog["anchor"]
+                ):
+                    raise ValueError(
+                        "Memory branch catalogue does not match source proof; "
+                        "rebuild before branch selection"
+                    )
                 views[name] = (
-                    dict(catalog["default_view"])
-                    if requested_view is None and "default_view" in catalog
-                    else selected_from_entries(catalog["entries"], requested_view)
+                    dict(branches["default_view"])
+                    if requested_view is None
+                    else project_candidates(branches, requested_view)
                 )
             else:
                 views[name] = resolve_search_view(source.events[name], requested_view)

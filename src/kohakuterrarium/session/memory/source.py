@@ -17,12 +17,12 @@ from typing import Any
 from kohakuterrarium.session.history.branch_paths import (
     index_eligible_parent_paths_by_position,
 )
-from kohakuterrarium.session.history.replay import resolve_selected_branches
 from kohakuterrarium.session.history.semantics import (
     BranchScope,
     classify_branch_scope,
     strict_parent_branch_path,
 )
+from kohakuterrarium.session.memory.branch_catalog import candidates_from_entries
 from kohakuterrarium.session.memory.blocks import _anchor
 from kohakuterrarium.session.store.events.read import MemoryEvent
 
@@ -114,15 +114,6 @@ def _merge_entries(previous: list[list], events: list[dict], paths=None) -> list
     return entries
 
 
-def selected_from_entries(entries: list[list], requested: dict[int, int] | None):
-    events = [{"turn_index": turn, "branch_id": branch} for turn, branch, _ in entries]
-    paths = [tuple(tuple(pair) for pair in ancestry) for _, _, ancestry in entries]
-    selected = resolve_selected_branches(events, paths, requested)
-    return {
-        turn: branch for turn, branch in selected.items() if turn > 0 and branch > 0
-    }
-
-
 def catalog_for_full(events: list[dict], frontier: SourceFrontier) -> dict | None:
     """Produce a compact, payload-free branch summary after full capture."""
     # A raw Store reader preserves legacy malformed key order for viewing.
@@ -139,6 +130,10 @@ def catalog_for_full(events: list[dict], frontier: SourceFrontier) -> dict | Non
         ):
             return None
     entries = _entries(events)
+    anchor = _anchor(events[-1]) if events else ""
+    branches = candidates_from_entries(entries)
+    branches["count"] = len(events)
+    branches["anchor"] = anchor
     last = getattr(events[-1], "source_ref", "") if events else ""
     prefix = ""
     next_seq = 0
@@ -155,9 +150,9 @@ def catalog_for_full(events: list[dict], frontier: SourceFrontier) -> dict | Non
         "source_order": NUMERIC_SOURCE_ORDER,
         "count": len(events),
         "next_seq": next_seq,
-        "anchor": _anchor(events[-1]) if events else "",
-        "entries": entries,
-        "default_view": selected_from_entries(entries, None),
+        "anchor": anchor,
+        # Ephemeral publication payload; never part of the small certificate.
+        "_branches": branches,
     }
 
 
@@ -225,6 +220,4 @@ def read_appended(
         updated["count"] = len(view)
         updated["next_seq"] = next_seq + len(suffix)
         updated["anchor"] = _anchor(suffix[-1])
-        updated["entries"] = _merge_entries(catalog["entries"], suffix)
-        updated["default_view"] = selected_from_entries(updated["entries"], None)
     return view, updated

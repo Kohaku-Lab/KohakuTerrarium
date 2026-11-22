@@ -59,6 +59,16 @@ def _run(turns, samples, append_count):
                 catalogue_bytes = len(
                     json.dumps(catalogue, ensure_ascii=False).encode("utf-8")
                 )
+                branches = memory._state.get("alice:memory_branch_catalog")
+                branch_bytes = len(
+                    json.dumps(branches, ensure_ascii=False).encode("utf-8")
+                )
+                cursor_bytes = len(
+                    json.dumps(
+                        memory._state.get("alice:cursor:keywords"),
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                )
                 counts = {"key_scans": 0, "full_source_reads": 0}
                 original_keys = store._event_key_names
                 original_events = store.get_memory_events
@@ -163,6 +173,8 @@ def _run(turns, samples, append_count):
                     "samples": samples,
                     "append_count": append_count,
                     "catalogue_bytes": catalogue_bytes,
+                    "branch_candidates_bytes": branch_bytes,
+                    "keyword_cursor_bytes": cursor_bytes,
                     "steady": steady,
                     "append": incremental,
                     "gap_recovery": recovery,
