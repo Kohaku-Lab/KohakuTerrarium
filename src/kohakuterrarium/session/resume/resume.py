@@ -47,6 +47,7 @@ from kohakuterrarium.session.resume.build import (
 )
 from kohakuterrarium.session.resume.checkpoint import prepare_clean_checkpoint
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store.records.snapshot import load_records
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -91,6 +92,7 @@ class _LoadedConversation(NamedTuple):
     messages: list[dict] | None
     full_replay: bool = False
     branch_view: dict[int, int] | None = None
+    context_cutoff_event_id: int = 0
 
 
 def _load_conversation_with_replay_fallback(
@@ -104,6 +106,66 @@ def _load_conversation_with_replay_fallback(
     Supplied ``events`` reuse the caller's raw read; omitted events are read here.
     """
     return _load_conversation_result(store, agent_name, events, prepared).messages
+
+
+def _replay_after_verified_clear(
+    store: SessionStore,
+    agent_name: str,
+    events: list[dict],
+    snapshot: list[dict],
+    branch_view: dict[int, int] | None,
+) -> _LoadedConversation | None:
+    """Preserve a recorded /clear across non-monotonic logical event IDs.
+
+    A numeric cutoff is not an event-slice position when mirrors can reuse
+    IDs. A matching system-only branch checkpoint and physical clear event
+    instead establish the boundary, without suppressing legitimate later
+    physical events. Search and historical viewers still retain the raw log.
+    """
+    if not snapshot or any(message.get("role") != "system" for message in snapshot):
+        return None
+    selected = resolve_selected_branches(
+        events, index_parent_paths(events), branch_view
+    )
+    pairs = sorted([turn, branch] for turn, branch in selected.items())
+    candidates = [
+        record
+        for record in load_records(store, agent_name)
+        if record["messages"] == snapshot
+        and (cutoff := record["context_cutoff_event_id"]) > 0
+        and record["watermark"] == cutoff
+        and pairs[: len(record["path"])] == record["path"]
+    ]
+    if not candidates:
+        return None
+    record = max(candidates, key=lambda item: len(item["path"]))
+    cutoff = record["context_cutoff_event_id"]
+    last_turn, last_branch = record["path"][-1]
+    boundaries = [
+        position
+        for position, event in enumerate(events)
+        if event.get("type") == "context_cleared"
+        and type(event.get("event_id")) is int
+        and event["event_id"] == cutoff
+        and event.get("turn_index") == last_turn
+        and event.get("branch_id") == last_branch
+    ]
+    if len(boundaries) != 1:
+        # The old snapshot proves what was cleared, but does not establish
+        # which imported physical rows were subsequently appended. Keeping
+        # only the cleared snapshot is safer than restoring old instructions.
+        logger.warning(
+            "Cannot locate unique physical clear boundary; retaining snapshot",
+            agent=agent_name,
+        )
+        return _LoadedConversation(list(snapshot), True, branch_view, cutoff)
+    tail = replay_with_settled_tools(
+        events[boundaries[0] + 1 :],
+        branch_view=branch_view,
+        include_metadata=True,
+        resumable=True,
+    )
+    return _LoadedConversation([*snapshot, *tail], True, branch_view, cutoff)
 
 
 def _load_conversation_result(
@@ -121,6 +183,11 @@ def _load_conversation_result(
         # than the cached watermark. Neither saved branch checkpoints nor
         # legacy snapshot+tail can prove its representation is still current.
         branch_view = load_persisted_branch_view(store, agent_name)
+        cleared = _replay_after_verified_clear(
+            store, agent_name, events, snapshot, branch_view
+        )
+        if cleared is not None:
+            return cleared
         replayed = replay_with_settled_tools(
             events, branch_view=branch_view, include_metadata=True, resumable=True
         )
@@ -359,6 +426,10 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
         if clean_checkpoint
         else _load_conversation_result(store, agent_name, events, prepared)
     )
+    if loaded.context_cutoff_event_id:
+        # The replay repaired a clear boundary that ID-based checkpoint
+        # admission cannot certify. Retain the same cutoff for future saves.
+        agent._context_cutoff_event_id = loaded.context_cutoff_event_id
     saved_messages = loaded.messages
     installed = None
     if saved_messages is not None:

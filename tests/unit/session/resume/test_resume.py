@@ -632,6 +632,117 @@ class TestAlignAgentName:
 # ── _load_conversation_with_replay_fallback ──────────────────────
 
 
+class TestNonMonotonicClearResume:
+    @pytest.mark.parametrize("after_clear", [False, True])
+    def test_clear_is_a_physical_boundary_not_a_logical_id_cutoff(
+        self, tmp_path, after_clear
+    ):
+        store = SessionStore(tmp_path / "nonmonotonic-clear.kohakutr")
+        try:
+            store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+            for event_id, event_type, content in (
+                (50, "user_message", "PRE_CLEAR_USER"),
+                (51, "text", "PRE_CLEAR_ASSISTANT"),
+                (10, "text", "MIRRORED_PRE_CLEAR"),
+            ):
+                store.append_event(
+                    "alice",
+                    event_type,
+                    {"event_id": event_id, "content": content},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+            store.append_event(
+                "alice",
+                "context_cleared",
+                {"event_id": 52, "messages_cleared": 4},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            persist_branch_view(store, "alice", {1: 1})
+            store.save_branch_snapshot(
+                "alice",
+                [{"role": "system", "content": "SYSTEM"}],
+                branch={
+                    "turn_index": 1,
+                    "branch_id": 1,
+                    "parent_branch_path": [],
+                    "context_cutoff_event_id": 52,
+                },
+                watermark=52,
+            )
+            if after_clear:
+                store.append_event(
+                    "alice",
+                    "user_message",
+                    {"event_id": 11, "content": "AFTER_CLEAR_USER"},
+                    turn_index=2,
+                    branch_id=1,
+                    parent_branch_path=[(1, 1)],
+                )
+            loaded = resume_mod._load_conversation_result(store, "alice")
+            assert loaded.full_replay
+            assert loaded.context_cutoff_event_id == 52
+            assert loaded.messages == (
+                [
+                    {"role": "system", "content": "SYSTEM"},
+                    {
+                        "role": "user",
+                        "content": "AFTER_CLEAR_USER",
+                        "metadata": {
+                            "event_id": 11,
+                            "turn_index": 2,
+                            "branch_id": 1,
+                        },
+                    },
+                ]
+                if after_clear
+                else [{"role": "system", "content": "SYSTEM"}]
+            )
+            assert all("PRE_CLEAR" not in str(message) for message in loaded.messages)
+            # A source-history query must still see the old physical events.
+            assert "PRE_CLEAR_USER" in [
+                event.get("content") for event in store.get_events("alice")
+            ]
+        finally:
+            store.close(update_status=False)
+
+    def test_uncertain_physical_clear_keeps_only_cleared_snapshot(self, tmp_path):
+        store = SessionStore(tmp_path / "unproven-clear.kohakutr")
+        try:
+            store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+            for event_id, kind, content in (
+                (50, "user_message", "PRE_CLEAR_USER"),
+                (10, "text", "PRE_CLEAR_ASSISTANT"),
+                (52, "processing_end", ""),
+            ):
+                store.append_event(
+                    "alice",
+                    kind,
+                    {"event_id": event_id, "content": content},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+            store.save_branch_snapshot(
+                "alice",
+                [{"role": "system", "content": "SYSTEM"}],
+                branch={
+                    "turn_index": 1,
+                    "branch_id": 1,
+                    "parent_branch_path": [],
+                    "context_cutoff_event_id": 52,
+                },
+                watermark=52,
+            )
+            loaded = resume_mod._load_conversation_result(store, "alice")
+            assert loaded.messages == [{"role": "system", "content": "SYSTEM"}]
+        finally:
+            store.close(update_status=False)
+
+
 class TestLoadConversationFallback:
     @pytest.mark.parametrize(
         "source",
