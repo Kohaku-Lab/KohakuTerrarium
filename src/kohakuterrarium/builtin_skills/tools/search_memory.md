@@ -26,7 +26,7 @@ Pass exactly one of `query` or `anchor`.
 
 ## Behavior
 
-- Hits include `anchor: ...`; call `search_memory(anchor="...", before=3, after=3)`. Context has anchors and `has_before`/`has_after` flags.
+- Hits include an `anchor`; expand only if needed with `search_memory(anchor="...", before=3, after=3)`. If `has_before`/`has_after` is true, navigate from the first/last event anchor.
 - Anchors freeze lineage. Changed sources or expired anchors return errors.
 - `fts`/anchor reads do not load embeddings. `auto`/`hybrid` fall back to FTS on embedding errors; `semantic` errors instead.
 - Searches cover this session's selected lineage, not files. Use `grep` for files.

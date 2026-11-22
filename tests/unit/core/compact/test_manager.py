@@ -31,6 +31,10 @@ from kohakuterrarium.core.compact.splice import (
     select_compact_boundary,
 )
 from kohakuterrarium.core.compact.text import format_messages_for_summary
+from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.modules.plugin.base import ToolVisibility
+from kohakuterrarium.builtins.tools.info import InfoTool
+from kohakuterrarium.builtins.tools.search_memory import SearchMemoryTool
 from kohakuterrarium.core.conversation.conversation import Conversation
 from kohakuterrarium.core.token_ledger import ledger_for
 from kohakuterrarium.llm.message import create_message
@@ -905,6 +909,95 @@ class TestRunCompact:
 
 
 # ── stale-usage guard (compact double-fire) ──────────────────────
+
+
+class TestCompactedHistoryRecoveryHint:
+    @staticmethod
+    def _registry(*, include_memory=True):
+        registry = Registry()
+        registry.register_tool(InfoTool())
+        if include_memory:
+            registry.register_tool(SearchMemoryTool())
+        return registry
+
+    async def test_successful_compaction_persists_demand_driven_recovery_hint(self):
+        conv = _build_conversation(n_user=10)
+        store, router = _Store(), _Router()
+        store.events = [{"event_id": 1}, {"event_id": 5}]
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(chunks=["summary with important decisions"]),
+            router=router,
+            store=store,
+        )
+        mgr._agent = types.SimpleNamespace(registry=self._registry())
+        await mgr._run_compact()
+
+        assert mgr._compact_count == 1
+        message = next(
+            m for m in conv.get_messages() if m.metadata.get("compact_summary")
+        )
+        assert "summary with important decisions" in message.content
+        assert message.content.count("[History recovery:") == 1
+        assert 'info(name="search_memory")' in message.content
+        assert "If details needed" in message.content
+        assert "Otherwise continue without retrieving it." in message.content
+
+        complete = next(call for call in router.calls if call[0] == "compact_complete")
+        # The physical event and snapshot agree, so event replay can recover
+        # the affordance without adding a separate persistent flag.
+        assert complete[2]["summary"] == message.content.split("\n\n", 1)[1]
+        assert any(
+            "[History recovery:" in str(saved) for _, saved in store.saved_conversations
+        )
+
+        # Event-based Resume uses the persisted summary, not the live message.
+        event = {
+            "type": "compact_complete",
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 5,
+            **complete[2],
+        }
+        restored_rule = compact_rule_from_event(event)
+        assert restored_rule is not None
+        assert "[History recovery:" in restored_rule.summary
+
+    async def test_unavailable_tool_or_failed_compaction_has_no_hint(self):
+        registry = self._registry()
+        conv = _build_conversation(n_user=10)
+        mgr = _build_mgr(
+            conversation=conv, llm=_LLM(chunks=["summary"]), store=_Store()
+        )
+        mgr._agent = types.SimpleNamespace(registry=registry)
+        decorated = mgr._summary_with_recovery_hint("plain")
+        assert decorated.count("[History recovery:") == 1
+        assert mgr._summary_with_recovery_hint(decorated) == decorated
+
+        mgr._agent.plugins = types.SimpleNamespace(
+            collect_tool_visibility=lambda: ToolVisibility(
+                allowed_tools=frozenset({"info"})
+            )
+        )
+        assert mgr._summary_with_recovery_hint("plain") == "plain"
+        mgr._agent.plugins = types.SimpleNamespace(
+            collect_tool_visibility=lambda: (_ for _ in ()).throw(
+                RuntimeError("visibility unavailable")
+            )
+        )
+        assert mgr._summary_with_recovery_hint("plain") == "plain"
+        mgr._agent.plugins = None
+        mgr._agent.registry = self._registry(include_memory=False)
+        assert mgr._summary_with_recovery_hint("plain") == "plain"
+        mgr._agent.registry = registry
+        mgr._session_store = None
+        assert mgr._summary_with_recovery_hint("plain") == "plain"
+
+        mgr._session_store = _Store()
+        mgr._llm = _LLM(raises=RuntimeError("summary failed"))
+        original = [m.content for m in conv.get_messages()]
+        await mgr._run_compact()
+        assert [m.content for m in conv.get_messages()] == original
+        assert mgr._compact_count == 0
 
 
 class TestStaleUsageGuard:

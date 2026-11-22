@@ -181,6 +181,13 @@ class SearchMemoryTool(BaseTool):
             )
             lines.append("")
 
+        if any(result.anchor for result in results):
+            lines.append("Navigation (tool-generated, optional):")
+            lines.append(
+                "If the excerpt omits context needed for your task, call "
+                "search_memory with anchor set to the relevant hit's anchor, "
+                "before=3, after=3. Otherwise no further retrieval is needed."
+            )
         return ToolResult(output="\n".join(lines), exit_code=0)
 
     @staticmethod
@@ -212,6 +219,27 @@ class SearchMemoryTool(BaseTool):
             f"has_before={str(window.has_before).lower()} "
             f"has_after={str(window.has_after).lower()}"
         )
+        hints = []
+        if window.events and window.has_before:
+            hints.append(
+                "Earlier visible context if needed: "
+                f'search_memory(anchor="{window.events[0].anchor}", '
+                "before=3, after=0)."
+            )
+        if window.events and window.has_after:
+            hints.append(
+                "Later visible context if needed: "
+                f'search_memory(anchor="{window.events[-1].anchor}", '
+                "before=0, after=3)."
+            )
+        if any(event.truncated for event in window.events):
+            hints.append(
+                "For truncated event text, use its anchor and next_offset "
+                "with before=0, after=0 to read the next slice if needed; "
+                "offset=0 reads an omitted beginning."
+            )
+        if hints:
+            lines.extend(("", "Navigation (tool-generated, optional):", *hints))
         return "\n".join(lines)
 
     async def _get_memory(self, context: ToolContext) -> Any:

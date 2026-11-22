@@ -19,6 +19,7 @@ from kohakuterrarium.builtins.tools.search_memory import (
 )
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.memory.index import SearchResult
+from kohakuterrarium.session.memory.context import ContextEvent, ContextWindow
 from tests.helpers.loop_witness import LoopWitness
 
 
@@ -188,6 +189,98 @@ class TestSearchMemoryDisplay:
         )
         assert "needle" in result.output
         assert "chars total" not in result.output
+
+
+class TestMemoryNavigationGuidance:
+    def test_no_eager_system_prompt_contribution(self):
+        assert SearchMemoryTool().prompt_contribution() is None
+
+    async def test_search_hint_only_when_a_usable_anchor_exists(self):
+        result = await _run(
+            "needle",
+            [
+                SearchResult(
+                    content="the relevant fact",
+                    round_num=1,
+                    block_num=1,
+                    agent="alice",
+                    block_type="text",
+                    score=1.0,
+                    anchor="known-token",
+                )
+            ],
+        )
+        assert "anchor: known-token" in result.output
+        assert "Navigation (tool-generated, optional):" in result.output
+        assert "If the excerpt omits context" in result.output
+        assert "Otherwise no further retrieval is needed" in result.output
+        unanchored = await _run(
+            "needle",
+            [
+                SearchResult(
+                    content="legacy result",
+                    round_num=1,
+                    block_num=1,
+                    agent="alice",
+                    block_type="text",
+                    score=1.0,
+                )
+            ],
+        )
+        assert "If the excerpt omits context" not in unanchored.output
+
+    def test_window_suggests_only_available_directions_and_truncated_pages(self):
+        events = [
+            ContextEvent(
+                anchor="first",
+                kind="user_input",
+                content="earlier detail",
+                turn_index=1,
+                branch_id=1,
+                truncated=False,
+                role="before",
+            ),
+            ContextEvent(
+                anchor="focus",
+                kind="tool_result",
+                content="long excerpt",
+                turn_index=2,
+                branch_id=1,
+                truncated=True,
+                role="match",
+                content_start=0,
+                content_end=900,
+                content_total=2200,
+            ),
+            ContextEvent(
+                anchor="last",
+                kind="text",
+                content="subsequent detail",
+                turn_index=3,
+                branch_id=1,
+                truncated=False,
+                role="after",
+            ),
+        ]
+        window = SearchMemoryTool._format_window(
+            ContextWindow(events, has_before=True, has_after=True)
+        )
+        assert 'search_memory(anchor="first", before=3, after=0)' in window
+        assert 'search_memory(anchor="last", before=0, after=3)' in window
+        assert "next_offset=900" in window
+        assert "Navigation (tool-generated, optional):" in window
+        assert "For truncated event text" in window
+
+        bounded = SearchMemoryTool._format_window(
+            ContextWindow([events[1]], has_before=False, has_after=False)
+        )
+        assert "Earlier visible context if needed" not in bounded
+        assert "Later visible context if needed" not in bounded
+        assert "For truncated event text" in bounded
+        complete = SearchMemoryTool._format_window(
+            ContextWindow([events[0]], has_before=False, has_after=False)
+        )
+        assert "For truncated event text" not in complete
 
 
 class TestEnsureIndexedOffLoop:

@@ -79,6 +79,7 @@ async def test_find_expand_cross_turn_and_chain(tmp_path):
             {"query": "traceback-needle", "mode": "fts"}, context=ctx
         )
         assert result.error is None
+        assert "If the excerpt omits context needed for your task" in result.output
         token = _anchor(result.output)
         expanded = await tool.execute(
             {"anchor": token, "before": 2, "after": 5}, context=ctx
@@ -100,6 +101,7 @@ async def test_find_expand_cross_turn_and_chain(tmp_path):
         )
         assert later.error is None
         assert "has_before=true" in later.output
+        assert "Earlier visible context if needed:" in later.output
         assert "follow-up request" in later.output
         assert "traceback-needle" not in later.output
     finally:

@@ -20,6 +20,7 @@ from kohakuterrarium.core.compact.text import (
     extract_message_text,
     format_messages_for_summary,
 )
+from kohakuterrarium.core.tools.gate import visible_catalog, visible_tool_names
 from kohakuterrarium.core.conversation.context_snapshot import capture_context
 from kohakuterrarium.core.compact.arguments import after_compact
 from kohakuterrarium.core.jobs.single_flight import (
@@ -45,6 +46,16 @@ DEFAULT_KEEP_RECENT = 8  # keep last 8 turns raw (not summarized)
 # after it (long rounds outlive the cooldown). Within this window after
 # a splice, a trigger must be corroborated by the live conversation.
 STALE_USAGE_WINDOW_SECONDS = 900.0
+
+# Included only in a successfully replaced, searchable conversation prefix.
+# It is part of the recorded summary, so event replay/resume preserves the
+# recovery affordance without adding a second lifecycle flag.
+_HISTORY_RECOVERY_NOTE = (
+    "[History recovery: Earlier context was summarized. "
+    "If details needed for the current task are missing and the tools "
+    'are still available, read info(name="search_memory") and search '
+    "the recorded session history. Otherwise continue without retrieving it.]"
+)
 
 
 @dataclass
@@ -413,11 +424,14 @@ class CompactManager:
                 self._last_compact_time = time.time()
                 return
 
-            # Atomic splice: replace compact zone with summary
+            # Recovery instructions belong to successfully compacted
+            # history, not the permanent system prompt or a new state flag.
+            # Persist the same displayed summary for event-based resume.
+            model_summary = self._summary_with_recovery_hint(summary)
             applied = self._splice_conversation(
                 conversation,
                 boundary,
-                summary,
+                model_summary,
                 expected_last=compact_messages[-1],
                 expected_fingerprint=expected_fingerprint,
                 retain_latest_user=boundary > preferred_boundary,
@@ -455,7 +469,7 @@ class CompactManager:
             # tail-replays events the compacted snapshot already contains.
             run = getattr(self._session_store, "run", None)
             if self._output_router:
-                metadata["summary"] = summary
+                metadata["summary"] = model_summary
                 metadata["context_tokens"] = 0
                 self._output_router.notify_activity(
                     "compact_complete",
@@ -571,6 +585,34 @@ class CompactManager:
                 summary_max_tokens=summary_max_tokens,
             )
             return ""
+
+    def _summary_with_recovery_hint(self, summary: str) -> str:
+        """Advertise recovery only when the model can use the required tools.
+
+        This is a bounded, event-local hint: it neither causes retrieval nor
+        changes the tool catalog or any persistent lifecycle state.
+        """
+        agent = self._agent
+        registry = getattr(agent, "registry", None)
+        if registry is None or self._session_store is None:
+            return summary
+        try:
+            visibility = visible_catalog(
+                registry,
+                getattr(agent, "plugins", None),
+                getattr(agent, "output_router", self._output_router),
+            )
+            visible = set(visible_tool_names(registry, visibility))
+        except Exception:
+            # An optional retrieval hint must never abort an otherwise valid
+            # compaction just because plugin/tool visibility failed.
+            logger.warning("Cannot check memory recovery tool visibility")
+            return summary
+        if not {"info", "search_memory"} <= visible:
+            return summary
+        if _HISTORY_RECOVERY_NOTE in summary:
+            return summary
+        return f"{summary}\n\n{_HISTORY_RECOVERY_NOTE}"
 
     def _splice_conversation(
         self,
