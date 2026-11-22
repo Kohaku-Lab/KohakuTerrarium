@@ -1890,3 +1890,67 @@ class TestPreviousBranchUnmatched:
         out = agent._previous_branch_user_content()
         # Valid prior branch returned.
         assert out == "valid"
+
+
+@pytest.mark.parametrize("compatible", [True, False])
+def test_settled_replay_keeps_reusable_compaction_evidence_off_selected_tail(
+    compatible,
+):
+    """Summary provenance, not completion-event branch, authorizes reuse."""
+    from kohakuterrarium.session.history.replay import replay_conversation
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "old prompt",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 2,
+            "type": "text",
+            "content": "old reply",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 3,
+            "type": "compact_complete",
+            "summary": "kept summary",
+            "round": 1,
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 2,
+            "compact_path": [[1, 1]],
+            "compact_source_path": [[1, 1]] if compatible else [[2, 1]],
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        # Mirrors may reuse completion's logical ID in the selected tail.
+        {
+            "event_id": 3,
+            "type": "user_message",
+            "content": "selected sibling",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 4,
+            "type": "text",
+            "content": "sibling reply",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1]],
+        },
+    ]
+    view = {1: 1, 2: 2}
+    direct = replay_conversation(events, branch_view=view, include_metadata=True)
+    settled = replay_with_settled_tools(
+        events, branch_view=view, include_metadata=True, resumable=True
+    )
+    assert [m["content"] for m in settled] == [m["content"] for m in direct]
+    assert any("kept summary" in m["content"] for m in settled) is compatible

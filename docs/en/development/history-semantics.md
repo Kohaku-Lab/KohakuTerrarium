@@ -126,6 +126,17 @@ Incremental and full materialization must return identical blocks, and neither
 a malformed coordinate nor an ambiguous completion may mutate a valid round.
 
 
+## Compaction evidence versus ordinary event visibility
+
+A compact_complete or compact_replace recorded on a deselected tail can
+still summarize **unchanged selected ancestors**. Its eligibility is governed
+by compact_replacement_rules() and the recorded compact_source_path, not
+by the visibility of the completion event's own turn/branch. Incompatible
+source dependencies are never reused. The visible user/tool event stream and
+the full compaction-rule evidence therefore have separate inputs during
+settled-tool replay and context-cutoff snapshot repair; discarded tail
+messages must never be reintroduced just to recover a summary.
+
 ## Consumer authority
 
 Branch visibility, physical event identity and conversational Round ownership

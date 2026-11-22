@@ -260,7 +260,11 @@ still require full-source recovery. Repeated unchanged queries do not
 reload the full event log or recompute its ancestry. For saved searches,
 the read-only memory source avoids rebuilding unrelated event counters on
 every open. The navigator enumerates physical event keys once per active
-Store/Agent and extends its compact sequence after normal appends.
+Store/Agent and extends its compact sequence after normal appends. If a
+failed Append consumes a sequence without publishing a row, the resulting
+physical gap invalidates the incremental extension; navigation re-enumerates
+that Agent's existing keys instead of treating the incomplete catalogue
+as current.
 
 **Explicit boundary:** This is not an arbitrary database mutation detector.
 Direct SQL / KVault edits, deleting or reusing old physical keys, replacing

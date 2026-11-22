@@ -208,8 +208,20 @@ def _replay_context(
         and event.get("type") == "tool_call"
         and str(event.get("call_id") or event.get("job_id") or "") in jobs
     ]
+    # Repair replays only the visible suffix, but summary eligibility may
+    # depend on a compact completion from a discarded tail. Keep the full
+    # source as rule evidence, never as visible user/tool events.
+    evidence = (
+        {"compaction_evidence": events}
+        if any(e.get("type") in {"compact_complete", "compact_replace"} for e in events)
+        else {}
+    )
     return replay(
-        [*calls, *retained], branch_view=selected, include_metadata=True, resumable=True
+        [*calls, *retained],
+        branch_view=selected,
+        include_metadata=True,
+        resumable=True,
+        **evidence,
     )
 
 

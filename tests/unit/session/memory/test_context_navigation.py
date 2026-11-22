@@ -817,3 +817,84 @@ async def test_repeated_anchor_expansion_reuses_physical_refs_and_appends_suffix
         assert len(enumerations) == 1
     finally:
         store.close(update_status=False)
+
+
+def test_failed_append_gap_cannot_poison_physical_ref_cache(tmp_path, monkeypatch):
+    """A rejected append reserves a sequence: catalogue must recover e2 after missing e1."""
+    from kohakuterrarium.session.memory.context import MemoryContextNavigator
+
+    store = SessionStore(tmp_path / "sequence-gap.kohakutr")
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+        _append(store, 1, "user_input", {"content": "needle before"})
+        navigator = MemoryContextNavigator(store)
+        refs = navigator._refs_for("alice")
+        assert [refs[i] for i in range(len(refs))] == ["alice:e000000"]
+
+        def fail_once(*args, **kwargs):
+            raise OSError("injected storage refusal")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(store._branch_maxima, "append", fail_once)
+            with pytest.raises(OSError, match="injected storage refusal"):
+                _append(store, 1, "user_input", {"content": "not committed"})
+        _append(store, 1, "user_input", {"content": "needle after"})
+        assert [ref for ref in store._event_key_names()] == [
+            "alice:e000000",
+            "alice:e000002",
+        ]
+        refs = navigator._refs_for("alice")
+        assert [refs[i] for i in range(len(refs))] == ["alice:e000000", "alice:e000002"]
+        assert navigator._refs_for("alice") is refs
+    finally:
+        store.close(update_status=False)
+
+
+@pytest.mark.asyncio
+async def test_failed_append_gap_preserves_old_and_new_search_anchors(
+    tmp_path,
+    monkeypatch,
+):
+    """Search -> expand before a failed append, then search -> expand across the hole."""
+    store = SessionStore(tmp_path / "gap-anchors.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    _append(store, 1, "user_input", {"content": "initial-needle"})
+    tool, ctx = SearchMemoryTool(), _context(store)
+    try:
+        first = await tool.execute(
+            {"query": "initial-needle", "mode": "fts"}, context=ctx
+        )
+        assert first.error is None
+        first_anchor = _anchor(first.output)
+        assert (
+            await tool.execute(
+                {"anchor": first_anchor, "before": 0, "after": 0}, context=ctx
+            )
+        ).error is None
+
+        def fail_once(*args, **kwargs):
+            raise OSError("injected refused event write")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(store._branch_maxima, "append", fail_once)
+            with pytest.raises(OSError, match="injected refused event write"):
+                _append(store, 1, "user_input", {"content": "not recorded"})
+        _append(store, 1, "user_input", {"content": "accepted-needle"})
+
+        next_result = await tool.execute(
+            {"query": "accepted-needle", "mode": "fts"}, context=ctx
+        )
+        assert next_result.error is None
+        second_anchor = _anchor(next_result.output)
+        old_expansion = await tool.execute(
+            {"anchor": first_anchor, "before": 0, "after": 1}, context=ctx
+        )
+        assert old_expansion.error is None
+        assert "accepted-needle" in old_expansion.output
+        new_expansion = await tool.execute(
+            {"anchor": second_anchor, "before": 1, "after": 0}, context=ctx
+        )
+        assert new_expansion.error is None
+        assert "initial-needle" in new_expansion.output
+    finally:
+        store.close(update_status=False)

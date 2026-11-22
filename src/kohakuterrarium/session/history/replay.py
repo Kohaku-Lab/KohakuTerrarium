@@ -437,6 +437,7 @@ def replay_conversation(
     *,
     branch_view: dict[int, int] | None = None,
     include_metadata: bool = False,
+    compaction_evidence: Iterable[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Rebuild an OpenAI-shape message list from the event log.
 
@@ -454,10 +455,15 @@ def replay_conversation(
         for event in events_list
         if isinstance(event.get("event_id"), int)
     ]
-    # Keep compaction records from the unprojected event stream: a summary
-    # can remain reusable on another tail branch when its source lineage is
-    # still selected, even if its completion record is not in the live tail.
-    rules_source = events_list
+    # Compaction evidence and ordinary visible events have different
+    # eligibility. A summary recorded on an old tail may still cover the
+    # currently selected prefix. Wrappers may supply the unprojected source
+    # as *evidence only*, without reintroducing foreign user/tool content.
+    rules_source = (
+        dedupe_adjacent_duplicate_events(compaction_evidence)
+        if compaction_evidence is not None
+        else events_list
+    )
     if len(logical_ids) != len(set(logical_ids)):
         live_positions = select_live_event_positions(
             events_list, branch_view=branch_view

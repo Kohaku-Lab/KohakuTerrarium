@@ -672,3 +672,99 @@ def test_freshness_uses_the_store_counter_not_a_full_event_scan(
     assert store.global_max_event_id == 2
     assert snapshot_history._fresh(store, "alice", alice_events, 2) is True
     assert snapshot_history._fresh(store, "alice", alice_events, 3) is False
+
+
+def test_cutoff_replay_retains_compaction_evidence_from_deselected_completion():
+    """A foreign completion may still summarize the selected ancestor suffix."""
+    from kohakuterrarium.core.conversation.snapshot import _replay_context
+
+    events = [
+        {
+            "event_id": 1,
+            "type": "user_message",
+            "content": "protected root",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 2,
+            "type": "user_message",
+            "content": "unchanged user",
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 3,
+            "type": "text",
+            "content": "unchanged reply",
+            "turn_index": 2,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1]],
+        },
+        {
+            "event_id": 4,
+            "type": "compact_complete",
+            "summary": "REUSED SUMMARY",
+            "round": 1,
+            "replaced_from_event_id": 2,
+            "replaced_to_event_id": 3,
+            "compact_path": [[2, 1]],
+            "compact_source_path": [[1, 1], [2, 1]],
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+        {
+            "event_id": 4,
+            "type": "user_message",
+            "content": "new sibling",
+            "turn_index": 3,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1], [2, 1]],
+        },
+    ]
+    messages = _replay_context(
+        events, {1: 1, 2: 1, 3: 2}, 1, None, replay_with_settled_tools
+    )
+    contents = [message["content"] for message in messages]
+    assert any("REUSED SUMMARY" in value for value in contents)
+    assert "unchanged user" not in contents
+    assert "unchanged reply" not in contents
+    assert "new sibling" in contents
+
+
+@pytest.mark.parametrize("source_compatible", [True, False])
+def test_prepare_snapshot_cutoff_repair_preserves_reusable_compaction_summary(
+    store: SessionStore, source_compatible: bool
+):
+    """Real cutoff repair retains compatible old-tail summary and settled tools."""
+    _save_cutoff_ack_snapshot(store, pending=False)
+    events = [
+        *_LATER_TOOL_EVENTS,
+        {
+            "event_id": 16,
+            "type": "compact_complete",
+            "summary": "inherited compacted work",
+            "round": 1,
+            "replaced_from_event_id": 9,
+            "replaced_to_event_id": 10,
+            "compact_path": [[3, 1]],
+            "compact_source_path": (
+                [[1, 1], [2, 1], [3, 1]]
+                if source_compatible
+                else [[1, 1], [2, 2], [3, 1]]
+            ),
+            "turn_index": 4,
+            "branch_id": 2,
+            "parent_branch_path": [[1, 1], [2, 1], [3, 1]],
+        },
+    ]
+    repaired = _prepare(store, events, {1: 1, 2: 1, 3: 1, 4: 1})
+    assert repaired is not None
+    contents = [m.get("content", "") for m in repaired["messages"]]
+    assert any("inherited compacted work" in v for v in contents) is source_compatible
+    assert repaired["compact_state"]["compact_count"] == int(source_compatible)
+    assert "new final result" in contents
+    assert repaired["context_cutoff_event_id"] == 8

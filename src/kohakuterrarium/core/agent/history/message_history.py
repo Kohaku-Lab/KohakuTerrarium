@@ -493,14 +493,20 @@ def replay_with_settled_tools(
     branch_view: dict[int, int] | None = None,
     include_metadata: bool = False,
     resumable: bool = False,
+    compaction_evidence: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Replay a branch, keeping completed results with their live calls."""
     parent_paths = index_parent_paths(events)
     live_event_ids = select_live_event_ids(
         events, branch_view=branch_view, parent_paths=parent_paths
     )
+    # Settled-tool placement sees visible events; summary provenance is
+    # independently evaluated against the complete original source.
+    rules_source = compaction_evidence if compaction_evidence is not None else events
     covered_ids = compact_covered_event_ids(
-        events, branch_view, parent_paths=parent_paths
+        rules_source,
+        branch_view,
+        parent_paths=parent_paths if rules_source is events else None,
     )
     replay_events = include_settled_tool_results(
         events,
@@ -520,6 +526,7 @@ def replay_with_settled_tools(
         replay_events,
         branch_view=branch_view,
         include_metadata=include_metadata,
+        compaction_evidence=rules_source,
     )
 
 

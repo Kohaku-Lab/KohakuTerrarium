@@ -378,11 +378,16 @@ class MemoryContextNavigator:
                 for seq in range(next_seq, next_seq + total - old_count):
                     ref = f"{agent}:e{seq:06d}"
                     if ref not in self._store.events:
+                        # A failed append can consume a physical sequence
+                        # without publishing the row. We cannot certify the
+                        # suffix through a hole: re-enumerate before caching
+                        # the new global count (which may include later rows).
                         break
                     refs.numbers.append(seq)
-                self._physical_refs[agent] = (total, refs)
-                self._legacy_cache.pop(agent, None)
-                return refs
+                else:
+                    self._physical_refs[agent] = (total, refs)
+                    self._legacy_cache.pop(agent, None)
+                    return refs
         numbers = array("Q")
         prefix = f"{agent}:e"
         for ref in _ordered_event_refs(self._store, agent):
