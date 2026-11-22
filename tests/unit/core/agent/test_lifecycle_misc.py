@@ -3,6 +3,7 @@
 """
 
 import asyncio
+import time
 import types
 from contextlib import closing
 from unittest.mock import AsyncMock, MagicMock
@@ -18,6 +19,12 @@ from kohakuterrarium.core.agent.history.compact import (
     AgentCompactMixin,
     restore_compact_state_from_session,
 )
+from kohakuterrarium.errors import (
+    ConflictError,
+    ConversationSealedError,
+    InvalidRequestError,
+    ShutdownIncompleteError,
+)
 from kohakuterrarium.core.agent.lifecycle import AgentLifecycleMixin
 from kohakuterrarium.core.agent.tools.dispatch import AgentToolsMixin
 from kohakuterrarium.core.agent.turn.interrupt import AgentInterruptMixin
@@ -27,7 +34,9 @@ from kohakuterrarium.core.conversation.conversation import (
     ConversationConfig,
 )
 from kohakuterrarium.core.conversation.pinned import PinnedContext
+from kohakuterrarium.modules.output.router.router import OutputRouter
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.testing.output import OutputRecorder
 
 # ── agent_lifecycle.AgentLifecycleMixin ──────────────────────────
 
@@ -830,3 +839,286 @@ class TestBuildCompactLLM:
         # profile_to_identifier was invoked, returning "resolved/profile",
         # then create_llm_from_profile_name was called with that name.
         assert out == "compact-llm"
+
+
+# ── bounded shutdown (issue #587) ────────────────────────────────
+
+
+class _CountingTask(asyncio.Task):
+    """Task that counts every ``cancel()`` it receives."""
+
+    requests = 0
+
+    def cancel(self, *args, **kwargs):
+        self.requests += 1
+        return super().cancel(*args, **kwargs)
+
+
+def _stubborn(release: asyncio.Event, *, yield_after: int | None = None):
+    """Suppress cancellation until released, or until ``yield_after`` cancels."""
+
+    async def body():
+        seen = 0
+        while True:
+            try:
+                await release.wait()
+                return "released"
+            except asyncio.CancelledError:
+                seen += 1
+                if yield_after is not None and seen >= yield_after:
+                    raise
+
+    return body()
+
+
+def _shutdown_agent():
+    """A lifecycle agent with a real conversation and output router."""
+    agent = _build_lifecycle_agent()
+    agent.controller = types.SimpleNamespace(
+        _interrupted=False, conversation=Conversation()
+    )
+    agent.output = OutputRecorder()
+    agent.output_router = OutputRouter(agent.output)
+    agent._active_handles = {}
+    agent._interrupt_requested = False
+    agent._interrupt_fence_wakeup = asyncio.Event()
+    return agent
+
+
+class TestBoundedShutdown:
+    async def test_default_stop_returns_settled_report_once(self):
+        agent = _shutdown_agent()
+        report = await agent.stop()
+        assert report.settled and report.terminated and not report.timed_out
+        again = await agent.stop()
+        assert again.settled
+        assert agent.input.stop.await_count == 1
+        assert agent.trigger_manager.stop_all.await_count == 1
+
+    async def test_unbounded_stop_cancels_turn_before_it_can_progress(self):
+        agent = _shutdown_agent()
+        gate = asyncio.Event()
+        steps = []
+
+        async def turn():
+            await gate.wait()
+            steps.append("progressed")
+
+        task = asyncio.create_task(turn())
+        await asyncio.sleep(0)
+        agent._processing_task = task
+        gate.set()
+        report = await agent.stop()
+        assert report.settled
+        assert steps == [] and task.cancelled()
+
+    async def test_joiner_timeout_revokes_sinks_of_a_stuck_unbounded_stop(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        agent.trigger_manager.stop_all = release.wait
+        owner = asyncio.create_task(agent.stop())
+        await agent._shutdown_event.wait()
+        await asyncio.sleep(0.01)
+        try:
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await asyncio.wait_for(agent.stop(grace=0.02), 3)
+            assert info.value.report.timed_out
+            assert agent.output_router.revoked
+            assert agent.controller.conversation.sealed
+        finally:
+            release.set()
+            await asyncio.gather(owner, return_exceptions=True)
+
+    async def test_invalid_requests_are_rejected(self):
+        agent = _shutdown_agent()
+        with pytest.raises(InvalidRequestError):
+            await agent.stop(grace=-1)
+        with pytest.raises(InvalidRequestError):
+            await agent.stop(force=True)
+        assert agent._running is True
+
+    async def test_interrupt_then_bounded_stop_settles_cleanup_in_time(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        task = _CountingTask(_stubborn(release))
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        AgentInterruptMixin._interrupt_active_turn(agent)
+        AgentInterruptMixin._interrupt_active_turn(agent)
+        stop = asyncio.create_task(agent.stop(grace=5))
+        await agent._shutdown_event.wait()
+        release.set()
+        report = await asyncio.wait_for(stop, 2)
+        assert report.settled and not report.timed_out
+        assert task.requests == 1
+        assert task.result() == "released"
+        assert not agent.output_router.revoked
+
+    async def test_never_ending_cleanup_returns_bounded_and_honest(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        task = _CountingTask(_stubborn(release))
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        try:
+            started = time.monotonic()
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await agent.stop(grace=0.05)
+            assert time.monotonic() - started < 2
+            report = info.value.report
+            assert isinstance(info.value, TimeoutError)
+            assert not report.settled and not report.terminated
+            assert report.timed_out and not report.forced
+            assert report.expired_stage == "processing"
+            assert "processing" in report.abandoned
+            assert task.requests == 1 and not task.done()
+            assert agent.output_router.revoked
+            assert agent.controller.conversation.sealed
+            agent.output_router.notify_activity("tool_done", "late")
+            assert agent.output.activities == []
+            with pytest.raises(ConversationSealedError):
+                agent.controller.conversation.append("tool", "late", tool_call_id="c")
+            assert "stage:provider_close" in report.abandoned
+            await asyncio.sleep(0.01)
+            assert agent.llm.close.await_count == 1
+            with pytest.raises(ShutdownIncompleteError):
+                await agent.stop()
+            with pytest.raises(ShutdownIncompleteError):
+                await agent.stop(grace=0)
+            assert task.requests == 1
+            with pytest.raises(ConflictError):
+                agent._prepare_restart()
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+        agent._prepare_restart()
+        assert not agent.output_router.revoked
+        assert not agent.controller.conversation.sealed
+
+    async def test_force_escalates_once_and_reports_incomplete_settlement(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        task = _CountingTask(_stubborn(release, yield_after=2))
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await agent.stop(grace=0.05, force=True)
+            report = info.value.report
+            assert report.forced and report.terminated and not report.settled
+            assert task.requests == 2 and task.cancelled()
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_force_after_incomplete_stop_escalates_abandoned_work(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        task = _CountingTask(_stubborn(release, yield_after=2))
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(ShutdownIncompleteError):
+                await agent.stop(grace=0.02)
+            assert task.requests == 1
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await agent.stop(force=True)
+            assert info.value.report.forced
+            assert info.value.report.terminated
+            assert task.requests == 2
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_second_caller_tightens_an_unbounded_stop(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        task = _CountingTask(_stubborn(release))
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        try:
+            first = asyncio.create_task(agent.stop())
+            await agent._shutdown_event.wait()
+            await asyncio.sleep(0.02)
+            assert not first.done()
+            with pytest.raises(ShutdownIncompleteError):
+                await asyncio.wait_for(agent.stop(grace=0.02), 3)
+            with pytest.raises(ShutdownIncompleteError):
+                await asyncio.wait_for(first, 3)
+            assert task.requests == 1
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_hanging_cleanup_stage_is_abandoned_uncancelled(self):
+        agent = _shutdown_agent()
+        release = asyncio.Event()
+        cancelled = []
+
+        async def slow_stop_all():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.append(True)
+                raise
+
+        agent.trigger_manager.stop_all = slow_stop_all
+        try:
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await agent.stop(grace=0.05)
+            assert "stage:triggers" in info.value.report.abandoned
+            assert info.value.report.expired_stage == "triggers"
+            assert not cancelled
+        finally:
+            release.set()
+            await asyncio.sleep(0.01)
+
+    async def test_settlement_error_is_the_cause_of_incomplete_shutdown(self):
+        agent = _shutdown_agent()
+        agent._interrupt_finalizer_error = "boom"
+        release = asyncio.Event()
+        task = _CountingTask(_stubborn(release))
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await agent.stop(grace=0.02)
+            assert isinstance(info.value.__cause__, RuntimeError)
+            assert "settlement failed" in info.value.report.errors[0]
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def test_failed_provider_close_allows_retry(self):
+        agent = _shutdown_agent()
+        agent.llm.close = AsyncMock(side_effect=[OSError("close"), None])
+        with pytest.raises(OSError):
+            await agent.stop()
+        assert agent._retired_llms == [agent.llm]
+        report = await agent.stop()
+        assert report.settled
+        assert agent._retired_llms == []
+
+    async def test_lock_holding_abandoned_turn_is_reported_once(self):
+        agent = _shutdown_agent()
+        agent._processing_lock = asyncio.Lock()
+        release = asyncio.Event()
+
+        async def turn():
+            async with agent._processing_lock:
+                agent._turn_lock_holder = asyncio.current_task()
+                return await _stubborn(release)
+
+        task = _CountingTask(turn())
+        agent._processing_task = task
+        await asyncio.sleep(0)
+        try:
+            with pytest.raises(ShutdownIncompleteError) as info:
+                await agent.stop(grace=0.02)
+            report = info.value.report
+            assert report.abandoned.count("processing") == 1
+            assert "turn_finalization" not in report.abandoned
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+        assert not agent._processing_lock.locked()

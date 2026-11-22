@@ -58,6 +58,7 @@ class OutputRouter(
         self._completed_outputs: list[CompletedOutput] = []
 
         self._secondary_outputs: list[OutputModule] = []
+        self._revoked = False
 
         self._init_widgets()
         self.widgets = WidgetService(self)
@@ -163,8 +164,29 @@ class OutputRouter(
         ]
         self.refresh_renderers()
 
+    @property
+    def revoked(self) -> bool:
+        """Whether events are dropped after an incomplete agent shutdown."""
+        return getattr(self, "_revoked", False)
+
+    def revoke(self) -> None:
+        """Drop every later event so abandoned work cannot reach the outputs."""
+        self._revoked = True
+
+    def restore(self) -> None:
+        """Deliver events again once no abandoned writer is alive."""
+        self._revoked = False
+
+    def _drop_revoked(self, event_type: str) -> bool:
+        if not getattr(self, "_revoked", False):
+            return False
+        logger.debug("Dropped event after shutdown revocation", event_type=event_type)
+        return True
+
     async def emit(self, event: OutputEvent) -> None:
         """Dispatch a typed event according to its output visibility contract."""
+        if self._drop_revoked(event.type):
+            return
         match event.type:
             case "model_recovery":
                 self.model_recovery_status = dict(event.payload)
@@ -220,6 +242,8 @@ class OutputRouter(
 
     def _dispatch_activity_event(self, event: OutputEvent) -> None:
         """Synchronously dispatch activity events through legacy renderer hooks."""
+        if self._drop_revoked(event.type):
+            return
         detail = event.content if isinstance(event.content, str) else ""
         metadata = event.payload or None
         targets = [self.default_output, *self._secondary_outputs]
