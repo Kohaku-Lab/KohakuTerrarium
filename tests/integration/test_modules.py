@@ -94,6 +94,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
+from kohakuterrarium.modules.tool.function import tool as kt_tool
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.session.history.replay import replay_conversation
 from kohakuterrarium.session.store import SessionStore
@@ -398,6 +399,20 @@ class ToolVisibilityPlugin(BasePlugin):
             allowed_tools=frozenset({"recorder"}),
             allowed_subagents=frozenset(),
         )
+
+
+class NetworkProbePlugin(BasePlugin):
+    """Contribute a ``@tool`` function that declares a URL argument."""
+
+    name = "net_probe"
+
+    def contribute_tools(self) -> list[BaseTool]:
+        @kt_tool(url_arguments="target")
+        def net_probe(target: str) -> str:
+            """Pretend to fetch target."""
+            return f"probed {target}"
+
+        return [net_probe]
 
 
 class PingCommand(BaseUserCommand):
@@ -824,6 +839,39 @@ class TestModulesIntegration:
             denied = await agent.executor.wait_for(denied_job)
             assert "SandboxViolation[fs_read]" in denied.error
             assert "blocked.txt" not in denied.output
+
+            async def run(name: str, args: dict[str, Any]) -> Any:
+                job = await agent.executor.submit(name, args, is_direct=True)
+                return await agent.executor.wait_for(job)
+
+            # Declared network use is gated live: a plugin-contributed function
+            # tool and web_fetch both, and a held network_policy follows edits.
+            mgr.register(NetworkProbePlugin())
+            agent.refresh_plugin_tools()
+            agent.executor.register_tool(WebFetchTool())
+            policy = mgr.collect_runtime_services(ctx)["network_policy"]
+            assert policy.mode == "allow" and policy.check("evil.test", 443) is None
+            mgr.set_plugin_options("sandbox", {"network_allowlist": ["ok.test"]})
+            probed = await run("net_probe", {"target": "https://ok.test/a"})
+            assert probed.error is None
+            assert probed.output.startswith("probed https://ok.test/a")
+            for name, key in (("net_probe", "target"), ("web_fetch", "url")):
+                refused = await run(name, {key: "https://evil.test/a"})
+                assert refused.error == (
+                    f"SandboxViolation[network]: {name}: host 'evil.test' not "
+                    "allowlisted (https://evil.test/a)"
+                )
+            assert policy.check("evil.test", 443) == "host 'evil.test' not allowlisted"
+            mgr.set_plugin_options("sandbox", {"network": "deny"})
+            assert policy.mode == "deny"
+            assert policy.check("ok.test", 443) == "network access denied"
+            refused = await run("net_probe", {"target": "https://ok.test/a"})
+            assert "net_probe: network access denied" in refused.error
+            mgr.set_plugin_options(
+                "sandbox", {"network": "default", "network_allowlist": []}
+            )
+            assert policy.check("evil.test", 443) is None
+            assert mgr.unregister("net_probe") is True
             if confinement_backend() is not None:
                 # pytest's base temp lies under /tmp on Linux, a writable root.
                 monkeypatch.setattr(roots, "temp_roots", lambda: [])

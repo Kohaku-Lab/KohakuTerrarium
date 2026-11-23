@@ -65,8 +65,19 @@ KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特�
   下並拒絕向上穿越；`broad` 在 `fs_deny` 之外都允許；`deny` 全擋。
 - **網路閘門**：當 `network=allow` 且設定了 `network_allowlist` 時，
   只有清單上的主機能過；否則在網路允許時全過。當 `network=deny` 時，
-  所有網路工具呼叫（`web_fetch`、`web_search`）都會拋
-  `PluginBlockError`。
+  所有網路工具呼叫都會拋 `PluginBlockError`。外掛內建一張以工具名稱
+  為鍵的表（`web_fetch`：其 `url` 參數；`web_search`：`duckduckgo.com`），
+  工具宣告的 `url_arguments`、`network_hosts`、`network_access` 會加到
+  這張表上（見 [自訂模組](../guides/custom-modules.md#宣告網路使用)）。
+  使用這些名稱的工具即使什麼都沒宣告也會受管制；每個主機或參數在一次
+  呼叫中只檢查一次。
+- **網路政策服務**：啟用時外掛也透過 `runtime_services()` 發布
+  `network_policy` 服務，供在工具 hook 之外建立連線的元件（例如過濾
+  代理）使用。`check(host, port)` 回傳 `None` 表示允許，否則回傳簡短
+  的拒絕原因，套用 `network` 與 `network_allowlist`；audit 模式下記錄
+  後允許。`mode` 為 `"allow"` 或 `"deny"`。`requires_os_confinement`
+  在 `os_enforce=require` 生效時為真，表示繞過 `subprocess_runner` 起的
+  行程會逃過它要求的核心約束。每次讀取都跟隨外掛當下的選項。
 - **子行程閘門**：外掛透過 `runtime_services()` 發布
   `subprocess_runner` 服務。需要起子行程的工具（`bash` 等）從
   `ToolContext.runtime_services` 取用。Runner 會先檢查 syscall 等級

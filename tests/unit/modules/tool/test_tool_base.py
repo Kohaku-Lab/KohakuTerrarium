@@ -251,6 +251,12 @@ class TestBaseToolMetadata:
     def test_provider_native_option_schema_defaults_empty(self):
         assert BaseTool.provider_native_option_schema() == {}
 
+    def test_network_declarations_default_to_no_network(self):
+        tool = _OkTool()
+        assert tool.url_arguments == ()
+        assert tool.network_hosts == ()
+        assert tool.network_access is False
+
     def test_full_documentation_falls_back_to_description(self):
         # Unknown tool name → no builtin doc → minimal header from description.
         doc = _OkTool().get_full_documentation()

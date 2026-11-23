@@ -91,8 +91,22 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   except `fs_deny`; `deny` blocks all paths.
 - **Network gating**: when `network=allow` and `network_allowlist`
   is set, only listed hosts pass the check; otherwise all hosts pass.
-  When `network=deny`, all network tool calls (`web_fetch`,
-  `web_search`) raise `PluginBlockError`.
+  When `network=deny`, all network tool calls raise `PluginBlockError`.
+  The plugin keeps a built-in table by tool name (`web_fetch`: its
+  `url` argument; `web_search`: `duckduckgo.com`), and a tool's
+  `url_arguments`, `network_hosts` and `network_access` declarations
+  add to it (see [Custom modules](../guides/custom-modules.md#network-use)).
+  A tool with one of those names is gated even when it declares
+  nothing; each host or argument is checked once per call.
+- **Network policy service**: while enabled, the plugin also publishes a
+  `network_policy` service via `runtime_services()`, for components that
+  open connections outside the tool hooks (such as a filtering proxy).
+  `check(host, port)` returns `None` to allow or a short reason to refuse,
+  applying `network` and `network_allowlist`; in audit mode it logs and
+  allows. `mode` is `"allow"` or `"deny"`. `requires_os_confinement` is
+  true while `os_enforce=require` is enforced, meaning a process spawned
+  outside the `subprocess_runner` would escape the confinement it demands.
+  Each read follows the plugin's current options.
 - **Subprocess gating**: the plugin publishes a `subprocess_runner`
   service via `runtime_services()`. Tools that need to spawn
   subprocesses (`bash`, etc.) consume it from
