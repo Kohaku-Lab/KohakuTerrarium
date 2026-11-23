@@ -89,6 +89,44 @@ SessionStore 的 embedding_config 记录不再保存明文 API Key。离线 CLI 
 或者使用不需要 Embedding 的 FTS 模式。
 
 
+## 索引格式升级后的版本回退
+
+Session 的**原始事件文件格式仍为 v2**；全分支 Memory **派生索引**
+使用 v3。旧版 KT 虽然能打开 Session，却可能静默复用不兼容的 FTS／
+向量表。普通增量索引**不能**修复：旧游标可能已经将全部事件记为完成。
+
+1. 停止所有使用该 Session 的 KT 进程（含 Agent、Studio、检索命令），
+   等待写入结束。备份完整的 `.kohakutr` 文件及关联产物；如存在 SQLite
+   `-wal`／`-shm` 文件也需保留。不要直接复制正在写入的数据库并将其
+   视为一致性备份。
+2. **不需要保留试用期间的新对话时**：优先恢复升级前的完整备份，再
+   使用旧版 KT。
+3. **需要保留新对话时**：切换至旧版 KT 代码后，必须**强制重建旧版
+   单分支索引**，之后才能使用 Memory Search。旧版 `kt embedding`
+   命令没有 `--force` 参数。仅恢复 **FTS** 时，用**旧版 KT 的 Python
+   环境**执行以下命令（替换 Session 文件路径）：
+
+   ```bash
+   python -c "import sys; from pathlib import Path; from kohakuterrarium.studio.sessions.memory.build import build_index; print(build_index(Path(sys.argv[1]), provider='none', force=True)['stats'])" "/path/to/session.kohakutr"
+   ```
+
+   **注意：**`provider='none'` 会将持久化的 `embedding_config` 改为
+   `none`，之后只能依赖 `--mode fts`。如需继续使用 Semantic／Hybrid，
+   应使用原有且可用的 Embedding **Provider、Model、Dimensions**
+   执行 `build_index(..., force=True)`，同时重建 FTS 与向量。例如，
+   只有原配置确实为对应模型时才使用
+   `provider='model2vec', model='@base'`。模型、凭据或自定义端点
+   不可用时可能需要恢复升级前的备份。执行 FTS-only 恢复前，
+   应另外保存原始 Embedding 配置。
+4. 用 `kt search <session> "<phrase>" --mode fts` 验证所选分支的
+   已知片段可以召回，而只存在于未选分支的片段**不会**召回；
+   同时确认原始 Session 历史仍可打开。验证前不能视为回退完成。
+
+以上操作只针对**派生索引**，不改写原始事件。之后再次升级到 v3 时，
+由新版 Reconciler 重新构建索引。如果此前 FTS-only 回退改写了
+Embedding 配置，则需显式恢复／重建目标模型，才能继续使用
+Semantic／Hybrid 检索。
+
 ## 从 CLI 搜索
 
 ```bash

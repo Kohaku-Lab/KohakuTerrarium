@@ -94,6 +94,51 @@ optional saved key-environment name is only a lookup hint); an expired key
 saved by an older version is not used. Provide current credentials for
 semantic search, or use FTS without an embedder.
 
+## Downgrading after an index-format upgrade
+
+The session **event-file format remains v2**; the all-branch memory **index**
+uses format v3. An older KT version may still open the session while silently
+reusing its incompatible FTS/vector tables. Ordinary incremental indexing
+does **not** repair this: an old cursor can already claim the entire source
+was indexed.
+
+1. Stop every KT process using the session (including live agents, Studio and
+   search commands). Allow pending writes to finish. Back up the **entire**
+   `.kohakutr` database and its associated artifacts; preserve any SQLite
+   `-wal`/`-shm` companions if present. Do not copy an actively written
+   database as though it were a consistent snapshot.
+2. **Preferred if newer turns are disposable:** restore the complete backup
+   made before the upgrade, then start the older KT version.
+3. **If newer turns must be kept:** switch to the older KT code **and force
+   rebuild the old selected-lineage index** before using memory search. There
+   is no `--force` option on the older `kt embedding` CLI. For
+   **FTS-only** recovery, run the following with the **older KT Python
+   environment**, substituting your session path:
+
+   ```bash
+   python -c "import sys; from pathlib import Path; from kohakuterrarium.studio.sessions.memory.build import build_index; print(build_index(Path(sys.argv[1]), provider='none', force=True)['stats'])" "/path/to/session.kohakutr"
+   ```
+
+   **Important:** `provider='none'` overwrites the saved
+   `embedding_config` with `none`; use `--mode fts` only. To retain
+   Semantic/Hybrid search instead, run `build_index(..., force=True)` with
+   the original, available embedding **provider, model and dimensions** so
+   both FTS and vectors are rebuilt (for example, use
+   `provider='model2vec', model='@base'` only if that was the original
+   model). An unavailable model, API credential or custom endpoint may
+   require restoring the pre-upgrade backup instead. Keep a record of
+   the original embedding configuration before selecting FTS-only recovery.
+4. Verify a known selected-branch phrase is returned by
+   `kt search <session> "<phrase>" --mode fts` while a phrase exclusive
+   to an unselected branch is **not** returned. Also confirm the original
+   session history still opens. Do not regard the rollback as complete
+   until these checks pass.
+
+These operations rebuild **derived** indexes, not raw events. On upgrading to
+v3 again, let the current reconciler rebuild the newer index. If FTS-only
+downgrade changed the embedding configuration, explicitly restore/rebuild the
+intended embedding model before relying on Semantic/Hybrid search.
+
 ## Search from the CLI
 
 ```bash
