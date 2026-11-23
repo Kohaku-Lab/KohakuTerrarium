@@ -219,10 +219,11 @@ and it is one option away: `allow_loopback: true`.
 
 ## Integration with existing plugins
 
-- **sandbox.** `BaseTool` gains declarative `url_arguments` and
-  `network_access`, next to the existing `path_arguments`; the sandbox reads
-  them instead of its hardcoded tool-name tables, and `web_fetch` /
-  `web_search` move to them with unchanged behaviour. The sandbox exposes its
+- **sandbox.** `BaseTool` gains declarative `url_arguments`, `network_hosts`
+  and `network_access`, next to the existing `path_arguments`; the sandbox
+  checks them in addition to its built-in tool-name tables, as it already
+  does for paths, so `web_fetch` / `web_search` are gated exactly as before
+  and any other tool can opt in. The sandbox exposes its
   network policy as a runtime service for the proxy. With `network: deny` no
   browser tool runs. The browser is treated as a network tool, not as an
   arbitrary subprocess, so it is not blocked by the `syscall` axis; it is
