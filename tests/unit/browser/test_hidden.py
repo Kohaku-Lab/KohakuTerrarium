@@ -1,12 +1,11 @@
 """Unit tests for ``kohakuterrarium.browser.hidden``: the probe and its application.
 
 The ``TestProbeInChromium`` tests run ``PROBE_JS`` in a real headless
-Chromium and skip when Playwright or its browser is missing; everything else
-works on recorded snapshots and needs no browser.
+Chromium (the ``chromium_page`` fixture in ``conftest.py``) and skip when
+Playwright or its browser is missing; everything else works on recorded
+snapshots and needs no browser.
 """
 
-import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -284,36 +283,6 @@ class TestApplyProbe:
         assert "s3cr.t+[x]" not in text and REDACTED in text
         assert outcome.passwords == ("s3cr.t+[x]",)
         assert outcome.dropped == 16
-
-
-def _real_browsers_path() -> Path | None:
-    home = Path(os.environ.get("KT_TEST_REAL_HOME") or Path.home())
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA")
-        return Path(base) / "ms-playwright" if base else None
-    if sys.platform == "darwin":
-        return home / "Library" / "Caches" / "ms-playwright"
-    return home / ".cache" / "ms-playwright"
-
-
-@pytest.fixture
-def chromium_page(monkeypatch):
-    sync_api = pytest.importorskip("playwright.sync_api")
-    if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
-        path = _real_browsers_path()
-        if path is not None and path.is_dir():
-            monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(path))
-    with sync_api.sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(
-                executable_path=os.environ.get("KT_CHROMIUM_PATH") or None
-            )
-        except Exception as e:
-            pytest.skip(f"no Chromium for Playwright: {e}")
-        try:
-            yield browser.new_page(viewport={"width": 1280, "height": 800})
-        finally:
-            browser.close()
 
 
 class TestProbeInChromium:
