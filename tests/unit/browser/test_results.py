@@ -24,33 +24,31 @@ def tree(text: str) -> list[snap.Node]:
 
 
 class TestHeader:
-    def test_short_header(self):
-        assert res.format_header("t1", "https://example.com/a", "Example") == (
-            '[t1] https://example.com/a | "Example"'
+    def test_tab_and_url_only(self):
+        assert res.format_header("t1", "https://example.com/a") == (
+            "[t1] https://example.com/a"
         )
 
-    def test_dialog_note(self):
-        header = res.format_header(
-            "t2", "https://x.test/", "X", dialog='confirm "Delete?"'
-        )
-        assert header.endswith('| dialog pending: confirm "Delete?"')
+    def test_dialog_kind_only(self):
+        header = res.format_header("t2", "https://x.test/", dialog="confirm")
+        assert header == "[t2] https://x.test/ | dialog pending: confirm"
 
-    def test_long_values_truncate_in_the_middle(self):
+    def test_dialog_kind_is_fixed_vocabulary(self):
+        header = res.format_header("t2", "https://x.test/", dialog='confirm "Delete?"')
+        assert header == "[t2] https://x.test/ | dialog pending: dialog"
+
+    def test_long_url_truncates_in_the_middle(self):
         url = "https://example.com/" + "a" * 500 + "/tail-end"
-        title = "T" * 300 + " the end"
-        header = res.format_header("t13", url, title, dialog="alert " + "m" * 400)
+        header = res.format_header("t13", url, dialog="alert")
         assert len(header) <= res.HEADER_MAX < 200
         assert header.startswith("[t13] https://example.com/")
-        assert "/tail-end" in header and "the end" in header
-        assert "…" in header
+        assert "/tail-end" in header and "…" in header
+        assert header.endswith("| dialog pending: alert")
 
-    def test_newlines_and_controls_in_title_stay_on_one_line(self):
-        header = res.format_header("t1", "https://x.test/", "a\nb\r\tc\x00d")
+    def test_controls_in_the_url_stay_on_one_line(self):
+        header = res.format_header("t1", "https://x.test/a\nb\r\tc\x00d")
         assert "\n" not in header and "\r" not in header and "\x00" not in header
-        assert header.endswith('"a b c d"')
-
-    def test_empty_title(self):
-        assert res.format_header("t1", "about:blank", "") == "[t1] about:blank"
+        assert header == "[t1] https://x.test/a b c d"
 
 
 class TestWrapUntrusted:

@@ -4,6 +4,7 @@ Options hold references only; values are read from the environment each
 time they are needed and are redacted from text the agent will see.
 """
 
+import json
 import os
 import re
 from collections.abc import Iterable, Mapping
@@ -20,9 +21,22 @@ _ENV_VAR = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def value_forms(value: str) -> tuple[str, ...]:
-    """The raw value plus its distinct URL-encoded spellings (path and form encoding)."""
+    """The raw value plus its distinct encoded spellings.
+
+    Covers URL encoding (path and form), JSON / double-quoted YAML string
+    escaping and single-quoted YAML quote doubling.
+    """
+    escaped = json.dumps(value, ensure_ascii=False)[1:-1]
+    spellings = (
+        value,
+        quote(value, safe=""),
+        quote_plus(value),
+        escaped,
+        json.dumps(value)[1:-1],
+        value.replace("'", "''"),
+    )
     forms: list[str] = []
-    for form in (value, quote(value, safe=""), quote_plus(value)):
+    for form in spellings:
         if form not in forms:
             forms.append(form)
     return tuple(forms)

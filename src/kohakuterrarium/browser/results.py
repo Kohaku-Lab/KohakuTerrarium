@@ -11,8 +11,7 @@ from kohakuterrarium.browser.snapshot import Node, is_interactive, line_of, norm
 
 HEADER_MAX = 160
 HEADER_URL = 64
-HEADER_TITLE = 32
-HEADER_DIALOG = 32
+DIALOG_KINDS = frozenset({"alert", "confirm", "prompt", "beforeunload"})
 LINE_URL = 120
 LINE_TEXT = 80
 MAX_LISTED = 5
@@ -37,7 +36,8 @@ _TAG_START = re.compile(
 )
 
 
-def _one_line(text: str) -> str:
+def one_line(text: str) -> str:
+    """``text`` on one line: control characters become spaces, runs of spaces collapse."""
     return normalize(_CONTROL.sub(" ", text or ""))
 
 
@@ -49,14 +49,23 @@ def middle(text: str, limit: int) -> str:
     return text[:head] + "…" + text[len(text) - (limit - 1 - head) :]
 
 
-def format_header(tab_id: str, url: str, title: str, dialog: str | None = None) -> str:
-    """One line naming the tab, URL, title and any pending dialog, at most ``HEADER_MAX``."""
-    parts = [f"[{_one_line(tab_id)}] {middle(_one_line(url), HEADER_URL)}"]
-    if _one_line(title):
-        parts.append(f'"{middle(_one_line(title), HEADER_TITLE)}"')
+def format_header(tab_id: str, url: str, dialog: str | None = None) -> str:
+    """One line naming the tab, URL and pending dialog kind, at most ``HEADER_MAX``.
+
+    The header sits outside the untrusted wrapper, so it carries no
+    page-chosen text: a dialog outside ``DIALOG_KINDS`` is shown as ``dialog``.
+    """
+    parts = [f"[{one_line(tab_id)}] {middle(one_line(url), HEADER_URL)}"]
     if dialog:
-        parts.append(f"dialog pending: {middle(_one_line(dialog), HEADER_DIALOG)}")
+        kind = dialog if dialog in DIALOG_KINDS else "dialog"
+        parts.append(f"dialog pending: {kind}")
     return middle(" | ".join(parts), HEADER_MAX)
+
+
+def format_title(title: str) -> str:
+    """The page title as the first line inside the untrusted wrapper."""
+    text = middle(one_line(title), LINE_TEXT)
+    return f'Title: "{text}"' if text else ""
 
 
 def new_token() -> str:
@@ -272,9 +281,9 @@ def format_navigation(
     before_url: str, after_url: str, before_title: str, after_title: str
 ) -> str:
     """A line for a URL or title change; empty when neither changed."""
-    titles = f'"{middle(_one_line(before_title), LINE_TEXT)}" → "{middle(_one_line(after_title), LINE_TEXT)}"'
+    titles = f'"{middle(one_line(before_title), LINE_TEXT)}" → "{middle(one_line(after_title), LINE_TEXT)}"'
     if before_url != after_url:
-        line = f"Navigated: {middle(_one_line(before_url), LINE_URL)} → {middle(_one_line(after_url), LINE_URL)}"
+        line = f"Navigated: {middle(one_line(before_url), LINE_URL)} → {middle(one_line(after_url), LINE_URL)}"
         return f"{line} | title {titles}" if before_title != after_title else line
     return f"Title changed: {titles}" if before_title != after_title else ""
 
@@ -282,7 +291,7 @@ def format_navigation(
 def format_tabs_opened(tabs: Iterable[tuple[str, str]]) -> str:
     """One line per tab an action opened: ``(tab_id, url)``."""
     return "\n".join(
-        f"Tab opened: {tab} {middle(_one_line(url), LINE_URL)}" for tab, url in tabs
+        f"Tab opened: {tab} {middle(one_line(url), LINE_URL)}" for tab, url in tabs
     )
 
 
@@ -290,7 +299,7 @@ def format_dialogs(dialogs: Iterable[tuple[str, ...]], pending: bool = False) ->
     """Lines for dialogs: ``(kind, message)`` or ``(kind, message, outcome)``."""
     lines = []
     for kind, message, *rest in dialogs:
-        quoted = f'{kind} "{middle(_one_line(message), LINE_TEXT)}"'
+        quoted = f'{kind} "{middle(one_line(message), LINE_TEXT)}"'
         if pending:
             lines.append(f"Dialog pending: {quoted} (answer it with the dialog action)")
         else:
@@ -301,7 +310,7 @@ def format_dialogs(dialogs: Iterable[tuple[str, ...]], pending: bool = False) ->
 def format_downloads(downloads: Iterable[tuple[str, str]]) -> str:
     """One line per finished download: ``(suggested filename, saved path)``."""
     return "\n".join(
-        f"Downloaded: {middle(_one_line(name), LINE_TEXT)} → {path}"
+        f"Downloaded: {middle(one_line(name), LINE_TEXT)} → {path}"
         for name, path in downloads
     )
 
@@ -314,7 +323,7 @@ def format_blocked(blocked: Iterable[tuple[str, str]]) -> str:
     noun = "request" if len(items) == 1 else "requests"
     lines = [f"Blocked {len(items)} {noun}:"]
     lines.extend(
-        f"  {middle(_one_line(url), LINE_URL)} ({_one_line(reason)})"
+        f"  {middle(one_line(url), LINE_URL)} ({one_line(reason)})"
         for url, reason in items[:MAX_LISTED]
     )
     if len(items) > MAX_LISTED:

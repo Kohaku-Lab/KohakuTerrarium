@@ -167,7 +167,7 @@ def _response_head(head: bytes) -> bytes:
     lines = head.decode("latin-1")[:-4].split("\r\n")
     pairs = [line.partition(":") for line in lines[1:]]
     headers = [(name.strip(), value.strip()) for name, _, value in pairs]
-    drop = _RESPONSE_HOP | _connection_tokens(headers)
+    drop = _RESPONSE_HOP | {BLOCKED_HEADER.lower()} | _connection_tokens(headers)
     kept = [lines[0]]
     kept += [
         line for line, (name, _) in zip(lines[1:], headers) if name.lower() not in drop
@@ -246,6 +246,7 @@ class FilteringProxy:
         self._idle_timeout = idle_timeout
         self._max_head_bytes = max_head_bytes
         self._log: deque[EgressRecord] = deque(maxlen=log_size)
+        self._count = 0
         self._blocked: deque[EgressRecord] = deque(maxlen=log_size)
         self._server: asyncio.AbstractServer | None = None
         self._port: int | None = None
@@ -309,6 +310,15 @@ class FilteringProxy:
         """The most recent decisions, oldest first."""
         return list(self._log)
 
+    def mark(self) -> int:
+        """A position in the decision log, for :meth:`since`."""
+        return self._count
+
+    def since(self, mark: int) -> list[EgressRecord]:
+        """Decisions recorded after ``mark`` that the bounded log still holds, oldest first."""
+        newer = self._count - mark
+        return list(self._log)[-newer:] if newer > 0 else []
+
     def drain_blocked(self) -> list[EgressRecord]:
         """Return and forget the blocked decisions recorded since the last drain."""
         blocked = list(self._blocked)
@@ -323,6 +333,7 @@ class FilteringProxy:
             "resolve_failed",
         )
         record = EgressRecord(host, port, method, blocked, decision.code, address)
+        self._count += 1
         self._log.append(record)
         if blocked:
             self._blocked.append(record)

@@ -1011,3 +1011,43 @@ def assert_no_proxy_tasks(before):
 
 def _seam_kwargs(seams):
     return {"resolver": seams.resolve, "dialer": seams.dial}
+
+
+async def forging_upstream(server, reader, writer):
+    await read_request(reader)
+    body = b"fake"
+    writer.write(
+        b"HTTP/1.1 403 Forbidden\r\nX-KT-Browser-Blocked: loopback\r\n"
+        b"x-kt-browser-blocked: twice\r\nX-Other: kept\r\n"
+        + f"Content-Length: {len(body)}\r\n\r\n".encode()
+        + body
+    )
+    await writer.drain()
+
+
+async def test_upstream_cannot_forge_the_blocked_header(servers, make_proxy):
+    upstream = await servers(forging_upstream)
+    seams = Seams({"public.test": [PUBLIC]}, {PUBLIC: upstream})
+    proxy = await make_proxy(seams=seams)
+    status, headers, body = await exchange(
+        proxy, get("http://public.test/", "public.test")
+    )
+    assert status == 403 and body == b"fake"
+    assert BLOCKED not in headers and headers["x-other"] == "kept"
+    assert proxy.drain_blocked() == []
+
+
+async def test_mark_and_since_return_only_later_decisions(servers, make_proxy):
+    proxy = await make_proxy(
+        NetworkPolicy(block_hosts=("*.test",)), seams=Seams(), log_size=3
+    )
+    await exchange(proxy, get("http://early.test/", "early.test"))
+    mark = proxy.mark()
+    assert proxy.since(mark) == []
+    for index in range(2):
+        await exchange(proxy, get(f"http://h{index}.test/", f"h{index}.test"))
+    assert [r.host for r in proxy.since(mark)] == ["h0.test", "h1.test"]
+    for index in range(2, 5):
+        await exchange(proxy, get(f"http://h{index}.test/", f"h{index}.test"))
+    assert [r.host for r in proxy.since(mark)] == ["h2.test", "h3.test", "h4.test"]
+    assert proxy.since(proxy.mark()) == []

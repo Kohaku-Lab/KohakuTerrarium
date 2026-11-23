@@ -6,23 +6,30 @@ snapshot before acting on it.
 """
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
 Fingerprint = tuple[str, str]
 MAX_REFS_PER_TAB = 5000
+NAME_MAX = 60
+
+_SPACE = re.compile(r"[\x00-\x20\x7f-\x9f\u2028\u2029]+")
 
 
 @dataclass(frozen=True)
 class RefVerdict:
     """Whether a ref may be acted on: ``ok``, ``stale`` or ``unknown``.
 
-    ``message`` is empty for ``ok`` and otherwise ready to show the model.
+    ``message`` is empty for ``ok`` and otherwise ready to show the model;
+    it names only the ref. ``detail`` names what the ref pointed at, which
+    is page text and belongs inside the untrusted wrapper.
     """
 
     status: str
     ref: str
     message: str
+    detail: str = ""
 
     @property
     def ok(self) -> bool:
@@ -31,6 +38,10 @@ class RefVerdict:
 
 def _describe(fingerprint: Fingerprint) -> str:
     role, name = fingerprint
+    name = _SPACE.sub(" ", name).strip()
+    if len(name) > NAME_MAX:
+        head = (NAME_MAX - 1) // 2
+        name = name[:head] + "…" + name[len(name) - (NAME_MAX - 1 - head) :]
     return f"{role} {json.dumps(name, ensure_ascii=False)}" if name else role
 
 
@@ -74,12 +85,13 @@ class RefBook:
         if now is None:
             if seen is None:
                 message = f"ref {ref} is not on the page. Take a snapshot to get current refs."
-            else:
-                message = (
-                    f"ref {ref} ({_describe(seen)}) is no longer on the page. "
-                    "Take a snapshot to get current refs."
-                )
-            return RefVerdict("stale", ref, message)
+                return RefVerdict("stale", ref, message)
+            return RefVerdict(
+                "stale",
+                ref,
+                f"ref {ref} is no longer on the page; take a snapshot to get current refs",
+                f"ref {ref} was {_describe(seen)}",
+            )
         if seen is None:
             return RefVerdict(
                 "unknown",
@@ -91,7 +103,8 @@ class RefBook:
             return RefVerdict(
                 "stale",
                 ref,
-                f"ref {ref} was {_describe(seen)} but now points at {_describe(now)}. "
-                "Take a snapshot to get current refs.",
+                f"ref {ref} now points at a different element; take a snapshot to "
+                "get current refs",
+                f"ref {ref} was {_describe(seen)} but now points at {_describe(now)}",
             )
         return RefVerdict("ok", ref, "")

@@ -83,6 +83,21 @@ def test_value_forms_lists_raw_and_url_encoded_spellings():
     assert value_forms("hunter22") == ("hunter22",)
 
 
+def test_value_forms_cover_json_and_yaml_quoting():
+    forms = value_forms('Pa"ss\\word-42')
+    assert 'Pa\\"ss\\\\word-42' in forms
+    assert "it''s-secret" in value_forms("it's-secret")
+
+
+def test_redact_covers_escaped_spellings_of_secrets_and_extras(env):
+    env.setenv("KT_T_PW", 'Pa"ss\\word-42')
+    store = SecretStore({"pw": "env:KT_T_PW"})
+    text = 'note: "Pa\\"ss\\\\word-42: x" and {"v": "Pa\\"ss\\\\word-42"}'
+    assert store.redact(text) == 'note: "[secret:pw]: x" and {"v": "[secret:pw]"}'
+    extra = 'say "a\\\\b\\"c-pw"'
+    assert store.redact(extra, extra=['a\\b"c-pw']) == 'say "[redacted]"'
+
+
 def test_redact_covers_url_encoded_forms(env):
     env.setenv("KT_T_PW", "p@ss word")
     store = SecretStore({"pw": "env:KT_T_PW"})
