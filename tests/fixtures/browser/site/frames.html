@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Frames fixture</title>
+</head>
+<body>
+<h1>Frames and shadow</h1>
+<iframe id="same" title="Same origin" src="frame_inner.html"></iframe>
+<iframe id="cross" title="Cross origin" src="about:blank"></iframe>
+<div id="host">
+  <template shadowrootmode="open">
+    <button type="button">Shadow button</button>
+    <input aria-label="Shadow input">
+  </template>
+</div>
+<script>
+  // ?cross=<url> loads that url into the second frame (a second port gives cross-origin).
+  const cross = new URLSearchParams(location.search).get("cross");
+  if (cross) document.getElementById("cross").src = cross;
+</script>
+</body>
+</html>

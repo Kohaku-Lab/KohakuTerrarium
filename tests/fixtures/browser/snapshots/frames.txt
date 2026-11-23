@@ -1,0 +1,13 @@
+- generic [active] [ref=e1]:
+  - heading "Frames and shadow" [level=1] [ref=e2]
+  - iframe [ref=e3]:
+    - generic [ref=f1e1]:
+      - button "Frame button" [ref=f1e2]
+      - textbox "Frame input" [ref=f1e3]: inside
+  - iframe [ref=e4]:
+    - generic [ref=f2e1]:
+      - button "Frame button" [ref=f2e2]
+      - textbox "Frame input" [ref=f2e3]: inside
+  - generic [ref=e5]:
+    - button "Shadow button" [ref=e6]
+    - textbox "Shadow input" [ref=e7]

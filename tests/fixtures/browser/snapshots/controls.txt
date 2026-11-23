@@ -1,0 +1,65 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation "Primary" [ref=e3]:
+      - list [ref=e4]:
+        - listitem [ref=e5]:
+          - link "Home" [ref=e6] [cursor=pointer]:
+            - /url: /home
+        - listitem [ref=e7]:
+          - link "Docs" [ref=e8] [cursor=pointer]:
+            - /url: /docs?page=1&q=a
+  - main [ref=e9]:
+    - heading "Account settings" [level=1] [ref=e13]
+    - paragraph [ref=e14]: "Update your details below. Status: idle"
+    - form "Profile" [ref=e15]:
+      - generic [ref=e16]:
+        - text: Name
+        - textbox "Name" [ref=e17]:
+          - /placeholder: Your name
+          - text: Ada
+      - generic [ref=e18]:
+        - text: Password
+        - textbox "Password" [ref=e19]: p4ss.w*rd(1)
+      - generic [ref=e20]:
+        - checkbox "Subscribe to news" [checked] [ref=e21]
+        - text: Subscribe to news
+      - group "Plan" [ref=e22]:
+        - generic [ref=e24]:
+          - radio "Free" [checked] [ref=e25]
+          - text: Free
+        - generic [ref=e26]:
+          - radio "Pro" [ref=e27]
+          - text: Pro
+      - text: Color
+      - combobox "Color" [ref=e28]:
+        - option "Red"
+        - option "Green" [selected]
+        - option "Blue"
+      - button "Save" [ref=e29]
+      - button "Delete account" [disabled] [ref=e30]
+    - table [ref=e31]:
+      - rowgroup [ref=e32]:
+        - row [ref=e33]:
+          - columnheader "User" [ref=e34]
+          - columnheader "Role" [ref=e35]
+          - columnheader "Action" [ref=e36]
+      - rowgroup [ref=e37]:
+        - row [ref=e38]:
+          - cell "Alice" [ref=e39]
+          - cell "Admin" [ref=e40]
+          - cell [ref=e41]:
+            - button "Remove" [ref=e42]
+        - row [ref=e43]:
+          - cell "Bob" [ref=e44]
+          - cell "Viewer" [ref=e45]
+          - cell [ref=e46]:
+            - button "Remove" [ref=e47]
+    - list [ref=e48]:
+      - listitem [ref=e49]: First item
+      - listitem [ref=e50]:
+        - text: Second item with
+        - link "a link" [ref=e51] [cursor=pointer]:
+          - /url: https://example.invalid/more
+    - generic [ref=e52] [cursor=pointer]: Clickable card
+    - 'button "Quote \"this\": yes" [ref=e53]': Q
+    - paragraph [ref=e54]: "- starts with a dash"

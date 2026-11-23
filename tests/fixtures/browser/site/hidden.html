@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hidden text fixture</title>
+<style>
+  body { background: #ffffff; color: #111111; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+             overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%);
+             white-space: nowrap; border: 0; }
+  .gradient { background-image: linear-gradient(90deg, #f00, #00f);
+              -webkit-background-clip: text; background-clip: text; color: transparent; }
+</style>
+</head>
+<body>
+<h1>Hidden text</h1>
+<p>Visible paragraph one.</p>
+<div style="opacity:0">HIDE01 opacity zero</div>
+<div style="opacity:0"><div><span>HIDE02 inherited opacity</span></div></div>
+<div style="font-size:0">HIDE03 font size zero</div>
+<div style="font-size:1px">HIDE04 font size one</div>
+<div style="color:#fff;background:#fff">HIDE05 white on white</div>
+<div style="color:#ffffff">HIDE06 white on page background</div>
+<div style="color:transparent">HIDE07 transparent text</div>
+<div style="color:rgba(0,0,0,0)">HIDE08 zero alpha text</div>
+<div style="position:absolute;left:-9999px">HIDE09 off screen left</div>
+<div style="position:absolute;top:-9999px">HIDE10 off screen top</div>
+<div class="sr-only">HIDE11 sr only</div>
+<div style="text-indent:-9999px">HIDE12 text indent</div>
+<div style="width:0;height:0;overflow:hidden">HIDE13 zero size box</div>
+<div style="height:0;overflow:hidden">HIDE14 zero height box</div>
+<div style="clip-path:inset(100%);position:absolute">HIDE15 clip path only</div>
+<p>Visible start <span style="font-size:0">HIDE16 inline hidden</span> visible end.</p>
+<div style="opacity:0">Visible paragraph one.</div>
+<p class="gradient">Gradient heading text</p>
+<div style="background:#000;color:#fff">Light on dark</div>
+<button type="button"><span class="sr-only">Close dialog</span><span aria-hidden="true">X</span></button>
+<button type="button" style="opacity:0">Invisible button</button>
+<a href="/next">Next page</a>
+<label for="secret">Secret</label>
+<input id="secret" type="password" value="s3cr.t+[x]">
+<div style="display:none">GONE display none</div>
+<div style="visibility:hidden">GONE visibility hidden</div>
+</body>
+</html>
