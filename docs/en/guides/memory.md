@@ -131,7 +131,7 @@ memory:
 
 When the LLM calls `search_memory`, the tool runs over the *current* session's index. This is the seamless-memory primitive: agents can look up what they (or their teammates) said in earlier rounds without explicit RAG scaffolding.
 
-The index retains searchable blocks from **all branches**. Normal searches use each agent's selected lineage (or the latest compatible lineage when no explicit selection exists). Switching branches changes retrieval scope without re-embedding previous branches. Ranked candidates are filtered before top-k truncation. When the vault cannot prove a complete filtered result within its bounded candidate budget, search reports an explicit error instead of a misleading empty result.
+The index retains searchable blocks from **all branches**. Normal searches use each agent's selected lineage (or the latest compatible lineage when no explicit selection exists). Switching branches changes retrieval scope without re-embedding previous branches. Ranked candidates are filtered before top-k truncation. Explicitly stamped background tool results remain searchable after the originating processing round ends; the full source stays available through Anchor navigation. When the vault cannot prove a complete filtered result within its bounded candidate budget, search reports an explicit error instead of a misleading empty result.
 
 Live searches keep model loading and encoding off the session's storage thread,
 so a stalled embedder does not prevent history reads, event persistence, or graph

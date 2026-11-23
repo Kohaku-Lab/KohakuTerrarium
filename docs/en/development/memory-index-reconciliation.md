@@ -143,11 +143,15 @@ Memory's strict source projection uses the same original-position ancestry
 authority in Search selection, FTS/vector extraction, and Anchor navigation.
 Unlike public Replay compatibility, its scoped round identity includes the
 ancestor path; late completion of an older mirror must not close a newer one.
-The single all-branch derived-index release format is **2**, replacing the
-legacy selected-lineage (format 1 / unversioned) materialization. Ancestry,
-physical provenance and deduplication semantics are all part of that one
-format contract; there is no compatibility promise for intermediate PR drafts.
-This is not a SessionStore source-format migration.
+The all-branch derived-index format is **3**, replacing legacy selected-lineage
+(format 1 / unversioned) and locally exercised all-branch v2 materializations.
+The v2 index could certify complete source coverage while excluding a delayed
+tool result after processing_end. V3 indexes such explicitly stamped results
+independently of the closed conversation Round, without admitting orphaned
+unstamped content or changing the event's recorded branch. The existing
+Session-wide format migration rebuilds FTS and vectors from original events:
+reusing a READY v2 cursor would silently preserve the missed result. This
+is not a SessionStore source-format migration; raw events remain authoritative.
 
 
 ## Replay event projection relationship
@@ -239,7 +243,7 @@ catalogue is valid only for the **numeric physical event-key order**, not
 KVault's lexical order (which differs after e999999). The full capture
 verifies the Agent roster and successfully decoded physical key counts once.
 Old catalogues without this ordering proof are rebuilt as *derived cache
-metadata*, not a new v2 index format.
+metadata*, not an additional index-format transition.
 
 The fast path compares the physical frontier **before and after** projecting
 the whole known Agent roster. Every newly inserted physical row must be

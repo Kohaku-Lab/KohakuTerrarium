@@ -424,7 +424,16 @@ def _extract_blocks(
             )
             block_num += 1
 
-        elif etype == "tool_result" and in_round:
+        elif etype == "tool_result" and (
+            in_round
+            or (all_branches and scoped and evt.get("parent_branch_path") is not None)
+        ):
+            # A settled background tool is a recorded source event even after
+            # processing_end closed its conversation Round. Admit a late
+            # result only with explicit valid branch ancestry; do not infer
+            # the ownership of orphaned legacy/ambiguous continuations.
+            # The event's physical coordinates (not a guessed future Round)
+            # remain the projection and Anchor source of truth.
             name = evt.get("name", "")
             output = _content_to_text(evt.get("output", ""))
             error = _content_to_text(evt.get("error", ""))

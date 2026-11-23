@@ -58,13 +58,15 @@ or appended in arbitrarily sized batches.
 
 ## Index migration
 
-This PR introduces one derived memory-index format transition: the legacy
-selected-lineage index (format 1, or an unversioned pre-feature index) is
-replaced by the all-branch **format 2**. Format 2 includes strict source
-coordinates, physical references, ancestry-aware round state, and eligible
-adjacent-event deduplication in its bounded incremental cursor. Intermediate
-formats tested during development of this unmerged PR are not release formats.
-The Session-wide lifecycle rebuilds old FTS/vector rows before scoped retrieval.
+The derived all-branch memory index uses **format 3**. The legacy
+selected-lineage format 1 and locally tested all-branch format 2 are both
+rebuilt under the existing Session-wide lifecycle. Format 3 preserves strict
+source coordinates, physical references, ancestry-aware round state and
+bounded deduplication, and additionally indexes explicitly stamped tool
+results that arrive after processing_end. Ordinary text still requires an
+open Round; missing/invalid lineage cannot authorize an orphaned result.
+A previously READY v2 cursor may have counted the omitted result as indexed,
+so automatic format migration must rebuild FTS and vectors from source.
 The SessionStore .kohakutr physical format and original event log do not change.
 A stale index must fail closed until rebuilt.
 

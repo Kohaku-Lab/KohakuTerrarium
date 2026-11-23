@@ -226,7 +226,7 @@ def test_legacy_index_is_invalidated_before_recovering_original_coordinates(tmp_
         with pytest.raises(ValueError, match="index.*(invalid|building|rebuild)"):
             upgraded.search("needle", mode="fts", branch_view={1: 1})
         upgraded.index_events("alice", events)
-        assert upgraded._manifest()["format"] == 2
+        assert upgraded._manifest()["format"] == 3
         assert upgraded.get_stats()["fts_blocks"] == len(events)
         assert {
             h.content for h in upgraded.search("needle", mode="fts", branch_view={1: 1})
@@ -571,7 +571,7 @@ def test_unversioned_index_rebuilds_mirrored_lineage(tmp_path):
         with pytest.raises(ValueError, match="(invalid|building|rebuild)"):
             upgraded.search("needle", mode="fts", branch_view={1: 2, 2: 1})
         upgraded.index_events("alice", rows)
-        assert upgraded._manifest()["format"] == 2
+        assert upgraded._manifest()["format"] == 3
         assert upgraded.get_stats()["fts_blocks"] == 6
         assert [
             hit.content

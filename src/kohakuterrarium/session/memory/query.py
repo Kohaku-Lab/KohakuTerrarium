@@ -13,11 +13,14 @@ from kohakuterrarium.session.memory.visibility import (
     ranked_filtered,
 )
 
-# One transition from the legacy selected-lineage index (format 1) to
-# the complete all-branch, provenance-aware index (format 2). Intermediate
-# designs within this unmerged PR are not published migration versions.
+# Selected-lineage v1 is the legacy corpus. All-branch v2 was exercised
+# locally before late background results became independently indexable.
+# This is a materialization change: an already-READY v2 index can have
+# certified the full source while silently omitting delayed tool results.
+# Bump the DERIVED index format to force a complete FTS/vector rebuild;
+# SessionStore's original on-disk event format is not affected.
 _SELECTED_INDEX_FORMAT = 1
-_ALL_BRANCH_INDEX_FORMAT = 2
+_ALL_BRANCH_INDEX_FORMAT = 3
 
 
 @dataclass

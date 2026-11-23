@@ -49,7 +49,7 @@ def test_keyword_only_v2_migration_rejects_old_vector_reads(tmp_path):
     keyword = SessionMemory(path, index_all_branches=True)
     try:
         keyword.index_events("alice", rows)
-        assert keyword._state["memory:index_manifest"]["format"] == 2
+        assert keyword._state["memory:index_manifest"]["format"] == 3
         assert keyword.get_stats()["vec_blocks"] > 0
     finally:
         keyword.close()
