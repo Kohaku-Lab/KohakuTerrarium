@@ -100,6 +100,32 @@ the declaration the sandbox cannot see the path, so a package tool that
 touches files should always declare it. Plugins receive the tool
 instance as the `tool` keyword of `pre_tool_execute`.
 
+### Network use
+
+A tool that reaches the network declares how, so the `sandbox` plugin's
+`network` / `network_allowlist` policy applies to it:
+
+```python
+class MirrorTool(BaseTool):
+    url_arguments = ("source",)          # arguments holding a URL it fetches
+    network_hosts = ("api.example.com",)  # hosts it contacts whatever its arguments
+    network_access = False                # True: hosts are decided elsewhere
+```
+
+- `url_arguments`: a value may be one URL or a list of URLs; a value
+  without a scheme is checked as `https://`. Each host must pass the
+  allowlist, and `network=deny` refuses the call.
+- `network_hosts`: each host is checked as `https://<host>/`.
+- `network_access`: the call is refused under `network=deny`; per-host
+  checks are the tool's own job (for example through the sandbox's
+  `network_policy` runtime service).
+
+The declarations add to the sandbox's built-in name tables, which gate
+`web_fetch` and `web_search` by name. Any other tool that declares none
+of them is not gated on the network axis. A
+`@kt.tool` function takes the same names as keyword arguments:
+`@kt.tool(url_arguments=["url"])`.
+
 ### Tools that need a UI renderer
 
 A tool that only makes sense while a client can draw its UI (a widget

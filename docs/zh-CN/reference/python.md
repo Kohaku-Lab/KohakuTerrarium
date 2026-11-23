@@ -169,10 +169,11 @@ finally:
 JSON-schema 参数取自类型注解。同步函数经 `asyncio.to_thread` 运行。
 名为 `context` 的参数会收到 `ToolContext`。
 
-- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT) -> FunctionTool | decorator`：
+- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT, url_arguments=(), network_hosts=(), network_access=False) -> FunctionTool | decorator`：
   可写作 `@tool`、`@tool(name=..., description=...)`，或直接调用
-  `tool(existing_fn)`。
-- `FunctionTool(fn, *, name=None, description=None, execution_mode=...)`：背后的类。
+  `tool(existing_fn)`。网络关键字设定 sandbox 插件据以管制的同名
+  `BaseTool` 属性（见 [自定义模块](../guides/custom-modules.md#声明网络使用)）。
+- `FunctionTool(fn, *, name=None, description=None, execution_mode=..., url_arguments=(), network_hosts=(), network_access=False)`：背后的类。
 
 ```python
 import kohakuterrarium as kt

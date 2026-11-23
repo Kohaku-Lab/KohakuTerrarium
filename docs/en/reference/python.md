@@ -212,10 +212,12 @@ description from the first docstring line, JSON-schema parameters from
 the type hints. Sync functions run via `asyncio.to_thread`. A `context`
 parameter receives the `ToolContext`.
 
-- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT) -> FunctionTool | decorator`:
+- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT, url_arguments=(), network_hosts=(), network_access=False) -> FunctionTool | decorator`:
   works as `@tool`, `@tool(name=..., description=...)`, or a direct
-  call `tool(existing_fn)`.
-- `FunctionTool(fn, *, name=None, description=None, execution_mode=...)`: the class behind it.
+  call `tool(existing_fn)`. The network keywords set the same-named
+  `BaseTool` attributes the sandbox plugin gates on (see
+  [Custom modules](../guides/custom-modules.md#network-use)).
+- `FunctionTool(fn, *, name=None, description=None, execution_mode=..., url_arguments=(), network_hosts=(), network_access=False)`: the class behind it.
 
 ```python
 import kohakuterrarium as kt

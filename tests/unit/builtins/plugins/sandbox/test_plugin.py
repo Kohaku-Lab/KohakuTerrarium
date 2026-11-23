@@ -17,13 +17,17 @@ from kohakuterrarium.builtins.tools.notebook.read import NotebookReadTool
 from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.builtins.tools.files.tree import TreeTool
 from kohakuterrarium.builtins.tools.files.write import WriteTool
+from kohakuterrarium.builtins.tools.web.fetch import WebFetchTool
+from kohakuterrarium.builtins.tools.web.search import WebSearchTool
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import (
+    BasePlugin,
     PluginBlockError,
     PluginContext,
     PluginLockedError,
 )
 from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
+from kohakuterrarium.modules.tool.function import tool as kt_tool
 
 
 @pytest.fixture
@@ -351,6 +355,445 @@ class TestFileToolWritesMatchTheKernelProfile:
                 tool=ReadTool(),
                 context=context,
             )
+
+
+class _UrlTool(_UploadTool):
+    path_arguments = {}
+    url_arguments = ("target",)
+
+    @property
+    def tool_name(self):
+        return "pkg_url"
+
+
+class _HostTool(_UploadTool):
+    path_arguments = {}
+    network_hosts = ("api.example.com",)
+
+    @property
+    def tool_name(self):
+        return "pkg_host"
+
+
+class _ElsewhereTool(_UploadTool):
+    path_arguments = {}
+    network_access = True
+
+    @property
+    def tool_name(self):
+        return "pkg_elsewhere"
+
+
+class _NetworkPlugin(BasePlugin):
+    name = "pkg_net"
+
+    def contribute_tools(self):
+        return [_UrlTool()]
+
+
+def _gate(sandbox, tool, args, context):
+    return sandbox.pre_tool_execute(
+        args, tool_name=tool.tool_name, tool=tool, context=context
+    )
+
+
+def _record_warnings(monkeypatch):
+    seen: list[str] = []
+    monkeypatch.setattr(
+        plugin_mod.logger, "warning", lambda msg, *a, **k: seen.append(msg)
+    )
+    return seen
+
+
+class TestDeclaredNetworkUse:
+    """``url_arguments`` / ``network_hosts`` / ``network_access`` gate any tool."""
+
+    @pytest.mark.parametrize(
+        ("tool", "args", "requested"),
+        [
+            (_UrlTool(), {"target": "https://ok.test/a"}, "https://ok.test/a"),
+            (_HostTool(), {}, "https://api.example.com/"),
+            (_ElsewhereTool(), {}, "pkg_elsewhere"),
+        ],
+    )
+    async def test_network_deny_blocks_each_declaration(
+        self, paths, tool, args, requested
+    ):
+        _, _, context = paths
+        with pytest.raises(PluginBlockError) as err:
+            await _gate(SandboxPlugin(network="deny"), tool, args, context)
+        assert str(err.value) == (
+            f"SandboxViolation[network]: {tool.tool_name}: network access denied "
+            f"({requested})"
+        )
+
+    @pytest.mark.parametrize(
+        ("tool", "args", "host"),
+        [
+            (_UrlTool(), {"target": "https://evil.test/a"}, "evil.test"),
+            (_UrlTool(), {"target": ["https://ok.test", "evil.test/x"]}, "evil.test"),
+            (_HostTool(), {}, "api.example.com"),
+        ],
+    )
+    async def test_allowlist_miss_is_blocked(self, paths, tool, args, host):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network="allow", network_allowlist=["ok.test"])
+        with pytest.raises(PluginBlockError, match=f"host '{host}' not allowlisted"):
+            await _gate(sandbox, tool, args, context)
+
+    @pytest.mark.parametrize(
+        ("tool", "args"),
+        [
+            (_UrlTool(), {"target": "https://OK.test/a"}),
+            (_UrlTool(), {"target": ["ok.test/1", "https://api.example.com/2"]}),
+            (_HostTool(), {}),
+            (_ElsewhereTool(), {}),
+        ],
+    )
+    async def test_allowlist_hit_passes(self, paths, tool, args):
+        _, _, context = paths
+        sandbox = SandboxPlugin(
+            network="allow", network_allowlist=["ok.test", "api.example.com"]
+        )
+        assert await _gate(sandbox, tool, args, context) is None
+
+    @pytest.mark.parametrize(
+        ("tool", "args"),
+        [
+            (_UrlTool(), {"target": "https://evil.test/a"}),
+            (_HostTool(), {}),
+            (_ElsewhereTool(), {}),
+        ],
+    )
+    async def test_audit_mode_logs_and_allows(self, paths, monkeypatch, tool, args):
+        _, _, context = paths
+        seen = _record_warnings(monkeypatch)
+        sandbox = SandboxPlugin(backend="audit", network="deny")
+        assert await _gate(sandbox, tool, args, context) is None
+        assert any("network access denied" in line for line in seen)
+
+    async def test_truthy_network_access_fails_closed(self, paths):
+        _, _, context = paths
+        tool = _ElsewhereTool()
+        tool.network_access = 1
+        with pytest.raises(PluginBlockError, match="network access denied"):
+            await _gate(SandboxPlugin(network="deny"), tool, {}, context)
+
+    async def test_bare_string_declarations_are_one_name(self, paths):
+        _, _, context = paths
+        tool = _UrlTool()
+        tool.url_arguments = "target"
+        tool.network_hosts = "api.example.com"
+        sandbox = SandboxPlugin(network_allowlist=["api.example.com"])
+        assert (
+            await _gate(sandbox, tool, {"target": "api.example.com"}, context) is None
+        )
+        with pytest.raises(PluginBlockError, match="host 'evil.test'"):
+            await _gate(sandbox, tool, {"target": "evil.test"}, context)
+
+    async def test_empty_url_argument_is_not_checked(self, paths):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network="deny")
+        assert await _gate(sandbox, _UrlTool(), {"target": ""}, context) is None
+
+    async def test_tool_without_declarations_is_not_gated(self, paths):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network="deny", network_allowlist=["ok.test"])
+        result = await _gate(
+            sandbox, _UndeclaredTool(), {"target": "https://evil.test"}, context
+        )
+        assert result is None
+
+    async def test_function_tool_declarations_are_gated(self, paths):
+        _, _, context = paths
+
+        @kt_tool(url_arguments=["url"])
+        def fetch_page(url: str) -> str:
+            return url
+
+        with pytest.raises(PluginBlockError, match="fetch_page: network access"):
+            await _gate(
+                SandboxPlugin(network="deny"), fetch_page, {"url": "x.test"}, context
+            )
+
+    async def test_plugin_contributed_tool_is_gated_through_the_registry(self, paths):
+        _, _, context = paths
+        registry = Registry()
+        for contributed in _NetworkPlugin().contribute_tools():
+            registry.register_tool(contributed)
+        sandbox = SandboxPlugin(network="allow", network_allowlist=["ok.test"])
+        await sandbox.on_load(
+            PluginContext(
+                agent_name="a",
+                working_dir=context.working_dir,
+                _host_agent=SimpleNamespace(registry=registry),
+            )
+        )
+        with pytest.raises(PluginBlockError, match="host 'evil.test'"):
+            await sandbox.pre_tool_execute(
+                {"target": "https://evil.test"}, tool_name="pkg_url", context=context
+            )
+
+
+class TestWebToolsKeepTheirDecisions:
+    """``web_fetch`` and ``web_search`` produce the exact pre-declaration messages."""
+
+    def test_web_tools_declare_their_network_use(self):
+        assert WebFetchTool.url_arguments == ("url",)
+        assert WebSearchTool.network_hosts == ("duckduckgo.com",)
+        assert WebFetchTool.network_access is False
+        assert WebSearchTool.network_access is False
+
+    @pytest.mark.parametrize(
+        ("tool", "args", "options", "message"),
+        [
+            (
+                WebFetchTool(),
+                {"url": "https://example.com/page"},
+                {"network": "deny"},
+                "SandboxViolation[network]: web_fetch: network access denied "
+                "(https://example.com/page)",
+            ),
+            (
+                WebFetchTool(),
+                {"url": "evil.test/x"},
+                {"network_allowlist": ["example.com"]},
+                "SandboxViolation[network]: web_fetch: host 'evil.test' not "
+                "allowlisted (https://evil.test/x)",
+            ),
+            (
+                WebSearchTool(),
+                {"query": "q"},
+                {"network": "deny"},
+                "SandboxViolation[network]: web_search: network access denied "
+                "(https://duckduckgo.com/)",
+            ),
+            (
+                WebSearchTool(),
+                {"query": "q"},
+                {"network_allowlist": ["example.com"]},
+                "SandboxViolation[network]: web_search: host 'duckduckgo.com' not "
+                "allowlisted (https://duckduckgo.com/)",
+            ),
+            (
+                WebSearchTool(),
+                {"query": "q"},
+                {"profile": "PURE"},
+                "SandboxViolation[network]: web_search: network access denied "
+                "(https://duckduckgo.com/)",
+            ),
+        ],
+    )
+    async def test_violation_messages_are_unchanged(
+        self, paths, tool, args, options, message
+    ):
+        _, _, context = paths
+        with pytest.raises(PluginBlockError) as err:
+            await _gate(SandboxPlugin(**options), tool, args, context)
+        assert str(err.value) == message
+
+    @pytest.mark.parametrize(
+        ("tool", "args", "options"),
+        [
+            (WebFetchTool(), {"url": "https://example.com/p"}, {}),
+            (
+                WebFetchTool(),
+                {"url": "example.com/p"},
+                {"network_allowlist": ["example.com"]},
+            ),
+            (WebFetchTool(), {}, {"network": "deny"}),
+            (WebSearchTool(), {"query": "q"}, {}),
+            (
+                WebSearchTool(),
+                {"query": "q"},
+                {"network_allowlist": ["duckduckgo.com"]},
+            ),
+        ],
+    )
+    async def test_allowed_calls_still_pass(self, paths, tool, args, options):
+        _, _, context = paths
+        assert await _gate(SandboxPlugin(**options), tool, args, context) is None
+
+    async def test_audit_logs_both_web_fetch_violations(self, paths, monkeypatch):
+        _, _, context = paths
+        seen = _record_warnings(monkeypatch)
+        sandbox = SandboxPlugin(
+            backend="audit", network="deny", network_allowlist=["example.com"]
+        )
+        args = {"url": "https://evil.test/x"}
+        assert await _gate(sandbox, WebFetchTool(), args, context) is None
+        assert seen == [
+            "SandboxViolation[network]: web_fetch: network access denied "
+            "(https://evil.test/x)",
+            "SandboxViolation[network]: web_fetch: host 'evil.test' not "
+            "allowlisted (https://evil.test/x)",
+        ]
+
+    async def test_audit_logs_both_web_search_violations_once(self, paths, monkeypatch):
+        _, _, context = paths
+        seen = _record_warnings(monkeypatch)
+        sandbox = SandboxPlugin(
+            backend="audit", network="deny", network_allowlist=["example.com"]
+        )
+        assert await _gate(sandbox, WebSearchTool(), {"query": "q"}, context) is None
+        assert seen == [
+            "SandboxViolation[network]: web_search: network access denied "
+            "(https://duckduckgo.com/)",
+            "SandboxViolation[network]: web_search: host 'duckduckgo.com' not "
+            "allowlisted (https://duckduckgo.com/)",
+        ]
+
+
+class _NamedUndeclaredTool(_UndeclaredTool):
+    """A replacement tool that takes a built-in network tool's name."""
+
+    def __init__(self, name):
+        super().__init__()
+        self._name = name
+
+    @property
+    def tool_name(self):
+        return self._name
+
+
+class TestNetworkNameTableFloor:
+    """The built-in name tables gate ``web_fetch`` / ``web_search`` regardless."""
+
+    @pytest.mark.parametrize(
+        ("name", "args", "requested"),
+        [
+            ("web_fetch", {"url": "https://example.com/p"}, "https://example.com/p"),
+            ("web_search", {"query": "q"}, "https://duckduckgo.com/"),
+        ],
+    )
+    async def test_undeclared_replacement_is_gated(self, paths, name, args, requested):
+        _, _, context = paths
+        with pytest.raises(PluginBlockError) as err:
+            await _gate(
+                SandboxPlugin(network="deny"), _NamedUndeclaredTool(name), args, context
+            )
+        assert str(err.value) == (
+            f"SandboxViolation[network]: {name}: network access denied ({requested})"
+        )
+
+    @pytest.mark.parametrize(
+        ("name", "args"),
+        [("web_fetch", {"url": "evil.test/x"}), ("web_search", {"query": "q"})],
+    )
+    async def test_call_without_tool_or_registry_is_gated(self, paths, name, args):
+        _, _, context = paths
+        sandbox = SandboxPlugin(network_allowlist=["example.com"])
+        with pytest.raises(PluginBlockError, match="not allowlisted"):
+            await sandbox.pre_tool_execute(
+                args, tool_name=name, tool=None, context=context
+            )
+
+    async def test_declared_and_tabled_entries_are_checked_once(
+        self, paths, monkeypatch
+    ):
+        _, _, context = paths
+        tool = _NamedUndeclaredTool("web_fetch")
+        tool.url_arguments = ("url", "url")
+        tool.network_hosts = ("api.example.com", "api.example.com")
+        seen = _record_warnings(monkeypatch)
+        sandbox = SandboxPlugin(backend="audit", network="deny")
+        assert await _gate(sandbox, tool, {"url": "https://a.test/"}, context) is None
+        assert seen == [
+            "SandboxViolation[network]: web_fetch: network access denied "
+            "(https://api.example.com/)",
+            "SandboxViolation[network]: web_fetch: network access denied "
+            "(https://a.test/)",
+        ]
+
+
+class TestNetworkPolicyService:
+    """``runtime_services()['network_policy']`` answers host checks live."""
+
+    def _policy(self, sandbox):
+        return sandbox.runtime_services(None)["network_policy"]
+
+    def test_published_beside_the_subprocess_runner(self):
+        services = SandboxPlugin().runtime_services(None)
+        assert services["subprocess_runner"] is not None
+        assert isinstance(services["network_policy"], plugin_mod.SandboxNetworkPolicy)
+        assert callable(services["network_policy"].check)
+
+    @pytest.mark.parametrize("options", [{"enabled": False}, {"backend": "off"}])
+    def test_disabled_plugin_exposes_no_service(self, options):
+        assert "network_policy" not in SandboxPlugin(**options).runtime_services(None)
+
+    @pytest.mark.parametrize(
+        ("options", "host", "expected"),
+        [
+            ({}, "anything.test", None),
+            ({"network": "deny"}, "anything.test", "network access denied"),
+            ({"profile": "PURE"}, "anything.test", "network access denied"),
+            (
+                {"network_allowlist": ["ok.test"]},
+                "evil.test",
+                "host 'evil.test' not allowlisted",
+            ),
+            ({"network_allowlist": ["ok.test"]}, "ok.test", None),
+            ({"network_allowlist": ["ok.test"]}, "OK.Test", None),
+            (
+                {"network": "deny", "network_allowlist": ["ok.test"]},
+                "ok.test",
+                "network access denied",
+            ),
+        ],
+    )
+    def test_check_applies_mode_and_allowlist(self, options, host, expected):
+        assert self._policy(SandboxPlugin(**options)).check(host, 443) == expected
+
+    def test_option_changes_apply_to_a_held_service(self):
+        sandbox = SandboxPlugin()
+        policy = self._policy(sandbox)
+        assert policy.mode == "allow"
+        assert policy.check("evil.test", 80) is None
+        sandbox.set_options({"network_allowlist": ["ok.test"]})
+        assert policy.check("evil.test", 80) == "host 'evil.test' not allowlisted"
+        sandbox.set_options({"network": "deny"})
+        assert policy.mode == "deny"
+        assert policy.check("ok.test", 80) == "network access denied"
+        sandbox.set_options({"enabled": False})
+        assert policy.check("evil.test", 80) is None
+        assert policy.mode == "allow"
+
+    def test_bracketed_ipv6_host_matches_its_allowlist_entry(self):
+        policy = self._policy(SandboxPlugin(network_allowlist=["::1"]))
+        assert policy.check("[::1]", 443) is None
+        assert policy.check("[::2]", 443) == "host '::2' not allowlisted"
+
+    def test_audit_mode_logs_and_allows(self, monkeypatch):
+        seen = _record_warnings(monkeypatch)
+        policy = self._policy(SandboxPlugin(backend="audit", network="deny"))
+        assert policy.check("evil.test", 8080) is None
+        assert seen == [
+            "SandboxViolation[network]: network_policy: network access denied "
+            "(evil.test:8080)"
+        ]
+
+    @pytest.mark.parametrize(
+        ("options", "expected"),
+        [
+            ({}, False),
+            ({"os_enforce": "auto"}, False),
+            ({"os_enforce": "off"}, False),
+            ({"os_enforce": "require"}, True),
+            ({"os_enforce": "require", "backend": "audit"}, False),
+        ],
+    )
+    def test_requires_os_confinement(self, options, expected):
+        policy = self._policy(SandboxPlugin(**options))
+        assert policy.requires_os_confinement is expected
+
+    def test_confinement_flag_follows_option_changes(self):
+        sandbox = SandboxPlugin()
+        policy = self._policy(sandbox)
+        sandbox.set_options({"os_enforce": "require"})
+        assert policy.requires_os_confinement is True
+        sandbox.set_options({"enabled": False})
+        assert policy.requires_os_confinement is False
 
 
 class TestLock:

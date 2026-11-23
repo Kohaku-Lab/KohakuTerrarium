@@ -73,6 +73,30 @@ tools:
 - **background**：送出後回傳 job id，結果晚點再到。
 - **stateful**：類似 generator，跨回合 yield 中間結果。
 
+### 宣告網路使用
+
+會連網的工具要宣告連網方式，`sandbox` 外掛的 `network` /
+`network_allowlist` 政策才會套用到它（與宣告檔案路徑的
+`path_arguments` 同一種做法）：
+
+```python
+class MirrorTool(BaseTool):
+    url_arguments = ("source",)          # 存放要抓取 URL 的參數
+    network_hosts = ("api.example.com",)  # 不論參數為何都會連的主機
+    network_access = False                # True：目的主機由別處決定
+```
+
+- `url_arguments`：值可以是一個 URL 或 URL 列表；沒有 scheme 的值以
+  `https://` 檢查。每個主機都要通過白名單，`network=deny` 時拒絕呼叫。
+- `network_hosts`：每個主機以 `https://<host>/` 檢查。
+- `network_access`：`network=deny` 時拒絕呼叫；逐主機的檢查由工具自己
+  負責（例如透過 sandbox 的 `network_policy` runtime service）。
+
+這些宣告會加到 sandbox 內建的工具名稱表上，該表依名稱管制 `web_fetch`
+與 `web_search`。其他三者都沒宣告的工具不受網路軸管制。`@kt.tool`
+函式以同名關鍵字參數宣告：
+`@kt.tool(url_arguments=["url"])`。
+
 ### 工具結果裡的媒體
 
 回傳 `ImagePart` / `FilePart` 媒體的工具，可用

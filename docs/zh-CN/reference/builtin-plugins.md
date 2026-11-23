@@ -65,8 +65,19 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
   下并拒绝向上穿越；`broad` 在 `fs_deny` 之外都允许；`deny` 全挡。
 - **网络闸门**：当 `network=allow` 且设定了 `network_allowlist` 时，
   只有清单上的主机能过；否则在网络允许时全过。当 `network=deny` 时，
-  所有网络工具呼叫（`web_fetch`、`web_search`）都会抛
-  `PluginBlockError`。
+  所有网络工具呼叫都会抛 `PluginBlockError`。插件内建一张以工具名称
+  为键的表（`web_fetch`：其 `url` 参数；`web_search`：`duckduckgo.com`），
+  工具声明的 `url_arguments`、`network_hosts`、`network_access` 会加到
+  这张表上（见 [自定义模块](../guides/custom-modules.md#声明网络使用)）。
+  使用这些名称的工具即使什么都没声明也会受管制；每个主机或参数在一次
+  呼叫中只检查一次。
+- **网络政策服务**：启用时插件也透过 `runtime_services()` 发布
+  `network_policy` 服务，供在工具 hook 之外建立连线的组件（例如过滤
+  代理）使用。`check(host, port)` 回传 `None` 表示允许，否则回传简短
+  的拒绝原因，套用 `network` 与 `network_allowlist`；audit 模式下记录
+  后允许。`mode` 为 `"allow"` 或 `"deny"`。`requires_os_confinement`
+  在 `os_enforce=require` 生效时为真，表示绕过 `subprocess_runner` 起的
+  行程会逃过它要求的内核约束。每次读取都跟随插件当下的选项。
 - **子行程闸门**：插件透过 `runtime_services()` 发布
   `subprocess_runner` 服务。需要起子行程的工具（`bash` 等）从
   `ToolContext.runtime_services` 取用。Runner 会先检查 syscall 等级

@@ -171,10 +171,11 @@ finally:
 同步函式透過 `asyncio.to_thread` 執行。`context`
 參數會收到 `ToolContext`。
 
-- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT) -> FunctionTool | decorator`：
+- `tool(fn=None, *, name=None, description=None, execution_mode=ExecutionMode.DIRECT, url_arguments=(), network_hosts=(), network_access=False) -> FunctionTool | decorator`：
   可寫成 `@tool`、`@tool(name=..., description=...)`，或直接呼叫
-  `tool(existing_fn)`。
-- `FunctionTool(fn, *, name=None, description=None, execution_mode=...)`：背後的類別。
+  `tool(existing_fn)`。網路關鍵字設定 sandbox 外掛據以管制的同名
+  `BaseTool` 屬性（見 [自訂模組](../guides/custom-modules.md#宣告網路使用)）。
+- `FunctionTool(fn, *, name=None, description=None, execution_mode=..., url_arguments=(), network_hosts=(), network_access=False)`：背後的類別。
 
 ```python
 import kohakuterrarium as kt

@@ -1,8 +1,9 @@
 """Enforce runtime-configurable file, network, tool, and subprocess policy.
 
 The sandbox remains a plugin: hooks gate known tools and any tool's declared
-``path_arguments``, while a runtime service provides the same policy boundary
-to subprocess-capable tools.
+``path_arguments`` and network use (``url_arguments``, ``network_hosts``,
+``network_access``), while runtime services provide the same policy boundary
+to subprocess-capable tools and to components that open connections.
 """
 
 import asyncio
@@ -56,6 +57,8 @@ NETWORK_URL_ARGS = {
 }
 
 NETWORK_TOOLS = {"web_search"}
+
+NETWORK_DENIED = "network access denied"
 
 UNLOCK_ENV = "KT_SANDBOX_ALLOW_UNLOCK"
 
@@ -181,6 +184,7 @@ class SandboxPlugin(BasePlugin):
         self._audit = False
         self._blocked_tools: set[str] = set()
         self._network_allowlist: set[str] = set()
+        self._network_policy = SandboxNetworkPolicy(self)
         self.refresh_options()
 
     async def on_load(self, context: PluginContext) -> None:
@@ -236,12 +240,11 @@ class SandboxPlugin(BasePlugin):
         cwd = _context_cwd(context, self._context)
         if tool_name == "glob":
             self._check_glob(args, context, cwd)
-        declared = _declared_path_arguments(
-            kwargs.get("tool") or self._lookup_tool(tool_name)
-        )
+        tool = kwargs.get("tool") or self._lookup_tool(tool_name)
+        declared = _declared_path_arguments(tool)
         for path in _iter_tool_paths(tool_name, args, cwd, declared):
             self._check_path(tool_name, path.path, path.operation, cwd)
-        self._check_network_tool(tool_name, args)
+        self._check_network_tool(tool_name, tool, args)
         return None
 
     def _lookup_tool(self, tool_name: str) -> Any:
@@ -253,10 +256,10 @@ class SandboxPlugin(BasePlugin):
         return registry.get_tool(tool_name)
 
     def runtime_services(self, context: Any) -> dict[str, Any]:
-        """Expose the optional subprocess runner service while enabled."""
+        """Expose the subprocess runner and network policy services while enabled."""
         if not self._enabled:
             return {}
-        return {"subprocess_runner": self}
+        return {"subprocess_runner": self, "network_policy": self._network_policy}
 
     async def run_subprocess_exec(
         self,
@@ -377,23 +380,62 @@ class SandboxPlugin(BasePlugin):
         """Whether ``resolved`` lies under any of ``roots``."""
         return any(_is_relative_to(resolved, _resolve(r, cwd).resolve()) for r in roots)
 
-    def _check_network_tool(self, tool_name: str, args: dict[str, Any]) -> None:
-        if tool_name in NETWORK_TOOLS:
-            self._check_network(tool_name, "https://duckduckgo.com/")
-        for arg_name in NETWORK_URL_ARGS.get(tool_name, []):
-            raw = args.get(arg_name)
-            if raw:
-                url = str(raw)
+    def _check_network_tool(
+        self, tool_name: str, tool: Any, args: dict[str, Any]
+    ) -> None:
+        """Check the hosts and URL arguments the name tables and ``tool`` declare."""
+        tabled_hosts = ["duckduckgo.com"] if tool_name in NETWORK_TOOLS else []
+        hosts = [*tabled_hosts, *_declared_names(tool, "network_hosts")]
+        for host in dict.fromkeys(host.lower() for host in hosts):
+            self._check_network(tool_name, f"https://{host}/")
+        url_args = [
+            *NETWORK_URL_ARGS.get(tool_name, []),
+            *_declared_names(tool, "url_arguments"),
+        ]
+        for arg_name in dict.fromkeys(url_args):
+            for url in _url_values(args.get(arg_name)):
                 if not url.startswith(("http://", "https://")):
                     url = "https://" + url
                 self._check_network(tool_name, url)
+        if getattr(tool, "network_access", False):
+            if self._profile.network == "deny":
+                self._violate("network", tool_name, f"{tool_name}: {NETWORK_DENIED}")
 
     def _check_network(self, tool_name: str, url: str) -> None:
         if self._profile.network == "deny":
-            self._violate("network", url, f"{tool_name}: network access denied")
+            self._violate("network", url, f"{tool_name}: {NETWORK_DENIED}")
         host = urlparse(url).hostname or ""
+        reason = self._allowlist_denial(host)
+        if reason is not None:
+            self._violate("network", url, f"{tool_name}: {reason}")
+
+    def _allowlist_denial(self, host: str) -> str | None:
         if self._network_allowlist and host not in self._network_allowlist:
-            self._violate("network", url, f"{tool_name}: host '{host}' not allowlisted")
+            return f"host '{host}' not allowlisted"
+        return None
+
+    def check_host(self, host: str, port: int) -> str | None:
+        """Why a connection to ``host:port`` is refused, or ``None`` to allow it."""
+        if not self._enabled:
+            return None
+        if self._profile.network == "deny":
+            reason: str | None = NETWORK_DENIED
+        else:
+            reason = self._allowlist_denial(host.strip("[]").lower())
+        if reason is None:
+            return None
+        if self._audit:
+            self._violate("network", f"{host}:{port}", f"network_policy: {reason}")
+            return None
+        return reason
+
+    def network_mode(self) -> str:
+        """The network level in force: ``allow`` or ``deny``."""
+        return self._profile.network if self._enabled else "allow"
+
+    def requires_os_confinement(self) -> bool:
+        """Whether every spawned process must run under kernel confinement."""
+        return self._enabled and not self._audit and self._os_enforce == "require"
 
     def _violate(self, axis: str, requested: str, message: str) -> None:
         full = f"SandboxViolation[{axis}]: {message} ({requested})"
@@ -401,6 +443,34 @@ class SandboxPlugin(BasePlugin):
             logger.warning(full)
             return
         raise PluginBlockError(full)
+
+
+class SandboxNetworkPolicy:
+    """Live network rules of a sandbox plugin, published as ``network_policy``.
+
+    For components that open connections outside the tool hooks, such as a
+    filtering proxy. Every access reads the plugin's current options, so a
+    held instance follows ``set_options`` / ``refresh_options``.
+    ``check(host, port)`` returns ``None`` to allow or a short reason to
+    refuse; in audit mode it logs the violation and allows. ``mode`` is the
+    network level in force. ``requires_os_confinement`` is true while
+    ``os_enforce=require`` is enforced: a process launched outside
+    ``run_subprocess_exec`` would escape the kernel confinement it demands.
+    """
+
+    def __init__(self, plugin: SandboxPlugin) -> None:
+        self._plugin = plugin
+
+    def check(self, host: str, port: int) -> str | None:
+        return self._plugin.check_host(host, port)
+
+    @property
+    def mode(self) -> str:
+        return self._plugin.network_mode()
+
+    @property
+    def requires_os_confinement(self) -> bool:
+        return self._plugin.requires_os_confinement()
 
 
 @dataclass(slots=True)
@@ -438,6 +508,23 @@ def _declared_path_arguments(tool: Any) -> dict[str, str]:
         str(name): "write" if operation == "write" else "read"
         for name, operation in declared.items()
     }
+
+
+def _declared_names(tool: Any, attribute: str) -> tuple[str, ...]:
+    """A tool's declared name tuple, accepting one bare string."""
+    declared = getattr(tool, attribute, None)
+    if isinstance(declared, str):
+        return (declared,)
+    if not isinstance(declared, (list, tuple, set, frozenset)):
+        return ()
+    return tuple(str(name) for name in declared)
+
+
+def _url_values(value: Any) -> list[str]:
+    """The non-empty URLs one argument holds: a URL or a list of URLs."""
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if item]
+    return [str(value)] if value else []
 
 
 def _iter_tool_paths(

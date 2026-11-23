@@ -5,6 +5,7 @@ Function signatures supply names, descriptions, schemas, and optional tool conte
 
 import asyncio
 import inspect
+from collections.abc import Iterable
 from typing import Any, Callable
 
 from kohakuterrarium.modules.tool.base import (
@@ -36,6 +37,13 @@ def _annotation_to_json_type(annotation: Any) -> str:
     return "string"
 
 
+def _names(value: Iterable[str]) -> tuple[str, ...]:
+    """One name or an iterable of names, as a tuple."""
+    if isinstance(value, str):
+        return (value,)
+    return tuple(str(item) for item in value)
+
+
 class FunctionTool(BaseTool):
     """Wrap a function with signature-derived schema and optional tool context."""
 
@@ -46,8 +54,14 @@ class FunctionTool(BaseTool):
         name: str | None = None,
         description: str | None = None,
         execution_mode: ExecutionMode = ExecutionMode.DIRECT,
+        url_arguments: Iterable[str] = (),
+        network_hosts: Iterable[str] = (),
+        network_access: bool = False,
     ) -> None:
         super().__init__()
+        self.url_arguments = _names(url_arguments)
+        self.network_hosts = _names(network_hosts)
+        self.network_access = bool(network_access)
         self._fn = fn
         self._name = name or fn.__name__
         doc = inspect.getdoc(fn) or ""
@@ -119,12 +133,25 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     execution_mode: ExecutionMode = ExecutionMode.DIRECT,
+    url_arguments: Iterable[str] = (),
+    network_hosts: Iterable[str] = (),
+    network_access: bool = False,
 ) -> "FunctionTool | Callable[[Callable[..., Any]], FunctionTool]":
-    """Return a function-backed tool through decorator or direct-call syntax."""
+    """Return a function-backed tool through decorator or direct-call syntax.
+
+    ``url_arguments`` / ``network_hosts`` / ``network_access`` declare the
+    tool's network use, as the same-named :class:`BaseTool` attributes do.
+    """
 
     def _wrap(f: Callable[..., Any]) -> FunctionTool:
         return FunctionTool(
-            f, name=name, description=description, execution_mode=execution_mode
+            f,
+            name=name,
+            description=description,
+            execution_mode=execution_mode,
+            url_arguments=url_arguments,
+            network_hosts=network_hosts,
+            network_access=network_access,
         )
 
     if fn is not None:
