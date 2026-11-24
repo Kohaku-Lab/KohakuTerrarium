@@ -6,7 +6,6 @@ of ``browser.errors`` with a short reason; call logs never leave this module.
 """
 
 import asyncio
-import importlib
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
@@ -62,11 +61,12 @@ _SCROLL_HEIGHT_JS = (
 def load_playwright() -> Any:
     """``playwright.async_api``, or ``BrowserUnavailableError`` saying how to install it."""
     try:
-        return importlib.import_module("playwright.async_api")
+        from playwright import async_api
     except ImportError as exc:
         raise BrowserUnavailableError(
             f"the browser tools need Playwright, which is not installed; {INSTALL_HINT}"
         ) from exc
+    return async_api
 
 
 def first_line(message: str) -> str:
@@ -481,6 +481,15 @@ class PlaywrightBrowser:
         if self._context_closed:
             return False
         return self._browser is None or self._browser.is_connected()
+
+    async def responsive(self, timeout: float) -> bool:
+        if not self.is_connected():
+            return False
+        try:
+            await asyncio.wait_for(self._context.cookies(), timeout)
+        except (asyncio.TimeoutError, self.api.Error):
+            return False
+        return True
 
     async def new_page(self, timeout: float) -> PlaywrightPage:
         try:

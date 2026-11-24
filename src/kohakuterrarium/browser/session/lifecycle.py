@@ -34,9 +34,11 @@ from kohakuterrarium.browser.session.types import (
     CLOSED,
     LAUNCHING,
     LOST_CRASH,
+    LOST_HUNG,
     MAX_TABS,
     NAV_CHAIN_MAX,
     NEW,
+    PROBE_TIMEOUT_S,
     READY,
     Op,
     Stack,
@@ -58,6 +60,7 @@ class SessionLifecycleMixin:
     """Owns the state machine, the lock, the launch stack and the per-browser books."""
 
     options: BrowserOptions
+    close_timeout: float
     # owned by SessionObserveMixin
     _last: dict[str, Observation]
     _blocked: list[EgressRecord]
@@ -84,6 +87,8 @@ class SessionLifecycleMixin:
         self._launch_task: asyncio.Task | None = None
         self._idle_task: asyncio.Task | None = None
         self._close_task: asyncio.Task | None = None
+        self._close_deadline = 0.0
+        self._live_stacks: set[Stack] = set()
         self._cleanup_task: asyncio.Task | None = None
         self._teardowns: set[asyncio.Task] = set()
         self._background: set[asyncio.Task] = set()
@@ -108,6 +113,12 @@ class SessionLifecycleMixin:
         """The network policy this session's proxy enforces."""
         return self.options.network_policy(self._external_check)
 
+    async def drop_connections(self) -> None:
+        """Cut the running browser's open proxy connections; new ones are judged afresh."""
+        stack = self._stack
+        if stack is not None:
+            await stack.proxy.drop_connections()
+
     def _require_open(self) -> None:
         if self._state == CLOSED:
             raise BrowserClosedError("the browser session is closed")
@@ -130,9 +141,27 @@ class SessionLifecycleMixin:
                     self._refs.reset(op.tab.id)
                 raise
             except Exception as exc:
+                if isinstance(exc, TimeoutError):
+                    await self._drop_if_unresponsive(op)
                 raise self._operation_error(exc, op) from None
             finally:
                 self._schedule_idle()
+
+    async def _drop_if_unresponsive(self, op: Op) -> None:
+        """After a timeout, kill the browser and mark it lost when it no longer answers."""
+        stack = op.stack
+        if stack is None or stack is not self._stack or stack.browser is None:
+            return
+        if await stack.browser.responsive(PROBE_TIMEOUT_S):
+            return
+        if self._stack is not stack or self._state == CLOSED:
+            return
+        logger.warning("The browser stopped responding; killing it")
+        try:
+            stack.browser.kill()
+        except Exception as exc:
+            logger.warning("Killing the browser failed", error=str(exc))
+        self._mark_lost(LOST_HUNG)
 
     def _operation_error(self, exc: Exception, op: Op) -> Exception:
         """The error an operation raises for ``exc``, redacted when it is a browser error."""
@@ -188,6 +217,7 @@ class SessionLifecycleMixin:
 
     async def _launch(self, generation: int) -> Stack:
         stack = Stack(self._proxy_factory(self.policy), generation)
+        self._live_stacks.add(stack)
         plan = None
         self._expect_page += 1
         try:
@@ -245,6 +275,7 @@ class SessionLifecycleMixin:
                 except Exception as exc:
                     logger.warning("Killing the browser failed", error=str(exc))
         await self._stage(stack.proxy.close, "proxy")
+        self._live_stacks.discard(stack)
 
     async def _teardown_shielded(self, stack: Stack) -> None:
         """Tear ``stack`` down to the end even if the caller is cancelled; ``close`` waits for it."""
@@ -308,11 +339,34 @@ class SessionLifecycleMixin:
             await self._teardown_stale()
 
     async def close(self) -> None:
-        """Close for good: mark closed, then context, browser, Playwright, proxy. Idempotent."""
+        """Close for good: mark closed, then context, browser, Playwright, proxy. Idempotent.
+
+        Returns within ``close_timeout`` of the first call whatever the stages
+        do; past it every browser still running is killed and the rest of the
+        teardown carries on in the background.
+        """
+        loop = asyncio.get_running_loop()
         if self._close_task is None:
             self._state = CLOSED
+            self._close_deadline = loop.time() + self.close_timeout
             self._close_task = asyncio.create_task(self._close())
-        await asyncio.shield(self._close_task)
+        task = self._close_task
+        remaining = max(0.0, self._close_deadline - loop.time())
+        done, _ = await asyncio.wait({task}, timeout=remaining)
+        if done:
+            task.result()
+            return
+        logger.warning("Browser close overran its bound; killing what is left")
+        self._kill_live_stacks()
+
+    def _kill_live_stacks(self) -> None:
+        for stack in list(self._live_stacks):
+            if stack.browser is None:
+                continue
+            try:
+                stack.browser.kill()
+            except Exception as exc:
+                logger.warning("Killing the browser failed", error=str(exc))
 
     async def _close(self) -> None:
         self._cancel_idle()

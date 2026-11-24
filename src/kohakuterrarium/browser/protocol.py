@@ -194,6 +194,9 @@ class BrowserDriver(Protocol):
 
     def is_connected(self) -> bool: ...
 
+    async def responsive(self, timeout: float) -> bool:
+        """Whether the browser process answers a round trip within ``timeout``."""
+
     async def new_page(self, timeout: float) -> PageDriver: ...
 
     async def close_context(self) -> None: ...

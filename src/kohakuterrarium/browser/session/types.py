@@ -10,6 +10,8 @@ from kohakuterrarium.browser.tabs import Tab
 NEW, LAUNCHING, READY, CLOSED = "new", "launching", "ready", "closed"
 CALL_MARGIN_S = 0.5
 CLOSE_STAGE_TIMEOUT_S = 5.0
+CLOSE_TIMEOUT_S = 20.0
+PROBE_TIMEOUT_S = 1.0
 COMPACT_MAX_CHARS = 4000
 FULL_PAGE_MAX_HEIGHT = 8000
 EVAL_MAX_CHARS = 10000
@@ -17,6 +19,7 @@ DOWNLOAD_WAIT_S = 2.0
 JPEG_QUALITIES = (75, 50, 30)
 HISTORY_STEPS = ("back", "forward", "reload")
 LOST_CRASH = "the browser crashed or was closed from outside"
+LOST_HUNG = "the browser stopped responding"
 MAX_TABS = 20
 NAV_CHAIN_MAX = 20
 

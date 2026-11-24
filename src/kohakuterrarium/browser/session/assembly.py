@@ -17,7 +17,10 @@ from kohakuterrarium.browser.session.lifecycle import (
 from kohakuterrarium.browser.session.navigation import SessionNavigationMixin
 from kohakuterrarium.browser.session.observing import SessionObserveMixin
 from kohakuterrarium.browser.session.tab_ops import SessionTabsMixin
-from kohakuterrarium.browser.session.types import CLOSE_STAGE_TIMEOUT_S
+from kohakuterrarium.browser.session.types import (
+    CLOSE_STAGE_TIMEOUT_S,
+    CLOSE_TIMEOUT_S,
+)
 from kohakuterrarium.browser.settle import NAV_GRACE_S
 
 
@@ -33,7 +36,8 @@ class BrowserSession(
 
     ``downloads_dir`` receives page downloads; ``external_check`` is consulted
     by the network policy for every connection; ``driver`` defaults to
-    Playwright; ``close_stage_timeout`` bounds each shutdown stage;
+    Playwright; ``close_stage_timeout`` bounds each shutdown stage and
+    ``close_timeout`` the whole of ``close``;
     ``settle_grace`` is how long to wait for an action's navigation to start;
     ``proxy_factory`` builds the filtering proxy from the network policy.
     """
@@ -46,11 +50,13 @@ class BrowserSession(
         driver: Driver | None = None,
         external_check: ExternalCheck | None = None,
         close_stage_timeout: float = CLOSE_STAGE_TIMEOUT_S,
+        close_timeout: float = CLOSE_TIMEOUT_S,
         settle_grace: float = NAV_GRACE_S,
         proxy_factory: ProxyFactory = FilteringProxy,
     ) -> None:
         self.options = options
         self.settle_grace = settle_grace
+        self.close_timeout = close_timeout
         self._init_observe()
         self._init_lifecycle(
             driver or PlaywrightDriver(),

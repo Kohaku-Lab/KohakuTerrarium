@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import os
 import re
+import sys
 import time
 from types import SimpleNamespace
 
@@ -27,6 +28,7 @@ from kohakuterrarium.browser.driver import (
 )
 from kohakuterrarium.browser.errors import (
     BrowserLaunchError,
+    BrowserStateLostError,
     BrowserUnavailableError,
     DriverError,
     DriverTimeoutError,
@@ -36,6 +38,7 @@ from kohakuterrarium.browser.launch import Candidate
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.proxy import FilteringProxy
 from kohakuterrarium.browser.session import BrowserSession
+from kohakuterrarium.browser.session.types import CLOSE_TIMEOUT_S
 from tests.helpers.browser_site import (
     FixtureSite,
     UdpSink,
@@ -48,7 +51,9 @@ LIVE = pytest.mark.asyncio(loop_scope="module")
 LIVE_SECRET = 'Pa"ss\\word-42'
 LIVE_SECRET_PRINTED = ': Pa"ss\\word-42\n'
 PUBLIC_IP = "203.0.113.7"
-LIMIT_S = 60.0
+# Under the suite-wide 60 s pytest-timeout, so a hang fails with its own message.
+LIMIT_S = 45.0
+CLOSE_LIMIT_S = CLOSE_TIMEOUT_S + 10.0
 
 FORM = """<!doctype html><title>Form</title>
 <label>Name <input id=name></label>
@@ -97,7 +102,10 @@ async def within(awaitable, what: str, limit: float = LIMIT_S):
 
 
 class Bounded:
-    """A session whose coroutine methods each fail the test after ``LIMIT_S``."""
+    """A session whose coroutine methods each fail the test after ``LIMIT_S``.
+
+    ``close`` fails after ``CLOSE_LIMIT_S``: its own bound plus killing what is left.
+    """
 
     def __init__(self, session: BrowserSession) -> None:
         self.session = session
@@ -108,7 +116,8 @@ class Bounded:
             return value
 
         async def call(*args, **kwargs):
-            return await within(value(*args, **kwargs), f"session.{name}")
+            limit = CLOSE_LIMIT_S if name == "close" else LIMIT_S
+            return await within(value(*args, **kwargs), f"session.{name}", limit)
 
         return call
 
@@ -141,12 +150,7 @@ class TestWithoutBrowser:
         assert timeout_reason("something else") == "timed out"
 
     def test_missing_playwright_is_a_typed_error(self, monkeypatch):
-        def missing(name):
-            raise ImportError(name)
-
-        monkeypatch.setattr(
-            driver_module, "importlib", SimpleNamespace(import_module=missing)
-        )
+        monkeypatch.setitem(sys.modules, "playwright", None)
         with pytest.raises(
             BrowserUnavailableError, match=r"kohakuterrarium\[browser-use\]"
         ):
@@ -570,6 +574,7 @@ async def test_secrets_redaction_crash_recovery_then_close_leaves_no_process(
                 {
                     "allow_loopback": True,
                     "action_timeout_s": 5,
+                    "nav_timeout_s": 8,
                     "secrets": {"pw": "env:KT_T_LIVE_PW"},
                 }
             ),
@@ -580,6 +585,23 @@ async def test_secrets_redaction_crash_recovery_then_close_leaves_no_process(
         await crash_and_recover(live, site)
     finally:
         await live.close()
+
+
+async def recover_after_crash(live, url: str, bound: float = 30.0):
+    """Navigate until a call succeeds on a fresh browser; every failure must be state-lost.
+
+    Each call is bounded by the session's own timeouts (``Bounded``); a browser
+    that dies slowly may cost one action timeout plus the liveness probe.
+    """
+    deadline = time.monotonic() + bound
+    failures = []
+    while time.monotonic() < deadline:
+        try:
+            return await live.navigate(url)
+        except BrowserStateLostError as exc:
+            failures.append(str(exc))
+        await asyncio.sleep(0.1)
+    pytest.fail(f"no call succeeded within {bound:g} s of the crash: {failures}")
 
 
 async def crash_and_recover(live, site):
@@ -594,18 +616,15 @@ async def crash_and_recover(live, site):
     assert line == f'- textbox "Name" [active] [ref={name}]: "[secret:pw]"', line
     for part in (LIVE_SECRET, LIVE_SECRET_PRINTED, "ss\\\\word"):
         assert part not in shown.text + typed.text
+    old_tabs = {tab.id for tab in live._tabs}
     pids = await within(live._stack.browser.process_ids(), "process_ids")
     assert pids and all(process_alive(pid) for pid in pids[:1])
     for pid in pids:
         kill_process(pid)
-    for _ in range(100):
-        if live.state == "new":
-            break
-        await asyncio.sleep(0.1)
-    assert live.state == "new"
-    recovered = await live.navigate(site.url("/form"))
-    assert "Browser state was lost (the browser crashed" in recovered.text
-    assert recovered.text.startswith("[t")
+    recovered = await recover_after_crash(live, site.url("/form"))
+    assert recovered.text.count("Browser state was lost") == 1, recovered.text
+    tabs = {tab.id for tab in live._tabs}
+    assert tabs and tabs.isdisjoint(old_tabs), (old_tabs, tabs)
     fresh = await within(live._stack.browser.process_ids(), "process_ids")
     assert set(fresh).isdisjoint(pids)
     await live.close()

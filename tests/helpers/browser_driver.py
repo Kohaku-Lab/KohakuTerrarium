@@ -314,6 +314,8 @@ class ScriptedBrowser:
         self.connected = True
         self.dead = False
         self.killed = False
+        self.unresponsive = False
+        self.probes = 0
         self.stages: list[str] = []
         self.hang_stages: set[str] = set()
         self.fail_stages: set[str] = set()
@@ -345,6 +347,13 @@ class ScriptedBrowser:
         return [p for p in self.page_list if not p.closed]
 
     def is_connected(self) -> bool:
+        return self.connected
+
+    async def responsive(self, timeout: float) -> bool:
+        self.probes += 1
+        if self.unresponsive:
+            await asyncio.sleep(timeout)
+            return False
         return self.connected
 
     async def new_page(self, timeout: float) -> ScriptedPage:

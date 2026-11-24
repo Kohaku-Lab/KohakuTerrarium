@@ -393,6 +393,34 @@ class TestTimeoutsAndCancellation:
         page.hang.clear()
         assert (await session.snapshot()).text.startswith("[t1]")
 
+    async def test_a_timeout_on_a_browser_that_no_longer_answers_is_a_crash(self, made):
+        session, driver = made
+        await session.snapshot()
+        dead = driver.browser
+        dead.page.hang.add("snapshot")
+        dead.unresponsive = True
+        started = time.monotonic()
+        with pytest.raises(BrowserStateLostError):
+            await session.snapshot()
+        assert time.monotonic() - started < 2.0
+        assert dead.killed and session.state == "new"
+        assert dead.probes == 1
+        again = await session.snapshot()
+        assert again.text.count("Browser state was lost") == 1
+        assert driver.browser is not dead and again.text.startswith("[t2]")
+
+    async def test_a_timeout_on_a_browser_that_answers_keeps_the_browser(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        browser.page.hang.add("snapshot")
+        with pytest.raises(BrowserTimeoutError):
+            await session.snapshot()
+        assert browser.probes == 1 and not browser.killed
+        assert session.state == "ready" and len(driver.browsers) == 1
+        browser.page.hang.clear()
+        assert "state was lost" not in (await session.snapshot()).text
+
     async def test_hung_action_fails_that_action_only(self, made):
         session, driver = made
         await session.snapshot()
@@ -1386,3 +1414,73 @@ class TestEdgePaths:
         with pytest.raises(ActionSpecError, match="non-empty"):
             await session.navigate("  ")
         assert driver.plans == []
+
+
+class TestDropConnections:
+    async def test_open_tunnels_are_cut_and_the_browser_stays(self, tmp_path):
+        async def echo(reader, writer):
+            while data := await reader.read(1024):
+                writer.write(data)
+                await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(echo, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        session, driver = make(tmp_path, allow_loopback=True)
+        await session.drop_connections()
+        assert driver.plans == [], "dropping launches nothing"
+        await session.snapshot()
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", session._stack.proxy.port
+        )
+        writer.write(f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\n\r\n".encode())
+        await writer.drain()
+        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+        assert head.startswith(b"HTTP/1.1 200")
+        await session.drop_connections()
+        assert await asyncio.wait_for(reader.read(), 5) == b""
+        assert session.state == "ready"
+        writer.close()
+        server.close()
+        await session.close()
+        assert driver.alive() == []
+
+
+class TestCloseBound:
+    async def test_close_returns_within_its_bound_when_every_stage_hangs(
+        self, tmp_path
+    ):
+        release = asyncio.Event()
+
+        async def stubborn():
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        driver = ScriptedDriver(shop)
+        session = BrowserSession(
+            BrowserOptions.from_mapping({"action_timeout_s": 0.3}),
+            downloads_dir=tmp_path / "downloads",
+            driver=driver,
+            close_stage_timeout=0.1,
+            close_timeout=1.0,
+            settle_grace=0.001,
+        )
+        await session.snapshot()
+        browser = driver.browser
+        browser.close_context = browser.close_browser = browser.stop = stubborn
+        started = time.perf_counter()
+        try:
+            await asyncio.wait_for(session.close(), 5)
+            elapsed = time.perf_counter() - started
+            assert elapsed < 2.0, elapsed
+            assert session.state == "closed"
+            assert browser.killed and driver.alive() == []
+            again = time.perf_counter()
+            await asyncio.wait_for(session.close(), 5)
+            assert time.perf_counter() - again < 0.5
+        finally:
+            release.set()
+            await asyncio.sleep(0.05)
