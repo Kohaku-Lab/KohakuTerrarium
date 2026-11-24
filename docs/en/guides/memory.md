@@ -69,6 +69,27 @@ kt embedding swe.kohakutr \
 
 Incremental: running `kt embedding` again only indexes new events.
 
+## Existing-session anchor upgrade (explicit, offline)
+
+For sessions with an older Memory index, keyword/semantic search still works,
+but those old rows do not have verified physical-source anchors. Stop all
+agents, Studio sessions and other writers using the file, then make a
+consistent backup of the session and its artifacts before running:
+
+`bash
+kt migrate-memory-anchors /path/to/session.kohakutr --agent alice
+`
+
+Repeat with each Agent namespace whose existing index needs anchors. This
+updates only existing FTS/vector **metadata**; it neither re-embeds nor changes
+the Session file format or selects a different history branch. An incomplete
+or stale index is rejected. If the command fails, stop conflicting writers,
+restore/rebuild a valid selected-lineage index if needed, and retry.
+
+Migration is deliberately not triggered by a search. Before migration, a
+search hit can report `ANCHOR_MIGRATION_REQUIRED` instead of an Anchor.
+Normal new index rows receive source references at indexing time.
+
 ## Search from the CLI
 
 ```bash

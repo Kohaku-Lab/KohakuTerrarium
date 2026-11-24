@@ -69,6 +69,27 @@ kt embedding swe.kohakutr \
 
 增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
 
+## 已有 Session 的 Anchor 显式迁移
+
+已有旧版 Memory Index 的 Session 仍可进行关键字和语义检索，但旧索引
+记录没有经过物理来源认证的 Anchor。迁移前必须停止该 Session 的
+所有 Agent、Studio 和其他写入进程，并对 Session 数据库及其关联产物
+制作一致性备份：
+
+`bash
+kt migrate-memory-anchors /path/to/session.kohakutr --agent alice
+`
+
+每个需要 Anchor 的 Agent namespace 分别执行一次。命令只补齐现有
+FTS／Vector **元数据**，不重新计算 Embedding，不改变 Session 格式，
+也不修改历史分支选择。如果旧索引尚未更新到当前来源或存在构建中状态，
+迁移会拒绝执行；应先排除并发写入，在必要时恢复／重建有效的选中分支
+索引，然后重试。
+
+普通 Search 不会自动执行迁移；旧记录在迁移前可能返回
+`ANCHOR_MIGRATION_REQUIRED` 而不是 Anchor。新索引记录会在
+正常写入时携带来源信息。
+
 ## 从 CLI 搜索
 
 ```bash

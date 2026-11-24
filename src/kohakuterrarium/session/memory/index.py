@@ -39,6 +39,9 @@ class SearchResult:
     tool_name: str = ""
     channel: str = ""
     block_id: str = ""
+    anchor: str = ""
+    source_ref: str = ""
+    source_fingerprint: str = ""
 
     @property
     def age_str(self) -> str:
@@ -365,6 +368,8 @@ class SessionMemory:
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
                     block_id=meta.get("block_id", ""),
+                    source_ref=meta.get("source_ref", ""),
+                    source_fingerprint=meta.get("source_fingerprint", ""),
                 )
             )
             if len(out) >= k:
@@ -402,6 +407,8 @@ class SessionMemory:
                     tool_name=meta.get("tool_name", ""),
                     channel=meta.get("channel", ""),
                     block_id=meta.get("block_id", ""),
+                    source_ref=meta.get("source_ref", ""),
+                    source_fingerprint=meta.get("source_fingerprint", ""),
                 )
             )
             if len(out) >= k:
@@ -467,6 +474,9 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
         "channel": block.channel,
         "block_id": block.block_id,
     }
+    if block.source_ref and block.source_fingerprint:
+        meta["source_ref"] = block.source_ref
+        meta["source_fingerprint"] = block.source_fingerprint
     if include_content:
         meta["content"] = block.content
     return meta

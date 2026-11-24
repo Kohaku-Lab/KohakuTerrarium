@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 from kohakuterrarium.session.memory.embedding import BaseEmbedder, NullEmbedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.navigation import MemoryNavigator
+from kohakuterrarium.session.memory.source_events import sourced_events
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -59,6 +61,7 @@ class LiveSessionMemory:
     def __init__(self, store):
         self._store = store
         self._memory = SessionMemory(store.path)
+        self._navigator = MemoryNavigator(store, self._memory)
         self._worker = _EmbeddingWorker()
         self._semantic_lock = asyncio.Lock()
         self._embedder: BaseEmbedder | None = None
@@ -69,14 +72,30 @@ class LiveSessionMemory:
         if not self._closed:
             self._closed = True
             self._worker.close()
+            self._navigator.close()
             self._memory.close()
+
+    async def attach_anchors(self, hits: list, query: str) -> list:
+        return await self._store.run(self._navigator.register_hits, hits, query)
+
+    async def read_context(
+        self, anchor: str, *, before: int = 3, after: int = 3, offset: int | None = None
+    ):
+        return await self._store.run(
+            self._navigator.expand, anchor, before, after, offset
+        )
 
     def _index_keywords(self, names: list[str]) -> None:
         for name in names:
-            self._memory._index_keywords(name, self._store.get_events(name))
+            events = sourced_events(self._store, name)
+            self._memory._index_keywords(name, events)
+            self._navigator.certify_source(
+                name,
+                bool(events) and all(hasattr(event, "source_ref") for event in events),
+            )
 
     def _vector_batch(self, name: str):
-        events = self._store.get_events(name)
+        events = sourced_events(self._store, name)
         start, blocks = self._memory._vector_batch(name, events)
         return start, len(events), blocks
 

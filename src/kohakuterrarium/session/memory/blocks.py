@@ -108,6 +108,8 @@ class Block:
     tool_args: dict[str, Any] = field(default_factory=dict)
     channel: str = ""
     block_id: str = ""
+    source_ref: str = ""
+    source_fingerprint: str = ""
 
 
 def _content_to_text(content: Any) -> str:
@@ -271,8 +273,12 @@ def _extract_blocks(
         elif etype == "processing_end":
             in_round = False
 
+        source_ref = getattr(evt, "source_ref", "")
+        source_fingerprint = _anchor(evt) if source_ref else ""
         for part, block in enumerate(blocks[first_block:]):
             block.block_id = f"{agent}:e{event_offset + i}:p{part}"
+            block.source_ref = source_ref
+            block.source_fingerprint = source_fingerprint
 
     state.update(round=round_num, block=block_num, in_round=in_round)
     return blocks

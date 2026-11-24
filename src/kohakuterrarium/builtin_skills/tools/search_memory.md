@@ -13,7 +13,10 @@ Searches the recorded event log of the current session.
 
 | Arg | Type | Req | Description |
 | --- | --- | --- | --- |
-| query | string | yes | Search text |
+| query | string | conditional | Search text; supply exactly one of query or anchor |
+| anchor | string | conditional | Opaque cursor from a preceding search/context window |
+| before / after | integer | no | At most 10 neighboring events on either side (default 3 each) |
+| offset | integer | no | Continue reading a long anchored event from a character offset |
 | k | integer | no | Maximum results (default 5) |
 | mode | string | no | `auto` (default), `fts`, `semantic`, or `hybrid` |
 | agent | string | no | Filter results by agent name |
@@ -25,6 +28,13 @@ Searches the recorded event log of the current session.
   the result reports the fallback. Explicit `semantic` returns an error.
 - Model work does not block session history, persistence, or shutdown.
 - Only the current session is searched, and only what was recorded before now.
+
+Search results with verified sources include an opaque Anchor. Call
+`search_memory(anchor=..., before=N, after=N)` to read bounded surrounding
+events and obtain more Anchors for continued navigation. Context is limited
+to the selected indexed branch; old unannotated indexes require an explicit,
+offline provenance migration by the session operator. An invalid, expired or
+unverifiable Anchor returns an explicit error, not unrelated history.
 
 ## Limits
 

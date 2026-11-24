@@ -330,8 +330,15 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "Search query (keywords or natural language)",
+                "description": "Search query; provide this or anchor, not both",
             },
+            "anchor": {
+                "type": "string",
+                "description": "Opaque handle returned by search_memory",
+            },
+            "before": {"type": "integer", "minimum": 0, "maximum": 10},
+            "after": {"type": "integer", "minimum": 0, "maximum": 10},
+            "offset": {"type": "integer", "minimum": 0},
             "mode": {
                 "type": "string",
                 "enum": ["fts", "semantic", "hybrid", "auto"],
@@ -342,7 +349,7 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "description": "Max results (default: 5)",
             },
         },
-        "required": ["query"],
+        "required": [],
     },
     "web_fetch": {
         "type": "object",

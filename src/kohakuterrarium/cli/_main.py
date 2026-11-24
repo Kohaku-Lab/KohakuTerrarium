@@ -35,7 +35,7 @@ from kohakuterrarium.cli.identity.mcp import list_for_agent_cli as mcp_list_cli
 from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
 from kohakuterrarium.cli.marketplace import marketplace_cli
 from kohakuterrarium.cli.mcp.serve import add_mcp_serve_subparser, mcp_serve_cli
-from kohakuterrarium.cli.memory import embedding_cli, search_cli
+from kohakuterrarium.cli.memory import embedding_cli, search_cli, migrate_anchors_cli
 from kohakuterrarium.cli.model import model_cli
 from kohakuterrarium.cli.packages import (
     edit_cli,
@@ -328,6 +328,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dimensions", type=int, default=None, help="Embedding dimensions (Matryoshka)"
     )
 
+    migrate_parser = subparsers.add_parser(
+        "migrate-memory-anchors",
+        help="Explicit offline source binding for existing memory indexes",
+    )
+    migrate_parser.add_argument("session", help="Session path or name/prefix")
+    migrate_parser.add_argument(
+        "--agent",
+        required=True,
+        help="Agent namespace whose existing index rows will be certified",
+    )
+
     search_parser = subparsers.add_parser("search", help="Search a session's memory")
     search_parser.add_argument("session", help="Session name/prefix or path")
     search_parser.add_argument("query", help="Search query")
@@ -561,6 +572,11 @@ def _dispatch_embedding(args: argparse.Namespace) -> int:
     return embedding_cli(args.session, args.provider, args.model, args.dimensions)
 
 
+def _dispatch_migrate_anchors(args: argparse.Namespace) -> int:
+    """Upgrade old index metadata without recomputing embeddings."""
+    return migrate_anchors_cli(args.session, args.agent)
+
+
 def _dispatch_search(args: argparse.Namespace) -> int:
     """Handle the 'search' command."""
     return search_cli(args.session, args.query, args.mode, args.agent, args.k)
@@ -630,6 +646,7 @@ COMMANDS: dict[str, callable] = {
     "update": lambda args: update_cli(args.target, args.all),
     "edit": lambda args: edit_cli(args.target),
     "embedding": _dispatch_embedding,
+    "migrate-memory-anchors": _dispatch_migrate_anchors,
     "search": _dispatch_search,
     "web": _dispatch_web,
     "app": _dispatch_app,

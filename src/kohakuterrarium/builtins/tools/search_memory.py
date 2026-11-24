@@ -14,6 +14,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.session.memory.embedding import create_embedder
+from kohakuterrarium.session.memory.navigation import MemoryNavigationError
 from kohakuterrarium.session.memory.async_search import (
     LiveSessionMemory,
     live_memory_for_store,
@@ -37,8 +38,10 @@ class SearchMemoryTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Search this session's earlier events by keyword or meaning. Use it to "
-            "recall details dropped from context. Not for searching files - use grep."
+            "Search this session's earlier events by keyword or meaning. "
+            "Search hits can provide anchors; pass an anchor with before/after "
+            "to inspect adjacent recorded events. "
+            "Not for searching files - use grep."
         )
 
     @property
@@ -47,9 +50,10 @@ class SearchMemoryTool(BaseTool):
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
         query = args.get("query", "")
-        if not query:
+        anchor = args.get("anchor", "")
+        if bool(query) == bool(anchor):
             return ToolResult(
-                error="No query provided. Usage: search_memory(query='...')"
+                error="Provide exactly one of query or anchor in search_memory."
             )
 
         mode = args.get("mode", "auto")
@@ -66,6 +70,20 @@ class SearchMemoryTool(BaseTool):
                 error="Session memory not available. "
                 "No session store attached or embedding not configured."
             )
+
+        if anchor:
+            if not isinstance(memory, LiveSessionMemory):
+                return ToolResult(error="Anchors require an attached live session.")
+            try:
+                window = await memory.read_context(
+                    anchor,
+                    before=args.get("before", 3),
+                    after=args.get("after", 3),
+                    offset=args.get("offset"),
+                )
+                return ToolResult(output=self._format_window(window), exit_code=0)
+            except MemoryNavigationError as exc:
+                return ToolResult(error=f"{exc.code}: {exc}")
 
         warning = None
         try:
@@ -100,6 +118,15 @@ class SearchMemoryTool(BaseTool):
                 exit_code=0,
             )
 
+        if isinstance(memory, LiveSessionMemory):
+            try:
+                results = await memory.attach_anchors(results, query)
+            except MemoryNavigationError as exc:
+                # An incompatible historical index must not break legacy search.
+                warning = (warning + "\n" if warning else "") + (
+                    f"Anchors unavailable ({exc.code}): {exc}"
+                )
+
         lines = [f"Found {len(results)} result(s) for: {query}\n"]
         if warning:
             lines.insert(0, warning + "\n")
@@ -113,6 +140,8 @@ class SearchMemoryTool(BaseTool):
             if age:
                 header += f" {age}"
             lines.append(header)
+            if getattr(r, "anchor", ""):
+                lines.append(f"anchor: {r.anchor}")
             # Bound each result so one event cannot consume the tool-result context.
             content = r.content
             if len(content) > SEARCH_RESULT_DISPLAY_CHARS:
@@ -124,6 +153,26 @@ class SearchMemoryTool(BaseTool):
             lines.append("")
 
         return ToolResult(output="\n".join(lines), exit_code=0)
+
+    @staticmethod
+    def _format_window(window) -> str:
+        lines = [f"Memory context ({len(window.events)} events, chronological):"]
+        for event in window.events:
+            lines.append(f"[{event.role}] {event.kind}")
+            lines.append(f"anchor: {event.anchor}")
+            lines.append(event.content)
+            if event.truncated:
+                lines.append(
+                    f"content_slice={event.start}:{event.end}/{event.total}"
+                    f" next_offset={event.end if event.end < event.total else 'none'}"
+                )
+            lines.append("")
+        before = (
+            "unknown" if window.has_before is None else str(window.has_before).lower()
+        )
+        after = "unknown" if window.has_after is None else str(window.has_after).lower()
+        lines.append(f"has_before={before} has_after={after}")
+        return "\n".join(lines)
 
     async def _get_memory(self, context: ToolContext) -> Any:
         """Return the store-owned index without initializing an embedding model."""

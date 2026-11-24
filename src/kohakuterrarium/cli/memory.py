@@ -9,6 +9,8 @@ module is strictly the rich-CLI presentation layer.
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.memory.embedding import create_embedder
 from kohakuterrarium.session.memory.index import SessionMemory
+from kohakuterrarium.session.memory.migration import backfill_legacy_sources
+from kohakuterrarium.session.occupancy.registry import live_store_for
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.memory.build import build_index
 from kohakuterrarium.utils.logging import get_logger
@@ -63,6 +65,49 @@ def embedding_cli(
         f"({stats.get('dimensions', 0)}d)"
     )
     return 0
+
+
+def migrate_anchors_cli(session_query: str, agent: str) -> int:
+    """Explicit offline provenance migration for one Agent's old index rows.
+
+    Does not build embeddings, touch the raw event log, or publish a Session-
+    wide migration marker. The operator must close all other session writers.
+    """
+    path = _resolve_session(session_query)
+    if path is None:
+        print(f"Session not found: {session_query}")
+        return 1
+    if not agent or agent != agent.strip():
+        print("An exact non-empty Agent namespace is required.")
+        return 1
+
+    # A same-process live writer may not have opted into FileLock. Reject it
+    # before constructing a second store with its own independent handles.
+    if live_store_for(path) is not None:
+        print("Session is already open here; stop live agents before migrating.")
+        return 1
+
+    store = memory = None
+    try:
+        store = SessionStore(path, writer_lock=True)
+        memory = SessionMemory(str(path))  # saved vector dimensions, no encoder
+        report = backfill_legacy_sources(store, memory, agent)
+        print(
+            f"Anchor metadata for {agent}: "
+            f"FTS patched={report.fts_patched}, present={report.fts_present}; "
+            f"Vector patched={report.vector_patched}, present={report.vector_present}"
+        )
+        print("Done. No Embedding computation or global migration marker.")
+        return 0
+    except Exception as exc:
+        print(f"Migration refused or incomplete: {exc}")
+        print("Stop all Session writers, verify index freshness, then retry.")
+        return 1
+    finally:
+        if memory is not None:
+            memory.close()
+        if store is not None:
+            store.close(update_status=False)
 
 
 def search_cli(
