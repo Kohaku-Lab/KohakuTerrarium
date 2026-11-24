@@ -35,6 +35,7 @@ from kohakuterrarium.browser.proxy import FilteringProxy
 from kohakuterrarium.browser.results import WRAPPER_TAG
 from kohakuterrarium.browser.session import BrowserSession
 from kohakuterrarium.browser.session import lifecycle as lifecycle_module
+from kohakuterrarium.browser.session.types import WINDOW_WAIT_S
 from tests.helpers.browser_driver import (
     ScriptedBrowser,
     ScriptedDialog,
@@ -590,6 +591,30 @@ class TestObservation:
         assert lines[-1] == "Dropped 1 visually hidden text block."
         assert text.index(f"</{WRAPPER_TAG}>") < text.index("Dropped 1")
 
+    async def test_snapshot_with_boxes_keeps_boxes_on_lines_without_refs(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        page.boxes_text = (
+            '- heading "Shop" [level=1] [ref=e1] [box=8,8,300,37]\n'
+            '- button "Buy" [ref=e2] [box=8,60,40,21]\n'
+            '- textbox "Name" [ref=e3] [box=8,90,150,21]\n'
+            "- list [ref=e5] [box=8,120,400,42]:\n"
+            "  - listitem [ref=e6] [box=48,120,360,21]: Northern Line\n"
+            "  - generic [ref=e7] [cursor=pointer] [box=48,141,360,21]: Grab me"
+        )
+        result = await session.snapshot(boxes=True)
+        lines = result.text.splitlines()
+        assert '- button "Buy" [ref=e2] [box=8,60,40,21]' in lines
+        assert "  - listitem [box=48,120,360,21]: Northern Line" in lines
+        assert "  - generic [ref=e7] [box=48,141,360,21]: Grab me" in lines
+        assert '- heading "Shop" [level=1] [box=8,8,300,37]' in lines
+        assert ("snapshot", {"timeout": 0.3, "boxes": True}) in page.calls
+        plain = await session.snapshot()
+        assert "[box=" not in plain.text
+        acted = await session.act([{"kind": "click", "ref": "e2"}])
+        assert "[box=" not in acted.text
+
     async def test_snapshot_is_capped_with_a_narrowing_hint(self, tmp_path):
         def setup(browser):
             shop(browser)
@@ -821,6 +846,67 @@ class TestAct:
         clicked = await session.act([{"kind": "click", "ref": "e1"}])
         assert clicked.meta["ok"] and clicked.meta["tab"] == "t2"
         assert (await session.snapshot()).text.startswith("[t2] http://help.test/faq")
+
+    async def test_a_late_tab_is_waited_for_when_a_window_was_announced(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+
+        async def late_popup():
+            await asyncio.sleep(0.3)
+            browser.open_popup(
+                "http://help.test/", '- button "Close help" [ref=e1]', "Help"
+            )
+
+        def click(**_):
+            browser.sink.window_opening(browser.page)
+            asyncio.get_running_loop().create_task(late_popup())
+
+        browser.page.handlers["click"] = click
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert "Tab opened: t2 http://help.test/" in result.text
+        assert "Tab t2 now (interactive elements):" in result.text
+        assert session._tabs.active.id == "t2"
+
+    async def test_a_tab_that_registers_before_its_signal_is_not_awaited(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+
+        def click(**_):
+            browser.open_popup("http://help.test/", "", "Help")
+            browser.sink.window_opening(browser.page)
+
+        browser.page.handlers["click"] = click
+        started = time.perf_counter()
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert time.perf_counter() - started < 1.0
+        assert "Tab opened: t2" in result.text
+        assert "did not open" not in result.text
+
+    async def test_no_window_signal_means_no_wait(self, made):
+        session, driver = made
+        await session.snapshot()
+        started = time.perf_counter()
+        await session.act([{"kind": "click", "ref": "e2"}])
+        assert time.perf_counter() - started < 0.5
+
+    async def test_an_announced_window_that_never_comes_is_bounded(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        browser.page.handlers["click"] = lambda **_: browser.sink.window_opening(
+            browser.page
+        )
+        started = time.perf_counter()
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        elapsed = time.perf_counter() - started
+        assert WINDOW_WAIT_S - 0.1 < elapsed < WINDOW_WAIT_S + 1.0
+        assert "A new tab was requested but did not open" in result.text
+        browser.page.handlers.pop("click")
+        started = time.perf_counter()
+        await session.act([{"kind": "click", "ref": "e2"}])
+        assert time.perf_counter() - started < 0.5
 
     async def test_unreadable_new_tab_is_a_note_not_a_failure(self, made):
         session, driver = made

@@ -87,7 +87,6 @@ class TestValidation:
             ),
             ({"kind": "click"}, r"field 'ref' is required \(or 'x' and 'y'"),
             ({"kind": "click", "ref": "button"}, "must be a ref from a snapshot"),
-            ({"kind": "click", "ref": "e1", "x": 1, "y": 2}, "not both"),
             ({"kind": "click", "x": 1}, "field 'y' is required"),
             ({"kind": "click", "x": -5, "y": 1}, "between 0 and 100000"),
             ({"kind": "click", "x": "a", "y": 1}, "must be a number"),
@@ -95,24 +94,24 @@ class TestValidation:
             ({"kind": "click", "ref": "e1", "button": "side"}, "one of left"),
             ({"kind": "click", "ref": "e1", "double": "yes"}, "true or false"),
             ({"kind": "click", "ref": "e1", "modifiers": ["Hyper"]}, "modifiers"),
-            ({"kind": "type", "ref": "e1"}, "exactly one of 'text' or 'secret'"),
-            (
-                {"kind": "type", "ref": "e1", "text": "a", "secret": "s"},
-                "exactly one",
-            ),
+            ({"kind": "type", "ref": "e1", "text": 5}, "must be a string"),
             ({"kind": "type", "ref": "e1", "text": 5}, "must be a string"),
             ({"kind": "type", "ref": "e1", "text": "x" * 10001}, "longer than"),
             ({"kind": "select", "ref": "e1"}, "non-empty list of option labels"),
             ({"kind": "select", "ref": "e1", "values": [1]}, "option labels"),
             ({"kind": "press"}, "field 'key' is required"),
-            ({"kind": "press", "key": ""}, "must not be empty"),
-            ({"kind": "scroll", "ref": "e1", "dy": 3}, "not both"),
-            ({"kind": "drag", "ref": "e1"}, "field 'to' is required"),
+            ({"kind": "press", "key": ""}, "field 'key' is required"),
+            ({"kind": "click", "ref": "e1", "key": "a"}, "does not apply to click"),
+            ({"kind": "drag", "ref": "e1"}, r"field 'to' is required \(or 'to_x'"),
+            ({"kind": "drag", "to": "e1"}, r"field 'ref' is required \(or 'x' and 'y'"),
+            ({"kind": "drag", "ref": "e1", "to_x": 1}, "field 'to_y' is required"),
+            ({"kind": "hover"}, r"field 'ref' is required \(or 'x' and 'y'"),
+            ({"kind": "hover", "x": 1}, "field 'y' is required"),
             ({"kind": "upload", "ref": "e1"}, "indexes into the call's 'files'"),
             ({"kind": "upload", "ref": "e1", "files": ["a"]}, "integer indexes"),
             ({"kind": "upload", "ref": "e1", "files": [2]}, "out of range"),
-            ({"kind": "wait"}, "exactly one of 'text', 'text_gone' or 'seconds'"),
-            ({"kind": "wait", "seconds": 1, "text": "a"}, "exactly one"),
+            ({"kind": "wait"}, "'text', 'text_gone' or 'seconds' above 0; set one"),
+            ({"kind": "wait", "seconds": -1}, "between 0 and 10"),
             ({"kind": "wait", "seconds": WAIT_MAX_S + 1}, "between 0 and 10"),
             ({"kind": "dialog", "accept": "maybe"}, "true or false"),
         ],
@@ -174,6 +173,9 @@ class TestValidation:
             ({"kind": "scroll", "dy": -100}, "scroll by (0, -100)"),
             ({"kind": "scroll", "ref": "e3"}, "scroll e3"),
             ({"kind": "hover", "ref": "e3"}, "hover e3"),
+            ({"kind": "hover", "x": 5, "y": 6}, "hover at (5, 6)"),
+            ({"kind": "drag", "x": 1, "y": 2, "to": "e4"}, "drag (1, 2) to e4"),
+            ({"kind": "drag", "ref": "e1", "to_x": 3, "to_y": 4}, "drag e1 to (3, 4)"),
         ],
     )
     def test_labels_never_show_typed_text(self, item, label):
@@ -345,6 +347,24 @@ class TestRunBatch:
         typed = [c for c in ctx.page.calls if c[0] == "type_text"]
         assert typed == [("type_text", ("e1", "abcd", 1.2), {})]
         assert ctx.timeouts[-1] == pytest.approx(1.2)
+
+    async def test_hover_and_drag_by_coordinates(self):
+        report, ctx = await run(
+            [
+                {"kind": "hover", "x": 10, "y": 20},
+                {"kind": "drag", "x": 1, "y": 2, "to_x": 3, "to_y": 4},
+                {"kind": "drag", "ref": "e1", "to_x": 5, "to_y": 6},
+                {"kind": "drag", "ref": "e1", "to": "e2"},
+            ]
+        )
+        assert report.ok
+        assert [c for c in ctx.page.calls] == [
+            ("hover_at", (10.0, 20.0, 1.0), {}),
+            ("drag_between", ((1.0, 2.0), (3.0, 4.0), 1.0), {}),
+            ("drag_between", ("e1", (5.0, 6.0), 1.0), {}),
+            ("drag", ("e1", "e2", 1.0), {}),
+        ]
+        assert ("check", "e1") in ctx.events and ("check", "e2") in ctx.events
 
     async def test_secret_is_resolved_at_execution(self):
         report, ctx = await run([{"kind": "type", "ref": "e1", "secret": "pw"}])

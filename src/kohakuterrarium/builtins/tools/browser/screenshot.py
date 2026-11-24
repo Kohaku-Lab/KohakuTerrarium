@@ -8,7 +8,6 @@ from typing import Any
 from kohakuterrarium.browser.session.types import FULL_PAGE_MAX_HEIGHT
 from kohakuterrarium.builtins.tools.browser.common import (
     TAB_ARG,
-    ArgumentError,
     BrowserTool,
     bool_arg,
     guarded_path,
@@ -38,6 +37,7 @@ class BrowserScreenshotTool(BrowserTool):
 
     path_arguments = {PATH_ARG: "write"}
     arguments = ("ref", "full_page", PATH_ARG, TAB_ARG)
+    neutral = {"ref": "", "full_page": False, PATH_ARG: "", TAB_ARG: ""}
     media_policy = MEDIA_POLICY
     failure = "no screenshot was taken; the result below says why"
 
@@ -55,9 +55,7 @@ class BrowserScreenshotTool(BrowserTool):
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         ref = text_arg(args, "ref")
-        full_page = bool_arg(args, "full_page")
-        if ref is not None and full_page:
-            raise ArgumentError("give either ref or full_page, not both")
+        full_page = bool_arg(args, "full_page") and ref is None
         raw = text_arg(args, PATH_ARG)
         path = guarded_path(raw, context, PATH_ARG) if raw else None
         return {

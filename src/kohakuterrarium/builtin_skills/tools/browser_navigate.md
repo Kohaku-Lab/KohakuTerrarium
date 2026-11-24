@@ -14,9 +14,9 @@ interactive elements with their refs.
 
 | Arg | Type | Req | Description |
 | --- | --- | --- | --- |
-| url | string | one of | `http` or `https` URL to open |
-| action | string | one of | `back`, `forward` or `reload` instead of a url |
-| tab | string | no | Tab id such as `t2`; default the active tab |
+| url | string | for goto | `http` or `https` URL; ignored by other actions |
+| action | string | no | `goto` (default), `back`, `forward` or `reload` |
+| tab | string | no | Tab id such as `t2`; `""` for the active tab |
 
 ## Behavior
 

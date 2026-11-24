@@ -40,6 +40,7 @@ from kohakuterrarium.browser.session.types import (
     NEW,
     PROBE_TIMEOUT_S,
     READY,
+    WINDOW_WAIT_S,
     Op,
     Stack,
 )
@@ -95,6 +96,9 @@ class SessionLifecycleMixin:
         self._expect_page = 0
         self._max_tabs = MAX_TABS
         self._refused_tabs = 0
+        self._windows_due = 0
+        self._windows_early = 0
+        self._window_arrived = asyncio.Event()
         self._refused_pages: set[PageDriver] = set()
         self._nav_urls: dict[str, list[str]] = {}
         self._tabs = TabRegistry()
@@ -305,6 +309,8 @@ class SessionLifecycleMixin:
         self._blocked.clear()
         self._refused_pages.clear()
         self._refused_tabs = 0
+        self._windows_due = 0
+        self._windows_early = 0
 
     def _mark_lost(self, reason: str | None) -> None:
         """Drop the current browser (kept for teardown) and every book about it."""
@@ -396,6 +402,11 @@ class SessionLifecycleMixin:
         if self._tabs.find(page) is not None or page in self._refused_pages:
             return
         by_page = self._expect_page == 0
+        if by_page and self._windows_due:
+            self._windows_due -= 1
+            self._window_arrived.set()
+        elif by_page:
+            self._windows_early += 1
         if by_page and len(self._tabs) >= self._max_tabs:
             self._refused_tabs += 1
             self._refused_pages.add(page)
@@ -432,6 +443,37 @@ class SessionLifecycleMixin:
             return
         tab = self._tabs.find(page) or self._tabs.add(page, opened_by_page=True)
         self._dialogs.opened(tab.id, dialog)
+
+    def _on_window_opening(self, page: PageDriver) -> None:
+        """A known tab asked for a new window; ``page_opened`` for it usually comes later.
+
+        A page that registered first, with no window due, is matched here instead.
+        """
+        if self._tabs.find(page) is None:
+            return
+        if self._windows_early:
+            self._windows_early -= 1
+        else:
+            self._windows_due += 1
+
+    async def _await_windows(self, op: Op) -> None:
+        """Wait, up to ``WINDOW_WAIT_S``, for announced windows to register as tabs."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + WINDOW_WAIT_S
+        while self._windows_due and loop.time() < deadline:
+            self._window_arrived.clear()
+            try:
+                await asyncio.wait_for(
+                    self._window_arrived.wait(), deadline - loop.time()
+                )
+            except asyncio.TimeoutError:
+                break
+        if self._windows_due:
+            self._windows_due = 0
+            op.notes.append(
+                f"A new tab was requested but did not open within {WINDOW_WAIT_S:g} s; "
+                "list tabs to check."
+            )
 
     def _on_navigation(self, page: PageDriver, url: str | None) -> None:
         tab = self._tabs.find(page)

@@ -15,8 +15,8 @@ their ids, the active one marked `*`.
 | Arg | Type | Req | Description |
 | --- | --- | --- | --- |
 | action | string | no | `list` (default), `new`, `select`, `close` or `close_browser` |
-| tab | string | no | Tab id for `select` and `close` |
-| url | string | no | URL to load in a `new` tab |
+| tab | string | no | Tab id for `select` and `close`; otherwise `""` |
+| url | string | no | URL to load in a `new` tab; otherwise `""` |
 
 ## Behavior
 

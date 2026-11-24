@@ -41,14 +41,42 @@ FIELDS: dict[str, frozenset[str]] = {
     "select": frozenset({"ref", "values"}),
     "check": frozenset({"ref", "checked"}),
     "press": frozenset({"key", "ref"}),
-    "hover": frozenset({"ref"}),
+    "hover": frozenset({"ref", "x", "y"}),
     "scroll": frozenset({"ref", "dx", "dy"}),
-    "drag": frozenset({"ref", "to"}),
+    "drag": frozenset({"ref", "x", "y", "to", "to_x", "to_y"}),
     "upload": frozenset({"ref", "files"}),
     "wait": frozenset({"text", "text_gone", "seconds"}),
     "dialog": frozenset({"accept", "text"}),
 }
 KINDS = tuple(FIELDS)
+ACTION_NEUTRALS: dict[str, Any] = {
+    "ref": "",
+    "x": 0,
+    "y": 0,
+    "button": "left",
+    "double": False,
+    "modifiers": [],
+    "text": "",
+    "secret": "",
+    "submit": False,
+    "slowly": False,
+    "values": [],
+    "checked": True,
+    "key": "",
+    "dx": 0,
+    "dy": 0,
+    "to": "",
+    "to_x": 0,
+    "to_y": 0,
+    "files": [],
+    "seconds": 0,
+    "text_gone": "",
+    "accept": True,
+}
+ALL_FIELDS = frozenset().union(*FIELDS.values())
+_PAIRS = (("x", "y"), ("to_x", "to_y"), ("dx", "dy"))
+_OWN_KIND = {"checked": "check", "accept": "dialog"}
+_FIRST_OF = {"wait": ("text", "text_gone", "seconds")}
 DONE, FAILED, PENDING, SKIPPED = "done", "failed", "dialog pending", "not executed"
 
 _FENCE = re.compile(r"```[A-Za-z]*\s*(.*?)```", re.DOTALL)
@@ -76,6 +104,8 @@ class Action:
     dx: float = 0.0
     dy: float = 0.0
     to: str | None = None
+    to_x: float | None = None
+    to_y: float | None = None
     files: tuple[int, ...] = ()
     text_gone: str | None = None
     seconds: float | None = None
@@ -89,8 +119,12 @@ class Action:
                 return f"click at ({self.x:g}, {self.y:g})"
             case "press":
                 return f"press {self.key}" + (f" on {self.ref}" if self.ref else "")
+            case "hover" if self.ref is None:
+                return f"hover at ({self.x:g}, {self.y:g})"
             case "drag":
-                return f"drag {self.ref} to {self.to}"
+                start = self.ref or f"({self.x:g}, {self.y:g})"
+                end = self.to or f"({self.to_x:g}, {self.to_y:g})"
+                return f"drag {start} to {end}"
             case "wait" if self.seconds is not None:
                 return f"wait {self.seconds:g} s"
             case "wait":
@@ -169,6 +203,75 @@ class ActionContext(Protocol):
         ...
 
 
+def is_neutral(value: Any, neutral: Any) -> bool:
+    """Whether ``value`` is the "not given" value ``neutral``, also as text-format text."""
+    if value is None:
+        return True
+    if isinstance(neutral, bool):
+        if isinstance(value, str):
+            return value.strip().lower() == str(neutral).lower()
+        return value is neutral
+    if isinstance(neutral, (int, float)):
+        if isinstance(value, str):
+            try:
+                return float(value) == neutral
+            except ValueError:
+                return False
+        return not isinstance(value, bool) and value == neutral
+    if isinstance(neutral, list):
+        return value in ([], (), "", "[]")
+    return value == neutral
+
+
+def _given(item: dict[str, Any], key: str) -> bool:
+    return key in item and not is_neutral(item[key], ACTION_NEUTRALS[key])
+
+
+def _settle(index: int, kind: str, item: dict[str, Any]) -> None:
+    """Apply precedence, then drop neutral values, so a filled-in call means the minimal one.
+
+    A given ``ref`` / ``to`` wins over its coordinates, ``secret`` over
+    ``text``, ``ref`` over scroll offsets, and ``wait`` takes the first of
+    ``text``, ``text_gone``, ``seconds``. A coordinate pair is dropped only
+    when both are 0. A real value on another kind's field is an error.
+    """
+    for ref, x, y in (("ref", "x", "y"), ("to", "to_x", "to_y")):
+        if _given(item, ref):
+            item.pop(x, None)
+            item.pop(y, None)
+    if kind == "scroll" and _given(item, "ref"):
+        item.pop("dx", None)
+        item.pop("dy", None)
+    if kind == "type" and _given(item, "secret"):
+        item.pop("text", None)
+    order = _FIRST_OF.get(kind, ())
+    first = next((key for key in order if _given(item, key)), None)
+    for key in order:
+        if key != first:
+            item.pop(key, None)
+    for a, b in _PAIRS:
+        if not _given(item, a) and not _given(item, b):
+            item.pop(a, None)
+            item.pop(b, None)
+    for key in [k for k in item if k in ACTION_NEUTRALS]:
+        own = _OWN_KIND.get(key)
+        if own is not None and own != kind:
+            del item[key]
+        elif key == "text" and kind == "type":
+            continue
+        elif not any(key in pair for pair in _PAIRS) and not _given(item, key):
+            del item[key]
+    for key in sorted(str(k) for k in item):
+        if key in ALL_FIELDS and key not in FIELDS[kind]:
+            neutral = json.dumps(ACTION_NEUTRALS[key])
+            raise _fail(
+                index,
+                kind,
+                f"field {key!r} does not apply to {kind}; set it to {neutral} or "
+                "remove it",
+            )
+
+
 def _fail(index: int, kind: str | None, message: str) -> ActionSpecError:
     where = f"actions[{index}]" + (f" ({kind})" if kind else "")
     return ActionSpecError(f"{where}: {message}")
@@ -240,10 +343,11 @@ def _parse_one(
         raise _fail(index, None, f"missing 'kind'; one of {', '.join(KINDS)}")
     if kind not in FIELDS:
         raise _fail(index, None, f"unknown kind {kind!r}; one of {', '.join(KINDS)}")
-    unknown = sorted(str(k) for k in item if k not in FIELDS[kind])
+    unknown = sorted(str(k) for k in item if k not in ALL_FIELDS)
     if unknown:
         allowed = ", ".join(sorted(FIELDS[kind])) or "none"
         raise _fail(index, kind, f"unknown field {unknown[0]!r}; allowed: {allowed}")
+    _settle(index, kind, item)
     reader = _Reader(index, kind, item)
     values: dict[str, Any] = {"index": index, "kind": kind}
     match kind:
@@ -261,12 +365,12 @@ def _parse_one(
             values["key"] = reader.text("key", required=True, limit=64)
             values["ref"] = reader.ref("ref", required=False)
         case "hover":
-            values["ref"] = reader.ref("ref")
+            values.update(reader.point_or_ref("ref", "x", "y"))
         case "scroll":
             values.update(_scroll(reader))
         case "drag":
-            values["ref"] = reader.ref("ref")
-            values["to"] = reader.ref("to")
+            values.update(reader.point_or_ref("ref", "x", "y"))
+            values.update(reader.point_or_ref("to", "to_x", "to_y"))
         case "upload":
             values["ref"] = reader.ref("ref")
             values["files"] = reader.indexes("files", file_count)
@@ -284,14 +388,7 @@ def _click(reader: "_Reader") -> dict[str, Any]:
         "double": reader.boolean("double", False),
         "modifiers": reader.modifiers(),
     }
-    has_xy = "x" in reader.item or "y" in reader.item
-    if "ref" in reader.item and has_xy:
-        raise reader.fail("give either 'ref' or 'x' and 'y', not both")
-    if has_xy:
-        values["x"] = reader.number("x", 0, 100000)
-        values["y"] = reader.number("y", 0, 100000)
-    else:
-        values["ref"] = reader.ref("ref", hint="or 'x' and 'y' in CSS pixels")
+    values.update(reader.point_or_ref("ref", "x", "y"))
     return values
 
 
@@ -301,8 +398,6 @@ def _type(reader: "_Reader", secrets: Sequence[str] | None) -> dict[str, Any]:
         "submit": reader.boolean("submit", False),
         "slowly": reader.boolean("slowly", False),
     }
-    if ("text" in reader.item) == ("secret" in reader.item):
-        raise reader.fail("give exactly one of 'text' or 'secret'")
     if "secret" in reader.item:
         name = reader.text("secret", required=True, limit=128)
         if secrets is not None and name not in secrets:
@@ -310,23 +405,24 @@ def _type(reader: "_Reader", secrets: Sequence[str] | None) -> dict[str, Any]:
             raise reader.fail(f"unknown secret {name!r}; known secrets: {known}")
         values["secret"] = name
     else:
-        values["text"] = reader.text("text", required=True, empty=True)
+        values["text"] = reader.text("text", required=False, empty=True) or ""
     return values
 
 
 def _scroll(reader: "_Reader") -> dict[str, Any]:
     if "ref" in reader.item:
-        if "dx" in reader.item or "dy" in reader.item:
-            raise reader.fail("give either 'ref' or 'dx'/'dy', not both")
         return {"ref": reader.ref("ref")}
-    dy = reader.number("dy", -SCROLL_MAX_PX, SCROLL_MAX_PX, SCROLL_DEFAULT_PX)
+    default = 0.0 if "dx" in reader.item else SCROLL_DEFAULT_PX
+    dy = reader.number("dy", -SCROLL_MAX_PX, SCROLL_MAX_PX, default)
     return {"dx": reader.number("dx", -SCROLL_MAX_PX, SCROLL_MAX_PX, 0.0), "dy": dy}
 
 
 def _wait(reader: "_Reader") -> dict[str, Any]:
     given = [k for k in ("text", "text_gone", "seconds") if k in reader.item]
-    if len(given) != 1:
-        raise reader.fail("give exactly one of 'text', 'text_gone' or 'seconds'")
+    if not given:
+        raise reader.fail(
+            "wait needs 'text', 'text_gone' or 'seconds' above 0; set one of them"
+        )
     match given[0]:
         case "seconds":
             return {"seconds": reader.number("seconds", 0, WAIT_MAX_S)}
@@ -356,6 +452,14 @@ class _Reader:
                 f"field {key!r} must be a ref from a snapshot, like 'e12', got {value!r}"
             )
         return value.strip()
+
+    def point_or_ref(self, ref: str, x: str, y: str) -> dict[str, Any]:
+        """The ``ref`` field when given, else the ``x`` / ``y`` pair in CSS pixels."""
+        if ref in self.item:
+            return {ref: self.ref(ref)}
+        if x in self.item or y in self.item:
+            return {x: self.number(x, 0, 100000), y: self.number(y, 0, 100000)}
+        return {ref: self.ref(ref, hint=f"or '{x}' and '{y}' in CSS pixels")}
 
     def text(
         self,
@@ -534,6 +638,9 @@ async def execute(action: Action, ctx: ActionContext) -> str:
         case "press":
             await ctx.call(lambda: page.press(action.ref, action.key, t), t)
             return ""
+        case "hover" if action.ref is None:
+            await ctx.call(lambda: page.hover_at(action.x, action.y, t), t)
+            return ""
         case "hover":
             await ctx.call(lambda: page.hover(action.ref, t), t)
             return ""
@@ -543,8 +650,13 @@ async def execute(action: Action, ctx: ActionContext) -> str:
             else:
                 await ctx.call(lambda: page.wheel(action.dx, action.dy, t), t)
             return ""
-        case "drag":
+        case "drag" if action.ref is not None and action.to is not None:
             await ctx.call(lambda: page.drag(action.ref, action.to, t), t)
+            return ""
+        case "drag":
+            start = action.ref or (action.x, action.y)
+            end = action.to or (action.to_x, action.to_y)
+            await ctx.call(lambda: page.drag_between(start, end, t), t)
             return ""
         case "upload":
             return await _upload(action, ctx)

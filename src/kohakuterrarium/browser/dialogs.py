@@ -131,23 +131,31 @@ class DialogManager:
         return record
 
     async def collect(self, tab_id: str, timeout: float) -> BaseException | None:
-        """Wait for the call parked on ``tab_id``; return its error, if it raised one."""
+        """Wait for the call parked on ``tab_id``; return its error, if it raised one.
+
+        A dialog opening on the tab meanwhile ends the wait at once and the
+        call stays parked behind that dialog.
+        """
         call = self._parked.pop(tab_id, None)
         if call is None:
             return None
+        opened = asyncio.create_task(self.wait_opened(tab_id))
         try:
-            await asyncio.wait_for(asyncio.shield(call), timeout)
-        except asyncio.TimeoutError as exc:
-            discard(call)
-            return exc
+            done, _ = await asyncio.wait(
+                {call, opened}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+            )
         except asyncio.CancelledError:
-            if not call.cancelled():
-                call.cancel()
-                raise
+            discard(call)
+            raise
+        finally:
+            opened.cancel()
+        if call in done:
+            return None if call.cancelled() else call.exception()
+        if opened in done:
+            self._parked[tab_id] = call
             return None
-        except Exception as exc:
-            return exc
-        return None
+        discard(call)
+        return asyncio.TimeoutError()
 
     def drain_reports(self) -> list[tuple[str, str, str]]:
         """``(kind, message, outcome)`` of auto-accepted dialogs since the last call."""

@@ -3,6 +3,7 @@
 import html
 import re
 import secrets
+from bisect import bisect_left
 from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -150,9 +151,10 @@ def _units(nodes: list[Node]) -> list[_Unit]:
 class SnapshotDiff:
     """The post-action snapshot delta as text, with its counts.
 
-    ``removed`` counts lines; ``added`` and ``changed`` count elements.
-    ``text`` is empty when nothing changed. ``fingerprints`` maps each ref
-    shown in ``text`` to its ``(role, name)``, ready for ``RefBook.record``.
+    ``removed`` counts lines; ``added`` and ``changed`` count elements, and
+    ``moved`` the changed ones that moved among their siblings or to another
+    parent. ``text`` is empty when nothing changed. ``fingerprints`` maps each
+    ref shown in ``text`` to its ``(role, name)``, ready for ``RefBook.record``.
     """
 
     text: str
@@ -161,6 +163,52 @@ class SnapshotDiff:
     removed: int
     truncated: bool
     fingerprints: dict[str, tuple[str, str]]
+    moved: int = 0
+
+
+def _in_order(values: list[int]) -> set[int]:
+    """Positions of one longest increasing subsequence of ``values``, in O(n log n)."""
+    tails: list[int] = []
+    tail_at: list[int] = []
+    before = [-1] * len(values)
+    for i, value in enumerate(values):
+        k = bisect_left(tails, value)
+        if k == len(tails):
+            tails.append(value)
+            tail_at.append(i)
+        else:
+            tails[k] = value
+            tail_at[k] = i
+        before[i] = tail_at[k - 1] if k else -1
+    kept: set[int] = set()
+    i = tail_at[-1] if tail_at else -1
+    while i >= 0:
+        kept.add(i)
+        i = before[i]
+    return kept
+
+
+def _moves(old: list[_Unit], new: list[_Unit]) -> set[int]:
+    """New units that kept their key but changed parent or order among their siblings.
+
+    Within each sibling group, the units outside one longest run that kept
+    its relative order count as moved, so a single move marks one unit.
+    """
+    old_at = {u.key: (i, u.group) for i, u in enumerate(old) if u.key is not None}
+    moved: set[int] = set()
+    groups: dict[tuple, list[tuple[int, int]]] = defaultdict(list)
+    for j, unit in enumerate(new):
+        seen = old_at.get(unit.key) if unit.key is not None else None
+        if seen is None:
+            continue
+        if seen[1] != unit.group:
+            moved.add(j)
+        else:
+            groups[unit.group].append((seen[0], j))
+    for pairs in groups.values():
+        kept = _in_order([i for i, _ in pairs])
+        moved.update(j for n, (_, j) in enumerate(pairs) if n not in kept)
+    return moved
 
 
 def _classify(old: list[_Unit], new: list[_Unit]) -> tuple[dict[int, str], int]:
@@ -230,6 +278,9 @@ def diff_snapshots(
     """
     old, new = _units(before), _units(after)
     marks, removed = _classify(old, new)
+    moved = _moves(old, new)
+    for j in moved:
+        marks.setdefault(j, "~")
     added = sum(1 for m in marks.values() if m == "+")
     changed = len(marks) - added
     if not marks and not removed:
@@ -252,7 +303,8 @@ def diff_snapshots(
                 entry.append("@ " + new[unit.anchor].lines[0].removesuffix(":"))
                 entry_units.append(new[unit.anchor])
         pad = "  " * max(0, unit.depth - base)
-        entry.append(f"{marks[j]} {pad}- {unit.lines[0]}")
+        tail = " (moved)" if j in moved else ""
+        entry.append(f"{marks[j]} {pad}- {unit.lines[0]}{tail}")
         entry.extend(f"  {pad}  - {line}" for line in unit.lines[1:])
         cost = sum(len(line) + 1 for line in entry)
         if len(body) + len(entry) > max_lines or used + cost > max_chars:
@@ -264,7 +316,8 @@ def diff_snapshots(
         shown += 1
     summary = (
         f"Page changes (+ added, ~ changed, @ context): {added} added, "
-        f"{changed} changed, {removed} lines removed"
+        f"{changed} changed{f' ({len(moved)} moved)' if moved else ''}, "
+        f"{removed} lines removed"
     )
     lines = [summary, *body]
     if truncated:
@@ -273,7 +326,13 @@ def diff_snapshots(
             " take a snapshot."
         )
     return SnapshotDiff(
-        "\n".join(lines), added, changed, removed, truncated, shown_refs
+        "\n".join(lines),
+        added,
+        changed,
+        removed,
+        truncated,
+        shown_refs,
+        len(moved),
     )
 
 

@@ -22,6 +22,7 @@ class BrowserTabsTool(BrowserTool):
 
     url_arguments = ("url",)
     arguments = ("action", TAB_ARG, "url")
+    neutral = {"action": "list", TAB_ARG: "", "url": ""}
 
     @property
     def tool_name(self) -> str:
@@ -38,14 +39,24 @@ class BrowserTabsTool(BrowserTool):
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         action = text_arg(args, "action") or text_arg(args, BODY_ARG) or "list"
         if action not in ACTIONS:
-            raise ArgumentError(f"action must be one of {', '.join(ACTIONS)}")
+            raise ArgumentError(
+                f"action must be one of {', '.join(ACTIONS)}; got {action!r}"
+            )
         tab, url = tab_arg(args), text_arg(args, "url")
         if action == "select" and tab is None:
-            raise ArgumentError("select needs tab, a tab id such as t2")
+            raise ArgumentError(
+                "select needs tab, a tab id such as t2; call browser_tabs with "
+                "action list to see them"
+            )
         if url is not None and action != "new":
-            raise ArgumentError("url goes with action new")
+            raise ArgumentError(
+                'url applies to action new; set url to "" or action to new'
+            )
         if tab is not None and action not in ("select", "close"):
-            raise ArgumentError("tab goes with action select or close")
+            raise ArgumentError(
+                'tab applies to action select or close; set tab to "" or action '
+                "to select or close"
+            )
         return {"action": action, "tab": tab, "url": url}
 
     async def run(self, session: Any, call: dict, context: ToolContext | None) -> Any:

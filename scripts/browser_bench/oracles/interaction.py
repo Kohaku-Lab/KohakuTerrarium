@@ -1,29 +1,10 @@
 """Oracles for dialogs, upload, drag, hover menu and the keyboard widget."""
 
-import json
 import time
 
 from ..tasks.interaction import PLAYLIST_TARGET, UPLOAD_NAME
 from .bot import Bot, OracleError, container_with, find, parse, ref
 from .runs import oracle
-
-_DROP_JS = """(list) => {
-  const order = %s;
-  for (let i = 0; i < order.length; i++) {
-    const items = [...list.children];
-    const moving = items.find(li => li.textContent.includes(order[i]));
-    const target = items[i];
-    if (moving === target) continue;
-    const data = new DataTransfer();
-    moving.dispatchEvent(new DragEvent('dragstart', {bubbles: true, dataTransfer: data}));
-    const box = target.getBoundingClientRect();
-    const at = {bubbles: true, cancelable: true, dataTransfer: data, clientX: box.left + 5, clientY: box.top + 2};
-    target.dispatchEvent(new DragEvent('dragover', at));
-    target.dispatchEvent(new DragEvent('drop', at));
-    moving.dispatchEvent(new DragEvent('dragend', {bubbles: true, dataTransfer: data}));
-  }
-  return [...list.children].map(li => li.textContent.replace(/^\\W+/, ''));
-}"""
 
 
 async def dialogs(bot: Bot) -> None:
@@ -60,37 +41,31 @@ async def file_upload(bot: Bot) -> None:
     await bot.act({"kind": "click", "ref": ref(text, "button", "Submit for review")})
 
 
+def _centre(box: str, *, top: bool = False) -> tuple[float, float]:
+    x, y, w, h = (float(v) for v in box.split(","))
+    return x + w / 2, y + (h / 4 if top else h / 2)
+
+
 async def drag_reorder(bot: Bot) -> None:
-    text = await bot.go()
-    items = [n for n in parse(text) if n.role == "listitem"]
-    if items and all(n.ref for n in items):
-        for index, title in enumerate(PLAYLIST_TARGET):
-            text = await bot.snap()
-            nodes = [n for n in parse(text) if n.role == "listitem"]
-            if title in nodes[index].label:
-                continue
-            moving = next(n for n in nodes if title in n.label)
-            await bot.act({"kind": "drag", "ref": moving.ref, "to": nodes[index].ref})
-    else:
-        bot.note(
-            "draggable list items (cursor: grab, no ARIA role) carry no ref, and drag "
-            "has no x/y form, so drag-to-reorder is impossible through act; the oracle "
-            "falls back to dispatching HTML5 drag events through evaluate"
-        )
-        order = await bot.js(
-            _DROP_JS % json.dumps(PLAYLIST_TARGET), element=ref(text, "list")
-        )
-        if order != PLAYLIST_TARGET:
-            raise OracleError(f"the list order after the drag events is {order}")
+    await bot.go()
+    for index, title in enumerate(PLAYLIST_TARGET):
+        nodes = [n for n in parse(await bot.snap(boxes=True)) if n.role == "listitem"]
+        if title in nodes[index].label:
+            continue
+        moving = next(n for n in nodes if title in n.label)
+        if "box" not in moving.attrs or "box" not in nodes[index].attrs:
+            raise OracleError("snapshot with boxes did not give list items a box")
+        x, y = _centre(moving.attrs["box"])
+        to_x, to_y = _centre(nodes[index].attrs["box"], top=True)
         result = await bot.act(
-            {"kind": "click", "ref": ref(text, "button", "Save order")}
+            {"kind": "drag", "x": x, "y": y, "to_x": to_x, "to_y": to_y}
         )
-        if "No change in the page snapshot" in result.text:
-            bot.note(
-                "act reports 'No change in the page snapshot' after list items were reordered"
-            )
-        return
+        if "(moved)" not in result.text:
+            bot.note("act did not mark reordered list items as (moved)")
     text = await bot.snap()
+    order = [n.label.lstrip("⋮ ") for n in parse(text) if n.role == "listitem"]
+    if order != PLAYLIST_TARGET:
+        raise OracleError(f"the list order after dragging is {order}")
     await bot.act({"kind": "click", "ref": ref(text, "button", "Save order")})
 
 

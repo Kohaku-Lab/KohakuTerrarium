@@ -25,6 +25,7 @@ from kohakuterrarium.browser.errors import (
     DriverDisconnectedError,
     DriverError,
     PageClosedError,
+    PageNavigatingError,
 )
 from kohakuterrarium.browser.observe import Observation, origin_of
 from kohakuterrarium.browser.options import BrowserOptions
@@ -130,7 +131,11 @@ class SessionActMixin:
             before = self._last.get(tab.id)
             fresh = None
             if self._dialogs.pending is None:
-                before = await self._observe(tab)
+                try:
+                    before = await self._observe(tab)
+                except PageNavigatingError as exc:
+                    line = f"Actions not run: {exc}."
+                    return self._error_result(tab, op, line, "")
                 fresh = before.fresh
             report = await run_batch(parsed, ActContext(self, tab, files, fresh))
             if report.lost:
@@ -169,6 +174,11 @@ class SessionActMixin:
                 after = await self._observe(tab)
             except DialogOpenedError:
                 after = None
+            except PageNavigatingError:
+                op.notes.append(
+                    "The page was navigating when the result was read; take a "
+                    "snapshot to see the new page."
+                )
         delta = await self._delta(tab, before, after)
         pending = self._dialogs.pending
         if pending is not None:
@@ -178,6 +188,7 @@ class SessionActMixin:
                     [(pending.kind, self._redact(pending.message, tab))], pending=True
                 ),
             )
+        await self._await_windows(op)
         events, event_notes, opened = await self._events_text(op)
         landed = await self._opened_tab_section(tab, opened)
         obs = after or before
@@ -211,7 +222,12 @@ class SessionActMixin:
         try:
             await self._settle_tab(active)
             obs = await self._observe(active)
-        except (DialogOpenedError, BrowserTimeoutError, DriverError) as exc:
+        except (
+            DialogOpenedError,
+            BrowserTimeoutError,
+            DriverError,
+            PageNavigatingError,
+        ) as exc:
             if isinstance(exc, DriverDisconnectedError):
                 raise
             return f"Could not read tab {active.id} yet; take a snapshot of it."

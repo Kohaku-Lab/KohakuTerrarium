@@ -99,6 +99,7 @@ class ScriptedPage:
         self.browser = browser
         self._url = url
         self.snapshot_text = snapshot
+        self.boxes_text = ""
         self.title_text = title
         self.doc = next(_DOCS)
         self.probe_results: list[Any] = [{"hidden": [], "visible": [], "passwords": []}]
@@ -187,8 +188,11 @@ class ScriptedPage:
     async def wait_for_load(self, timeout: float) -> None:
         await self._do("wait_for_load", timeout=timeout)
 
-    async def snapshot(self, timeout: float) -> str:
-        return await self._do("snapshot", self.snapshot_text, timeout=timeout)
+    async def snapshot(self, timeout: float, boxes: bool = False) -> str:
+        default = self.boxes_text if boxes and self.boxes_text else self.snapshot_text
+        if boxes:
+            return await self._do("snapshot", default, timeout=timeout, boxes=True)
+        return await self._do("snapshot", default, timeout=timeout)
 
     async def probe(self, script: str, timeout: float) -> ProbeFrames:
         result = await self._enter("probe", timeout=timeout)
@@ -257,6 +261,9 @@ class ScriptedPage:
     async def hover(self, ref: str, timeout: float) -> None:
         await self._do("hover", ref=ref, timeout=timeout)
 
+    async def hover_at(self, x: float, y: float, timeout: float) -> None:
+        await self._do("hover_at", x=x, y=y, timeout=timeout)
+
     async def scroll_into_view(self, ref: str, timeout: float) -> None:
         await self._do("scroll_into_view", ref=ref, timeout=timeout)
 
@@ -265,6 +272,9 @@ class ScriptedPage:
 
     async def drag(self, ref: str, to_ref: str, timeout: float) -> None:
         await self._do("drag", ref=ref, to_ref=to_ref, timeout=timeout)
+
+    async def drag_between(self, start, end, timeout: float) -> None:
+        await self._do("drag_between", start=start, end=end, timeout=timeout)
 
     async def set_input_files(self, ref: str, files, timeout: float) -> None:
         await self._do("set_input_files", ref=ref, files=list(files), timeout=timeout)

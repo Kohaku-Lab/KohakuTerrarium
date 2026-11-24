@@ -176,3 +176,27 @@ async def test_an_answer_that_hangs_fails_and_keeps_the_dialog_pending():
     with pytest.raises(ActionFailedError, match="answering the confirm dialog failed"):
         await manager.answer(False, None)
     assert manager.pending is not None
+
+
+async def test_collect_returns_at_once_when_the_answer_opens_another_dialog():
+    manager = DialogManager()
+    confirm = ScriptedDialog("confirm", "Archive?")
+    prompt = ScriptedDialog("prompt", "Type the name")
+    manager.opened("t1", confirm)
+
+    async def interrupted():
+        await confirm.answered
+        manager.opened("t1", prompt)
+        await prompt.answered
+        return "finished"
+
+    call = asyncio.create_task(interrupted())
+    manager.park("t1", call)
+    await manager.answer(True, None)
+    started = asyncio.get_running_loop().time()
+    assert await manager.collect("t1", 5.0) is None
+    assert asyncio.get_running_loop().time() - started < 0.5
+    assert manager.pending.message == "Type the name" and not call.done()
+    await manager.answer(True, "Orion")
+    assert await manager.collect("t1", 1.0) is None
+    assert call.result() == "finished"

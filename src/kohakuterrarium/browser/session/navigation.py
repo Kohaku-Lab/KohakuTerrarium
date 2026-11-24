@@ -18,10 +18,11 @@ from kohakuterrarium.browser.errors import (
     NavigationBlockedError,
     NavigationError,
     PageClosedError,
+    PageNavigatingError,
 )
 from kohakuterrarium.browser.observe import blocked_reason
 from kohakuterrarium.browser.options import BrowserOptions
-from kohakuterrarium.browser.policy import NetworkPolicy, normalize_host
+from kohakuterrarium.browser.policy import WEB_SCHEMES, NetworkPolicy, normalize_host
 from kohakuterrarium.browser.protocol import NavResponse
 from kohakuterrarium.browser.proxy import EgressRecord
 from kohakuterrarium.browser.session.types import (
@@ -125,6 +126,8 @@ class SessionNavigationMixin:
             obs = await self._observe(tab)
         except DialogOpenedError:
             return self._dialog_result(tab, op)
+        except PageNavigatingError as exc:
+            return self._error_result(tab, op, f"Page not read: {exc}.", "")
         return await self._page_result(tab, obs, op, await self._compact(obs))
 
     def _check_url(self, url: str) -> str:
@@ -139,29 +142,41 @@ class SessionNavigationMixin:
             )
         return url
 
-    def _chain_hosts(
+    def _chain(
         self, target: str, tab: Tab, response: NavResponse | None
-    ) -> set[str]:
-        """Hosts this navigation's main frame went to: target, redirect hops, final URL."""
+    ) -> set[tuple[str, int]]:
+        """``(host, port)`` of each URL the main frame went to: target, redirect hops, final."""
         urls = [target, *self._nav_urls.get(tab.id, ())]
         if response is not None:
             urls.append(response.url)
-        return {host for host in map(host_of, urls) if host}
+        return {hop for hop in map(endpoint_of, urls) if hop[0]}
 
     def _raise_if_blocked(
         self, target: str, mark: int, tab: Tab, response: NavResponse | None
     ) -> None:
-        """Raise ``NavigationBlockedError`` when the proxy blocked a hop of this navigation."""
-        hosts = self._chain_hosts(target, tab, response)
+        """Raise ``NavigationBlockedError`` when the proxy blocked a hop of this navigation.
+
+        Only records whose host and port match a URL on the chain count; the
+        rest stay buffered for the usual blocked-requests report.
+        """
+        chain = self._chain(target, tab, response)
         blocked = [
-            r for r in self._stack.proxy.since(mark) if r.blocked and r.host in hosts
+            r
+            for r in self._stack.proxy.since(mark)
+            if r.blocked and (r.host, r.port) in chain
         ]
         if not blocked:
             return
         self._buffer_blocked()
-        self._blocked = [r for r in self._blocked if r not in blocked]
+        self._blocked = [r for r in self._blocked if not any(r is b for b in blocked)]
         record = blocked[-1]
-        hop = "" if record.host == host_of(target) else f" (it led to {record.host})"
+        start = endpoint_of(target)
+        if (record.host, record.port) == start:
+            hop = ""
+        elif record.host == start[0]:
+            hop = f" (it led to {record.host}:{record.port})"
+        else:
+            hop = f" (it led to {record.host})"
         raise NavigationBlockedError(
             self._redact(
                 f"loading {target} was blocked by the browser network policy{hop}: "
@@ -171,9 +186,11 @@ class SessionNavigationMixin:
 
     def _unreachable(self, mark: int, response: NavResponse) -> str:
         """Why the proxy could not reach the final host, when it recorded so; else empty."""
-        host = host_of(response.url)
+        host, port = endpoint_of(response.url)
         for record in self._stack.proxy.since(mark):
-            if record.host == host and record.code == response.blocked:
+            if (record.host, record.port) == (host, port) and (
+                record.code == response.blocked
+            ):
                 verb = _UNREACHABLE.get(record.code)
                 if verb:
                     return f"could not {verb} {host}"
@@ -193,9 +210,13 @@ class SessionNavigationMixin:
         depth: int | None = None,
         query: str | None = None,
         interactive: bool = False,
+        boxes: bool = False,
         tab_id: str | None = None,
     ) -> BrowserResult:
-        """The current page as a filtered snapshot capped at ``snapshot_max_chars``."""
+        """The current page as a filtered snapshot capped at ``snapshot_max_chars``.
+
+        ``boxes`` adds each element's ``[box=x,y,w,h]`` in viewport CSS pixels.
+        """
         if depth is not None and (
             isinstance(depth, bool) or not isinstance(depth, int) or depth < 1
         ):
@@ -204,10 +225,13 @@ class SessionNavigationMixin:
             if self._dialogs.pending is not None:
                 return self._pending_result(op)
             tab = op.tab = self._tabs.get(tab_id)
-            obs = await self._observe(tab)
+            try:
+                obs = await self._observe(tab, boxes)
+            except PageNavigatingError as exc:
+                return self._error_result(tab, op, f"Snapshot not taken: {exc}.", "")
             try:
                 rendered = await self._render(
-                    obs.nodes,
+                    snap.add_boxes(obs.nodes, obs.boxes),
                     ref=ref,
                     depth=depth,
                     query=query,
@@ -226,8 +250,15 @@ class SessionNavigationMixin:
 
 def host_of(url: str) -> str:
     """The host of ``url`` normalised the way the proxy records it; empty when none."""
+    return endpoint_of(url)[0]
+
+
+def endpoint_of(url: str) -> tuple[str, int]:
+    """``(host, port)`` of ``url`` as the proxy records them; ``("", 0)`` when none."""
     try:
-        host = urlsplit(url).hostname or ""
-        return normalize_host(host) if host else ""
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = parts.port or WEB_SCHEMES.get(parts.scheme.lower(), 0)
+        return (normalize_host(host), port) if host else ("", 0)
     except ValueError:
-        return ""
+        return ("", 0)

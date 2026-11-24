@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.browser.actions import is_neutral
 from kohakuterrarium.browser.errors import BrowserError
 from kohakuterrarium.browser.results import wrap_untrusted
 from kohakuterrarium.browser.session.types import BrowserResult
@@ -111,14 +112,17 @@ class BrowserTool(BaseTool):
     """One browser tool: validate arguments, call the session, shape the result.
 
     Subclasses set ``arguments`` (accepted names besides ``content``) and
-    implement ``parse`` (arguments to call keywords) and ``run`` (the session
-    call). ``failure`` is the error line shown above an ``is_error`` result.
+    ``neutral`` (each optional argument's "not given" value, which is dropped
+    before ``parse``), and implement ``parse`` (arguments to call keywords)
+    and ``run`` (the session call). ``failure`` is the error line shown above
+    an ``is_error`` result.
     """
 
     needs_context = True
     is_concurrency_safe = False
     network_access = True
     arguments: tuple[str, ...] = ()
+    neutral: dict[str, Any] = {}
     failure: str = FAILED
 
     @property
@@ -132,6 +136,16 @@ class BrowserTool(BaseTool):
     async def run(self, session: Any, call: dict, context: ToolContext | None) -> Any:
         """Call the session and return its ``BrowserResult`` or a finished ``ToolResult``."""
         raise NotImplementedError
+
+    def call_for(self, args: dict[str, Any], context: ToolContext | None) -> dict:
+        """Check names, drop neutral values and parse ``args`` into the keywords for ``run``."""
+        self.check_names(args)
+        given = {
+            key: value
+            for key, value in args.items()
+            if key not in self.neutral or not is_neutral(value, self.neutral[key])
+        }
+        return self.parse(given, context)
 
     def check_names(self, args: dict[str, Any]) -> None:
         """Reject argument names this tool does not take, naming the ones it does."""
@@ -152,8 +166,7 @@ class BrowserTool(BaseTool):
             return ToolResult(error=NO_PLUGIN)
         session = None
         try:
-            self.check_names(args)
-            call = self.parse(args, context)
+            call = self.call_for(args, context)
             session = await service.prepare(context)
             result = await self.run(session, call, context)
         except ArgumentError as exc:

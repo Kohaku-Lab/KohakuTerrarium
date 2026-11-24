@@ -465,6 +465,36 @@ def clean(nodes: list[Node]) -> list[Node]:
     return collapse_wrappers(nodes)
 
 
+def split_boxes(nodes: list[Node]) -> tuple[list[Node], dict[str, str]]:
+    """Take ``[box=x,y,w,h]`` off every line; return the tree and ``{uid: box}``."""
+    boxes: dict[str, str] = {}
+
+    def strip(level: list[Node]) -> list[Node]:
+        out = []
+        for node in level:
+            box = node.attr("box") if node.has_attr("box") else None
+            if box is not None and node.uid:
+                boxes[node.uid] = box
+            attrs = tuple(a for a in node.attrs if a[0] != "box")
+            out.append(replace(node, attrs=attrs, children=strip(node.children)))
+        return out
+
+    stripped = strip(nodes)
+    return (stripped, boxes) if boxes else (nodes, {})
+
+
+def add_boxes(nodes: list[Node], boxes: dict[str, str]) -> list[Node]:
+    """Put each element's box from ``split_boxes`` back as its last attribute."""
+    if not boxes:
+        return nodes
+    out = []
+    for node in nodes:
+        box = boxes.get(node.uid) if node.uid else None
+        attrs = node.attrs + ((("box", box),) if box is not None else ())
+        out.append(replace(node, attrs=attrs, children=add_boxes(node.children, boxes)))
+    return out
+
+
 def select_ref(nodes: list[Node], ref: str) -> list[Node]:
     """The subtree rooted at ``ref``; raises ``UnknownRefError`` when absent."""
     node = index_refs(nodes).get(ref)

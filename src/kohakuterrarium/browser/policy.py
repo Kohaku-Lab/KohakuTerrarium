@@ -128,6 +128,14 @@ def _embedded_ipv4(ip: ipaddress.IPv6Address) -> ipaddress.IPv4Address | None:
     return None
 
 
+def _plain_ip(address: str | IPAddress) -> IPAddress:
+    """``address`` as an address object, an IPv4-mapped IPv6 address as its IPv4."""
+    ip = address if not isinstance(address, str) else ipaddress.ip_address(address)
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
 def classify_address(address: str | IPAddress) -> str | None:
     """Return the special-use class of an address, or ``None`` when public.
 
@@ -268,7 +276,7 @@ class NetworkPolicy:
             return _deny("malformed", "the URL has no host")
         decision = self.check_host(hostname, port)
         if decision and parse_ip(hostname) is not None:
-            return self.check_address(hostname)
+            return self.check_address(hostname, port)
         return decision
 
     def check_host(self, host: str, port: int) -> Decision:
@@ -292,12 +300,28 @@ class NetworkPolicy:
                 return _deny("external", f"{normal} denied: {verdict}")
         return ALLOWED
 
-    def check_address(self, address: str | IPAddress) -> Decision:
-        """Judge a resolved address by its special-use class and the loopback/private flags."""
+    def check_address(
+        self, address: str | IPAddress, port: int | None = None
+    ) -> Decision:
+        """Judge a resolved address: IP-literal ``block_hosts``, then its special-use class.
+
+        A block pattern with a port applies only when ``port`` is given and
+        equal; an IPv4-mapped IPv6 address counts as its IPv4 address.
+        """
         try:
             kind = classify_address(address)
         except ValueError:
             return _deny("malformed", f"{address!r} is not an IP address")
+        same = _plain_ip(address)
+        for pattern in self.block_hosts:
+            literal = parse_ip(pattern.host)
+            if literal is None or _plain_ip(literal) != same:
+                continue
+            if pattern.port is None or pattern.port == port:
+                return _deny(
+                    "blocked_host",
+                    f"address {address} is in block_hosts ({pattern.text})",
+                )
         if kind is None:
             return ALLOWED
         flag = FLAG_CLASSES.get(kind)

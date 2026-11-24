@@ -39,6 +39,8 @@ class Observation:
     refs) and ``fresh`` its ref fingerprints; ``nodes`` is the cleaned tree
     that results are rendered from. When the raw text was cut,
     ``cut_from`` is its full length and ``raw_chars`` the length kept.
+    ``boxes`` maps refs to ``x,y,w,h`` when the read asked for boxes; the
+    trees never carry them.
     """
 
     doc_id: Any
@@ -52,6 +54,7 @@ class Observation:
     fresh: dict[str, tuple[str, str]] = field(default_factory=dict)
     cut_from: int = 0
     raw_chars: int = 0
+    boxes: dict[str, str] = field(default_factory=dict)
 
     @property
     def origin(self) -> str:
@@ -79,7 +82,7 @@ def _process(
     text: str, results: list[Any], limit: int, redact: Redact | None
 ) -> dict[str, Any]:
     prepared, cut_from, kept = _prepare(text, limit, redact)
-    raw = snap.parse(prepared)
+    raw, boxes = snap.split_boxes(snap.parse(prepared))
     outcome = apply_probe(raw, ProbeResult.merge(results))
     return {
         "raw": raw,
@@ -89,6 +92,7 @@ def _process(
         "fresh": snap.fingerprints(raw),
         "cut_from": cut_from,
         "raw_chars": kept if cut_from else 0,
+        "boxes": boxes,
     }
 
 
@@ -112,9 +116,12 @@ async def read_document(page: PageDriver, call: Call, timeout: float) -> Any:
     )
 
 
-async def _snapshot_text(page: PageDriver, call: Call, timeout: float) -> str:
+async def _snapshot_text(
+    page: PageDriver, call: Call, timeout: float, boxes: bool = False
+) -> str:
+    read = (lambda: page.snapshot(timeout, boxes=True)) if boxes else None
     return await call(
-        lambda: page.snapshot(timeout), timeout, "taking the page snapshot"
+        read or (lambda: page.snapshot(timeout)), timeout, "taking the page snapshot"
     )
 
 
@@ -138,14 +145,16 @@ async def observe(
     *,
     redact: Redact | None = None,
     max_chars: int = RAW_SNAPSHOT_MAX_CHARS,
+    boxes: bool = False,
 ) -> Observation:
     """Read ``page`` through ``call`` (the session's bounded, dialog-aware runner).
 
     ``redact`` is applied to the raw snapshot text before it is parsed, so
-    no later cut can split a secret.
+    no later cut can split a secret. ``boxes`` also reads each element's
+    box into ``Observation.boxes``.
     """
     doc_id = await read_document(page, call, timeout)
-    text = await _snapshot_text(page, call, timeout)
+    text = await _snapshot_text(page, call, timeout, boxes)
     note = ""
     try:
         frames = await call(
@@ -176,7 +185,7 @@ def blocked_reason(record: EgressRecord, policy: NetworkPolicy) -> str:
     if address is None and parse_ip(record.host) is not None:
         address = record.host
     if address is not None:
-        decision = policy.check_address(address)
+        decision = policy.check_address(address, record.port)
     else:
         decision = policy.check_host(record.host, record.port)
     return decision.reason if not decision.allowed else record.code

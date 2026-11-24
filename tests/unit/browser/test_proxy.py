@@ -1051,3 +1051,26 @@ async def test_mark_and_since_return_only_later_decisions(servers, make_proxy):
         await exchange(proxy, get(f"http://h{index}.test/", f"h{index}.test"))
     assert [r.host for r in proxy.since(mark)] == ["h2.test", "h3.test", "h4.test"]
     assert proxy.since(proxy.mark()) == []
+
+
+async def test_ip_block_pattern_refuses_any_name_resolving_to_it(servers, make_proxy):
+    upstream = await servers()
+    seams = Seams(
+        {"localhost.test": ["127.0.0.1"], "other.test": ["127.0.0.1"]},
+        {"127.0.0.1": upstream},
+    )
+    policy = NetworkPolicy(block_hosts=("127.0.0.1:8001",), allow_loopback=True)
+    proxy = await make_proxy(policy, seams=seams)
+    status, headers, _ = await exchange(
+        proxy, get("http://localhost.test:8001/", "localhost.test:8001")
+    )
+    assert status == 403 and headers[BLOCKED] == "blocked_host"
+    assert seams.dialed == []
+    status, _, _ = await exchange(
+        proxy, get("http://other.test:8002/", "other.test:8002")
+    )
+    assert status == 200
+    assert [(r.host, r.port, r.blocked, r.code) for r in proxy.recent()] == [
+        ("localhost.test", 8001, True, "blocked_host"),
+        ("other.test", 8002, False, "ok"),
+    ]

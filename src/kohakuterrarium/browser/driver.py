@@ -33,6 +33,7 @@ INSTALL_HINT = (
 )
 CLEANUP_TIMEOUT_S = 10.0
 REASON_CHARS = 200
+DRAG_STEPS = 8
 _TIMEOUT_HINTS = (
     (
         "intercepts pointer events",
@@ -188,10 +189,11 @@ class PlaywrightPage:
             )
         )
 
-    async def snapshot(self, timeout: float) -> str:
-        return await self._run(
-            lambda: self._page.aria_snapshot(mode="ai", timeout=timeout * 1000)
-        )
+    async def snapshot(self, timeout: float, boxes: bool = False) -> str:
+        options: dict[str, Any] = {"mode": "ai", "timeout": timeout * 1000}
+        if boxes:
+            options["boxes"] = True
+        return await self._run(lambda: self._page.aria_snapshot(**options))
 
     async def probe(self, script: str, timeout: float) -> ProbeFrames:
         frames = list(self._page.frames)
@@ -299,6 +301,9 @@ class PlaywrightPage:
     async def hover(self, ref: str, timeout: float) -> None:
         await self._run(lambda: self._ref(ref).hover(timeout=timeout * 1000))
 
+    async def hover_at(self, x: float, y: float, timeout: float) -> None:
+        await self._run(lambda: asyncio.wait_for(self._page.mouse.move(x, y), timeout))
+
     async def scroll_into_view(self, ref: str, timeout: float) -> None:
         await self._run(
             lambda: self._ref(ref).scroll_into_view_if_needed(timeout=timeout * 1000)
@@ -318,6 +323,36 @@ class PlaywrightPage:
         await self._run(
             lambda: self._ref(ref).drag_to(self._ref(to_ref), timeout=timeout * 1000)
         )
+
+    async def _point(
+        self, target: str | tuple[float, float], timeout: float
+    ) -> tuple[float, float]:
+        if not isinstance(target, str):
+            return target
+        locator = self._ref(target)
+        await locator.scroll_into_view_if_needed(timeout=timeout * 1000)
+        box = await locator.bounding_box(timeout=timeout * 1000)
+        if box is None:
+            raise DriverError("the element has no box on the page")
+        return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+    async def drag_between(
+        self,
+        start: str | tuple[float, float],
+        end: str | tuple[float, float],
+        timeout: float,
+    ) -> None:
+        mouse = self._page.mouse
+
+        async def drag() -> None:
+            sx, sy = await self._point(start, timeout)
+            await mouse.move(sx, sy)
+            await mouse.down()
+            ex, ey = await self._point(end, timeout)
+            await mouse.move(ex, ey, steps=DRAG_STEPS)
+            await mouse.up()
+
+        await self._run(lambda: asyncio.wait_for(drag(), timeout))
 
     async def set_input_files(
         self, ref: str, files: Sequence[str], timeout: float
@@ -408,6 +443,7 @@ class PlaywrightBrowser:
         self._pages: dict[Any, PlaywrightPage] = {}
         self._closing = False
         self._context_closed = False
+        self._watchers: set[asyncio.Task] = set()
 
     def attach(self, sink: EventSink) -> None:
         """Start delivering events to ``sink`` and wrap the pages already open."""
@@ -448,6 +484,24 @@ class PlaywrightBrowser:
             ),
         )
         sink.page_opened(wrapped)
+        task = asyncio.get_running_loop().create_task(
+            self._watch_windows(page, wrapped)
+        )
+        self._watchers.add(task)
+        task.add_done_callback(self._watchers.discard)
+
+    async def _watch_windows(self, page: Any, wrapped: PlaywrightPage) -> None:
+        """Report ``Page.windowOpen``: a popup is coming before Playwright announces it."""
+        try:
+            session = await self._context.new_cdp_session(page)
+            session.on("Page.windowOpen", lambda _event: self._window_opening(wrapped))
+            await session.send("Page.enable")
+        except Exception as exc:
+            logger.debug("Watching for new windows failed", error=type(exc).__name__)
+
+    def _window_opening(self, wrapped: PlaywrightPage) -> None:
+        if self._sink is not None:
+            self._sink.window_opening(wrapped)
 
     def _on_page_close(self, page: Any) -> None:
         wrapped = self._pages.pop(page, None)

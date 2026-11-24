@@ -123,9 +123,9 @@ class TestNavigate:
     @pytest.mark.parametrize(
         ("args", "message"),
         [
-            ({}, "either url or action"),
-            ({"url": "http://a.test/", "action": "back"}, "either url or action"),
-            ({"action": "sideways"}, "back, forward, reload"),
+            ({}, "url is required for action goto; give a url, or set action"),
+            ({"action": "goto", "url": ""}, "url is required for action goto"),
+            ({"action": "sideways"}, "goto, back, forward, reload; got 'sideways'"),
             ({"url": 5}, "url must be a string"),
         ],
     )
@@ -173,10 +173,21 @@ class TestSnapshot:
         assert result.success and 'button "Buy" [ref=e2]' in result.output
         assert 'heading "Shop"' not in result.output
 
+    async def test_boxes_flag_reaches_the_driver(self, env):
+        _, driver, run = env
+        result = await run("browser_snapshot", {"boxes": "true"})
+        assert result.success
+        calls = driver.browser.page.calls
+        assert (
+            "snapshot",
+            {"timeout": calls[-2][1]["timeout"], "boxes": True},
+        ) in calls
+
     @pytest.mark.parametrize(
         ("args", "message"),
         [
-            ({"depth": "0"}, "depth must be a whole number"),
+            ({"boxes": "maybe"}, "boxes must be true or false"),
+            ({"depth": "-1"}, "depth must be a whole number"),
             ({"depth": True}, "depth must be a whole number"),
             ({"interactive": "maybe"}, "interactive must be true or false"),
         ],
@@ -344,10 +355,13 @@ class TestScreenshot:
         )
         assert "outside the working directory" in result.error
 
-    async def test_ref_and_full_page_together_are_refused(self, env):
-        _, _, run = env
+    async def test_ref_wins_over_full_page(self, env):
+        _, driver, run = env
+        await run("browser_snapshot", {})
         result = await run("browser_screenshot", {"ref": "e2", "full_page": True})
-        assert "either ref or full_page" in result.error
+        assert result.error is None
+        shot = [k for n, k in driver.browser.page.calls if n == "screenshot"][-1]
+        assert shot["ref"] == "e2" and not shot["full_page"]
 
     async def test_stale_ref_is_an_error_without_an_image(self, env):
         _, driver, run = env
@@ -384,7 +398,11 @@ class TestTabs:
         [
             ({"action": "jump"}, "action must be one of"),
             ({"action": "select"}, "select needs tab"),
-            ({"action": "list", "url": "http://a.test/"}, "url goes with action new"),
+            (
+                {"action": "list", "url": "http://a.test/"},
+                'url applies to action new; set url to ""',
+            ),
+            ({"action": "list", "tab": "t1"}, "tab applies to action select or close"),
         ],
     )
     async def test_argument_errors(self, env, args, message):

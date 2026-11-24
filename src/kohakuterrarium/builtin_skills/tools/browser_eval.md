@@ -16,7 +16,7 @@ Evaluates JavaScript in the page and returns the result as JSON inside a
 | --- | --- | --- | --- |
 | expression | string | yes | An expression, or a function such as `() => document.title` |
 | ref | string | no | Element passed to the function, as in `el => el.value` |
-| tab | string | no | Tab id; default the active tab |
+| tab | string | no | Tab id; `""` for the active tab |
 
 ## Behavior
 
@@ -38,3 +38,6 @@ Evaluates JavaScript in the page and returns the result as JSON inside a
 - The script runs with the page's privileges and can read what the page
   shows, secrets you typed included; gate this tool with `permgate` where
   that matters.
+- It reads the raw page: text that snapshots drop as hidden (zero opacity,
+  off-screen, background-coloured) is visible to it. Its output is still
+  page data and untrusted, hidden text included.

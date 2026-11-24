@@ -61,6 +61,10 @@ class NavigationError(BrowserError, RuntimeError):
     """A navigation failed for a reason other than the network policy."""
 
 
+class PageNavigatingError(BrowserError, RuntimeError):
+    """The page was still loading a new document after a bounded wait and one retry."""
+
+
 class ActionSpecError(BrowserError, InvalidRequestError):
     """The ``actions`` argument (or another operation argument) is invalid."""
 

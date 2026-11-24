@@ -346,3 +346,85 @@ class TestDeltaHelpers:
 
     def test_join_sections_skips_empty(self):
         assert res.join_sections("a", "", "b", "") == "a\nb"
+
+
+def playlist(order: list[int], names=("A", "B", "C", "D", "E", "F")) -> list[snap.Node]:
+    lines = ["- list [ref=e1]:"] + [
+        f"  - listitem [ref=e{10 + i}]: Track {names[i]}" for i in order
+    ]
+    return snap.clean(snap.parse("\n".join(lines)))
+
+
+class TestMoves:
+    def test_one_item_moved_is_one_line(self):
+        result = res.diff_snapshots(
+            playlist([0, 1, 2, 3, 4]), playlist([2, 0, 1, 3, 4])
+        )
+        assert result.text.splitlines() == [
+            "Page changes (+ added, ~ changed, @ context): 0 added, 1 changed (1 moved), "
+            "0 lines removed",
+            "@ list [ref=e1]",
+            "~ - listitem: Track C (moved)",
+        ]
+        assert (result.added, result.changed, result.removed, result.moved) == (
+            0,
+            1,
+            0,
+            1,
+        )
+
+    def test_a_swap_marks_one_and_a_reversal_marks_all_but_one(self):
+        swap = res.diff_snapshots(playlist([0, 1, 2]), playlist([1, 0, 2]))
+        assert swap.moved == 1
+        reverse = res.diff_snapshots(
+            playlist([0, 1, 2, 3, 4, 5]), playlist([5, 4, 3, 2, 1, 0])
+        )
+        assert reverse.moved == 5
+        assert sum("(moved)" in line for line in reverse.text.splitlines()) == 5
+
+    def test_insertions_and_removals_are_not_moves(self):
+        result = res.diff_snapshots(playlist([0, 1, 2, 3]), playlist([0, 2, 3, 4]))
+        assert result.moved == 0
+        assert (result.added, result.removed) == (1, 1)
+
+    def test_a_moved_and_changed_item_is_one_line(self):
+        before = playlist([0, 1, 2])
+        after = snap.clean(
+            snap.parse(
+                "- list [ref=e1]:\n  - listitem [ref=e12]: Track C now\n"
+                "  - listitem [ref=e10]: Track A\n  - listitem [ref=e11]: Track B"
+            )
+        )
+        result = res.diff_snapshots(before, after)
+        assert result.text.splitlines()[2:] == ["~ - listitem: Track C now (moved)"]
+
+    def test_a_move_to_another_parent_is_a_move(self):
+        before = snap.clean(
+            snap.parse(
+                "- list [ref=e1]:\n  - listitem [ref=e10]: One\n"
+                "  - listitem [ref=e11]: Two\n- list [ref=e2]:\n"
+                "  - listitem [ref=e12]: Three"
+            )
+        )
+        after = snap.clean(
+            snap.parse(
+                "- list [ref=e1]:\n  - listitem [ref=e10]: One\n- list [ref=e2]:\n"
+                "  - listitem [ref=e12]: Three\n  - listitem [ref=e11]: Two"
+            )
+        )
+        result = res.diff_snapshots(before, after)
+        assert result.moved == 1 and "~ - listitem: Two (moved)" in result.text
+
+    def test_large_shuffles_stay_fast_and_capped(self):
+        size = 6000
+        names = tuple(f"N{i}" for i in range(size))
+        order = list(range(size))
+        moved = order[1:] + order[:1]
+        start = time.perf_counter()
+        result = res.diff_snapshots(playlist(order, names), playlist(moved, names))
+        assert time.perf_counter() - start < 5
+        assert result.moved == 1
+        shuffled = order[::-1]
+        many = res.diff_snapshots(playlist(order, names), playlist(shuffled, names))
+        assert many.moved == size - 1 and many.truncated
+        assert len(many.text.splitlines()) <= res.DIFF_MAX_LINES + 2

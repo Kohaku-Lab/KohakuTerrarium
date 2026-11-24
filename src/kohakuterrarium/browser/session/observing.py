@@ -6,13 +6,20 @@ chose goes through :meth:`SessionObserveMixin._wrap`.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from kohakuterrarium.browser import results as fmt
 from kohakuterrarium.browser import snapshot as snap
 from kohakuterrarium.browser.dialogs import DialogManager
 from kohakuterrarium.browser.downloads import Downloads
-from kohakuterrarium.browser.errors import ActionFailedError, NoTabError
+from kohakuterrarium.browser.errors import (
+    ActionFailedError,
+    BrowserTimeoutError,
+    ContextDestroyedError,
+    NoTabError,
+    PageNavigatingError,
+)
 from kohakuterrarium.browser.observe import (
     Observation,
     format_blocked_records,
@@ -34,6 +41,8 @@ from kohakuterrarium.browser.session.types import (
     Stack,
 )
 from kohakuterrarium.browser.tabs import Tab, TabRegistry
+
+NAVIGATING = "the page was navigating; take a snapshot again"
 
 
 class SessionObserveMixin:
@@ -67,16 +76,44 @@ class SessionObserveMixin:
 
         return run
 
-    async def _observe(self, tab: Tab) -> Observation:
-        obs = await observe(
-            tab.page,
-            self._runner(tab),
-            self.options.action_timeout_s,
-            redact=self._secrets.redact,
+    async def _observe(self, tab: Tab, boxes: bool = False) -> Observation:
+        obs = await self._reading(
+            tab,
+            lambda: observe(
+                tab.page,
+                self._runner(tab),
+                self.options.action_timeout_s,
+                redact=self._secrets.redact,
+                boxes=boxes,
+            ),
         )
         self._sync_doc(tab, obs.doc_id)
         self._last[tab.id] = obs
         return obs
+
+    async def _reading(self, tab: Tab, read: Callable[[], Awaitable[Any]]) -> Any:
+        """Run ``read``; when a navigation destroys its context, wait for the new document and retry once.
+
+        Raises ``PageNavigatingError`` when the retry is interrupted too.
+        """
+        try:
+            return await read()
+        except ContextDestroyedError:
+            pass
+        timeout = self.options.action_timeout_s
+        try:
+            await self._call(
+                tab,
+                lambda: tab.page.wait_for_load(timeout),
+                timeout,
+                "waiting for the new page",
+            )
+        except (BrowserTimeoutError, ContextDestroyedError):
+            pass
+        try:
+            return await read()
+        except ContextDestroyedError:
+            raise PageNavigatingError(NAVIGATING) from None
 
     def _sync_doc(self, tab: Tab, doc_id: Any) -> None:
         """Forget the tab's refs when it now shows a different main document."""
@@ -88,8 +125,14 @@ class SessionObserveMixin:
         """Fingerprints of a fresh full snapshot, for judging refs at this moment."""
         timeout = self.options.action_timeout_s
         runner = self._runner(tab)
-        self._sync_doc(tab, await read_document(tab.page, runner, timeout))
-        return await read_fresh(tab.page, runner, timeout, redact=self._secrets.redact)
+
+        async def read() -> dict[str, tuple[str, str]]:
+            self._sync_doc(tab, await read_document(tab.page, runner, timeout))
+            return await read_fresh(
+                tab.page, runner, timeout, redact=self._secrets.redact
+            )
+
+        return await self._reading(tab, read)
 
     async def _check_ref(
         self, tab: Tab, ref: str, fresh: dict[str, tuple[str, str]]

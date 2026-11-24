@@ -12,6 +12,7 @@ from kohakuterrarium.browser.errors import (
     DriverDisconnectedError,
     DriverError,
     PageClosedError,
+    PageNavigatingError,
 )
 from kohakuterrarium.browser.images import image_size, mime_type
 from kohakuterrarium.browser.observe import origin_of
@@ -42,7 +43,7 @@ class SessionCaptureMixin:
             return None
         try:
             await self._check_ref(tab, ref, await self._fresh_refs(tab))
-        except ActionFailedError as exc:
+        except (ActionFailedError, PageNavigatingError) as exc:
             return self._error_result(tab, op, f"{what}: {exc}", exc.detail)
         return None
 

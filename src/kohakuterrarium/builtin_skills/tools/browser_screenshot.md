@@ -14,10 +14,10 @@ text line with the tab, URL, size and format.
 
 | Arg | Type | Req | Description |
 | --- | --- | --- | --- |
-| ref | string | no | Capture this element |
+| ref | string | no | Capture this element; wins over `full_page` |
 | full_page | boolean | no | Capture the whole page, height-capped |
-| path | string | no | Also save the image to this file |
-| tab | string | no | Tab id; default the active tab |
+| path | string | no | Also save the image to this file; `""` to skip |
+| tab | string | no | Tab id; `""` for the active tab |
 
 ## Behavior
 

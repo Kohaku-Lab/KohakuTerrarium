@@ -443,7 +443,7 @@ class FilteringProxy:
         passed: list[str] = []
         denied: tuple[str, Decision] | None = None
         for answer in answers:
-            verdict = policy.check_address(answer)
+            verdict = policy.check_address(answer, port)
             ip = parse_ip(answer)
             if verdict and ip is not None:
                 passed.append(canonical_ip(ip))

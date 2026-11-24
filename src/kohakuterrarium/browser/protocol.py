@@ -79,8 +79,12 @@ class PageDriver(Protocol):
     async def wait_for_load(self, timeout: float) -> None:
         """Wait for ``domcontentloaded`` of the current main document."""
 
-    async def snapshot(self, timeout: float) -> str:
-        """The full-page AI-mode ARIA snapshot text; never scoped."""
+    async def snapshot(self, timeout: float, boxes: bool = False) -> str:
+        """The full-page AI-mode ARIA snapshot text; never scoped.
+
+        With ``boxes`` each element line carries ``[box=x,y,w,h]``: its
+        bounding box in viewport CSS pixels.
+        """
 
     async def probe(self, script: str, timeout: float) -> ProbeFrames:
         """Evaluate ``script`` (a function source) in every frame."""
@@ -134,11 +138,22 @@ class PageDriver(Protocol):
 
     async def hover(self, ref: str, timeout: float) -> None: ...
 
+    async def hover_at(self, x: float, y: float, timeout: float) -> None:
+        """Move the mouse to viewport point ``(x, y)``."""
+
     async def scroll_into_view(self, ref: str, timeout: float) -> None: ...
 
     async def wheel(self, dx: float, dy: float, timeout: float) -> None: ...
 
     async def drag(self, ref: str, to_ref: str, timeout: float) -> None: ...
+
+    async def drag_between(
+        self,
+        start: str | tuple[float, float],
+        end: str | tuple[float, float],
+        timeout: float,
+    ) -> None:
+        """Press the mouse at ``start`` and release it at ``end``: a ref's centre or a viewport point."""
 
     async def set_input_files(
         self, ref: str, files: Sequence[str], timeout: float
@@ -182,6 +197,9 @@ class EventSink(Protocol):
 
     def navigation_started(self, page: PageDriver, url: str | None = None) -> None:
         """A main-frame navigation request (or redirect hop) went out to ``url``."""
+
+    def window_opening(self, page: PageDriver) -> None:
+        """``page`` asked for a new window; its ``page_opened`` follows later."""
 
     def disconnected(self) -> None:
         """The browser went away without the session asking."""

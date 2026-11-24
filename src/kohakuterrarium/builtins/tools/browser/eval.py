@@ -19,6 +19,7 @@ class BrowserEvalTool(BrowserTool):
     """Evaluate an expression or function in the page; with ``ref`` it receives the element."""
 
     arguments = ("expression", "ref", TAB_ARG)
+    neutral = {"ref": "", TAB_ARG: ""}
     failure = "the script did not succeed; the result below says why"
 
     @property

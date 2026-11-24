@@ -16,14 +16,15 @@ returns one status line per action plus what changed on the page.
 | --- | --- | --- | --- |
 | actions | array | yes | Action objects, e.g. `[{"kind": "click", "ref": "e5"}]`; a JSON string or the call body also works |
 | files | array | no | File paths that `upload` actions index into |
-| tab | string | no | Tab id; default the active tab |
+| tab | string | no | Tab id; `""` for the active tab |
 
 ## Behavior
 
 - Put the steps of one intent in one call (fill a form, then submit): later
   actions run only if earlier ones succeeded; the rest show `not executed`.
-- The result is a delta: lines added (`+`) or changed (`~`). Read it instead
-  of taking a new snapshot; a new page shows its interactive elements.
+- The result is a delta: lines added (`+`) or changed (`~`), `(moved)` when
+  an element changed place. Read it instead of taking a new snapshot; a new
+  page or a new tab shows its interactive elements.
 - Check the result for the outcome you wanted before you report success.
 
 ## Output
@@ -40,19 +41,26 @@ returns one status line per action plus what changed on the page.
 
 | kind | Fields |
 | --- | --- |
-| click | `ref`, or `x`/`y` in screenshot pixels; `button`, `double`, `modifiers` |
+| click | `ref`, or `x`/`y`; `button`, `double`, `modifiers` |
 | type | `ref`; `text` or `secret` (a configured secret name); `submit`, `slowly` |
 | select | `ref`, `values` (option labels) |
 | check | `ref`, `checked` (default true) |
 | press | `key` such as `Enter` or `Control+A`; optional `ref` |
-| hover | `ref` |
+| hover | `ref`, or `x`/`y` |
 | scroll | `ref` to scroll into view, or `dx` / `dy` pixels |
-| drag | `ref`, `to` (target ref) |
+| drag | start `ref` or `x`/`y`; end `to` (a ref) or `to_x`/`to_y` |
 | upload | `ref`, `files` (indexes into the `files` argument) |
 | wait | one of `text`, `text_gone`, `seconds` |
 | dialog | `accept` (default true), `text` for a prompt |
 
-Coordinates (`x`/`y`) are for canvas-like content with no refs; prefer refs.
+Unused fields may be sent empty (`""`, 0, `[]`, false): a non-empty
+`ref` wins over `x`/`y` (0, 0 means none), `secret` over `text` (`text: ""`
+clears the field), and `wait` takes `text`, else `text_gone`, else `seconds`
+above 0. A real value on another kind's field is refused.
+
+Coordinates are viewport CSS pixels, as in a screenshot or a
+`browser_snapshot` with `boxes`; use them for elements without refs (canvas,
+draggable rows, hover areas) and prefer refs otherwise.
 
 ### Statuses and what they mean
 

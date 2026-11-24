@@ -18,6 +18,7 @@ import pytest
 from kohakuterrarium.browser.errors import (
     BrowserError,
     BrowserStateLostError,
+    ContextDestroyedError,
     DriverError,
     NavigationBlockedError,
     NoTabError,
@@ -401,6 +402,41 @@ class TestBlockedAttribution:
         assert "Blocked 1 request" in result.text and "c.test" in result.text
         await session.close()
 
+    async def test_a_block_on_another_port_of_the_same_host_is_not_the_navigation(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+
+        async def goto(url, timeout):
+            page.load(url)
+            await self.proxied_get(session, "c.test:9000")
+            return NavResponse(url, 200)
+
+        page.handlers["goto"] = goto
+        result = await session.navigate("http://c.test:8001/")
+        assert not result.is_error
+        assert "Blocked 1 request:" in result.text
+        assert "c.test:9000 (c.test is in block_hosts)" in result.text
+        await session.close()
+
+    async def test_a_blocked_port_on_the_chain_is_named_with_its_port(self, tmp_path):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+
+        async def goto(url, timeout):
+            driver.browser.sink.navigation_started(page, "http://c.test:9000/next")
+            await self.proxied_get(session, "c.test:9000")
+            return NavResponse("http://c.test:9000/next", 403, "blocked_host")
+
+        page.handlers["goto"] = goto
+        with pytest.raises(NavigationBlockedError) as info:
+            await session.navigate("http://c.test:8001/")
+        assert "(it led to c.test:9000)" in str(info.value)
+        await session.close()
+
 
 class TestHeavyPages:
     async def test_huge_snapshot_never_stalls_the_loop(self, tmp_path):
@@ -602,3 +638,77 @@ class TestConcurrency:
         await task
         assert time.perf_counter() - start < 1
         assert "1. wait 5 s: dialog pending" in result.text
+
+
+class TestChainedDialogs:
+    async def test_a_prompt_right_after_a_confirm_is_reported_at_once(self, tmp_path):
+        session, driver = make(tmp_path, action_timeout_s=5.0)
+        await session.snapshot()
+        page = driver.browser.page
+
+        async def click(**_):
+            confirm = page.open_dialog(ScriptedDialog("confirm", "Archive?"))
+            await confirm.answered
+            prompt = page.open_dialog(ScriptedDialog("prompt", "Name?"))
+            await prompt.answered
+
+        page.handlers["click"] = click
+        await session.act([{"kind": "click", "ref": "e2"}])
+        started = time.perf_counter()
+        result = await session.act([{"kind": "dialog", "accept": True}])
+        assert time.perf_counter() - started < 1.0
+        assert result.text.splitlines()[0].endswith("| dialog pending: prompt")
+        assert "1. dialog accept: done — confirm dialog accepted" in result.text
+        assert 'Dialog pending: prompt "Name?"' in result.text
+        answered = await session.act([{"kind": "dialog", "text": "Orion"}])
+        assert answered.meta["dialog"] is None and answered.meta["ok"]
+        await session.close()
+
+
+class TestNavigationInFlight:
+    def flaky(self, page, times):
+        """A snapshot handler whose first ``times`` calls hit a destroyed context."""
+        calls = []
+
+        def snapshot(**_):
+            calls.append(1)
+            if len(calls) <= times:
+                raise ContextDestroyedError("a navigation interrupted the call")
+            return page.snapshot_text
+
+        return snapshot
+
+    async def test_a_read_during_a_navigation_waits_and_retries_once(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        page.handlers["snapshot"] = self.flaky(page, 1)
+        result = await session.snapshot()
+        assert not result.is_error and 'button "Buy" [ref=e2]' in result.text
+        assert "wait_for_load" in page.names()
+
+    async def test_a_page_still_navigating_is_an_error_result(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        page.handlers["snapshot"] = self.flaky(page, 2)
+        result = await session.snapshot()
+        assert result.is_error
+        assert result.text.splitlines()[1] == (
+            "Snapshot not taken: the page was navigating; take a snapshot again."
+        )
+        page.handlers["snapshot"] = self.flaky(page, 2)
+        acted = await session.act([{"kind": "click", "ref": "e2"}])
+        assert acted.is_error and "the page was navigating" in acted.text
+        assert "click" not in page.names()
+
+    async def test_a_navigation_after_an_action_is_a_note(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        page.handlers["click"] = lambda **_: page.handlers.__setitem__(
+            "snapshot", self.flaky(page, 2)
+        )
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert result.meta["ok"] and not result.is_error
+        assert "The page was navigating when the result was read" in result.text

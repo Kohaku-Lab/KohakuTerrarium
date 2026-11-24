@@ -27,6 +27,7 @@ class BrowserActTool(BrowserTool):
 
     path_arguments = {FILES_ARG: "read"}
     arguments = ("actions", FILES_ARG, TAB_ARG)
+    neutral = {FILES_ARG: [], TAB_ARG: ""}
     failure = "an action did not succeed; the statuses below say which and why"
 
     @property

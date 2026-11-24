@@ -40,6 +40,10 @@ class LaunchSink:
         if self._live():
             self._session._on_navigation(page, url)
 
+    def window_opening(self, page: PageDriver) -> None:
+        if self._live():
+            self._session._on_window_opening(page)
+
     def disconnected(self) -> None:
         if self._live() and self._session._state == READY:
             self._session._mark_lost(LOST_CRASH)

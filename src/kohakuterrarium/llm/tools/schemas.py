@@ -451,33 +451,43 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
     "browser_navigate": {
         "type": "object",
         "properties": {
-            "url": {"type": "string", "description": "http or https URL to open"},
+            "url": {
+                "type": "string",
+                "description": "URL for goto; ignored for other actions",
+            },
             "action": {
                 "type": "string",
-                "enum": ["back", "forward", "reload"],
-                "description": "History step instead of a url",
+                "enum": ["goto", "back", "forward", "reload"],
+                "description": "Default goto (open url)",
             },
-            "tab": {"type": "string", "description": "Tab id; default active tab"},
+            "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
     },
     "browser_snapshot": {
         "type": "object",
         "properties": {
-            "ref": {"type": "string", "description": "Only this element's subtree"},
+            "ref": {
+                "type": "string",
+                "description": 'Only this element\'s subtree; "" = whole page',
+            },
             "depth": {
                 "type": "integer",
-                "minimum": 1,
-                "description": "Levels to show below the root",
+                "minimum": 0,
+                "description": "Levels below the root; 0 = no limit",
             },
             "query": {
                 "type": "string",
-                "description": "Only lines matching this text, with ancestors",
+                "description": 'Only lines matching this text; "" = all',
             },
             "interactive": {
                 "type": "boolean",
                 "description": "Only interactive elements",
             },
-            "tab": {"type": "string", "description": "Tab id; default active tab"},
+            "boxes": {
+                "type": "boolean",
+                "description": "Add each element's [box=x,y,w,h] in CSS pixels",
+            },
+            "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
     },
     "browser_act": {
@@ -485,7 +495,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "actions": {
                 "type": "array",
-                "description": "Run in order; stops at the first failure",
+                "description": (
+                    "Run in order; stops at the first failure. Unused fields: "
+                    '"", 0, [], false'
+                ),
                 "items": {
                     "type": "object",
                     "properties": {
@@ -524,6 +537,8 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                         "dx": {"type": "number"},
                         "dy": {"type": "number"},
                         "to": {"type": "string"},
+                        "to_x": {"type": "number"},
+                        "to_y": {"type": "number"},
                         "files": {"type": "array", "items": {"type": "integer"}},
                         "seconds": {"type": "number"},
                         "text_gone": {"type": "string"},
@@ -535,22 +550,28 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Paths that upload actions index into",
+                "description": "Paths upload actions index into; [] = none",
             },
-            "tab": {"type": "string", "description": "Tab id; default active tab"},
+            "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
         "required": ["actions"],
     },
     "browser_screenshot": {
         "type": "object",
         "properties": {
-            "ref": {"type": "string", "description": "Only this element"},
+            "ref": {
+                "type": "string",
+                "description": "Only this element; wins over full_page",
+            },
             "full_page": {
                 "type": "boolean",
                 "description": "Whole page, height-capped",
             },
-            "path": {"type": "string", "description": "Also save the image here"},
-            "tab": {"type": "string", "description": "Tab id; default active tab"},
+            "path": {
+                "type": "string",
+                "description": 'Also save the image here; "" = don\'t',
+            },
+            "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
     },
     "browser_tabs": {
@@ -561,8 +582,14 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "enum": ["list", "new", "select", "close", "close_browser"],
                 "description": "Default list",
             },
-            "tab": {"type": "string", "description": "Tab id for select or close"},
-            "url": {"type": "string", "description": "URL to open in a new tab"},
+            "tab": {
+                "type": "string",
+                "description": 'Tab id for select or close; else ""',
+            },
+            "url": {
+                "type": "string",
+                "description": 'URL for new; else ""',
+            },
         },
     },
     "browser_eval": {
@@ -572,8 +599,11 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "type": "string",
                 "description": "JavaScript expression or function; with ref it gets the element",
             },
-            "ref": {"type": "string", "description": "Element passed to the function"},
-            "tab": {"type": "string", "description": "Tab id; default active tab"},
+            "ref": {
+                "type": "string",
+                "description": 'Element passed to the function; "" = none',
+            },
+            "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
         "required": ["expression"],
     },

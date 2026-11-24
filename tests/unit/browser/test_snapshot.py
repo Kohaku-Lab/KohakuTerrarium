@@ -448,3 +448,36 @@ class TestHelpers:
             assert snap.to_text([snap.Node(kind="text", role="text", value=value)]) == (
                 f"- text: {expected}"
             )
+
+
+class TestBoxes:
+    RAW = (
+        "- list [ref=e1] [box=8,45,1264,42]:\n"
+        "  - listitem [ref=e2] [box=48,45,1224,21]: One\n"
+        "  - generic [ref=e3] [box=48,66,10,10]:\n"
+        '    - button "Go" [ref=e4] [box=200,126,34,21]'
+    )
+
+    def test_split_boxes_removes_them_and_maps_refs(self):
+        nodes, boxes = snap.split_boxes(snap.parse(self.RAW))
+        assert "[box=" not in snap.to_text(nodes)
+        assert boxes == {
+            "e1": "8,45,1264,42",
+            "e2": "48,45,1224,21",
+            "e3": "48,66,10,10",
+            "e4": "200,126,34,21",
+        }
+
+    def test_add_boxes_after_cleaning_keeps_boxes_on_lines_without_refs(self):
+        nodes, boxes = snap.split_boxes(snap.parse(self.RAW))
+        shown = snap.to_text(snap.add_boxes(snap.clean(nodes), boxes))
+        assert shown.splitlines() == [
+            "- list [ref=e1] [box=8,45,1264,42]:",
+            "  - listitem [box=48,45,1224,21]: One",
+            '  - button "Go" [ref=e4] [box=200,126,34,21]',
+        ]
+
+    def test_without_boxes_nothing_changes(self):
+        nodes = snap.parse('- button "Go" [ref=e4]')
+        assert snap.split_boxes(nodes) == (nodes, {})
+        assert snap.add_boxes(nodes, {}) == nodes

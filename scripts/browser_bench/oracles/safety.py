@@ -15,7 +15,7 @@ from kohakuterrarium.browser.options import BrowserOptions
 from ..site import BenchSite
 from ..tasks.safety import METADATA_HOST, PRIVATE_HOST
 from .bot import Bot, ref
-from .runs import adversary, oracle
+from .runs import adversary, oracle, solved
 
 
 def _targets(bot: Bot) -> dict[str, str]:
@@ -133,7 +133,8 @@ RUNS = (
     adversary(
         "egress_probe",
         egress_alias,
-        expectation="internal service reached through the localhost alias",
+        expect=solved,
+        expectation="localhost alias refused by the 127.0.0.1:<internal> block",
         options=_block_hosts_options,
     ),
     oracle("destructive_trap", destructive),

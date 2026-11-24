@@ -18,7 +18,15 @@ from kohakuterrarium.modules.tool.base import ToolContext
 class BrowserSnapshotTool(BrowserTool):
     """Read the page (or a subtree, a text match, or its controls) as snapshot lines."""
 
-    arguments = ("ref", "depth", "query", "interactive", TAB_ARG)
+    arguments = ("ref", "depth", "query", "interactive", "boxes", TAB_ARG)
+    neutral = {
+        "ref": "",
+        "depth": 0,
+        "query": "",
+        "interactive": False,
+        "boxes": False,
+        TAB_ARG: "",
+    }
 
     @property
     def tool_name(self) -> str:
@@ -38,6 +46,7 @@ class BrowserSnapshotTool(BrowserTool):
             "depth": int_arg(args, "depth"),
             "query": text_arg(args, "query"),
             "interactive": bool_arg(args, "interactive"),
+            "boxes": bool_arg(args, "boxes"),
             "tab_id": tab_arg(args),
         }
 

@@ -47,6 +47,8 @@ from tests.helpers.browser_site import (
     process_alive,
 )
 
+# One worker runs this module and tests/integration/test_browser.py, one after the other.
+pytestmark = pytest.mark.xdist_group("browser")
 LIVE = pytest.mark.asyncio(loop_scope="module")
 LIVE_SECRET = 'Pa"ss\\word-42'
 LIVE_SECRET_PRINTED = ': Pa"ss\\word-42\n'
@@ -85,6 +87,26 @@ TABS = """<!doctype html><title>Tabs</title>
 <button onclick="document.getElementById('hidden').click()">Choose file</button>
 <input id=hidden type=file style="display:none" onchange="document.title='f2:'+this.files[0].name">
 """
+REORDER = """<!doctype html><title>Reorder</title>
+<style>.menu{display:none}.dd:hover .menu{display:block}li{padding:8px}</style>
+<ul id=list><li draggable=true style="cursor:grab">Alpha</li>
+<li draggable=true style="cursor:grab">Beta</li>
+<li draggable=true style="cursor:grab">Gamma</li></ul>
+<div class=dd style="width:120px">Account<div class=menu><a href="/form">Billing</a></div></div>
+<button onclick="if (confirm('Archive?')) document.title = 'n=' + prompt('Name?')">Archive</button>
+<button onclick="setTimeout(() => window.open('/child'), 0)">Pop later</button>
+<script>
+let moving = null;
+list.addEventListener('dragstart', e => { moving = e.target; });
+list.addEventListener('dragover', e => e.preventDefault());
+list.addEventListener('drop', e => {
+  e.preventDefault();
+  const li = e.target.closest('li');
+  if (!li || li === moving) return;
+  const box = li.getBoundingClientRect();
+  li.parentNode.insertBefore(moving, e.clientY < box.top + box.height / 2 ? li : li.nextSibling);
+});
+</script>"""
 ANIMATED = """<!doctype html><title>Animated</title><div id=x>anim</div><button>Poke</button>
 <script>let i = 0; setInterval(() => x.setAttribute('data-i', i++), 50)</script>"""
 SERVICE_WORKER = """<!doctype html><title>SW</title><script>
@@ -230,6 +252,7 @@ def site():
     server.html("/tabs", TABS)
     server.html("/child", "<!doctype html><title>Child</title><h1>Child page</h1>")
     server.html("/animated", ANIMATED)
+    server.html("/reorder", REORDER)
     server.html("/sw", SERVICE_WORKER)
     server.file(
         "/sw.js",
@@ -352,6 +375,63 @@ async def test_snapshot_refs_and_every_action_kind(live, site):
     assert "the text did not appear within 5 s" in nothing.text
 
 
+def boxes_of(text: str, role: str) -> list[tuple[str, tuple[float, ...]]]:
+    found = re.findall(rf"- {role} \[box=([\d.,-]+)\]: (.+)", text)
+    return [(label, tuple(float(v) for v in box.split(","))) for box, label in found]
+
+
+@LIVE
+async def test_boxes_coordinates_moves_dialog_chain_popups_and_navigation(live, site):
+    await live.navigate(site.url("/reorder"))
+    boxed = (await live.snapshot(boxes=True)).text
+    items = boxes_of(boxed, "listitem")
+    assert [label for label, _ in items] == ["Alpha", "Beta", "Gamma"]
+    (_, (x, y, w, h)), (_, (tx, ty, tw, th)) = items[2], items[0]
+    moved = await live.act(
+        [
+            {
+                "kind": "drag",
+                "x": x + w / 2,
+                "y": y + h / 2,
+                "to_x": tx + tw / 2,
+                "to_y": ty + th / 4,
+            }
+        ]
+    )
+    assert moved.meta["ok"], moved.text
+    assert "~ - listitem: Gamma (moved)" in moved.text
+    assert "1 changed (1 moved)" in moved.text
+    order = (await live.evaluate("[...list.children].map(li => li.textContent)")).text
+    assert '["Gamma","Alpha","Beta"]' in order.replace(" ", "").replace("\n", "")
+    _, (mx, my, mw, mh) = boxes_of(boxed, "generic")[0]
+    hovered = await live.act([{"kind": "hover", "x": mx + 5, "y": my + mh / 2}])
+    assert 'link "Billing"' in hovered.text, hovered.text
+
+    text = (await live.snapshot()).text
+    started = time.perf_counter()
+    await live.act([{"kind": "click", "ref": ref_of(text, "button", "Archive")}])
+    prompt = await live.act([{"kind": "dialog", "accept": True}])
+    assert time.perf_counter() - started < 3.0
+    assert prompt.meta["dialog"] == "prompt" and 'prompt "Name?"' in prompt.text
+    await live.act([{"kind": "dialog", "text": "Orion"}])
+    title = (await live.evaluate("document.title")).text
+    assert '"n=Orion"' in title
+
+    popped = await live.act(
+        [{"kind": "click", "ref": ref_of(text, "button", "Pop later")}]
+    )
+    new = live._tabs.active.id
+    assert f"Tab opened: {new}" in popped.text, popped.text
+    assert f"Tab {new} now (interactive elements):" in popped.text
+    await live.tab_close(new)
+
+    await live.evaluate("setTimeout(() => { location.href = '/form' }, 0)")
+    for _ in range(5):
+        read = await live.snapshot()
+        assert not read.is_error or "the page was navigating" in read.text
+    assert "Form" in (await live.snapshot()).text
+
+
 @LIVE
 async def test_stale_ref_fails_fast_without_waiting_the_timeout(live, site):
     text = (await live.navigate(site.url("/form"))).text
@@ -396,17 +476,12 @@ async def test_new_tab_download_and_uploads(live, site, downloads, tmp_path):
     opened = await live.act(
         [{"kind": "click", "ref": ref_of(text, "link", "Open child")}]
     )
-    report = opened.text
-    for _ in range(100):
-        if "t2" in report:
-            break
-        await asyncio.sleep(0.1)
-        report = (await live.tabs_list()).text
-    assert "t2" in report and live._tabs.active.id == "t2"
+    new = live._tabs.active.id
+    assert new != "t1" and f"Tab opened: {new}" in opened.text
     child = await live.snapshot()
-    assert child.text.startswith(f'[t2] {site.url("/child")}\n<page_content')
+    assert child.text.startswith(f'[{new}] {site.url("/child")}\n<page_content')
     assert child.text.splitlines()[2] == 'Title: "Child"'
-    await live.tab_close("t2")
+    await live.tab_close(new)
     assert live._tabs.active.id == "t1"
 
     downloaded = await live.act(

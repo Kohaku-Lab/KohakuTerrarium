@@ -400,3 +400,39 @@ def test_decision_truthiness_and_text():
     assert not denied
     assert ALLOWED
     assert str(denied) == "private: address 10.0.0.1 is private"
+
+
+class TestAddressBlockPatterns:
+    def policy(self, *block):
+        return NetworkPolicy(block_hosts=block, allow_loopback=True, allow_private=True)
+
+    @pytest.mark.parametrize(
+        "pattern,address,port,blocked",
+        [
+            ("127.0.0.1:8001", "127.0.0.1", 8001, True),
+            ("127.0.0.1:8001", "127.0.0.1", 8002, False),
+            ("127.0.0.1", "127.0.0.1", 9, True),
+            ("127.0.0.1", "::ffff:127.0.0.1", 9, True),
+            ("[::ffff:127.0.0.1]:80", "127.0.0.1", 80, True),
+            ("[::1]", "::1", 443, True),
+            ("10.0.0.5", "10.0.0.6", 80, False),
+            ("example.test", "127.0.0.1", 80, False),
+        ],
+    )
+    def test_ip_literal_patterns_apply_to_resolved_addresses(
+        self, pattern, address, port, blocked
+    ):
+        decision = self.policy(pattern).check_address(address, port)
+        assert decision.allowed is not blocked
+        if blocked:
+            assert decision.code == "blocked_host"
+            assert "block_hosts" in decision.reason
+
+    def test_without_a_port_only_portless_patterns_apply(self):
+        assert self.policy("127.0.0.1:8001").check_address("127.0.0.1").allowed
+        assert not self.policy("127.0.0.1").check_address("127.0.0.1").allowed
+
+    def test_check_url_with_an_ip_literal_honours_the_port(self):
+        policy = self.policy("[::ffff:127.0.0.1]:8001")
+        assert policy.check_url("http://127.0.0.1:8001/").code == "blocked_host"
+        assert policy.check_url("http://127.0.0.1:8002/")
