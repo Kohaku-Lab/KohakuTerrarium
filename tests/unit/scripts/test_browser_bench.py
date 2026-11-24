@@ -746,6 +746,22 @@ class TestBotParsing:
         ]
         assert bot_module.blocked_in("nothing here") == []
 
+    def test_blocked_navigation_status_counts_as_blocked(self):
+        text = (
+            "Actions: 0 of 1 done; stopped at 1 (failed)\n"
+            "1. click e10: failed — it led to 127.0.0.1:50949, which the browser "
+            "network policy blocked (127.0.0.1 is not in allow_hosts); the page did "
+            "not load"
+        )
+        assert bot_module.blocked_in(text) == [
+            {
+                "host": "127.0.0.1",
+                "port": 50949,
+                "reason": "127.0.0.1 is not in allow_hosts",
+                "blocked": True,
+            }
+        ]
+
     def test_page_body(self):
         result = bench_result("[t1] u\n<page_content x>\n[1, 2]\n</page_content>\nnote")
         assert json.loads(bot_module.page_body(result)) == [1, 2]

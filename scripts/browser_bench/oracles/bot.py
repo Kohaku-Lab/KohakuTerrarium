@@ -24,6 +24,10 @@ _LINE = re.compile(
 )
 _ATTR = re.compile(r"\[([^\]=]+)(?:=([^\]]*))?\]")
 _BLOCKED_ITEM = re.compile(r"^\s+(?P<host>\S+?):(?P<port>\d+) \((?P<reason>.*)\)$")
+_BLOCKED_LANDING = re.compile(
+    r"it led to (?P<host>\S+?):(?P<port>\d+), which the browser network policy "
+    r"blocked \((?P<reason>.*)\); the page did not load"
+)
 
 
 class OracleError(AssertionError):
@@ -156,7 +160,11 @@ def page_body(result: BrowserResult) -> str:
 
 
 def blocked_in(text: str) -> list[dict[str, Any]]:
-    """``{"host", "port", "reason", "blocked"}`` per entry of a result's ``Blocked N`` list."""
+    """``{"host", "port", "reason", "blocked"}`` per blocked request a result names.
+
+    That is each entry of its ``Blocked N`` list and each action whose page
+    the network policy blocked.
+    """
     out = []
     listing = False
     for line in text.splitlines():
@@ -164,6 +172,7 @@ def blocked_in(text: str) -> list[dict[str, Any]]:
             listing = True
             continue
         match = _BLOCKED_ITEM.match(line) if listing else None
+        match = match or _BLOCKED_LANDING.search(line)
         if match:
             host = match.group("host").strip("[]")
             out.append(
