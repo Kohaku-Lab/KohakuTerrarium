@@ -215,6 +215,9 @@ class BrowserDriver(Protocol):
     async def responsive(self, timeout: float) -> bool:
         """Whether the browser process answers a round trip within ``timeout``."""
 
+    async def process_ids(self) -> list[int]:
+        """Ids of every browser process, the browser process first."""
+
     async def new_page(self, timeout: float) -> PageDriver: ...
 
     async def close_context(self) -> None: ...

@@ -692,7 +692,7 @@ async def crash_and_recover(live, site):
     for part in (LIVE_SECRET, LIVE_SECRET_PRINTED, "ss\\\\word"):
         assert part not in shown.text + typed.text
     old_tabs = {tab.id for tab in live._tabs}
-    pids = await within(live._stack.browser.process_ids(), "process_ids")
+    pids = await live.process_ids()
     assert pids and all(process_alive(pid) for pid in pids[:1])
     for pid in pids:
         kill_process(pid)
@@ -700,7 +700,7 @@ async def crash_and_recover(live, site):
     assert recovered.text.count("Browser state was lost") == 1, recovered.text
     tabs = {tab.id for tab in live._tabs}
     assert tabs and tabs.isdisjoint(old_tabs), (old_tabs, tabs)
-    fresh = await within(live._stack.browser.process_ids(), "process_ids")
+    fresh = await live.process_ids()
     assert set(fresh).isdisjoint(pids)
     await live.close()
     assert live.state == "closed"

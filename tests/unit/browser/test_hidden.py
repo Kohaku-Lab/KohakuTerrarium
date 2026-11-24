@@ -285,6 +285,7 @@ class TestApplyProbe:
         assert outcome.dropped == 16
 
 
+@pytest.mark.xdist_group("browser")
 class TestProbeInChromium:
     def test_probe_finds_every_technique_and_spares_visible_text(self, chromium_page):
         page = chromium_page

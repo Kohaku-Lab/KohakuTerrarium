@@ -127,9 +127,7 @@ def page_line(text: str, index: int = 2) -> str:
 
 async def browser_pids(plugin) -> list[int]:
     """Every process of the plugin's running browser, the browser process first."""
-    stack = plugin.session._stack
-    assert stack is not None and stack.browser is not None
-    pids = await within(stack.browser.process_ids(), "process_ids")
+    pids = await within(plugin.session.process_ids(), "process_ids")
     assert pids and process_alive(pids[0])
     return pids
 

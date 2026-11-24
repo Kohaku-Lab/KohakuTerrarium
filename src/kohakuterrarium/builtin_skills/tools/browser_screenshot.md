@@ -35,12 +35,14 @@ text line with the tab, URL, size and format.
 
 ### Without image input
 
-The text part stands on its own: tab, URL, size and format. A model that
-cannot see images should read the page with `browser_snapshot`.
+The text part stands on its own: tab, URL, size, format and where the image
+was saved. The image is attached when the tool format carries images (native
+tool calls); text tool formats pass on the text only. Without the image, read
+the saved file or the page with `browser_snapshot`.
 
 ### Errors
 
 - A stale `ref` returns an error naming it and no image; take a snapshot.
-- `ref` and `full_page` together are refused.
+- With both `ref` and `full_page`, `ref` wins.
 - A `path` outside the working directory goes through the same checks as
   other file writes.

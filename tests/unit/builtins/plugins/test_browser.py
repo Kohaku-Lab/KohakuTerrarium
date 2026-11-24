@@ -479,6 +479,40 @@ class TestSandboxWiring:
         assert driver.alive() == [] and plugin.session.state == "new"
         await plugin.on_unload()
 
+    async def test_empty_path_and_files_reach_no_sandbox_path_check(self, tmp_path):
+        plugin, driver = scripted_plugin()
+        manager = PluginManager()
+        manager.register(SandboxPlugin(options={"fs_write": "deny"}))
+        manager.register(plugin)
+        await manager.load_all(plugin_context(tmp_path, manager))
+        tools = {tool.tool_name: tool for tool in plugin.contribute_tools()}
+        context = manager_context(manager, tmp_path)
+        nav = tools["browser_navigate"]
+        await wrapped(manager, nav, context)({"url": "http://shop.test/"}, context)
+        shot = tools["browser_screenshot"]
+        filled = {"ref": "", "full_page": False, "path": "", "tab": ""}
+        for path in ("", "  "):
+            result = await wrapped(manager, shot, context)(
+                {**filled, "path": path}, context
+            )
+            assert result.error is None, result.error
+            assert result.metadata["session_metadata"]["browser"]["ok"] is True
+        with pytest.raises(PluginBlockError, match="shot.png"):
+            await wrapped(manager, shot, context)(
+                {**filled, "path": "shot.png"}, context
+            )
+        assert not (tmp_path / "shot.png").exists()
+        act = tools["browser_act"]
+        for files in ("", [], "[]"):
+            changed = await plugin.pre_tool_execute(
+                {"actions": [], "files": files, "tab": ""},
+                tool_name="browser_act",
+                tool=act,
+                context=context,
+            )
+            assert changed == {"actions": [], "tab": ""}
+        await manager.unload_all()
+
     async def test_files_given_as_text_are_checked_by_the_sandbox_as_paths(
         self, tmp_path
     ):

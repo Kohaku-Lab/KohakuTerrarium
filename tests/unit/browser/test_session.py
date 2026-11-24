@@ -113,6 +113,20 @@ class TestLifecycle:
         listing = await second
         assert len(driver.plans) == 1 and listing.meta["tabs"][0]["tab"] == "t1"
 
+    async def test_process_ids_follow_the_running_browser(self, made):
+        session, driver = made
+        assert await session.process_ids() == []
+        await session.snapshot()
+        first = await session.process_ids()
+        assert first and first == driver.browser.pids
+        await session.close_browser()
+        assert await session.process_ids() == []
+        await session.snapshot()
+        second = await session.process_ids()
+        assert second == driver.browser.pids and set(second).isdisjoint(first)
+        await session.close()
+        assert await session.process_ids() == []
+
     async def test_tabs_list_never_launches(self, made):
         session, driver = made
         result = await session.tabs_list()

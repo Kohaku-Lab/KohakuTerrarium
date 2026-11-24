@@ -335,6 +335,16 @@ class TestScreenshot:
         text = result.get_text_output()
         assert "1280x800" in text and "browser_snapshot" in text
 
+    async def test_text_is_true_whether_or_not_the_image_reaches_the_model(self, env):
+        _, _, run = env
+        unsaved = (await run("browser_screenshot", {})).output[0].text
+        saved = (await run("browser_screenshot", {"path": "s.png"})).output[0].text
+        for text in (unsaved, saved):
+            assert "follows" not in text
+            assert "attached when your tool format carries images" in text
+        assert "pass a path to save it" in unsaved
+        assert "read the saved file" in saved and "pass a path" not in saved
+
     async def test_budget_is_passed_and_full_page_is_capped(self, env):
         _, driver, run = env
         await run("browser_screenshot", {"full_page": "true"})

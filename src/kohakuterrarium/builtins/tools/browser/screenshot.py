@@ -25,9 +25,10 @@ PATH_ARG = "path"
 SCREENSHOT_MAX_BYTES = 512_000
 # Context the creature looked at: kept for the model, folded with the tool block.
 MEDIA_POLICY = MediaPolicy(persist=True, pinned=False, inline_fallback=True)
-TEXT_HINT = (
-    "The image follows. Without image input, read the page with browser_snapshot "
-    "instead."
+IMAGE_NOTE = "The image is attached when your tool format carries images"
+SAVED_HINT = f"{IMAGE_NOTE}; otherwise read the saved file or use browser_snapshot."
+UNSAVED_HINT = (
+    f"{IMAGE_NOTE}; otherwise use browser_snapshot, or pass a path to save it."
 )
 
 
@@ -92,7 +93,7 @@ class BrowserScreenshotTool(BrowserTool):
             else:
                 lines.append(f"Saved to {path} ({result.mime_type}).")
                 meta["saved_to"] = str(path)
-        lines.append(TEXT_HINT)
+        lines.append(SAVED_HINT if "saved_to" in meta else UNSAVED_HINT)
         data = base64.b64encode(result.image).decode("ascii")
         image = ImagePart(
             url=f"data:{result.mime_type};base64,{data}",

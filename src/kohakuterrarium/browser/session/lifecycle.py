@@ -117,6 +117,23 @@ class SessionLifecycleMixin:
         """The network policy this session's proxy enforces."""
         return self.options.network_policy(self._external_check)
 
+    async def process_ids(self) -> list[int]:
+        """Ids of the running browser's processes, browser process first.
+
+        Empty when no browser is running or it does not answer within the
+        action timeout; never launches one.
+        """
+        stack = self._stack
+        if stack is None or stack.browser is None:
+            return []
+        try:
+            return await asyncio.wait_for(
+                stack.browser.process_ids(), self.options.action_timeout_s
+            )
+        except Exception as exc:
+            logger.debug("Reading browser process ids failed", error=str(exc))
+            return []
+
     async def drop_connections(self) -> None:
         """Cut the running browser's open proxy connections; new ones are judged afresh."""
         stack = self._stack

@@ -44,8 +44,9 @@ containers carry refs such as `[ref=e12]` (`f1e3` inside frames).
 - Text hidden from sight (zero opacity, off-screen, same colour as the
   background) is dropped, and the result says how many blocks were dropped.
   Interactive elements are always kept.
-- Password field values and configured secrets show as `[redacted]` or
-  `[secret:name]`.
+- A password field's value shows as `(redacted)`, a configured secret as
+  `[secret:name]`, and a password value repeated elsewhere (a title, a URL)
+  as `[redacted]`.
 
 ### Errors
 

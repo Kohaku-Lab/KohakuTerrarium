@@ -23,7 +23,10 @@ from kohakuterrarium.builtins.tools.browser.act import FILES_ARG, BrowserActTool
 from kohakuterrarium.builtins.tools.browser.common import SERVICE, files_list
 from kohakuterrarium.builtins.tools.browser.eval import BrowserEvalTool
 from kohakuterrarium.builtins.tools.browser.navigate import BrowserNavigateTool
-from kohakuterrarium.builtins.tools.browser.screenshot import BrowserScreenshotTool
+from kohakuterrarium.builtins.tools.browser.screenshot import (
+    PATH_ARG,
+    BrowserScreenshotTool,
+)
 from kohakuterrarium.builtins.tools.browser.snapshot import BrowserSnapshotTool
 from kohakuterrarium.builtins.tools.browser.tabs import BrowserTabsTool
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
@@ -36,6 +39,7 @@ logger = get_logger(__name__)
 CLOSED = "closed"
 DOWNLOADS_DIR = "browser-downloads"
 ACT_TOOL = "browser_act"
+SCREENSHOT_TOOL = "browser_screenshot"
 OPTIONAL_TEXT = ("channel", "executable_path", "profile_dir")
 PROMPT = (
     "## Browser pages\n\n"
@@ -233,18 +237,22 @@ class BrowserPlugin(BasePlugin):
             self._spawn(session.close())
 
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
-        """Follow the sandbox on every call; give the sandbox ``files`` as a path list."""
+        """Follow the sandbox on every call; show the sandbox only real file paths.
+
+        ``files`` given as text becomes a path list; an empty ``files`` or a
+        blank screenshot ``path`` (a fully filled call's "not given") is dropped,
+        so the sandbox does not check the working directory in its place.
+        """
         context = kwargs.get("context")
         if context is not None:
             await self._follow_sandbox(getattr(context, "runtime_services", None))
-        if kwargs.get("tool_name") != ACT_TOOL or not isinstance(
-            args.get(FILES_ARG), str
-        ):
-            return None
-        try:
-            return {**args, FILES_ARG: files_list(args[FILES_ARG])}
-        except ValueError:
-            return None
+        tool_name = kwargs.get("tool_name")
+        if tool_name == ACT_TOOL:
+            return _files_for_sandbox(args)
+        path = args.get(PATH_ARG)
+        if tool_name == SCREENSHOT_TOOL and isinstance(path, str) and not path.strip():
+            return {k: v for k, v in args.items() if k != PATH_ARG}
+        return None
 
     async def prepare(self, context: Any) -> BrowserSession:
         """Gate one tool call: closed session, host resources, sandbox; then the session."""
@@ -305,3 +313,18 @@ class BrowserPlugin(BasePlugin):
             return
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
+
+
+def _files_for_sandbox(args: dict) -> dict | None:
+    """``args`` with ``files`` as a path list, or without it when it names no file."""
+    files = args.get(FILES_ARG)
+    if isinstance(files, str):
+        try:
+            files = files_list(files)
+        except ValueError:
+            return None
+    elif not isinstance(files, (list, tuple)):
+        return None
+    if not files:
+        return {k: v for k, v in args.items() if k != FILES_ARG}
+    return None if files is args[FILES_ARG] else {**args, FILES_ARG: files}

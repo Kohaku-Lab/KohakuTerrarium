@@ -331,6 +331,8 @@ class ScriptedBrowser:
         self.fail_stages: set[str] = set()
         self.page_list: list[ScriptedPage] = []
         self._hung: list[asyncio.Future] = []
+        first = 4000 + 10 * len(driver.browsers)
+        self.pids = [first, first + 1, first + 2]
 
     def start(self) -> None:
         page = ScriptedPage(self)
@@ -358,6 +360,9 @@ class ScriptedBrowser:
 
     def is_connected(self) -> bool:
         return self.connected
+
+    async def process_ids(self) -> list[int]:
+        return list(self.pids) if self.connected else []
 
     async def responsive(self, timeout: float) -> bool:
         self.probes += 1
