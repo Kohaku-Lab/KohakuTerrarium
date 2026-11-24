@@ -148,6 +148,11 @@ browser = [
     "crawl4ai>=0.8.0",
 ]
 
+# The browser plugin's interactive Chromium (then: playwright install chromium).
+browser-use = [
+    "playwright>=1.64",
+]
+
 # Everything, including pytorch-based embeddings.
 embeddings-heavy = [
     "sentence-transformers>=5.0.0",
@@ -165,7 +170,7 @@ ktui = [
 ]
 
 full = [
-    "KohakuTerrarium[demo,browser,embeddings-heavy,desktop,litellm,ktui,antigravity]",
+    "KohakuTerrarium[demo,browser,browser-use,embeddings-heavy,desktop,litellm,ktui,antigravity]",
 ]
 
 # Testing and linting.

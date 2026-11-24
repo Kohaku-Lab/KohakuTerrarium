@@ -15,6 +15,10 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.builtins.plugins.apps.plugin import FULL_PAGE_PART
+from kohakuterrarium.builtins.plugins.browser.plugin import (
+    PROMPT as BROWSER_PROMPT,
+    BrowserPlugin,
+)
 from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
     inline_ui_section,
 )
@@ -112,6 +116,10 @@ class TestPromptBudget:
             assert "## Calling functions" not in prompt
             assert "## Output format" not in prompt
 
+            # The browser plugin is off by default and costs nothing while off.
+            assert not [s.name for s in schemas if s.name.startswith("browser_")]
+            assert "browser_" not in prompt and "page_content" not in prompt
+
             # Solo creature: no graph sections at all.
             assert "Working with the group" not in prompt
             assert "Growing the group" not in prompt
@@ -183,6 +191,15 @@ class TestPromptBudget:
         assert len(app_tool.prompt_contribution()) <= MAX_WIDGET_GUIDANCE_CHARS
         assert len(json.dumps(_BUILTIN_SCHEMAS["show_app"])) <= MAX_SCHEMA_CHARS
         assert len(app_tool.description) <= 160
+
+        # ── the browser plugin's tools and prompt block, when it is on ──
+        browser = BrowserPlugin()
+        for tool in browser.contribute_tools():
+            schema = json.dumps(_BUILTIN_SCHEMAS[tool.tool_name])
+            assert len(schema) <= MAX_SCHEMA_CHARS, (tool.tool_name, len(schema))
+            assert len(tool.description) <= 160
+            assert tool.prompt_contribution() is None
+        assert len(BROWSER_PROMPT) <= MAX_TOOL_GUIDANCE_CHARS
 
     @pytest.mark.asyncio
     async def test_per_tool_full_override_costs_only_that_tool(

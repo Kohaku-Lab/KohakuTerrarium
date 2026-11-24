@@ -448,6 +448,135 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "timeout_s": {"type": "number", "description": "Bound the wait"},
         },
     },
+    "browser_navigate": {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "http or https URL to open"},
+            "action": {
+                "type": "string",
+                "enum": ["back", "forward", "reload"],
+                "description": "History step instead of a url",
+            },
+            "tab": {"type": "string", "description": "Tab id; default active tab"},
+        },
+    },
+    "browser_snapshot": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Only this element's subtree"},
+            "depth": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Levels to show below the root",
+            },
+            "query": {
+                "type": "string",
+                "description": "Only lines matching this text, with ancestors",
+            },
+            "interactive": {
+                "type": "boolean",
+                "description": "Only interactive elements",
+            },
+            "tab": {"type": "string", "description": "Tab id; default active tab"},
+        },
+    },
+    "browser_act": {
+        "type": "object",
+        "properties": {
+            "actions": {
+                "type": "array",
+                "description": "Run in order; stops at the first failure",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "click",
+                                "type",
+                                "select",
+                                "check",
+                                "press",
+                                "hover",
+                                "scroll",
+                                "drag",
+                                "upload",
+                                "wait",
+                                "dialog",
+                            ],
+                        },
+                        "ref": {"type": "string"},
+                        "text": {"type": "string"},
+                        "secret": {"type": "string"},
+                        "submit": {"type": "boolean"},
+                        "slowly": {"type": "boolean"},
+                        "values": {"type": "array", "items": {"type": "string"}},
+                        "checked": {"type": "boolean"},
+                        "key": {"type": "string"},
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "button": {
+                            "type": "string",
+                            "enum": ["left", "right", "middle"],
+                        },
+                        "double": {"type": "boolean"},
+                        "modifiers": {"type": "array", "items": {"type": "string"}},
+                        "dx": {"type": "number"},
+                        "dy": {"type": "number"},
+                        "to": {"type": "string"},
+                        "files": {"type": "array", "items": {"type": "integer"}},
+                        "seconds": {"type": "number"},
+                        "text_gone": {"type": "string"},
+                        "accept": {"type": "boolean"},
+                    },
+                    "required": ["kind"],
+                },
+            },
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Paths that upload actions index into",
+            },
+            "tab": {"type": "string", "description": "Tab id; default active tab"},
+        },
+        "required": ["actions"],
+    },
+    "browser_screenshot": {
+        "type": "object",
+        "properties": {
+            "ref": {"type": "string", "description": "Only this element"},
+            "full_page": {
+                "type": "boolean",
+                "description": "Whole page, height-capped",
+            },
+            "path": {"type": "string", "description": "Also save the image here"},
+            "tab": {"type": "string", "description": "Tab id; default active tab"},
+        },
+    },
+    "browser_tabs": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "new", "select", "close", "close_browser"],
+                "description": "Default list",
+            },
+            "tab": {"type": "string", "description": "Tab id for select or close"},
+            "url": {"type": "string", "description": "URL to open in a new tab"},
+        },
+    },
+    "browser_eval": {
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": "JavaScript expression or function; with ref it gets the element",
+            },
+            "ref": {"type": "string", "description": "Element passed to the function"},
+            "tab": {"type": "string", "description": "Tab id; default active tab"},
+        },
+        "required": ["expression"],
+    },
     "show_card": {
         "type": "object",
         "properties": {

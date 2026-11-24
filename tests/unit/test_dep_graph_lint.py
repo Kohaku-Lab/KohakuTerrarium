@@ -47,6 +47,22 @@ def test_dep_graph_passes_all_gates(monkeypatch):
         "`python scripts/dep_graph.py --lint-imports` for the full list"
     )
 
+    # The browser runtime is a library: it never reaches the top tiers.
+    assert dep_graph.check_tier_violations(
+        {"kohakuterrarium.browser.session": {"kohakuterrarium.studio.studio"}}
+    ) == [
+        (
+            "kohakuterrarium.browser.session",
+            "kohakuterrarium.studio.studio",
+            "browser",
+            "studio",
+        )
+    ]
+    browser_tier = [
+        v for v in dep_graph.check_tier_violations(runtime) if v[2] == "browser"
+    ]
+    assert browser_tier == [], browser_tier
+
 
 def test_allowlist_entries_are_line_free_and_live(monkeypatch):
     """Every allowlist entry matches by file+function+target and still

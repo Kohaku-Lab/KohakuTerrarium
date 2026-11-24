@@ -392,6 +392,8 @@ def _matches(entry: dict, fact: dict) -> bool:
 #   ``bootstrap``, ``compose``, ``terrarium``, ``packages``) cannot
 #   import it, and ``studio/`` cannot import ``api/`` or ``cli/``.
 # - ``api/`` and ``cli/`` are top tiers — every other tier is below.
+# - ``browser/`` is the browser runtime library; like ``packages/`` it
+#   cannot reach into ``studio/``, ``api/``, or ``cli/``.
 #
 # Lower tiers below ``studio/`` are peers: the existing dependency
 # edges between e.g. ``core`` and ``bootstrap`` are not regulated
@@ -399,6 +401,7 @@ def _matches(entry: dict, fact: dict) -> bool:
 
 # Mapping from tier root → set of tier roots it MAY NOT import.
 FORBIDDEN_TIER_TARGETS: dict[str, set[str]] = {
+    "browser": {"studio", "api", "cli"},
     "core": {"studio", "api", "cli"},
     "bootstrap": {"studio", "api", "cli"},
     "compose": {"studio", "api", "cli"},
