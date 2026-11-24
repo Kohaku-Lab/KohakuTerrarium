@@ -78,7 +78,7 @@ Six tools, split by risk class so name-based gating is meaningful.
 
 | Tool | Class | Purpose |
 |------|-------|---------|
-| `browser_navigate` | egress | `action` = `goto` (default, opens `url`) / `back` / `forward` / `reload` (which ignore `url`). Returns the page header and a compact snapshot. |
+| `browser_navigate` | egress | `action` = `goto` (default, opens `url`) / `back` / `forward` / `reload` (which ignore `url`). Returns the page header and the page text (the cleaned snapshot), or its interactive elements when it is longer than `PAGE_TEXT_MAX_CHARS` (8000). |
 | `browser_snapshot` | read | Current page as a snapshot. Filters: `ref` (subtree), `depth` (0 = no limit), `query` (text match, keeps ancestors), `interactive` (interactive elements only); `boxes` adds `[box=x,y,w,h]` in viewport CSS pixels. |
 | `browser_act` | mutate | `actions`: an ordered batch. Runs in order, stops at the first failure, reports the rest as not executed. Returns per-action status and a delta. `files`: paths for upload actions. |
 | `browser_screenshot` | read | Viewport by default; `ref` for one element (wins over `full_page`); `full_page` capped in height; optional `path` to save. Returns an image part after a text line that stands alone. |
@@ -146,15 +146,32 @@ and the kind of a pending dialog, nothing the page chose. The title is the
 first line inside the wrapper. A later history stub still says where the
 browser was.
 
-**Delta after `browser_act`.** Not a full snapshot. URL and title change, tabs
-opened (with the new active tab's interactive elements), dialogs, downloads,
-blocked requests, and the lines added (`+`) to or changed (`~`) in the
-snapshot, with `(moved)` on elements that changed place, capped at 40 lines
-and 3000 characters. Past the cap the result says the page changed
-substantially and to take a snapshot. A batch that lands on a new document
-shows that document's interactive elements instead.
+**Page text after a new document.** `browser_navigate`, a `browser_act`
+batch that lands on a new document, and a tab a batch opened all show the
+page's cleaned snapshot when it fits `PAGE_TEXT_MAX_CHARS` (8000 characters,
+never more than `snapshot_max_chars`), else its interactive elements plus a
+fixed note that the text was left out and how to read it. The cap came from
+the benchmark: every one of its 29 start pages fits (largest 6577, median
+about 800), while a long article or a 60-item listing does not (12000 to
+20000 and more). A model that sees the text skips a snapshot round; a page
+over the cap would cost more tokens than that round saves.
 
-**Refs.** Playwright's own (`e12`, `f1e3` inside frames). Measured behaviour
+**Delta after `browser_act`.** URL and title change, tabs opened (with the new
+active tab's page text), dialogs, downloads, blocked requests, and the lines
+added (`+`) to or changed (`~`) in the snapshot, with `(moved)` on elements
+that changed place, capped at 40 lines and 3000 characters, or `No change in
+the page snapshot.` A delta that was cut or removed more lines than it shows
+gives way to the whole page when that fits the page-text cap; otherwise past
+the cap the result says the page changed substantially and to take a
+snapshot. An action that led to a blocked host is marked failed (`it led to
+host:port, which the browser network policy blocked (reason); the page did
+not load`) and the delta becomes `Navigation blocked: from → to; the page did
+not load.`; its blocked record is not repeated under `Blocked N requests`. A
+page with no nodes adds a fixed note that it may still be loading and to
+wait.
+
+**Refs.** Playwright's own: `e12`, and `f1e12` / `f2e12` once the tab has
+loaded a new document or inside frames. Measured behaviour
 that the session must compensate for:
 
 - Acting on a stale ref waits the whole timeout before failing. The session

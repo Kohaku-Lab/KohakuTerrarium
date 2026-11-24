@@ -130,14 +130,16 @@ meaning not given, for models that must fill in every argument. See
 [guides/browser](../guides/browser.md).
 
 **`browser_navigate`**: Open a URL, or go back, forward or reload. Returns a
-header line (tab id and URL) and the page's interactive elements with refs.
+header line (tab id and URL) and the page text with refs; a page longer than
+8000 characters shows only its interactive elements.
 A URL the network policy refuses is an error naming the reason.
 
 - Args: `url` (http or https), `action` (`goto` default, `back`, `forward`,
   `reload`; the last three ignore `url`).
 
 **`browser_snapshot`**: The current page as an accessibility tree with element
-refs (`e12`; `f1e3` inside frames), hidden text dropped, password and secret
+refs (`e12`; `f1e12` / `f2e12` after the tab loads a new page or inside
+frames), hidden text dropped, password and secret
 values redacted, capped at the plugin's `snapshot_max_chars`.
 
 - Args: `ref` (one subtree), `depth` (0 = no limit), `query` (matching lines with their
@@ -147,7 +149,9 @@ values redacted, capped at the plugin's `snapshot_max_chars`.
 **`browser_act`**: Run an ordered batch of actions on one tab, stopping at the
 first failure. Returns one status line per action and the page delta (lines
 added or changed, elements marked `(moved)`, navigation, tabs opened with
-their interactive elements, dialogs, downloads, blocked requests). At most 20
+their text, dialogs, downloads, blocked requests), or the whole page when it
+loaded a new one or the delta would hide more than it shows. An action that
+led to a blocked page is reported as failed. At most 20
 actions per call. `click`, `hover` and `drag` also take viewport coordinates
 (`x` / `y`, `to_x` / `to_y`); a non-empty `ref` wins over them.
 

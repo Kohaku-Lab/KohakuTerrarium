@@ -111,12 +111,12 @@ Chromium，頁面來的文字會包在標記為不受信任的 `page_content` �
 模型使用。見 [guides/browser](../guides/browser.md)。
 
 **`browser_navigate`**：開啟 URL，或上一頁、下一頁、重新載入。回傳頁首行（分頁 id
-與 URL）以及頁面的可互動元素與 ref。網路政策拒絕的 URL 會回傳指出原因的錯誤。
+與 URL）以及帶 ref 的頁面文字；頁面超過 8000 個字元時只列可互動元素。網路政策拒絕的 URL 會回傳指出原因的錯誤。
 
 - 參數：`url`（http 或 https）、`action`（預設 `goto`，另有 `back`、`forward`、
   `reload`；後三者會忽略 `url`）。
 
-**`browser_snapshot`**：以帶元素 ref（`e12`；frame 內為 `f1e3`）的無障礙樹呈現
+**`browser_snapshot`**：以帶元素 ref（`e12`；分頁載入新頁面後或 frame 內為 `f1e12` / `f2e12`）的無障礙樹呈現
 目前頁面；隱藏文字會丟掉，密碼與密鑰的值會遮蔽，長度上限為外掛的
 `snapshot_max_chars`。
 
@@ -125,7 +125,7 @@ Chromium，頁面來的文字會包在標記為不受信任的 `page_content` �
 
 **`browser_act`**：在單一分頁上依序執行一批動作，遇到第一個失敗就停。每個動作回傳
 一行狀態，加上頁面的變化（新增或變更的行、標成 `(moved)` 的元素、導覽、新開的
-分頁及其可互動元素、對話框、下載、被擋下的請求）。每次最多 20 個動作。`click`、
+分頁及其文字、對話框、下載、被擋下的請求）；載入了新頁面、或變化會藏住的比顯示的多時，改為顯示整個頁面。導向被擋下頁面的動作會回報為失敗。每次最多 20 個動作。`click`、
 `hover`、`drag` 也接受 viewport 座標（`x` / `y`、`to_x` / `to_y`）；非空的 `ref`
 優先於座標。
 

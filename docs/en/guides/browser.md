@@ -94,7 +94,7 @@ the same way.
 
 | Tool | Kind | What it is for |
 |---|---|---|
-| `browser_navigate` | egress | Open a `url` (`action` `goto`, the default), or go `back` / `forward` / `reload`, which ignore `url`. Returns the page header and its interactive elements with refs. |
+| `browser_navigate` | egress | Open a `url` (`action` `goto`, the default), or go `back` / `forward` / `reload`, which ignore `url`. Returns the page header and the page text with refs (only the interactive elements when the page is longer than 8000 characters). |
 | `browser_snapshot` | read | Read the current page as an accessibility tree with refs. Narrow it with `ref` (one subtree), `depth` (0 for no limit), `query` (lines matching a text, with their ancestors) or `interactive` (controls only); `boxes` adds each element's position in viewport pixels. |
 | `browser_act` | mutate | Run an ordered batch of `actions` on one tab. Returns one status line per action and what changed on the page. `files` lists the paths that upload actions use. |
 | `browser_screenshot` | read | The viewport, one element (`ref`, which wins over `full_page`) or the whole page (`full_page`) as an image; `path` also saves it to a file. |
@@ -140,15 +140,19 @@ be a JSON string or the call body.
 
 ## How the tools fit together
 
-The tools are built around one loop: **snapshot first, act by ref in batches,
-read the delta.**
+The tools are built around one loop: **read the page, act by ref in
+batches, read the result.**
 
 1. **Open a page.** `browser_navigate` returns a header line (`[t1]` and the
-   URL) and the page's interactive elements, each with a ref such as `e12`
-   (`f1e3` inside a frame).
-2. **Read it.** `browser_snapshot` gives the whole page: headings, text,
-   controls. On a large page narrow it with `query` or `interactive` instead of
-   reading everything.
+   URL) and the page text, the same cleaned tree `browser_snapshot` gives,
+   with a ref on each control. A page longer than 8000 characters shows only
+   its interactive elements, with a note saying the text was left out.
+2. **Read more when needed.** `browser_snapshot` gives the whole page:
+   headings, text, controls. On a large page narrow it with `query` or
+   `interactive` instead of reading everything. Refs look like `e12`; after
+   the tab loads a new page they carry a prefix such as `f1e12` or `f2e12`,
+   and elements inside a frame carry their frame's prefix. Use refs exactly
+   as shown.
 3. **Act in one batch.** Put the steps of one intent in one `browser_act`:
    type the name, pick the plan, tick the box, click Save, then `wait` for the
    confirmation text. Actions run in order and the batch stops at the first
@@ -156,13 +160,21 @@ read the delta.**
    because tool calls from one turn run concurrently, so separate calls cannot
    express "click, then type, and stop if the click failed", and every round
    trip to the model is the slow part of a browsing task.
-4. **Read the delta.** The result is not a new snapshot. It lists the lines
-   that were added (`+`) or changed (`~`) since the snapshot before the batch,
-   elements that changed place (marked `(moved)`), URL and title changes, tabs opened, dialogs, downloads
-   and blocked requests. A batch that lands on a new page shows that page's
-   interactive elements instead. Check it for the outcome you wanted before
-   reporting success.
-5. **Fall back to pixels.** When something has no ref (a canvas, a chart, a
+4. **Read the result.** After a batch on the same page the result is a
+   delta: the lines added (`+`) or changed (`~`) since the snapshot before
+   the batch, elements that changed place (marked `(moved)`), URL and title
+   changes, tabs opened, dialogs, downloads and blocked requests, or `No
+   change in the page snapshot.` When the delta would hide more than it shows
+   (a filter that removed most rows, a closed overlay, a cut delta), the
+   result shows the whole page instead. A batch that lands on a new page, or
+   opens a tab, shows that page's text the way `browser_navigate` does. Check
+   it for the outcome you wanted before reporting success.
+5. **Long and lazy pages.** To reach the end of a long or lazily loaded page,
+   `scroll` with a large `dy` (or `press` `End`), `wait` for the new items,
+   and repeat until the result says `No change in the page snapshot.` A page
+   that shows no content yet says it may still be loading; `wait` for the
+   text you expect, then read it again.
+6. **Fall back to pixels.** When something has no ref (a canvas, a chart, a
    custom drag area), `browser_screenshot` shows it, and `click`, `hover` and
    `drag` take `x` / `y` coordinates. Screenshot pixels are CSS pixels at a
    device scale of 1, so a coordinate read off the image is the coordinate to
@@ -176,8 +188,7 @@ instead of waiting for a timeout. Take a new snapshot and use the new refs.
 ### Tabs, dialogs, downloads, uploads
 
 - **Tabs** have stable ids (`t1`, `t2`, …). A tab a click opens becomes the
-  active tab, and the action's result says so and shows its interactive
-  elements. When Chromium has announced a new window, the action waits up to
+  active tab, and the action's result says so and shows its text. When Chromium has announced a new window, the action waits up to
   3 seconds for it to open before returning.
 - **Dialogs.** `alert` and `beforeunload` are accepted for you and reported.
   A `confirm` or `prompt` dialog leaves the call with "dialog pending"; until
@@ -264,7 +275,10 @@ For each connection the proxy:
 A blocked request gets a 403 from the proxy, and the next tool result lists
 it under `Blocked N requests` with the reason. A navigation whose main page
 (or any host on its redirect chain) is blocked becomes a tool error that names
-the URL and the reason. `browser_navigate` also refuses non-web schemes
+the URL and the reason. When a `browser_act` action leads to a blocked page
+(a link or form that redirects to a blocked host), that action is reported
+as failed, naming the host and the reason, and the result says `Navigation
+blocked` and that the page did not load. `browser_navigate` also refuses non-web schemes
 (`file:`, `javascript:` …) and URLs with embedded credentials up front.
 
 **Local dev servers.** Loopback is blocked by default. Testing a local app is
