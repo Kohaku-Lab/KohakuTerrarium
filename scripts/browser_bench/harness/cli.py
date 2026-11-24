@@ -44,6 +44,7 @@ class Settings:
     out: Path
     force: bool = False
     report_only: bool = False
+    min_free_gb: float = 5.0
 
     def meta(self) -> dict:
         return {
@@ -128,6 +129,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--out", type=Path, required=True, help="output directory")
     parser.add_argument(
+        "--min-free-gb",
+        type=float,
+        default=5.0,
+        help="start a run only while this much memory is free",
+    )
+    parser.add_argument(
         "--force", action="store_true", help="rerun pairs that already have a record"
     )
     parser.add_argument(
@@ -154,6 +161,7 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         out=args.out,
         force=args.force,
         report_only=args.report_only,
+        min_free_gb=args.min_free_gb,
     )
 
 
@@ -204,6 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             meta=meta,
             concurrency=settings.concurrency,
             on_record=lambda r: print(_line(r), flush=True),
+            min_free_gb=settings.min_free_gb,
         )
     )
     path = write_report(store, meta)

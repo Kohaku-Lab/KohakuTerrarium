@@ -2,7 +2,8 @@
 
 Records are appended as runs finish, so an interrupted run resumes: a rerun
 skips every task/repeat pair that already has a judged record of the same
-model, and retries pairs whose latest record is a harness error.
+model, and retries pairs whose latest record is a harness error until a pair
+has two of them.
 """
 
 import json
@@ -14,6 +15,7 @@ RUNS_FILE = "runs.jsonl"
 META_FILE = "meta.json"
 TRANSCRIPTS_DIR = "transcripts"
 META_KEYS = ("model", "effort")
+MAX_HARNESS_ERRORS = 2
 
 
 def latest(records: Iterable[Mapping[str, Any]]) -> dict[tuple[str, int], dict]:
@@ -39,6 +41,12 @@ def plan(
         for key, record in latest(mine).items()
         if record.get("outcome") != "harness_error"
     }
+    errors: dict[tuple[str, int], int] = {}
+    for record in mine:
+        if record.get("outcome") == "harness_error":
+            key = (record["task_id"], int(record["repeat"]))
+            errors[key] = errors.get(key, 0) + 1
+    done |= {key for key, count in errors.items() if count >= MAX_HARNESS_ERRORS}
     return [
         (task_id, repeat)
         for task_id in dict.fromkeys(task_ids)

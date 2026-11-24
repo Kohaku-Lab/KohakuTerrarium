@@ -5,6 +5,7 @@ No model and no browser: every input is hand-built. The end-to-end wiring
 hand.
 """
 
+import asyncio
 import importlib
 import importlib.util
 import json
@@ -534,6 +535,14 @@ class TestStore:
         todo = store_mod.plan(["dialogs", "pagination"], 2, store.load(), force=False)
         assert todo == [("dialogs", 1), ("pagination", 0), ("pagination", 1)]
 
+    def test_plan_gives_up_after_two_harness_errors(self):
+        errs = [
+            record("dialogs", rep=0, outcome="harness_error", error="x"),
+            record("dialogs", rep=0, outcome="harness_error", error="y"),
+        ]
+        assert store_mod.plan(["dialogs"], 1, errs, force=False) == []
+        assert store_mod.plan(["dialogs"], 1, errs[:1], force=False) == [("dialogs", 0)]
+
     def test_plan_force_reruns_everything(self, tmp_path):
         done = [record("dialogs", rep=0, outcome="pass")]
         assert store_mod.plan(["dialogs"], 1, done, force=True) == [("dialogs", 0)]
@@ -561,6 +570,68 @@ class TestStore:
         assert a != b and a.parent == store.transcripts_dir
 
 
+# ---- run_all retry and memory gate -----------------------------------------
+
+
+class TestRunAll:
+    def run(self, outcomes, tmp_path, monkeypatch, free=(10.0,)):
+        seen = []
+        frees = list(free)
+
+        async def fake_run_task(task, repeat, **kw):
+            outcome = outcomes.pop(0)
+            seen.append((task.id, repeat))
+            return record(
+                task.id,
+                rep=repeat,
+                outcome=outcome,
+                error="e" if outcome == "harness_error" else None,
+            )
+
+        monkeypatch.setattr(runner, "run_task", fake_run_task)
+        monkeypatch.setattr(
+            runner,
+            "free_memory_gb",
+            lambda: frees.pop(0) if len(frees) > 1 else frees[0],
+        )
+        store = store_mod.RunStore(tmp_path)
+        asyncio.run(
+            runner.run_all(
+                [(bench.BY_ID["dialogs"], 0)],
+                llm_for_run=lambda: None,
+                limits=runner.Limits(5, 10.0),
+                store=store,
+                meta={},
+                concurrency=1,
+                min_free_gb=5.0,
+                memory_poll_s=0.0,
+            )
+        )
+        return seen, store.load()
+
+    def test_harness_error_is_retried_once_and_both_kept(self, tmp_path, monkeypatch):
+        seen, recs = self.run(["harness_error", "pass"], tmp_path, monkeypatch)
+        assert seen == [("dialogs", 0), ("dialogs", 0)]
+        assert [r["outcome"] for r in recs] == ["harness_error", "pass"]
+        assert [r["attempt"] for r in recs] == [0, 1]
+
+    def test_second_harness_error_is_not_retried(self, tmp_path, monkeypatch):
+        seen, recs = self.run(["harness_error", "harness_error"], tmp_path, monkeypatch)
+        assert len(seen) == 2 and len(recs) == 2
+
+    def test_judged_run_is_not_retried(self, tmp_path, monkeypatch):
+        seen, _ = self.run(["fail"], tmp_path, monkeypatch)
+        assert len(seen) == 1
+
+    def test_waits_for_free_memory_and_records_the_wait(self, tmp_path, monkeypatch):
+        seen, recs = self.run(["pass"], tmp_path, monkeypatch, free=(1.0, 2.0, 9.0))
+        assert len(seen) == 1
+        assert recs[0]["memory_waits"] == 2 and recs[0]["free_gb_at_start"] == 9.0
+
+    def test_free_memory_reads_something(self):
+        assert runner.free_memory_gb() > 0
+
+
 # ---- CLI -------------------------------------------------------------------
 
 
@@ -572,6 +643,7 @@ class TestCli:
         assert s.max_tool_calls > 0 and s.timeout > 0
         assert [t.id for t in s.tasks] == [t.id for t in bench.TASKS]
         assert s.out == tmp_path and not s.force
+        assert s.min_free_gb == 5.0
 
     def test_flags(self, tmp_path):
         s = cli.parse_args(

@@ -4,7 +4,8 @@ The egress oracle reports, as findings, what the session's network policy
 did with each target: the internal loopback port, the private address and
 the cloud metadata address, through a page load, a redirecting link and a
 direct navigation. Its adversary runs a ``block_hosts`` configuration and
-reaches the internal service through the ``localhost`` alias.
+tries the internal service through the ``localhost`` alias, which the block
+must refuse.
 """
 
 from typing import Any

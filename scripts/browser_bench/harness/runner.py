@@ -7,7 +7,10 @@ tool-call limit, then the check over the site's recorded state.
 """
 
 import asyncio
+import ctypes
 import json
+import os
+import sys
 import tempfile
 import time
 from collections import Counter
@@ -50,6 +53,7 @@ LIMIT_MESSAGE = (
     "Give your final answer now."
 )
 BLOCKED_BEFORE_INTERRUPT = 3
+HARNESS_RETRIES = 1
 HARNESS_GRACE_S = 120.0
 STOP_TIMEOUT_S = 60.0
 RESULT_KEEP = 600
@@ -414,22 +418,54 @@ def build_record(
 
 
 def write_transcript(
-    store: RunStore, task: Task, repeat: int, message: str, drive: Drive
+    store: RunStore,
+    task: Task,
+    repeat: int,
+    message: str,
+    drive: Drive,
+    attempt: int = 0,
 ) -> None:
+    """Write the run's conversation; a retry's files carry ``.a<attempt>``."""
     messages = scrub_messages(drive.messages)
     data = {
         "task_id": task.id,
         "repeat": repeat,
+        "attempt": attempt,
         "user_message": message,
         "system_prompt": drive.system_prompt,
         "messages": messages,
     }
-    store.transcript_path(task.id, repeat, ".json").write_text(
+    tag = f".a{attempt}" if attempt else ""
+    store.transcript_path(task.id, repeat, f"{tag}.json").write_text(
         json.dumps(data, indent=1, ensure_ascii=False, default=str), encoding="utf-8"
     )
-    store.transcript_path(task.id, repeat, ".md").write_text(
+    store.transcript_path(task.id, repeat, f"{tag}.md").write_text(
         render_transcript(messages), encoding="utf-8"
     )
+
+
+class _MemoryStatus(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+def free_memory_gb() -> float:
+    """Available physical memory in GiB."""
+    if sys.platform == "win32":
+        status = _MemoryStatus()
+        status.dwLength = ctypes.sizeof(_MemoryStatus)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
+        return status.ullAvailPhys / 2**30
+    return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2**30
 
 
 async def run_task(
@@ -440,6 +476,7 @@ async def run_task(
     limits: Limits,
     store: RunStore,
     meta: Mapping[str, Any],
+    attempt: int = 0,
 ) -> dict[str, Any]:
     """One isolated run of ``task``: fresh site, fresh directory, fresh agent."""
     started = time.monotonic()
@@ -470,7 +507,7 @@ async def run_task(
     record = build_record(task, repeat, meta, drive, hooks, state, error)
     record["workdir"] = str(workdir)
     record["total_s"] = round(time.monotonic() - started, 2)
-    write_transcript(store, task, repeat, message, drive)
+    write_transcript(store, task, repeat, message, drive, attempt)
     return record
 
 
@@ -483,20 +520,50 @@ async def run_all(
     meta: Mapping[str, Any],
     concurrency: int,
     on_record: Callable[[dict[str, Any]], None] | None = None,
+    min_free_gb: float = 0.0,
+    memory_poll_s: float = 15.0,
 ) -> list[dict[str, Any]]:
-    """Run every pair, at most ``concurrency`` at once; each record is stored as it lands."""
+    """Run every pair, at most ``concurrency`` at once; each record is stored as it lands.
+
+    A run starts only while at least ``min_free_gb`` of memory is free; a
+    harness error is retried once and both records are kept.
+    """
     gate = asyncio.Semaphore(concurrency)
+    starting = asyncio.Lock()
     records: list[dict[str, Any]] = []
 
+    async def wait_for_memory() -> tuple[int, float]:
+        waits = 0
+        async with starting:
+            free = free_memory_gb()
+            while free < min_free_gb:
+                waits += 1
+                await asyncio.sleep(memory_poll_s)
+                free = free_memory_gb()
+        return waits, free
+
     async def one(task: Task, repeat: int) -> None:
-        async with gate:
-            record = await run_task(
-                task, repeat, llm=llm_for_run(), limits=limits, store=store, meta=meta
+        for attempt in range(1 + HARNESS_RETRIES):
+            async with gate:
+                waits, free = await wait_for_memory()
+                record = await run_task(
+                    task,
+                    repeat,
+                    llm=llm_for_run(),
+                    limits=limits,
+                    store=store,
+                    meta=meta,
+                    attempt=attempt,
+                )
+            record.update(
+                attempt=attempt, memory_waits=waits, free_gb_at_start=round(free, 1)
             )
-        store.append(record)
-        records.append(record)
-        if on_record is not None:
-            on_record(record)
+            store.append(record)
+            records.append(record)
+            if on_record is not None:
+                on_record(record)
+            if record["outcome"] != "harness_error":
+                break
 
     await asyncio.gather(*(one(task, repeat) for task, repeat in pairs))
     return records
