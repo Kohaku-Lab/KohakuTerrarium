@@ -144,7 +144,7 @@ playwright install chromium
 `PLAYWRIGHT_BROWSERS_PATH` 可改用别的缓存，设置 `KT_CHROMIUM_PATH`（用于页面
 探测 fixture）可指定某个浏览器可执行文件。
 
-集成工作流和 `test_driver.py` 都带有 `@pytest.mark.xdist_group("browser")`，
+集成工作流、`test_driver.py` 以及 `test_hidden.py` 中的 Chromium 测试都带有 `@pytest.mark.xdist_group("browser")`，
 并行运行时它们会被放到同一个 worker 上依次执行。
 
 ```bash

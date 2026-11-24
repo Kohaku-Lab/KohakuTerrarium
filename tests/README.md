@@ -51,7 +51,8 @@ What keeps tests independent across workers:
 - Tests that share one real resource carry `@pytest.mark.xdist_group(...)`
   and run in order on one worker: `ports` (probe-a-free-port-then-reuse),
   `mcp-subprocess` (real `mcp-serve` children), `browser` (real Chromium:
-  `tests/integration/test_browser.py` and `tests/unit/browser/test_driver.py`),
+  `tests/integration/test_browser.py`, `tests/unit/browser/test_driver.py` and
+  the Chromium probe tests in `tests/unit/browser/test_hidden.py`),
   and the whole e2e tier (`e2e`, added automatically). Everything else is
   distributed per test.
 - "The event loop was not blocked" is witnessed by

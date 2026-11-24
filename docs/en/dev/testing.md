@@ -154,7 +154,8 @@ home even though the suite redirects `HOME`; set `PLAYWRIGHT_BROWSERS_PATH`
 to use another cache, or `KT_CHROMIUM_PATH` (for the page-probe fixture) to
 use a specific binary.
 
-The integration workflow and `test_driver.py` carry
+The integration workflow, `test_driver.py` and the Chromium tests in
+`test_hidden.py` carry
 `@pytest.mark.xdist_group("browser")`, so a parallel run puts them on one
 worker, one after the other.
 

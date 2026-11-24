@@ -249,7 +249,7 @@ plugins:
 | `viewport` | `"WxH"` / `[w, h]` | `1280x800` | 页面尺寸，CSS 像素（宽 320–7680，高 200–4320）。 |
 | `profile_dir` | str | null | 持久 profile 目录；null = 每次启动用一次性 profile。 |
 | `allow_hosts` | list[str] | `[]` | 非空时，页面只能访问这些主机。模式：`host`、`*.host`、`host:port`、`[v6]:port`。 |
-| `block_hosts` | list[str] | `[]` | 页面永远不能访问的主机；最先检查。 |
+| `block_hosts` | list[str] | `[]` | 页面永远不能访问的主机；最先检查。这里的 IP 地址也会拦截解析到它的主机名。 |
 | `allow_loopback` | bool | false | 允许回环地址（本地开发服务器）。 |
 | `allow_private` | bool | false | 允许内网、运营商级 NAT 与 IPv6 唯一本地地址。 |
 | `secrets` | dict | `{}` | 密钥名到 `env:VAR_NAME` 引用的映射，供 `type` 动作使用；其值会从结果中遮蔽。 |

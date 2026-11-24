@@ -423,7 +423,7 @@ the runtime is `src/kohakuterrarium/browser/`.
 | `viewport` | `"WxH"` / `[w, h]` | `1280x800` | Page size in CSS pixels (width 320–7680, height 200–4320). |
 | `profile_dir` | str | null | Persistent profile directory; null = throwaway profile per launch. |
 | `allow_hosts` | list[str] | `[]` | If not empty, the only hosts pages may reach. Patterns: `host`, `*.host`, `host:port`, `[v6]:port`. |
-| `block_hosts` | list[str] | `[]` | Hosts pages may never reach; checked first. |
+| `block_hosts` | list[str] | `[]` | Hosts pages may never reach; checked first. An IP address here also blocks names that resolve to it. |
 | `allow_loopback` | bool | false | Allow loopback addresses (local dev servers). |
 | `allow_private` | bool | false | Allow private, carrier-grade NAT and IPv6 unique-local addresses. |
 | `secrets` | dict | `{}` | Secret names to `env:VAR_NAME` references for `type` actions; values are redacted from results. |

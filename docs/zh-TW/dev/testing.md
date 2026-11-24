@@ -145,7 +145,7 @@ playwright install chromium
 `PLAYWRIGHT_BROWSERS_PATH`，要用特定執行檔（頁面偵測 fixture）請設
 `KT_CHROMIUM_PATH`。
 
-整合工作流程與 `test_driver.py` 都帶有 `@pytest.mark.xdist_group("browser")`，
+整合工作流程、`test_driver.py` 以及 `test_hidden.py` 裡的 Chromium 測試都帶有 `@pytest.mark.xdist_group("browser")`，
 平行執行時會被排到同一個 worker 上依序跑。
 
 ```bash

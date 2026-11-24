@@ -124,27 +124,32 @@ Contributed by the [`browser` plugin](builtin-plugins.md#browser), not listed
 under `tools:`: enabling the plugin adds all six, disabling it removes them.
 They share one Chromium per creature (and its sub-agents), and page-derived
 text comes back inside a `page_content` element marked untrusted. Every tool
-except `browser_tabs` takes an optional `tab` (default the active tab). See
+except `browser_tabs` takes an optional `tab` (default the active tab). Every
+optional argument also accepts an empty value (`""`, `0`, `false`, `[]`)
+meaning not given, for models that must fill in every argument. See
 [guides/browser](../guides/browser.md).
 
 **`browser_navigate`**: Open a URL, or go back, forward or reload. Returns a
 header line (tab id and URL) and the page's interactive elements with refs.
 A URL the network policy refuses is an error naming the reason.
 
-- Args: `url` (http or https) or `action` (`back` / `forward` / `reload`).
+- Args: `url` (http or https), `action` (`goto` default, `back`, `forward`,
+  `reload`; the last three ignore `url`).
 
 **`browser_snapshot`**: The current page as an accessibility tree with element
 refs (`e12`; `f1e3` inside frames), hidden text dropped, password and secret
 values redacted, capped at the plugin's `snapshot_max_chars`.
 
-- Args: `ref` (one subtree), `depth`, `query` (matching lines with their
+- Args: `ref` (one subtree), `depth` (0 = no limit), `query` (matching lines with their
   ancestors), `interactive` (controls only), `boxes` (element positions in
   viewport pixels).
 
 **`browser_act`**: Run an ordered batch of actions on one tab, stopping at the
 first failure. Returns one status line per action and the page delta (lines
-added or changed, navigation, tabs opened, dialogs, downloads, blocked
-requests). At most 20 actions per call.
+added or changed, elements marked `(moved)`, navigation, tabs opened with
+their interactive elements, dialogs, downloads, blocked requests). At most 20
+actions per call. `click`, `hover` and `drag` also take viewport coordinates
+(`x` / `y`, `to_x` / `to_y`); a non-empty `ref` wins over them.
 
 - Args: `actions` (list of action objects: `click`, `type`, `select`, `check`,
   `press`, `hover`, `scroll`, `drag`, `upload`, `wait`, `dialog`), `files`
@@ -155,7 +160,8 @@ image in CSS pixels (PNG, or JPEG above about 500 KB; full pages stop at 8000
 px). The image reaches the model with native tool calling; text tool formats
 pass on the text line only.
 
-- Args: `ref`, `full_page`, `path` (also save the image there).
+- Args: `ref` (wins over `full_page`), `full_page`, `path` (also save the
+  image there).
 
 **`browser_tabs`**: List, open, select or close tabs, or close the browser (the
 next call starts a fresh one). `list` never starts the browser. At most 20

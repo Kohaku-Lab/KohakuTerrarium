@@ -94,10 +94,10 @@ the same way.
 
 | Tool | Kind | What it is for |
 |---|---|---|
-| `browser_navigate` | egress | Open a `url`, or go `back` / `forward` / `reload` (the `action` argument). Returns the page header and its interactive elements with refs. |
-| `browser_snapshot` | read | Read the current page as an accessibility tree with refs. Narrow it with `ref` (one subtree), `depth`, `query` (lines matching a text, with their ancestors) or `interactive` (controls only); `boxes` adds each element's position in viewport pixels. |
+| `browser_navigate` | egress | Open a `url` (`action` `goto`, the default), or go `back` / `forward` / `reload`, which ignore `url`. Returns the page header and its interactive elements with refs. |
+| `browser_snapshot` | read | Read the current page as an accessibility tree with refs. Narrow it with `ref` (one subtree), `depth` (0 for no limit), `query` (lines matching a text, with their ancestors) or `interactive` (controls only); `boxes` adds each element's position in viewport pixels. |
 | `browser_act` | mutate | Run an ordered batch of `actions` on one tab. Returns one status line per action and what changed on the page. `files` lists the paths that upload actions use. |
-| `browser_screenshot` | read | The viewport, one element (`ref`) or the whole page (`full_page`) as an image; `path` also saves it to a file. |
+| `browser_screenshot` | read | The viewport, one element (`ref`, which wins over `full_page`) or the whole page (`full_page`) as an image; `path` also saves it to a file. |
 | `browser_tabs` | session | `list` (the default), `new` (optionally with a `url`), `select` or `close` a tab, or `close_browser`. |
 | `browser_eval` | script | Run a JavaScript expression or function in the page, optionally on one element `ref`, and return its JSON result. |
 
@@ -105,6 +105,10 @@ Every tool except `browser_tabs` takes an optional `tab` (a tab id such as
 `t2`; default the active tab). The tools are split by risk so that name-based
 gates (`permgate`, `sandbox`) can tell reading a page from changing it or
 running script in it.
+
+Models that must fill in every argument (strict function calling) can send an
+empty value for each one they do not use: `""`, `0`, `false` or `[]` means
+not given.
 
 ### Actions in a batch
 
@@ -124,6 +128,12 @@ below.
 | `upload` | `ref`, `files` (indexes into the call's `files` list) |
 | `wait` | one of `text`, `text_gone`, `seconds` |
 | `dialog` | `accept` (default true), `text` for a prompt |
+
+Fields an action does not use may be sent empty. Where two could apply, a
+non-empty `ref` wins over `x` / `y` (`0, 0` means none), `secret` wins over
+`text` (an empty `text` clears the field), and `wait` takes `text`, else
+`text_gone`, else `seconds` above 0. A real value on a field that belongs to
+another kind is refused.
 
 In text tool formats every argument arrives as a string, so `actions` may also
 be a JSON string or the call body.
@@ -148,7 +158,7 @@ read the delta.**
    trip to the model is the slow part of a browsing task.
 4. **Read the delta.** The result is not a new snapshot. It lists the lines
    that were added (`+`) or changed (`~`) since the snapshot before the batch,
-   elements that moved, URL and title changes, tabs opened, dialogs, downloads
+   elements that changed place (marked `(moved)`), URL and title changes, tabs opened, dialogs, downloads
    and blocked requests. A batch that lands on a new page shows that page's
    interactive elements instead. Check it for the outcome you wanted before
    reporting success.
@@ -167,14 +177,16 @@ instead of waiting for a timeout. Take a new snapshot and use the new refs.
 
 - **Tabs** have stable ids (`t1`, `t2`, …). A tab a click opens becomes the
   active tab, and the action's result says so and shows its interactive
-  elements.
+  elements. When Chromium has announced a new window, the action waits up to
+  3 seconds for it to open before returning.
 - **Dialogs.** `alert` and `beforeunload` are accepted for you and reported.
   A `confirm` or `prompt` dialog leaves the call with "dialog pending"; until
   it is answered with a `dialog` action, every other browser call returns an
   error that says a dialog is waiting.
 - **Downloads** are saved under `browser-downloads/` in the creature's working
   directory, and the result gives the saved path. A download still running
-  after two seconds is reported as in progress.
+  after two seconds is reported as in progress. A browser keeps at most 50
+  downloads and 1 GB in total; later ones are refused and reported.
 - **Uploads** take their paths from the call's `files` argument (relative to
   the working directory), so the sandbox checks them like any other file read.
   A file input that is hidden behind a styled button has no ref of its own;
@@ -344,8 +356,11 @@ plugins:
 A `type` action that names `secret: staging_pw` (instead of `text`) types the
 value of `STAGING_PASSWORD`, read from the environment when the action runs.
 The value must be at least four characters. In every text result it shows as
-`[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings; the
-value of any password field on the page shows as `[redacted]`.
+`[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings.
+Password fields are redacted too: a password field's value shows as
+`(redacted)` in snapshots (`[secret:staging_pw]` when the secret filled it),
+and the same value appearing anywhere else in a result (a title, a URL) as
+`[redacted]`.
 
 What can still see a secret:
 
@@ -403,8 +418,9 @@ options. Single-user hosts, `kt run` and the CLI are not restricted.
   updates later, add a `wait` for the text you expect.
 - **Screenshots reach the model only with native tool calling.** In the text
   tool formats (`bracket`, `xml`) a tool result is passed back as text, so the
-  model gets the screenshot's description line but not the image. Use
-  `tool_format: native` when screenshots matter.
+  model gets the screenshot's text line (what was captured and where it was
+  saved) but not the image. Use `tool_format: native` when screenshots
+  matter, or save the screenshot with `path`.
 - One browser per creature; its calls run one at a time.
 - Chromium only, through Playwright.
 - Not supported: attaching to your own running Chrome or its default profile;

@@ -249,7 +249,7 @@ plugins:
 | `viewport` | `"WxH"` / `[w, h]` | `1280x800` | 頁面尺寸（CSS 像素；寬 320–7680，高 200–4320）。 |
 | `profile_dir` | str | null | 持久化設定檔目錄；null = 每次啟動用完即丟的設定檔。 |
 | `allow_hosts` | list[str] | `[]` | 非空時，頁面只能連到這些主機。樣式：`host`、`*.host`、`host:port`、`[v6]:port`。 |
-| `block_hosts` | list[str] | `[]` | 頁面永遠不能連到的主機；最先檢查。 |
+| `block_hosts` | list[str] | `[]` | 頁面永遠不能連到的主機；最先檢查。這裡的 IP 位址也會擋下解析到它的主機名稱。 |
 | `allow_loopback` | bool | false | 允許 loopback 位址（本機開發伺服器）。 |
 | `allow_private` | bool | false | 允許私有、電信級 NAT 與 IPv6 unique-local 位址。 |
 | `secrets` | dict | `{}` | 密鑰名稱對應 `env:VAR_NAME` 參照，供 `type` 動作使用；值會從結果中遮蔽。 |
