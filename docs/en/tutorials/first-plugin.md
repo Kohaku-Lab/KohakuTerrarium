@@ -225,7 +225,7 @@ alternative. No files are touched.
 The two hooks used above are just the most common pair. The full
 lifecycle-plugin surface is:
 
-- Lifecycle: `on_load`, `on_unload`, `on_agent_start`, `on_agent_stop`
+- Lifecycle: `on_load`, `on_unload`, `on_disable`, `on_agent_start`, `on_agent_stop`
 - LLM: `pre_llm_call`, `post_llm_call`
 - Tools: `pre_tool_execute`, `post_tool_execute`
 - Sub-agents: `pre_subagent_run`, `post_subagent_run`

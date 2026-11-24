@@ -80,6 +80,7 @@ Subclass `BasePlugin` and implement any of these hooks. All are async unless not
 |---|---|---|
 | `on_load(context)` | setup at agent start | (none) |
 | `on_unload()` | teardown at stop | (none) |
+| `on_disable()` | sync; after a runtime disable took effect | Release what the plugin owns; schedule async cleanup and await it in `on_unload` |
 | `should_apply(context)` | return `bool` | Dynamic per-agent/model gating |
 | `pre_llm_call(messages, **kwargs)` | return `list[dict] \| None` | Replace messages sent to LLM |
 | `post_llm_call(messages, response, usage, **kwargs)` | return `str \| None` | Rewrite final assistant text |

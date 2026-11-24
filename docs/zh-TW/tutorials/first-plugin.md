@@ -194,7 +194,7 @@ controller 會派送工具呼叫，守衛接著丟出 `PluginBlockError`，而�
 
 上面兩個 hook 只是最常見的一組。完整的生命週期外掛介面如下：
 
-- 生命週期：`on_load`、`on_unload`、`on_agent_start`、`on_agent_stop`
+- 生命週期：`on_load`、`on_unload`、`on_disable`、`on_agent_start`、`on_agent_stop`
 - LLM：`pre_llm_call`、`post_llm_call`
 - 工具：`pre_tool_execute`、`post_tool_execute`
 - Sub-agents：`pre_subagent_run`、`post_subagent_run`

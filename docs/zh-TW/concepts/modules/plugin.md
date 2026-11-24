@@ -47,7 +47,7 @@ plugin 是在 *不 fork 任何模組* 的前提下加行為的主要方式。
 
 一個 `BasePlugin` subclass，可以實作以下任意 hooks：
 
-- `on_load(context)`, `on_unload()`
+- `on_load(context)`, `on_unload()`, `on_disable()`（執行時被停用後呼叫；釋放外掛持有的資源）
 - `pre_llm_call(messages, **kwargs) → list[dict] | None`
 - `post_llm_call(response) → ChatResponse | None`
 - `pre_tool_execute(name, args) → dict | None`

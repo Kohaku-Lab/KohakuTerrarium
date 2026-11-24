@@ -6,6 +6,7 @@ runtime contribution refresh share the same applicability rules.
 
 import asyncio
 import functools
+import inspect
 import time
 from typing import Any, Callable
 
@@ -121,6 +122,26 @@ class PluginManager(
         except Exception:  # noqa: BLE001 - an observer must never break a toggle
             logger.warning("plugin selection callback failed", exc_info=True)
 
+    def _notify_disabled(self, plugin: BasePlugin) -> None:
+        hook = getattr(plugin, "on_disable", None)
+        if not callable(hook):
+            return
+        try:
+            result = hook()
+        except Exception:  # noqa: BLE001 - a hook must never undo a disable
+            logger.warning(
+                "plugin on_disable failed",
+                plugin_name=getattr(plugin, "name", "?"),
+                exc_info=True,
+            )
+            return
+        if inspect.iscoroutine(result):
+            result.close()
+            logger.warning(
+                "plugin on_disable must be synchronous; its coroutine was not run",
+                plugin_name=getattr(plugin, "name", "?"),
+            )
+
     def enable(self, name: str) -> bool:
         """Enable a plugin, rolling back state if host inventory refresh fails."""
         self._default_on.discard(name)
@@ -154,6 +175,7 @@ class PluginManager(
                     raise
                 logger.info("Plugin disabled", plugin_name=name)
                 if changed:
+                    self._notify_disabled(p)
                     self._notify_selection_change()
                 return True
         return False

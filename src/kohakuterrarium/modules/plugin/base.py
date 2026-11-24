@@ -414,6 +414,17 @@ class BasePlugin(UIOwnerMixin):
     async def on_unload(self) -> None:
         """Called when agent shuts down."""
 
+    def on_disable(self) -> None:
+        """Called once after a runtime disable took effect; ``on_unload`` is not.
+
+        Release what the plugin owns while it is off (re-enabling calls
+        ``on_load`` again). Not called for a disable that changed nothing, nor
+        on unload. Synchronous (an ``async def`` hook is not run) and must
+        return promptly: the manager does not wait for cleanup started here,
+        so schedule async work yourself and await it in ``on_unload``. An
+        exception is logged and does not undo the disable.
+        """
+
     async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
         """Optionally transform messages before a model call."""
         return None
