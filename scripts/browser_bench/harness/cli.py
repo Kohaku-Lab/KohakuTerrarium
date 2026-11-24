@@ -9,7 +9,7 @@ import argparse
 import asyncio
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +22,7 @@ from .. import model as bench_model
 from ..model import Task
 from ..tasks import BY_ID, TASKS
 from .report import render
+from .memory import free_memory_gb
 from .runner import Limits, run_all
 from .store import RunStore, plan
 from .wire import OMIT_HINT, install, tool_rewriter
@@ -245,6 +246,18 @@ def outside(roots: dict[str, str], root: Path) -> list[str]:
     return [name for name, path in roots.items() if not Path(path).is_relative_to(base)]
 
 
+def memory_gate_note(
+    min_free_gb: float, reader: Callable[[], float | None] = free_memory_gb
+) -> str | None:
+    """A warning line when ``--min-free-gb`` is set but memory cannot be read here."""
+    if min_free_gb <= 0 or reader() is not None:
+        return None
+    return (
+        "warning: free memory cannot be read on this machine; "
+        f"--min-free-gb {min_free_gb:g} is not enforced (runs start without waiting)"
+    )
+
+
 def write_report(store: RunStore, meta: dict) -> Path:
     path = store.out / "report.md"
     path.write_text(render(store.load(), meta), encoding="utf-8")
@@ -283,6 +296,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         model=settings.model,
     )
     print(f"{len(todo)} runs to do ({settings.model}, effort {settings.effort})")
+    note = memory_gate_note(settings.min_free_gb)
+    if note:
+        print(note, file=sys.stderr)
     install(settings.tool_rewriter())
     started = time.monotonic()
     asyncio.run(

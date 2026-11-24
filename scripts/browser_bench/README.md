@@ -213,6 +213,14 @@ python -m scripts.browser_bench.harness.dryrun --out DIR          # ScriptedLLM,
 | `--max-tool-calls` | 50 | calls beyond it are refused; the turn is interrupted after 3 more |
 | `--timeout` | 900 | seconds for the agent's turn |
 | `--force` | off | rerun pairs that already have a record; allow another model in `DIR` |
+| `--min-free-gb` | 5 | start a run only while this much physical memory is free (GiB); see below |
+
+The memory gate reads available memory with `GlobalMemoryStatusEx` on
+Windows, `MemAvailable` in `/proc/meminfo` on Linux, and `vm_stat` (free +
+inactive + speculative pages) on macOS. Where it cannot read a value (no
+`vm_stat`, an unknown `sysconf` name, unparsable output), the gate is open:
+runs start without waiting, the harness prints a warning at start, and each
+record has `free_gb_at_start: null`.
 
 The model runs through the Codex (ChatGPT subscription) provider with the
 credentials of the real `~/.kohakuterrarium`: the harness builds an

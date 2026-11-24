@@ -7,10 +7,7 @@ tool-call limit, then the check over the site's recorded state.
 """
 
 import asyncio
-import ctypes
 import json
-import os
-import sys
 import tempfile
 import time
 import uuid
@@ -36,6 +33,7 @@ from kohakuterrarium.modules.plugin.base import (
 from ..model import CheckResult, Task, check
 from ..oracles.bot import blocked_in
 from ..site import BenchSite
+from .memory import free_memory_gb
 from .score import PASSING, egress_summary, failure_reason, judge_run
 from .store import RunStore
 from .usage import CallLog, instrument, run_totals
@@ -472,30 +470,6 @@ def write_transcript(
     )
 
 
-class _MemoryStatus(ctypes.Structure):
-    _fields_ = [
-        ("dwLength", ctypes.c_ulong),
-        ("dwMemoryLoad", ctypes.c_ulong),
-        ("ullTotalPhys", ctypes.c_ulonglong),
-        ("ullAvailPhys", ctypes.c_ulonglong),
-        ("ullTotalPageFile", ctypes.c_ulonglong),
-        ("ullAvailPageFile", ctypes.c_ulonglong),
-        ("ullTotalVirtual", ctypes.c_ulonglong),
-        ("ullAvailVirtual", ctypes.c_ulonglong),
-        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
-    ]
-
-
-def free_memory_gb() -> float:
-    """Available physical memory in GiB."""
-    if sys.platform == "win32":
-        status = _MemoryStatus()
-        status.dwLength = ctypes.sizeof(_MemoryStatus)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status))
-        return status.ullAvailPhys / 2**30
-    return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2**30
-
-
 async def run_task(
     task: Task,
     repeat: int,
@@ -553,18 +527,20 @@ async def run_all(
 ) -> list[dict[str, Any]]:
     """Run every pair, at most ``concurrency`` at once; each record is stored as it lands.
 
-    A run starts only while at least ``min_free_gb`` of memory is free; a
+    A run starts only while at least ``min_free_gb`` of memory is free. When
+    memory cannot be read (``free_memory_gb()`` is ``None``) the gate is open:
+    the run starts at once and its record has ``free_gb_at_start: null``. A
     harness error is retried once and both records are kept.
     """
     gate = asyncio.Semaphore(concurrency)
     starting = asyncio.Lock()
     records: list[dict[str, Any]] = []
 
-    async def wait_for_memory() -> tuple[int, float]:
+    async def wait_for_memory() -> tuple[int, float | None]:
         waits = 0
         async with starting:
             free = free_memory_gb()
-            while free < min_free_gb:
+            while free is not None and free < min_free_gb:
                 waits += 1
                 await asyncio.sleep(memory_poll_s)
                 free = free_memory_gb()
@@ -584,7 +560,9 @@ async def run_all(
                     attempt=attempt,
                 )
             record.update(
-                attempt=attempt, memory_waits=waits, free_gb_at_start=round(free, 1)
+                attempt=attempt,
+                memory_waits=waits,
+                free_gb_at_start=None if free is None else round(free, 1),
             )
             store.append(record)
             records.append(record)

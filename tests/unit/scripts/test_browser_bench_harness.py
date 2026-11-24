@@ -48,6 +48,7 @@ tokens_mod = importlib.import_module("browser_bench.harness.tokens")
 probe_mod = importlib.import_module("browser_bench.harness.probe")
 verbosity = importlib.import_module("browser_bench.harness.verbosity")
 wire = importlib.import_module("browser_bench.harness.wire")
+memory = importlib.import_module("browser_bench.harness.memory")
 
 parse_verdict = verdict_mod.parse_verdict
 Verdict = verdict_mod.Verdict
@@ -637,7 +638,151 @@ class TestRunAll:
         assert recs[0]["memory_waits"] == 2 and recs[0]["free_gb_at_start"] == 9.0
 
     def test_free_memory_reads_something(self):
-        assert runner.free_memory_gb() > 0
+        free = runner.free_memory_gb()
+        assert free is None or (isinstance(free, float) and free > 0)
+        if sys.platform in ("win32", "linux"):
+            assert free is not None and free > 0
+
+    def test_unreadable_memory_opens_the_gate(self, tmp_path, monkeypatch):
+        seen, recs = self.run(["pass"], tmp_path, monkeypatch, free=(None,))
+        assert len(seen) == 1, "the run started although memory could not be read"
+        assert recs[0]["memory_waits"] == 0
+        assert recs[0]["free_gb_at_start"] is None
+
+    def test_memory_that_becomes_unreadable_ends_the_wait(self, tmp_path, monkeypatch):
+        seen, recs = self.run(["pass"], tmp_path, monkeypatch, free=(1.0, None))
+        assert len(seen) == 1
+        assert recs[0]["memory_waits"] == 1 and recs[0]["free_gb_at_start"] is None
+
+
+VM_STAT = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                               10000.
+Pages active:                             90000.
+Pages inactive:                           20000.
+Pages speculative:                         5000.
+Pages throttled:                              0.
+Pages wired down:                         40000.
+"""
+
+
+class _Done:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout, self.returncode = stdout, returncode
+
+
+class TestFreeMemory:
+    def test_linux_reads_memavailable(self, tmp_path):
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text(
+            "MemTotal:       16000000 kB\nMemFree:  1000 kB\n"
+            "MemAvailable:    8388608 kB\n",
+            encoding="utf-8",
+        )
+        assert memory.linux_free_gb(meminfo) == 8.0
+
+    def test_linux_without_meminfo_falls_back_to_sysconf(self, tmp_path):
+        free = memory.linux_free_gb(
+            tmp_path / "absent",
+            sysconf=lambda name: {"SC_AVPHYS_PAGES": 262144, "SC_PAGE_SIZE": 4096}[
+                name
+            ],
+            names={"SC_AVPHYS_PAGES": 1, "SC_PAGE_SIZE": 2},
+        )
+        assert free == 1.0
+
+    def test_linux_garbage_meminfo_and_no_sysconf_is_none(self, tmp_path):
+        meminfo = tmp_path / "meminfo"
+        meminfo.write_text("MemAvailable: lots\n", encoding="utf-8")
+        assert memory.linux_free_gb(meminfo, names={}) is None
+
+    def test_missing_sysconf_name_is_none_not_an_error(self):
+        def sysconf(name):
+            raise ValueError("unrecognized configuration name")
+
+        assert memory.sysconf_free_gb(sysconf, {"SC_PAGE_SIZE": 1}) is None
+        assert (
+            memory.sysconf_free_gb(sysconf, {"SC_AVPHYS_PAGES": 1, "SC_PAGE_SIZE": 2})
+            is None
+        ), "a name listed but refused at call time is also None"
+
+    def test_macos_reads_vm_stat(self):
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return _Done(VM_STAT)
+
+        free = memory.macos_free_gb(run=run, which=lambda name: "/usr/bin/vm_stat")
+        assert free == (10000 + 20000 + 5000) * 16384 / 2**30
+        assert calls[0][0] == ["/usr/bin/vm_stat"]
+        assert calls[0][1]["timeout"] > 0
+
+    def test_macos_without_vm_stat_is_none(self):
+        def run(argv, **kwargs):
+            raise AssertionError("must not run a tool that is absent")
+
+        assert memory.macos_free_gb(run=run, which=lambda name: None) is None
+
+    @pytest.mark.parametrize(
+        "outcome",
+        [
+            _Done("not vm_stat output at all"),
+            _Done(VM_STAT.replace("16384", "many")),
+            _Done(VM_STAT.replace("Pages free:", "Pages lost:")),
+            _Done(VM_STAT, returncode=1),
+            OSError("exec format error"),
+            memory.subprocess.TimeoutExpired("vm_stat", 5),
+        ],
+    )
+    def test_macos_failures_are_none(self, outcome):
+        def run(argv, **kwargs):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+        assert (
+            memory.macos_free_gb(run=run, which=lambda name: "/usr/bin/vm_stat") is None
+        )
+
+    def test_windows_failed_call_is_none(self):
+        assert memory.windows_free_gb(lambda status: 0) is None
+
+    def test_windows_reads_avail_phys(self):
+        def call(ref):
+            ref._obj.ullAvailPhys = 3 * 2**30
+            return 1
+
+        assert memory.windows_free_gb(call) == 3.0
+
+    @pytest.mark.parametrize("platform", ["win32", "linux", "darwin", "freebsd14"])
+    def test_dispatch_never_raises(self, platform, monkeypatch):
+        def boom(*a, **k):
+            raise RuntimeError("reader bug")
+
+        for name in ("windows_free_gb", "linux_free_gb", "macos_free_gb"):
+            monkeypatch.setattr(memory, name, boom)
+        monkeypatch.setattr(memory, "sysconf_free_gb", boom)
+        assert memory.free_memory_gb(platform) is None
+
+    def test_dispatch_picks_the_platform_reader(self, monkeypatch):
+        monkeypatch.setattr(memory, "macos_free_gb", lambda: 2.0)
+        monkeypatch.setattr(memory, "linux_free_gb", lambda: 3.0)
+        monkeypatch.setattr(memory, "windows_free_gb", lambda: 4.0)
+        monkeypatch.setattr(memory, "sysconf_free_gb", lambda: 5.0)
+        assert memory.free_memory_gb("darwin") == 2.0
+        assert memory.free_memory_gb("linux") == 3.0
+        assert memory.free_memory_gb("win32") == 4.0
+        assert memory.free_memory_gb("freebsd14") == 5.0
+
+    def test_cli_says_when_the_gate_cannot_be_enforced(self):
+        note = cli.memory_gate_note(5.0, reader=lambda: None)
+        assert note and "--min-free-gb" in note and "not enforced" in note
+        assert cli.memory_gate_note(5.0, reader=lambda: 12.0) is None
+        assert cli.memory_gate_note(0.0, reader=lambda: None) is None
+
+    def test_zero_or_negative_reading_is_none(self, monkeypatch):
+        monkeypatch.setattr(memory, "linux_free_gb", lambda: 0.0)
+        assert memory.free_memory_gb("linux") is None
 
 
 # ---- CLI -------------------------------------------------------------------
