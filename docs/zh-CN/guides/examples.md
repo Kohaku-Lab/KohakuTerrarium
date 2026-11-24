@@ -31,6 +31,7 @@ kt run examples/agent-apps/<name>
 | `conversational` | 串流 ASR/TTS | Whisper 输入、TTS 输出、交互式子代理 |
 | `rp_agent` | 角色扮演 | 以记忆为优先的设计、启动触发器、角色提示词 |
 | `compact_test` | 压缩压力测试 | 小型上下文 + 自动压缩，用来验证压缩流程 |
+| `web_tester` | 浏览器 QA | 把 `browser` 插件限定在 `localhost`，检查本地网页应用；见[浏览器](browser.md) |
 
 相关指南：[Creatures 指南](creatures.md)、[配置指南](configuration.md)。
 

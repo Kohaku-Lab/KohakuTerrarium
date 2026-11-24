@@ -31,6 +31,7 @@ kt run examples/agent-apps/<name>
 | `conversational` | Streaming ASR/TTS | Whisper input, TTS output, interactive sub-agent |
 | `rp_agent` | Roleplay | Memory-first design, startup trigger, persona prompt |
 | `compact_test` | Compaction stress | Small context + auto-compact, for validating the compaction path |
+| `web_tester` | Browser QA | The `browser` plugin limited to `localhost`, checking a local web app; see [Browser](browser.md) |
 
 Related guides: [Creatures](creatures.md), [Configuration](configuration.md).
 

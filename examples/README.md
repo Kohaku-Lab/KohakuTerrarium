@@ -17,6 +17,7 @@ kt run examples/agent-apps/<name>
 | conversational | Streaming ASR/TTS | Whisper input, interactive output sub-agent |
 | rp_agent | Character roleplay | Memory-first, startup trigger |
 | compact_test | Compaction stress test | Auto-compact with small context |
+| web_tester | Browser QA | `browser` plugin limited to localhost, native tool calls |
 
 ## Terrariums (`terrariums/`)
 

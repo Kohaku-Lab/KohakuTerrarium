@@ -31,6 +31,7 @@ kt run examples/agent-apps/<name>
 | `conversational` | 串流 ASR/TTS | Whisper 輸入、TTS 輸出、互動式子代理 |
 | `rp_agent` | 角色扮演 | 以記憶為優先的設計、啟動觸發器、角色提示詞 |
 | `compact_test` | 壓縮壓力測試 | 小型上下文 + 自動壓縮，用來驗證壓縮流程 |
+| `web_tester` | 瀏覽器 QA | `browser` 外掛限定只連 `localhost`，用來檢查本機網頁應用程式；見[瀏覽器](browser.md) |
 
 相關指南：[Creatures](creatures.md)、[Configuration](configuration.md)。
 

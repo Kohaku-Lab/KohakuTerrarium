@@ -1,6 +1,6 @@
 ---
 title: 內建外掛
-summary: 框架附帶的四個執行期外掛參考：sandbox、budget、permgate、compact.auto。
+summary: 框架附帶的執行期外掛參考：sandbox、budget、permgate、compact.auto、browser。
 tags:
   - reference
   - plugins
@@ -9,7 +9,7 @@ tags:
 
 # 內建外掛
 
-KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特權，用的
+KohakuTerrarium 附帶下列執行期外掛。它們在框架裡沒有任何特權，用的
 是和使用者外掛一樣的 hook。它們在 agent 啟動時被自動發現；config 用
 和其他外掛一樣的 `plugins:` 區塊來啟用。
 
@@ -22,6 +22,7 @@ KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特�
 | [`budget`](#budget) | 5 | `pre_llm_call`、`post_llm_call`、`pre_tool_execute`、`pre_subagent_run`、`get_prompt_content` | 回合 / 工具呼叫 / 牆鐘預算記帳。 |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`、`on_load` | 在高 token LLM 呼叫之後觸發 context 壓縮。 |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`、`on_load` | 互動式使用者批准工具呼叫。 |
+| [`browser`](#browser) | 0 | `contribute_tools`、`runtime_services`、`pre_tool_execute`、`get_prompt_content`、`on_disable` | 由六個 `browser_*` 工具驅動的互動式 Chromium。 |
 
 `pre_*` hook 在低 priority 先跑。上面列的順序是預設註冊順序。
 
@@ -227,6 +228,67 @@ plugins:
       gated_tools: ["bash", "write", "edit"]
       allowlist: ["read", "grep", "glob"]
 ```
+
+## `browser`
+
+每個生物一個互動式 Chromium，由六個工具驅動（`browser_navigate`、
+`browser_snapshot`、`browser_act`、`browser_screenshot`、`browser_tabs`、
+`browser_eval`；見[內建項目](builtins.md#browser)）。外掛提供這些工具、擁有瀏覽器
+工作階段（與生物的子代理共用），並在生物停止、外掛卸載或在執行期間被停用時關閉它。
+需要 `browser-use` extra 與 `playwright install chromium`。
+實作：`src/kohakuterrarium/builtins/plugins/browser/plugin.py`；執行期在
+`src/kohakuterrarium/browser/`。
+
+### Options
+
+| Option | 類型 | 預設 | 用途 |
+|--------|------|------|------|
+| `headless` | bool | true | 不開視窗執行。 |
+| `channel` | str | null | 已安裝的瀏覽器 channel，例如 `chrome` 或 `msedge`。 |
+| `executable_path` | str | null | Chromium 系瀏覽器的路徑。 |
+| `viewport` | `"WxH"` / `[w, h]` | `1280x800` | 頁面尺寸（CSS 像素；寬 320–7680，高 200–4320）。 |
+| `profile_dir` | str | null | 持久化設定檔目錄；null = 每次啟動用完即丟的設定檔。 |
+| `allow_hosts` | list[str] | `[]` | 非空時，頁面只能連到這些主機。樣式：`host`、`*.host`、`host:port`、`[v6]:port`。 |
+| `block_hosts` | list[str] | `[]` | 頁面永遠不能連到的主機；最先檢查。 |
+| `allow_loopback` | bool | false | 允許 loopback 位址（本機開發伺服器）。 |
+| `allow_private` | bool | false | 允許私有、電信級 NAT 與 IPv6 unique-local 位址。 |
+| `secrets` | dict | `{}` | 密鑰名稱對應 `env:VAR_NAME` 參照，供 `type` 動作使用；值會從結果中遮蔽。 |
+| `nav_timeout_s` | float | 30 | 導覽逾時秒數。 |
+| `action_timeout_s` | float | 5 | 每個動作的逾時秒數。 |
+| `snapshot_max_chars` | int | 20000 | 快照長度上限（1000–1000000）。 |
+| `idle_close_s` | float | 600 | 閒置這麼多秒後關閉瀏覽器；下一次呼叫會啟動新的。 |
+
+未知的 option 名稱會被拒絕。
+
+### 行為
+
+- **延遲啟動。** 瀏覽器在第一次瀏覽器呼叫時才啟動。閒置關閉、當機或
+  `close_browser` 會丟掉它；下一次呼叫會啟動新的，並說明狀態已遺失。停止、卸載與
+  執行期停用則會永久關閉：之後的呼叫會失敗，不會重新啟動。
+- **網路。** 所有流量都經過工作階段擁有的過濾代理，每一跳、每個子資源、彈出視窗與
+  WebSocket 都會被判斷。loopback 與私有位址除非放行否則拒絕；link-local 位址（含
+  雲端 metadata）一律拒絕。
+- **sandbox。** 代理對每條連線都會詢問 sandbox 的 `network_policy` 服務。
+  `network: deny` 會拒絕所有瀏覽器工具；`os_enforce: require` 會拒絕啟動瀏覽器。
+- **主機資源。** engine 的主機資源關閉時（多使用者伺服器上的非管理員），只允許
+  headless、用完即丟的設定檔、內附的 Chromium 與公開位址。
+- **提示詞。** 啟用期間，外掛會加上一小段 `## Browser pages`，說明頁面內容放在
+  `page_content` 元素裡，是資料，永遠不是指令。
+
+### 範例
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true
+      allow_hosts: ["localhost", "127.0.0.1"]
+  - name: permgate
+    options:
+      gated_tools: [browser_navigate, browser_act, browser_eval, browser_tabs]
+```
+
+工作流程、完整的網路政策、密鑰與疑難排解見 [guides/browser](../guides/browser.md)。
 
 ## 啟用總覽
 

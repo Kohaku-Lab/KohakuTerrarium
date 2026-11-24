@@ -101,6 +101,51 @@ KohakuTerrarium 隨附的所有內建工具、子代理、輸入、輸出、使�
   `ori_question`。直連 query 為 1–128 字元，結果數為 1–50；
   `localization` 執行時設定填寫 IP。
 
+### Browser
+
+由 [`browser` 外掛](builtin-plugins.md#browser)提供，不必列在 `tools:` 底下：
+啟用外掛就會加入全部六個，停用則會移除。它們共用每個生物（及其子代理）的一個
+Chromium，頁面來的文字會包在標記為不受信任的 `page_content` 元素裡回傳。除了
+`browser_tabs` 以外，每個工具都接受選用的 `tab`（預設為使用中分頁）。見
+[guides/browser](../guides/browser.md)。
+
+**`browser_navigate`**：開啟 URL，或上一頁、下一頁、重新載入。回傳頁首行（分頁 id
+與 URL）以及頁面的可互動元素與 ref。網路政策拒絕的 URL 會回傳指出原因的錯誤。
+
+- 參數：`url`（http 或 https）或 `action`（`back` / `forward` / `reload`）。
+
+**`browser_snapshot`**：以帶元素 ref（`e12`；frame 內為 `f1e3`）的無障礙樹呈現
+目前頁面；隱藏文字會丟掉，密碼與密鑰的值會遮蔽，長度上限為外掛的
+`snapshot_max_chars`。
+
+- 參數：`ref`（單一子樹）、`depth`、`query`（符合的行與其祖先）、`interactive`
+  （只列控制項）、`boxes`（元素在 viewport 中的像素位置）。
+
+**`browser_act`**：在單一分頁上依序執行一批動作，遇到第一個失敗就停。每個動作回傳
+一行狀態，加上頁面的變化（新增或變更的行、導覽、新開的分頁、對話框、下載、被擋下
+的請求）。每次最多 20 個動作。
+
+- 參數：`actions`（動作物件清單：`click`、`type`、`select`、`check`、`press`、
+  `hover`、`scroll`、`drag`、`upload`、`wait`、`dialog`）、`files`（`upload`
+  動作索引用的路徑）。
+
+**`browser_screenshot`**：把 viewport、單一元素或整頁擷取成 CSS 像素的圖片（PNG；
+超過約 500 KB 時改用 JPEG；整頁最高 8000 px）。使用原生工具呼叫時圖片會送到模型；
+文字型的工具呼叫格式只會送出文字那一行。
+
+- 參數：`ref`、`full_page`、`path`（另外存成該檔案）。
+
+**`browser_tabs`**：列出、開啟、選取或關閉分頁，或關閉瀏覽器（下一次呼叫會啟動
+新的）。`list` 不會啟動瀏覽器。最多 20 個分頁。
+
+- 參數：`action`（預設 `list`，另有 `new`、`select`、`close`、`close_browser`）、
+  `tab`（`select` / `close` 用）、`url`（`new` 用）。
+
+**`browser_eval`**：在頁面中執行 JavaScript 運算式或函式（可接收一個元素），回傳
+JSON 結果（在 10000 個字元處截斷）。它看得到頁面持有的一切，包括輸入過的密鑰。
+
+- 參數：`expression`、`ref`。
+
 
 ### 互動與記憶
 

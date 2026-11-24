@@ -1,6 +1,6 @@
 ---
 title: 内建插件
-summary: 框架附带的四个运行时插件参考：sandbox、budget、permgate、compact.auto。
+summary: 框架附带的运行时插件参考：sandbox、budget、permgate、compact.auto、browser。
 tags:
   - reference
   - plugins
@@ -9,7 +9,7 @@ tags:
 
 # 内建插件
 
-KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特权，用的
+KohakuTerrarium 附带以下运行时插件。它们在框架里没有任何特权，用的
 是和使用者插件一样的 hook。它们在 agent 启动时被自动发现；config 用
 和其他插件一样的 `plugins:` 区块来启用。
 
@@ -22,6 +22,7 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
 | [`budget`](#budget) | 5 | `pre_llm_call`、`post_llm_call`、`pre_tool_execute`、`pre_subagent_run`、`get_prompt_content` | 回合 / 工具呼叫 / 墙钟预算记账。 |
 | [`compact.auto`](#compactauto) | 30 | `post_llm_call`、`on_load` | 在高 token LLM 呼叫之后触发 context 压缩。 |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`、`on_load` | 互动式使用者批准工具呼叫。 |
+| [`browser`](#browser) | 0 | `contribute_tools`、`runtime_services`、`pre_tool_execute`、`get_prompt_content`、`on_disable` | 由六个 `browser_*` 工具驱动的交互式 Chromium。 |
 
 `pre_*` hook 在低 priority 先跑。上面列的顺序是预设注册顺序。
 
@@ -227,6 +228,67 @@ plugins:
       gated_tools: ["bash", "write", "edit"]
       allowlist: ["read", "grep", "glob"]
 ```
+
+## `browser`
+
+每个 Creature 一个交互式 Chromium，由六个工具驱动（`browser_navigate`、
+`browser_snapshot`、`browser_act`、`browser_screenshot`、`browser_tabs`、
+`browser_eval`；见[内建组件](builtins.md#browser)）。插件提供这些工具、持有浏览器
+会话（与 Creature 的子代理共用），并在 Creature 停止、插件卸载或运行时被停用时
+关闭它。需要 `browser-use` extra 和 `playwright install chromium`。
+实现：`src/kohakuterrarium/builtins/plugins/browser/plugin.py`；
+运行时代码在 `src/kohakuterrarium/browser/`。
+
+### Options
+
+| Option | 类型 | 预设 | 用途 |
+|--------|------|------|------|
+| `headless` | bool | true | 不显示窗口运行。 |
+| `channel` | str | null | 已安装的浏览器 channel，例如 `chrome` 或 `msedge`。 |
+| `executable_path` | str | null | Chromium 系浏览器的路径。 |
+| `viewport` | `"WxH"` / `[w, h]` | `1280x800` | 页面尺寸，CSS 像素（宽 320–7680，高 200–4320）。 |
+| `profile_dir` | str | null | 持久 profile 目录；null = 每次启动用一次性 profile。 |
+| `allow_hosts` | list[str] | `[]` | 非空时，页面只能访问这些主机。模式：`host`、`*.host`、`host:port`、`[v6]:port`。 |
+| `block_hosts` | list[str] | `[]` | 页面永远不能访问的主机；最先检查。 |
+| `allow_loopback` | bool | false | 允许回环地址（本地开发服务器）。 |
+| `allow_private` | bool | false | 允许内网、运营商级 NAT 与 IPv6 唯一本地地址。 |
+| `secrets` | dict | `{}` | 密钥名到 `env:VAR_NAME` 引用的映射，供 `type` 动作使用；其值会从结果中遮蔽。 |
+| `nav_timeout_s` | float | 30 | 导航超时（秒）。 |
+| `action_timeout_s` | float | 5 | 每个动作的超时（秒）。 |
+| `snapshot_max_chars` | int | 20000 | 快照长度上限（1000–1000000）。 |
+| `idle_close_s` | float | 600 | 闲置这么多秒后关闭浏览器；下一次调用会启动新的。 |
+
+未知的 option 名会被拒绝。
+
+### 行为
+
+- **延迟启动。** 浏览器在第一次浏览器调用时启动。闲置关闭、崩溃或
+  `close_browser` 会丢弃它；下一次调用启动一个新的，并说明状态已丢失。停止、
+  卸载和运行时停用会永久关闭它：之后的调用直接失败，不会重新启动。
+- **网络。** 所有流量都经过会话持有的过滤代理，代理会检查每一跳、子资源、
+  弹出窗口和 WebSocket。回环与内网地址默认拒绝，可用 option 放行；链路本地
+  地址（包括云元数据地址）一律拒绝。
+- **sandbox。** 代理对每个连接都会查询 sandbox 的 `network_policy` 服务。
+  `network: deny` 拒绝所有浏览器工具；`os_enforce: require` 拒绝启动浏览器。
+- **主机资源。** 引擎的主机资源关闭时（多用户服务器上的非管理员用户），只允许
+  headless、一次性 profile、自带的 Chromium 和公网地址。
+- **Prompt。** 启用期间，插件加入一小段 `## Browser pages`，说明页面内容放在
+  `page_content` 元素中，是数据而不是指令。
+
+### 范例
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true
+      allow_hosts: ["localhost", "127.0.0.1"]
+  - name: permgate
+    options:
+      gated_tools: [browser_navigate, browser_act, browser_eval, browser_tabs]
+```
+
+完整的使用流程、网络策略、密钥与疑难排解见 [guides/browser](../guides/browser.md)。
 
 ## 启用总览
 

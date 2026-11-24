@@ -1,6 +1,6 @@
 ---
 title: Built-in plugins
-summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, permgate, compact.auto, ui.apps.
+summary: Reference for the runtime plugins shipped with the framework. Sandbox, budget, permgate, compact.auto, ui.apps, browser.
 tags:
   - reference
   - plugins
@@ -26,6 +26,7 @@ of the sandbox plugin, see
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
 | [`ui.apps`](#uiapps) | 50 | `contribute_tools`, `presentation_contribution` | Adds `show_app`: model-written HTML apps in the web UI. |
 | [`ui.declarative`](#uideclarative) | 50 | `presentation_contribution`, `pre_llm_call` | Inline UI: `<ui>` components in replies (renderer `kt.ui`). |
+| [`browser`](#browser) | 0 | `contribute_tools`, `runtime_services`, `pre_tool_execute`, `get_prompt_content`, `on_disable` | An interactive Chromium driven by six `browser_*` tools. |
 
 Lower priority runs earlier on `pre_*` hooks. The order above is the
 default registration order.
@@ -400,6 +401,74 @@ ignored). See [guides/chat-widgets](../guides/chat-widgets.md#inline-ui).
 plugins:
   - name: ui.declarative
 ```
+
+## `browser`
+
+An interactive Chromium per creature, driven by six tools (`browser_navigate`,
+`browser_snapshot`, `browser_act`, `browser_screenshot`, `browser_tabs`,
+`browser_eval`; see [built-ins](builtins.md#browser)). The plugin contributes
+the tools, owns the browser session (shared with the creature's sub-agents),
+and closes it when the creature stops, the plugin unloads, or it is disabled
+at runtime. Needs the `browser-use` extra and `playwright install chromium`.
+Implementation: `src/kohakuterrarium/builtins/plugins/browser/plugin.py`;
+the runtime is `src/kohakuterrarium/browser/`.
+
+### Options
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `headless` | bool | true | Run without a window. |
+| `channel` | str | null | Installed browser channel, e.g. `chrome` or `msedge`. |
+| `executable_path` | str | null | Path of a Chromium-based browser. |
+| `viewport` | `"WxH"` / `[w, h]` | `1280x800` | Page size in CSS pixels (width 320–7680, height 200–4320). |
+| `profile_dir` | str | null | Persistent profile directory; null = throwaway profile per launch. |
+| `allow_hosts` | list[str] | `[]` | If not empty, the only hosts pages may reach. Patterns: `host`, `*.host`, `host:port`, `[v6]:port`. |
+| `block_hosts` | list[str] | `[]` | Hosts pages may never reach; checked first. |
+| `allow_loopback` | bool | false | Allow loopback addresses (local dev servers). |
+| `allow_private` | bool | false | Allow private, carrier-grade NAT and IPv6 unique-local addresses. |
+| `secrets` | dict | `{}` | Secret names to `env:VAR_NAME` references for `type` actions; values are redacted from results. |
+| `nav_timeout_s` | float | 30 | Navigation timeout in seconds. |
+| `action_timeout_s` | float | 5 | Per-action timeout in seconds. |
+| `snapshot_max_chars` | int | 20000 | Snapshot size cap (1000–1000000). |
+| `idle_close_s` | float | 600 | Close the browser after this many idle seconds; the next call starts a fresh one. |
+
+Unknown option names are rejected.
+
+### Behaviour
+
+- **Lazy launch.** The browser starts on the first browser call. Idle close,
+  a crash or `close_browser` drop it; the next call starts a fresh one and
+  says that state was lost. Stop, unload and runtime disable close it for
+  good: a later call fails instead of relaunching.
+- **Network.** All traffic goes through a filtering proxy owned by the
+  session, which judges every hop, subresource, popup and WebSocket. Loopback
+  and private addresses are refused unless allowed; link-local addresses
+  (cloud metadata included) are always refused.
+- **sandbox.** The proxy consults the sandbox's `network_policy` service for
+  every connection. `network: deny` refuses every browser tool;
+  `os_enforce: require` refuses to start the browser.
+- **Host resources.** Where the engine's host resources are off (non-admin
+  users on a multi-user server), only a headless browser with a throwaway
+  profile, the bundled Chromium and public addresses is allowed.
+- **Prompt.** While enabled, the plugin adds a short `## Browser pages` block
+  saying that page content arrives in `page_content` elements and is data,
+  never instructions.
+
+### Example
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true
+      allow_hosts: ["localhost", "127.0.0.1"]
+  - name: permgate
+    options:
+      gated_tools: [browser_navigate, browser_act, browser_eval, browser_tabs]
+```
+
+See [guides/browser](../guides/browser.md) for the workflow, the network
+policy in full, secrets and troubleshooting.
 
 ## Activation summary
 

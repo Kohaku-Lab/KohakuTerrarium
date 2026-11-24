@@ -1,0 +1,467 @@
+---
+title: Browser
+summary: Give a creature a real Chromium with the built-in browser plugin. Install, enable, the six browser tools, network policy, sandbox and permgate, secrets, limits.
+tags:
+  - guides
+  - browser
+  - plugins
+  - tools
+---
+
+# Browser
+
+For readers who want a creature to drive a real web browser: log in to a test
+site, fill a form, click through a flow, or check a web UI it just built.
+
+The built-in `browser` plugin gives a creature one long-lived Chromium and six
+`browser_*` tools to drive it. The browser keeps its state between calls
+(cookies, logins, open tabs), the model reads pages as text with element refs
+and acts on those refs, and every request the page makes goes through a
+filtering proxy that keeps it away from your private network.
+
+It is different from `web_fetch`, which renders one page and returns its text
+with no session and no interaction. Use `web_fetch` to read; use the browser
+plugin when the creature has to do something on a site.
+
+Concept primer: [plugins](../concepts/modules/plugin.md) and
+[tools](../concepts/modules/tool.md). The plugin owns the browser and
+contributes the tools; nothing about it is built into the framework core.
+
+## Install
+
+The browser is an optional extra. A framework install without it starts
+normally; only the browser tools fail, with a message saying what to install.
+
+```bash
+pip install "kohakuterrarium[browser-use]"
+playwright install chromium
+```
+
+The first line installs Playwright. The second downloads the Chromium build
+Playwright drives. Without that download the plugin falls back to an installed
+Google Chrome, then Microsoft Edge (see [Launch](#launch)). The
+`kohakuterrarium[full]` extra includes `browser-use`; the older `browser` extra
+is the Crawl4AI renderer behind `web_fetch` and does not install Playwright.
+
+## Enable it on a creature
+
+The plugin is registered in the built-in catalog and **off by default**: a
+creature gets no browser tools until the plugin is on.
+
+### In config
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true      # reach a dev server on localhost
+```
+
+With no `options` every default applies, and the browser can reach public web
+sites only. The browser starts on the first browser call, not when the
+creature starts.
+
+### At runtime
+
+The plugin is discovered for every creature, so it can be switched on in a
+running session: `/plugin enable browser` from the chat, or the Plugins tab in
+the web UI, which can also edit its options. Changed options take effect
+on the next browser call: the current browser closes and a new one starts with
+the new options.
+
+Disabling the plugin closes the browser at once. The tools disappear from the
+creature, and enabling the plugin again starts a fresh browser on the next call
+(no tabs, cookies or logins carried over).
+
+### From Python
+
+Either put the entry in the config you build from, or pass a plugin instance:
+
+```python
+from kohakuterrarium import Agent
+from kohakuterrarium.builtins.plugins.browser.plugin import BrowserPlugin
+
+agent = await Agent.build(
+    "path/to/creature",
+    plugins=[BrowserPlugin(options={"allow_loopback": True})],
+)
+```
+
+An `AgentConfig` with `plugins=[{"name": "browser", "options": {...}}]` works
+the same way.
+
+## The six tools
+
+| Tool | Kind | What it is for |
+|---|---|---|
+| `browser_navigate` | egress | Open a `url`, or go `back` / `forward` / `reload` (the `action` argument). Returns the page header and its interactive elements with refs. |
+| `browser_snapshot` | read | Read the current page as an accessibility tree with refs. Narrow it with `ref` (one subtree), `depth`, `query` (lines matching a text, with their ancestors) or `interactive` (controls only); `boxes` adds each element's position in viewport pixels. |
+| `browser_act` | mutate | Run an ordered batch of `actions` on one tab. Returns one status line per action and what changed on the page. `files` lists the paths that upload actions use. |
+| `browser_screenshot` | read | The viewport, one element (`ref`) or the whole page (`full_page`) as an image; `path` also saves it to a file. |
+| `browser_tabs` | session | `list` (the default), `new` (optionally with a `url`), `select` or `close` a tab, or `close_browser`. |
+| `browser_eval` | script | Run a JavaScript expression or function in the page, optionally on one element `ref`, and return its JSON result. |
+
+Every tool except `browser_tabs` takes an optional `tab` (a tab id such as
+`t2`; default the active tab). The tools are split by risk so that name-based
+gates (`permgate`, `sandbox`) can tell reading a page from changing it or
+running script in it.
+
+### Actions in a batch
+
+`browser_act` takes a list of action objects. Each has a `kind` and the fields
+below.
+
+| kind | Fields |
+|---|---|
+| `click` | `ref`, or `x` / `y` in viewport pixels; `button`, `double`, `modifiers` |
+| `type` | `ref`; `text`, or `secret` (a configured secret name); `submit`, `slowly` |
+| `select` | `ref`, `values` (option labels) |
+| `check` | `ref`, `checked` (default true) |
+| `press` | `key` such as `Enter` or `Control+A`; optional `ref` |
+| `hover` | `ref`, or `x` / `y` |
+| `scroll` | `ref` to scroll into view, or `dx` / `dy` pixels |
+| `drag` | start `ref` or `x` / `y`; end `to` (a ref) or `to_x` / `to_y` |
+| `upload` | `ref`, `files` (indexes into the call's `files` list) |
+| `wait` | one of `text`, `text_gone`, `seconds` |
+| `dialog` | `accept` (default true), `text` for a prompt |
+
+In text tool formats every argument arrives as a string, so `actions` may also
+be a JSON string or the call body.
+
+## How the tools fit together
+
+The tools are built around one loop: **snapshot first, act by ref in batches,
+read the delta.**
+
+1. **Open a page.** `browser_navigate` returns a header line (`[t1]` and the
+   URL) and the page's interactive elements, each with a ref such as `e12`
+   (`f1e3` inside a frame).
+2. **Read it.** `browser_snapshot` gives the whole page: headings, text,
+   controls. On a large page narrow it with `query` or `interactive` instead of
+   reading everything.
+3. **Act in one batch.** Put the steps of one intent in one `browser_act`:
+   type the name, pick the plan, tick the box, click Save, then `wait` for the
+   confirmation text. Actions run in order and the batch stops at the first
+   failure; the rest are reported as not executed. One call per intent matters
+   because tool calls from one turn run concurrently, so separate calls cannot
+   express "click, then type, and stop if the click failed", and every round
+   trip to the model is the slow part of a browsing task.
+4. **Read the delta.** The result is not a new snapshot. It lists the lines
+   that were added (`+`) or changed (`~`) since the snapshot before the batch,
+   elements that moved, URL and title changes, tabs opened, dialogs, downloads
+   and blocked requests. A batch that lands on a new page shows that page's
+   interactive elements instead. Check it for the outcome you wanted before
+   reporting success.
+5. **Fall back to pixels.** When something has no ref (a canvas, a chart, a
+   custom drag area), `browser_screenshot` shows it, and `click`, `hover` and
+   `drag` take `x` / `y` coordinates. Screenshot pixels are CSS pixels at a
+   device scale of 1, so a coordinate read off the image is the coordinate to
+   click. `browser_snapshot` with `boxes` gives the same coordinates as text.
+
+Refs are valid for the page as it was last shown to the model. Before a batch
+the session takes a fresh snapshot and rejects a ref whose element is gone or
+now names a different element, at once and with a message naming the ref,
+instead of waiting for a timeout. Take a new snapshot and use the new refs.
+
+### Tabs, dialogs, downloads, uploads
+
+- **Tabs** have stable ids (`t1`, `t2`, …). A tab a click opens becomes the
+  active tab, and the action's result says so and shows its interactive
+  elements.
+- **Dialogs.** `alert` and `beforeunload` are accepted for you and reported.
+  A `confirm` or `prompt` dialog leaves the call with "dialog pending"; until
+  it is answered with a `dialog` action, every other browser call returns an
+  error that says a dialog is waiting.
+- **Downloads** are saved under `browser-downloads/` in the creature's working
+  directory, and the result gives the saved path. A download still running
+  after two seconds is reported as in progress.
+- **Uploads** take their paths from the call's `files` argument (relative to
+  the working directory), so the sandbox checks them like any other file read.
+  A file input that is hidden behind a styled button has no ref of its own;
+  aim the `upload` at the visible button and the session goes through the file
+  chooser.
+
+### What the browser keeps, and when it starts over
+
+The browser starts on the first browser call (`browser_tabs` with `list` does
+not start it). It closes after `idle_close_s` without use, when it crashes,
+or on `close_browser`; the next call starts a fresh one and says that state
+was lost. A fresh browser has a throwaway profile unless `profile_dir` is set,
+so logins do not survive a restart.
+
+When the creature stops, or the plugin is unloaded or disabled, the browser
+closes for good. A call that reaches a closed browser fails; it never starts a
+new one behind your back.
+
+The creature's sub-agents share its browser. Calls from the creature and its
+sub-agents queue on the browser one at a time.
+
+## Options
+
+Every option, with its default. Unknown option names are rejected when the
+creature is built.
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `headless` | bool | `true` | Run without a window. Set `false` to watch the browser work. |
+| `channel` | string | none | Use an installed browser channel such as `chrome` or `msedge`. |
+| `executable_path` | string | none | Path of a Chromium-based browser to run. |
+| `viewport` | `"WIDTHxHEIGHT"` or `[w, h]` | `1280x800` | Page size in CSS pixels; width 320–7680, height 200–4320. |
+| `profile_dir` | string | none | Persistent profile directory. None means a fresh throwaway profile each launch. |
+| `allow_hosts` | list | `[]` | If not empty, the only hosts pages may reach. |
+| `block_hosts` | list | `[]` | Hosts pages may never reach. Checked before `allow_hosts`. |
+| `allow_loopback` | bool | `false` | Allow `localhost` and other loopback addresses (local dev servers). |
+| `allow_private` | bool | `false` | Allow private-network addresses (10/8, 172.16/12, 192.168/16, carrier-grade NAT, IPv6 unique-local). |
+| `secrets` | map | `{}` | Secret names to `env:VAR_NAME` references, for `type` actions. See [Secrets](#secrets). |
+| `nav_timeout_s` | number | `30` | Navigation timeout, in seconds (above 0, at most 3600). |
+| `action_timeout_s` | number | `5` | Timeout of each action and page read, in seconds (above 0, at most 3600). |
+| `snapshot_max_chars` | int | `20000` | Cap on a snapshot's length (1000–1000000). A cut snapshot ends with a line saying how much was left out and how to narrow. |
+| `idle_close_s` | number | `600` | Close the browser after this many seconds without a call (above 0, at most 86400). |
+
+### Launch
+
+With `executable_path`, only that browser is tried; with `channel`, only that
+channel. With neither, the plugin tries Playwright's bundled Chromium, then an
+installed Google Chrome, then Microsoft Edge. Pages always get a fixed
+viewport at a device scale factor of 1.
+
+## Network policy
+
+All browser traffic goes through a filtering proxy on 127.0.0.1 that the
+session owns. Chromium is told to send even loopback traffic through it, QUIC
+is turned off, and WebRTC may not send UDP outside the proxy. The proxy sees
+every request: each hop of a redirect, subresources, popups, service-worker
+requests and WebSocket handshakes, so a page cannot reach a blocked address by
+redirecting or by loading it in the background.
+
+For each connection the proxy:
+
+1. accepts `http` and `https` only;
+2. refuses a host in `block_hosts`, then, when `allow_hosts` is not empty, a
+   host that is not in it;
+3. asks the sandbox plugin, when it is active (see below);
+4. resolves the host and refuses special addresses: loopback unless
+   `allow_loopback`; private, carrier-grade NAT and IPv6 unique-local unless
+   `allow_private`; and always link-local (which includes the
+   `169.254.169.254` cloud metadata address), unspecified, multicast and
+   reserved ranges. An IPv4 address carried inside an IPv6 one is judged as
+   the IPv4 address;
+5. connects to the address it checked, so a second DNS answer cannot point
+   somewhere else.
+
+A blocked request gets a 403 from the proxy, and the next tool result lists
+it under `Blocked N requests` with the reason. A navigation whose main page
+(or any host on its redirect chain) is blocked becomes a tool error that names
+the URL and the reason. `browser_navigate` also refuses non-web schemes
+(`file:`, `javascript:` …) and URLs with embedded credentials up front.
+
+**Local dev servers.** Loopback is blocked by default. Testing a local app is
+one option away: `allow_loopback: true`. To keep the rest of the internet out
+at the same time, add `allow_hosts`:
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      allow_loopback: true
+      allow_hosts: ["localhost", "127.0.0.1"]
+```
+
+**Host patterns.** `allow_hosts` and `block_hosts` entries are:
+
+| Pattern | Matches |
+|---|---|
+| `example.com` | exactly `example.com`, any port |
+| `*.example.com` | any subdomain of `example.com` (not `example.com` itself) |
+| `example.com:8443` | `example.com` on port 8443 only |
+| `127.0.0.1:5173` | that address on that port only |
+| `[::1]:5173` | an IPv6 address with a port |
+
+Names are compared lower-case and IDNA-encoded, with any trailing dot dropped.
+A wildcard over an IP address is rejected. An IP address in `block_hosts` also
+blocks a host name that resolves to it.
+
+Link-local addresses are refused even when they are listed in `allow_hosts`;
+no option permits them.
+
+## With the sandbox
+
+The browser follows the [`sandbox`](../reference/builtin-plugins.md#sandbox)
+plugin when both are on. The proxy asks the sandbox about every connection,
+so a change to the sandbox's options applies from the next request. When the
+sandbox is switched on or off, or denies the network, open browser
+connections are dropped.
+
+- **`network: deny`**: no browser tool runs. The sandbox refuses the call
+  before it reaches the browser.
+- **`network_allowlist`**: the URL arguments of `browser_navigate` and
+  `browser_tabs` are checked against it, and so is every connection the proxy
+  opens, subresources included. The allowlist names hosts only (no ports). It
+  applies on top of the browser's own `allow_hosts`; a host must pass both.
+- **`os_enforce: require`**: the browser refuses to start (and closes a running
+  one), because Chromium cannot run under the sandbox's subprocess
+  confinement. The browser is treated as a network tool, so the `syscall`
+  level does not block it.
+- **File paths**: `files` in `browser_act` (read) and `path` in
+  `browser_screenshot` (write) go through the same path checks as other file
+  tools.
+- **`backend: audit`** logs what it would refuse and lets it through.
+
+## With permgate
+
+[`permgate`](../reference/builtin-plugins.md#permgate) needs no
+browser-specific setup. Gate the tools that
+leave the page, change it or run script in it, and let the read-only ones
+through:
+
+```yaml
+plugins:
+  - name: browser
+  - name: permgate
+    options:
+      gated_tools:
+        - browser_navigate
+        - browser_act
+        - browser_eval
+        - browser_tabs
+```
+
+`browser_snapshot` and `browser_screenshot` only read the page and stay
+ungated. An empty `gated_tools` gates every tool, so list them.
+
+## Secrets
+
+Options hold references, never values:
+
+```yaml
+plugins:
+  - name: browser
+    options:
+      secrets:
+        staging_pw: "env:STAGING_PASSWORD"
+```
+
+A `type` action that names `secret: staging_pw` (instead of `text`) types the
+value of `STAGING_PASSWORD`, read from the environment when the action runs.
+The value must be at least four characters. In every text result it shows as
+`[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings; the
+value of any password field on the page shows as `[redacted]`.
+
+What can still see a secret:
+
+- **Screenshots.** A page that echoes the value as visible text shows it in
+  the image.
+- **`browser_eval`.** A script runs with the page's privileges and can read a
+  field's value. Gate `browser_eval` with `permgate` when secrets are in play.
+- **The site itself**, of course. Type secrets only into sites you trust.
+
+## Untrusted page content
+
+Everything a page chose (text, titles, element names, dialog messages, file
+names, script results, error text from the page) is delivered inside a
+`page_content` element that carries the page's origin, a random id fixed for
+the session and `trust="untrusted"`. Anything inside that looks like the
+closing tag is escaped, so a page cannot end the wrapper early. The plugin adds
+a short `## Browser pages` block to the system prompt saying that this content
+is data, never instructions.
+
+Snapshots also drop text a person would not see: elements marked
+`aria-hidden`, and non-interactive text that is transparent, tiny, the same
+colour as its background, far off-screen or clipped away. The result says how
+many blocks were dropped. Interactive elements are always kept, since
+screen-reader labels on real controls are legitimate. `browser_eval` reads the
+raw page, so a script can still see hidden text; its output is wrapped the same
+way.
+
+This is **defence in depth, not a guarantee**. Marking content as untrusted
+lowers the success rate of prompt injection; it does not stop it. A page can
+still persuade a model. Limit what a browsing creature can reach and do: keep
+`allow_hosts` tight, gate the mutating tools with `permgate`, and do not give
+it secrets or tools it does not need.
+
+## Multi-user hosts
+
+On a server with user accounts, only administrators' engines may use host
+resources. For every other user (and the anonymous slot), the browser runs
+only headless, with a throwaway profile, the bundled Chromium and public
+addresses. A creature whose options ask for more (`headless: false`,
+`profile_dir`, `executable_path`, `channel`, `allow_loopback` or
+`allow_private`) gets an error on every browser call naming the refused
+options. Single-user hosts, `kt run` and the CLI are not restricted.
+
+## Limits and known gaps
+
+- At most 20 actions per `browser_act`; a `wait` lasts at most 10 seconds.
+- At most 20 open tabs; tabs a page opens beyond that are closed and
+  reported.
+- `browser_eval` results are cut at 10000 characters, and the script must
+  finish within `action_timeout_s`.
+- Screenshots are PNG, or JPEG when a PNG would exceed about 500 KB; a
+  full-page screenshot stops at 8000 pixels high.
+- After an action the session waits for the page to go quiet (150 ms without
+  DOM changes, at most 2 seconds). It cannot see pending timers: when a page
+  updates later, add a `wait` for the text you expect.
+- **Screenshots reach the model only with native tool calling.** In the text
+  tool formats (`bracket`, `xml`) a tool result is passed back as text, so the
+  model gets the screenshot's description line but not the image. Use
+  `tool_format: native` when screenshots matter.
+- One browser per creature; its calls run one at a time.
+- Chromium only, through Playwright.
+- Not supported: attaching to your own running Chrome or its default profile;
+  stealth, anti-bot evasion or CAPTCHA solving (a CAPTCHA or a two-factor
+  prompt should be handed to the user); controlling the desktop or other
+  applications.
+- Not yet built: a dedicated browsing sub-agent, a prompt-injection classifier,
+  provider-native computer-use tools, and memory of past browsing workflows.
+
+## Example
+
+[`examples/agent-apps/web_tester`](../../../examples/agent-apps/web_tester/)
+is a small creature that checks a web app running on your machine. It turns on
+the browser with `allow_loopback` and `allow_hosts` limited to `localhost` and
+`127.0.0.1`, uses native tool calling so screenshots reach the model, and has a
+prompt that asks it to report only what the page showed.
+
+```bash
+kt run examples/agent-apps/web_tester --llm <your preset>
+```
+
+## Troubleshooting
+
+- **"the browser tools need Playwright, which is not installed".** Install
+  the extra: `pip install "kohakuterrarium[browser-use]"`, then
+  `playwright install chromium`.
+- **"no usable Chromium was found".** Run `playwright install chromium`, or
+  point `executable_path` or `channel` at an installed Chromium-based
+  browser.
+- **"the browser needs the Proactor event loop on Windows".** Playwright starts
+  its driver as a subprocess, which only the Proactor loop supports. Something
+  in the process set the selector loop: most often a server started with
+  `--reload` (uvicorn runs the reloaded app on a selector loop on Windows), or
+  code that sets `WindowsSelectorEventLoopPolicy`. Start the server without
+  `--reload`, or remove the policy.
+- **A navigation is blocked.** The error names the URL and the reason. For a
+  local server set `allow_loopback: true` (and `allow_private: true` for a
+  machine on your LAN); for a host missing from `allow_hosts`, add it; check
+  the sandbox's `network_allowlist` too. Link-local addresses cannot be
+  allowed.
+- **"dialog pending" on every call.** A `confirm` or `prompt` dialog is open. Answer it with a `dialog` action in `browser_act` (`accept`
+  true or false, `text` for a prompt).
+- **"ref eN is no longer on the page" / "now points at a different element".**
+  The page changed since the model last saw it. Take a snapshot and use the
+  new refs.
+- **"the browser tools need the browser plugin".** A `browser_*` tool was
+  listed under `tools:` without the plugin. Enable the `browser` plugin
+  instead; it brings all six tools.
+- **"the browser session is closed".** The creature stopped or the plugin was
+  disabled. Enable the plugin again; the next call starts a fresh browser.
+
+## See also
+
+- [Reference / built-in plugins](../reference/builtin-plugins.md#browser): the
+  option table.
+- [Reference / built-ins](../reference/builtins.md#browser): the six tools.
+- [Plugins](plugins.md): how plugins hook into the agent, `sandbox` and
+  `permgate` included.
+- [Configuration](configuration.md): where `plugins:` sits in a creature
+  config.

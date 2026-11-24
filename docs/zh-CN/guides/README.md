@@ -39,6 +39,7 @@ tags:
 - [自定义模块指南](custom-modules.md)：自定义输入、触发器、工具、输出、子代理的写法与注册。
 - [MCP 指南](mcp.md)：连接 Model Context Protocol 服务器，把它们的工具暴露给 Creature。
 - [MCP 服务器](mcp-server.md)：向外部 MCP 客户端提供 KT 工具和本地任务委派。
+- [浏览器](browser.md)：`browser` 插件：真正的 Chromium、它的六个工具、网络策略、sandbox 与 permgate。
 
 ## 发布与部署
 

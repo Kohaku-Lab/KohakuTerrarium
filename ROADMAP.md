@@ -70,6 +70,7 @@ Possible areas include:
 - **Permission guard / approval plugins**
   - for safer execution and user confirmation workflows
 - **Computer use tools**
+  - browser use ships as the built-in `browser` plugin; whole-desktop control is still open
 - **Messaging platform integrations**
   - such as Discord, Telegram, and similar systems
 

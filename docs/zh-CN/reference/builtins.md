@@ -98,6 +98,53 @@ KohakuTerrarium 随附的所有内置工具、子代理、输入、输出、用�
   `ori_question`。直连 query 为 1–128 字符，结果数为 1–50；
   `localization` 运行时配置填写 IP。
 
+### Browser
+
+由 [`browser` 插件](builtin-plugins.md#browser)提供，不写在 `tools:` 下：启用插件
+即加入全部六个工具，停用则移除。它们共用每个 Creature（及其子代理）的一个
+Chromium，来自页面的文字放在标记为不可信的 `page_content` 元素中返回。除
+`browser_tabs` 外，每个工具都接受可选的 `tab`（默认活动标签页）。见
+[guides/browser](../guides/browser.md)。
+
+**`browser_navigate`**：打开 URL，或后退、前进、重新加载。返回一行头部信息
+（标签页 id 与 URL）以及带 ref 的可交互元素。被网络策略拒绝的 URL 会返回
+写明原因的错误。
+
+- 参数：`url`（http 或 https）或 `action`（`back` / `forward` / `reload`）。
+
+**`browser_snapshot`**：以带元素 ref（`e12`；frame 内为 `f1e3`）的无障碍树
+返回当前页面，隐藏文字被丢弃，密码与密钥值被遮蔽，长度上限为插件的
+`snapshot_max_chars`。
+
+- 参数：`ref`（单个子树）、`depth`、`query`（匹配的行及其祖先）、
+  `interactive`（只看控件）、`boxes`（以视口像素表示的元素位置）。
+
+**`browser_act`**：在一个标签页上按顺序执行一批动作，遇到第一个失败即停止。
+每个动作返回一行状态，并附上页面变化（新增或改变的行、导航、新开的标签页、
+对话框、下载、被拦截的请求）。每次最多 20 个动作。
+
+- 参数：`actions`（动作对象列表：`click`、`type`、`select`、`check`、
+  `press`、`hover`、`scroll`、`drag`、`upload`、`wait`、`dialog`）、`files`
+  （`upload` 动作按下标引用的路径）。
+
+**`browser_screenshot`**：以 CSS 像素截取视口、单个元素或整个页面（PNG，
+超过约 500 KB 时改用 JPEG；整页最高 8000 px）。原生工具调用下图片会送到模型；
+文本工具格式只传回说明行。
+
+- 参数：`ref`、`full_page`、`path`（同时把图片存到该路径）。
+
+**`browser_tabs`**：列出、打开、切换或关闭标签页，或关闭浏览器（下一次调用
+会启动一个新的）。`list` 从不启动浏览器。最多 20 个标签页。
+
+- 参数：`action`（默认 `list`，以及 `new`、`select`、`close`、
+  `close_browser`）、`tab`（用于 `select` / `close`）、`url`（用于 `new`）。
+
+**`browser_eval`**：在页面中运行一段 JavaScript 表达式或函数，可选地传入一个
+元素，返回其 JSON 结果（在 10000 字符处截断）。它能看到页面持有的一切，包括
+已输入的密钥。
+
+- 参数：`expression`、`ref`。
+
 
 ### 互动与记忆
 
