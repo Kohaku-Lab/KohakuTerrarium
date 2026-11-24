@@ -69,26 +69,42 @@ kt embedding swe.kohakutr \
 
 Incremental: running `kt embedding` again only indexes new events.
 
-## Existing-session anchor upgrade (explicit, offline)
+## Rebuild memory indexes for an older Session
 
-For sessions with an older Memory index, keyword/semantic search still works,
-but those old rows do not have verified physical-source anchors. Stop all
-agents, Studio sessions and other writers using the file, then make a
-consistent backup of the session and its artifacts before running:
+Close all agents/Studio instances that use this Session. Run one command for
+the **whole Session**, without selecting individual Agents:
 
-`bash
-kt migrate-memory-anchors /path/to/session.kohakutr --agent alice
-`
+```bash
+kt memory rebuild /path/to/session.kohakutr
+```
 
-Repeat with each Agent namespace whose existing index needs anchors. This
-updates only existing FTS/vector **metadata**; it neither re-embeds nor changes
-the Session file format or selects a different history branch. An incomplete
-or stale index is rejected. If the command fails, stop conflicting writers,
-restore/rebuild a valid selected-lineage index if needed, and retry.
+The command inspects existing indexes first. If old vector rows are present,
+the interactive CLI asks whether to **recompute** their embeddings (may
+download a model or incur API charges) or **drop** the obsolete semantic
+index. In scripts, select the behavior explicitly:
 
-Migration is deliberately not triggered by a search. Before migration, a
-search hit can report `ANCHOR_MIGRATION_REQUIRED` instead of an Anchor.
-Normal new index rows receive source references at indexing time.
+```bash
+kt memory rebuild /path/to/session.kohakutr --dry-run
+kt memory rebuild /path/to/session.kohakutr --vectors drop
+kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentence-transformer --model @best
+```
+
+A rebuild recreates selected-lineage FTS and Source Anchors from the original
+event log. Existing all-branch indexes may become narrower: no recorded
+events are deleted, but some previously indexed blocks may no longer be
+searchable in the current projection.
+
+For safety, indexes are rebuilt in a **separate database copy** and published
+only after validation. The original database is saved as a backup; sidecar
+artifacts are not changed. If rebuilding fails, the original database remains
+in place. Existing vectors are not silently reused across incompatible index
+formats, and the default mode does not silently drop them.
+If you choose to drop vectors, semantic search is disabled until you
+explicitly rebuild an embedding index.
+
+Old Search results may report `ANCHOR_REBUILD_REQUIRED` until the Session's
+derived indexes have been rebuilt. Normal Search never silently triggers
+this maintenance command.
 
 ## Search from the CLI
 

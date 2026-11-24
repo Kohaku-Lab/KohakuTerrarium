@@ -1,130 +1,115 @@
-# Issue #584 — selected-lineage Search anchors
+# Issue #584 — source-bound Search Anchors and index rebuild
 
-Status: **local integration candidate**, not a published feature or an approved
-replacement for Draft PR #586. Experiment branch:
-experiment/issue-584-minimal-anchor, originally based on 09d22a7a1.
+Status: scoped integration on feat/issue-584-memory-anchors, targeting #605.
+The earlier 48-commit, all-branch Draft #586 was superseded. Mainline
+selected-lineage Search remains the source of truth for what is searchable.
 
-## Scope and architectural decision
+## Scope and source contracts
 
-The creature-facing search_memory tool should return opaque references to
-source events, so a hit can be expanded into bounded chronological context
-across turns. The user explicitly accepted these two limits:
+The builtin search_memory tool returns opaque, process-local Anchors for hits
+whose physical source event and projected block have been independently
+verified. A creature can read bounded preceding/following context and follow
+continuation Anchors. Stale, invalid, or unprovable source data is never
+silently reinterpreted as a neighboring event.
 
-- **Existing selected-lineage index:** no requirement to search all historical
-  branches. A different explicitly saved branch view must not expose siblings
-  through an Anchor from an incompatible old index.
-- **Explicit migration:** existing indexes may need a manual, offline source
-  metadata upgrade. Search still works before migration; such hits do not
-  receive an Anchor until their source is certified.
+- New FTS and Vector index records carry exact physical event keys and source
+  fingerprints. Both live indexing and the existing offline embedding
+  builder use the same sourced-events adapter.
+- Anchor issuance checks exact event content, selected-lineage visibility and
+  the canonical block extractor; expansion uses bounded physical key probes.
+- Expansion is capped to 10 neighboring events per direction, 256 examined
+  keys per side, and 900 characters per displayed event slice. Continuity can
+  be unknown when the source budget cannot determine whether more history
+  exists; requested unavailable neighbors still return a scan-limit error.
+- Legacy unannotated or all-branch index records remain ordinary Search hits
+  but do not receive unproven Anchors. They report ANCHOR_REBUILD_REQUIRED.
+- No new all-branch Search feature, Replay, Resume, /clear, Compaction or
+  Session-format contract is introduced.
 
-No Replay, Resume, /clear, Compaction, full-branch indexing, embedding model
-governance, SessionStore format migration, or global proof state machine is part
-of this feature. Cold Resume continues in its own worktrees.
+## Session-level index maintenance
 
-## Source and lifetime contracts
+The previous metadata-only, Agent-scoped migration attempted to prove that
+all old indexed rows match today's selected-lineage extraction exactly.
+A real Session indexed under the former #586 all-branch prototype disproved
+that assumption: 2,087 raw events, 512 FTS rows vs 438 current selected
+rows, and 74 old extra tool_result blocks. Its old Vector index contained
+414 rows, 20 without Source Refs; its old index manifest marked Vector
+invalid. The old migration incorrectly reported one of those FTS blocks
+as "not selected", even though its saved physical source was valid.
 
-**Indexing** uses the existing store executor to read real physical event keys,
-not guessed logical event_ids or the old block_id ordinal. A compatible
-event becomes an ephemeral SourcedEvent carrying its exact physical key.
-The block extractor attaches that key and a fingerprint to a searchable Block;
-existing FTS/Vector metadata stores both. If chronological IDs, ancestry or
-physical key structure cannot be proved, ordinary Search retains its prior
-behavior but source Anchors are withheld. Normal index updates still follow
-the mainline per-Agent cursor.
-
-**Search** returns a hit's source reference and fingerprint. The Navigator
-looks up the exact source event and compares its hash, reconstructs the
-indexed block with the **same block extractor** as the index,
-and checks the selected-lineage view before issuing an opaque process-local
-token. Tokens are bounded in number and cleared on Store close.
-Unannotated old rows return ANCHOR_MIGRATION_REQUIRED without triggering
-an online rewrite or full-history scan. Malformed or stale evidence produces
-explicit errors.
-
-**Context expansion** reads the actual source by physical key. It uses a
-frozen selected-branch view, filters other branches, and walks canonical
-numeric physical event keys in each direction, looking at no more than 256
-keys per side for up to 10 neighboring events. Failed append sequence
-holes are skipped. A gap or invisible history beyond the budget raises
-CONTEXT_SCAN_LIMIT when a requested neighbor cannot be certified. If all
-requested events are present but a has-more flag exceeds the scan budget,
-that continuity flag is reported as unknown instead of failing the content
-read or falsely claiming the history ended. Each displayed content slice
-is limited to 900 characters, supports an offset, and returns another
-opaque Anchor to continue walking.
-
-A source fingerprint proves only that **that event** is unchanged, not that
-all indexed rows or arbitrary out-of-band SQL modifications are globally
-certified. No unbounded invalidation responsibility is assigned to the runtime.
-
-## Existing-index upgrade
-
-With *all writers stopped*, and after making a consistent Session/sidecar
-backup, the operator can run:
+The replacement user-facing entry point is Session-level:
 
 ~~~bash
-kt migrate-memory-anchors /path/to/session.kohakutr --agent alice
+kt memory rebuild SESSION
+kt memory rebuild SESSION --dry-run
+kt memory rebuild SESSION --vectors drop
+kt memory rebuild SESSION --vectors rebuild --provider sentence-transformer --model @best
 ~~~
 
-Repeat for other Agent namespaces. The CLI refuses an already-open Store in
-the current process and requests a writer lock. It never runs implicitly in
-search_memory. The command only changes **derived FTS/Vector metadata** and
-does not need an embedding model or vector re-encoding.
+Users do not need to know Agent namespaces or Block IDs. Normal Search never
+performs this maintenance implicitly. In a terminal, old vector rows require
+an explicit choice to rebuild their embeddings or drop stale semantic
+retrieval. In noninteractive mode the choice must be provided by an argument.
+No incompatible old vector bytes are silently reused, and re-embedding may
+download models or incur API charges.
 
-The migration proves file identity, complete source/key alignment, compatible
-published FTS and vector cursors **for the target Agent's actual rows**,
-source fingerprint, and exact block content. Vectors belonging only to another
-Agent do not require the target Agent to have a vector cursor. The original
-source sequence is captured before any index preflight and retained as the
-operation's boundary. It validates all candidates before writing; per-row
-source/index revision
-and row checks fence changes during publication. On interruption, patched
-rows may remain independently valid. Retrying is idempotent. No global
-ready marker or new index format is written. The operator must own an
-exclusive, quiescent Store: a migration-only lock would **not** serialize
-unrelated older writers or direct SQL modifications.
+The operation:
+1. Checks for a live Session and writer ownership; requires all external
+   writers and readers to have stopped.
+2. Inspects old FTS and vector counts without materializing old indexes.
+3. Takes a same-directory stage copy of the database, rebuilding **only the
+   derived Memory indexes** in that copy for all discovered Session agents.
+   It clears old index cursors, manifest, FTS and known vector tables; it
+   preserves Session events, conversation, snapshots and artifact storage.
+4. Uses the physical Source Ref reader for both selected-lineage FTS and any
+   newly recomputed vectors. It checks all published FTS metadata and compares
+   physical event fingerprints before and after staging.
+5. Keeps a backup of the original Session file, then publishes the staged
+   database using one atomic file replacement; a staging/model failure
+   leaves the original in place.
 
-If the index is stale, incomplete or historically unprovable, migration fails.
-The operator must repair or rebuild the original selected-lineage index
-under its existing workflow before retrying. This feature does not attempt
-to fix Replay or historical index extraction semantics.
+The vector drop choice also sets the saved embedding provider to none so
+a later semantic search does not silently re-encode the discarded index.
+A subsequent explicit embedding build can restore semantic retrieval.
 
-## Cost evidence (isolated Windows synthetic measurements)
+This is not a concurrent live database migration; the same operation must
+not race unrelated processes that ignore the Session writer lock. Byte-for-
+byte restoration of the old file remains possible using the emitted backup.
 
-| Already indexed physical events | FTS search | Anchor registration | Context expansion |
+## Validation and cost
+
+Measured on synthetic Windows histories (already indexed, median of five):
+
+| Events | FTS query | Anchor registration | Context expansion |
 | ---: | ---: | ---: | ---: |
 | 200 | 0.170 ms | 0.075 ms | 0.160 ms |
 | 1,000 | 0.174 ms | 0.064 ms | 0.140 ms |
 | 4,000 | 0.219 ms | 0.076 ms | 0.206 ms |
 
-The initial history-rescanning prototype cost about 27.96 ms to register
-and 13.73 ms to expand a 4,000-event anchor. The final path no longer
-rereads the entire history **per Anchor action**. These measurements exclude
-the mainline live index refresh. At 4,000 events, direct baseline get_events
-cost about 9.68 ms, while validated sourced_events cost about 15.28 ms.
-The existing Search refresh still has a linear source-read cost; address it
-separately only if justified by large-session performance evidence.
+Unlike the initial prototype (27.96 ms registration and 13.73 ms expansion
+at 4,000 events), Anchor navigation no longer rereads all historical events
+per hit. The mainline live Search refresh still scans history and has its
+own cost, outside #584's performance target.
 
-The explicit offline FTS metadata backfill cost about 53 ms for 200 events
-and 277 ms for 1,000 events in one local run; repeat full validation took
-about 12/61 ms. Separate FTS+Vector experiments confirmed unchanged vector
-values and embedding call counts. These are feasibility measurements, not
-release SLA or proof of unrestricted concurrent migration.
+A copy of the real 2,087-event Session was rebuilt in FTS-only mode after
+explicitly dropping invalid old vectors. FTS rows changed 512 -> 438,
+Vector rows 414 -> 0; the output could issue and expand real source Anchors.
+The event fingerprints matched before/after and the original snapshot was
+byte-for-byte unchanged. A verified original backup was retained. Separately,
+a deterministic test embedder validated full FTS+Vector reconstruction and
+semantic hits without network or paid API calls.
 
-## Release boundaries and Cold Resume coordination
+The original user's Session was never modified during these validations.
+No future promise is made for arbitrary malformed imports or out-of-band
+uncoordinated SQL mutations: such histories are refused, not guessed.
 
-The scoped public API is search_memory(query=...) followed by
-search_memory(anchor=..., before=N, after=N, offset=...). Query and anchor
-are mutually exclusive; invalid or expired Anchors report diagnostic codes.
-Direct Search remains backward-compatible.
+## Coordination and review
 
-Physical source identity and bounded native reads may later become a
-tiny shared SessionStore/Cold Resume interface, but that branch's current
-reverse cursor still enumerates all keys and does not meet a bounded-key
-scan guarantee. This implementation keeps the canonical-key reader local
-to Memory and changes no Cold Resume branch or on-disk format.
+Cold Resume owns its own physical event reading and shutdown/resume concerns.
+The Memory-only physical-key scan can later reuse a bounded Store cursor,
+but #584 does not depend on Cold Resume's checkpoint lifecycle or format.
 
-Before using this candidate to replace PR #586, perform a fresh overall
-Review/CI, confirm explicit migration documentation and get the standard
-Maintainer scope approval. Historical alternatives and probes remain in
-earlier experiment commits.
+The upstream Review and CI should focus on crash-safe index publication,
+vector-policy UX, unambiguous source proof, selected-lineage behavior,
+old-index recovery and bounded context navigation, not on unrelated
+Compaction/Resume repairs.

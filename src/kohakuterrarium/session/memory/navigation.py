@@ -192,10 +192,9 @@ class MemoryNavigator:
                 if first_error is None:
                     if self._certified_sources.get(hit.agent, False):
                         first_error = MemoryNavigationError(
-                            "ANCHOR_MIGRATION_REQUIRED",
+                            "ANCHOR_REBUILD_REQUIRED",
                             "Existing index row has no certified source. "
-                            "Stop session writers, then run "
-                            "'kt migrate-memory-anchors SESSION --agent NAME'.",
+                            "Stop session writers, then run 'kt memory rebuild SESSION'.",
                         )
                     else:
                         first_error = MemoryNavigationError(
@@ -297,6 +296,12 @@ class MemoryNavigator:
         if not isinstance(checkpoint, dict):
             raise MemoryNavigationError(
                 "UNVERIFIABLE_SOURCE", "Missing selected-index checkpoint."
+            )
+        if checkpoint.get("all_branches"):
+            raise MemoryNavigationError(
+                "ANCHOR_REBUILD_REQUIRED",
+                "This index uses a legacy all-branch projection; "
+                "run 'kt memory rebuild SESSION' to restore selected-lineage indexing.",
             )
         raw = checkpoint.get("branches")
         if not isinstance(raw, dict):

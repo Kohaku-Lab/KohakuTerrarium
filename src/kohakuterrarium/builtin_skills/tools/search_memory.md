@@ -43,5 +43,5 @@ To inspect one search hit's context, call
 `search_memory(anchor=..., before=N, after=N, offset=N)` and follow the
 returned continuation Anchors. Navigation is restricted to the selected indexed
 branch; a legacy index must first be upgraded by the operator via
-`kt migrate-memory-anchors SESSION --agent NAME`, after closing its writers.
+`kt memory rebuild SESSION`, after closing its writers.
 Stale, invalid and unverifiable source references return explicit errors.

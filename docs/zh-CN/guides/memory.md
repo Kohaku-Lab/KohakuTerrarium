@@ -69,26 +69,37 @@ kt embedding swe.kohakutr \
 
 增量建立：再次执行 `kt embedding` 时，只会索引新增事件。
 
-## 已有 Session 的 Anchor 显式迁移
+## 为旧 Session 重建记忆索引
 
-已有旧版 Memory Index 的 Session 仍可进行关键字和语义检索，但旧索引
-记录没有经过物理来源认证的 Anchor。迁移前必须停止该 Session 的
-所有 Agent、Studio 和其他写入进程，并对 Session 数据库及其关联产物
-制作一致性备份：
+先关闭使用该 Session 的全部 Agent、Studio 及其他写入进程。对**整个
+Session** 执行一次重建，不需要逐个指定 Agent：
 
-`bash
-kt migrate-memory-anchors /path/to/session.kohakutr --agent alice
-`
+```bash
+kt memory rebuild /path/to/session.kohakutr
+```
 
-每个需要 Anchor 的 Agent namespace 分别执行一次。命令只补齐现有
-FTS／Vector **元数据**，不重新计算 Embedding，不改变 Session 格式，
-也不修改历史分支选择。如果旧索引尚未更新到当前来源或存在构建中状态，
-迁移会拒绝执行；应先排除并发写入，在必要时恢复／重建有效的选中分支
-索引，然后重试。
+命令首先检查旧索引。若存在旧向量记录，交互式 CLI 会让你明确选择：
+**重新计算 Embedding**（可能下载模型或产生 API 费用），或者**舍弃旧
+Semantic 索引**。在非交互环境中，应显式选择：
 
-普通 Search 不会自动执行迁移；旧记录在迁移前可能返回
-`ANCHOR_MIGRATION_REQUIRED` 而不是 Anchor。新索引记录会在
-正常写入时携带来源信息。
+```bash
+kt memory rebuild /path/to/session.kohakutr --dry-run
+kt memory rebuild /path/to/session.kohakutr --vectors drop
+kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentence-transformer --model @best
+```
+
+新索引将从原始事件重建当前选中分支的 FTS 和 Source Anchor。对于原先
+使用全分支索引的 Session，新的检索覆盖范围可能缩小，但**原始事件
+不会被删除**。
+
+重建先在**独立数据库副本**上完成，验证通过后才替换 Session 文件，
+并自动保留原数据库备份；关联的 artifacts 不会被改动。如果重建失败，
+原数据库仍保留在原位置。不会在格式不兼容时静默复用旧向量，也不会
+在默认模式下擅自删除它们。显式舍弃旧向量后，需重新建立 Embedding
+索引才能恢复语义检索。
+
+未重建的旧索引可能返回 `ANCHOR_REBUILD_REQUIRED`。普通 Search 不会
+自动启动重建。
 
 ## 从 CLI 搜索
 

@@ -208,44 +208,10 @@ async def test_old_unannotated_index_requires_explicit_migration(tmp_path):
         )
         assert result.error is None
         assert "LEGACY_SOURCE_CONTENT" in result.output
-        assert "ANCHOR_MIGRATION_REQUIRED" in result.output
+        assert "ANCHOR_REBUILD_REQUIRED" in result.output
         assert not re.search(r"^anchor:", result.output, re.M)
         # Ordinary search must not silently perform experimental backfill.
         assert "source_ref" not in ctx.session._memory._memory._fts.get_by_id(1)[1]
-    finally:
-        _close(store, ctx)
-
-
-async def test_explicit_legacy_metadata_backfill_enables_direct_path(
-    tmp_path, monkeypatch
-):
-    from kohakuterrarium.session.memory.migration import backfill_legacy_sources
-
-    store, ctx, tool = _env(tmp_path)
-    try:
-        store.append_event("alice", "user_input", {"content": "UPGRADED_OLD_INDEX"})
-        legacy = SessionMemory(str(store.path))
-        try:
-            legacy.index_events("alice", store.get_events("alice"))
-            outcome = backfill_legacy_sources(store, legacy, "alice")
-            assert outcome.fts_patched == 1
-        finally:
-            legacy.close()
-
-        def forbid(*args, **kwargs):
-            raise AssertionError("Backfilled direct path reread full get_events")
-
-        monkeypatch.setattr(store, "get_events", forbid)
-        result = await tool.execute(
-            {"query": "UPGRADED_OLD_INDEX", "mode": "fts"}, context=ctx
-        )
-        assert result.error is None, result.error
-        token = _token(result.output)
-        context = await tool.execute(
-            {"anchor": token, "before": 0, "after": 0}, context=ctx
-        )
-        assert context.error is None
-        assert "UPGRADED_OLD_INDEX" in context.output
     finally:
         _close(store, ctx)
 
@@ -336,69 +302,6 @@ async def test_direct_anchor_not_issued_from_incomplete_keyword_checkpoint(tmp_p
         _close(store, ctx)
 
 
-async def test_partial_legacy_backfill_keeps_individually_safe_search_anchors(
-    tmp_path, monkeypatch
-):
-    import pytest
-
-    from kohakuterrarium.session.memory.migration import (
-        backfill_legacy_sources,
-    )
-
-    store, ctx, tool = _env(tmp_path)
-    old = None
-    try:
-        for content in ("PARTIAL_CERTIFIED_ONE", "PARTIAL_LEGACY_TWO"):
-            store.append_event("alice", "user_input", {"content": content})
-        old = SessionMemory(str(store.path))
-        old.index_events("alice", store.get_events("alice"))
-        fts_type = type(old._fts)
-        original = fts_type.update
-        count = 0
-
-        def fail_second(self, *args, **kwargs):
-            nonlocal count
-            count += 1
-            if count == 2:
-                raise RuntimeError("synthetic interrupted backfill")
-            return original(self, *args, **kwargs)
-
-        monkeypatch.setattr(fts_type, "update", fail_second)
-        with pytest.raises(RuntimeError, match="interrupted backfill"):
-            backfill_legacy_sources(store, old, "alice")
-        assert "source_ref" in old._fts.get_by_id(1)[1]
-        assert "source_ref" not in old._fts.get_by_id(2)[1]
-        monkeypatch.setattr(fts_type, "update", original)
-        old.close()
-        old = None
-
-        # A partially migrated index must not pretend it is globally ready.
-        # Independently certified rows may have anchors; missing ones still
-        # return the original Search result but explicitly need migration.
-        for content, certified in (
-            ("PARTIAL_CERTIFIED_ONE", True),
-            ("PARTIAL_LEGACY_TWO", False),
-        ):
-            searched = await tool.execute(
-                {"query": content, "mode": "fts"}, context=ctx
-            )
-            assert searched.error is None and content in searched.output
-            if certified:
-                token = _token(searched.output)
-                expanded = await tool.execute(
-                    {"anchor": token, "before": 0, "after": 0},
-                    context=ctx,
-                )
-                assert expanded.error is None and content in expanded.output
-            else:
-                assert "ANCHOR_MIGRATION_REQUIRED" in searched.output
-                assert not re.search(r"^anchor:", searched.output, re.M)
-    finally:
-        if old is not None:
-            old.close()
-        _close(store, ctx)
-
-
 async def test_zero_neighbor_window_survives_unverifiable_further_continuity(
     tmp_path,
 ):
@@ -443,5 +346,32 @@ async def test_zero_neighbor_window_survives_unverifiable_further_continuity(
             {"anchor": token, "before": 0, "after": 1}, context=ctx
         )
         assert "CONTEXT_SCAN_LIMIT" in (neighbor.error or "")
+    finally:
+        _close(store, ctx)
+
+
+async def test_old_all_branch_cursor_withholds_anchor_until_rebuild(tmp_path):
+    store, ctx, tool = _env(tmp_path)
+    try:
+        store.append_event(
+            "alice", "user_input", {"content": "ALL_BRANCH_INDEX_MISMATCH"}
+        )
+        first = await tool.execute(
+            {"query": "ALL_BRANCH_INDEX_MISMATCH", "mode": "fts"}, context=ctx
+        )
+        assert first.error is None and _token(first.output)
+        live = ctx.session._memory
+        cursor = live._memory._state["alice:cursor:keywords"]
+        live._memory._state["alice:cursor:keywords"] = {
+            **cursor,
+            "all_branches": True,
+        }
+        result = await tool.execute(
+            {"query": "ALL_BRANCH_INDEX_MISMATCH", "mode": "fts"},
+            context=ctx,
+        )
+        assert result.error is None
+        assert "ANCHOR_REBUILD_REQUIRED" in result.output
+        assert not re.search(r"^anchor:", result.output, re.M)
     finally:
         _close(store, ctx)
