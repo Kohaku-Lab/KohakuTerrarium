@@ -135,8 +135,21 @@ Post-processing, in order:
    reported.
 4. Redact the value of every password field (`(redacted)`); the same value
    elsewhere in a result's text becomes `[redacted]`.
-5. Strip presentation noise and refs on roles that are neither interactive
-   nor containers.
+5. Strip presentation noise. Keep a ref only where a model can use it:
+   interactive elements (an interactive role, `[cursor=pointer]` or a
+   checked / expanded / pressed / selected state), frames and dialogs,
+   tables, grids, rows and articles, and named containers. In the baseline
+   run every ref a model passed back was on one of these; unnamed `banner`,
+   `main`, `list`, `navigation` and the like were never used. A hidden ref
+   is still in the raw tree, so passing it back reads as "never shown".
+   Fold a plain unnamed wrapper line into its children: a `generic` with
+   one child or that is its parent's only child (as before), a `rowgroup`
+   with one child, and a `listitem` or `paragraph` whose one child is
+   interactive or holds no elements. A lifted line remembers the wrapper it
+   came out of, so the delta places it as before and a wrapper that folds or
+   unfolds between two reads moves nothing. Together these cut the page text
+   of navigation results by 3.6% over the 29 benchmark start pages and two
+   long generated pages; the interactive view is unchanged.
 6. Apply `ref` / `depth` / `query` / `interactive` / `boxes`.
 7. Cap at `snapshot_max_chars` (1000–1,000,000), ending with a line that says
    how much was cut and how to narrow.
@@ -171,7 +184,10 @@ page with no nodes adds a fixed note that it may still be loading and to
 wait.
 
 **Refs.** Playwright's own: `e12`, and `f1e12` / `f2e12` once the tab has
-loaded a new document or inside frames. Measured behaviour
+loaded a new document or inside frames. An `iframe` line whose frame shows
+another http(s) origin than the page carries `[origin=scheme://host:port]`,
+redacted like any URL; the session reads the frame URLs of up to 20 iframes
+per observation, and a failed read leaves the lines without it. Measured behaviour
 that the session must compensate for:
 
 - Acting on a stale ref waits the whole timeout before failing. The session
@@ -185,7 +201,9 @@ A rejected ref returns a specific error naming the ref and telling the model
 to take a snapshot.
 
 **Untrusted marking.** Page-derived text is wrapped in a `page_content`
-element carrying the page origin and a per-session random id; lookalike
+element carrying a per-session random id, and an `origin` attribute only
+when the content's origin differs from that of the URL on the result's first
+header line (a tab a batch opened, the tab list); lookalike
 closing tags inside the content are escaped. The plugin contributes a short
 `## Browser pages` prompt block stating that this content is data and never
 instructions. This is defence in depth, not a guarantee: delimiting alone cut

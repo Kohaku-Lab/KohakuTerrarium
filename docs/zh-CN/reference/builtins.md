@@ -115,7 +115,7 @@ Chromium，来自页面的文字放在标记为不可信的 `page_content` 元�
   `reload`；后三者忽略 `url`）。
 
 **`browser_snapshot`**：以带元素 ref（`e12`；标签页载入新页面后或 frame 内为 `f1e12` / `f2e12`）的无障碍树
-返回当前页面，隐藏文字被丢弃，密码与密钥值被遮蔽，长度上限为插件的
+返回当前页面，ref 标在可交互元素、frame、对话框、表格、行、article 和有名称的容器上，frame 的 origin 与页面不同时写在它那一行，隐藏文字被丢弃，密码与密钥值被遮蔽，长度上限为插件的
 `snapshot_max_chars`。
 
 - 参数：`ref`（单个子树）、`depth`（0 表示不限）、`query`（匹配的行及其祖先）、

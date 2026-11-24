@@ -152,7 +152,13 @@ batches, read the result.**
    `interactive` instead of reading everything. Refs look like `e12`; after
    the tab loads a new page they carry a prefix such as `f1e12` or `f2e12`,
    and elements inside a frame carry their frame's prefix. Use refs exactly
-   as shown.
+   as shown. Refs sit where they can be used: on interactive elements
+   (including anything clickable or carrying a checked, expanded, pressed or
+   selected state), frames, dialogs, tables, rows, articles and named
+   containers; unnamed landmarks and wrappers such as `main` or `list` have
+   none, and a ref that was never shown is refused. A frame showing another
+   origin than the page names it on its line, as in
+   `- iframe [ref=e12] [origin=https://pay.example]:`.
 3. **Act in one batch.** Put the steps of one intent in one `browser_act`:
    type the name, pick the plan, tick the box, click Save, then `wait` for the
    confirmation text. Actions run in order and the batch stops at the first
@@ -388,8 +394,10 @@ What can still see a secret:
 
 Everything a page chose (text, titles, element names, dialog messages, file
 names, script results, error text from the page) is delivered inside a
-`page_content` element that carries the page's origin, a random id fixed for
-the session and `trust="untrusted"`. Anything inside that looks like the
+`page_content` element that carries a random id fixed for the session and
+`trust="untrusted"`, plus an `origin` attribute whenever the content comes
+from another origin than the URL on the result's first line (a tab a click
+opened, the tab list). Anything inside that looks like the
 closing tag is escaped, so a page cannot end the wrapper early. The plugin adds
 a short `## Browser pages` block to the system prompt saying that this content
 is data, never instructions.

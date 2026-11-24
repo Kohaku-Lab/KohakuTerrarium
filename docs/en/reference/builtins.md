@@ -139,7 +139,9 @@ A URL the network policy refuses is an error naming the reason.
 
 **`browser_snapshot`**: The current page as an accessibility tree with element
 refs (`e12`; `f1e12` / `f2e12` after the tab loads a new page or inside
-frames), hidden text dropped, password and secret
+frames) on interactive elements, frames, dialogs, tables, rows, articles and
+named containers, a frame's origin on its line when it differs from the
+page's, hidden text dropped, password and secret
 values redacted, capped at the plugin's `snapshot_max_chars`.
 
 - Args: `ref` (one subtree), `depth` (0 = no limit), `query` (matching lines with their

@@ -117,7 +117,7 @@ Chromium，頁面來的文字會包在標記為不受信任的 `page_content` �
   `reload`；後三者會忽略 `url`）。
 
 **`browser_snapshot`**：以帶元素 ref（`e12`；分頁載入新頁面後或 frame 內為 `f1e12` / `f2e12`）的無障礙樹呈現
-目前頁面；隱藏文字會丟掉，密碼與密鑰的值會遮蔽，長度上限為外掛的
+目前頁面；ref 標在可互動元素、frame、對話框、表格、列、article 與有名稱的容器上，frame 的來源與頁面不同時寫在它那一行；隱藏文字會丟掉，密碼與密鑰的值會遮蔽，長度上限為外掛的
 `snapshot_max_chars`。
 
 - 參數：`ref`（單一子樹）、`depth`（0 表示不限）、`query`（符合的行與其祖先）、`interactive`
