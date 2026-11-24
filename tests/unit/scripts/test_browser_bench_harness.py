@@ -40,6 +40,11 @@ report = importlib.import_module("browser_bench.harness.report")
 store_mod = importlib.import_module("browser_bench.harness.store")
 cli = importlib.import_module("browser_bench.harness.cli")
 runner = importlib.import_module("browser_bench.harness.runner")
+usage = importlib.import_module("browser_bench.harness.usage")
+accounting = importlib.import_module("browser_bench.harness.accounting")
+tokens_mod = importlib.import_module("browser_bench.harness.tokens")
+probe_mod = importlib.import_module("browser_bench.harness.probe")
+verbosity = importlib.import_module("browser_bench.harness.verbosity")
 
 parse_verdict = verdict_mod.parse_verdict
 Verdict = verdict_mod.Verdict
@@ -839,3 +844,721 @@ class TestRunnerHelpers:
         ]
         assert runner.final_assistant_text(msgs) == "fin"
         assert runner.final_assistant_text([]) == ""
+
+
+# ---- per-call accounting ---------------------------------------------------
+
+NAV_RESULT = (
+    "[t1] http://x/a\n"
+    '<page_content origin="http://x" id="1" trust="untrusted">\n'
+    'Title: "Shop"\n'
+    '- button "Buy" [ref=e3]\n'
+    "</page_content>\n"
+    "Dropped 2 visually hidden text blocks."
+)
+ACT_RESULT = (
+    "[t1] http://x/a\n"
+    "Actions: 1 of 1 done\n"
+    "1. click e3: done\n"
+    '<page_content origin="http://x" id="1" trust="untrusted">\n'
+    'Title: "Shop"\n'
+    "Reloaded: http://x/a\n"
+    '- paragraph: "Cart: 1 item"\n'
+    "</page_content>"
+)
+SYSTEM = "Base line\n\n## Browser pages\n\nbp\n\n## Execution model\n\nem\n"
+
+
+def conversation():
+    return [
+        {"role": "system", "content": SYSTEM},
+        {"role": "user", "content": "buy it"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "function": {
+                        "name": "browser_navigate",
+                        "arguments": '{"url":"http://x/a"}',
+                    },
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": NAV_RESULT},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "function": {"name": "browser_act", "arguments": '{"actions":[]}'},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "c2",
+            "name": "browser_act",
+            "content": ACT_RESULT,
+        },
+        {"role": "assistant", "content": "Bought.\nRESULT: DONE"},
+    ]
+
+
+class TestCompose:
+    def test_system_sections(self):
+        out = usage.system_sections(SYSTEM)
+        assert set(out) == {"base", "browser_plugin", "execution_model"}
+        assert sum(out.values()) == len(SYSTEM)
+
+    def test_unknown_heading_is_slugged(self):
+        assert "growing_the_group" in usage.system_sections("## Growing the group\nx")
+
+    def test_navigate_result_parts(self):
+        parts = usage.tool_result_parts(NAV_RESULT)
+        assert set(parts) == {"header", "page_wrapper", "title", "page_body", "notes"}
+        assert sum(parts.values()) == len(NAV_RESULT)
+        assert parts["notes"] == len("Dropped 2 visually hidden text blocks.")
+
+    def test_act_result_parts(self):
+        parts = usage.tool_result_parts(ACT_RESULT)
+        assert parts["action_report"] == len(
+            "Actions: 1 of 1 done\n1. click e3: done\n"
+        )
+        assert parts["page_meta"] == len("Reloaded: http://x/a\n")
+        assert sum(parts.values()) == len(ACT_RESULT)
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("browser_navigate: give either url or action", {"body"}),
+            ("[t1] http://x/a\nno page here", {"header", "body"}),
+            ("", set()),
+        ],
+    )
+    def test_results_without_a_page(self, text, expected):
+        assert set(usage.tool_result_parts(text)) == expected
+
+    def test_compose_whole_conversation(self):
+        schema = {
+            "type": "function",
+            "name": "read",
+            "description": "d",
+            "parameters": {},
+        }
+        ctx = usage.compose(conversation(), [schema])
+        assert ctx["system.browser_plugin"] > 0 and ctx["system.execution_model"] > 0
+        assert ctx["user"] == len("buy it")
+        assert ctx["assistant.tool_args.browser_navigate"] == len(
+            '{"url":"http://x/a"}'
+        )
+        assert ctx["assistant.text"] == len("Bought.\nRESULT: DONE")
+        assert (
+            ctx["tool_result.browser_navigate.page_body"] > 0
+        ), "name from tool_call_id"
+        assert ctx["tool_result.browser_act.action_report"] > 0
+        assert ctx["tools.read"] == usage.schema_chars(schema)[1]
+        total = sum(ctx.values())
+        assert (
+            total
+            == sum(len(m["content"]) for m in conversation())
+            + len('{"url":"http://x/a"}')
+            + len('{"actions":[]}')
+            + ctx["tools.read"]
+        )
+
+    def test_images_are_counted_not_measured(self):
+        msgs = [
+            {
+                "role": "tool",
+                "name": "browser_screenshot",
+                "content": [
+                    {"type": "text", "text": "[t1] http://x"},
+                    {"type": "image_url", "image_url": {"url": "data:x"}},
+                ],
+            }
+        ]
+        ctx = usage.compose(msgs)
+        assert ctx["image_parts"] == 1
+        assert ctx["tool_result.browser_screenshot.header"] == len("[t1] http://x")
+
+    def test_schema_object_and_mapping_agree(self):
+        class Schema:
+            name, description, parameters = "t", "d", {"type": "object"}
+
+        mapping = {
+            "type": "function",
+            "name": "t",
+            "description": "d",
+            "parameters": {"type": "object"},
+        }
+        assert usage.schema_chars(Schema()) == usage.schema_chars(mapping)
+
+
+def completed(inp=100, cached=40, out=10, reasoning=3):
+    details = {"reasoning_tokens": reasoning} if reasoning is not None else {}
+    return {
+        "type": "response.completed",
+        "response": {
+            "usage": {
+                "input_tokens": inp,
+                "input_tokens_details": {"cached_tokens": cached},
+                "output_tokens": out,
+                "output_tokens_details": details,
+            }
+        },
+    }
+
+
+class TestCallLog:
+    def test_usage_of(self):
+        assert usage.usage_of(completed()) == {
+            "input": 100,
+            "cached_input": 40,
+            "output": 10,
+            "reasoning": 3,
+        }
+        assert usage.usage_of(completed(reasoning=None))["reasoning"] is None
+        assert usage.usage_of({"type": "response.output_text.delta"}) is None
+        assert usage.usage_of({"type": "response.completed", "response": {}}) is None
+
+    def test_full_then_delta_wire(self):
+        log = usage.CallLog()
+        log.begin(conversation()[:2], [])
+        log.on_wire([{"a": 1}], None)
+        log.on_usage(usage.usage_of(completed()))
+        log.end({"prompt_tokens": 999})
+        log.begin(conversation()[:4], [])
+        log.on_wire([{"a": 1}, {"b": 2}, {"c": 3}], [{"c": 3}])
+        log.end({})
+        first, second = log.calls
+        assert first["wire"]["mode"] == "ws_full" and first["usage"]["input"] == 100
+        assert "source" not in first["usage"], "provider usage wins over the fallback"
+        assert second["wire"]["mode"] == "ws_delta"
+        assert second["wire"]["items_sent"] == 1 and second["wire"]["items_total"] == 3
+        assert second["wire"]["input_chars_sent"] < second["wire"]["input_chars_total"]
+        assert second["usage"] is None, "missing usage stays missing"
+        assert [c["round"] for c in log.calls] == [0, 1]
+        assert first["wall_s"] is not None
+
+    def test_prefix_fingerprint_tracks_system_and_tools_only(self):
+        tools = [
+            {"type": "function", "name": "read", "description": "d", "parameters": {}}
+        ]
+        a = usage.prefix_fingerprint(conversation()[:2], tools)
+        assert (
+            usage.prefix_fingerprint(conversation(), tools) == a
+        ), "history is not prefix"
+        changed = [{"role": "system", "content": SYSTEM + "x"}, *conversation()[1:2]]
+        assert usage.prefix_fingerprint(changed, tools)["system"] != a["system"]
+        assert (
+            usage.prefix_fingerprint(conversation()[:2], tools[::-1] + [tools[0]])[
+                "tools"
+            ]
+            != a["tools"]
+        )
+        log = usage.CallLog()
+        log.begin(conversation()[:2], tools)
+        assert log.calls[0]["prefix"] == a
+
+    def test_usage_without_wire_is_http(self):
+        log = usage.CallLog()
+        log.begin([], None)
+        log.on_usage(usage.usage_of(completed()))
+        assert log.calls[0]["wire"]["mode"] == "http"
+
+    def test_controller_fallback_is_marked(self):
+        log = usage.CallLog()
+        log.begin([], None)
+        log.end({"prompt_tokens": 5, "completion_tokens": 1})
+        assert log.calls[0]["usage"]["source"] == "controller"
+
+    def test_events_before_any_call_are_ignored(self):
+        log = usage.CallLog()
+        log.on_usage({"input": 1})
+        log.on_wire([], None)
+        log.end({})
+        assert log.calls == []
+
+    def test_instrument_feeds_the_log(self):
+        class Session:
+            def _compute_delta(self, items):
+                return items[1:]
+
+        class Provider:
+            def __init__(self):
+                self.session = Session()
+                self.seen = []
+
+            def _process_stream_event(self, event, calls, parts=None):
+                self.seen.append(event)
+                return "x"
+
+            def _ws_session_for_turn(self, headers):
+                return self.session
+
+        provider, log = Provider(), usage.CallLog()
+        assert usage.instrument(provider, log)
+        log.begin([], None)
+        session = provider._ws_session_for_turn({})
+        assert provider._ws_session_for_turn({}) is session
+        session._compute_delta([1, 2, 3])
+        assert provider._process_stream_event(completed(), []) == "x"
+        call = log.calls[0]
+        assert call["wire"]["mode"] == "ws_delta" and call["wire"]["attempts"] == 1
+        assert call["usage"]["cached_input"] == 40
+        assert len(provider.seen) == 1, "the original handler still runs"
+
+    def test_instrument_refuses_other_providers(self):
+        assert not usage.instrument(object(), usage.CallLog())
+        assert not usage.instrument(None, usage.CallLog())
+
+    def test_run_totals(self):
+        calls = [
+            {"usage": {"input": 10, "cached_input": 2, "output": 1, "reasoning": None}},
+            {"usage": None},
+            {"usage": {"input": 5, "cached_input": 0, "output": 2, "reasoning": 4}},
+        ]
+        assert usage.run_totals(calls) == {
+            "input": 15,
+            "cached_input": 2,
+            "output": 3,
+            "reasoning": 4,
+        }
+        assert usage.run_totals(calls[:2])["reasoning"] is None
+
+    def test_runner_prefers_provider_usage(self):
+        hooks = runner.BenchHooks(5)
+        hooks.usages = [{"prompt_tokens": 999, "completion_tokens": 9}]
+        hooks.log.calls = [
+            {"usage": {"input": 10, "cached_input": 0, "output": 1, "reasoning": 2}}
+        ]
+        assert runner._tokens(hooks)["input"] == 10
+        hooks.log.calls = [
+            {
+                "usage": {
+                    "input": 7,
+                    "cached_input": 0,
+                    "output": 1,
+                    "reasoning": None,
+                    "source": "controller",
+                }
+            }
+        ]
+        assert runner._tokens(hooks)["input"] == 999
+
+
+# ---- analysis --------------------------------------------------------------
+
+
+class TestFit:
+    def test_recovers_exact_coefficients(self):
+        samples = [
+            (c, m, round(0.3 * c + 5 * m + 40))
+            for c, m in [
+                (100, 2),
+                (900, 4),
+                (2000, 6),
+                (3500, 9),
+                (5000, 12),
+                (800, 10),
+            ]
+        ]
+        cal = accounting.fit(samples)
+        assert cal.per_char == pytest.approx(0.3, abs=1e-3)
+        assert cal.per_message == pytest.approx(5, abs=0.2)
+        assert cal.per_call == pytest.approx(40, abs=2)
+        assert cal.r2 == pytest.approx(1.0, abs=1e-6)
+
+    def test_negative_coefficients_are_dropped(self):
+        samples = [
+            (c, m, round(0.3 * c - 500))
+            for c, m in [(4000, 2), (5000, 3), (6000, 4), (8000, 5), (9000, 7)]
+        ]
+        cal = accounting.fit(samples)
+        assert cal.per_call >= 0 and cal.per_message >= 0 and cal.per_char > 0
+
+    def test_too_few_samples_fall_back(self):
+        cal = accounting.fit([(100, 2, 30)])
+        assert cal.r2 is None and cal.per_char == accounting.DEFAULT_TOKENS_PER_CHAR
+
+    def test_residual_is_against_full_input(self):
+        samples = [(c, 2, 0.5 * c, 0.5 * c + 1000) for c in (100, 200, 300, 400, 500)]
+        cal = accounting.fit(samples)
+        assert cal.max_abs_residual_pct < 1
+
+    def test_split_fixed(self):
+        ctx = {"system.base": 100, "tools.read": 50, "user": 10, "image_parts": 2}
+        assert accounting.split_fixed(ctx, {"system.base": 30, "tools.read": 20}) == (
+            50,
+            10,
+        )
+        assert accounting.split_fixed(ctx, None) == (0, 160)
+
+
+def instrumented_record(
+    task="dialogs", rep=0, outcome="pass", attempt=0, inp=(1000, 1400)
+):
+    rec = record(task, rep=rep, outcome=outcome, text="RESULT: DONE")
+    rec["attempt"] = attempt
+    msgs = conversation()
+    calls = []
+    for k, idx in enumerate([2, 4, 6][: len(inp)]):
+        calls.append(
+            {
+                "round": k,
+                "messages": idx,
+                "context": usage.compose(
+                    msgs[:idx],
+                    [
+                        {
+                            "type": "function",
+                            "name": "read",
+                            "description": "d",
+                            "parameters": {},
+                        }
+                    ],
+                ),
+                "usage": {
+                    "input": inp[k],
+                    "cached_input": 100 * k,
+                    "output": 20,
+                    "reasoning": 5,
+                },
+                "wire": {"mode": "http"},
+            }
+        )
+    rec["llm_calls"] = calls
+    rec["tokens"] = usage.run_totals(calls)
+    return rec
+
+
+def write_dir(tmp_path, records, transcripts):
+    store = store_mod.RunStore(tmp_path)
+    for rec in records:
+        store.append(rec)
+    for (task, rep, tag), msgs in transcripts.items():
+        store.transcript_path(task, rep, f"{tag}.json").write_text(
+            json.dumps({"messages": msgs}), encoding="utf-8"
+        )
+    return tmp_path
+
+
+class TestSplitRuns:
+    def test_retry_is_not_double_counted(self):
+        err = record("dialogs", rep=0, outcome="harness_error", error="x")
+        ok = record("dialogs", rep=0, outcome="pass")
+        judged, excluded = accounting.split_runs([err, ok])
+        assert [r["outcome"] for r in judged] == ["pass"]
+        assert [r["outcome"] for r in excluded] == ["harness_error"]
+
+    def test_latest_harness_error_is_excluded(self):
+        judged, excluded = accounting.split_runs(
+            [record("dialogs", outcome="harness_error", error="x")]
+        )
+        assert judged == [] and len(excluded) == 1
+
+    def test_identical_records_count_once(self):
+        a = record("dialogs", rep=0, outcome="pass")
+        judged, excluded = accounting.split_runs([a, dict(a)])
+        assert len(judged) == 1 and len(excluded) == 1
+
+
+class TestAnalyse:
+    def test_totals_exclude_retries_and_harness_errors(self, tmp_path):
+        err = instrumented_record(outcome="harness_error", inp=(50000, 50000))
+        err["harness_error"] = "boom"
+        ok = instrumented_record(attempt=1)
+        out = write_dir(tmp_path, [err, ok], {("dialogs", 0, ".a1"): conversation()})
+        a = accounting.analyse(out)
+        assert a["totals"]["runs"] == 1
+        assert (
+            a["totals"]["input"] == 2400
+        ), "the harness-error attempt is not in totals"
+        assert a["totals"]["reasoning"] == 10
+        assert a["totals"]["cached_input"] == 100
+        assert (
+            len(a["excluded"]) == 1 and a["excluded"][0]["outcome"] == "harness_error"
+        )
+        assert a["per_call_usage"] is True
+        assert a["by_round"]["0"]["median_input"] == 1000
+
+    def test_probe_replaces_fixed_estimates(self, tmp_path):
+        out = write_dir(
+            tmp_path, [instrumented_record()], {("dialogs", 0, ""): conversation()}
+        )
+        probe = {
+            "components": {"system.base": 7, "tools.read": 11},
+            "tool_chars": {"read": 60},
+        }
+        a = accounting.analyse(out, probe=probe)
+        assert a["components"]["system.base"] == 14, "7 tokens on each of two calls"
+        assert a["components"]["tools.read"] == 22
+        assert a["probed_components"] == probe["components"]
+
+    def test_prefix_changes_are_counted(self, tmp_path):
+        rec = instrumented_record()
+        rec["llm_calls"][0]["prefix"] = {"system": "a", "tools": "t"}
+        rec["llm_calls"][1]["prefix"] = {"system": "b", "tools": "t"}
+        out = write_dir(tmp_path, [rec], {})
+        assert accounting.analyse(out)["prefix"] == {
+            "calls_checked": 2,
+            "changed_within_run": 1,
+        }
+
+    def test_missing_usage_is_tolerated(self, tmp_path):
+        rec = instrumented_record()
+        rec["llm_calls"][1]["usage"] = None
+        out = write_dir(tmp_path, [rec], {})
+        a = accounting.analyse(out)
+        assert a["totals"]["calls"] == 2
+        assert a["by_round"]["1"]["median_input"] is None
+
+    def test_old_runs_are_rebuilt_from_transcripts(self, tmp_path):
+        old = record("dialogs", rep=0, outcome="pass", text="RESULT: DONE")
+        out = write_dir(tmp_path, [old], {("dialogs", 0, ""): conversation()})
+        a = accounting.analyse(out, static_tools={"read": 80})
+        assert a["per_call_usage"] is False
+        assert a["totals"]["calls"] == 3, "one call per assistant message"
+        assert a["totals"]["input"] == 100, "the run total is still the provider's"
+        assert "tools.read" in a["components"]
+        assert a["calibration"]["r2"] is None
+
+    def test_output_split(self, tmp_path):
+        out = write_dir(
+            tmp_path, [instrumented_record()], {("dialogs", 0, ""): conversation()}
+        )
+        o = accounting.analyse(out)["output_split"]
+        assert o["output"] == 40 and o["reasoning"] == 10
+        assert o["tool_args_est"] > 0
+
+    def test_render(self, tmp_path):
+        out = write_dir(
+            tmp_path, [instrumented_record()], {("dialogs", 0, ""): conversation()}
+        )
+        md = tokens_mod.render(accounting.analyse(out))
+        for heading in (
+            "## Totals",
+            "## Input by area",
+            "## Fixed per-call overhead vs history",
+            "## Input and cache by round index",
+            "## Tool results",
+            "## Output",
+            "## By task",
+            "## By category",
+            "## Rounds vs tokens",
+            "## Input by component",
+            "## Excluded from totals",
+        ):
+            assert heading in md
+        assert "Residual (provider − estimate)" in md
+
+    def test_entry_point_writes_both_files(self, tmp_path):
+        out = write_dir(
+            tmp_path, [instrumented_record()], {("dialogs", 0, ""): conversation()}
+        )
+        assert tokens_mod.main(["--out", str(out)]) == 0
+        data = json.loads((out / "tokens.json").read_text(encoding="utf-8"))
+        assert data["totals"]["input"] == 2400
+        assert (out / "tokens.md").exists()
+
+
+def _page(tab, *lines):
+    body = "\n".join(lines)
+    return (
+        f'[{tab}] http://x/\n<page_content origin="http://x" id="1" '
+        f'trust="untrusted">\n{body}\n</page_content>'
+    )
+
+
+def _call(cid, name, **args):
+    return {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+            {
+                "id": cid,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(args)},
+            }
+        ],
+    }
+
+
+def _result(cid, text):
+    return {"role": "tool", "tool_call_id": cid, "content": text}
+
+
+class TestVerbosity:
+    def test_superseded_full_views_are_counted_per_later_call(self):
+        first = _page("t1", '- button "A" [ref=e1]')
+        second = _page("t1", '- button "B" [ref=e2]')
+        msgs = [
+            {"role": "user", "content": "go"},
+            _call("c1", "browser_navigate", url="http://x/"),
+            _result("c1", first),
+            _call("c2", "browser_snapshot", ref="", query="", depth=0),
+            _result("c2", second),
+            _call("c3", "browser_act", actions=[{"kind": "click", "ref": "e2"}]),
+            _result("c3", "done"),
+            {"role": "assistant", "content": "RESULT: DONE"},
+        ]
+        costs = verbosity.page_costs(msgs)
+        body = len('- button "A" [ref=e1]\n')
+        assert costs["page_body"] == body * 3 + len('- button "B" [ref=e2]\n') * 2
+        assert (
+            costs["superseded_body"] == body * 2
+        ), "the first view is stale for the two calls after the snapshot"
+        assert costs["unused_ref_marks"] == len(" [ref=e1]") * 3
+        assert costs["ref_marks"] == len(" [ref=e1]") * 3 + len(" [ref=e2]") * 2
+
+    def test_narrowed_snapshot_and_other_tab_do_not_supersede(self):
+        msgs = [
+            _call("c1", "browser_navigate", url="http://x/"),
+            _result("c1", _page("t1", "- heading")),
+            _call("c2", "browser_snapshot", query="price"),
+            _result("c2", _page("t1", "- text")),
+            _call("c3", "browser_navigate", url="http://y/"),
+            _result("c3", _page("t2", "- link")),
+            {"role": "assistant", "content": "RESULT: DONE"},
+        ]
+        assert verbosity.page_costs(msgs).get("superseded_body", 0) == 0
+
+    def test_in_page_change_list_does_not_supersede_but_navigation_does(self):
+        snap = _page("t1", "- paragraph: long text")
+        changed = _page("t1", "Page now (interactive elements):", "- button")
+        moved = _page(
+            "t1",
+            "Navigated: http://x/ → http://x/b",
+            "Page now (interactive elements):",
+        )
+        msgs = [
+            _call("c1", "browser_snapshot"),
+            _result("c1", snap),
+            _call("c2", "browser_act", actions=[{"kind": "click", "ref": "e1"}]),
+            _result("c2", changed),
+            {"role": "assistant", "content": "thinking"},
+        ]
+        assert verbosity.page_costs(msgs).get("superseded_body", 0) == 0
+        msgs[3] = _result("c2", moved)
+        assert verbosity.page_costs(msgs)["superseded_body"] == len(
+            "- paragraph: long text\n"
+        )
+
+    def test_structural_lines_and_wrapper(self):
+        msgs = [
+            _call("c1", "browser_navigate", url="http://x/"),
+            _result("c1", _page("t1", "- generic:", "  - group [ref=e3]:", "- text")),
+            {"role": "assistant", "content": "done"},
+        ]
+        costs = verbosity.page_costs(msgs)
+        assert costs["structural_lines"] == len("- generic:\n") + len(
+            "  - group [ref=e3]:\n"
+        )
+        assert costs["wrapper"] > 0
+
+    def test_results_without_a_page_cost_nothing(self):
+        msgs = [
+            _call("c1", "read", path="a"),
+            _result("c1", "plain file text"),
+            {"role": "assistant", "content": "done"},
+        ]
+        assert verbosity.page_costs(msgs).get("page_body", 0) == 0
+
+    def test_dir_costs_uses_only_judged_runs(self, tmp_path):
+        page = [
+            _call("c1", "browser_navigate", url="http://x/"),
+            _result("c1", _page("t1", "- text")),
+            {"role": "assistant", "content": "RESULT: DONE"},
+        ]
+        err = instrumented_record(outcome="harness_error")
+        err["harness_error"] = "boom"
+        ok = instrumented_record(attempt=1)
+        out = write_dir(
+            tmp_path,
+            [err, ok],
+            {
+                ("dialogs", 0, ""): page * 5,
+                ("dialogs", 0, ".a1"): page,
+            },
+        )
+        assert verbosity.dir_costs(out) == verbosity.page_costs(page)
+
+    def test_tokens_section_uses_the_probe_sample_density(self, tmp_path):
+        page = [
+            _call("c1", "browser_navigate", url="http://x/"),
+            _result("c1", _page("t1", "- text " * 50)),
+            {"role": "assistant", "content": "RESULT: DONE"},
+        ]
+        out = write_dir(tmp_path, [instrumented_record()], {("dialogs", 0, ""): page})
+        probe = tmp_path / "probe.json"
+        probe.write_text(
+            json.dumps({"components": {}, "sample": {"tokens_per_char": 0.5}}),
+            encoding="utf-8",
+        )
+        assert tokens_mod.main(["--out", str(out), "--probe", str(probe)]) == 0
+        data = json.loads((out / "tokens.json").read_text(encoding="utf-8"))
+        hist = data["page_history"]
+        assert (
+            hist["tokens_per_char"] == 0.5 and hist["density_source"] == "probe sample"
+        )
+        assert hist["chars"]["page_body"] == len("- text " * 50) + 1
+        md = (out / "tokens.md").read_text(encoding="utf-8")
+        assert "## Page content in history" in md
+
+    def test_tokens_section_absent_without_pages(self, tmp_path):
+        out = write_dir(tmp_path, [instrumented_record()], {})
+        assert "## Page content in history" not in tokens_mod.render(
+            accounting.analyse(out)
+        )
+
+
+class TestProbe:
+    def test_components_by_difference(self):
+        usages = {
+            "full": {"prompt_tokens": 1000},
+            "no_tools": {"prompt_tokens": 400},
+            "without_section:base": {"prompt_tokens": 300},
+            "without_section:Execution model": {"prompt_tokens": 250},
+            "without_tool:browser_act": {"prompt_tokens": 700},
+        }
+        assert probe_mod.components(usages) == {
+            "system.base": 100,
+            "system.execution_model": 150,
+            "tools.browser_act": 300,
+        }
+
+    def test_sections(self):
+        parts = probe_mod.sections(SYSTEM)
+        assert [name for name, _ in parts] == [
+            "base",
+            "Browser pages",
+            "Execution model",
+        ]
+        assert "".join(text for _, text in parts) == SYSTEM
+
+
+class TestCliTransport:
+    def test_cache_key_mode(self):
+        assert cli.parse_args(["--out", "x"]).cache_key == "shared"
+        s = cli.parse_args(["--out", "x", "--cache-key", "per-run"])
+        assert s.cache_key == "per-run" and s.meta()["cache_key"] == "per-run"
+        with pytest.raises(SystemExit):
+            cli.parse_args(["--out", "x", "--cache-key", "sometimes"])
+
+    def test_websocket_switch(self):
+        assert (
+            cli.model_profile("gpt-6.2-sol", "high").extra_body["websocket_mode"]
+            is True
+        )
+        p = cli.model_profile("gpt-6.2-sol", "high", websocket=False)
+        assert p.extra_body["websocket_mode"] is False
+        assert cli.parse_args(["--out", "x", "--no-websocket"]).websocket is False
+
+    def test_outside(self, tmp_path):
+        inside = tmp_path / "a" / "pkg"
+        roots = {"x": str(inside), "y": str(tmp_path.parent / "elsewhere")}
+        assert cli.outside(roots, tmp_path) == ["y"]
+        assert cli.code_roots().keys() == {"kohakuterrarium", "browser_bench"}

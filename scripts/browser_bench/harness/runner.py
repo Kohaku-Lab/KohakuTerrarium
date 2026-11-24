@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import time
+import uuid
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
@@ -37,6 +38,7 @@ from ..oracles.bot import blocked_in
 from ..site import BenchSite
 from .score import PASSING, egress_summary, failure_reason, judge_run
 from .store import RunStore
+from .usage import CallLog, instrument, run_totals
 from .verdict import SYSTEM_PROMPT, parse_verdict, user_message
 
 BROWSER_TOOLS = (
@@ -68,10 +70,15 @@ LAUNCH_MARKERS = (
 
 @dataclass(frozen=True)
 class Limits:
-    """Per-run limits: tool calls the agent may make and seconds its turn may take."""
+    """Per-run settings: tool-call and wall-clock limits, and the prompt-cache key mode.
+
+    ``per_run_cache_key`` gives each run's provider its own ``prompt_cache_key``
+    instead of the default derived from the system prompt (shared by every run).
+    """
 
     max_tool_calls: int
     timeout_s: float
+    per_run_cache_key: bool = False
 
 
 def browser_options(site: Any) -> dict[str, Any]:
@@ -233,6 +240,7 @@ class BenchHooks(BasePlugin):
         self.egress: list[dict[str, Any]] = []
         self.limit_hit = False
         self.agent: Any = None
+        self.log = CallLog()
         self._open: dict[Any, dict[str, Any]] = {}
 
     def get_tool_visibility(self, context: Any) -> ToolVisibility:
@@ -270,10 +278,17 @@ class BenchHooks(BasePlugin):
                 self.egress.extend(blocked_in(text))
         return None
 
+    async def pre_llm_call(
+        self, messages: list[dict], **kwargs: Any
+    ) -> list[dict] | None:
+        self.log.begin(list(messages), kwargs.get("tools"))
+        return None
+
     async def post_llm_call(
         self, messages: list[dict], response: str, usage: dict, **kwargs: Any
     ) -> str | None:
         self.usages.append(dict(usage or {}))
+        self.log.end(usage)
         return None
 
 
@@ -286,6 +301,7 @@ class Drive:
     wall_s: float = 0.0
     messages: list[dict[str, Any]] = field(default_factory=list)
     system_prompt: str = ""
+    instrumented: bool = False
 
 
 def _quiet_skills(agent: Any) -> None:
@@ -308,6 +324,9 @@ async def drive_agent(
     out = Drive()
     agent = await Agent.build(config, llm=llm, pwd=str(workdir), plugins=[hooks])
     hooks.agent = agent
+    out.instrumented = instrument(getattr(agent, "llm", None), hooks.log)
+    if limits.per_run_cache_key and hasattr(agent.llm, "prompt_cache_key"):
+        agent.llm.prompt_cache_key = uuid.uuid4().hex
     try:
         await agent.start()
         _quiet_skills(agent)
@@ -325,6 +344,13 @@ async def drive_agent(
         except Exception as exc:
             out.error = out.error or f"stop failed: {type(exc).__name__}: {exc}"
     return out
+
+
+def _tokens(hooks: BenchHooks) -> dict[str, int | None]:
+    """Run totals from provider usage per call when recorded, else the controller's."""
+    if any(c.get("usage") and "source" not in c["usage"] for c in hooks.log.calls):
+        return run_totals(hooks.log.calls)
+    return sum_usage(hooks.usages)
 
 
 def _check_dict(result: CheckResult) -> dict[str, Any]:
@@ -410,7 +436,9 @@ def build_record(
         "tool_calls": tally(hooks.calls),
         "calls": hooks.calls,
         "llm_rounds": len(hooks.usages),
-        "tokens": sum_usage(hooks.usages),
+        "tokens": _tokens(hooks),
+        "llm_calls": hooks.log.calls,
+        "llm_instrumented": drive.instrumented,
         "wall_s": round(drive.wall_s, 2),
     }
     record["reason"] = "" if judgement.outcome in PASSING else failure_reason(record)

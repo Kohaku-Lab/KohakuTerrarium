@@ -14,9 +14,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
+import kohakuterrarium
 from kohakuterrarium.llm.codex.presets import PRESETS as CODEX_PRESETS
 from kohakuterrarium.llm.profiles.types import LLMProfile
 
+from .. import model as bench_model
 from ..model import Task
 from ..tasks import BY_ID, TASKS
 from .report import render
@@ -45,6 +47,9 @@ class Settings:
     force: bool = False
     report_only: bool = False
     min_free_gb: float = 5.0
+    websocket: bool = True
+    expect_root: Path | None = None
+    cache_key: str = "shared"
 
     def meta(self) -> dict:
         return {
@@ -53,6 +58,8 @@ class Settings:
             "provider": "codex",
             "max_tool_calls": self.max_tool_calls,
             "timeout": self.timeout,
+            "websocket": self.websocket,
+            "cache_key": self.cache_key,
         }
 
 
@@ -78,13 +85,16 @@ def select_tasks(spec: str, tasks: Sequence[Task] = TASKS) -> list[Task]:
     return list(chosen.values())
 
 
-def model_profile(model: str, effort: str) -> LLMProfile:
+def model_profile(model: str, effort: str, websocket: bool = True) -> LLMProfile:
     """A Codex (ChatGPT subscription) profile for any model id, at ``effort``.
 
     A listed Codex preset lends its context and output limits; any other id
     runs with the Codex defaults, and the provider decides whether it exists.
+    ``websocket=False`` sends every call over HTTP with the full context.
     """
     preset = CODEX_PRESETS.get(model, {})
+    extra = deepcopy(preset.get("extra_body", {"websocket_mode": True}))
+    extra["websocket_mode"] = websocket
     return LLMProfile(
         name=f"browser-bench/{model}",
         model=model,
@@ -93,7 +103,7 @@ def model_profile(model: str, effort: str) -> LLMProfile:
         max_context=preset.get("max_context", DEFAULT_CONTEXT),
         max_output=preset.get("max_output", DEFAULT_OUTPUT),
         reasoning_effort=effort,
-        extra_body=deepcopy(preset.get("extra_body", {"websocket_mode": True})),
+        extra_body=extra,
     )
 
 
@@ -140,6 +150,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--report-only", action="store_true", help="rewrite report.md and exit"
     )
+    parser.add_argument(
+        "--no-websocket",
+        dest="websocket",
+        action="store_false",
+        help="send every call over HTTP instead of the WebSocket continuation",
+    )
+    parser.add_argument(
+        "--cache-key",
+        choices=("shared", "per-run"),
+        default="shared",
+        help="prompt_cache_key: the provider default (shared) or one per run",
+    )
+    parser.add_argument(
+        "--expect-root",
+        type=Path,
+        default=None,
+        help="refuse to run unless the framework and the bench load from this tree",
+    )
     return parser
 
 
@@ -162,6 +190,9 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         force=args.force,
         report_only=args.report_only,
         min_free_gb=args.min_free_gb,
+        websocket=args.websocket,
+        expect_root=args.expect_root,
+        cache_key=args.cache_key,
     )
 
 
@@ -175,6 +206,20 @@ def _line(record: dict) -> str:
     )
 
 
+def code_roots() -> dict[str, str]:
+    """Where the framework and the bench package were imported from."""
+    return {
+        "kohakuterrarium": str(Path(kohakuterrarium.__file__).resolve().parent),
+        "browser_bench": str(Path(bench_model.__file__).resolve().parent),
+    }
+
+
+def outside(roots: dict[str, str], root: Path) -> list[str]:
+    """The names in ``roots`` whose path does not lie under ``root``."""
+    base = root.resolve()
+    return [name for name, path in roots.items() if not Path(path).is_relative_to(base)]
+
+
 def write_report(store: RunStore, meta: dict) -> Path:
     path = store.out / "report.md"
     path.write_text(render(store.load(), meta), encoding="utf-8")
@@ -184,8 +229,19 @@ def write_report(store: RunStore, meta: dict) -> Path:
 def main(argv: Sequence[str] | None = None) -> int:
     settings = parse_args(argv)
     sys.stdout.reconfigure(errors="backslashreplace")
+    roots = code_roots()
+    for name, path in roots.items():
+        print(f"{name}: {path}")
+    if settings.expect_root is not None:
+        stray = outside(roots, settings.expect_root)
+        if stray:
+            print(
+                f"error: loaded outside {settings.expect_root}: {stray}",
+                file=sys.stderr,
+            )
+            return 3
     store = RunStore(settings.out)
-    meta = settings.meta()
+    meta = {**settings.meta(), "code_roots": roots}
     if settings.report_only:
         print(write_report(store, meta))
         return 0
@@ -206,8 +262,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     asyncio.run(
         run_all(
             [(BY_ID[task_id], repeat) for task_id, repeat in todo],
-            llm_for_run=lambda: model_profile(settings.model, settings.effort),
-            limits=Limits(settings.max_tool_calls, settings.timeout),
+            llm_for_run=lambda: model_profile(
+                settings.model, settings.effort, settings.websocket
+            ),
+            limits=Limits(
+                settings.max_tool_calls,
+                settings.timeout,
+                per_run_cache_key=settings.cache_key == "per-run",
+            ),
             store=store,
             meta=meta,
             concurrency=settings.concurrency,
