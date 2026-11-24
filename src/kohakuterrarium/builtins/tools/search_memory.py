@@ -38,10 +38,9 @@ class SearchMemoryTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Search this session's earlier events by keyword or meaning. "
-            "Search hits can provide anchors; pass an anchor with before/after "
-            "to inspect adjacent recorded events. "
-            "Not for searching files - use grep."
+            "Search this session's history by keyword or meaning. "
+            "Use it to recall prior turns and explore context via anchors. "
+            "Not for files - use grep."
         )
 
     @property

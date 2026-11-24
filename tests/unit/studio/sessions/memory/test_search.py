@@ -349,43 +349,19 @@ class TestSearchSessionMemory:
             live_store.close()
             raise
 
-        real_get_events = live_store.get_events
+        from kohakuterrarium.session.memory import async_search as live_search
+
+        real_sourced_events = live_search.sourced_events
         witness = LoopWitness(asyncio.get_running_loop())
 
-        def observed_get_events(agent, **kwargs):
+        def observed_sourced_events(source_store, agent):
             witness.observe()
-            return real_get_events(agent, **kwargs)
+            return real_sourced_events(source_store, agent)
 
-        live_store.get_events = observed_get_events
+        monkeypatch.setattr(live_search, "sourced_events", observed_sourced_events)
         monkeypatch.setattr(
             mem_mod, "_live_store_for_path", lambda eng, p: (None, live_store)
         )
-        from kohakuterrarium.session.memory.index import SearchResult
-
-        class _FakeMemory:
-            def __init__(self, *a, **kw):
-                pass
-
-            def close(self):
-                pass
-
-            def index_events(self, *a, **kw):
-                return 0
-
-            def search(self, query, mode, k, agent):
-                return [
-                    SearchResult(
-                        content="needle",
-                        round_num=0,
-                        block_num=0,
-                        agent="alice",
-                        block_type="user",
-                        score=1.0,
-                    )
-                ]
-
-        monkeypatch.setattr(mem_mod, "SessionMemory", _FakeMemory)
-
         try:
             out = await mem_mod.search_session_memory(path, q="needle", mode="fts")
             assert out["count"] >= 1

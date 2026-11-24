@@ -1,6 +1,6 @@
 ---
 name: search_memory
-description: 'Search this session''s earlier events by keyword or meaning. Use it to recall details dropped from context. Not for searching files - use grep.'
+description: 'Search this session''s history by keyword or meaning. Use it to recall prior turns and explore context via anchors. Not for files - use grep.'
 category: builtin
 tags: [memory, search]
 ---
@@ -29,14 +29,19 @@ Searches the recorded event log of the current session.
 - Model work does not block session history, persistence, or shutdown.
 - Only the current session is searched, and only what was recorded before now.
 
-Search results with verified sources include an opaque Anchor. Call
-`search_memory(anchor=..., before=N, after=N)` to read bounded surrounding
-events and obtain more Anchors for continued navigation. Context is limited
-to the selected indexed branch; old unannotated indexes require an explicit,
-offline provenance migration by the session operator. An invalid, expired or
-unverifiable Anchor returns an explicit error, not unrelated history.
+- Verified results carry Anchors; pass one back with before/after to inspect
+  bounded context and continue walking.
 
 ## Limits
 
 - Compaction summarizes rather than deletes, so older turns stay findable here
   after they leave your context.
+
+## Reference
+
+To inspect one search hit's context, call
+`search_memory(anchor=..., before=N, after=N, offset=N)` and follow the
+returned continuation Anchors. Navigation is restricted to the selected indexed
+branch; a legacy index must first be upgraded by the operator via
+`kt migrate-memory-anchors SESSION --agent NAME`, after closing its writers.
+Stale, invalid and unverifiable source references return explicit errors.
