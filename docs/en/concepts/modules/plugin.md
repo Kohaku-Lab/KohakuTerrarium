@@ -62,7 +62,7 @@ sections, not plugins.
 
 A `BasePlugin` subclass with any of these hooks:
 
-- `on_load(context)`, `on_unload()`
+- `on_load(context)`, `on_unload()`, `on_disable()` (after a runtime disable; release what the plugin owns)
 - `should_apply(context) -> bool` or declarative `applies_to = {agent_names, model_patterns}`
 - `contribute_commands()` for custom `##command##` handlers
 - `contribute_termination_check()` for pluggable stop conditions

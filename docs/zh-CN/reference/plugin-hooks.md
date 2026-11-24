@@ -30,6 +30,7 @@ tags:
 |---|---|---|---|
 | `on_load` | `async on_load(ctx: PluginContext) -> None` | 插件加载到 Agent 时。 | 忽略 |
 | `on_unload` | `async on_unload() -> None` | 插件卸载时，或 Agent 停止时。 | 忽略 |
+| `on_disable` | `def on_disable() -> None` | 运行时 `PluginManager.disable()` 生效后（状态确实改变、清单已刷新）；此时不会调用 `on_unload`。每次实际生效的停用只调用一次：未改变状态的停用与卸载时都不会调用。同步执行（`async def` 的 Hook不会被执行，只记录警告）且必须尽快返回；管理器不会等待在此启动的清理，异步工作需自行排程，并在 `on_unload` 中等待。抛出的异常只记录日志，不会撤销停用。 | 忽略 |
 
 `PluginContext` 允许插件访问 Agent、其配置、scratchpad 和 logger。详细结构请参见 `kohakuterrarium.modules.plugin.base`。
 

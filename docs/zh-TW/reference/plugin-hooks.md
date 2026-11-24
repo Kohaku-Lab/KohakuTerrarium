@@ -30,6 +30,7 @@ tags:
 |---|---|---|---|
 | `on_load` | `async on_load(ctx: PluginContext) -> None` | 外掛被載入到 agent 時。 | 忽略 |
 | `on_unload` | `async on_unload() -> None` | 外掛被卸載，或 agent 停止時。 | 忽略 |
+| `on_disable` | `def on_disable() -> None` | 執行時 `PluginManager.disable()` 生效後（狀態確實改變、清單已刷新）；此時不會呼叫 `on_unload`。每次實際生效的停用只呼叫一次：未改變狀態的停用與卸載時都不會呼叫。同步執行（`async def` 的 hook不會被執行，只記錄警告）且必須盡快返回；管理器不會等待在此啟動的清理，非同步工作需自行排程，並在 `on_unload` 中等待。拋出的例外只記錄日誌，不會撤銷停用。 | 忽略 |
 
 `PluginContext` 讓外掛能存取 agent、其設定、scratchpad 與 logger。詳細結構請看 `kohakuterrarium.modules.plugin.base`。
 

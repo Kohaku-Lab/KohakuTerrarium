@@ -194,7 +194,7 @@ controller 会分发这次工具调用，随后守卫会抛出 `PluginBlockError
 
 上面两个 hook 只是最常见的一组。完整的生命周期插件接口如下：
 
-- 生命周期：`on_load`、`on_unload`、`on_agent_start`、`on_agent_stop`
+- 生命周期：`on_load`、`on_unload`、`on_disable`、`on_agent_start`、`on_agent_stop`
 - LLM：`pre_llm_call`、`post_llm_call`
 - 工具：`pre_tool_execute`、`post_tool_execute`
 - Sub-agent：`pre_subagent_run`、`post_subagent_run`
