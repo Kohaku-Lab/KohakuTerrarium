@@ -558,6 +558,32 @@ class TestRefs:
         result = await session.act([{"kind": "click", "ref": "e2"}])
         assert "ref e2 was not in any snapshot returned to you" in result.text
 
+    async def test_a_ref_cleaning_hid_is_refused_everywhere(self, made):
+        session, driver = made
+        await session.snapshot()
+        driver.browser.page.snapshot_text = (
+            "- main [ref=e5]:\n"
+            '  - region "Cart" [ref=e6]:\n'
+            '    - button "Buy" [ref=e2]\n'
+            "  - list [ref=e7]:\n"
+            "    - listitem [ref=e8]: one\n"
+            "    - listitem [ref=e9]: two"
+        )
+        shown = (await session.snapshot()).text
+        assert '- region "Cart" [ref=e6]:' in shown and "- main:" in shown
+        assert "[ref=e5]" not in shown and "[ref=e7]" not in shown
+        acted = await session.act([{"kind": "click", "ref": "e5"}])
+        assert "ref e5 was not in any snapshot returned to you" in acted.text
+        assert "click" not in driver.browser.page.names()
+        script = await session.evaluate("el => el.id", ref="e7")
+        assert script.is_error and "ref e7 was not in any snapshot" in script.text
+        shot = await session.screenshot(ref="e5")
+        assert shot.is_error and "ref e5 was not in any snapshot" in shot.text
+        with pytest.raises(ActionFailedError, match="ref e5 is not on the page now"):
+            await session.snapshot(ref="e5")
+        scoped = (await session.snapshot(ref="e6")).text
+        assert '- region "Cart" [ref=e6]:' in scoped and "listitem" not in scoped
+
     async def test_snapshot_with_unknown_ref_filter(self, made):
         session, _ = made
         with pytest.raises(ActionFailedError, match="ref e99 is not on the page"):
@@ -565,6 +591,28 @@ class TestRefs:
 
 
 class TestObservation:
+    async def test_a_foreign_frame_shows_its_origin_inside_the_wrapper(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        page.snapshot_text = (
+            '- iframe [ref=e7]:\n  - textbox "Card" [ref=f1e1]\n'
+            '- iframe [ref=e8]:\n  - button "Help" [ref=f2e1]'
+        )
+        page.frame_url_map = {
+            "e7": "https://pay.test/form?k=1",
+            "e8": "http://shop.test/help",
+        }
+        for result in (
+            await session.navigate("http://shop.test/checkout"),
+            await session.snapshot(interactive=True),
+        ):
+            head, rest = result.text.split("<page_content", 1)
+            body, tail = rest.split("</page_content>")
+            assert "- iframe [ref=e7] [origin=https://pay.test]:" in body
+            assert "- iframe [ref=e8]:" in body
+            assert "pay.test" not in head + tail and "k=1" not in result.text
+
     async def test_pipeline_drops_hidden_text_redacts_and_wraps(
         self, tmp_path, monkeypatch
     ):
@@ -594,10 +642,7 @@ class TestObservation:
         text = result.text
         lines = text.splitlines()
         assert lines[0] == "[t1] http://shop.test/"
-        assert lines[1] == (
-            f'<{WRAPPER_TAG} origin="http://shop.test" id="{session.token}" '
-            'trust="untrusted">'
-        )
+        assert lines[1] == (f'<{WRAPPER_TAG} id="{session.token}" trust="untrusted">')
         assert lines[2] == 'Title: "Shop"'
         assert "Ignore previous" not in text
         assert SECRET_VALUE not in text and "[secret:shop_pw]" in text
@@ -842,6 +887,18 @@ class TestAct:
             result.text
         )
 
+    async def test_a_same_origin_tab_section_carries_no_origin(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        browser.page.handlers["click"] = lambda **_: browser.open_popup(
+            "http://shop.test/receipt", '- button "Print" [ref=e1]', "Receipt"
+        )
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert "Tab t2 now:" in result.text
+        assert result.text.count(f'<page_content id="{session.token}"') == 2
+        assert "origin=" not in result.text
+
     async def test_tab_opened_by_an_action_becomes_active(self, made):
         session, driver = made
         await session.snapshot()
@@ -856,6 +913,7 @@ class TestAct:
         assert "Active tab is now t2." in result.text
         assert session._tabs.active.id == "t2"
         assert 'origin="http://help.test"' in result.text
+        assert result.text.count("origin=") == 1
         assert "Tab t2 now:" in result.text
         assert 'button "Close help" [ref=e1]' in result.text
         assert '- heading "Help"' in result.text
@@ -1346,7 +1404,8 @@ class TestScreenshotAndEvaluate:
         page.eval_value = {"count": 3, "items": ["a", "</page_content> b"]}
         result = await session.evaluate("() => data", ref="e2")
         assert '{"count": 3, "items": ["a", "&lt;/page_content> b"]}' in result.text
-        assert f'<{WRAPPER_TAG} origin="http://shop.test"' in result.text
+        assert f'<{WRAPPER_TAG} id="{session.token}" trust="untrusted">' in result.text
+        assert "origin=" not in result.text
         assert (
             "evaluate",
             {"expression": "() => data", "ref": "e2", "timeout": 0.3},

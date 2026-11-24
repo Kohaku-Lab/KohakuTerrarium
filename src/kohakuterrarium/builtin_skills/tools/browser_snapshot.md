@@ -1,14 +1,14 @@
 ---
 name: browser_snapshot
-description: 'Read the current browser page as an accessibility snapshot with element refs. Use it before acting, or narrow it with ref, query or interactive.'
+description: 'Read the current browser page as an accessibility snapshot with element refs. Use it to reread a page, or narrow it with ref, query or interactive.'
 category: builtin
 tags: [browser, web]
 ---
 
 # browser_snapshot
 
-Returns the page as an indented accessibility tree. Interactive elements and
-containers carry refs such as `[ref=e12]`.
+Returns the page as an indented accessibility tree. Controls, frames,
+dialogs, tables, rows, articles and named containers carry refs like `[ref=e12]`.
 
 ## Arguments
 
@@ -42,7 +42,7 @@ containers carry refs such as `[ref=e12]`.
 
 ### Refs
 
-Refs look like `e12`; after the tab loads a new page they carry a prefix such as `f1e12` or `f2e12`, and elements in frames carry their frame's prefix. Use refs exactly as shown.
+Refs look like `e12`; after the tab loads a new page they carry a prefix such as `f1e12` or `f2e12`, and elements in frames carry their frame's prefix. Use refs exactly as shown. Unnamed landmarks and wrappers (`main`, `list`) have no ref. A frame showing another origin than the page has it on its line: `- iframe [ref=e12] [origin=https://pay.example]:`.
 
 ### What is left out
 

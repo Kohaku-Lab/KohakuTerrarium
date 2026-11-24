@@ -195,7 +195,8 @@ class TestFormats:
         result = await session.navigate("http://shop.test/")
         lines = result.text.splitlines()
         assert lines[0] == "[t1] http://shop.test/"
-        assert lines[1].startswith('<page_content origin="http://shop.test"')
+        assert lines[1].startswith('<page_content id="')
+        assert "origin=" not in result.text
         assert lines[2] == 'Title: "Shop"'
         assert result.meta["url"] == "http://shop.test/"
         assert "title" not in result.meta

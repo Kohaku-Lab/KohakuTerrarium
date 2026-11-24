@@ -142,7 +142,7 @@ class SessionCaptureMixin:
             url = tab.page.url
             text = fmt.join_sections(
                 self._header(tab, url),
-                self._wrap(body, tab, origin_of(url)),
+                self._wrap(body, tab, origin_of(url), url),
                 self._notes(op, None),
             )
             meta = self._meta(tab, None)

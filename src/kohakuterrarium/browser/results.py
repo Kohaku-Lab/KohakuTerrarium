@@ -74,8 +74,10 @@ def new_token() -> str:
     return secrets.token_hex(8)
 
 
-def wrap_untrusted(text: str, origin: str, token: str) -> str:
+def wrap_untrusted(text: str, origin: str | None, token: str) -> str:
     """Wrap page-derived text in a ``page_content`` element the page cannot close.
+
+    ``origin`` becomes the ``origin`` attribute; ``None`` leaves it out.
 
     Inside the content, the session token is removed and every ``<`` that
     starts something resembling the wrapper tag (any case; whitespace, line
@@ -86,9 +88,9 @@ def wrap_untrusted(text: str, origin: str, token: str) -> str:
         re.sub(re.escape(token), "[id]", text, flags=re.IGNORECASE) if token else text
     )
     body = _TAG_START.sub("&lt;", body)
-    attr = html.escape(origin, quote=True)
+    attr = "" if origin is None else f'origin="{html.escape(origin, quote=True)}" '
     return (
-        f'<{WRAPPER_TAG} origin="{attr}" id="{token}" trust="untrusted">\n'
+        f'<{WRAPPER_TAG} {attr}id="{token}" trust="untrusted">\n'
         f"{body}\n</{WRAPPER_TAG}>"
     )
 
@@ -109,27 +111,37 @@ def _units(nodes: list[Node]) -> list[_Unit]:
     """Flatten a tree into diff units in document order.
 
     A unit is one element line plus its folded leaf lines. ``key`` is the
-    element's identity (its parsed ref); a unit without one is placed by
-    ``group``: its nearest identified ancestor and its depth.
+    element's identity (its parsed ref); ``group`` is its nearest identified
+    ancestor and its depth, both as they were before wrapper lines were
+    collapsed, so a wrapper that folds or unfolds moves nothing.
     """
     units: list[_Unit] = []
     seen: dict[str, int] = {}
+    wrappers: dict[str, tuple] = {}
 
-    def visit(siblings: list[Node], depth: int, anchor: int | None, owner) -> None:
+    def identify(uid: str) -> tuple:
+        seen[uid] = seen.get(uid, 0) + 1
+        return (uid, seen[uid])
+
+    def visit(
+        siblings: list[Node], depth: int, anchor: int | None, owner, level: int
+    ) -> None:
         for node in siblings:
+            parent, place = owner, level + node.lifted
+            if node.lifted and node.via:
+                if node.via not in wrappers:
+                    wrappers[node.via] = identify(node.via)
+                parent = wrappers[node.via]
             folded = ("prop", "text") if is_interactive(node) else ("prop",)
             leaves = [c for c in node.children if c.kind in folded and not c.children]
             lines = (line_of(node),) + tuple(line_of(c) for c in leaves)
             uid = node.uid or node.ref
-            key = None
-            if uid:
-                seen[uid] = seen.get(uid, 0) + 1
-                key = (uid, seen[uid])
+            key = identify(uid) if uid else None
             ref = node.ref
             units.append(
                 _Unit(
                     key,
-                    (owner, depth),
+                    (parent, place),
                     lines,
                     depth,
                     node.role,
@@ -141,9 +153,9 @@ def _units(nodes: list[Node]) -> list[_Unit]:
             index = len(units) - 1
             inner = anchor if not (ref or node.name) else index
             rest = [c for c in node.children if not any(c is leaf for leaf in leaves)]
-            visit(rest, depth + 1, inner, key or owner)
+            visit(rest, depth + 1, inner, key or parent, place + 1)
 
-    visit(nodes, 0, None, None)
+    visit(nodes, 0, None, None, 0)
     return units
 
 

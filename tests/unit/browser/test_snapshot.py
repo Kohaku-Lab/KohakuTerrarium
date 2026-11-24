@@ -148,15 +148,15 @@ class TestCleaning:
         assert snap.to_text(out) == '- main:\n  - button "Kept" [ref=e5]'
         assert "e4" in snap.index_refs(nodes), "input tree is not mutated"
 
-    def test_prune_refs_keeps_actionable_and_containers(self):
+    def test_prune_refs_keeps_what_can_be_acted_on_or_scoped_to(self):
         out = snap.prune_refs(snap.parse(recorded("controls")))
         refs = snap.index_refs(out)
         for kept in (
             "e3",
-            "e9",
             "e15",
             "e17",
             "e21",
+            "e22",
             "e25",
             "e28",
             "e29",
@@ -166,8 +166,67 @@ class TestCleaning:
             "e52",
         ):
             assert kept in refs, kept
-        for dropped in ("e1", "e5", "e13", "e14", "e16", "e34", "e39", "e41", "e49"):
+        for dropped in (
+            "e1",
+            "e2",
+            "e4",
+            "e5",
+            "e9",
+            "e13",
+            "e14",
+            "e16",
+            "e32",
+            "e34",
+            "e39",
+            "e41",
+            "e48",
+            "e49",
+        ):
             assert dropped not in refs, dropped
+
+    @pytest.mark.parametrize(
+        "role",
+        [
+            "banner",
+            "complementary",
+            "contentinfo",
+            "form",
+            "group",
+            "list",
+            "main",
+            "menu",
+            "navigation",
+            "region",
+            "toolbar",
+        ],
+    )
+    def test_unnamed_structural_containers_lose_their_ref_named_ones_keep_it(
+        self, role
+    ):
+        (bare,) = snap.prune_refs(snap.parse(f"- {role} [ref=e1]:\n  - text: x"))
+        assert bare.ref is None and bare.uid == "e1"
+        (named,) = snap.prune_refs(
+            snap.parse(f'- {role} "Cart" [ref=e1]:\n  - text: x')
+        )
+        assert named.ref == "e1"
+
+    @pytest.mark.parametrize(
+        "role",
+        [
+            "alertdialog",
+            "article",
+            "dialog",
+            "grid",
+            "iframe",
+            "row",
+            "table",
+            "treegrid",
+        ],
+    )
+    def test_frames_dialogs_tables_rows_and_articles_keep_a_ref_unnamed(self, role):
+        (node,) = snap.prune_refs(snap.parse(f"- {role} [ref=e1]:\n  - text: x"))
+        assert node.ref == "e1"
+        assert snap.keeps_ref(node)
 
     def test_prune_refs_keeps_state_bearing_unknown_roles(self):
         (node,) = snap.prune_refs(snap.parse('- widgetx "W" [expanded] [ref=e4]'))
@@ -226,6 +285,84 @@ class TestCleaning:
             '  - button "Five" [ref=e7]'
         )
 
+    def test_collapse_folds_single_child_rowgroups_list_items_and_paragraphs(self):
+        nodes = snap.parse(
+            "- table [ref=e1]:\n"
+            "  - rowgroup:\n"
+            "    - row [ref=e2]:\n"
+            '      - cell "A"\n'
+            "- list:\n"
+            "  - listitem:\n"
+            '    - link "Home" [ref=e3]:\n'
+            "      - /url: /home\n"
+            "  - listitem:\n"
+            "    - strong: Note\n"
+            "- paragraph:\n"
+            '  - link "More" [ref=e4]'
+        )
+        assert snap.to_text(snap.collapse_wrappers(nodes)) == (
+            "- table [ref=e1]:\n"
+            "  - row [ref=e2]:\n"
+            '    - cell "A"\n'
+            "- list:\n"
+            '  - link "Home" [ref=e3]:\n'
+            "    - /url: /home\n"
+            "  - strong: Note\n"
+            '- link "More" [ref=e4]'
+        )
+
+    def test_collapse_keeps_list_items_and_paragraphs_that_group_something(self):
+        text = (
+            "- list:\n"
+            "  - listitem:\n"
+            "    - article [ref=e4]:\n"
+            "      - text: Blue umbrella $12\n"
+            '      - button "Add" [ref=e5]\n'
+            "  - listitem:\n"
+            '    - link "A" [ref=e6]\n'
+            '    - link "B" [ref=e7]\n'
+            "  - listitem: just text\n"
+            '  - listitem "Named":\n'
+            '    - link "C" [ref=e8]\n'
+            "  - listitem [ref=e9]:\n"
+            '    - link "D" [ref=e10]\n'
+            "- banner:\n"
+            '  - link "Logo" [ref=e11]\n'
+            "- rowgroup:\n"
+            "  - row [ref=e12]: one\n"
+            "  - row [ref=e13]: two"
+        )
+        nodes = snap.parse(text)
+        assert snap.to_text(snap.collapse_wrappers(nodes)) == text
+
+    def test_a_folded_list_item_leaves_the_interactive_view_as_it_was(self):
+        raw = snap.parse(
+            "- list [ref=e1]:\n"
+            "  - listitem [ref=e2]:\n"
+            '    - link "Home" [ref=e3]\n'
+            "  - listitem [ref=e4]:\n"
+            "    - generic [ref=e5]:\n"
+            "      - text: Blue umbrella $12\n"
+            '      - button "Add" [ref=e6]'
+        )
+        assert text_of(snap.clean(raw), interactive=True).splitlines() == [
+            '- link "Home" [ref=e3]',
+            "- listitem:",
+            "  - text: Blue umbrella $12",
+            '  - button "Add" [ref=e6]',
+        ]
+
+    def test_folded_lines_remember_the_wrapper_they_came_out_of(self):
+        (outer,) = snap.clean(
+            snap.parse(
+                "- main [ref=e1]:\n  - generic [ref=e2]:\n    - generic [ref=e3]:\n"
+                '      - button "Go" [ref=e4]'
+            )
+        )
+        (button,) = outer.children
+        assert (button.via, button.lifted) == ("e3", 2)
+        assert (outer.via, outer.lifted) == (None, 0)
+
     def test_collapse_keeps_generic_with_text(self):
         nodes = snap.parse("- generic: hello\n- generic:\n  - text: a")
         out = snap.collapse_wrappers(nodes)
@@ -233,7 +370,9 @@ class TestCleaning:
 
     def test_clean_controls_end_to_end(self):
         text = snap.to_text(cleaned("controls"))
-        assert text.startswith("- banner [ref=e2]:\n")
+        assert text.startswith('- banner:\n  - navigation "Primary" [ref=e3]:\n')
+        assert '    - list:\n      - link "Home" [ref=e6]:' in text
+        assert "- main:\n" in text and text.count("- rowgroup:") == 1
         assert "[cursor=pointer]" not in text
         assert "[active]" not in text
         assert '- textbox "Name" [ref=e17]:' in text
@@ -267,7 +406,7 @@ class TestFilters:
 
     def test_depth_limits_levels_but_keeps_props(self):
         out = text_of(cleaned("controls"), depth=1)
-        assert out.splitlines() == ["- banner [ref=e2]", "- main [ref=e9]"]
+        assert out.splitlines() == ["- banner", "- main"]
         links = text_of(
             snap.parse('- link "A" [ref=e1]:\n  - /url: /a\n  - img "x"'), depth=1
         )
@@ -280,7 +419,7 @@ class TestFilters:
     def test_query_keeps_ancestor_chain_and_match_subtree(self):
         out = text_of(cleaned("controls"), query="alice")
         assert out.splitlines() == [
-            "- main [ref=e9]:",
+            "- main:",
             "  - table [ref=e31]:",
             "    - rowgroup:",
             "      - row [ref=e38]:",
@@ -361,7 +500,7 @@ class TestFilters:
         )
 
     def test_filters_compose(self):
-        out = text_of(cleaned("controls"), ref="e9", query="remove", interactive=True)
+        out = text_of(cleaned("controls"), ref="e31", query="remove", interactive=True)
         assert out.splitlines() == [
             "- row [ref=e38]:",
             "  - text: Alice Admin",
@@ -472,7 +611,7 @@ class TestBoxes:
         nodes, boxes = snap.split_boxes(snap.parse(self.RAW))
         shown = snap.to_text(snap.add_boxes(snap.clean(nodes), boxes))
         assert shown.splitlines() == [
-            "- list [ref=e1] [box=8,45,1264,42]:",
+            "- list [box=8,45,1264,42]:",
             "  - listitem [box=48,45,1224,21]: One",
             '  - button "Go" [ref=e4] [box=200,126,34,21]',
         ]

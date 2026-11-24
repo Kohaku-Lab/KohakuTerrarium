@@ -36,8 +36,8 @@ class BrowserSnapshotTool(BrowserTool):
     def description(self) -> str:
         return (
             "Read the current browser page as an accessibility snapshot with "
-            "element refs. Use it before acting, or narrow it with ref, query or "
-            "interactive."
+            "element refs. Use it to reread a page, or narrow it with ref, query "
+            "or interactive."
         )
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:

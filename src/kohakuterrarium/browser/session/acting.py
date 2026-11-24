@@ -230,9 +230,9 @@ class SessionActMixin:
             )
         await self._await_windows(op)
         events, event_notes, opened = await self._events_text(op)
-        landed_tab = await self._opened_tab_section(tab, opened, op)
         obs = after or before
         url = obs.url if obs else tab.page.url
+        landed_tab = await self._opened_tab_section(tab, opened, op, url)
         inside = fmt.join_sections(
             self._title_line(tab, obs.title) if obs else "",
             format_details(report),
@@ -242,7 +242,7 @@ class SessionActMixin:
         text = fmt.join_sections(
             self._header(tab, url),
             format_report(report),
-            self._wrap(inside, tab, origin_of(url)),
+            self._wrap(inside, tab, origin_of(url), url),
             event_notes,
             landed_tab,
             self._notes(op, after),
@@ -285,8 +285,13 @@ class SessionActMixin:
         start = self._line(before.url, fmt.LINE_URL, tab)
         return f"Navigation blocked: {start} → {to}; the page did not load."
 
-    async def _opened_tab_section(self, tab: Tab, opened: list[Tab], op: Op) -> str:
-        """The page view of a tab the batch opened that is now active, wrapped."""
+    async def _opened_tab_section(
+        self, tab: Tab, opened: list[Tab], op: Op, shown: str
+    ) -> str:
+        """The page view of a tab the batch opened that is now active, wrapped.
+
+        ``shown`` is the URL on the result's first header line.
+        """
         active = self._tabs.active
         if active is None or active is tab or active not in opened:
             return ""
@@ -315,6 +320,7 @@ class SessionActMixin:
                 ),
                 active,
                 obs.origin,
+                shown,
             ),
         )
 

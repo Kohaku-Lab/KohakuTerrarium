@@ -49,7 +49,7 @@ plugins:
   - name: browser
     options:
       allow_loopback: true
-      allow_hosts: ["127.0.0.1:{port}", "169.254.169.254"]
+      allow_hosts: ["127.0.0.1:{port}", "localhost:{port}", "169.254.169.254"]
       action_timeout_s: 8
       nav_timeout_s: 15
 """
@@ -174,8 +174,8 @@ class TestBrowserIntegration:
     ):
         """navigate with page text → snapshot → batch + delta → dialog → new tab
         with its text → upload → download → screenshot → eval → blocked egress →
-        stale ref → interrupt → blocked redirect → runtime disable / enable → stop,
-        with no Chromium left behind."""
+        stale ref → interrupt → blocked redirect → a frame from another origin →
+        runtime disable / enable → stop, with no Chromium left behind."""
         pytest.importorskip("playwright.async_api")
         for name, value in browsers_env().items():
             monkeypatch.setenv(name, value)
@@ -217,9 +217,11 @@ class TestBrowserIntegration:
                     pytest.skip(f"no Chromium for Playwright: {exc}")
                 pytest.fail(f"the first navigation failed:\n{page}")
             assert page.startswith(f"[t1] {app}\n<page_content")
+            assert page.split("\n")[1].startswith('<page_content id="')
             assert 'trust="untrusted"' in page.split("\n")[1]
             assert site.hits["/workflow.html"] == 1
             assert '- heading "Team settings" [level=1]' in page
+            assert "- main:" in page and "- main [ref=" not in page
             assert "Page text left out" not in page
 
             # Snapshot: refs for every control the workflow uses.
@@ -287,6 +289,7 @@ class TestBrowserIntegration:
             assert f"[t2] {site.url('/help.html')}" in help_page
             assert "Tab t2 now:" in help_page
             assert "Was this page helpful?" in help_page
+            assert "origin=" not in help_page
             tabs = await creature.call("browser_tabs", action="list")
             assert "* [t2] " + site.url("/help.html") in tabs
             await creature.call(
@@ -412,6 +415,24 @@ class TestBrowserIntegration:
             assert "Navigation blocked: " in left_out and "Navigated:" not in left_out
             assert "Blocked 1 request" not in left_out
             assert listener.total_hits() == 0
+
+            # A frame from another origin names that origin on its line.
+            inner = site.url("/frame_inner.html", host="localhost")
+            site.html(
+                "/framed.html",
+                '<!doctype html><title>Framed</title><iframe src="/frame_inner.html">'
+                f'</iframe><iframe src="{inner}"></iframe>',
+            )
+            framed = await creature.call(
+                "browser_navigate", url=site.url("/framed.html")
+            )
+            body = framed.split("</page_content>")[0]
+            frames = [line.strip() for line in body.splitlines() if "- iframe" in line]
+            foreign = f"[origin=http://localhost:{site.port}]:"
+            assert len(frames) == 2, body
+            assert "origin=" not in frames[0] and frames[1].endswith(foreign), frames
+            assert framed.count("origin=") == 1
+            assert body.count('- button "Frame button"') == 2
 
             # Disable at runtime: the browser exits and the tools refuse.
             pids = await browser_pids(plugin)

@@ -180,11 +180,20 @@ class SessionObserveMixin:
     def _title_line(self, tab: Tab, title: str) -> str:
         return fmt.format_title(self._redact(title, tab))
 
-    def _wrap(self, text: str, tab: Tab | None, origin: str) -> str:
+    def _wrap(
+        self, text: str, tab: Tab | None, origin: str, shown: str | None = None
+    ) -> str:
+        """``text`` wrapped; ``origin`` is left out when it is that of ``shown``.
+
+        ``shown`` is the URL on the result's first header line.
+        """
         if not text:
             return ""
+        same = shown is not None and origin_of(shown) == origin
         return fmt.wrap_untrusted(
-            self._redact(text, tab), self._redact(origin, tab), self._token
+            self._redact(text, tab),
+            None if same else self._redact(origin, tab),
+            self._token,
         )
 
     def _take_blocked(self) -> list[EgressRecord]:
@@ -293,7 +302,7 @@ class SessionObserveMixin:
         events, event_notes, _ = await self._events_text(op)
         text = fmt.join_sections(
             self._header(tab, obs.url),
-            self._wrap(fmt.join_sections(body, events), tab, obs.origin),
+            self._wrap(fmt.join_sections(body, events), tab, obs.origin, obs.url),
             event_notes,
             self._notes(op, obs),
         )
@@ -337,6 +346,7 @@ class SessionObserveMixin:
                 ),
                 tab,
                 origin_of(tab.page.url),
+                tab.page.url,
             ),
             self._notes(op, None),
         )
@@ -359,7 +369,7 @@ class SessionObserveMixin:
         text = fmt.join_sections(
             self._header(tab, url),
             line,
-            self._wrap(detail, tab, origin_of(url)),
+            self._wrap(detail, tab, origin_of(url), url),
             self._notes(op, None),
         )
         return BrowserResult(

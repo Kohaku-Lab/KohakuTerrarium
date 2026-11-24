@@ -462,6 +462,23 @@ async def test_page_text_after_navigation_keeps_hidden_text_and_passwords_out(
 
 
 @LIVE
+async def test_a_foreign_frame_line_names_its_origin(live, site):
+    other = site.url("/child", host="localhost")
+    site.html(
+        "/framed",
+        f'<!doctype html><title>Framed</title><iframe src="{other}?k=1"></iframe>'
+        '<iframe src="/child"></iframe>',
+    )
+    text = (await live.navigate(site.url("/framed"))).text
+    body = text.split("</page_content>")[0]
+    foreign = f"[origin=http://localhost:{site.port}]"
+    lines = [line.strip() for line in body.splitlines() if "- iframe" in line]
+    assert len(lines) == 2, body
+    assert lines[0].endswith(f"{foreign}:") and "origin=" not in lines[1]
+    assert "Child page" in body and "k=1" not in text
+
+
+@LIVE
 async def test_a_click_refused_at_connect_reads_as_a_blocked_landing(live, site):
     start = (await live.navigate(site.url("/to-https"))).text
     link = ref_of(start, "link", "Secure copy")

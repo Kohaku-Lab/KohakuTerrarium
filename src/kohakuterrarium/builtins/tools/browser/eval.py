@@ -29,8 +29,8 @@ class BrowserEvalTool(BrowserTool):
     @property
     def description(self) -> str:
         return (
-            "Run JavaScript in the browser page, optionally on one element ref, and "
-            "return JSON. Use it to read state the snapshot does not show."
+            "Run JavaScript in the browser page and return JSON. Use it to read "
+            "state the snapshot does not show."
         )
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:

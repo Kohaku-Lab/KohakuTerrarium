@@ -1,6 +1,6 @@
 ---
 name: browser_act
-description: 'Run a batch of browser actions (click, type, select, press, wait, dialog, upload...) by ref. Use it to interact with a page; returns statuses and what changed.'
+description: 'Run a batch of browser actions by ref. Use it to interact with a page; returns statuses and what changed.'
 category: builtin
 tags: [browser, web]
 ---

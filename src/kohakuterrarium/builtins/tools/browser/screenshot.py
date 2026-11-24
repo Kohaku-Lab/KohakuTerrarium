@@ -50,8 +50,7 @@ class BrowserScreenshotTool(BrowserTool):
     def description(self) -> str:
         return (
             "Capture the browser page or one element as an image. Use it for "
-            "canvas, charts or layout the snapshot cannot show; optionally save "
-            "it to a file."
+            "canvas, charts or layout the snapshot cannot show."
         )
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:

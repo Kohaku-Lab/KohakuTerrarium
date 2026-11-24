@@ -1,6 +1,6 @@
 ---
 name: browser_eval
-description: 'Run JavaScript in the browser page, optionally on one element ref, and return JSON. Use it to read state the snapshot does not show.'
+description: 'Run JavaScript in the browser page and return JSON. Use it to read state the snapshot does not show.'
 category: builtin
 tags: [browser, web]
 ---

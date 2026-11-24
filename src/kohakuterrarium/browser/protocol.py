@@ -89,6 +89,9 @@ class PageDriver(Protocol):
     async def probe(self, script: str, timeout: float) -> ProbeFrames:
         """Evaluate ``script`` (a function source) in every frame."""
 
+    async def frame_urls(self, refs: Sequence[str], timeout: float) -> dict[str, str]:
+        """The URL each ``iframe`` ref's frame shows now; refs without a frame are left out."""
+
     async def evaluate(
         self,
         expression: str,

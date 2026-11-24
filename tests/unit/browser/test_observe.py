@@ -3,8 +3,13 @@
 import pytest
 
 from kohakuterrarium.browser import snapshot as snap
-from kohakuterrarium.browser.errors import DialogOpenedError
+from kohakuterrarium.browser.errors import (
+    BrowserTimeoutError,
+    DialogOpenedError,
+    DriverError,
+)
 from kohakuterrarium.browser.observe import (
+    MAX_FRAME_ORIGINS,
     blocked_reason,
     cap_text,
     format_blocked_records,
@@ -103,3 +108,113 @@ async def test_observe_redacts_before_parsing_and_reports_the_cut():
     assert "tail" not in rendered
     fresh = await read_fresh(Secretive(), run, 1.0, max_chars=30)
     assert fresh == {"e1": ("button", "Go")}
+
+
+class Framed(Page):
+    url = "https://shop.test/checkout"
+
+    def __init__(self, frames: dict[str, str] | Exception | None = None, count=0):
+        self.frames = frames if frames is not None else {}
+        self.count = count
+        self.asked: list[list[str]] = []
+
+    async def snapshot(self, timeout):
+        lines = [
+            "- iframe [ref=e2]:",
+            '  - textbox "Card" [ref=f1e1]',
+            "- iframe [ref=e3]:",
+            '  - button "Help" [ref=f2e1]',
+            "- iframe [ref=e4]:",
+            "  - text: inline",
+            "- generic [ref=e5]:",
+            "  - iframe [ref=e6]:",
+            '    - button "Ad" [ref=f3e1]',
+        ]
+        lines += [f"- iframe [ref=e{100 + i}]" for i in range(self.count)]
+        return "\n".join(lines)
+
+    async def probe(self, script, timeout):
+        return ProbeFrames([])
+
+    async def frame_urls(self, refs, timeout):
+        self.asked.append(list(refs))
+        if isinstance(self.frames, Exception):
+            raise self.frames
+        return {ref: url for ref, url in self.frames.items() if ref in refs}
+
+
+def iframe_lines(obs) -> list[str]:
+    return [snap.line_of(n) for n, _, _ in snap.walk(obs.nodes) if n.role == "iframe"]
+
+
+async def test_a_frame_from_another_origin_names_its_origin():
+    page = Framed(
+        {
+            "e2": "https://pay.test:8443/card?session=abc",
+            "e3": "https://shop.test/help",
+            "e4": "about:srcdoc",
+            "e6": "https://ads.test/x",
+        }
+    )
+    obs = await observe(page, run, 1.0)
+    assert page.asked == [["e2", "e3", "e4", "e6"]]
+    assert iframe_lines(obs) == [
+        "iframe [ref=e2] [origin=https://pay.test:8443]:",
+        "iframe [ref=e3]:",
+        "iframe [ref=e4]:",
+        "iframe [ref=e6] [origin=https://ads.test]:",
+    ]
+    assert obs.fresh["e2"] == ("iframe", "")
+    bare = await observe(
+        Framed(
+            {
+                "e2": "HTTPS://user:pw@pay.test/x",
+                "e3": "https://other.test",
+                "e4": "chrome-error://chromewebdata/",
+                "e6": "http://[::1]:9000/ad",
+            }
+        ),
+        run,
+        1.0,
+    )
+    assert iframe_lines(bare) == [
+        "iframe [ref=e2] [origin=https://pay.test]:",
+        "iframe [ref=e3] [origin=https://other.test]:",
+        "iframe [ref=e4]:",
+        "iframe [ref=e6] [origin=http://[::1]:9000]:",
+    ]
+
+
+async def test_frame_origins_are_redacted():
+    page = Framed({"e2": "https://tok-SECRET.pay.test/x"})
+    obs = await observe(
+        page, run, 1.0, redact=lambda text: text.replace("SECRET", "[secret:k]")
+    )
+    assert (
+        iframe_lines(obs)[0]
+        == "iframe [ref=e2] [origin=https://tok-[secret:k].pay.test]:"
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", [BrowserTimeoutError("slow"), DriverError("frame detached")]
+)
+async def test_a_failed_frame_read_leaves_the_lines_plain(failure):
+    obs = await observe(Framed(failure), run, 1.0)
+    assert all("origin=" not in line for line in iframe_lines(obs))
+    assert len(iframe_lines(obs)) == 4
+
+
+async def test_a_dialog_during_the_frame_read_is_not_swallowed():
+    with pytest.raises(DialogOpenedError):
+        await observe(Framed(DialogOpenedError(None, "an alert opened")), run, 1.0)
+
+
+async def test_frame_reads_are_capped_and_skipped_without_frames():
+    page = Framed(count=MAX_FRAME_ORIGINS * 2)
+    await observe(page, run, 1.0)
+    assert len(page.asked[0]) == MAX_FRAME_ORIGINS
+    plain = Framed()
+    plain.snapshot = Page().snapshot
+    await observe(plain, run, 1.0)
+    assert plain.asked == []

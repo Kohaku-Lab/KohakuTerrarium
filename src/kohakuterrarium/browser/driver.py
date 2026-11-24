@@ -206,6 +206,26 @@ class PlaywrightPage:
         good = [r for r in results if not isinstance(r, BaseException)]
         return ProbeFrames(good, len(results) - len(good))
 
+    async def frame_urls(self, refs: Sequence[str], timeout: float) -> dict[str, str]:
+        async def one(ref: str) -> str | None:
+            handles = await self._ref(ref).element_handles()
+            try:
+                frame = await handles[0].content_frame() if handles else None
+                return frame.url if frame is not None else None
+            finally:
+                for handle in handles:
+                    await handle.dispose()
+
+        results = await asyncio.gather(
+            *(asyncio.wait_for(one(ref), timeout) for ref in refs),
+            return_exceptions=True,
+        )
+        if not self._owner.is_connected():
+            raise DriverDisconnectedError("the browser closed unexpectedly")
+        return {
+            ref: url for ref, url in zip(refs, results) if isinstance(url, str) and url
+        }
+
     async def evaluate(
         self,
         expression: str,

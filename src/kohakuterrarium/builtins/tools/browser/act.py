@@ -37,9 +37,8 @@ class BrowserActTool(BrowserTool):
     @property
     def description(self) -> str:
         return (
-            "Run a batch of browser actions (click, type, select, press, wait, "
-            "dialog, upload...) by ref. Use it to interact with a page; returns "
-            "statuses and what changed."
+            "Run a batch of browser actions by ref. Use it to interact with a page; "
+            "returns statuses and what changed."
         )
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:

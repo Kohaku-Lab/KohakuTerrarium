@@ -71,6 +71,8 @@ CONTAINER_ROLES = frozenset(
 )
 STATE_ATTRS = frozenset({"checked", "expanded", "pressed", "selected"})
 BOUNDARY_ROLES = frozenset({"alertdialog", "dialog", "document", "iframe"})
+SCOPE_ROLES = BOUNDARY_ROLES | {"article", "grid", "row", "table", "treegrid"}
+FOLD_ROLES = frozenset({"listitem", "paragraph"})
 SUMMARY_ROLES = frozenset({"article", "listitem", "row"})
 MAX_DEPTH = 200
 SUMMARY_CHARS = 60
@@ -122,6 +124,8 @@ class Node:
     ``attrs`` keeps the bracketed attributes in their original order.
     ``uid`` is the ref the element had when parsed; it is never rendered and
     survives ``prune_refs``, so it identifies the element across snapshots.
+    ``lifted`` counts the wrapper lines ``collapse_wrappers`` removed directly
+    above the node, and ``via`` is the uid of the innermost of them.
     """
 
     kind: str = "element"
@@ -132,6 +136,8 @@ class Node:
     children: list["Node"] = field(default_factory=list)
     raw: str = ""
     uid: str | None = field(default=None, compare=False, repr=False)
+    via: str | None = field(default=None, compare=False, repr=False)
+    lifted: int = field(default=0, compare=False, repr=False)
 
     def has_attr(self, key: str) -> bool:
         return any(k == key for k, _ in self.attrs)
@@ -396,11 +402,22 @@ def drop_aria_hidden(nodes: list[Node]) -> list[Node]:
     ]
 
 
+def keeps_ref(node: Node) -> bool:
+    """Whether a cleaned line shows its ref: something to act on or to scope a view to.
+
+    That is an interactive element, a frame, dialog, table, row or article,
+    or a named container; unnamed landmarks and wrappers show none.
+    """
+    if is_interactive(node) or node.role in SCOPE_ROLES:
+        return True
+    return node.role in CONTAINER_ROLES and bool(node.name)
+
+
 def prune_refs(nodes: list[Node]) -> list[Node]:
-    """Keep refs only on interactive, clickable, state-bearing or container nodes."""
+    """Keep refs only where ``keeps_ref`` says a model can use them."""
     out = []
     for node in nodes:
-        keep = is_interactive(node) or node.role in CONTAINER_ROLES
+        keep = keeps_ref(node)
         attrs = node.attrs if keep else tuple(a for a in node.attrs if a[0] != "ref")
         out.append(replace(node, attrs=attrs, children=prune_refs(node.children)))
     return out
@@ -433,7 +450,6 @@ def drop_label_echo(nodes: list[Node]) -> list[Node]:
 def _plain_wrapper(node: Node) -> bool:
     return (
         node.kind == "element"
-        and node.role == "generic"
         and node.name is None
         and node.value is None
         and not node.attrs
@@ -441,16 +457,41 @@ def _plain_wrapper(node: Node) -> bool:
     )
 
 
-def collapse_wrappers(nodes: list[Node]) -> list[Node]:
-    """Replace a plain unnamed ``generic`` by its children when that loses no grouping.
+def _leaf_like(node: Node) -> bool:
+    return is_interactive(node) or not any(
+        c.kind in ("element", "opaque") for c in node.children
+    )
 
-    That is when it has a single child, or is itself its parent's only child.
+
+def _folds(node: Node, siblings: int) -> bool:
+    if not _plain_wrapper(node):
+        return False
+    single = len(node.children) == 1
+    if node.role == "generic":
+        return single or siblings == 1
+    if node.role == "rowgroup":
+        return single
+    return node.role in FOLD_ROLES and single and _leaf_like(node.children[0])
+
+
+def _lift(child: Node, wrapper: Node) -> Node:
+    via = child.via if child.lifted else wrapper.uid
+    return replace(child, via=via, lifted=child.lifted + 1)
+
+
+def collapse_wrappers(nodes: list[Node]) -> list[Node]:
+    """Replace a plain unnamed wrapper line by its children when that loses no grouping.
+
+    A ``generic`` folds when it has a single child or is its parent's only
+    child; a ``rowgroup`` when it has a single child; a ``listitem`` or
+    ``paragraph`` when its single child is interactive or holds no elements.
+    Lifted children record the wrapper in ``via`` / ``lifted``.
     """
     out: list[Node] = []
     for node in nodes:
         node = replace(node, children=collapse_wrappers(node.children))
-        if _plain_wrapper(node) and (len(node.children) == 1 or len(nodes) == 1):
-            out.extend(node.children)
+        if _folds(node, len(nodes)):
+            out.extend(_lift(child, node) for child in node.children)
         else:
             out.append(node)
     return out

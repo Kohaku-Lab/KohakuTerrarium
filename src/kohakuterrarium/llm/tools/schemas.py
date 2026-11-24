@@ -458,7 +458,7 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             "action": {
                 "type": "string",
                 "enum": ["goto", "back", "forward", "reload"],
-                "description": "Default goto (open url)",
+                "description": "Default goto",
             },
             "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
@@ -485,7 +485,7 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             },
             "boxes": {
                 "type": "boolean",
-                "description": "Add each element's [box=x,y,w,h] in CSS pixels",
+                "description": "Add [box=x,y,w,h] to each element",
             },
             "tab": {"type": "string", "description": 'Tab id; "" = active tab'},
         },
@@ -565,7 +565,7 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             },
             "full_page": {
                 "type": "boolean",
-                "description": "Whole page, height-capped",
+                "description": "Whole page",
             },
             "path": {
                 "type": "string",
@@ -597,7 +597,7 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         "properties": {
             "expression": {
                 "type": "string",
-                "description": "JavaScript expression or function; with ref it gets the element",
+                "description": "JavaScript expression or function",
             },
             "ref": {
                 "type": "string",

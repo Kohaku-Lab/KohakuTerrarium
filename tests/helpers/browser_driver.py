@@ -104,6 +104,7 @@ class ScriptedPage:
         self.doc = next(_DOCS)
         self.probe_results: list[Any] = [{"hidden": [], "visible": [], "passwords": []}]
         self.probe_failed = 0
+        self.frame_url_map: dict[str, str] = {}
         self.eval_value: Any = None
         self.history_back: list[str] = []
         self.closed = False
@@ -199,6 +200,10 @@ class ScriptedPage:
         if result is _MISSING:
             return ProbeFrames(list(self.probe_results), self.probe_failed)
         return result
+
+    async def frame_urls(self, refs, timeout: float) -> dict[str, str]:
+        known = {ref: url for ref, url in self.frame_url_map.items() if ref in refs}
+        return await self._do("frame_urls", known, refs=list(refs), timeout=timeout)
 
     async def evaluate(
         self,

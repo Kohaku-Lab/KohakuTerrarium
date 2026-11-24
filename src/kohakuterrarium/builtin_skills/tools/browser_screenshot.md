@@ -1,6 +1,6 @@
 ---
 name: browser_screenshot
-description: 'Capture the browser page or one element as an image. Use it for canvas, charts or layout the snapshot cannot show; optionally save it to a file.'
+description: 'Capture the browser page or one element as an image. Use it for canvas, charts or layout the snapshot cannot show.'
 category: builtin
 tags: [browser, web, image]
 ---
