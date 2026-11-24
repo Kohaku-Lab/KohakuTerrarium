@@ -253,6 +253,14 @@ def site():
     server.html("/child", "<!doctype html><title>Child</title><h1>Child page</h1>")
     server.html("/animated", ANIMATED)
     server.html("/reorder", REORDER)
+    server.html(
+        "/to-https",
+        '<!doctype html><title>Out</title><a href="https://10.255.255.1/q3">Secure copy</a>',
+    )
+    server.html(
+        "/to-hidden",
+        '<!doctype html><title>Start</title><a href="/hidden.html">Go hidden</a>',
+    )
     server.html("/sw", SERVICE_WORKER)
     server.file(
         "/sw.js",
@@ -422,7 +430,7 @@ async def test_boxes_coordinates_moves_dialog_chain_popups_and_navigation(live, 
     )
     new = live._tabs.active.id
     assert f"Tab opened: {new}" in popped.text, popped.text
-    assert f"Tab {new} now (interactive elements):" in popped.text
+    assert f"Tab {new} now:" in popped.text
     await live.tab_close(new)
 
     await live.evaluate("setTimeout(() => { location.href = '/form' }, 0)")
@@ -430,6 +438,45 @@ async def test_boxes_coordinates_moves_dialog_chain_popups_and_navigation(live, 
         read = await live.snapshot()
         assert not read.is_error or "the page was navigating" in read.text
     assert "Form" in (await live.snapshot()).text
+
+
+@LIVE
+async def test_page_text_after_navigation_keeps_hidden_text_and_passwords_out(
+    live, site
+):
+    navigated = (await live.navigate(site.url("/hidden.html"))).text
+    start = (await live.navigate(site.url("/to-hidden"))).text
+    acted = await live.act(
+        [{"kind": "click", "ref": ref_of(start, "link", "Go hidden")}]
+    )
+    assert "Page now:" in acted.text
+    for text in (navigated, acted.text):
+        assert "Visible paragraph one." in text
+        assert "HIDE" not in text and "GONE" not in text
+        assert "s3cr.t+[x]" not in text
+        assert "visually hidden text block" in text.split("</page_content>")[-1]
+    clicked = await live.act(
+        [{"kind": "click", "ref": ref_of(acted.text, "link", "Next page")}]
+    )
+    assert clicked.meta["ok"], clicked.text
+
+
+@LIVE
+async def test_a_click_refused_at_connect_reads_as_a_blocked_landing(live, site):
+    start = (await live.navigate(site.url("/to-https"))).text
+    link = ref_of(start, "link", "Secure copy")
+    result = await live.act([{"kind": "click", "ref": link}])
+    assert result.is_error, result.text
+    assert (
+        f"1. click {link}: failed — it led to 10.255.255.1:443, which the browser "
+        "network policy blocked"
+    ) in result.text
+    assert "the page did not load" in result.text
+    assert (
+        f"Navigation blocked: {site.url('/to-https')} → https://10.255.255.1/q3; "
+        "the page did not load."
+    ) in result.text
+    assert "Blocked 1 request" not in result.text
 
 
 @LIVE

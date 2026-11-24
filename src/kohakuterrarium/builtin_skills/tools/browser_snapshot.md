@@ -8,7 +8,7 @@ tags: [browser, web]
 # browser_snapshot
 
 Returns the page as an indented accessibility tree. Interactive elements and
-containers carry refs such as `[ref=e12]` (`f1e3` inside frames).
+containers carry refs such as `[ref=e12]`.
 
 ## Arguments
 
@@ -23,8 +23,9 @@ containers carry refs such as `[ref=e12]` (`f1e3` inside frames).
 
 ## Behavior
 
-- Take a snapshot before acting on a page you have not seen, and act on the
-  refs it shows. Refs are valid for the page as last shown to you.
+- `browser_navigate` and `browser_act` already show a new page's text when
+  it fits; snapshot when they left text out, or to narrow a big page.
+- Refs are valid for the page as last shown to you, from any browser tool.
 - On a big page, narrow first: `query` for a word you expect, `interactive`
   for the controls, `ref` plus `depth` for one region.
 - `boxes` gives positions for `browser_act` coordinates, including elements
@@ -38,6 +39,10 @@ containers carry refs such as `[ref=e12]` (`f1e3` inside frames).
   saying how much was left out and how to narrow.
 
 ## Reference
+
+### Refs
+
+Refs look like `e12`; after the tab loads a new page they carry a prefix such as `f1e12` or `f2e12`, and elements in frames carry their frame's prefix. Use refs exactly as shown.
 
 ### What is left out
 
@@ -53,5 +58,7 @@ containers carry refs such as `[ref=e12]` (`f1e3` inside frames).
 - `ref eN is not on the page now`: the element is gone; snapshot without
   `ref` to see current refs.
 - `dialog pending`: answer the dialog with `browser_act` first.
+- `no content yet`: the page may still be loading; wait with `browser_act`,
+  then snapshot again.
 - A tab id that does not exist names the tabs to use instead; see
   `browser_tabs`.

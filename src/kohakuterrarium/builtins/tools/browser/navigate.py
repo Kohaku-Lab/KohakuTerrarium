@@ -32,8 +32,8 @@ class BrowserNavigateTool(BrowserTool):
     def description(self) -> str:
         return (
             "Open a URL in the browser, or go back, forward or reload. Use it to "
-            "start browsing or change page; returns the page and its interactive "
-            "elements."
+            "start browsing or change page; returns the page text with element "
+            "refs."
         )
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:

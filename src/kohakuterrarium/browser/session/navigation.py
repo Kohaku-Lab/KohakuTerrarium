@@ -128,7 +128,8 @@ class SessionNavigationMixin:
             return self._dialog_result(tab, op)
         except PageNavigatingError as exc:
             return self._error_result(tab, op, f"Page not read: {exc}.", "")
-        return await self._page_result(tab, obs, op, await self._compact(obs))
+        rendered, full = await self._page_view(obs, op)
+        return await self._page_result(tab, obs, op, rendered, full)
 
     def _check_url(self, url: str) -> str:
         """The stripped URL, or ``NavigationBlockedError`` when the policy refuses it outright."""
@@ -142,33 +143,40 @@ class SessionNavigationMixin:
             )
         return url
 
-    def _chain(
-        self, target: str, tab: Tab, response: NavResponse | None
-    ) -> set[tuple[str, int]]:
-        """``(host, port)`` of each URL the main frame went to: target, redirect hops, final."""
-        urls = [target, *self._nav_urls.get(tab.id, ())]
-        if response is not None:
-            urls.append(response.url)
-        return {hop for hop in map(endpoint_of, urls) if hop[0]}
+    def _blocked_hops(self, urls: list[str], mark: int, tab: Tab) -> list[EgressRecord]:
+        """Blocked proxy records since ``mark`` for the tab's main-frame chain, taken out.
 
-    def _raise_if_blocked(
-        self, target: str, mark: int, tab: Tab, response: NavResponse | None
-    ) -> None:
-        """Raise ``NavigationBlockedError`` when the proxy blocked a hop of this navigation.
-
-        Only records whose host and port match a URL on the chain count; the
-        rest stay buffered for the usual blocked-requests report.
+        The chain is ``urls`` plus the hops the tab reported since its last
+        reset. Only records whose host and port match a URL on the chain
+        count; the rest stay buffered for the usual blocked-requests report.
         """
-        chain = self._chain(target, tab, response)
+        if self._stack is None:
+            return []
+        chain = {
+            hop
+            for hop in map(endpoint_of, [*urls, *self._nav_urls.get(tab.id, ())])
+            if hop[0]
+        }
         blocked = [
             r
             for r in self._stack.proxy.since(mark)
             if r.blocked and (r.host, r.port) in chain
         ]
+        if blocked:
+            self._buffer_blocked()
+            self._blocked = [
+                r for r in self._blocked if not any(r is b for b in blocked)
+            ]
+        return blocked
+
+    def _raise_if_blocked(
+        self, target: str, mark: int, tab: Tab, response: NavResponse | None
+    ) -> None:
+        """Raise ``NavigationBlockedError`` when the proxy blocked a hop of this navigation."""
+        urls = [target] if response is None else [target, response.url]
+        blocked = self._blocked_hops(urls, mark, tab)
         if not blocked:
             return
-        self._buffer_blocked()
-        self._blocked = [r for r in self._blocked if not any(r is b for b in blocked)]
         record = blocked[-1]
         start = endpoint_of(target)
         if (record.host, record.port) == start:
@@ -245,7 +253,7 @@ class SessionNavigationMixin:
                 ) from None
             if not rendered.text and query:
                 rendered = snap.Rendered(f"(nothing matches {query!r})", 0, 0, 0, {})
-            return await self._page_result(tab, obs, op, rendered)
+            return await self._page_result(tab, obs, op, rendered, not interactive)
 
 
 def host_of(url: str) -> str:

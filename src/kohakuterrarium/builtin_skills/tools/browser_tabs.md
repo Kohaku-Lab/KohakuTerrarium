@@ -34,4 +34,5 @@ their ids, the active one marked `*`.
 ## Reference
 
 Tab titles are page text and appear inside a `page_content` element. A tab a
-click opened becomes the active tab, and the action result names it.
+click opened becomes the active tab, and the action result names it and
+shows its text.

@@ -676,3 +676,7 @@ class TestPrompt:
         assert len(PROMPT) <= 600
         for phrase in DISCOURAGING:
             assert phrase not in PROMPT.lower()
+
+    def test_prompt_points_at_the_page_text_results_already_carry(self):
+        assert "snapshot first" not in PROMPT.lower()
+        assert "browser_navigate and browser_act show the page text" in PROMPT

@@ -35,6 +35,7 @@ from kohakuterrarium.browser.refs import RefBook
 from kohakuterrarium.browser.secrets import SecretStore
 from kohakuterrarium.browser.session.types import (
     COMPACT_MAX_CHARS,
+    PAGE_TEXT_MAX_CHARS,
     DOWNLOAD_WAIT_S,
     BrowserResult,
     Op,
@@ -43,6 +44,15 @@ from kohakuterrarium.browser.session.types import (
 from kohakuterrarium.browser.tabs import Tab, TabRegistry
 
 NAVIGATING = "the page was navigating; take a snapshot again"
+LOADING = (
+    "The page shows no content yet and may still be loading; wait with the wait "
+    "action of browser_act (text or seconds), then take a snapshot."
+)
+TEXT_LEFT_OUT = (
+    "Page text left out: the page has more than {limit} characters, so only its "
+    "interactive elements are shown; read the text with browser_snapshot (query "
+    "or ref narrows it)."
+)
 
 
 class SessionObserveMixin:
@@ -260,13 +270,24 @@ class SessionObserveMixin:
         return fmt.join_sections(*notes)
 
     async def _page_result(
-        self, tab: Tab, obs: Observation, op: Op, rendered: snap.Rendered
+        self,
+        tab: Tab,
+        obs: Observation,
+        op: Op,
+        rendered: snap.Rendered,
+        full: bool = True,
     ) -> BrowserResult:
-        """Header, wrapped title, snapshot and events, notes; records the refs it shows."""
+        """Header, wrapped title, snapshot and events, notes; records the refs it shows.
+
+        ``full`` is false when ``rendered`` lists only the interactive elements.
+        """
         self._refs.record(tab.id, rendered.fingerprints)
+        if not obs.nodes and LOADING not in op.notes:
+            op.notes.append(LOADING)
         body = fmt.join_sections(
             self._title_line(tab, obs.title),
-            rendered.text or "(no accessible content)",
+            rendered.text
+            or ("(no accessible content)" if full else "(no interactive elements)"),
             fmt.format_truncation(rendered.cut_lines, rendered.cut_refs),
         )
         events, event_notes, _ = await self._events_text(op)
@@ -277,6 +298,21 @@ class SessionObserveMixin:
             self._notes(op, obs),
         )
         return BrowserResult(self._redact(text, tab), self._meta(tab, obs))
+
+    async def _page_view(self, obs: Observation, op: Op) -> tuple[snap.Rendered, bool]:
+        """The cleaned page when it fits ``PAGE_TEXT_MAX_CHARS``, else its controls.
+
+        Returns the rendering and whether it is the full page; the fallback
+        and an empty page each add a note to ``op``.
+        """
+        limit = min(PAGE_TEXT_MAX_CHARS, self.options.snapshot_max_chars)
+        full = await self._render(obs.nodes, max_chars=limit)
+        if not full.cut_lines:
+            if not obs.nodes and LOADING not in op.notes:
+                op.notes.append(LOADING)
+            return full, True
+        op.notes.append(TEXT_LEFT_OUT.format(limit=limit))
+        return await self._compact(obs), False
 
     async def _compact(self, obs: Observation) -> snap.Rendered:
         """Interactive elements only, capped well below ``snapshot_max_chars``."""

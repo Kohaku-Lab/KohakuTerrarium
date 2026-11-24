@@ -172,9 +172,10 @@ class TestBrowserIntegration:
     async def test_creature_browses_a_site_end_to_end(
         self, sites, tmp_path, monkeypatch
     ):
-        """navigate → snapshot → batch + delta → dialog → new tab → upload →
-        download → screenshot → eval → blocked egress → stale ref → interrupt →
-        runtime disable / enable → stop, with no Chromium left behind."""
+        """navigate with page text → snapshot → batch + delta → dialog → new tab
+        with its text → upload → download → screenshot → eval → blocked egress →
+        stale ref → interrupt → blocked redirect → runtime disable / enable → stop,
+        with no Chromium left behind."""
         pytest.importorskip("playwright.async_api")
         for name, value in browsers_env().items():
             monkeypatch.setenv(name, value)
@@ -183,6 +184,11 @@ class TestBrowserIntegration:
         site.routes["/api/slow"] = serve_slowly(arrived, release)
         for path in ("/api/profile", "/api/delete", "/api/upload", "/api/helpful"):
             site.file(path, b"ok", "text/plain")
+        site.html(
+            "/leave.html",
+            '<!doctype html><title>Leave</title><a href="/out">Archive copy</a>',
+        )
+        site.redirect("/out", listener.url("/archive"))
         site.file(
             "/report.csv",
             REPORT,
@@ -213,6 +219,8 @@ class TestBrowserIntegration:
             assert page.startswith(f"[t1] {app}\n<page_content")
             assert 'trust="untrusted"' in page.split("\n")[1]
             assert site.hits["/workflow.html"] == 1
+            assert '- heading "Team settings" [level=1]' in page
+            assert "Page text left out" not in page
 
             # Snapshot: refs for every control the workflow uses.
             snapshot = await creature.call("browser_snapshot")
@@ -233,6 +241,7 @@ class TestBrowserIntegration:
                     ("button", "Run probes"),
                 )
             }
+            assert ref_of(page, "button", "Save profile") == refs["Save profile"]
 
             # One batch fills and submits the form; the result is a delta.
             saved = await creature.call(
@@ -272,17 +281,14 @@ class TestBrowserIntegration:
             assert site.hits["/api/delete"] == 1
 
             # A link that opens a new tab, then work inside that tab.
-            await creature.call(
+            help_page = await creature.call(
                 "browser_act", actions=[{"kind": "click", "ref": refs["Open help"]}]
             )
-            for _ in range(50):
-                tabs = await creature.call("browser_tabs", action="list")
-                if "* [t2] " in tabs:
-                    break
-                await asyncio.sleep(0.1)
+            assert f"[t2] {site.url('/help.html')}" in help_page
+            assert "Tab t2 now:" in help_page
+            assert "Was this page helpful?" in help_page
+            tabs = await creature.call("browser_tabs", action="list")
             assert "* [t2] " + site.url("/help.html") in tabs
-            help_page = await creature.call("browser_snapshot")
-            assert help_page.startswith(f"[t2] {site.url('/help.html')}")
             await creature.call(
                 "browser_act",
                 actions=[
@@ -388,6 +394,24 @@ class TestBrowserIntegration:
             release.set()
             after = await creature.call("browser_snapshot", query="status")
             assert after.startswith(f"[t1] {app}\n<page_content")
+
+            # A click that redirects to a forbidden host reads as a blocked navigation.
+            leave = await creature.call("browser_navigate", url=site.url("/leave.html"))
+            left_out = await creature.call(
+                "browser_act",
+                actions=[
+                    {"kind": "click", "ref": ref_of(leave, "link", "Archive copy")}
+                ],
+            )
+            target = f"127.0.0.1:{listener.port}"
+            assert (
+                f"1. click {ref_of(leave, 'link', 'Archive copy')}: failed — it led to "
+                f"{target}, which the browser network policy blocked"
+            ) in left_out
+            assert "the page did not load" in left_out
+            assert "Navigation blocked: " in left_out and "Navigated:" not in left_out
+            assert "Blocked 1 request" not in left_out
+            assert listener.total_hits() == 0
 
             # Disable at runtime: the browser exits and the tools refuse.
             pids = await browser_pids(plugin)

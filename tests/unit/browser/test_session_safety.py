@@ -421,6 +421,86 @@ class TestBlockedAttribution:
         assert "c.test:9000 (c.test is in block_hosts)" in result.text
         await session.close()
 
+    async def test_a_click_that_lands_on_a_blocked_host_reads_as_blocked(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+
+        async def click(**_):
+            driver.browser.sink.navigation_started(page, "http://c.test:9000/q3")
+            await self.proxied_get(session, "c.test:9000")
+            page.load("http://c.test:9000/q3", "", "")
+
+        page.handlers["click"] = click
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert result.is_error and not result.meta["ok"]
+        assert (
+            "1. click e2: failed — it led to c.test:9000, which the browser network "
+            "policy blocked (c.test is in block_hosts); the page did not load"
+        ) in result.text
+        assert (
+            "Navigation blocked: http://shop.test/ → http://c.test:9000/q3; "
+            "the page did not load."
+        ) in result.text
+        assert "Navigated:" not in result.text
+        assert "Blocked 1 request" not in result.text
+        assert "Page now" not in result.text
+        await session.close()
+
+    async def test_the_action_that_navigated_carries_the_blocked_landing(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+
+        async def click(**_):
+            driver.browser.sink.navigation_started(page, "http://c.test:9000/q3")
+            await self.proxied_get(session, "c.test:9000")
+            page.load("http://c.test:9000/q3", "", "")
+
+        page.handlers["click"] = click
+        result = await session.act(
+            [{"kind": "click", "ref": "e2"}, {"kind": "wait", "seconds": 0.05}]
+        )
+        assert "1. click e2: failed — it led to c.test:9000" in result.text
+        assert "2. wait 0.05 s: done" in result.text
+        await session.close()
+
+    async def test_a_refused_same_origin_request_without_navigation_is_no_landing(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["shop.test"])
+        await session.snapshot()
+
+        async def click(**_):
+            await self.proxied_get(session, "shop.test")
+
+        driver.browser.page.handlers["click"] = click
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert result.meta["ok"] and "1. click e2: done" in result.text
+        assert "Navigation blocked" not in result.text
+        assert "Blocked 1 request:" in result.text and "shop.test:80" in result.text
+        await session.close()
+
+    async def test_a_blocked_subresource_in_an_act_is_still_a_request_list(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+
+        async def click(**_):
+            await self.proxied_get(session, "c.test:9000")
+
+        driver.browser.page.handlers["click"] = click
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert result.meta["ok"] and "1. click e2: done" in result.text
+        assert "Blocked 1 request:" in result.text
+        assert "Navigation blocked" not in result.text
+        await session.close()
+
     async def test_a_blocked_port_on_the_chain_is_named_with_its_port(self, tmp_path):
         session, driver = make(tmp_path, block_hosts=["c.test:9000"])
         await session.snapshot()

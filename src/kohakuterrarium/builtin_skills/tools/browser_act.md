@@ -22,9 +22,9 @@ returns one status line per action plus what changed on the page.
 
 - Put the steps of one intent in one call (fill a form, then submit): later
   actions run only if earlier ones succeeded; the rest show `not executed`.
-- The result is a delta: lines added (`+`) or changed (`~`), `(moved)` when
-  an element changed place. Read it instead of taking a new snapshot; a new
-  page or a new tab shows its interactive elements.
+- The result is a delta (`+` added, `~` changed, `(moved)`) or `No change in
+  the page snapshot.` A new page, a new tab, or a change the delta would hide
+  shows the page text instead. Read it instead of taking a new snapshot.
 - Check the result for the outcome you wanted before you report success.
 
 ## Output
@@ -58,6 +58,10 @@ Unused fields may be sent empty (`""`, 0, `[]`, false): a non-empty
 clears the field), and `wait` takes `text`, else `text_gone`, else `seconds`
 above 0. A real value on another kind's field is refused.
 
+To reach the end of a long or lazily loaded page, `scroll` with a large
+`dy` (or `press` `End`), `wait` for the new items, and repeat until the
+result says `No change in the page snapshot.`
+
 Coordinates are viewport CSS pixels, as in a screenshot or a
 `browser_snapshot` with `boxes`; use them for elements without refs (canvas,
 draggable rows, hover areas) and prefer refs otherwise.
@@ -70,8 +74,10 @@ draggable rows, hover areas) and prefer refs otherwise.
 - **dialog pending**: an alert, confirm or prompt opened. Only the `dialog`
   action is accepted until you answer it; `alert` dialogs are accepted for you
   and reported.
-- **blocked**: requests the network policy refused are listed under
-  `Blocked N requests`; a form that posts to a blocked host does not submit.
+- **failed — it led to host:port, which the browser network policy
+  blocked**: the action's page did not load; the result says `Navigation
+  blocked`. Other refused requests are listed under `Blocked N requests`; a
+  form that posts to a blocked host does not submit.
 - Downloads are saved under `browser-downloads/` in the working directory and
   listed with their path; new tabs a click opened become active and are named.
 
