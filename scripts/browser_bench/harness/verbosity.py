@@ -4,7 +4,9 @@ Every figure is a re-sent cost: a tool result's characters times the number
 of later LLM calls whose context still carries it. A result is *superseded*
 for a call when a later view that replaces it (a navigation of the same tab,
 by ``browser_navigate`` or by an action, or an unnarrowed snapshot) is also
-in that call's context. An in-page change does not supersede an earlier view.
+in that call's context. An in-page change shown as a delta or as the
+interactive elements does not supersede an earlier view; one shown as the
+whole page (``Page now:``) does.
 """
 
 import json
@@ -24,7 +26,7 @@ STRUCTURAL = re.compile(
 )
 REF = re.compile(r" \[ref=([\w]+)\]")
 TAB = re.compile(r"^\[(t\d+)\]")
-NAVIGATION_MARKERS = ("Navigated:", "Reloaded:")
+NAVIGATION_MARKERS = ("Navigated:", "Reloaded:", "Page now:")
 NARROWING = ("ref", "query", "depth", "interactive")
 
 

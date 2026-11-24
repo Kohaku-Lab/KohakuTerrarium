@@ -24,6 +24,7 @@ from ..tasks import BY_ID, TASKS
 from .report import render
 from .runner import Limits, run_all
 from .store import RunStore, plan
+from .wire import OMIT_HINT, install, tool_rewriter
 
 DEFAULT_MODEL = "gpt-6.2-sol"
 DEFAULT_EFFORT = "high"
@@ -50,6 +51,8 @@ class Settings:
     websocket: bool = True
     expect_root: Path | None = None
     cache_key: str = "shared"
+    tool_strict: str = "unset"
+    act_hint: str = "default"
 
     def meta(self) -> dict:
         return {
@@ -60,7 +63,15 @@ class Settings:
             "timeout": self.timeout,
             "websocket": self.websocket,
             "cache_key": self.cache_key,
+            "tool_strict": self.tool_strict,
+            "act_hint": self.act_hint,
         }
+
+    def tool_rewriter(self):
+        """The outgoing tool-list rewrite these settings ask for."""
+        strict = {"unset": None, "false": False, "true": True}[self.tool_strict]
+        hint = OMIT_HINT if self.act_hint == "omit" else None
+        return tool_rewriter(strict=strict, act_hint=hint)
 
 
 def select_tasks(spec: str, tasks: Sequence[Task] = TASKS) -> list[Task]:
@@ -163,6 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="prompt_cache_key: the provider default (shared) or one per run",
     )
     parser.add_argument(
+        "--tool-strict",
+        choices=("unset", "false", "true"),
+        default="unset",
+        help="send this `strict` on every function tool (unset: as the provider does)",
+    )
+    parser.add_argument(
+        "--act-hint",
+        choices=("default", "omit"),
+        default="default",
+        help="browser_act actions description: the product's, or 'give only used fields'",
+    )
+    parser.add_argument(
         "--expect-root",
         type=Path,
         default=None,
@@ -193,6 +216,8 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         websocket=args.websocket,
         expect_root=args.expect_root,
         cache_key=args.cache_key,
+        tool_strict=args.tool_strict,
+        act_hint=args.act_hint,
     )
 
 
@@ -258,6 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         model=settings.model,
     )
     print(f"{len(todo)} runs to do ({settings.model}, effort {settings.effort})")
+    install(settings.tool_rewriter())
     started = time.monotonic()
     asyncio.run(
         run_all(

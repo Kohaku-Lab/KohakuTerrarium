@@ -7,6 +7,7 @@ section left out, each tool left out. The differences are the tokens each
 part costs on every call. Optionally measures a sample text's tokens.
 
     python -m scripts.browser_bench.harness.probe --out FILE [--sample TEXT_FILE]
+        [--act-schema PARAMETERS_JSON]
 """
 
 import argparse
@@ -15,6 +16,7 @@ import json
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -81,6 +83,19 @@ def components(usage: Mapping[str, Mapping[str, int]]) -> dict[str, int]:
     return out
 
 
+def with_parameters(tools: list[Any], name: str, parameters: dict) -> list[Any]:
+    """``tools`` with tool ``name``'s parameters replaced, as copies."""
+    return [replace(t, parameters=parameters) if t.name == name else t for t in tools]
+
+
+def variant_cost(usage: Mapping[str, Mapping[str, int]]) -> int:
+    """Per-call tokens of the ``browser_act`` variant, by difference."""
+    return (
+        usage["act_variant"]["prompt_tokens"]
+        - usage["without_tool:browser_act"]["prompt_tokens"]
+    )
+
+
 async def measure(provider: Any, system: str, tools: list[Any], user: str) -> dict:
     messages = [
         {"role": "system", "content": system},
@@ -91,7 +106,9 @@ async def measure(provider: Any, system: str, tools: list[Any], user: str) -> di
     return dict(provider._last_usage)
 
 
-async def run_probe(model: str, sample: str | None) -> dict[str, Any]:
+async def run_probe(
+    model: str, sample: str | None, act_schema: str | None = None
+) -> dict[str, Any]:
     system, tools = await fixed_parts()
     provider = coerce_llm_provider(model_profile(model, "low", websocket=False), None)
     usage = {
@@ -117,6 +134,15 @@ async def run_probe(model: str, sample: str | None) -> dict[str, Any]:
         "usage": usage,
         "components": components(usage),
     }
+    if act_schema:
+        parameters = json.loads(Path(act_schema).read_text(encoding="utf-8"))
+        variant = with_parameters(tools, "browser_act", parameters)
+        usage["act_variant"] = await measure(provider, system, variant, QUESTION)
+        result["act_variant"] = {
+            "schema": act_schema,
+            "tokens": variant_cost(usage),
+            "current_tokens": result["components"].get("tools.browser_act"),
+        }
     if sample:
         text = Path(sample).read_text(encoding="utf-8")
         measured = await measure(provider, MINIMAL, [], QUESTION + "\n\n" + text)
@@ -134,8 +160,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--model", default="gpt-6.2-sol")
     parser.add_argument("--sample", default=None)
+    parser.add_argument(
+        "--act-schema",
+        default=None,
+        help="a JSON file of browser_act parameters whose per-call cost to measure",
+    )
     args = parser.parse_args(argv)
-    result = asyncio.run(run_probe(args.model, args.sample))
+    result = asyncio.run(run_probe(args.model, args.sample, args.act_schema))
     args.out.write_text(json.dumps(result, indent=1), encoding="utf-8")
     print(json.dumps(result["components"], indent=1))
     return 0

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.llm.base import ToolSchema
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PACKAGE_DIR = REPO_ROOT / "scripts" / "browser_bench"
 
@@ -45,6 +47,7 @@ accounting = importlib.import_module("browser_bench.harness.accounting")
 tokens_mod = importlib.import_module("browser_bench.harness.tokens")
 probe_mod = importlib.import_module("browser_bench.harness.probe")
 verbosity = importlib.import_module("browser_bench.harness.verbosity")
+wire = importlib.import_module("browser_bench.harness.wire")
 
 parse_verdict = verdict_mod.parse_verdict
 Verdict = verdict_mod.Verdict
@@ -1447,6 +1450,24 @@ class TestVerbosity:
             "- paragraph: long text\n"
         )
 
+    def test_whole_page_instead_of_delta_supersedes(self):
+        snap = _page("t1", "- paragraph: old text")
+        whole = _page(
+            "t1",
+            "Page changes: 1 added, 0 changed, 9 lines removed. Page now:",
+            "- paragraph: new",
+        )
+        msgs = [
+            _call("c1", "browser_snapshot"),
+            _result("c1", snap),
+            _call("c2", "browser_act", actions=[{"kind": "click", "ref": "e1"}]),
+            _result("c2", whole),
+            {"role": "assistant", "content": "thinking"},
+        ]
+        assert verbosity.page_costs(msgs)["superseded_body"] == len(
+            "- paragraph: old text\n"
+        )
+
     def test_structural_lines_and_wrapper(self):
         msgs = [
             _call("c1", "browser_navigate", url="http://x/"),
@@ -1539,6 +1560,24 @@ class TestProbe:
         ]
         assert "".join(text for _, text in parts) == SYSTEM
 
+    def test_with_parameters_swaps_one_tool(self):
+        tools = [
+            ToolSchema(name="a", description="da", parameters={"x": 1}),
+            ToolSchema(name="browser_act", description="d", parameters={"old": 1}),
+        ]
+        out = probe_mod.with_parameters(tools, "browser_act", {"new": 2})
+        assert [t.name for t in out] == ["a", "browser_act"]
+        assert out[1].parameters == {"new": 2} and out[1].description == "d"
+        assert tools[1].parameters == {"old": 1}, "the input is not changed"
+        assert out[0] is tools[0]
+
+    def test_variant_cost_by_difference(self):
+        usage = {
+            "without_tool:browser_act": {"prompt_tokens": 700},
+            "act_variant": {"prompt_tokens": 1100},
+        }
+        assert probe_mod.variant_cost(usage) == 400
+
 
 class TestCliTransport:
     def test_cache_key_mode(self):
@@ -1562,3 +1601,108 @@ class TestCliTransport:
         roots = {"x": str(inside), "y": str(tmp_path.parent / "elsewhere")}
         assert cli.outside(roots, tmp_path) == ["y"]
         assert cli.code_roots().keys() == {"kohakuterrarium", "browser_bench"}
+
+
+ACT_TOOL = {
+    "type": "function",
+    "name": "browser_act",
+    "description": "d",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "actions": {
+                "type": "array",
+                "description": 'Run in order. Unused fields: "", 0, [], false',
+                "items": {"type": "object", "properties": {"kind": {"type": "string"}}},
+            }
+        },
+    },
+}
+
+
+class TestWire:
+    def test_default_rewrite_is_identity(self):
+        rewrite = wire.tool_rewriter()
+        tools = [ACT_TOOL, {"type": "web_search"}]
+        assert rewrite(tools) == tools
+
+    def test_strict_false_only_on_function_tools(self):
+        out = wire.tool_rewriter(strict=False)([ACT_TOOL, {"type": "web_search"}])
+        assert out[0]["strict"] is False
+        assert "strict" not in out[1]
+        assert "strict" not in ACT_TOOL, "the input list is not mutated"
+
+    def test_act_hint_replaces_only_the_actions_description(self):
+        out = wire.tool_rewriter(act_hint="Give only the fields an action uses.")(
+            [ACT_TOOL]
+        )
+        actions = out[0]["parameters"]["properties"]["actions"]
+        assert actions["description"] == "Give only the fields an action uses."
+        assert (
+            actions["items"] == ACT_TOOL["parameters"]["properties"]["actions"]["items"]
+        )
+        assert (
+            ACT_TOOL["parameters"]["properties"]["actions"]["description"]
+            != actions["description"]
+        )
+
+    def test_install_rewrites_http_and_websocket_paths(self):
+        seen = {}
+
+        class FakeModule:
+            @staticmethod
+            def prepare_request_tools(payload):
+                return (dict(payload), [])
+
+            @staticmethod
+            def stream_codex_ws_turn(provider, session, base_event, *rest):
+                seen["ws"] = base_event
+                return "stream"
+
+        undo = wire.install(wire.tool_rewriter(strict=False), FakeModule)
+        payload = FakeModule.prepare_request_tools({"tools": [ACT_TOOL]})[0]
+        assert payload["tools"][0]["strict"] is False
+        assert FakeModule.prepare_request_tools({"x": 1})[0] == {"x": 1}
+        assert FakeModule.stream_codex_ws_turn(
+            None, None, {"tools": [ACT_TOOL]}, 1
+        ) == ("stream")
+        assert seen["ws"]["tools"][0]["strict"] is False
+        undo()
+        assert (
+            "strict"
+            not in FakeModule.prepare_request_tools({"tools": [ACT_TOOL]})[0]["tools"][
+                0
+            ]
+        )
+
+    def test_cli_flags(self):
+        s = cli.parse_args(["--out", "x"])
+        assert s.tool_strict == "unset" and s.act_hint == "default"
+        s = cli.parse_args(
+            ["--out", "x", "--tool-strict", "false", "--act-hint", "omit"]
+        )
+        assert s.meta()["tool_strict"] == "false" and s.meta()["act_hint"] == "omit"
+        out = s.tool_rewriter()([ACT_TOOL])[0]
+        assert out["strict"] is False
+        assert (
+            out["parameters"]["properties"]["actions"]["description"] == wire.OMIT_HINT
+        )
+        default = cli.parse_args(["--out", "x"]).tool_rewriter()
+        assert default([ACT_TOOL]) == [ACT_TOOL]
+
+    def test_padding_counts_default_valued_fields(self):
+        msgs = [
+            _call(
+                "c1",
+                "browser_act",
+                actions=[{"kind": "click", "ref": "e1", "text": "", "x": 0}],
+            ),
+            _call("c2", "browser_navigate", url="http://x/"),
+        ]
+        p = wire.argument_padding(msgs)
+        assert p["browser_act"]["calls"] == 1
+        assert p["browser_act"]["default_chars"] > 0
+        assert p["browser_navigate"]["default_chars"] == 0
+        assert p["browser_act"]["chars"] == len(
+            msgs[0]["tool_calls"][0]["function"]["arguments"]
+        )
