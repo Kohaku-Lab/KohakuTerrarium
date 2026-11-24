@@ -19,13 +19,15 @@ class FixtureSite:
     """A threaded HTTP server on 127.0.0.1 serving ``routes`` then files from ``SITE_DIR``.
 
     A route is ``(status, headers, body)`` or a callable that writes the
-    response itself. ``hits`` counts requests per path.
+    response itself. ``hits`` counts requests per path; ``bodies`` keeps the
+    request bodies each path received.
     """
 
     def __init__(self, root: Path = SITE_DIR) -> None:
         self.root = root
         self.routes: dict[str, Route] = {}
         self.hits: dict[str, int] = {}
+        self.bodies: dict[str, list[bytes]] = {}
         site = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -68,7 +70,7 @@ class FixtureSite:
         self.hits[path] = self.hits.get(path, 0) + 1
         length = int(handler.headers.get("Content-Length") or 0)
         if length:
-            handler.rfile.read(length)
+            self.bodies.setdefault(path, []).append(handler.rfile.read(length))
         route = self.routes.get(path)
         if callable(route):
             route(handler)

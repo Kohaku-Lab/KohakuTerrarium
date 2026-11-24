@@ -50,14 +50,36 @@ What keeps tests independent across workers:
   `tests/helpers/kt_biome.real_home()` (captured before redirection).
 - Tests that share one real resource carry `@pytest.mark.xdist_group(...)`
   and run in order on one worker: `ports` (probe-a-free-port-then-reuse),
-  `mcp-subprocess` (real `mcp-serve` children), and the whole e2e tier
-  (`e2e`, added automatically). Everything else is distributed per test.
+  `mcp-subprocess` (real `mcp-serve` children), `browser` (real Chromium:
+  `tests/integration/test_browser.py` and `tests/unit/browser/test_driver.py`),
+  and the whole e2e tier (`e2e`, added automatically). Everything else is
+  distributed per test.
 - "The event loop was not blocked" is witnessed by
   `tests/helpers/loop_witness.py` (the loop runs a callback while the
   operation is in flight), never by wall-clock gaps. Ordering and
   overlap are asserted with counters or events, not elapsed seconds.
   A new test that bounds elapsed time is a check on the machine, not the
   design.
+
+### Browser-backed tests
+
+`tests/integration/test_browser.py`, `tests/unit/browser/test_driver.py` and
+the page-probe tests in `tests/unit/browser/test_hidden.py` run real Chromium
+through Playwright against a loopback fixture site
+(`tests/helpers/browser_site.py`, pages in `tests/fixtures/browser/site/`).
+They need the `browser-use` extra and Playwright's Chromium:
+
+```bash
+uv pip install -e ".[dev,browser-use]"
+playwright install chromium
+```
+
+Without Playwright or Chromium they skip; any other launch failure fails.
+They read Playwright's browser cache from the operator's real home
+(`KT_TEST_REAL_HOME`; `%LOCALAPPDATA%` on Windows) unless
+`PLAYWRIGHT_BROWSERS_PATH` is set. CI does not install Playwright, so there
+they skip. Every other browser test drives the session through the scripted
+driver in `tests/helpers/browser_driver.py` and needs no browser.
 
 **CI policy (`.github/workflows/ci.yml`).** Unit and integration tiers
 run on the full OS × Python matrix (3.12+ on Linux / macOS / Windows).
@@ -184,6 +206,7 @@ Each mirrors how the **real consumer** drives that folder.
 | `test_compose.py` | `compose/` | build real `>>` / `&` / `\|` / `*` pipelines over engine-backed runnables and run them | user code (compose is a public API) |
 | `test_serving.py` | `serving/` | `KohakuManager` + `AgentSession` → create session → stream chat → lifecycle | `api/`, `compose/` |
 | `test_packages.py` | `packages/` | install a local package → list → info → resolve a `pkg:` ref → uninstall | `cli/packages.py`, `terrarium/config.py` |
+| `test_browser.py` | `browser/` | a real `Agent` from an on-disk config with the `browser` plugin and a native-tool-call `ScriptedLLM`, against the loopback fixture site through real Chromium and the real proxy → navigate → snapshot → act batch + delta → dialog → new tab → upload → download → screenshot → eval → blocked egress → stale ref → interrupt → runtime disable / enable → stop, no Chromium left | `builtins/plugins/browser/plugin.py` + the `browser_*` tools, toggled via `terrarium/creature/ops.py` |
 | `test_llm.py` | `llm/` | define profiles/presets → save/load the store → resolve a provider config → build tool schemas + messages → api-key round-trip (live providers excluded) | `bootstrap/llm.py` |
 
 `utils/` has no standalone cross-folder workflow; its helpers are
@@ -493,4 +516,5 @@ testing otherwise.
 | `laboratory/_internal/transport/ws.py` | `websockets` library: `InProcTransport` is the test transport |
 | `builtins/inputs/cli*.py`, `builtins/inputs/tui*.py`, `builtins/outputs/*` (terminal/audio) | CLI / TUI / audio UI |
 | `serving/web.py` (the pywebview / uvicorn boot path) | Desktop bundling, manual test only |
+| `browser/driver.py` (without Chromium) | The only module that imports Playwright; covered by the browser-backed tests, which skip where Playwright's Chromium is missing (CI included) |
 | `api/main.py`, `__briefcase__.py` | Server / bundler entry points: module-level side effects only |

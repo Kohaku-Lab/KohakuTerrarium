@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Help fixture</title>
+</head>
+<body>
+<h1>Help centre</h1>
+<p role="status" id="status">Was this page helpful?</p>
+<button type="button" onclick="fetch('/api/helpful', {method: 'POST', body: 'yes'}).then(() => { document.getElementById('status').textContent = 'Thanks for the feedback'; })">Mark helpful</button>
+</body>
+</html>
