@@ -79,6 +79,13 @@ The operation:
    event rejects publication instead of being reclassified as an empty Agent.
    Normal Search still uses its existing tolerant fallback and withholds
    unverifiable Anchors.
+   Before opening the staged copy, the existing Session
+   `require_writable_format()` gate validates the **original archive family**
+   under the existing writer lock (and before native exclusive occupancy
+   admission, because the format reader itself uses a legacy lease).
+   Rebuild refuses to replace a previously nonempty Agent FTS/vector index
+   when that Agent has no physical source event keys; it does not assert
+   completeness or attempt repair of the Session event log.
 3. Takes a same-directory stage copy of the database, rebuilding **only the
    derived Memory indexes** in that copy for all discovered Session agents.
    It clears old index cursors, manifest, FTS and known vector tables; it

@@ -93,7 +93,11 @@ kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentenc
 A rebuild recreates selected-lineage FTS and Source Anchors from the original
 event log. Existing all-branch indexes may become narrower: no recorded
 events are deleted, but some previously indexed blocks may no longer be
-searchable in the current projection.
+searchable in the current projection. Rebuild refuses to clear a previously
+indexed Agent's FTS/vector entries if no physical source events remain, and
+uses the ordinary Session format gate to reject future archive-family versions.
+This guards the derived Search index; it does not diagnose or repair missing
+Session history.
 
 For safety, indexes are rebuilt in a **separate database copy** and published
 only after validation. The original database is saved as a backup; externally stored Session

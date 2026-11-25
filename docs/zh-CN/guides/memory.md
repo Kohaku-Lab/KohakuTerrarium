@@ -90,7 +90,10 @@ kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentenc
 
 新索引将从原始事件重建当前选中分支的 FTS 和 Source Anchor。对于原先
 使用全分支索引的 Session，新的检索覆盖范围可能缩小，但**原始事件
-不会被删除**。
+不会被删除**。若已索引的 Agent 完全没有对应的物理事件，命令会拒绝
+清空其 FTS/Vector 索引；也会复用 Session 原有的格式门禁，拒绝含未来
+版本成员的文件族。这里仅保护派生的 Search 索引，**不负责检查或修复
+Session 事件历史的完整性**。
 
 重建先在**独立数据库副本**上完成，验证通过后才替换 Session 文件，
 并自动保留原数据库备份；关联的 artifacts 不会被改动。如果重建失败，

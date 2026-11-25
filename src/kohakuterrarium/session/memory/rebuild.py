@@ -34,6 +34,7 @@ from kohakuterrarium.session.store.lifecycle.lock import (
     acquire_writer_lock,
     release_writer_lock,
 )
+from kohakuterrarium.session.store.lifecycle.version import require_writable_format
 from kohakuterrarium.session.vault.io import key_text, scan_keys
 
 _VECTOR_TABLE = re.compile(r"memory_vec_(\d+)d\Z")
@@ -225,19 +226,42 @@ def _source_agents(store, memory) -> tuple[str, ...]:
     meta = store.load_meta()
     names = {x for x in meta.get("agents", ()) if isinstance(x, str) and x}
     # Search may index attached agents that are absent from the Session header.
+    physical_agents = set()
     for key in scan_keys(store.events):
         text = key_text(key)
         prefix, sep, suffix = text.rpartition(":e")
         if sep and prefix and suffix.isascii() and suffix.isdecimal():
             names.add(prefix)
+            physical_agents.add(prefix)
     for row_id in memory._fts.keys(limit=memory._fts.count()):
         _, row_meta = memory._fts.get_by_id(row_id)
         if isinstance(row_meta, dict) and row_meta.get("agent"):
-            if row_meta["agent"] not in names:
+            if row_meta["agent"] not in physical_agents:
+                # Search index replacement must not erase a previously indexed
+                # namespace solely because no source events remain. This does
+                # not assert that the original Session event log is complete.
                 raise RebuildRefused(
-                    f"Indexed Agent {row_meta['agent']!r} has no identifiable "
-                    "source namespace; manual source repair is required."
+                    f"Indexed Agent {row_meta['agent']!r} has no physical source "
+                    "events; refusing to replace its Search index."
                 )
+    # Semantic-only remnants still represent indexed Memory data, even if
+    # the corresponding FTS row was removed by an older partial operation.
+    if memory._vec is not None:
+        dims = memory._state.get("vec_dimensions")
+        reader = memory._resources.open(
+            TextVault, memory._path, table=f"memory_vec_{dims}d"
+        )
+        try:
+            for row_id in reader.keys(limit=reader.count()):
+                _, row_meta = memory._vec.get_by_id(row_id)
+                if isinstance(row_meta, dict) and row_meta.get("agent"):
+                    if row_meta["agent"] not in physical_agents:
+                        raise RebuildRefused(
+                            f"Indexed Agent {row_meta['agent']!r} has no physical "
+                            "source events; refusing to replace its Search index."
+                        )
+        finally:
+            memory._resources.drop(reader)
     return tuple(sorted(names))
 
 
@@ -373,21 +397,27 @@ def rebuild_session_memory(
         item is not None for item in (provider, model, dimensions, embedder)
     ):
         raise ValueError("Embedding settings require --vectors rebuild")
-    # Preserve the direct "currently open" diagnostic for a live Store.
-    # Admission immediately afterwards closes any race with new native opens.
     _reject_busy_source(source, allow_idle_sidecars=True)
-    lease = _reserve_source_occupancy(source)
+    lock = acquire_writer_lock(str(source))
     try:
-        return _rebuild_reserved(
-            source,
-            vectors=vectors,
-            provider=provider,
-            model=model,
-            dimensions=dimensions,
-            embedder=embedder,
-        )
+        # Reuse SessionStore's existing archive-family admission, including
+        # future-version siblings. It reads native metadata under a *legacy*
+        # occupancy lease, so it must run BEFORE our exclusive NEW lease.
+        require_writable_format(source)
+        lease = _reserve_source_occupancy(source)
+        try:
+            return _rebuild_reserved(
+                source,
+                vectors=vectors,
+                provider=provider,
+                model=model,
+                dimensions=dimensions,
+                embedder=embedder,
+            )
+        finally:
+            lease.finish(source_released=True)
     finally:
-        lease.finish(source_released=True)
+        release_writer_lock(lock)
 
 
 def _rebuild_reserved(
@@ -401,7 +431,6 @@ def _rebuild_reserved(
 ) -> RebuildResult:
     """Rebuild with exclusive process-local native occupancy held throughout."""
     _reject_busy_source(source, allow_idle_sidecars=True)
-    lock = acquire_writer_lock(str(source))
     stage = source.with_name(f"{source.stem}.memory-rebuild-{uuid4().hex}.kohakutr")
     try:
         _reject_busy_source(source, allow_idle_sidecars=True)
@@ -484,9 +513,6 @@ def _rebuild_reserved(
         os.replace(stage, source)
         return RebuildResult(names, events, fts, vec, policy, backup)
     finally:
-        try:
-            stage.unlink(missing_ok=True)
-            for suffix in ("-wal", "-shm", ".lock"):
-                Path(str(stage) + suffix).unlink(missing_ok=True)
-        finally:
-            release_writer_lock(lock)
+        stage.unlink(missing_ok=True)
+        for suffix in ("-wal", "-shm", ".lock"):
+            Path(str(stage) + suffix).unlink(missing_ok=True)

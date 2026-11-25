@@ -469,3 +469,89 @@ def test_strict_source_attestation_does_not_change_tolerant_search(
             source_events.sourced_events(store, "alice", strict=True)
     finally:
         store.close(update_status=False)
+
+
+def test_rebuild_refuses_to_erase_indexed_agent_with_no_physical_events(tmp_path):
+    """Index loss guard, not a general Session event-history integrity check."""
+    path = tmp_path / "missing-indexed-events.kohakutr"
+    _seed(path)
+    store = SessionStore(path)
+    try:
+        # A real index exists for both agents, but one indexed namespace is gone.
+        del store.events["bob:e000000"]
+    finally:
+        store.close(update_status=False)
+
+    before = _hash(path)
+    with pytest.raises(RebuildRefused, match="indexed|source|events"):
+        rebuild_session_memory(path)
+    assert _hash(path) == before
+    index = SessionMemory(str(path))
+    try:
+        assert index._fts.count() == 2
+    finally:
+        index.close()
+    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+
+
+def test_rebuild_allows_genuinely_empty_unindexed_agent(tmp_path):
+    path = tmp_path / "empty-unindexed-agent.kohakutr"
+    store = SessionStore(path)
+    try:
+        store.init_meta("s", "agent", "", str(tmp_path), ["alice", "bob"])
+        store.append_event("alice", "user_input", {"content": "ONLY_ALICE_INDEXED"})
+    finally:
+        store.close(update_status=False)
+
+    result = rebuild_session_memory(path)
+    assert result.fts_rows == 1 and result.events == 1
+    assert result.agents == ("alice", "bob")
+
+
+def test_rebuild_reuses_source_writable_format_gate(tmp_path):
+    """Versioned siblings constrain the original archive, not the staged name."""
+    from kohakuterrarium.session.store.lifecycle.version import SessionFormatError
+
+    path = tmp_path / "session.kohakutr"
+    _seed(path)
+    future = Path(f"{path}.v3")
+    future.write_bytes(b"FUTURE_FORMAT_SENTINEL")
+    before = _hash(path)
+    try:
+        with pytest.raises(SessionFormatError, match="format v3"):
+            rebuild_session_memory(path)
+        assert _hash(path) == before
+        assert future.read_bytes() == b"FUTURE_FORMAT_SENTINEL"
+        assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+        assert not list(tmp_path.glob("*memory-rebuild-*.kohakutr"))
+    finally:
+        future.unlink(missing_ok=True)
+
+    # Rejection must release the writer lock and allow an ordinary retry
+    # after the incompatible family member is no longer present.
+    result = rebuild_session_memory(path)
+    assert result.fts_rows == 2
+
+
+def test_rebuild_refuses_vector_only_index_when_agent_events_are_gone(tmp_path):
+    """An old semantic row must not be deleted because its FTS sibling is gone."""
+    path = tmp_path / "vector-only-missing-events.kohakutr"
+    _seed(path, vectors=True)
+    store = SessionStore(path)
+    memory = SessionMemory(str(path))
+    try:
+        for row in memory._fts.keys(limit=memory._fts.count()):
+            _, meta = memory._fts.get_by_id(row)
+            if meta["agent"] == "bob":
+                memory._fts.delete(row)
+        assert memory._vec is not None and memory._vec.count() == 2
+        del store.events["bob:e000000"]
+    finally:
+        memory.close()
+        store.close(update_status=False)
+
+    original = _hash(path)
+    with pytest.raises(RebuildRefused, match="Indexed Agent .*bob.*no physical source"):
+        rebuild_session_memory(path, vectors="drop")
+    assert _hash(path) == original
+    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
