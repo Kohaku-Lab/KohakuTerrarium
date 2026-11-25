@@ -8,11 +8,11 @@ from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from kohakuterrarium.browser.dialogs import DIALOG_KINDS
 from kohakuterrarium.browser.snapshot import Node, is_interactive, line_of, normalize
 
 HEADER_MAX = 160
 HEADER_URL = 64
-DIALOG_KINDS = frozenset({"alert", "confirm", "prompt", "beforeunload"})
 LINE_URL = 120
 LINE_TEXT = 80
 MAX_LISTED = 5

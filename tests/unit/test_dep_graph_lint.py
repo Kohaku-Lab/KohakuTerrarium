@@ -64,6 +64,71 @@ def test_dep_graph_passes_all_gates(monkeypatch):
     assert browser_tier == [], browser_tier
 
 
+def test_the_browser_runtime_imports_only_errors_and_utils(monkeypatch):
+    """No ``browser/`` module imports the rest of the framework, at any depth.
+
+    Imports inside functions and under ``TYPE_CHECKING`` count too.
+    """
+    monkeypatch.chdir(REPO_ROOT)
+    dep_graph = _load_dep_graph()
+    facts, _, all_modules = dep_graph.collect_facts()
+    assert dep_graph.check_allowed_tiers(facts, all_modules) == []
+    assert dep_graph.ALLOWED_TIER_TARGETS["browser"] == {"browser", "errors", "utils"}
+
+
+def test_the_browser_boundary_check_sees_every_kind_of_import():
+    dep_graph = _load_dep_graph()
+    modules = {
+        "kohakuterrarium",
+        "kohakuterrarium.browser.x",
+        "kohakuterrarium.core.agent",
+        "kohakuterrarium.builtins.plugins.browser.plugin",
+        "kohakuterrarium.errors",
+        "kohakuterrarium.utils.logging",
+        "kohakuterrarium.browser.y",
+    }
+
+    def fact(target, **kind):
+        return {
+            "from_mod": "kohakuterrarium.browser.x",
+            "target": target,
+            "type_checking": kind.get("type_checking", False),
+            "in_function": kind.get("in_function"),
+        }
+
+    allowed = [
+        fact("kohakuterrarium.errors"),
+        fact("kohakuterrarium.utils.logging", in_function="f"),
+        fact("kohakuterrarium.browser.y", type_checking=True),
+        fact("playwright.async_api", in_function="load"),
+    ]
+    assert dep_graph.check_allowed_tiers(allowed, modules) == []
+    refused = [
+        fact("kohakuterrarium.core.agent"),
+        fact("kohakuterrarium.core.agent", type_checking=True),
+        fact("kohakuterrarium.builtins.plugins.browser.plugin", in_function="g"),
+        fact("kohakuterrarium"),
+    ]
+    found = dep_graph.check_allowed_tiers(refused, modules)
+    assert sorted(found) == sorted(
+        {
+            (
+                "kohakuterrarium.browser.x",
+                "kohakuterrarium.core.agent",
+                "browser",
+                "core",
+            ),
+            (
+                "kohakuterrarium.browser.x",
+                "kohakuterrarium.builtins.plugins.browser.plugin",
+                "browser",
+                "builtins",
+            ),
+            ("kohakuterrarium.browser.x", "kohakuterrarium", "browser", ""),
+        }
+    )
+
+
 def test_allowlist_entries_are_line_free_and_live(monkeypatch):
     """Every allowlist entry matches by file+function+target and still
     covers a real in-function import.

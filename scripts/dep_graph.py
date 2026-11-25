@@ -411,6 +411,14 @@ FORBIDDEN_TIER_TARGETS: dict[str, set[str]] = {
 }
 
 
+# Mapping from tier root → the only tier roots it MAY import (itself included).
+# Checked on every import: module level, inside functions and under
+# ``TYPE_CHECKING``; importing the package root counts as tier "".
+ALLOWED_TIER_TARGETS: dict[str, set[str]] = {
+    "browser": {"browser", "errors", "utils"},
+}
+
+
 def _tier_for(module: str) -> str | None:
     """Return the tier root for ``module`` or ``None`` if unmanaged."""
     if not module.startswith(f"{PKG}."):
@@ -437,6 +445,25 @@ def check_tier_violations(
                 continue
             if dst_tier in forbidden:
                 violations.append((src, dst, src_tier, dst_tier))
+    return violations
+
+
+def check_allowed_tiers(
+    facts: list[dict], all_modules: set[str]
+) -> list[tuple[str, str, str, str]]:
+    """Return (src, dst, src_tier, dst_tier) for each import outside its tier's allowlist."""
+    graph, _ = build_graph(
+        facts, all_modules, include_in_function=True, skip_type_checking=False
+    )
+    violations: list[tuple[str, str, str, str]] = []
+    for src, targets in graph.items():
+        allowed = ALLOWED_TIER_TARGETS.get(_tier_for(src) or "")
+        if allowed is None:
+            continue
+        for dst in targets:
+            dst_tier = _tier_for(dst) or ""
+            if dst_tier not in allowed:
+                violations.append((src, dst, _tier_for(src), dst_tier))
     return violations
 
 
@@ -797,7 +824,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.lint_imports or args.all or args.fail:
         violations, allowed = lint_imports(facts, required, optional)
 
-    tier_violations = check_tier_violations(runtime)
+    tier_violations = check_tier_violations(runtime) + check_allowed_tiers(
+        facts, all_modules
+    )
 
     show_stats = (
         args.stats

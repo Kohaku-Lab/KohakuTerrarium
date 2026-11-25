@@ -11,12 +11,12 @@ from dataclasses import dataclass, field
 
 from kohakuterrarium.browser.errors import ActionFailedError, DialogPendingError
 from kohakuterrarium.browser.protocol import DialogDriver
-from kohakuterrarium.browser.results import DIALOG_KINDS
 from kohakuterrarium.browser.tasks import discard
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+DIALOG_KINDS = frozenset({"alert", "confirm", "prompt", "beforeunload"})
 AUTO_ACCEPT = frozenset({"alert", "beforeunload"})
 ANSWER_TIMEOUT_S = 5.0
 
@@ -25,7 +25,7 @@ ANSWER_TIMEOUT_S = 5.0
 class DialogRecord:
     """One dialog the page opened and what became of it.
 
-    ``kind`` is one of ``results.DIALOG_KINDS`` or ``dialog``; ``message``
+    ``kind`` is one of ``DIALOG_KINDS`` or ``dialog``; ``message``
     is page text and is shown only inside the untrusted wrapper.
     """
 
