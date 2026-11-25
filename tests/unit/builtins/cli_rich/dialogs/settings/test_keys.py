@@ -37,3 +37,23 @@ class TestSettingsMcpHeaders:
 
         assert row["headers"] == server["headers"]
         assert form.context["preserved_headers"] == server["headers"]
+
+
+class TestSettingsMcpTransport:
+    def test_legacy_http_entry_shows_as_sse_and_streamable_is_offered(
+        self, monkeypatch
+    ):
+        server = {"name": "old", "transport": "http", "url": "http://h/sse"}
+        monkeypatch.setattr(settings, "load_servers", lambda: [server])
+
+        overlay = SettingsOverlay()
+        row = next(r for r in overlay._load_mcp() if r["name"] == "old")
+        form = overlay._build_mcp_form(row)
+        transport = next(f for f in form.fields if f.key == "transport")
+
+        assert transport.options == ["stdio", "streamable_http", "sse"]
+        assert transport.value == "sse"
+        new_form = overlay._build_mcp_form(None)
+        assert next(f for f in new_form.fields if f.key == "transport").value == (
+            "stdio"
+        )

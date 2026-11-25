@@ -61,7 +61,7 @@ mcp_servers:
 
 ```bash
 kt config mcp list
-kt config mcp add              # 交互式：transport、command、args、env、url
+kt config mcp add              # 交互式：transport（stdio、streamable_http、sse）、command、args、env、url、headers
 kt config mcp edit sqlite
 kt config mcp delete sqlite
 ```
@@ -89,10 +89,15 @@ kt config mcp delete sqlite
 ## 传输方式
 
 - **stdio**：启动一个子程序（`command` + `args` + `env`）。最适合本地服务器，延迟低，每个 agent 都有独立的程序生命周期。
-- **http** / **sse**：对 `url` 开一个传统 SSE 连线。适合明确暴露 `/sse` 之类端点的旧式服务器。
-- **streamable_http**：对 `url` 开一个现代 streamable HTTP 连线。许多新的 FastMCP 服务器（例如 `FastMCP.streamable_http_app()`）默认就是这个模式。
+- **streamable_http**：对 `url`（通常以 `/mcp` 结尾）开一个现代 streamable HTTP 连线。当前的远程服务器都使用这种方式，包括 FastMCP 的 `streamable_http_app()`。
+- **sse**：对 `url`（通常以 `/sse` 结尾）开一个传统 SSE 连线。`http` 是这个 transport 的旧名称，仍然可用。
 
-本地 MCP 服务器（sqlite、filesystem、git）通常选 stdio；大多数现代托管服务器优先选 `streamable_http`；只有服务器明确提供旧式 SSE 端点时再选 `http` / `sse`。
+所有编辑器提供同样的三个选项：网页界面（Settings > MCP 的 Add 表单和 Edit 对话框：
+“stdio（子进程）”“Streamable HTTP（推荐用于远程）”“SSE（旧版）”）、`kt config mcp add`，
+以及 rich CLI 和 ktui 的设置界面。已有的 `http` 条目会显示为 SSE。HTTP API 接受 `stdio`、
+`streamable_http`、`sse` 和 `http`，其他值返回 `422`。
+
+本地 MCP 服务器（sqlite、filesystem、git）通常选 stdio；大多数现代托管服务器优先选 `streamable_http`；只有服务器只提供旧式 SSE 端点时再选 `sse`。
 
 ## MCP 工具如何进到 LLM
 

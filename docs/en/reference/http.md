@@ -762,12 +762,20 @@ enablement, `401` missing/invalid admin token, `404` unknown component,
 
 #### `GET /api/settings/mcp`
 
-`{"servers": [{"name", "transport", "command", "args", "env", "url"}]}`.
+`{"servers": [...]}`: each entry as stored, with `${VAR}` markers left unexpanded.
 
 #### `POST /api/settings/mcp`
 
 - Body: `MCPServerRequest`.
 - Response: `{"status": "saved", "name"}`.
+
+#### `PATCH /api/settings/mcp/{name}`
+
+Body `MCPServerPatch` (any subset of the `MCPServerRequest` fields except `name`). Response: `{"status": "saved", "name", "server"}`.
+
+#### `POST /api/settings/mcp/{name}/test`
+
+Connect, list tools, disconnect. Response `MCPTestResult`: `{"ok", "error", "tool_count", "elapsed_ms"}`; a failure is `ok: false` with the readable cause in `error` (for example `MCP server sandbox: HTTP 401 Unauthorized from http://host/mcp; check the headers/token`).
 
 #### `DELETE /api/settings/mcp/{name}`
 
@@ -1172,11 +1180,13 @@ At least one of `message` or `content` must be provided.
 | Field | Type | Required | Default |
 |---|---|---|---|
 | `name` | str | yes | |
-| `transport` | str | no | `"stdio"` |
+| `transport` | `"stdio"` \| `"streamable_http"` \| `"sse"` \| `"http"` (old name of `sse`); anything else is `422` | no | `"stdio"` |
 | `command` | str | no | `""` |
 | `args` | list[str] | no | `[]` |
 | `env` | dict[str, str] | no | `{}` |
 | `url` | str | no | `""` |
+| `headers` | dict[str, str] | no | `{}` |
+| `connect_timeout` | float \| None | no | `None` |
 
 ---
 

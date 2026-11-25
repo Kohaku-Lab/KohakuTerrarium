@@ -14,6 +14,7 @@ vi.mock("@/utils/api", () => {
     getBackends: vi.fn(),
     getNativeTools: vi.fn(),
     listMCP: vi.fn(),
+    addMCP: vi.fn(),
     setDefaultModel: vi.fn(),
   }
   const configAPI = { getModels: vi.fn() }
@@ -291,5 +292,49 @@ describe("SettingsPage model presets", () => {
       unregisterSettingsSection("ext:demo/s")
       unregisterSettingsSection("ext:other/s")
     }
+  })
+})
+
+describe("SettingsPage MCP add form", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    settingsAPI.listMCP.mockResolvedValue({ servers: [] })
+    settingsAPI.addMCP.mockResolvedValue({ status: "saved" })
+  })
+
+  it("adds a streamable HTTP server with its URL", async () => {
+    vi.spyOn(ElMessage, "success").mockImplementation(() => {})
+    const wrapper = mountSettingsPage("mcp")
+    await flushPromises()
+    wrapper.vm.mcpForm.name = "sandbox"
+    wrapper.vm.mcpForm.transport = "streamable_http"
+    wrapper.vm.mcpForm.url = "http://127.0.0.1:8765/mcp"
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find("[data-test=mcp-add-url]").exists()).toBe(true)
+    expect(wrapper.find("[data-test=mcp-add-transport-hint]").text()).toBe(
+      "settings.mcp.transportStreamableHttpHint",
+    )
+    await wrapper.vm.addMCPServer()
+    expect(settingsAPI.addMCP).toHaveBeenCalledWith({
+      name: "sandbox",
+      transport: "streamable_http",
+      command: "",
+      args: [],
+      url: "http://127.0.0.1:8765/mcp",
+    })
+    wrapper.unmount()
+  })
+
+  it("keeps the URL field for legacy SSE and hides it for stdio", async () => {
+    const wrapper = mountSettingsPage("mcp")
+    await flushPromises()
+    wrapper.vm.mcpForm.transport = "sse"
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find("[data-test=mcp-add-url]").exists()).toBe(true)
+    wrapper.vm.mcpForm.transport = "stdio"
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find("[data-test=mcp-add-url]").exists()).toBe(false)
+    wrapper.unmount()
   })
 })

@@ -683,12 +683,20 @@ Response：`{"status": "deleted", "name"}`。
 
 #### `GET /api/settings/mcp`
 
-`{"servers": [{"name", "transport", "command", "args", "env", "url"}]}`。
+`{"servers": [...]}`：依儲存的原樣回傳每個條目，`${VAR}` 標記不展開。
 
 #### `POST /api/settings/mcp`
 
 - Body：`MCPServerRequest`。
 - Response：`{"status": "saved", "name"}`。
+
+#### `PATCH /api/settings/mcp/{name}`
+
+body 為 `MCPServerPatch`（`MCPServerRequest` 中除 `name` 外的任意欄位）。Response：`{"status": "saved", "name", "server"}`。
+
+#### `POST /api/settings/mcp/{name}/test`
+
+連線、列出工具、中斷。Response 為 `MCPTestResult`：`{"ok", "error", "tool_count", "elapsed_ms"}`；失敗時 `ok: false`，`error` 裡是可讀的原因（例如 `MCP server sandbox: HTTP 401 Unauthorized from http://host/mcp; check the headers/token`）。
 
 #### `DELETE /api/settings/mcp/{name}`
 
@@ -1062,11 +1070,13 @@ Request / response 用到的 Pydantic 模型。
 | 欄位 | 型別 | 必要 | 預設 |
 |---|---|---|---|
 | `name` | str | 是 | |
-| `transport` | str | 否 | `"stdio"` |
+| `transport` | `"stdio"` \| `"streamable_http"` \| `"sse"` \| `"http"`（`sse` 的舊名稱）；其他值回傳 `422` | 否 | `"stdio"` |
 | `command` | str | 否 | `""` |
 | `args` | list[str] | 否 | `[]` |
 | `env` | dict[str, str] | 否 | `{}` |
 | `url` | str | 否 | `""` |
+| `headers` | dict[str, str] | 否 | `{}` |
+| `connect_timeout` | float \| None | 否 | `None` |
 
 ---
 

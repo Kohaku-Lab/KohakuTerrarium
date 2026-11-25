@@ -15,6 +15,7 @@ from kohakuterrarium.mcp.client import (
     MCPServerConfig,
 )
 from kohakuterrarium.mcp.diagnose import leaf_exceptions
+from kohakuterrarium.mcp.transports import MCPTransportName
 from kohakuterrarium.studio.identity.mcp.servers import (
     delete_server,
     find_server,
@@ -32,7 +33,7 @@ class MCPServerRequest(BaseModel):
     """Describe a complete MCP server registration."""
 
     name: str
-    transport: str = "stdio"
+    transport: MCPTransportName = "stdio"
     command: str = ""
     args: list[str] = []
     env: dict[str, str] = {}
@@ -48,7 +49,7 @@ class MCPServerPatch(BaseModel):
     replace their existing values in full rather than merging element-wise.
     """
 
-    transport: Literal["stdio", "http"] | None = None
+    transport: MCPTransportName | None = None
     command: str | None = None
     args: list[str] | None = None
     env: dict[str, str] | None = None

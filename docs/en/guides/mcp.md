@@ -61,7 +61,7 @@ Managed interactively:
 
 ```bash
 kt config mcp list
-kt config mcp add              # interactive: transport, command, args, env, url
+kt config mcp add              # interactive: transport (stdio, streamable_http, sse), command, args, env, url, headers
 kt config mcp edit sqlite
 kt config mcp delete sqlite
 ```
@@ -93,10 +93,17 @@ expanded.
 ## Transports
 
 - **stdio**: launches a subprocess (`command` + `args` + `env`). Best for local servers, low latency, isolated-per-agent process lifetime.
-- **http** / **sse**: opens a legacy SSE session to `url`. Use this for servers that explicitly expose SSE endpoints such as `/sse`.
-- **streamable_http**: opens a modern streamable HTTP session to `url`. This is the default for many newer FastMCP servers (`FastMCP.streamable_http_app()`).
+- **streamable_http**: opens a modern streamable HTTP session to `url` (usually ending in `/mcp`). This is what current remote servers speak, including FastMCP's `streamable_http_app()`.
+- **sse**: opens a legacy SSE session to `url` (usually ending in `/sse`). `http` is the old name of this transport and still works.
 
-Pick stdio for local MCP servers (sqlite, filesystem, git), `streamable_http` for most modern hosted servers, and `http` / `sse` only when the server specifically exposes legacy SSE.
+Pick stdio for local MCP servers (sqlite, filesystem, git), `streamable_http` for remote servers, and `sse` only when the server only exposes legacy SSE.
+
+Every editor offers the same three choices: the web UI (Settings > MCP, both the
+Add form and the Edit dialog: "stdio (subprocess)", "Streamable HTTP
+(recommended for remote)", "SSE (legacy)"), `kt config mcp add`, and the rich
+CLI and ktui settings screens. An existing `http` entry is shown as SSE. The
+HTTP API accepts `stdio`, `streamable_http`, `sse` and `http`, and rejects
+anything else with `422`.
 
 ## How MCP tools reach the LLM
 

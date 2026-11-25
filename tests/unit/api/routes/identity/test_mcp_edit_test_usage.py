@@ -71,6 +71,35 @@ class TestPatch:
         }
         assert stored["fs"]["headers"] == {}
 
+    def test_every_transport_choice_is_accepted_on_create_and_update(self, client):
+        for transport in ("stdio", "streamable_http", "sse", "http"):
+            created = client.post(
+                "/api/settings/mcp",
+                json={"name": f"n-{transport}", "transport": transport, "url": "u"},
+            )
+            assert created.status_code == 200, (transport, created.text)
+            patched = client.patch(
+                "/api/settings/mcp/fs", json={"transport": transport, "url": "u"}
+            )
+            assert patched.status_code == 200, (transport, patched.text)
+            assert patched.json()["server"]["transport"] == transport
+        stored = {
+            s["name"]: s["transport"]
+            for s in client.get("/api/settings/mcp").json()["servers"]
+        }
+        assert stored["n-streamable_http"] == "streamable_http"
+        assert stored["fs"] == "http"
+
+    def test_unknown_transport_is_rejected_on_create_and_update(self, client):
+        created = client.post(
+            "/api/settings/mcp", json={"name": "bad", "transport": "websocket"}
+        )
+        assert created.status_code == 422
+        patched = client.patch("/api/settings/mcp/fs", json={"transport": "websocket"})
+        assert patched.status_code == 422
+        names = [s["name"] for s in client.get("/api/settings/mcp").json()["servers"]]
+        assert "bad" not in names
+
     def test_patch_name_immutable(self, client):
         resp = client.patch(
             "/api/settings/mcp/fs",

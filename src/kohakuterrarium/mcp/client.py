@@ -12,24 +12,13 @@ from kohakuterrarium.mcp.diagnose import (
     explain_timeout,
     leaf_exceptions,
 )
+from kohakuterrarium.mcp.transports import normalize_mcp_transport
 from kohakuterrarium.utils.env_interp import interpolate_env_vars, unset_env_vars
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 DEFAULT_MCP_CONNECT_TIMEOUT = 20.0
-
-
-def normalize_mcp_transport(transport: str) -> str:
-    """Normalize user-facing transport names to runtime transport kinds."""
-    raw = (transport or "stdio").strip().lower().replace("-", "_")
-    if raw == "stdio":
-        return "stdio"
-    if raw in {"http", "sse"}:
-        return "sse"
-    if raw in {"streamable_http", "streamablehttp", "http_streamable"}:
-        return "streamable_http"
-    raise MCPConfigError(f"Unknown transport: {transport}")
 
 
 @dataclass

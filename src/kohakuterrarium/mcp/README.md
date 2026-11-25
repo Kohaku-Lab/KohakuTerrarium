@@ -20,6 +20,7 @@ failures contained.
 | `__init__.py` | Package docstring                                                                                                                                     |
 | `client.py`   | `MCPClientManager`, `MCPServerConfig`, `MCPServerInfo`: `MCPServerConfig.from_entry` (the one constructor for registry / `mcp_servers` entries; expands `${VAR}`), per-server `ClientSession`, tool discovery, lock-protected connect/disconnect, tool dispatch |
 | `diagnose.py` | `HandshakeObserver` (fail fast on an HTTP error or refused connection during the handshake), `explain_failure` / `explain_timeout`: one typed `MCPError` naming the root cause |
+| `transports.py` | `MCP_TRANSPORT_NAMES` / `MCP_TRANSPORT_CHOICES` / `MCPTransportName`: the transport list the API, `kt config mcp`, rich CLI, ktui and web UI share; `normalize_mcp_transport`, `parse_transport`, `choice_for_transport` |
 | `tools.py`    | Four builtin tools (`@register_builtin`): `mcp_list`, `mcp_call`, `mcp_connect`, `mcp_disconnect`                                                    |
 
 ## Dependency direction

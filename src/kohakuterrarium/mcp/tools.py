@@ -228,7 +228,7 @@ class MCPConnectTool(BaseTool):
                 "name": {"type": "string", "description": "Name for this MCP server"},
                 "transport": {
                     "type": "string",
-                    "description": "Transport: stdio, http/sse, or streamable_http",
+                    "description": "Transport: stdio, streamable_http, or sse (http is the old name of sse)",
                 },
                 "command": {
                     "type": "string",
