@@ -417,6 +417,8 @@ export default {
   "settings.mcp.argsHint": "공백으로 구분된 인자입니다 (셸과 동일).",
   "settings.mcp.env": "환경 변수",
   "settings.mcp.envHint": "한 줄에 KEY=값 하나씩.",
+  "settings.mcp.headers": "HTTP 헤더",
+  "settings.mcp.headersHint": "한 줄에 Name: value 하나씩. 예: Authorization: Bearer your-token.",
   "settings.mcp.connectTimeout": "연결 타임아웃 (초)",
   "settings.mcp.connectTimeoutPlaceholder": "(선택)",
   "settings.mcp.testConnection": "연결 테스트",

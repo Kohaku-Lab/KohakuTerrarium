@@ -420,6 +420,9 @@ export default {
   "settings.mcp.argsHint": "空白区切りの引数です（シェルと同じ）。",
   "settings.mcp.env": "環境変数",
   "settings.mcp.envHint": "1 行につき KEY=値 を 1 つ。",
+  "settings.mcp.headers": "HTTP ヘッダー",
+  "settings.mcp.headersHint":
+    "1 行につき Name: value を 1 つ。例: Authorization: Bearer your-token。",
   "settings.mcp.connectTimeout": "接続タイムアウト (秒)",
   "settings.mcp.connectTimeoutPlaceholder": "（任意）",
   "settings.mcp.testConnection": "接続テスト",

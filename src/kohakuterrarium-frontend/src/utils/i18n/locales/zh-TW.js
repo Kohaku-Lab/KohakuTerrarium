@@ -505,6 +505,8 @@ export default {
   "settings.mcp.argsHint": "以空白分隔的參數（與 shell 相同）。",
   "settings.mcp.env": "環境變數",
   "settings.mcp.envHint": "每行一個 KEY=value。",
+  "settings.mcp.headers": "HTTP 請求標頭",
+  "settings.mcp.headersHint": "每行一個 Name: value，例如 Authorization: Bearer your-token。",
   "settings.mcp.connectTimeout": "連線逾時（秒）",
   "settings.mcp.connectTimeoutPlaceholder": "（選填）",
   "settings.mcp.testConnection": "測試連線",

@@ -621,6 +621,9 @@ export default {
   "settings.mcp.argsHint": "Whitespace-separated args, same as on a shell.",
   "settings.mcp.env": "Environment variables",
   "settings.mcp.envHint": "One KEY=value per line.",
+  "settings.mcp.headers": "HTTP headers",
+  "settings.mcp.headersHint":
+    "One Name: value per line, for example Authorization: Bearer your-token.",
   "settings.mcp.connectTimeout": "Connect timeout (seconds)",
   "settings.mcp.connectTimeoutPlaceholder": "(optional)",
   "settings.mcp.testConnection": "Test connection",

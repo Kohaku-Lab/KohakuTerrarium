@@ -435,6 +435,9 @@ export default {
   "settings.mcp.argsHint": "Mit Leerzeichen getrennte Argumente, wie in der Shell.",
   "settings.mcp.env": "Umgebungsvariablen",
   "settings.mcp.envHint": "Eine KEY=Wert pro Zeile.",
+  "settings.mcp.headers": "HTTP-Header",
+  "settings.mcp.headersHint":
+    "Ein Name: Wert pro Zeile, zum Beispiel Authorization: Bearer your-token.",
   "settings.mcp.connectTimeout": "Verbindungs-Timeout (Sekunden)",
   "settings.mcp.connectTimeoutPlaceholder": "(optional)",
   "settings.mcp.testConnection": "Verbindung testen",

@@ -587,6 +587,8 @@ export default {
   "settings.mcp.argsHint": "以空格分隔的参数（与 shell 相同）。",
   "settings.mcp.env": "环境变量",
   "settings.mcp.envHint": "每行一个 KEY=value。",
+  "settings.mcp.headers": "HTTP 请求头",
+  "settings.mcp.headersHint": "每行一个 Name: value，例如 Authorization: Bearer your-token。",
   "settings.mcp.connectTimeout": "连接超时（秒）",
   "settings.mcp.connectTimeoutPlaceholder": "（可选）",
   "settings.mcp.testConnection": "测试连接",

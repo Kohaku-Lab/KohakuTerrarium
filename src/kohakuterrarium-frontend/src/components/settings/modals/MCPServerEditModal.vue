@@ -37,6 +37,11 @@
           <label class="text-[11px] text-warm-400 block mb-1">{{ t("settings.mcp.url") }}</label>
           <el-input v-model="form.url" size="small" placeholder="https://mcp.example.com/api" />
         </div>
+        <div>
+          <label class="text-[11px] text-warm-400 block mb-1">{{ t("settings.mcp.headers") }}</label>
+          <el-input v-model="form.headersStr" size="small" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" placeholder="Authorization: Bearer ..." />
+          <p class="text-[11px] text-warm-400 mt-1">{{ t("settings.mcp.headersHint") }}</p>
+        </div>
       </template>
 
       <div>
@@ -115,6 +120,7 @@ const form = reactive({
   command: "",
   argsStr: "",
   envStr: "",
+  headersStr: "",
   url: "",
   connectTimeout: null,
 })
@@ -144,12 +150,32 @@ function envStrToObject(text) {
   return out
 }
 
+function headersObjectToStr(headers) {
+  if (!headers || typeof headers !== "object") return ""
+  return Object.entries(headers)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n")
+}
+
+function headersStrToObject(text) {
+  const out = {}
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#")) continue
+    const colon = trimmed.indexOf(":")
+    if (colon <= 0) continue
+    out[trimmed.slice(0, colon).trim()] = trimmed.slice(colon + 1).trim()
+  }
+  return out
+}
+
 function reset(srv) {
   if (!srv) return
   form.transport = srv.transport || "stdio"
   form.command = srv.command || ""
   form.argsStr = (srv.args || []).join(" ")
   form.envStr = envObjectToStr(srv.env)
+  form.headersStr = headersObjectToStr(srv.headers)
   form.url = srv.url || ""
   form.connectTimeout = srv.connect_timeout ?? null
   testResult.value = null
@@ -178,9 +204,11 @@ async function save() {
       patch.command = form.command
       patch.args = form.argsStr ? form.argsStr.split(/\s+/).filter(Boolean) : []
       patch.env = envStrToObject(form.envStr)
+      patch.headers = {}
       patch.url = ""
     } else {
       patch.url = form.url
+      patch.headers = headersStrToObject(form.headersStr)
       patch.command = ""
       patch.args = []
       patch.env = {}
