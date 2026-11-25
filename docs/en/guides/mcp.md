@@ -165,7 +165,10 @@ images, the `isError` flag) for callers that want to render it themselves.
 Both raise `ValueError` when the server is not connected or does not list the
 tool. After `connect`, `MCPServerInfo.instructions` holds the instructions the
 server sent in its `initialize` result (an empty string when it sent none).
-The framework does not add these instructions to the system prompt.
+`list_servers()` reports them as `instructions`. In a creature, the "Available
+MCP Tools" prompt section shows each server's instructions under its
+`### Server: <name>` heading (capped at 4000 characters, with a truncation
+marker); a server that sent none adds nothing.
 
 ## Troubleshooting
 

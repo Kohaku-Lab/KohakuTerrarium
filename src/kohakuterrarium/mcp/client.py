@@ -521,6 +521,7 @@ class MCPClientManager:
                     "transport": info.config.transport,
                     "status": info.status,
                     "error": info.error,
+                    "instructions": info.instructions,
                     "tools": info.tools,
                 }
             )

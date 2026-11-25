@@ -252,6 +252,78 @@ class TestInjectMcpToolsIntoPrompt:
         # No "—" separator because no description.
         assert "**x** —" not in prompt
 
+    def test_server_instructions_follow_the_server_heading(self):
+        a = _agent_with_mcp()
+        a._mcp_manager = _FakeManager(
+            server_list=[
+                {
+                    "name": "sandbox",
+                    "status": "connected",
+                    "instructions": "  Refer to files as sandbox:<name>/<path>.\n",
+                    "tools": [{"name": "run"}],
+                },
+                {
+                    "name": "fs",
+                    "status": "connected",
+                    "instructions": "",
+                    "tools": [{"name": "read"}],
+                },
+            ]
+        )
+        inject_mcp_tools_into_prompt(a)
+        prompt = a.prompts[-1]
+        assert (
+            "### Server: sandbox\n"
+            "Refer to files as sandbox:<name>/<path>.\n"
+            "- **run**" in prompt
+        )
+        assert "### Server: fs\n- **read**" in prompt
+
+    def test_no_instructions_add_nothing(self):
+        with_key = _agent_with_mcp()
+        with_key._mcp_manager = _FakeManager(
+            server_list=[
+                {
+                    "name": "fs",
+                    "status": "connected",
+                    "instructions": "   ",
+                    "tools": [{"name": "read"}],
+                }
+            ]
+        )
+        without_key = _agent_with_mcp()
+        without_key._mcp_manager = _FakeManager(
+            server_list=[
+                {"name": "fs", "status": "connected", "tools": [{"name": "read"}]}
+            ]
+        )
+        inject_mcp_tools_into_prompt(with_key)
+        inject_mcp_tools_into_prompt(without_key)
+        assert with_key.prompts == without_key.prompts
+        assert "### Server: fs\n- **read**" in with_key.prompts[-1]
+
+    def test_long_instructions_are_capped_with_a_marker(self):
+        long_text = "a" * (am.MAX_SERVER_INSTRUCTIONS_CHARS + 500)
+        a = _agent_with_mcp()
+        a._mcp_manager = _FakeManager(
+            server_list=[
+                {
+                    "name": "big",
+                    "status": "connected",
+                    "instructions": long_text,
+                    "tools": [],
+                }
+            ]
+        )
+        inject_mcp_tools_into_prompt(a)
+        prompt = a.prompts[-1]
+        assert (
+            "a" * am.MAX_SERVER_INSTRUCTIONS_CHARS
+            + "\n[... 500 more characters of server instructions truncated]"
+            in prompt
+        )
+        assert "a" * (am.MAX_SERVER_INSTRUCTIONS_CHARS + 1) not in prompt
+
 
 # ── disconnect failure path during connect cleanup (lines 60-61) ──
 

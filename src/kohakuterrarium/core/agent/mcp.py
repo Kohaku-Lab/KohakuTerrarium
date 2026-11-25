@@ -8,6 +8,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 _DEFAULT_MCP_CONNECT_TIMEOUT = 20
+MAX_SERVER_INSTRUCTIONS_CHARS = 4000
 
 
 async def init_mcp(agent: Any) -> None:
@@ -72,6 +73,9 @@ def inject_mcp_tools_into_prompt(agent: Any) -> None:
 
     for srv in servers:
         lines.append(f"### Server: {srv['name']}")
+        instructions = _server_instructions(srv.get("instructions"))
+        if instructions:
+            lines.append(instructions)
         for tool in srv["tools"]:
             desc = f" — {tool['description']}" if tool.get("description") else ""
             lines.append(f"- **{tool['name']}**{desc}")
@@ -94,4 +98,16 @@ def inject_mcp_tools_into_prompt(agent: Any) -> None:
         "MCP tools injected into prompt",
         servers=len(servers),
         tools=sum(len(s["tools"]) for s in servers),
+    )
+
+
+def _server_instructions(text: str | None) -> str:
+    """Return a server's ``initialize`` instructions, capped for the prompt."""
+    text = (text or "").strip()
+    if len(text) <= MAX_SERVER_INSTRUCTIONS_CHARS:
+        return text
+    hidden = len(text) - MAX_SERVER_INSTRUCTIONS_CHARS
+    return (
+        f"{text[:MAX_SERVER_INSTRUCTIONS_CHARS]}\n"
+        f"[... {hidden} more characters of server instructions truncated]"
     )

@@ -77,7 +77,10 @@ from kohakuterrarium.utils.logging import ColoredFormatter
 _GREETER_SERVER = '''\
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("kt-greeter")
+mcp = FastMCP(
+    "kt-greeter",
+    instructions="Greet people by their first name; files are greeter:<path>.",
+)
 
 
 @mcp.tool()
@@ -670,11 +673,17 @@ class TestMcpIntegration:
             assert "Hello, Kohaku!" in convo_text
             prompt = agent.get_system_prompt()
             assert prompt.count("## Available MCP Tools") == 1
+            assert (
+                "### Server: greeter\n"
+                "Greet people by their first name; files are greeter:<path>.\n"
+                "- **greet**" in prompt
+            )
             assert prompt.count("PUBLIC-RUNTIME-CONTEXT") == 1
             assert "CURRENT-GRAPH" not in prompt
             await agent._mcp_manager.disconnect("greeter")
             agent._inject_mcp_tools_into_prompt()
             assert "## Available MCP Tools" not in agent.get_system_prompt()
+            assert "greeter:<path>" not in agent.get_system_prompt()
             assert "PUBLIC-RUNTIME-CONTEXT" in agent.get_system_prompt()
 
         # Engine __aexit__ stopped the creature; the manager's servers

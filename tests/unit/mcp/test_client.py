@@ -978,9 +978,26 @@ class TestListing:
                 "transport": "stdio",
                 "status": "connected",
                 "error": "",
+                "instructions": "",
                 "tools": [{"name": "t", "description": "desc", "input_schema": {}}],
             }
         ]
+
+    async def test_list_servers_carries_server_instructions(self, monkeypatch):
+        class _Init:
+            instructions = "Use sandbox:<name>/<path> for files."
+
+        class _InstructedSession(_FakeClientSession):
+            _init_result = _Init()
+
+        _install_fake_mcp(
+            monkeypatch, session_cls=lambda r, w: _InstructedSession(r, w, tools=[])
+        )
+        mgr = MCPClientManager()
+        await mgr.connect(MCPServerConfig(name="sb", command="c"))
+        assert mgr.list_servers()[0]["instructions"] == (
+            "Use sandbox:<name>/<path> for files."
+        )
 
     def test_list_servers_empty_when_none_connected(self):
         assert MCPClientManager().list_servers() == []

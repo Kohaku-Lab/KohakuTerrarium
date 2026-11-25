@@ -157,7 +157,9 @@ Agent 執行時底層就是用這套機制。
 （結構化內容、圖片、`isError` 旗標），給需要自行呈現結果的呼叫端使用。
 伺服器未連線或沒有列出該工具時，兩者都會拋出 `ValueError`。`connect` 之後，
 `MCPServerInfo.instructions` 保存伺服器在 `initialize` 結果中送出的說明
-（沒有送出時為空字串）。框架不會把這段說明加進系統提示詞。
+（沒有送出時為空字串）。`list_servers()` 以 `instructions` 欄位回傳它。在生物中，
+「Available MCP Tools」提示詞段落會在每個 `### Server: <name>` 標題下顯示該伺服器的說明
+（上限 4000 個字元，超出部分以截斷標記表示）；沒有送出說明的伺服器不增加任何內容。
 
 ## 疑難排解
 

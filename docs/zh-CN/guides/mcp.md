@@ -157,7 +157,9 @@ Agent 执行时底层就是用这套机制。
 （结构化内容、图片、`isError` 标记），给需要自行呈现结果的调用方使用。
 服务器未连线或没有列出该工具时，两者都会抛出 `ValueError`。`connect` 之后，
 `MCPServerInfo.instructions` 保存服务器在 `initialize` 结果中送出的说明
-（没有送出时为空字符串）。框架不会把这段说明加进系统提示词。
+（没有送出时为空字符串）。`list_servers()` 以 `instructions` 字段返回它。在 Creature 中，
+“Available MCP Tools” 提示词段落会在每个 `### Server: <name>` 标题下显示该服务器的说明
+（上限 4000 个字符，超出部分以截断标记表示）；没有送出说明的服务器不增加任何内容。
 
 ## 疑难排解
 
