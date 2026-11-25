@@ -200,24 +200,23 @@ host-loop 檢查，因此仍需 `compact.auto` 才能自動壓縮。兩種情況
 
 | Option | 類型 | 預設 | 用途 |
 |--------|------|------|------|
-| `enabled` | bool | true | 總開關。 |
-| `tools` | list[str] / `"all"` | `"all"` | 哪些工具需要批准。`"all"` = 每個工具。 |
-| `whitelist` | list[str] | `[]` | 跳過批准的工具（使用者選「always」時也會被加進 per-session 「always allow」清單）。 |
-| `auto_approve_pattern` | str | "" | regex 模式；符合的工具 args 會自動批准而不詢問。 |
-| `prompt_template` | str | 預設 | 自訂顯示給使用者的批准 prompt。 |
+| `gated_tools` | list[str] | `[]` | 需要批准的工具。空清單 = 每個工具；`"*"` 也符合每個工具。 |
+| `allowlist` | list[str] | `[]` | 永遠不需要批准的工具，即使也列在 `gated_tools` 中。 |
+| `timeout_s` | float | null | 等待使用者的秒數；null = 一直等。逾時沒有回應就拒絕。 |
+| `surface` | `modal` / `chat` | `modal` | 批准提示出現的位置。 |
 
 ### 行為
 
-`pre_tool_execute` 發出 `tool_approval_request` 輸出事件，附工具名、
-args、request id。Agent 在 output bus 上等一個匹配 id 的
-`tool_approval_reply` 事件；回覆帶 `decision ∈ {approve, deny,
-always}`。`always` 把工具加進 per-session whitelist（持久化在外掛 state
-裡）。`deny` 拋 `PluginBlockError`，讓 agent 把它當成普通工具失敗處
-理。
+`pre_tool_execute` 在設定的 `surface` 上發出可互動的 `confirm` 輸出
+事件，寫明工具名並摘要其參數，然後等待回覆。選項為 `allow_once`、
+`allow_session`（「Always allow」）與 `deny`。`allow_session` 在這個外掛
+實例存續期間不再詢問該工具，不會持久化。其他任何結果（拒絕、取消、
+`timeout_s` 內沒有回應、bus 錯誤）都會拋 `PluginBlockError`，讓 agent
+把它當成普通工具失敗處理。
 
 網頁 UI 與 TUI 把批准渲染成輸出流上的內聯 prompt；CLI 也透過同一個
 output bus 出場，並經由 input loop 回覆。沒有使用者介面的無頭部署應該
-關掉 permgate 或設 `auto_approve_pattern: "^.*$"`。
+關掉 permgate 或設 `timeout_s`，讓沒人回應的呼叫被拒絕，而不是一直等。
 
 ### 範例
 
@@ -225,8 +224,8 @@ output bus 出場，並經由 input loop 回覆。沒有使用者介面的無頭
 plugins:
   - name: permgate
     options:
-      tools: ["bash", "write", "edit"]
-      whitelist: ["read", "grep", "glob"]
+      gated_tools: ["bash", "write", "edit"]
+      allowlist: ["read", "grep", "glob"]
 ```
 
 ## 啟用總覽
@@ -241,7 +240,7 @@ plugins:
       network_allowlist: ["api.example.com"]
   - name: permgate
     options:
-      tools: "all"
+      gated_tools: ["*"]
   - name: budget
     options:
       turn_budget: [40, 60]
