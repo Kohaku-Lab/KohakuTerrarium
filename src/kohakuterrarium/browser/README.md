@@ -62,7 +62,7 @@ page = await browser.read_page(url, options, external_check=check)
 - `status`: the HTTP status of the response that answered the load (after
   HTTP redirects); `None` when no response did. A later script navigation does
   not change it.
-- `title`: `document.title`, empty when it cannot be read.
+- `title`: `document.title`, empty when it cannot be read; cut at `max_chars`.
 - `html`: the doctype plus `document.documentElement.outerHTML` after
   scripts ran and the DOM settled (quiet for 150 ms, at most 2 s): the
   serialized DOM, not the bytes the server sent.

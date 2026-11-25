@@ -67,8 +67,9 @@ class PageRead:
     ``url`` is the final URL, after redirects and script navigations;
     ``status`` the HTTP status of the response that answered the load
     (``None`` when none did). ``html`` is the serialized DOM after scripts
-    ran and ``text`` the body's rendered text, each cut at the read's
-    ``max_chars`` (``html_truncated`` / ``text_truncated`` say so). Every
+    ran and ``text`` the body's rendered text; these and ``title`` are cut
+    at the read's ``max_chars`` (``html_truncated`` / ``text_truncated``
+    say so for the first two). Every
     field is page-chosen, untrusted text with the session's secrets redacted.
     """
 
@@ -200,7 +201,10 @@ class SessionReadMixin:
         reason = unreachable(stack.proxy.since(mark), response.url, response.blocked)
         if reason:
             raise NavigationError(f"loading {url} failed ({reason})")
-        await settle(page, self._read_nav, grace=self.settle_grace)
+        try:
+            await settle(page, self._read_nav, grace=self.settle_grace)
+        except PageClosedError:
+            raise NavigationError("the page was closed during the read") from None
         content = await self._read_content(page, limit)
         title = await self._read_title(page)
         self._raise_read_blocked(url, mark, page.url)
@@ -289,9 +293,8 @@ class SessionReadMixin:
         forms = self._secret_forms()
         html, html_cut = _cut(redact, forms, content.html, content.html_chars, limit)
         text, text_cut = _cut(redact, forms, content.text, content.text_chars, limit)
-        return PageRead(
-            redact(url), status, redact(title), html, text, html_cut, text_cut
-        )
+        title, _ = _cut(redact, forms, title, len(title), limit)
+        return PageRead(redact(url), status, title, html, text, html_cut, text_cut)
 
     def _secret_forms(self) -> list[str]:
         """Every spelling of every secret value currently set and long enough to redact."""

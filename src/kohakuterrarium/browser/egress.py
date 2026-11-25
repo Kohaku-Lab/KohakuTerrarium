@@ -29,9 +29,12 @@ def blocked_reason(record: EgressRecord, policy: NetworkPolicy) -> str:
     address = record.address
     if address is None and parse_ip(record.host) is not None:
         address = record.host
-    decision = policy.check_host(record.host, record.port)
-    if decision and address is not None:
+    if address is None:
+        decision = policy.check_host(record.host, record.port)
+    else:
         decision = policy.check_address(address, record.port)
+        if decision:
+            decision = policy.check_host(record.host, record.port)
     return decision.reason if not decision.allowed else record.code
 
 

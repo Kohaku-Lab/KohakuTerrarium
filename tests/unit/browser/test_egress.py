@@ -91,5 +91,17 @@ class TestBlockedReason:
         resolved = record("a.test", 81, code="external", address="127.0.0.1")
         assert blocked_reason(resolved, policy) == "a.test denied: port closed"
 
+    def test_an_address_record_is_judged_by_its_address_first(self):
+        asked = []
+
+        def check(host, port):
+            asked.append(host)
+            return "nope"
+
+        policy = NetworkPolicy(block_hosts=("a.test",), external_check=check)
+        reason = blocked_reason(record("a.test", address="10.0.0.5"), policy)
+        assert reason == "address 10.0.0.5 is private (set allow_private to permit)"
+        assert asked == []
+
     def test_a_decision_that_no_longer_refuses_falls_back_to_the_code(self):
         assert blocked_reason(record("a.test", code="gone"), NetworkPolicy()) == "gone"

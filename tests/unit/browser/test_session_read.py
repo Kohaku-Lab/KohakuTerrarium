@@ -17,6 +17,7 @@ from kohakuterrarium.browser.errors import (
     DriverError,
     NavigationBlockedError,
     NavigationError,
+    PageClosedError,
 )
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.protocol import NavResponse, PageContent
@@ -269,6 +270,20 @@ class TestRead:
         assert_no_read_left(session, driver)
         await session.close()
 
+    @pytest.mark.parametrize("step", ["settle", "content"])
+    async def test_a_page_closed_mid_read_is_a_navigation_error(self, tmp_path, step):
+        session, _ = reader(
+            tmp_path,
+            lambda page: page.raises.__setitem__(
+                step, PageClosedError("the tab was closed")
+            ),
+        )
+        await session.snapshot()
+        with pytest.raises(NavigationError, match="closed during the read"):
+            await session.read_page(NEWS)
+        assert [t.id for t in session._tabs] == ["t1"]
+        await session.close()
+
     async def test_a_load_that_hangs_times_out(self, tmp_path):
         session, driver = reader(tmp_path, lambda page: page.hang.add("goto"))
         with pytest.raises(BrowserTimeoutError, match="did not finish within 0.5 s"):
@@ -317,12 +332,14 @@ class TestRead:
             browser.site[NEWS] = {
                 "html_text": "<p>" + "x" * 500,
                 "body_text": "y" * 500,
+                "title_text": "t" * 500,
             }
 
         session, _ = make(tmp_path, setup=setup)
         got = await session.read_page(NEWS, max_chars=100)
         assert len(got.html) == 100 and got.html_truncated
         assert len(got.text) == 100 and got.text_truncated
+        assert got.title == "t" * 100
         assert READ_MAX_CHARS >= 1_000_000
         await session.close()
 
