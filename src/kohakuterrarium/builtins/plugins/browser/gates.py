@@ -21,48 +21,44 @@ Services = dict[str, Any]
 class SandboxLink:
     """The sandbox's policy services as the browser's network and file-write checks.
 
-    ``live`` returns the host's current runtime services, or ``None`` when
-    no host is reachable; then the services of the latest tool call given to
-    ``bind`` stand in. ``check`` is what the proxy consults for every
-    connection; ``check_write`` judges a download path.
+    Every answer reads the services in force at that moment: ``live``
+    returns the host's current runtime services, or ``None`` when no host is
+    reachable; then the services last given to ``bind`` stand in. ``check``
+    is what the proxy consults for every connection and every re-judge;
+    ``check_write`` judges a download path.
     """
 
     def __init__(self, live: Callable[[], Services | None] | None = None) -> None:
-        self.policy: Any = None
         self._live = live
         self._bound: Services = {}
 
-    def bind(self, services: Services | None) -> bool:
-        """Follow ``services``; whether the bound service changed."""
+    def bind(self, services: Services | None) -> None:
+        """Keep one tool call's ``services`` for when no host is reachable."""
         self._bound = dict(services or {})
-        policy = self._bound.get(NETWORK_POLICY)
-        changed = policy is not self.policy
-        self.policy = policy
-        return changed
 
     def services(self) -> Services:
         """The runtime services in force now."""
         live = self._live() if self._live is not None else None
         return self._bound if live is None else live
 
-    def check_write(self, path: Path) -> str | None:
-        """Why the sandbox refuses writing ``path``, or ``None`` to allow it."""
-        policy = self.services().get(WRITE_POLICY)
-        return None if policy is None else policy.check(path)
+    @property
+    def policy(self) -> Any:
+        """The sandbox's ``network_policy`` service now; ``None`` without a sandbox."""
+        return self.services().get(NETWORK_POLICY)
 
     def check(self, host: str, port: int) -> str | None:
         """Why the sandbox refuses ``host:port``, or ``None`` to allow it."""
         policy = self.policy
         return None if policy is None else policy.check(host, port)
 
-    @property
-    def denies_all(self) -> bool:
-        """Whether the bound sandbox denies all network access."""
-        return getattr(self.policy, "mode", "allow") == "deny"
+    def check_write(self, path: Path) -> str | None:
+        """Why the sandbox refuses writing ``path``, or ``None`` to allow it."""
+        policy = self.services().get(WRITE_POLICY)
+        return None if policy is None else policy.check(path)
 
     @property
     def requires_confinement(self) -> bool:
-        """Whether the bound sandbox demands kernel confinement for every process."""
+        """Whether the sandbox demands kernel confinement for every process."""
         return bool(getattr(self.policy, "requires_os_confinement", False))
 
 

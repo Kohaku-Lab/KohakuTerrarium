@@ -3,7 +3,9 @@
 Handles ``CONNECT`` tunnels and absolute-form plain-HTTP requests. Each
 connection is checked by host, resolved once, checked by every resolved
 address, and dialled to an address that passed. Plain HTTP carries one
-request per connection; both sides are told ``Connection: close``.
+request per connection; both sides are told ``Connection: close``. While
+connections are open their hosts are judged again every
+``REJUDGE_INTERVAL_S``, and those the policy now refuses are cut.
 """
 
 import asyncio
@@ -38,6 +40,7 @@ HEAD_TIMEOUT_S = 30.0
 IDLE_TIMEOUT_S = 300.0
 LINGER_TIMEOUT_S = 2.0
 LINGER_BYTES = 1024 * 1024
+REJUDGE_INTERVAL_S = 2.0
 LOG_SIZE = 256
 CHUNK = 64 * 1024
 
@@ -223,7 +226,8 @@ class FilteringProxy:
     ``resolver(host, port)`` returns candidate IP strings and
     ``dialer(ip, port)`` opens streams to one of them; both default to the
     running loop's networking. ``policy`` may be replaced while running and
-    applies from the next connection on.
+    applies from the next connection on; open connections are judged again
+    every ``rejudge_interval`` seconds (default ``REJUDGE_INTERVAL_S``).
     """
 
     def __init__(
@@ -237,6 +241,7 @@ class FilteringProxy:
         idle_timeout: float = IDLE_TIMEOUT_S,
         max_head_bytes: int = MAX_HEAD_BYTES,
         log_size: int = LOG_SIZE,
+        rejudge_interval: float | None = None,
     ):
         self._policy = policy
         self._resolver = resolver or _default_resolver
@@ -252,6 +257,9 @@ class FilteringProxy:
         self._port: int | None = None
         self._closed = False
         self._tasks: set[asyncio.Task] = set()
+        self._targets: dict[asyncio.Task, tuple[str, int, str]] = {}
+        self._rejudge_interval = rejudge_interval
+        self._watch_task: asyncio.Task | None = None
 
     @property
     def port(self) -> int:
@@ -280,6 +288,10 @@ class FilteringProxy:
             return
         self._closed = True
         self._server.close()
+        watch, self._watch_task = self._watch_task, None
+        if watch is not None:
+            watch.cancel()
+            await asyncio.gather(watch, return_exceptions=True)
         await asyncio.sleep(0)
         while self._tasks:
             await self._cancel(list(self._tasks))
@@ -291,7 +303,11 @@ class FilteringProxy:
         return self._policy
 
     async def set_policy(self, policy: NetworkPolicy, *, drop: bool = True) -> None:
-        """Judge new connections by ``policy``; with ``drop``, cut every open one."""
+        """Judge connections by ``policy``; with ``drop``, cut every open one now.
+
+        Without ``drop``, open connections ``policy`` refuses are cut by the
+        next re-judge.
+        """
         self._policy = policy
         if drop:
             await self.drop_connections()
@@ -300,11 +316,52 @@ class FilteringProxy:
         """Cancel and await every open connection; the listener keeps accepting."""
         await self._cancel(list(self._tasks))
 
+    def open_connections(self) -> list[tuple[str, int]]:
+        """``(host, port)`` of every connection the policy allowed that is still open."""
+        return [(host, port) for host, port, _ in self._targets.values()]
+
+    async def rejudge(self) -> int:
+        """Cut the open connections whose host the policy now refuses; how many were cut."""
+        policy = self._policy
+        refused: list[asyncio.Task] = []
+        for task, (host, port, method) in list(self._targets.items()):
+            decision = policy.check_host(host, port)
+            if not decision:
+                self._record(host, port, method, decision, None)
+                refused.append(task)
+        if refused:
+            await self._cancel(refused)
+        return len(refused)
+
+    def _register(self, host: str, port: int, method: str) -> None:
+        """Remember the current connection's target and keep the re-judge running."""
+        task = asyncio.current_task()
+        if task is None or self._closed:
+            return
+        self._targets[task] = (host, port, method)
+        if self._watch_task is None:
+            self._watch_task = asyncio.create_task(self._watch())
+
+    async def _watch(self) -> None:
+        """Re-judge open connections every interval; ends once none is open."""
+        interval = self._rejudge_interval or REJUDGE_INTERVAL_S
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await self.rejudge()
+            except Exception as exc:
+                logger.warning("Re-judging proxy connections failed", error=str(exc))
+            if not self._targets or self._closed:
+                self._watch_task = None
+                return
+
     async def _cancel(self, tasks: list[asyncio.Task]) -> None:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self._tasks.difference_update(tasks)
+        for task in tasks:
+            self._targets.pop(task, None)
 
     def recent(self) -> list[EgressRecord]:
         """The most recent decisions, oldest first."""
@@ -353,6 +410,7 @@ class FilteringProxy:
                 "Browser proxy connection failed", error=str(exc), exc_info=True
             )
         finally:
+            self._targets.pop(task, None)
             try:
                 await _close_writer(writer)
             finally:
@@ -375,6 +433,7 @@ class FilteringProxy:
         try:
             await self._dispatch(_parse_head(head), reader, writer)
         except _Reject as reject:
+            self._targets.pop(asyncio.current_task(), None)
             await self._respond(reader, writer, reject)
 
     async def _dispatch(
@@ -412,6 +471,7 @@ class FilteringProxy:
             self._record(name, port, request.method, decision, None)
             status = 400 if decision.code in _CLIENT_ERRORS else 403
             raise _Reject(status, decision.code, decision.reason)
+        self._register(name, port, request.method)
         upstream, _ = await self._open(policy, request.method, name, port)
         try:
             if request.method == "CONNECT":

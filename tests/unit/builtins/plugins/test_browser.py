@@ -10,12 +10,14 @@ import asyncio
 import json
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from dataclasses import fields
 from types import SimpleNamespace
 
 import pytest
 
 import kohakuterrarium as kt
+from kohakuterrarium.browser import proxy as proxy_module
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.builtins.plugin_catalog import is_default_on, lookup_plugin
 from kohakuterrarium.builtins.plugins.browser.plugin import (
@@ -118,6 +120,79 @@ def manager_context(manager, tmp_path) -> ToolContext:
     context = ToolContext(agent_name="browser_test", session=None, working_dir=tmp_path)
     context.runtime_services.update(manager.collect_runtime_services(context))
     return context
+
+
+FAST_REJUDGE_S = 0.1
+REJUDGE_BOUND_S = 2.0
+
+
+@pytest.fixture
+def fast_rejudge(monkeypatch):
+    monkeypatch.setattr(proxy_module, "REJUDGE_INTERVAL_S", FAST_REJUDGE_S)
+
+
+async def connect(session, port: int, host: str = "127.0.0.1"):
+    """A ``CONNECT`` to ``host:port`` through the session's proxy: its head and streams."""
+    target = f"{host}:{port}"
+    reader, writer = await proxied(
+        session, f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n".encode()
+    )
+    head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+    if not head.startswith(b"HTTP/1.1 200"):
+        writer.write_eof()
+        head += await asyncio.wait_for(reader.read(), 5)
+        writer.close()
+    return head, (reader, writer)
+
+
+async def tunnel(session, port: int):
+    """An open, working tunnel to the loopback echo server."""
+    head, (reader, writer) = await connect(session, port)
+    assert head.startswith(b"HTTP/1.1 200"), head
+    writer.write(b"ping")
+    await writer.drain()
+    assert await asyncio.wait_for(reader.readexactly(4), 5) == b"ping"
+    return reader, writer
+
+
+async def closes_within(reader, seconds: float) -> None:
+    """``reader`` reaches EOF within ``seconds``."""
+    try:
+        data = await asyncio.wait_for(reader.read(), seconds)
+    except asyncio.TimeoutError:
+        pytest.fail(f"the tunnel was still open after {seconds:g} s")
+    assert data == b"", data
+
+
+@asynccontextmanager
+async def sandboxed(tmp_path, sandbox_options, disabled=False, **options):
+    """A launched browser next to a real sandbox, and a loopback echo server."""
+
+    async def echo(reader, writer):
+        while data := await reader.read(1024):
+            writer.write(data)
+            await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(echo, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    plugin, driver = scripted_plugin(allow_loopback=True, **options)
+    sandbox = SandboxPlugin(options=sandbox_options)
+    manager = PluginManager()
+    manager.register(sandbox)
+    manager.register(plugin)
+    await manager.load_all(plugin_context(tmp_path, manager))
+    if disabled:
+        manager.disable("sandbox")
+    snapshot = plugin.contribute_tools()[1]
+    context = manager_context(manager, tmp_path)
+    assert (await wrapped(manager, snapshot, context)({}, context)).success
+    try:
+        yield plugin, sandbox, manager, port
+    finally:
+        server.close()
+        await manager.unload_all()
+        assert driver.alive() == []
 
 
 class TestCatalogAndConstruction:
@@ -425,43 +500,109 @@ class TestSandboxWiring:
         await manager.unload_all()
         assert driver.alive() == []
 
-    async def test_deny_drops_open_connections_of_a_running_browser(self, tmp_path):
-        async def echo(reader, writer):
-            while data := await reader.read(1024):
-                writer.write(data)
-                await writer.drain()
+    async def test_deny_drops_open_connections_without_a_tool_call(
+        self, tmp_path, fast_rejudge
+    ):
+        async with sandboxed(tmp_path, {}) as (plugin, sandbox, manager, port):
+            reader, writer = await tunnel(plugin.session, port)
+            sandbox.set_options({"network": "deny"})
+            await closes_within(reader, REJUDGE_BOUND_S)
+            assert plugin.session.state == "ready", "only connections are dropped"
+            head, _ = await connect(plugin.session, port)
+            assert head.startswith(b"HTTP/1.1 403") and b"external" in head
             writer.close()
 
-        server = await asyncio.start_server(echo, "127.0.0.1", 0)
-        port = server.sockets[0].getsockname()[1]
-        plugin, driver = scripted_plugin(allow_loopback=True)
-        sandbox = SandboxPlugin()
-        manager = PluginManager()
-        manager.register(sandbox)
-        manager.register(plugin)
-        await manager.load_all(plugin_context(tmp_path, manager))
-        snapshot = plugin.contribute_tools()[1]
-        context = manager_context(manager, tmp_path)
-        assert (await wrapped(manager, snapshot, context)({}, context)).success
-        reader, writer = await proxied(
-            plugin.session,
-            f"CONNECT 127.0.0.1:{port} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n".encode(),
-        )
-        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
-        assert head.startswith(b"HTTP/1.1 200")
-        writer.write(b"ping")
-        await writer.drain()
-        assert await asyncio.wait_for(reader.readexactly(4), 5) == b"ping"
-        sandbox.set_options({"network": "deny"})
-        context = manager_context(manager, tmp_path)
-        with pytest.raises(PluginBlockError):
-            await wrapped(manager, snapshot, context)({}, context)
-        assert await asyncio.wait_for(reader.read(), 5) == b"", "tunnel still open"
-        assert plugin.session.state == "ready", "only connections are dropped"
-        writer.close()
-        server.close()
-        await manager.unload_all()
-        assert driver.alive() == []
+    async def test_a_narrowed_allowlist_drops_tunnels_it_no_longer_allows(
+        self, tmp_path, fast_rejudge
+    ):
+        allow = {"network_allowlist": ["127.0.0.1", "shop.test"]}
+        async with sandboxed(tmp_path, allow) as (plugin, sandbox, manager, port):
+            reader, writer = await tunnel(plugin.session, port)
+            sandbox.set_options({"network_allowlist": ["shop.test"]})
+            await closes_within(reader, REJUDGE_BOUND_S)
+            writer.close()
+
+    async def test_an_allowed_tunnel_survives_rejudges(self, tmp_path, fast_rejudge):
+        allow = {"network_allowlist": ["127.0.0.1", "shop.test"]}
+        async with sandboxed(tmp_path, allow) as (plugin, sandbox, manager, port):
+            reader, writer = await tunnel(plugin.session, port)
+            sandbox.set_options({"network_allowlist": ["127.0.0.1"]})
+            await asyncio.sleep(FAST_REJUDGE_S * 5)
+            writer.write(b"pong")
+            await writer.drain()
+            assert await asyncio.wait_for(reader.readexactly(4), 5) == b"pong"
+            writer.close()
+
+    async def test_enabling_the_sandbox_applies_at_once(self, tmp_path, fast_rejudge):
+        allow = {"network_allowlist": ["shop.test"]}
+        async with sandboxed(tmp_path, allow, disabled=True) as (
+            plugin,
+            sandbox,
+            manager,
+            port,
+        ):
+            reader, writer = await tunnel(plugin.session, port)
+            assert manager.enable("sandbox")
+            head, _ = await connect(plugin.session, port)
+            assert head.startswith(b"HTTP/1.1 403"), "the next connection was let in"
+            assert b"not allowlisted" in head
+            await closes_within(reader, REJUDGE_BOUND_S)
+            writer.close()
+
+    async def test_a_disabled_sandbox_leaves_the_browsers_own_policy(
+        self, tmp_path, fast_rejudge
+    ):
+        async with sandboxed(tmp_path, {}, block_hosts=["blocked.test"]) as (
+            plugin,
+            sandbox,
+            manager,
+            port,
+        ):
+            sandbox.set_options({"network": "deny"})
+            head, _ = await connect(plugin.session, port)
+            assert head.startswith(b"HTTP/1.1 403")
+            assert manager.disable("sandbox")
+            reader, writer = await tunnel(plugin.session, port)
+            head, _ = await connect(plugin.session, port, host="blocked.test")
+            assert head.startswith(b"HTTP/1.1 403") and b"blocked_host" in head
+            await asyncio.sleep(FAST_REJUDGE_S * 3)
+            writer.write(b"pong")
+            await writer.drain()
+            assert await asyncio.wait_for(reader.readexactly(4), 5) == b"pong"
+            writer.close()
+
+    async def test_a_browser_call_rejudges_at_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(proxy_module, "REJUDGE_INTERVAL_S", 60.0)
+        allow = {"network_allowlist": ["127.0.0.1", "shop.test"]}
+        async with sandboxed(tmp_path, allow) as (plugin, sandbox, manager, port):
+            reader, writer = await tunnel(plugin.session, port)
+            sandbox.set_options({"network_allowlist": ["shop.test"]})
+            snapshot = plugin.contribute_tools()[1]
+            context = manager_context(manager, tmp_path)
+            assert (await wrapped(manager, snapshot, context)({}, context)).success
+            await closes_within(reader, 1.0)
+            writer.close()
+
+    async def test_other_tools_pass_the_pre_hook_untouched(self, tmp_path):
+        async with sandboxed(tmp_path, {}) as (plugin, sandbox, manager, port):
+            session = plugin.session
+            seen = []
+
+            async def record():
+                seen.append("touched")
+
+            session.rejudge_connections = record
+            session.drop_connections = record
+            context = manager_context(manager, tmp_path)
+            args = {"path": "x.txt"}
+            for name in ("read", "write", "bash"):
+                assert (
+                    await plugin.pre_tool_execute(
+                        args, tool_name=name, tool=None, context=context
+                    )
+                    is None
+                )
+            assert seen == [] and args == {"path": "x.txt"}
 
     async def test_required_os_confinement_refuses_launch(self, tmp_path):
         plugin, driver = await loaded(tmp_path)

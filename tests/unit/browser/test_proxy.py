@@ -626,26 +626,171 @@ async def test_external_check_denial(make_proxy):
     assert seams.resolved == []
 
 
-async def test_policy_replaced_without_drop_keeps_old_tunnels(servers, make_proxy):
+async def test_policy_replaced_without_drop_keeps_tunnels_it_allows(
+    servers, make_proxy
+):
     upstream = await servers(tcp_echo)
-    seams = Seams({"public.test": [PUBLIC]}, {PUBLIC: upstream})
+    seams = Seams(
+        {"public.test": [PUBLIC], "other.test": [PUBLIC_2]}, {PUBLIC: upstream}
+    )
     proxy = await make_proxy(seams=seams)
     _, reader, writer = await open_tunnel(proxy, "public.test:443")
     assert await reader.readexactly(9) == b"greeting\n"
 
-    replacement = NetworkPolicy(block_hosts=("public.test",))
+    replacement = NetworkPolicy(block_hosts=("other.test",))
     await proxy.set_policy(replacement, drop=False)
     assert proxy.policy is replacement
-    head, _, w2 = await open_tunnel(proxy, "public.test:443")
+    head, _, w2 = await open_tunnel(proxy, "other.test:443")
     w2.close()
     await w2.wait_closed()
     assert b" 403 " in head
-    # the tunnel opened under the old policy keeps working
+    assert await proxy.rejudge() == 0
     writer.write(b"still")
     await writer.drain()
     assert await asyncio.wait_for(reader.readexactly(5), 10) == b"still"
     writer.close()
     await writer.wait_closed()
+
+
+class TestRejudge:
+    """Open connections are judged again by the policy in force."""
+
+    def test_the_interval_is_a_couple_of_seconds(self):
+        assert proxy_module.REJUDGE_INTERVAL_S == 2.0
+
+    async def test_rejudge_cuts_only_what_the_check_now_refuses(
+        self, servers, make_proxy
+    ):
+        upstream = await servers(tcp_echo)
+        seams = Seams(
+            {"public.test": [PUBLIC], "other.test": [PUBLIC]}, {PUBLIC: upstream}
+        )
+        refused: set[str] = set()
+        policy = NetworkPolicy(
+            external_check=lambda host, port: "gone" if host in refused else None
+        )
+        proxy = await make_proxy(policy, seams=seams, rejudge_interval=60)
+        _, kept_r, kept_w = await open_tunnel(proxy, "public.test:443")
+        _, cut_r, cut_w = await open_tunnel(proxy, "other.test:443")
+        for reader in (kept_r, cut_r):
+            assert await reader.readexactly(9) == b"greeting\n"
+        assert sorted(proxy.open_connections()) == [
+            ("other.test", 443),
+            ("public.test", 443),
+        ]
+        refused.add("other.test")
+        assert await proxy.rejudge() == 1
+        assert await asyncio.wait_for(cut_r.read(), 10) == b""
+        assert proxy.open_connections() == [("public.test", 443)]
+        dropped = proxy.drain_blocked()
+        assert [(r.host, r.port, r.code) for r in dropped] == [
+            ("other.test", 443, "external")
+        ]
+        kept_w.write(b"alive")
+        await kept_w.drain()
+        assert await asyncio.wait_for(kept_r.readexactly(5), 10) == b"alive"
+        for writer in (kept_w, cut_w):
+            writer.close()
+            await writer.wait_closed()
+
+    async def test_open_connections_are_rejudged_on_the_interval(
+        self, servers, make_proxy
+    ):
+        upstream = await servers(tcp_echo)
+        seams = Seams({"public.test": [PUBLIC]}, {PUBLIC: upstream})
+        verdict: list[str | None] = [None]
+        policy = NetworkPolicy(external_check=lambda host, port: verdict[0])
+        proxy = await make_proxy(policy, seams=seams, rejudge_interval=0.05)
+        _, reader, writer = await open_tunnel(proxy, "public.test:443")
+        assert await reader.readexactly(9) == b"greeting\n"
+        await asyncio.sleep(0.2)
+        writer.write(b"ok")
+        await writer.drain()
+        assert await asyncio.wait_for(reader.readexactly(2), 10) == b"ok"
+        verdict[0] = "network access denied"
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_a_refused_dial_lingering_on_its_answer_is_not_rejudged(
+        self, make_proxy
+    ):
+        refused = [False]
+        policy = NetworkPolicy(
+            external_check=lambda host, port: "gone" if refused[0] else None
+        )
+        proxy = await make_proxy(policy, seams=Seams(), rejudge_interval=60)
+        reader, writer = await asyncio.open_connection("127.0.0.1", proxy.port)
+        writer.write(get("http://nowhere.test/", "nowhere.test"))
+        await writer.drain()
+        head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+        assert b" 502 " in head
+        assert proxy.open_connections() == []
+        mark = proxy.mark()
+        refused[0] = True
+        assert await proxy.rejudge() == 0 and proxy.since(mark) == []
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_a_check_that_raises_cuts_the_connection(self, servers, make_proxy):
+        upstream = await servers(tcp_echo)
+        seams = Seams({"public.test": [PUBLIC]}, {PUBLIC: upstream})
+        broken = [False]
+
+        def check(host, port):
+            if broken[0]:
+                raise RuntimeError("policy gone")
+            return None
+
+        proxy = await make_proxy(
+            NetworkPolicy(external_check=check), seams=seams, rejudge_interval=60
+        )
+        _, reader, writer = await open_tunnel(proxy, "public.test:443")
+        assert await reader.readexactly(9) == b"greeting\n"
+        broken[0] = True
+        assert await proxy.rejudge() == 1
+        assert await asyncio.wait_for(reader.read(), 10) == b""
+        writer.close()
+        await writer.wait_closed()
+
+    async def test_the_watch_runs_only_while_connections_are_open(
+        self, servers, make_proxy
+    ):
+        upstream = await servers()
+        seams = Seams({"public.test": [PUBLIC]}, {PUBLIC: upstream})
+        proxy = await make_proxy(seams=seams, rejudge_interval=0.02)
+        assert proxy._watch_task is None
+        status, _, _ = await exchange(proxy, get("http://public.test/", "public.test"))
+        assert status == 200
+        for _ in range(100):
+            if proxy._watch_task is None:
+                break
+            await asyncio.sleep(0.02)
+        assert proxy._watch_task is None and proxy.open_connections() == []
+        status, _, _ = await exchange(proxy, get("http://public.test/", "public.test"))
+        assert status == 200
+
+    async def test_close_ends_the_watch(self, servers):
+        upstream = await servers(tcp_echo)
+        seams = Seams({"public.test": [PUBLIC]}, {PUBLIC: upstream})
+        proxy = FilteringProxy(
+            NetworkPolicy(), rejudge_interval=60, **_seam_kwargs(seams)
+        )
+        await proxy.start()
+        _, reader, writer = await open_tunnel(proxy, "public.test:443")
+        assert await reader.readexactly(9) == b"greeting\n"
+        watch = proxy._watch_task
+        assert watch is not None and not watch.done()
+        await asyncio.wait_for(proxy.close(), 10)
+        assert watch.done() and proxy._watch_task is None
+        assert not [
+            task
+            for task in asyncio.all_tasks()
+            if not task.done()
+            and task.get_coro().__qualname__.startswith("FilteringProxy.")
+        ]
+        writer.close()
+        await writer.wait_closed()
 
 
 async def test_policy_attribute_is_read_only(make_proxy):

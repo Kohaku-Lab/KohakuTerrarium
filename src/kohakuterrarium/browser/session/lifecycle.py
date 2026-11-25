@@ -143,6 +143,11 @@ class SessionLifecycleMixin:
         if stack is not None:
             await stack.proxy.drop_connections()
 
+    async def rejudge_connections(self) -> int:
+        """Cut the open proxy connections the policy now refuses; how many were cut."""
+        stack = self._stack
+        return 0 if stack is None else await stack.proxy.rejudge()
+
     def _require_open(self) -> None:
         if self._state == CLOSED:
             raise BrowserClosedError("the browser session is closed")

@@ -1716,7 +1716,8 @@ class TestDropConnections:
         port = server.sockets[0].getsockname()[1]
         session, driver = make(tmp_path, allow_loopback=True)
         await session.drop_connections()
-        assert driver.plans == [], "dropping launches nothing"
+        assert await session.rejudge_connections() == 0
+        assert driver.plans == [], "dropping and re-judging launch nothing"
         await session.snapshot()
         reader, writer = await asyncio.open_connection(
             "127.0.0.1", session._stack.proxy.port

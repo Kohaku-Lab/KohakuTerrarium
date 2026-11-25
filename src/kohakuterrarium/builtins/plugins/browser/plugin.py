@@ -2,8 +2,9 @@
 
 The plugin owns one :class:`BrowserSession` (launched on first use), publishes
 it to the tools as the ``browser`` runtime service, links the session's proxy
-to the sandbox's ``network_policy`` service, and closes the session when the
-agent stops, the plugin unloads, or the plugin is disabled at runtime.
+and downloads to the sandbox's ``network_policy`` and ``write_policy``
+services as the host publishes them at each moment, and closes the session
+when the agent stops, the plugin unloads, or the plugin is disabled at runtime.
 """
 
 import asyncio
@@ -148,7 +149,7 @@ class BrowserPlugin(BasePlugin):
 
     name = "browser"
     description = "Browser use: an interactive Chromium driven by browser_* tools."
-    # Runs before the sandbox, so a denied call still drops open connections.
+    # Runs before the sandbox, which then checks the rewritten file arguments.
     priority = 0
     session_factory = BrowserSession
 
@@ -251,15 +252,13 @@ class BrowserPlugin(BasePlugin):
             self._spawn(session.close())
 
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
-        """Follow the sandbox on every call; show the sandbox only real file paths.
+        """Show the sandbox only real file paths of ``browser_act`` and ``browser_screenshot``.
 
         ``files`` given as text becomes a path list; an empty ``files`` or a
         blank screenshot ``path`` (a fully filled call's "not given") is dropped,
         so the sandbox does not check the working directory in its place.
+        Every other tool's call passes unchanged.
         """
-        context = kwargs.get("context")
-        if context is not None:
-            await self._follow_sandbox(getattr(context, "runtime_services", None))
         tool_name = kwargs.get("tool_name")
         if tool_name == ACT_TOOL:
             return _files_for_sandbox(args)
@@ -269,16 +268,20 @@ class BrowserPlugin(BasePlugin):
         return None
 
     async def prepare(self, context: Any) -> BrowserSession:
-        """Gate one tool call: closed session, host resources, sandbox; then the session."""
+        """Gate one tool call: closed session, host resources, sandbox; then the session.
+
+        Open connections are judged again by the sandbox as it is now.
+        """
         session = self._live_session()
         refusal = host_resource_refusal(self._browser_options, context)
         if refusal is not None:
             raise BrowserUnavailableError(refusal)
-        await self._follow_sandbox(getattr(context, "runtime_services", None))
+        self._link.bind(getattr(context, "runtime_services", None))
         if self._link.requires_confinement:
             if session.state != "new":
                 await session.close_browser()
             raise BrowserUnavailableError(CONFINEMENT_REFUSAL)
+        await session.rejudge_connections()
         return session
 
     def _live_session(self) -> BrowserSession:
@@ -318,13 +321,6 @@ class BrowserPlugin(BasePlugin):
         manager = self._manager
         collect = getattr(manager, "collect_runtime_services", None)
         return collect(None) if callable(collect) else None
-
-    async def _follow_sandbox(self, services: dict[str, Any] | None) -> None:
-        """Rebind the sandbox service; drop open connections when it changed or denies."""
-        changed = self._link.bind(services)
-        session = self._session
-        if session is not None and (changed or self._link.denies_all):
-            await session.drop_connections()
 
     async def _close(self) -> None:
         session = self._session
