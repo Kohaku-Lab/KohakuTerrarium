@@ -3,7 +3,8 @@
 The sandbox remains a plugin: hooks gate known tools and any tool's declared
 ``path_arguments`` and network use (``url_arguments``, ``network_hosts``,
 ``network_access``), while runtime services provide the same policy boundary
-to subprocess-capable tools and to components that open connections.
+to subprocess-capable tools and to components that open connections or write
+files outside a tool call.
 """
 
 import asyncio
@@ -185,6 +186,7 @@ class SandboxPlugin(BasePlugin):
         self._blocked_tools: set[str] = set()
         self._network_allowlist: set[str] = set()
         self._network_policy = SandboxNetworkPolicy(self)
+        self._write_policy = SandboxWritePolicy(self)
         self.refresh_options()
 
     async def on_load(self, context: PluginContext) -> None:
@@ -256,10 +258,14 @@ class SandboxPlugin(BasePlugin):
         return registry.get_tool(tool_name)
 
     def runtime_services(self, context: Any) -> dict[str, Any]:
-        """Expose the subprocess runner and network policy services while enabled."""
+        """Expose the subprocess runner and the policy services while enabled."""
         if not self._enabled:
             return {}
-        return {"subprocess_runner": self, "network_policy": self._network_policy}
+        return {
+            "subprocess_runner": self,
+            "network_policy": self._network_policy,
+            "write_policy": self._write_policy,
+        }
 
     async def run_subprocess_exec(
         self,
@@ -349,6 +355,13 @@ class SandboxPlugin(BasePlugin):
         *,
         literal: bool = False,
     ) -> None:
+        for axis, reason in self._path_denials(path, operation, cwd, literal):
+            self._violate(axis, str(path), f"{tool_name}: {reason}")
+
+    def _path_denials(
+        self, path: Path, operation: str, cwd: Path, literal: bool = False
+    ) -> list[tuple[str, str]]:
+        """Every ``(axis, reason)`` the file policy has against ``path``."""
         axis = "fs_write" if operation == "write" else "fs_read"
         level = getattr(self._profile, axis)
         resolved = (
@@ -360,20 +373,40 @@ class SandboxPlugin(BasePlugin):
             and level != "deny"
             and self._under(resolved, self._write_allow, cwd)
         ):
-            return
-        for denied in self._profile.fs_deny:
-            denied_path = _resolve(denied, cwd).resolve()
-            if _is_relative_to(resolved, denied_path):
-                self._violate(axis, str(path), f"{tool_name}: path is denied")
+            return []
+        denials = [
+            (axis, "path is denied")
+            for denied in self._profile.fs_deny
+            if _is_relative_to(resolved, _resolve(denied, cwd).resolve())
+        ]
         if level == "deny":
-            self._violate(axis, str(path), f"{tool_name}: {axis}=deny")
+            denials.append((axis, f"{axis}=deny"))
         roots = workspace_roots(cwd) if writing else [str(cwd)]
         if level == "workspace" and not self._under(resolved, roots, cwd):
-            self._violate(
-                axis,
-                str(path),
-                f"{tool_name}: path is outside working directory ({cwd})",
-            )
+            denials.append((axis, f"path is outside working directory ({cwd})"))
+        return denials
+
+    def check_write(self, path: str | Path) -> str | None:
+        """Why writing ``path`` is refused, or ``None`` to allow it."""
+        if not self._enabled:
+            return None
+        cwd = self._live_cwd()
+        target = _resolve(str(path), cwd)
+        denials = self._path_denials(target, "write", cwd)
+        if not denials:
+            return None
+        if self._audit:
+            self._check_path("write_policy", target, "write", cwd)
+            return None
+        return denials[0][1]
+
+    def _live_cwd(self) -> Path:
+        """The host agent's current working directory, as its tool calls see it."""
+        agent = self._context.host_agent if self._context is not None else None
+        workspace = getattr(agent, "workspace", None)
+        if workspace is not None:
+            return Path(workspace.get()).resolve()
+        return _context_cwd(None, self._context)
 
     @staticmethod
     def _under(resolved: Path, roots: tuple[str, ...] | list[str], cwd: Path) -> bool:
@@ -471,6 +504,23 @@ class SandboxNetworkPolicy:
     @property
     def requires_os_confinement(self) -> bool:
         return self._plugin.requires_os_confinement()
+
+
+class SandboxWritePolicy:
+    """Live file-write rules of a sandbox plugin, published as ``write_policy``.
+
+    For components that write files outside the tool hooks, such as a browser
+    saving a download. ``check(path)`` gives the decision a write tool's path
+    argument gets, from the current options: ``None`` to allow or a short
+    reason to refuse (audit mode logs and allows). A relative path resolves
+    against the agent's current working directory.
+    """
+
+    def __init__(self, plugin: SandboxPlugin) -> None:
+        self._plugin = plugin
+
+    def check(self, path: str | Path) -> str | None:
+        return self._plugin.check_write(path)
 
 
 @dataclass(slots=True)
