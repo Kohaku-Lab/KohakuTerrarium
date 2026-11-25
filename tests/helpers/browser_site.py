@@ -5,6 +5,7 @@ import ctypes
 import os
 import signal
 import socket
+import subprocess
 import sys
 import threading
 from collections.abc import Callable
@@ -140,7 +141,11 @@ def browsers_env() -> dict[str, str]:
 
 
 def process_alive(pid: int) -> bool:
-    """Whether process ``pid`` is still running (never signals it)."""
+    """Whether process ``pid`` is still running (never signals it).
+
+    A POSIX process that has ended but is not yet reaped by its parent (a
+    zombie) is not running.
+    """
     if sys.platform == "win32":
         kernel32 = ctypes.windll.kernel32
         handle = kernel32.OpenProcess(0x00100000 | 0x1000, False, pid)
@@ -155,8 +160,33 @@ def process_alive(pid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
-    return True
+        pass
+    return not _ended_unreaped(pid)
+
+
+def _ended_unreaped(pid: int) -> bool:
+    """Whether ``pid`` is a zombie or already gone: ``/proc`` on Linux, ``ps`` elsewhere."""
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+        return stat.rpartition(")")[2].split()[:1] in (["Z"], ["X"])
+    try:
+        state = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return state.startswith("Z")
 
 
 def suspend_process(pid: int) -> None:
