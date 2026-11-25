@@ -582,6 +582,12 @@ class TestRefs:
         await session.snapshot()
         again = await session.act([{"kind": "click", "ref": "f1e1"}])
         assert again.meta["ok"], again.text
+        page.raises["frame_document"] = DriverError("a navigation interrupted the call")
+        broken = await session.act([{"kind": "click", "ref": "f1e1"}])
+        assert "1. click f1e1: failed — a navigation interrupted the call" in (
+            broken.text
+        )
+        assert "its frame has since left" not in broken.text
 
     async def test_only_refs_a_result_showed_are_recorded(self, made):
         session, _ = made

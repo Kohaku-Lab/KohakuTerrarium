@@ -17,10 +17,7 @@ from kohakuterrarium.browser.errors import (
     ActionFailedError,
     BrowserTimeoutError,
     ContextDestroyedError,
-    DriverDisconnectedError,
-    DriverError,
     NoTabError,
-    PageClosedError,
     PageNavigatingError,
 )
 from kohakuterrarium.browser.observe import (
@@ -168,19 +165,12 @@ class SessionObserveMixin:
             )
         if self._refs.document(tab.id, ref) is None:
             return
-        try:
-            document = await self._call(
-                tab,
-                lambda: tab.page.evaluate(
-                    FRAME_DOCUMENT_ID_JS, ref=ref, timeout=timeout
-                ),
-                timeout,
-                f"reading the frame of {ref}",
-            )
-        except (DriverDisconnectedError, PageClosedError):
-            raise
-        except (DriverError, BrowserTimeoutError):
-            document = None
+        document = await self._call(
+            tab,
+            lambda: tab.page.evaluate(FRAME_DOCUMENT_ID_JS, ref=ref, timeout=timeout),
+            timeout,
+            f"reading the frame of {ref}",
+        )
         verdict = self._refs.judge_document(tab.id, ref, document)
         if not verdict.ok:
             raise ActionFailedError(verdict.message)
