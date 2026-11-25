@@ -1,6 +1,6 @@
 """The observation pipeline: one page read into a cleaned snapshot tree.
 
-Raw snapshot text (cut at ``RAW_SNAPSHOT_MAX_CHARS``, secrets redacted) →
+Raw snapshot text (secrets redacted, then cut at ``RAW_SNAPSHOT_MAX_CHARS``) →
 ``snapshot.parse`` → per-frame hidden-text probe → ``hidden.apply_probe`` →
 ``snapshot.clean``. An ``iframe`` line whose frame shows another origin than
 the page gets ``[origin=...]``. The CPU-heavy steps run in a worker thread. A
@@ -76,8 +76,10 @@ def cap_text(text: str, limit: int) -> tuple[str, int]:
 
 
 def _prepare(text: str, limit: int, redact: Redact | None) -> tuple[str, int, int]:
-    kept, cut_from = cap_text(text or "", limit)
-    return (redact(kept) if redact else kept), cut_from, len(kept)
+    """``text`` redacted, then capped: the text kept, the length cut from, the length kept."""
+    text = text or ""
+    kept, cut_from = cap_text(redact(text) if redact else text, limit)
+    return kept, cut_from, len(kept)
 
 
 def _fresh(text: str, limit: int, redact: Redact | None) -> dict[str, tuple[str, str]]:
@@ -207,7 +209,7 @@ async def observe(
 ) -> Observation:
     """Read ``page`` through ``call`` (the session's bounded, dialog-aware runner).
 
-    ``redact`` is applied to the raw snapshot text before it is parsed, so
+    ``redact`` is applied to the raw snapshot text before it is capped, so
     no later cut can split a secret. ``boxes`` also reads each element's
     box into ``Observation.boxes``.
     """
@@ -251,8 +253,11 @@ def blocked_reason(record: EgressRecord, policy: NetworkPolicy) -> str:
     return decision.reason if not decision.allowed else record.code
 
 
-def format_blocked_records(records: list[EgressRecord], policy: NetworkPolicy) -> str:
-    """``results.format_blocked`` over proxy records."""
+def format_blocked_records(
+    records: list[EgressRecord], policy: NetworkPolicy, redact: Redact | None = None
+) -> str:
+    """``results.format_blocked`` over proxy records, each host redacted before it is cut."""
+    hide = redact or (lambda text: text)
     return format_blocked(
-        (f"{r.host}:{r.port}", blocked_reason(r, policy)) for r in records
+        (hide(f"{r.host}:{r.port}"), blocked_reason(r, policy)) for r in records
     )

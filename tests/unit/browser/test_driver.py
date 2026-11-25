@@ -158,7 +158,11 @@ class TestWithoutBrowser:
         assert first_line("Error: Page.goto: net::ERR_ABORTED at x") == (
             "net::ERR_ABORTED at x"
         )
-        assert len(first_line("x" * 500)) == 200
+        assert len(first_line("x" * 50_000)) == driver_module.DETAIL_MAX_CHARS
+        assert len(first_line("x" * 500, limit=200)) == 200
+        assert first_line("Error: " + "x" * 190 + "Sx9f2kq-hunter-77").endswith(
+            "Sx9f2kq-hunter-77"
+        )
 
     def test_timeout_reason_reads_the_call_log(self):
         log = (
@@ -218,6 +222,10 @@ class TestWithoutBrowser:
         )
         assert str(nav) == "net::ERR_NAME_NOT_RESOLVED"
         assert nav.detail.endswith("at http://x.test/?q=evil")
+        long = handle.translate(api.Error("Error: " + "x" * 190 + "TAILSECRET"), page)
+        assert long.detail.endswith("TAILSECRET")
+        huge = handle.translate(api.Error("y" * 5_000_000), page)
+        assert len(huge.detail) == driver_module.DETAIL_MAX_CHARS
         timeout = handle.translate(api.TimeoutError("Timeout 300ms exceeded."), page)
         assert isinstance(timeout, DriverTimeoutError)
         assert str(timeout) == "timed out after 0.3 s"

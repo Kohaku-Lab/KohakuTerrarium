@@ -35,6 +35,7 @@ from kohakuterrarium.browser.refs import RefBook
 from kohakuterrarium.browser.secrets import SecretStore
 from kohakuterrarium.browser.session.types import (
     COMPACT_MAX_CHARS,
+    DETAIL_MAX_CHARS,
     PAGE_TEXT_MAX_CHARS,
     DOWNLOAD_WAIT_S,
     BrowserResult,
@@ -148,7 +149,9 @@ class SessionObserveMixin:
         self, tab: Tab, ref: str, fresh: dict[str, tuple[str, str]]
     ) -> None:
         """Raise ``ActionFailedError`` unless ``ref`` is known, unchanged and on the page."""
-        verdict = self._refs.judge(tab.id, ref, fresh)
+        verdict = self._refs.judge(
+            tab.id, ref, fresh, lambda text: self._redact(text, tab)
+        )
         if not verdict.ok:
             raise ActionFailedError(verdict.message, detail=verdict.detail)
         timeout = self.options.action_timeout_s
@@ -166,6 +169,10 @@ class SessionObserveMixin:
     def _redact(self, text: str, tab: Tab | None = None) -> str:
         obs = self._last.get(tab.id) if tab is not None else None
         return self._secrets.redact(text, extra=obs.passwords if obs else ())
+
+    def _detail(self, text: str, tab: Tab | None = None) -> str:
+        """Page-derived error ``text`` redacted, then cut to ``DETAIL_MAX_CHARS``."""
+        return self._redact(text, tab)[:DETAIL_MAX_CHARS]
 
     def _line(self, text: str, limit: int, tab: Tab | None = None) -> str:
         """``text`` redacted, then flattened to one line, then capped at ``limit``."""
@@ -232,7 +239,7 @@ class SessionObserveMixin:
                 f"Download in progress: {self._line(n, fmt.LINE_TEXT)}"
                 for n in in_progress
             ),
-            format_blocked_records(self._take_blocked(), self.policy),
+            format_blocked_records(self._take_blocked(), self.policy, redact),
         ]
         return fmt.join_sections(*page), self._event_notes(opened, in_progress), opened
 
@@ -369,7 +376,7 @@ class SessionObserveMixin:
         text = fmt.join_sections(
             self._header(tab, url),
             line,
-            self._wrap(detail, tab, origin_of(url), url),
+            self._wrap(self._detail(detail, tab), tab, origin_of(url), url),
             self._notes(op, None),
         )
         return BrowserResult(

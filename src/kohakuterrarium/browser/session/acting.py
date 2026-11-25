@@ -256,7 +256,7 @@ class SessionActMixin:
         landed_tab = await self._opened_tab_section(tab, opened, op, url)
         inside = fmt.join_sections(
             self._title_line(tab, obs.title) if obs else "",
-            format_details(report),
+            format_details(report, lambda detail: self._detail(detail, tab)),
             delta,
             events,
         )

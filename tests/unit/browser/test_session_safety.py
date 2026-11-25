@@ -24,6 +24,8 @@ from kohakuterrarium.browser.errors import (
     NoTabError,
     TabLimitError,
 )
+from kohakuterrarium.browser import observe as observe_module
+from kohakuterrarium.browser import snapshot as snap
 from kohakuterrarium.browser.protocol import NavResponse
 from kohakuterrarium.browser.session import observing as observing_module
 from kohakuterrarium.browser.session import types as types_module
@@ -187,6 +189,51 @@ class TestHostilePage:
         page.title_text = "T" * 70 + SECRET + "T" * 70
         result = await session.snapshot()
         assert_no_secret(result.text)
+        limit = observe_module.RAW_SNAPSHOT_MAX_CHARS
+        head = "- paragraph: "
+        page.snapshot_text = head + "x" * (limit - len(head) - 8) + SECRET + " tail"
+        result = await session.snapshot()
+        assert_no_secret(result.text)
+        kept = session._last["t1"]
+        assert kept.cut_from and kept.nodes
+        assert_no_secret("".join(snap.line_of(n) for n in kept.nodes))
+        page.snapshot_text = PAGE
+        await session.snapshot()
+        page.eval_value = None
+        page.raises["evaluate"] = DriverError(
+            "the call failed", detail="Error: " + "x" * 190 + SECRET
+        )
+        result = await session.evaluate("x")
+        assert result.is_error and "Error: xxx" in result.text
+        assert_no_secret(result.text)
+        del page.raises["evaluate"]
+        page.raises["goto"] = DriverError(
+            "net::ERR_FAILED", detail="Error: " + "x" * 190 + SECRET
+        )
+        result = await session.navigate("http://shop.test/next")
+        assert result.is_error and "Error: xxx" in result.text
+        assert_no_secret(result.text)
+        del page.raises["goto"]
+        page.raises["click"] = DriverError(
+            "the call failed", detail="Error: " + "x" * 190 + SECRET
+        )
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert result.is_error and "Action 1: Error: xxx" in result.text
+        assert_no_secret(result.text)
+        page.raises["click"] = DriverError("the call failed", detail="z" * 50_000)
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert "z" * types_module.DETAIL_MAX_CHARS in result.text
+        assert "z" * (types_module.DETAIL_MAX_CHARS + 1) not in result.text
+        del page.raises["click"]
+        page.raises["evaluate"] = DriverError("the call failed", detail="z" * 50_000)
+        result = await session.evaluate("x")
+        assert "z" * (types_module.DETAIL_MAX_CHARS + 1) not in result.text
+        page.raises["snapshot"] = DriverError(
+            "the call failed", detail="z" * 50_000 + SECRET
+        )
+        with pytest.raises(DriverError) as info:
+            await session.snapshot()
+        assert info.value.detail == "z" * types_module.DETAIL_MAX_CHARS
         await session.close()
 
 
@@ -261,6 +308,17 @@ class TestFormats:
             assert "ref e2 now points at a different element" in out
             assert "Sell" not in out and "Buy" not in out
             assert 'was button "Buy" but now points at button "Sell"' in result.text
+
+    async def test_a_stale_ref_detail_never_splits_a_password(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        value = "Pw-77-typed-into-the-form"
+        page.probe_results = [{"hidden": [], "visible": [], "passwords": [value]}]
+        page.snapshot_text = PAGE.replace('"Buy"', f'"{"a" * 20}{value}{"b" * 60}"')
+        result = await session.act([{"kind": "click", "ref": "e2"}])
+        assert "Action 1: ref e2 was button" in result.text
+        assert "Pw-77" not in result.text
 
     async def test_stale_ref_act_keeps_names_inside(self, made):
         session, driver = made
@@ -367,6 +425,24 @@ class TestBlockedAttribution:
         page.handlers["goto"] = goto
         result = await session.navigate("https://evil.test/")
         assert not result.is_error and "SYSTEM" not in result.text
+
+    async def test_a_long_blocked_host_never_splits_a_secret(
+        self, tmp_path, monkeypatch
+    ):
+        token = "qx9f2kq-hunter-77"
+        monkeypatch.setenv("KT_T_BROWSER_TOKEN", token)
+        session, _ = make(
+            tmp_path,
+            block_hosts=["*.evil.test"],
+            secrets={"tok": "env:KT_T_BROWSER_TOKEN"},
+        )
+        await session.snapshot()
+        host = "x" * 50 + "." + token + "." + "y" * 50 + ".evil.test"
+        await self.proxied_get(session, host)
+        result = await session.snapshot()
+        assert "Blocked 1 request:" in result.text
+        assert not [p for p in slices(token) if p in result.text], result.text
+        await session.close()
 
     async def test_blocked_hop_in_the_redirect_chain_is_named(self, tmp_path):
         session, driver = make(tmp_path, block_hosts=["b.test", "c.test"])

@@ -772,8 +772,15 @@ def format_report(report: BatchReport) -> str:
     return "\n".join(lines)
 
 
-def format_details(report: BatchReport) -> str:
-    """``Action N: <detail>`` lines of page-derived detail, for inside the wrapper."""
+def format_details(
+    report: BatchReport, shown: Callable[[str], str] = lambda detail: detail
+) -> str:
+    """``Action N: <detail>`` lines of page-derived detail, for inside the wrapper.
+
+    ``shown`` turns each detail into the text that is shown.
+    """
     return "\n".join(
-        f"Action {o.action.index + 1}: {o.detail}" for o in report.outcomes if o.detail
+        f"Action {o.action.index + 1}: {shown(o.detail)}"
+        for o in report.outcomes
+        if o.detail
     )

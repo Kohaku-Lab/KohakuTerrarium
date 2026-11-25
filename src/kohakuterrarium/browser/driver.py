@@ -33,6 +33,7 @@ INSTALL_HINT = (
 )
 CLEANUP_TIMEOUT_S = 10.0
 REASON_CHARS = 200
+DETAIL_MAX_CHARS = 10_000
 DRAG_STEPS = 8
 _TIMEOUT_HINTS = (
     (
@@ -70,11 +71,15 @@ def load_playwright() -> Any:
     return async_api
 
 
-def first_line(message: str) -> str:
-    """The first line of a Playwright error without its ``Locator.click:`` prefix, capped."""
+def first_line(message: str, limit: int = DETAIL_MAX_CHARS) -> str:
+    """The first line of a Playwright error without its ``Locator.click:`` prefix.
+
+    Capped at ``limit``: generous by default, since the session redacts the
+    line before it shortens it for display.
+    """
     line = (message or "").strip().split("\n", 1)[0].strip()
     line = _CALL_PREFIX.sub("", line)
-    return line[:REASON_CHARS]
+    return line[:limit]
 
 
 def timeout_reason(message: str) -> str:
@@ -649,7 +654,7 @@ class PlaywrightDriver:
                     return None, context
                 browser = await playwright.chromium.launch(**kwargs)
             except api.Error as exc:
-                failures.append((candidate, first_line(str(exc))))
+                failures.append((candidate, first_line(str(exc), REASON_CHARS)))
                 continue
             try:
                 context = await browser.new_context(**plan.context_kwargs())

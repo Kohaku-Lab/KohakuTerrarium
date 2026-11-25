@@ -134,7 +134,7 @@ class SessionCaptureMixin:
                 raise
             except DriverError as exc:
                 failed = True
-                body = f"The script threw: {exc.detail or exc}"
+                body = f"The script threw: {self._detail(exc.detail or str(exc), tab)}"
             body = self._redact(body, tab)
             if len(body) > EVAL_MAX_CHARS:
                 cut = len(body) - EVAL_MAX_CHARS

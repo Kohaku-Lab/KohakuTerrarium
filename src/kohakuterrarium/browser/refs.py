@@ -7,10 +7,11 @@ snapshot before acting on it.
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 Fingerprint = tuple[str, str]
+Redact = Callable[[str], str]
 MAX_REFS_PER_TAB = 5000
 NAME_MAX = 60
 
@@ -36,9 +37,9 @@ class RefVerdict:
         return self.status == "ok"
 
 
-def _describe(fingerprint: Fingerprint) -> str:
+def _describe(fingerprint: Fingerprint, redact: Redact | None) -> str:
     role, name = fingerprint
-    name = _SPACE.sub(" ", name).strip()
+    name = _SPACE.sub(" ", redact(name) if redact else name).strip()
     if len(name) > NAME_MAX:
         head = (NAME_MAX - 1) // 2
         name = name[:head] + "…" + name[len(name) - (NAME_MAX - 1 - head) :]
@@ -77,9 +78,16 @@ class RefBook:
         return bool(self._tabs.get(tab_id))
 
     def judge(
-        self, tab_id: str, ref: str, fresh: Mapping[str, Fingerprint]
+        self,
+        tab_id: str,
+        ref: str,
+        fresh: Mapping[str, Fingerprint],
+        redact: Redact | None = None,
     ) -> RefVerdict:
-        """Judge ``ref`` against ``fresh``, the fingerprints of a new full snapshot."""
+        """Judge ``ref`` against ``fresh``, the fingerprints of a new full snapshot.
+
+        ``redact`` is applied to the names a ``detail`` shows before they are cut.
+        """
         seen = self._tabs.get(tab_id, {}).get(ref)
         now = fresh.get(ref)
         if now is None:
@@ -90,7 +98,7 @@ class RefBook:
                 "stale",
                 ref,
                 f"ref {ref} is no longer on the page; take a snapshot to get current refs",
-                f"ref {ref} was {_describe(seen)}",
+                f"ref {ref} was {_describe(seen, redact)}",
             )
         if seen is None:
             return RefVerdict(
@@ -105,6 +113,7 @@ class RefBook:
                 ref,
                 f"ref {ref} now points at a different element; take a snapshot to "
                 "get current refs",
-                f"ref {ref} was {_describe(seen)} but now points at {_describe(now)}",
+                f"ref {ref} was {_describe(seen, redact)} but now points at "
+                f"{_describe(now, redact)}",
             )
         return RefVerdict("ok", ref, "")

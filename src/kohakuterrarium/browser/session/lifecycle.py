@@ -32,6 +32,7 @@ from kohakuterrarium.browser.session.sink import LaunchSink
 from kohakuterrarium.browser.session.types import (
     CALL_MARGIN_S,
     CLOSED,
+    DETAIL_MAX_CHARS,
     LAUNCHING,
     LOST_CRASH,
     LOST_HUNG,
@@ -202,6 +203,7 @@ class SessionLifecycleMixin:
             exc = NoTabError("the tab was closed during the call")
         if isinstance(exc, BrowserError):
             exc.with_text(self._redact)
+            exc.detail = exc.detail[:DETAIL_MAX_CHARS]
         return exc
 
     async def _ensure_ready(self, op: Op) -> None:

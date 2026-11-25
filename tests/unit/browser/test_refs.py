@@ -189,3 +189,14 @@ class TestPageNames:
         assert "\n" not in detail
         assert "Z" * 61 not in detail and "…" in detail
         assert detail.startswith('ref e2 was button "Buy" but now points at button "')
+
+    def test_detail_names_are_redacted_before_they_are_cut(self):
+        book = RefBook()
+        value = "PASSWORD-VALUE-9"
+        name = "a" * 20 + value + "b" * 60
+        book.record("t1", {"e2": ("button", "Buy"), "e3": ("button", name)})
+        hide = lambda text: text.replace(value, "[password]")  # noqa: E731
+        changed = book.judge("t1", "e2", {"e2": ("button", name)}, redact=hide)
+        gone = book.judge("t1", "e3", {}, redact=hide)
+        for verdict in (changed, gone):
+            assert "PASSWORD" not in verdict.detail and "[password" in verdict.detail

@@ -50,6 +50,12 @@ def test_blocked_reason_by_address_host_or_code():
     assert format_blocked_records([by_host], policy) == (
         "Blocked 1 request:\n  bad.test:443 (bad.test is in block_hosts)"
     )
+    long_host = EgressRecord(
+        "a" * 50 + ".tok-value-1." + "b" * 70, 80, "GET", True, "x"
+    )
+    hide = lambda text: text.replace("tok-value-1", "[secret:t]")  # noqa: E731
+    listed = format_blocked_records([long_host], policy, hide)
+    assert "tok-" not in listed and "[secr" in listed
 
 
 class Page:
@@ -101,13 +107,25 @@ async def test_observe_redacts_before_parsing_and_reports_the_cut():
         redact=lambda text: text.replace("SECRET-1234", "[secret:x]"),
         max_chars=60,
     )
-    assert obs.cut_from == 71 and obs.raw_chars == 53
+    assert obs.cut_from == 70 and obs.raw_chars == 52
     assert obs.fresh == {"e1": ("button", "Go")}
     rendered = "\n".join(snap.line_of(n) for n in obs.nodes)
     assert "[secret:x]" in rendered and "SECRET" not in rendered
     assert "tail" not in rendered
     fresh = await read_fresh(Secretive(), run, 1.0, max_chars=30)
     assert fresh == {"e1": ("button", "Go")}
+
+
+class Straddling(Secretive):
+    async def snapshot(self, timeout):
+        return "- paragraph: " + "x" * 37 + "SECRET-1234 tail"
+
+
+async def test_a_cut_without_a_line_break_never_splits_a_secret():
+    redact = lambda text: text.replace("SECRET-1234", "[secret:x]")  # noqa: E731
+    obs = await observe(Straddling(), run, 1.0, redact=redact, max_chars=55)
+    rendered = "\n".join(snap.line_of(n) for n in obs.raw)
+    assert obs.cut_from and "SECRE" not in rendered and "[secr" in rendered
 
 
 class Framed(Page):
