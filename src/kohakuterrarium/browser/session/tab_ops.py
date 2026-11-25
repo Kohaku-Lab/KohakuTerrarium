@@ -34,6 +34,7 @@ class SessionTabsMixin:
     _stale: list[Stack]
     _state: str
     _expect_page: int
+    _late_opens: int
     _max_tabs: int
     _arrived: list[PageDriver]
     _refused_pages: set[PageDriver]
@@ -54,6 +55,7 @@ class SessionTabsMixin:
                 lambda: asyncio.shield(opening), timeout, "opening a tab"
             )
         except BrowserTimeoutError:
+            self._late_opens += 1
             self._spawn(self._finish_late_open(opening, timeout))
             raise
         except BaseException:
@@ -67,7 +69,8 @@ class SessionTabsMixin:
     async def _finish_late_open(self, opening: asyncio.Future, timeout: float) -> None:
         """Wait, one more ``timeout``, for a tab open that timed out; close the tab it made.
 
-        Pages that arrived meanwhile are admitted as opened by the site.
+        Pages that arrived meanwhile are admitted as opened by the site once
+        no other open is waiting for its own page.
         """
         own = None
         try:
@@ -76,12 +79,15 @@ class SessionTabsMixin:
             own = None
         finally:
             self._expect_page -= 1
-            arrived, self._arrived = self._arrived, []
+            self._late_opens -= 1
             if own is not None:
+                if own in self._arrived:
+                    self._arrived.remove(own)
                 self._refused_pages.add(own)
                 self._spawn(own.close(timeout))
-            for page in arrived:
-                if page is not own:
+            if not self._expect_page:
+                arrived, self._arrived = self._arrived, []
+                for page in arrived:
                     self._admit_by_page(page)
 
     async def tabs_list(self) -> BrowserResult:

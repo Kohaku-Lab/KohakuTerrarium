@@ -851,6 +851,36 @@ class TestCaps:
         assert "Tab opened: t2 http://pop.test/" in listing.text
         assert "about:blank" not in listing.text
 
+    async def test_a_later_open_does_not_take_a_pending_late_page(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        real = browser.new_page
+        release = asyncio.Event()
+        own = []
+
+        async def slow_once(timeout):
+            page = await real(timeout)
+            own.append(page)
+            if len(own) == 1:
+                await release.wait()
+            return page
+
+        browser.new_page = slow_once
+        browser.sink.window_opening(browser.page)
+        with pytest.raises(BrowserTimeoutError):
+            await session.tab_new()
+        await session.tab_new()
+        second = session._tabs.active
+        assert second.page is own[1] and not second.opened_by_page
+        assert session._tabs.find(own[0]) is None
+        assert session._windows_due == 1 and session._windows_early == 0
+        release.set()
+        await asyncio.sleep(0.05)
+        assert own[0].closed and session._tabs.find(own[0]) is None
+        assert session._windows_due == 1 and session._windows_early == 0
+        assert session._expect_page == 0 and session._arrived == []
+
     async def test_an_own_tab_open_that_never_finishes_falls_back(self, made):
         session, driver = made
         await session.snapshot()

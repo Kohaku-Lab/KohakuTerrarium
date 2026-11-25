@@ -96,6 +96,7 @@ class SessionLifecycleMixin:
         self._teardowns: set[asyncio.Task] = set()
         self._background: set[asyncio.Task] = set()
         self._expect_page = 0
+        self._late_opens = 0
         self._max_tabs = MAX_TABS
         self._refused_tabs = 0
         self._windows_due = 0
@@ -476,13 +477,17 @@ class SessionLifecycleMixin:
         """Admit the pages that opened while the session opened ``own``.
 
         ``own`` (already allowed by the cap) is admitted first and stays
-        active; the others count as opened by the page.
+        active; the others count as opened by the page, and stay buffered
+        while a timed-out open may still claim one of them.
         """
         arrived, self._arrived = self._arrived, []
         tab = None if own is None else self._tabs.add(own)
-        for page in arrived:
-            if page is not own:
-                self._admit_by_page(page)
+        others = [page for page in arrived if page is not own]
+        if self._late_opens:
+            self._arrived = others
+            others = []
+        for page in others:
+            self._admit_by_page(page)
         if tab is not None:
             self._tabs.select(tab.id)
         return tab
