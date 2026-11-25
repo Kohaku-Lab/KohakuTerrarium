@@ -9,12 +9,14 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 Fingerprint = tuple[str, str]
 Redact = Callable[[str], str]
 MAX_REFS_PER_TAB = 5000
 NAME_MAX = 60
 
+_FRAME_PREFIX = re.compile(r"f\d+(?=e\d+$)")
 _SPACE = re.compile(r"[\x00-\x20\x7f-\x9f\u2028\u2029]+")
 
 
@@ -49,22 +51,37 @@ def _describe(fingerprint: Fingerprint, redact: Redact | None) -> str:
 class RefBook:
     """Fingerprints of the refs returned to the model, kept per tab id.
 
+    A ref inside an iframe also keeps the document id its frame showed.
     Each tab holds at most ``max_refs`` entries; the least recently recorded
     ref is forgotten first.
     """
 
     def __init__(self, max_refs: int = MAX_REFS_PER_TAB) -> None:
         self.max_refs = max_refs
-        self._tabs: dict[str, dict[str, Fingerprint]] = {}
+        self._tabs: dict[str, dict[str, tuple[Fingerprint, Any]]] = {}
 
-    def record(self, tab_id: str, shown: Mapping[str, Fingerprint]) -> None:
-        """Remember the refs a result just showed; called at the end of each tool call."""
+    def record(
+        self,
+        tab_id: str,
+        shown: Mapping[str, Fingerprint],
+        frames: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Remember the refs a result just showed; called at the end of each tool call.
+
+        ``frames`` maps a ref prefix (``f2``) to the document id that frame showed.
+        """
         book = self._tabs.setdefault(tab_id, {})
+        frames = frames or {}
         for ref, fingerprint in shown.items():
             book.pop(ref, None)
-            book[ref] = fingerprint
+            book[ref] = (fingerprint, frames.get(frame_prefix(ref)))
         while len(book) > self.max_refs:
             del book[next(iter(book))]
+
+    def document(self, tab_id: str, ref: str) -> Any:
+        """The document id of the frame ``ref`` was shown in; ``None`` when not known."""
+        entry = self._tabs.get(tab_id, {}).get(ref)
+        return entry[1] if entry else None
 
     def reset(self, tab_id: str | None = None) -> None:
         """Forget one tab (navigation, close) or every tab when ``tab_id`` is None."""
@@ -88,7 +105,8 @@ class RefBook:
 
         ``redact`` is applied to the names a ``detail`` shows before they are cut.
         """
-        seen = self._tabs.get(tab_id, {}).get(ref)
+        entry = self._tabs.get(tab_id, {}).get(ref)
+        seen = entry[0] if entry else None
         now = fresh.get(ref)
         if now is None:
             if seen is None:
@@ -117,3 +135,21 @@ class RefBook:
                 f"{_describe(now, redact)}",
             )
         return RefVerdict("ok", ref, "")
+
+    def judge_document(self, tab_id: str, ref: str, document: Any) -> RefVerdict:
+        """Stale when ``ref``'s frame now shows another ``document`` than when shown."""
+        shown = self.document(tab_id, ref)
+        if shown is None or shown == document:
+            return RefVerdict("ok", ref, "")
+        return RefVerdict(
+            "stale",
+            ref,
+            f"ref {ref} is from a page its frame has since left; take a snapshot to "
+            "get current refs",
+        )
+
+
+def frame_prefix(ref: str) -> str:
+    """The frame part of ``ref`` (``f2`` of ``f2e7``); empty for a plain ``e7``."""
+    match = _FRAME_PREFIX.match(ref)
+    return match.group(0) if match else ""

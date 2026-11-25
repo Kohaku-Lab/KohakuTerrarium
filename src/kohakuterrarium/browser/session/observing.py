@@ -17,7 +17,10 @@ from kohakuterrarium.browser.errors import (
     ActionFailedError,
     BrowserTimeoutError,
     ContextDestroyedError,
+    DriverDisconnectedError,
+    DriverError,
     NoTabError,
+    PageClosedError,
     PageNavigatingError,
 )
 from kohakuterrarium.browser.observe import (
@@ -30,6 +33,7 @@ from kohakuterrarium.browser.observe import (
 )
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.policy import NetworkPolicy
+from kohakuterrarium.browser.protocol import FRAME_DOCUMENT_ID_JS
 from kohakuterrarium.browser.proxy import EgressRecord
 from kohakuterrarium.browser.refs import RefBook
 from kohakuterrarium.browser.secrets import SecretStore
@@ -162,6 +166,24 @@ class SessionObserveMixin:
             raise ActionFailedError(
                 f"ref {ref} is no longer on the page; take a snapshot to get current refs"
             )
+        if self._refs.document(tab.id, ref) is None:
+            return
+        try:
+            document = await self._call(
+                tab,
+                lambda: tab.page.evaluate(
+                    FRAME_DOCUMENT_ID_JS, ref=ref, timeout=timeout
+                ),
+                timeout,
+                f"reading the frame of {ref}",
+            )
+        except (DriverDisconnectedError, PageClosedError):
+            raise
+        except (DriverError, BrowserTimeoutError):
+            document = None
+        verdict = self._refs.judge_document(tab.id, ref, document)
+        if not verdict.ok:
+            raise ActionFailedError(verdict.message)
 
     async def _render(self, nodes: list[snap.Node], **options: Any) -> snap.Rendered:
         return await asyncio.to_thread(lambda: snap.render(nodes, **options))
@@ -297,7 +319,7 @@ class SessionObserveMixin:
 
         ``full`` is false when ``rendered`` lists only the interactive elements.
         """
-        self._refs.record(tab.id, rendered.fingerprints)
+        self._refs.record(tab.id, rendered.fingerprints, obs.frame_docs)
         if not obs.nodes and LOADING not in op.notes:
             op.notes.append(LOADING)
         body = fmt.join_sections(

@@ -21,7 +21,13 @@ from PIL import Image
 
 from kohakuterrarium.browser.errors import DriverDisconnectedError, PageClosedError
 from kohakuterrarium.browser.launch import LaunchPlan
-from kohakuterrarium.browser.protocol import DOCUMENT_ID_JS, NavResponse, ProbeFrames
+from kohakuterrarium.browser.protocol import (
+    DOCUMENT_ID_JS,
+    FRAME_DOCUMENT_ID_JS,
+    FrameView,
+    NavResponse,
+    ProbeFrames,
+)
 from kohakuterrarium.browser.settle import QUIET_JS
 
 _DOCS = itertools.count(1)
@@ -123,6 +129,8 @@ class ScriptedPage:
         self.probe_results: list[Any] = [{"hidden": [], "visible": [], "passwords": []}]
         self.probe_failed = 0
         self.frame_url_map: dict[str, str] = {}
+        self.frame_doc_map: dict[str, Any] = {}
+        self.frame_prefixes: dict[str, str] = {}
         self.eval_value: Any = None
         self.history_back: list[str] = []
         self.closed = False
@@ -219,9 +227,15 @@ class ScriptedPage:
             return ProbeFrames(list(self.probe_results), self.probe_failed)
         return result
 
-    async def frame_urls(self, refs, timeout: float) -> dict[str, str]:
-        known = {ref: url for ref, url in self.frame_url_map.items() if ref in refs}
-        return await self._do("frame_urls", known, refs=list(refs), timeout=timeout)
+    async def frame_views(self, refs, timeout: float) -> dict[str, FrameView]:
+        """Views from ``frame_url_map`` (URL) and ``frame_doc_map`` (document id)."""
+        known = {**dict.fromkeys(self.frame_doc_map, ""), **self.frame_url_map}
+        views = {
+            ref: FrameView(url, self.frame_doc_map.get(ref))
+            for ref, url in known.items()
+            if ref in refs
+        }
+        return await self._do("frame_views", views, refs=list(refs), timeout=timeout)
 
     async def evaluate(
         self,
@@ -233,6 +247,11 @@ class ScriptedPage:
     ) -> Any:
         if expression == DOCUMENT_ID_JS:
             return await self._do("document_id", self.doc, timeout=timeout)
+        if expression == FRAME_DOCUMENT_ID_JS:
+            prefix = ref.rsplit("e", 1)[0] if ref else ""
+            frame = self.frame_prefixes.get(prefix)
+            doc = self.frame_doc_map.get(frame) if frame else None
+            return await self._do("frame_document", doc, ref=ref, timeout=timeout)
         if expression == QUIET_JS:
             return await self._do("settle", "quiet", arg=arg, timeout=timeout)
         return await self._do(

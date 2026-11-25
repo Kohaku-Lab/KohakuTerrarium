@@ -18,7 +18,7 @@ from kohakuterrarium.browser.observe import (
     read_fresh,
 )
 from kohakuterrarium.browser.policy import NetworkPolicy
-from kohakuterrarium.browser.protocol import ProbeFrames
+from kohakuterrarium.browser.protocol import FrameView, ProbeFrames
 from kohakuterrarium.browser.proxy import EgressRecord
 
 
@@ -131,9 +131,15 @@ async def test_a_cut_without_a_line_break_never_splits_a_secret():
 class Framed(Page):
     url = "https://shop.test/checkout"
 
-    def __init__(self, frames: dict[str, str] | Exception | None = None, count=0):
+    def __init__(
+        self,
+        frames: dict[str, str] | Exception | None = None,
+        count=0,
+        docs: dict[str, float] | None = None,
+    ):
         self.frames = frames if frames is not None else {}
         self.count = count
+        self.docs = docs or {}
         self.asked: list[list[str]] = []
 
     async def snapshot(self, timeout):
@@ -154,11 +160,16 @@ class Framed(Page):
     async def probe(self, script, timeout):
         return ProbeFrames([])
 
-    async def frame_urls(self, refs, timeout):
+    async def frame_views(self, refs, timeout):
         self.asked.append(list(refs))
         if isinstance(self.frames, Exception):
             raise self.frames
-        return {ref: url for ref, url in self.frames.items() if ref in refs}
+        known = {**dict.fromkeys(self.docs, ""), **self.frames}
+        return {
+            ref: FrameView(url, self.docs.get(ref))
+            for ref, url in known.items()
+            if ref in refs
+        }
 
 
 def iframe_lines(obs) -> list[str]:
@@ -201,6 +212,13 @@ async def test_a_frame_from_another_origin_names_its_origin():
         "iframe [ref=e4]:",
         "iframe [ref=e6] [origin=http://[::1]:9000]:",
     ]
+
+
+async def test_frame_documents_are_keyed_by_the_ref_prefix_of_their_content():
+    page = Framed({"e2": "https://pay.test/x"}, docs={"e2": 11.5, "e4": 12.5, "e6": 13})
+    obs = await observe(page, run, 1.0)
+    assert obs.frame_docs == {"f1": 11.5, "f3": 13}
+    assert (await observe(Framed(DriverError("gone")), run, 1.0)).frame_docs == {}
 
 
 async def test_frame_origins_are_redacted():

@@ -25,8 +25,14 @@ from kohakuterrarium.browser.errors import (
 )
 from kohakuterrarium.browser.hidden import PROBE_JS, ProbeResult, apply_probe
 from kohakuterrarium.browser.policy import NetworkPolicy, parse_ip
-from kohakuterrarium.browser.protocol import DOCUMENT_ID_JS, PageDriver, ProbeFrames
+from kohakuterrarium.browser.protocol import (
+    DOCUMENT_ID_JS,
+    FrameView,
+    PageDriver,
+    ProbeFrames,
+)
 from kohakuterrarium.browser.proxy import EgressRecord
+from kohakuterrarium.browser.refs import frame_prefix
 from kohakuterrarium.browser.results import format_blocked
 
 Call = Callable[[Callable[[], Awaitable[Any]], float, str], Awaitable[Any]]
@@ -46,7 +52,8 @@ class Observation:
     that results are rendered from. When the raw text was cut,
     ``cut_from`` is its full length and ``raw_chars`` the length kept.
     ``boxes`` maps refs to ``x,y,w,h`` when the read asked for boxes; the
-    trees never carry them.
+    trees never carry them. ``frame_docs`` maps the ref prefix of an
+    iframe's content (``f2``) to that frame's document id.
     """
 
     doc_id: Any
@@ -61,6 +68,7 @@ class Observation:
     cut_from: int = 0
     raw_chars: int = 0
     boxes: dict[str, str] = field(default_factory=dict)
+    frame_docs: dict[str, Any] = field(default_factory=dict)
 
     @property
     def origin(self) -> str:
@@ -96,15 +104,31 @@ def _mark_frames(nodes: list[snap.Node], origins: dict[str, str]) -> list[snap.N
     return out
 
 
+def _frame_docs(nodes: list[snap.Node], docs: dict[str, Any]) -> dict[str, Any]:
+    """``{ref prefix of an iframe's content: its frame's document id}``."""
+    found: dict[str, Any] = {}
+    for node, _, _ in snap.walk(nodes):
+        if node.role != "iframe" or docs.get(node.uid or "") is None:
+            continue
+        inner = (frame_prefix(n.uid or "") for n, _, _ in snap.walk(node.children))
+        prefix = next((p for p in inner if p), "")
+        if prefix:
+            found[prefix] = docs[node.uid]
+    return found
+
+
 def _process(
     text: str,
     results: list[Any],
     limit: int,
     redact: Redact | None,
-    origins: dict[str, str] | None = None,
+    views: dict[str, FrameView] | None = None,
+    page_origin: str | None = None,
 ) -> dict[str, Any]:
     prepared, cut_from, kept = _prepare(text, limit, redact)
     raw, boxes = snap.split_boxes(snap.parse(prepared))
+    views = views or {}
+    origins = _origins(views, page_origin, redact)
     outcome = apply_probe(raw, ProbeResult.merge(results))
     nodes = _mark_frames(outcome.nodes, origins) if origins else outcome.nodes
     return {
@@ -116,6 +140,7 @@ def _process(
         "cut_from": cut_from,
         "raw_chars": kept if cut_from else 0,
         "boxes": boxes,
+        "frame_docs": _frame_docs(raw, {ref: v.doc for ref, v in views.items()}),
     }
 
 
@@ -143,25 +168,31 @@ def _web_origin(url: str) -> str | None:
     return f"{scheme}://{host}"
 
 
-async def _frame_origins(
-    page: PageDriver, call: Call, timeout: float, text: str, redact: Redact | None
-) -> dict[str, str]:
-    """``{iframe ref: origin}`` for frames showing another origin than the page."""
+async def _frame_views(
+    page: PageDriver, call: Call, timeout: float, text: str
+) -> tuple[dict[str, FrameView], str | None]:
+    """What the first ``MAX_FRAME_ORIGINS`` iframes of ``text`` show, and the page origin."""
     refs = list(dict.fromkeys(_IFRAME_REF.findall(text)))[:MAX_FRAME_ORIGINS]
     if not refs:
-        return {}
+        return {}, None
     try:
-        urls = await call(
-            lambda: page.frame_urls(refs, timeout), timeout, "reading frame addresses"
+        views = await call(
+            lambda: page.frame_views(refs, timeout), timeout, "reading frame addresses"
         )
     except (DriverDisconnectedError, PageClosedError, DialogOpenedError):
         raise
     except (DriverError, BrowserTimeoutError):
-        return {}
-    page_origin = _web_origin(page.url)
+        return {}, None
+    return views, _web_origin(page.url)
+
+
+def _origins(
+    views: dict[str, FrameView], page_origin: str | None, redact: Redact | None
+) -> dict[str, str]:
+    """``{iframe ref: origin}`` for frames showing another origin than the page."""
     origins = {}
-    for ref, url in urls.items():
-        origin = _web_origin(url) if isinstance(url, str) else None
+    for ref, view in views.items():
+        origin = _web_origin(view.url) if isinstance(view.url, str) else None
         if origin is not None and origin != page_origin:
             origins[ref] = redact(origin) if redact else origin
     return origins
@@ -231,9 +262,9 @@ async def observe(
         frames = ProbeFrames([])
         note = f"Hidden-text check skipped ({exc}); visually hidden text may be shown."
     kept, _ = cap_text(text or "", max_chars)
-    origins = await _frame_origins(page, call, timeout, kept, redact)
+    views, page_origin = await _frame_views(page, call, timeout, kept)
     parts = await asyncio.to_thread(
-        _process, text, list(frames.results), max_chars, redact, origins
+        _process, text, list(frames.results), max_chars, redact, views, page_origin
     )
     title = await call(lambda: page.title(timeout), timeout, "reading the title")
     return Observation(

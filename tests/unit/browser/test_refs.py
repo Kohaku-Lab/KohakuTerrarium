@@ -45,6 +45,36 @@ class TestJudge:
             'ref f1e4 was textbox "SAME input" but now points at textbox "SAMEP2 input"'
         )
 
+    def test_iframe_ref_reuse_with_the_same_role_and_name_is_stale(self):
+        book = RefBook()
+        book.record("t1", fps(FRAME_BEFORE), {"f1": 100.5})
+        reused = fps(FRAME_BEFORE)
+        assert book.judge("t1", "f1e2", reused).ok
+        assert book.document("t1", "f1e2") == 100.5
+        verdict = book.judge_document("t1", "f1e2", 200.5)
+        assert verdict.status == "stale" and not verdict.ok
+        assert verdict.message == (
+            "ref f1e2 is from a page its frame has since left; take a snapshot to "
+            "get current refs"
+        )
+        assert book.judge_document("t1", "f1e2", 100.5).ok
+
+    def test_documents_follow_their_refs(self):
+        book = RefBook(max_refs=2)
+        book.record("t1", {"e1": ("button", "A"), "f1e1": ("button", "B")}, {"f1": 1})
+        assert book.document("t1", "e1") is None
+        assert book.document("t1", "f1e1") == 1
+        assert book.document("t1", "f9e1") is None
+        book.record("t1", {"f1e1": ("button", "B")}, {"f1": 2})
+        assert book.document("t1", "f1e1") == 2
+        book.record("t1", {"f2e1": ("button", "C")})
+        assert book.document("t1", "f2e1") is None
+        assert book.judge_document("t1", "f2e1", 7).ok
+        book.record("t1", {"e2": ("button", "D")})
+        assert book.document("t1", "f1e1") is None, "evicted with its ref"
+        book.reset("t1")
+        assert book.document("t1", "f2e1") is None
+
     def test_role_change_alone_is_stale(self):
         book = RefBook()
         book.record("t1", fps(FRAME_BEFORE))

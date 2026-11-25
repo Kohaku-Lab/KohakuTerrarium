@@ -329,7 +329,7 @@ class SessionActMixin:
                 raise
             return f"Could not read tab {active.id} yet; take a snapshot of it."
         rendered, full = await self._page_view(obs, op)
-        self._refs.record(active.id, rendered.fingerprints)
+        self._refs.record(active.id, rendered.fingerprints, obs.frame_docs)
         return fmt.join_sections(
             self._header(active, obs.url),
             self._wrap(
@@ -370,7 +370,7 @@ class SessionActMixin:
                     redact(after.title, tab),
                 ) or (f"Reloaded: {self._line(after.url, fmt.LINE_URL, tab)}")
             rendered, full = await self._page_view(after, op)
-            self._refs.record(tab.id, rendered.fingerprints)
+            self._refs.record(tab.id, rendered.fingerprints, after.frame_docs)
             return fmt.join_sections(
                 nav,
                 _now("Page now", full),
@@ -379,7 +379,7 @@ class SessionActMixin:
             )
         diff = await asyncio.to_thread(fmt.diff_snapshots, before.nodes, after.nodes)
         page = await self._page_instead(after, diff)
-        self._refs.record(tab.id, (page or diff).fingerprints)
+        self._refs.record(tab.id, (page or diff).fingerprints, after.frame_docs)
         nav = fmt.format_navigation(
             redact(before.url, tab),
             redact(after.url, tab),

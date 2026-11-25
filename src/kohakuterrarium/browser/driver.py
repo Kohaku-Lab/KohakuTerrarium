@@ -21,7 +21,13 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
 )
 from kohakuterrarium.browser.launch import Candidate, LaunchPlan, check_event_loop
-from kohakuterrarium.browser.protocol import EventSink, NavResponse, ProbeFrames
+from kohakuterrarium.browser.protocol import (
+    DOCUMENT_ID_JS,
+    EventSink,
+    FrameView,
+    NavResponse,
+    ProbeFrames,
+)
 from kohakuterrarium.browser.proxy import BLOCKED_HEADER
 from kohakuterrarium.utils.logging import get_logger
 
@@ -212,12 +218,20 @@ class PlaywrightPage:
         good = [r for r in results if not isinstance(r, BaseException)]
         return ProbeFrames(good, len(results) - len(good))
 
-    async def frame_urls(self, refs: Sequence[str], timeout: float) -> dict[str, str]:
-        async def one(ref: str) -> str | None:
+    async def frame_views(
+        self, refs: Sequence[str], timeout: float
+    ) -> dict[str, FrameView]:
+        async def one(ref: str) -> FrameView | None:
             handles = await self._ref(ref).element_handles()
             try:
                 frame = await handles[0].content_frame() if handles else None
-                return frame.url if frame is not None else None
+                if frame is None or not frame.url:
+                    return None
+                try:
+                    doc = await frame.evaluate(DOCUMENT_ID_JS)
+                except self._owner.api.Error:
+                    doc = None
+                return FrameView(frame.url, doc)
             finally:
                 for handle in handles:
                     await handle.dispose()
@@ -229,7 +243,7 @@ class PlaywrightPage:
         if not self._owner.is_connected():
             raise DriverDisconnectedError("the browser closed unexpectedly")
         return {
-            ref: url for ref, url in zip(refs, results) if isinstance(url, str) and url
+            ref: view for ref, view in zip(refs, results) if isinstance(view, FrameView)
         }
 
     async def evaluate(

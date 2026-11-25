@@ -548,6 +548,41 @@ class TestRefs:
         assert 'Action 2: ref e3 was textbox "Name"' in result.text
         assert "fill" not in page.names()
 
+    async def test_a_frame_ref_from_an_earlier_frame_document_is_stale(self, made):
+        session, driver = made
+        await session.snapshot()
+        page = driver.browser.page
+        page.snapshot_text = (
+            '- button "Main" [ref=e1]\n- iframe [ref=e7]:\n'
+            '  - button "Same" [ref=f1e1]\n  - button "Other" [ref=f1e2]'
+        )
+        page.frame_doc_map = {"e7": 1.5}
+        page.frame_prefixes = {"f1": "e7"}
+        await session.snapshot()
+        names = page.names()
+        assert names.count("frame_views") == 1 and "frame_document" not in names
+        clicked = await session.act([{"kind": "click", "ref": "f1e1"}])
+        assert clicked.meta["ok"], clicked.text
+        assert page.names().count("frame_document") == 1
+        await session.act([{"kind": "click", "ref": "e1"}])
+        assert page.names().count("frame_document") == 1
+        page.frame_doc_map["e7"] = 2.5
+        for result in (
+            await session.act([{"kind": "click", "ref": "f1e1"}]),
+            await session.screenshot(ref="f1e2"),
+            await session.evaluate("el => el.id", ref="f1e2"),
+        ):
+            assert result.is_error, result.text
+            assert (
+                "ref f1e1 is from a page its frame has since left" in result.text
+                or ("ref f1e2 is from a page its frame has since left" in result.text)
+            )
+        clicks = [k["ref"] for n, k in page.calls if n == "click"]
+        assert clicks == ["f1e1", "e1"]
+        await session.snapshot()
+        again = await session.act([{"kind": "click", "ref": "f1e1"}])
+        assert again.meta["ok"], again.text
+
     async def test_only_refs_a_result_showed_are_recorded(self, made):
         session, _ = made
         await session.snapshot(query="Name")

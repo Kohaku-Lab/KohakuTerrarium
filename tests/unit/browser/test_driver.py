@@ -498,6 +498,31 @@ async def test_a_foreign_frame_line_names_its_origin(live, site):
 
 
 @LIVE
+async def test_a_frame_ref_from_before_the_frame_navigated_is_stale(live, site):
+    site.html("/frame-a", "<!doctype html><button>Same</button>")
+    site.html(
+        "/frame-b",
+        "<!doctype html><button onclick=\"parent.document.title='B'\">Same</button>",
+    )
+    site.html(
+        "/reframe",
+        '<!doctype html><title>Reframe</title><iframe src="/frame-a"></iframe>',
+    )
+    text = (await live.navigate(site.url("/reframe"))).text
+    ref = ref_of(text, "button", "Same")
+    assert ref.startswith("f"), text
+    same = await live.act([{"kind": "click", "ref": ref}])
+    assert same.meta["ok"], same.text
+    await live.evaluate("document.querySelector('iframe').src = '/frame-b'")
+    await asyncio.sleep(1.0)
+    result = await live.act([{"kind": "click", "ref": ref}])
+    assert result.is_error, result.text
+    assert f"ref {ref} is from a page its frame has since left" in result.text
+    title = await live.evaluate("document.title")
+    assert title.text.split("\n")[2] == '"Reframe"'
+
+
+@LIVE
 async def test_a_click_refused_at_connect_reads_as_a_blocked_landing(live, site):
     start = (await live.navigate(site.url("/to-https"))).text
     link = ref_of(start, "link", "Secure copy")

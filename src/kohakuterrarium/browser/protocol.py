@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from kohakuterrarium.browser.launch import LaunchPlan
 
 DOCUMENT_ID_JS = "() => performance.timeOrigin"
+FRAME_DOCUMENT_ID_JS = "el => el.ownerDocument.defaultView.performance.timeOrigin"
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,14 @@ class NavResponse:
     url: str
     status: int | None = None
     blocked: str | None = None
+
+
+@dataclass(frozen=True)
+class FrameView:
+    """What the frame of an ``iframe`` ref shows now: its URL and document id."""
+
+    url: str
+    doc: Any = None
 
 
 @dataclass(frozen=True)
@@ -89,8 +98,14 @@ class PageDriver(Protocol):
     async def probe(self, script: str, timeout: float) -> ProbeFrames:
         """Evaluate ``script`` (a function source) in every frame."""
 
-    async def frame_urls(self, refs: Sequence[str], timeout: float) -> dict[str, str]:
-        """The URL each ``iframe`` ref's frame shows now; refs without a frame are left out."""
+    async def frame_views(
+        self, refs: Sequence[str], timeout: float
+    ) -> dict[str, FrameView]:
+        """What each ``iframe`` ref's frame shows now; refs without a frame are left out.
+
+        ``FrameView.doc`` is the frame's ``DOCUMENT_ID_JS`` value, ``None``
+        when it could not be read.
+        """
 
     async def evaluate(
         self,
