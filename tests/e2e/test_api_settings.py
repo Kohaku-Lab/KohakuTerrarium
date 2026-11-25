@@ -779,9 +779,9 @@ class TestApiSettingsJourney:
         # itself resolves (a get on a missing name is a 404, not a 400).
         resp = client.get(f"{cbase}/modules/native_tool/no-such-tool/options")
         assert resp.status_code == 404
-        # native_tool does not support toggle — that is a hard 400.
+        # Toggling a native tool the creature does not have is a 404.
         resp = client.post(f"{cbase}/modules/native_tool/anything/toggle")
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         # Re-enable the budget plugin and reset its options to defaults
         # by applying an empty values payload — the live creature reads
         # back the plugin's declared defaults again.

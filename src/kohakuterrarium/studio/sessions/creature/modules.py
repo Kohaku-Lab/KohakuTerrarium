@@ -10,6 +10,7 @@ ordinary tool, or provider-native tool. All types expose a common shape::
         "schema":  {<option_key>: {<spec>}},
         "options": {<option_key>: <value>},
         "enabled": True | False | None,
+        "origin": {"kind", "name", "label"},  # tool / native_tool only
     }
 
 Each type delegates inventory, options, and toggling to its existing backend.
@@ -18,7 +19,9 @@ Adding a type requires one entry in :data:`_TYPE_DISPATCH`.
 
 from typing import Any
 
+from kohakuterrarium.core.agent.tools.enablement import switch_tool
 from kohakuterrarium.studio.sessions.creature import plugins as creature_plugins
+from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.studio.sessions.creature import state as creature_state
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
@@ -52,7 +55,8 @@ def _inventory_native_tools(
             "description": entry.get("description", ""),
             "schema": entry.get("option_schema", {}),
             "options": entry.get("values", {}),
-            "enabled": None,
+            "enabled": entry.get("enabled", True),
+            "origin": entry.get("origin"),
         }
         for entry in creature_state.native_tool_inventory(
             engine, session_id, creature_id
@@ -70,7 +74,8 @@ def _inventory_tools(
             "description": entry.get("description", ""),
             "schema": entry.get("option_schema", {}),
             "options": entry.get("values", {}),
-            "enabled": None,
+            "enabled": entry.get("enabled", True),
+            "origin": entry.get("origin"),
         }
         for entry in creature_state.tool_inventory(engine, session_id, creature_id)
     ]
@@ -158,10 +163,18 @@ async def _toggle_plugin(
     return await creature_plugins.toggle_plugin(engine, session_id, creature_id, name)
 
 
-async def _toggle_unsupported(
+async def _toggle_tool(
     engine: Terrarium, session_id: str, creature_id: str, name: str
 ) -> dict:
-    raise ValueError("Module type does not support toggle")
+    agent = find_creature(engine, session_id, creature_id).agent
+    return switch_tool(agent, name, None, provider_native=False)
+
+
+async def _toggle_native_tool(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    agent = find_creature(engine, session_id, creature_id).agent
+    return switch_tool(agent, name, None, provider_native=True)
 
 
 _TYPE_DISPATCH: dict[str, dict[str, Any]] = {
@@ -175,13 +188,13 @@ _TYPE_DISPATCH: dict[str, dict[str, Any]] = {
         "inventory": _inventory_native_tools,
         "get_options": _get_options_native_tool,
         "set_options": _set_options_native_tool,
-        "toggle": _toggle_unsupported,
+        "toggle": _toggle_native_tool,
     },
     "tool": {
         "inventory": _inventory_tools,
         "get_options": _get_options_tool,
         "set_options": _set_options_tool,
-        "toggle": _toggle_unsupported,
+        "toggle": _toggle_tool,
     },
 }
 
@@ -251,7 +264,7 @@ async def toggle_module(
     module_type: str,
     name: str,
 ) -> dict:
-    """Flip a module's enabled state (only supported for some types)."""
+    """Flip a module's enabled state: a plugin, or a tool turned off / on."""
     engine = as_engine(service)
     fn = _adapter(module_type, "toggle")
     return await fn(engine, session_id, creature_id, name)

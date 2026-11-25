@@ -48,6 +48,8 @@ def _list_modules(agent: Any) -> list[dict[str, Any]]:
             )
     registry = getattr(agent, "registry", None)
     for entry in agent_tool_inventory(agent):
+        if not entry.get("option_schema"):
+            continue
         out.append(
             {
                 "type": "tool",

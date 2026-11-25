@@ -154,6 +154,8 @@ def _render_row(m: ModuleEntry, selected: bool) -> Text:
         line.append(f"  p{m.priority}", style="dim cyan")
     if m.schema:
         line.append(f"  {len(m.schema)} opt", style="dim")
+    if m.origin:
+        line.append(f"  {m.origin}", style="dim cyan")
 
     if selected and m.description:
         # Selected descriptions remain single-line to preserve row density.
@@ -239,7 +241,7 @@ def _render_hint(overlay: "ModulePicker") -> Text:
             ("↑↓", "navigate"),
             ("tab", "switch tab"),
             ("enter", "edit"),
-            ("t", "toggle"),
+            ("t", "on/off"),
             ("esc", "close"),
         ]
     else:

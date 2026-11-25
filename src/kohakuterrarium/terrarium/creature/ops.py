@@ -28,6 +28,7 @@ import kohakuterrarium.terrarium.graph.snapshot as _terrarium_topology_snap
 from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.core.agent.history.selection import persist_plugin_selection
+from kohakuterrarium.core.agent.tools.enablement import switch_tool, tool_switch_state
 from kohakuterrarium.core.agent.tools.options import (
     agent_get_tool_options,
     agent_set_tool_options,
@@ -184,6 +185,7 @@ def agent_native_tool_inventory(agent: Any) -> list[dict[str, Any]]:
                 "description": getattr(tool, "description", "") or "",
                 "option_schema": schema,
                 "values": values,
+                **tool_switch_state(agent, name),
             }
         )
     out.sort(key=lambda entry: entry["name"])
@@ -407,7 +409,9 @@ async def agent_toggle_module(
     if module_type == "plugin":
         return await agent_toggle_plugin(agent, name)
     if module_type in {"native_tool", "tool"}:
-        raise ValueError("Module type does not support toggle")
+        return switch_tool(
+            agent, name, None, provider_native=module_type == "native_tool"
+        )
     raise ValueError(f"Unknown module type: {module_type!r}")
 
 
@@ -434,7 +438,8 @@ def _inventory_native_tools(agent: Any) -> list[dict[str, Any]]:
             "description": entry.get("description", ""),
             "schema": entry.get("option_schema", {}),
             "options": entry.get("values", {}),
-            "enabled": None,
+            "enabled": entry.get("enabled", True),
+            "origin": entry.get("origin"),
         }
         for entry in agent_native_tool_inventory(agent)
     ]
@@ -448,7 +453,8 @@ def _inventory_tools(agent: Any) -> list[dict[str, Any]]:
             "description": entry.get("description", ""),
             "schema": entry.get("option_schema", {}),
             "options": entry.get("values", {}),
-            "enabled": None,
+            "enabled": entry.get("enabled", True),
+            "origin": entry.get("origin"),
         }
         for entry in agent_tool_inventory(agent)
     ]

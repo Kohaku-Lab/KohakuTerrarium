@@ -529,11 +529,15 @@ class TestApiTerrariumJourney:
             json={"enabled": True},
         )
         assert resp.status_code == 404
-        # modules — the unified plugin / native-tool catalog.
+        # modules — the unified plugin / native-tool / tool catalog; the
+        # engine's channel tool is listed with its origin and state.
         resp = client.get(f"/api/sessions/{session_id}/creatures/alice/modules")
         assert resp.status_code == 200
         mods = resp.json()["modules"]
-        assert {m["type"] for m in mods} <= {"plugin", "native_tool"}
+        assert {m["type"] for m in mods} <= {"plugin", "native_tool", "tool"}
+        send = next(m for m in mods if m["name"] == "send_channel")
+        assert (send["type"], send["enabled"]) == ("tool", True)
+        assert send["origin"]["label"] == "builtin"
         assert any(m["name"] == "sandbox" for m in mods)
         # jobs — no tool/sub-agent jobs in flight after a plain turn.
         resp = client.get(f"/api/sessions/{session_id}/creatures/alice/jobs")

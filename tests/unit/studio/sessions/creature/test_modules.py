@@ -1,8 +1,14 @@
 """Unit tests for :mod:`kohakuterrarium.studio.sessions.creature.modules`."""
 
+from types import SimpleNamespace
+
 import pytest
 
+import kohakuterrarium as kt
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.studio.sessions.creature import modules as mod
+from kohakuterrarium.testing.llm import ScriptedLLM
 
 # ── helpers ──────────────────────────────────────────────────────
 
@@ -31,6 +37,49 @@ def _patch_adapter_inventory(
         mod.creature_state,
         "tool_inventory",
         lambda e, sid, cid: tool_rows or [],
+    )
+
+
+class _Probe(BaseTool):
+    def __init__(self, name, native=False):
+        super().__init__()
+        self._name = name
+        self.is_provider_native = native
+
+    @property
+    def tool_name(self):
+        return self._name
+
+    @property
+    def description(self):
+        return self._name
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="ran")
+
+
+async def _tool_agent(tmp_path):
+    cfg = AgentConfig(
+        name="studio_agent",
+        system_prompt="Test.",
+        include_hints_in_prompt=False,
+        agent_path=tmp_path,
+        input=InputConfig(type="none"),
+        output=OutputConfig(type="none"),
+    )
+    agent = await kt.Agent.build(cfg, llm=ScriptedLLM(["ok"]))
+    agent.add_tool(_Probe("probe"))
+    agent.add_tool(_Probe("hosted", native=True))
+    return agent
+
+
+def _install_creature(monkeypatch, agent):
+    monkeypatch.setattr(
+        mod, "find_creature", lambda engine, sid, cid: SimpleNamespace(agent=agent)
     )
 
 
@@ -68,13 +117,25 @@ class TestListModules:
             monkeypatch,
             plugin_rows=[{"name": "p1", "description": "pd", "enabled": False}],
             native_rows=[
-                {"name": "nt1", "description": "nd", "option_schema": {"k": 1}}
+                {
+                    "name": "nt1",
+                    "description": "nd",
+                    "option_schema": {"k": 1},
+                    "enabled": False,
+                    "origin": {"kind": "builtin", "name": "", "label": "builtin"},
+                }
             ],
             tool_rows=[
                 {
                     "name": "web_search",
                     "description": "search",
                     "values": {"backend": "duckduckgo"},
+                    "enabled": True,
+                    "origin": {
+                        "kind": "package",
+                        "name": "kt-biome",
+                        "label": "package:kt-biome",
+                    },
                 }
             ],
         )
@@ -85,13 +146,15 @@ class TestListModules:
         assert by_name["p1"]["type"] == "plugin"
         assert by_name["p1"]["description"] == "pd"
         assert by_name["p1"]["enabled"] is False
-        # Native-tool row: type=native_tool, enabled=None, schema mapped
-        # from the source's option_schema key.
+        # Tool rows carry the on/off state and origin of their source row.
         assert by_name["nt1"]["type"] == "native_tool"
-        assert by_name["nt1"]["enabled"] is None
+        assert by_name["nt1"]["enabled"] is False
+        assert by_name["nt1"]["origin"]["label"] == "builtin"
         assert by_name["nt1"]["schema"] == {"k": 1}
         assert by_name["web_search"]["type"] == "tool"
         assert by_name["web_search"]["options"] == {"backend": "duckduckgo"}
+        assert by_name["web_search"]["enabled"] is True
+        assert by_name["web_search"]["origin"]["label"] == "package:kt-biome"
 
     def test_swallows_per_type_errors(self, monkeypatch):
         def raise_runtime(*args, **kwargs):
@@ -247,10 +310,31 @@ class TestToggleModule:
         out = await mod.toggle_module(_FakeService(), "sid", "cid", "plugin", "p1")
         assert out == {"enabled": True}
 
-    async def test_native_tool_unsupported(self):
-        with pytest.raises(ValueError, match="does not support toggle"):
-            await mod.toggle_module(_FakeService(), "sid", "cid", "native_tool", "nt1")
+    async def test_tool_is_turned_off_and_on(self, monkeypatch, tmp_path):
+        agent = await _tool_agent(tmp_path)
+        _install_creature(monkeypatch, agent)
+        out = await mod.toggle_module(_FakeService(), "sid", "cid", "tool", "probe")
+        assert out == {"name": "probe", "enabled": False, "warning": ""}
+        assert agent.is_tool_enabled("probe") is False
+        out = await mod.toggle_module(_FakeService(), "sid", "cid", "tool", "probe")
+        assert out["enabled"] is True
 
-    async def test_tool_unsupported(self):
-        with pytest.raises(ValueError, match="does not support toggle"):
-            await mod.toggle_module(_FakeService(), "sid", "cid", "tool", "web_search")
+    async def test_native_tool_is_turned_off(self, monkeypatch, tmp_path):
+        agent = await _tool_agent(tmp_path)
+        _install_creature(monkeypatch, agent)
+        out = await mod.toggle_module(
+            _FakeService(), "sid", "cid", "native_tool", "hosted"
+        )
+        assert out["enabled"] is False
+        assert agent.disabled_tools == frozenset({"hosted"})
+
+    async def test_tool_toggle_rejects_the_wrong_kind(self, monkeypatch, tmp_path):
+        agent = await _tool_agent(tmp_path)
+        _install_creature(monkeypatch, agent)
+        with pytest.raises(KeyError):
+            await mod.toggle_module(_FakeService(), "sid", "cid", "tool", "hosted")
+        with pytest.raises(KeyError):
+            await mod.toggle_module(
+                _FakeService(), "sid", "cid", "native_tool", "probe"
+            )
+        assert agent.disabled_tools == frozenset()

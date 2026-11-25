@@ -9,6 +9,7 @@ from textual.widgets import DataTable, Input, Select, Switch, TabbedContent
 from kohakuterrarium.core.agent.tools.options import ToolOptions
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.profiles.api_keys import save_api_key
+from kohakuterrarium.builtins.tools.files.read import ReadTool
 from kohakuterrarium.builtins.tools.web.fetch import WebFetchTool
 from kohakuterrarium.builtins.tools.web.search import WebSearchTool
 from kohakuterrarium.builtins.tui.widgets.modules_modal import (
@@ -118,3 +119,19 @@ class TestToolModulesModal:
         assert module["type"] == "tool"
         assert applied["backend"] == "deepseek"
         assert helper.values["backend"] == "deepseek"
+
+    def test_tools_without_runtime_options_are_not_listed(self):
+        registry = Registry()
+        registry.register_tool(WebSearchTool())
+        registry.register_tool(ReadTool())
+        agent = SimpleNamespace(
+            plugins=None,
+            native_tool_options=None,
+            registry=registry,
+            config=SimpleNamespace(name="tui-test"),
+            session=SimpleNamespace(extra={}),
+            session_store=None,
+        )
+        agent.tool_options = ToolOptions(agent)
+        names = [m["name"] for m in _list_modules(agent) if m["type"] == "tool"]
+        assert names == ["web_search"]

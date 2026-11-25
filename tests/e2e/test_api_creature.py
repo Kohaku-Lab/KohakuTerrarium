@@ -21,7 +21,7 @@ observable state at every milestone. The call sequence mirrors
   ``sessionAPI.listActive`` / ``getActive`` → the
   ``/ws/sessions/.../chat`` attach (multi-turn stream + a tool-call
   turn) → ``terrariumAPI.switchCreatureModel`` /
-  ``moduleAPI.toggle`` (plugin) / ``terrariumAPI.patchScratchpad`` →
+  ``moduleAPI.toggle`` (plugin, then a tool) / ``terrariumAPI.patchScratchpad`` →
   ``terrariumAPI.interruptCreature`` → ``terrariumAPI.getHistory`` →
   ``agentAPI.regenerate`` / ``agentAPI.editMessage`` +
   ``creature_branches`` → ``sessionAPI.stopActive``.
@@ -350,6 +350,33 @@ class TestApiCreatureJourney:
         resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/plugins")
         assert resp.status_code == 200
         assert {p["name"]: p["enabled"] for p in resp.json()}["budget"] is True
+
+        # 5b'. Tool switch (frontend: moduleAPI.list / moduleAPI.toggle).
+        #      Every tool is a module with its origin; toggling one turns
+        #      it off for this creature and drops it from the system prompt.
+        modules_url = f"/api/sessions/{session_id}/creatures/{creature_id}/modules"
+        prompt_url = f"/api/sessions/{session_id}/creatures/{creature_id}/system-prompt"
+        resp = client.get(modules_url)
+        assert resp.status_code == 200
+        tools = {m["name"]: m for m in resp.json()["modules"] if m["type"] == "tool"}
+        assert tools["scratchpad"]["enabled"] is True
+        assert tools["scratchpad"]["origin"] == {
+            "kind": "builtin",
+            "name": "",
+            "label": "builtin",
+        }
+        assert "`scratchpad`" in client.get(prompt_url).json()["text"]
+        resp = client.post(f"{modules_url}/tool/scratchpad/toggle")
+        assert resp.status_code == 200
+        assert resp.json() == {"name": "scratchpad", "enabled": False, "warning": ""}
+        resp = client.get(modules_url)
+        tools = {m["name"]: m for m in resp.json()["modules"] if m["type"] == "tool"}
+        assert tools["scratchpad"]["enabled"] is False
+        assert "`scratchpad`" not in client.get(prompt_url).json()["text"]
+        assert client.post(f"{modules_url}/tool/no_such_tool/toggle").status_code == 404
+        resp = client.post(f"{modules_url}/tool/scratchpad/toggle")
+        assert resp.json()["enabled"] is True
+        assert "`scratchpad`" in client.get(prompt_url).json()["text"]
 
         # 5c. Scratchpad patch (frontend: terrariumAPI.patchScratchpad).
         resp = client.patch(

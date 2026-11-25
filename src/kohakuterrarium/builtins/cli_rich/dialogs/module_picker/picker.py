@@ -3,8 +3,8 @@
 Pattern mirrors :class:`SettingsOverlay`:
 
 * Tabs across the top (one per module type).
-* List mode with a row-per-module cursor; ``t`` toggles enable/
-  disable on plugin rows; ``Enter`` opens the edit form.
+* List mode with a row-per-module cursor; ``t`` turns the plugin or
+  tool on the row on / off; ``Enter`` opens the edit form.
 * Form mode with schema-driven fields. ``Tab`` / ``↑↓`` cycles
   fields, ``←→`` cycles enum options, printable chars edit string
   / numeric fields, ``Enter`` submits.
@@ -35,6 +35,7 @@ from kohakuterrarium.builtins.cli_rich.dialogs.module_picker.model import (
 from kohakuterrarium.builtins.cli_rich.dialogs.module_picker.render import (
     render_overlay,
 )
+from kohakuterrarium.core.agent.tools.enablement import switch_tool, tool_switch_state
 from kohakuterrarium.core.agent.tools.options import agent_tool_inventory
 from kohakuterrarium.utils.logging import get_logger
 
@@ -110,9 +111,8 @@ class ModulePicker:
                     schema = schema_fn() if callable(schema_fn) else {}
                 except Exception:
                     schema = {}
-                if not schema:
-                    continue
-                values = helper.get(name) if helper else {}
+                values = helper.get(name) if helper and schema else {}
+                state = tool_switch_state(agent, name)
                 natives.append(
                     ModuleEntry(
                         type="native_tool",
@@ -120,8 +120,9 @@ class ModulePicker:
                         description=getattr(tool, "description", "") or "",
                         schema=schema or {},
                         options=values or {},
-                        enabled=None,
+                        enabled=state["enabled"],
                         priority=None,
+                        origin=state["origin"]["label"],
                     )
                 )
             for entry in agent_tool_inventory(agent):
@@ -132,8 +133,9 @@ class ModulePicker:
                         description=entry.get("description", ""),
                         schema=entry.get("option_schema", {}),
                         options=entry.get("values", {}),
-                        enabled=None,
+                        enabled=entry.get("enabled", True),
                         priority=None,
+                        origin=(entry.get("origin") or {}).get("label", ""),
                     )
                 )
         plugins.sort(
@@ -255,6 +257,9 @@ class ModulePicker:
         if entry is None or entry.enabled is None:
             return
         agent = self._get_agent()
+        if entry.type in ("tool", "native_tool"):
+            self._toggle_tool(agent, entry)
+            return
         mgr = getattr(agent, "plugins", None) if agent else None
         if mgr is None:
             return
@@ -269,6 +274,27 @@ class ModulePicker:
                 self._flash = f"Plugin {entry.name!r} not found"
         except Exception as e:
             self._flash = f"Toggle failed: {e}"
+        self._reload()
+
+    def _toggle_tool(self, agent: Any, entry: ModuleEntry) -> None:
+        if agent is None:
+            return
+        try:
+            result = switch_tool(
+                agent,
+                entry.name,
+                None,
+                provider_native=entry.type == "native_tool",
+            )
+        except Exception as e:
+            self._flash = f"Toggle failed: {e}"
+        else:
+            state = "on" if result["enabled"] else "off"
+            self._flash = " ".join(
+                part
+                for part in (f"Tool {entry.name!r} turned {state}.", result["warning"])
+                if part
+            )
         self._reload()
 
     def _open_form_for(self, entry: ModuleEntry) -> None:

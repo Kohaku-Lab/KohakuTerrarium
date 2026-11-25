@@ -3,10 +3,20 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import kohakuterrarium as kt
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2.creatures import modules as mods_mod
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.modules.plugin.base import PluginLockedError
-from kohakuterrarium.terrarium.service.service import CreatureInfo
+from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.origin import ToolOrigin
+from kohakuterrarium.terrarium.creature.host import Creature
+from kohakuterrarium.terrarium.engine.engine import Terrarium
+from kohakuterrarium.terrarium.service.service import (
+    CreatureInfo,
+    LocalTerrariumService,
+)
+from kohakuterrarium.testing.llm import ScriptedLLM
 
 
 def _info(cid="cid", name="alice"):
@@ -161,3 +171,76 @@ class TestToggleModule:
         client = _client(svc)
         resp = client.post("/sess/creatures/alice/modules/plugin/p/toggle")
         assert resp.status_code == 400
+
+
+class _Probe(BaseTool):
+    def __init__(self, name, native=False):
+        super().__init__()
+        self._name = name
+        self.is_provider_native = native
+
+    @property
+    def tool_name(self):
+        return self._name
+
+    @property
+    def description(self):
+        return f"{self._name} tool"
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="ran")
+
+
+class TestToolModulesOnALiveCreature:
+    async def test_list_and_toggle_a_tool(self, tmp_path):
+        cfg = AgentConfig(
+            name="alice",
+            system_prompt="Test.",
+            include_hints_in_prompt=False,
+            agent_path=tmp_path,
+            input=InputConfig(type="none"),
+            output=OutputConfig(type="none"),
+        )
+        agent = await kt.Agent.build(cfg, llm=ScriptedLLM(["ok"]))
+        agent.add_tool(_Probe("lab_query"), origin=ToolOrigin("mcp", "sandbox-lab"))
+        agent.add_tool(_Probe("hosted", native=True))
+        engine = Terrarium()
+        creature = await engine.add_creature(
+            Creature(creature_id="alice", name="alice", agent=agent), start=False
+        )
+        client = _client(LocalTerrariumService(engine))
+        base = f"/{creature.graph_id}/creatures/alice/modules"
+        try:
+            modules = client.get(base).json()["modules"]
+            rows = {(m["type"], m["name"]): m for m in modules}
+            lab = rows[("tool", "lab_query")]
+            assert lab["enabled"] is True
+            assert lab["origin"] == {
+                "kind": "mcp",
+                "name": "sandbox-lab",
+                "label": "mcp:sandbox-lab",
+            }
+            assert rows[("native_tool", "hosted")]["origin"]["label"] == "runtime"
+
+            resp = client.post(f"{base}/tool/lab_query/toggle")
+            assert resp.status_code == 200
+            assert resp.json() == {
+                "name": "lab_query",
+                "enabled": False,
+                "warning": "",
+            }
+            assert agent.is_tool_enabled("lab_query") is False
+            listed = {m["name"]: m for m in client.get(base).json()["modules"]}
+            assert listed["lab_query"]["enabled"] is False
+
+            assert client.post(f"{base}/tool/ghost/toggle").status_code == 404
+            assert client.post(f"{base}/tool/hosted/toggle").status_code == 404
+            resp = client.post(f"{base}/native_tool/hosted/toggle")
+            assert resp.json()["enabled"] is False
+            assert agent.disabled_tools == frozenset({"lab_query", "hosted"})
+        finally:
+            await engine.shutdown()

@@ -281,6 +281,8 @@ class TestNativeToolOptions:
         assert "bash" not in names
         img = next(e for e in out if e["name"] == "image_gen")
         assert img["option_schema"] == {"size": {"type": "string"}}
+        assert img["enabled"] is True
+        assert img["origin"]["label"] == "builtin"
 
     def test_inventory_handles_schema_error(self, monkeypatch):
         class _BadTool:

@@ -465,6 +465,51 @@ tools such as `image_gen`.
 
 ---
 
+### Live creature modules
+
+A module is a runtime-configurable part of a live creature: a plugin, a
+provider-native tool (`native_tool`), or an ordinary tool (`tool`).
+`{creature_id}` accepts the creature id or its display name.
+
+#### `GET /api/sessions/{session_id}/creatures/{creature_id}/modules`
+
+Returns `{"modules": [...]}`. Every registered tool is listed, also tools
+without runtime options. Entry shape:
+
+```json
+{
+  "type": "tool",
+  "name": "lab_query",
+  "description": "...",
+  "schema": {},
+  "options": {},
+  "enabled": true,
+  "origin": {"kind": "mcp", "name": "sandbox-lab", "label": "mcp:sandbox-lab"},
+  "configured_options": {}
+}
+```
+
+- `origin` is present on `tool` and `native_tool` entries. `kind` is one of
+  `builtin`, `package`, `custom`, `plugin`, `mcp`, `runtime`; `label` is the
+  display form (`builtin`, `package:kt-biome`, `plugin:ui.apps`, ...).
+- `enabled` is a boolean for plugins, tools and native tools.
+- Plugin entries also carry `priority` and `configured_enabled`.
+
+#### `POST /api/sessions/{session_id}/creatures/{creature_id}/modules/{module_type}/{name}/toggle`
+
+Flip a module. For a plugin the response is `{"name", "enabled"}`. For
+`tool` / `native_tool` it turns the tool off or on for this creature (hidden
+from the model, refused when called, saved with the session) and returns
+`{"name": "lab_query", "enabled": false, "warning": ""}`; `warning` is
+non-empty when a framework tool (`info`, `skill`, `send_channel`,
+`group_send`) is turned off. 404 when no module of that type and name
+exists (a provider-native tool must use `native_tool`).
+
+#### `GET` / `PUT /api/sessions/{session_id}/creatures/{creature_id}/modules/{module_type}/{name}/options`
+
+Read `{"type", "name", "schema", "options"}`, or apply
+`{"values": {...}}`. A tool without runtime options has an empty `schema`.
+
 ## Drive records
 
 Records for the [Drive runtime](../concepts/multi-agent/drive.md). A

@@ -1,4 +1,4 @@
-"""Inspect and configure runtime plugins and tool options."""
+"""Inspect and configure runtime plugins and tools: options, and turning them off / on."""
 
 import json
 import os
@@ -11,7 +11,9 @@ from typing import Any
 import yaml
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
+from kohakuterrarium.core.agent.tools.enablement import switch_tool, tool_switch_state
 from kohakuterrarium.core.agent.tools.options import agent_tool_inventory
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,
@@ -25,7 +27,7 @@ class ModuleCommand(BaseUserCommand):
     name = "module"
     aliases = ["modules", "mod"]
     description = (
-        "List, inspect, toggle, or edit module options at runtime "
+        "List, inspect, turn on/off, or edit module options at runtime "
         "(plugins + tools + provider-native tools). "
         "/module enable|disable|set|edit|reset <name> …"
     )
@@ -120,9 +122,8 @@ def _inventory_native_tools(agent: Any) -> list[dict[str, Any]]:
             schema = schema_fn() if callable(schema_fn) else {}
         except Exception:
             schema = {}
-        if not schema:
-            continue
-        values = helper.get(name) if helper else {}
+        values = helper.get(name) if helper and schema else {}
+        state = tool_switch_state(agent, name)
         out.append(
             {
                 "type": "native_tool",
@@ -130,7 +131,8 @@ def _inventory_native_tools(agent: Any) -> list[dict[str, Any]]:
                 "description": getattr(tool, "description", "") or "",
                 "schema": schema or {},
                 "options": values or {},
-                "enabled": None,
+                "enabled": state["enabled"],
+                "origin": state["origin"],
                 "priority": None,
             }
         )
@@ -145,7 +147,8 @@ def _inventory_tools(agent: Any) -> list[dict[str, Any]]:
             "description": entry.get("description", ""),
             "schema": entry.get("option_schema", {}),
             "options": entry.get("values", {}),
-            "enabled": None,
+            "enabled": entry.get("enabled", True),
+            "origin": entry.get("origin"),
             "priority": None,
         }
         for entry in agent_tool_inventory(agent)
@@ -225,7 +228,16 @@ def _render_list(agent: Any, rest: list[str]) -> str:
 
     out.append("")
     out.append("Edit: /module show <name>  ·  /module set <name> <key> <value>")
+    if native_tools or tools:
+        out.append(
+            "Turn a tool off / on: /module disable <tool>  ·  /module enable <tool>"
+        )
     return "\n".join(out)
+
+
+def _origin_label(m: dict[str, Any]) -> str:
+    origin = m.get("origin")
+    return origin.get("label", "") if isinstance(origin, dict) else ""
 
 
 def _format_row(m: dict[str, Any]) -> str:
@@ -235,7 +247,11 @@ def _format_row(m: dict[str, Any]) -> str:
     pr_part = f"p{pr}" if pr is not None else "  "
     n_opts = len(m.get("schema") or {})
     opts_part = f"{n_opts} opt" if n_opts else "      "
-    return f"    {glyph} {name:<24} {pr_part:>4}  {opts_part}"
+    row = f"    {glyph} {name:<24} {pr_part:>4}  {opts_part}"
+    origin = _origin_label(m)
+    if origin:
+        row = f"{row}  {origin}"
+    return row.rstrip()
 
 
 def _render_show_module(m: dict[str, Any]) -> str:
@@ -247,6 +263,8 @@ def _render_show_module(m: dict[str, Any]) -> str:
         out[-1] += f"  (priority {m['priority']})"
     if m["enabled"] is not None:
         out[-1] += f"  [{'enabled' if m['enabled'] else 'disabled'}]"
+    if _origin_label(m):
+        out.append(f"  from {_origin_label(m)}")
     if m.get("description"):
         out.append(f"  {m['description']}")
 
@@ -287,10 +305,8 @@ async def _do_toggle(
     m, err = _resolve_or_error(agent, rest[0])
     if err:
         return UserCommandResult(error=err)
-    if m["type"] != "plugin":
-        return UserCommandResult(
-            error=f"Cannot toggle {m['type']}; only plugins have an enabled state."
-        )
+    if m["type"] in ("tool", "native_tool"):
+        return _toggle_tool(agent, m, want)
     mgr = agent.plugins
     name = m["name"]
     is_on = mgr.is_enabled(name)
@@ -303,6 +319,20 @@ async def _do_toggle(
     if not mgr.disable(name):
         return UserCommandResult(error=f"Plugin not found: {name}")
     return UserCommandResult(output=f"Plugin {name!r} disabled.")
+
+
+def _toggle_tool(agent: Any, m: dict[str, Any], want: bool | None) -> UserCommandResult:
+    try:
+        result = switch_tool(
+            agent, m["name"], want, provider_native=m["type"] == "native_tool"
+        )
+    except NotFoundError as exc:
+        return UserCommandResult(error=str(exc))
+    state = "on" if result["enabled"] else "off"
+    lines = [f"Tool {m['name']!r} turned {state}."]
+    if result["warning"]:
+        lines.append(result["warning"])
+    return UserCommandResult(output="\n".join(lines))
 
 
 def _do_set(agent: Any, rest: list[str]) -> UserCommandResult:

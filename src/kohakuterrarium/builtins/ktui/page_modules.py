@@ -1,7 +1,8 @@
 """The Settings page's Modules section, as the web's: every configurable module of the target
-creature (plugins, native tools, tools). Enter on one offers what it supports: switching a
-plugin on or off, editing its options in a form (from the module's option schema, as the web's
-module settings). Works on a local engine and on a session in a server alike.
+creature (plugins, native tools, tools; a tool row shows where the tool comes from). Enter on
+one offers what it supports: switching a plugin or a tool on or off, editing its options in a
+form (from the module's option schema, as the web's module settings). Works on a local engine
+and on a session in a server alike.
 """
 
 import json
@@ -19,12 +20,21 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 TYPE_LABEL = {"plugin": "plugins", "native_tool": "native tools", "tool": "tools"}
+SWITCHABLE = ("plugin", "native_tool", "tool")
 
 
 def module_service(shell: "KtuiShell") -> Any:
     """The four module calls (list, options, set options, toggle) for the shell's engine."""
     remote = getattr(shell.engine, "remote_service", None)
     return remote if remote is not None else LocalTerrariumService(shell.engine)
+
+
+def _detail(module: dict) -> str | None:
+    """Origin label (tools) and description, on one line."""
+    origin = module.get("origin")
+    label = origin.get("label", "") if isinstance(origin, dict) else ""
+    description = one_line(module.get("description") or "", 50)
+    return " · ".join(part for part in (label, description) if part) or None
 
 
 def _field(key: str, spec: dict, value: Any) -> dict:
@@ -103,7 +113,7 @@ class Modules:
                     "label": m["name"],
                     "icon": icon,
                     "tone": "success" if enabled else None,
-                    "detail": one_line(m.get("description") or "", 50) or None,
+                    "detail": _detail(m),
                     "value": f"set:module:{m['type']}:{m['name']}",
                 }
             )
@@ -145,7 +155,7 @@ class Modules:
         if module is None:
             return
         actions = []
-        if kind == "plugin":
+        if kind in SWITCHABLE and module.get("enabled") is not None:
             verb = "switch off" if module.get("enabled") else "switch on"
             actions.append({"label": verb, "value": "toggle"})
         if module.get("schema"):
@@ -157,9 +167,11 @@ class Modules:
         service = module_service(shell)
         try:
             if choice == "toggle":
-                result = await service.toggle_module(cid, kind, name)
-                state = "on" if (result or {}).get("enabled") else "off"
+                result = await service.toggle_module(cid, kind, name) or {}
+                state = "on" if result.get("enabled") else "off"
                 shell.app.notify(f"{name}: {state}", "success")
+                if result.get("warning"):
+                    shell.app.notify(one_line(result["warning"], 120), "warning")
             elif choice == "options":
                 await self._options(service, cid, kind, name)
         except Exception as exc:

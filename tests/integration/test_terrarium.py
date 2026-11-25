@@ -445,11 +445,13 @@ class TestTerrariumIntegration:
         # native-tool inventory + options map — scripted creatures have none.
         assert await service.native_tool_inventory("alice") == []
         assert await service.get_native_tool_options("alice") == {}
-        # ``list_modules`` returns only known module types.
-        assert {m["type"] for m in await service.list_modules("alice")} <= {
-            "plugin",
-            "native_tool",
-        }
+        # ``list_modules`` returns only known module types; every engine
+        # tool (``send_channel`` / ``group_send``) is a ``tool`` with its origin.
+        alice_modules = await service.list_modules("alice")
+        assert {m["type"] for m in alice_modules} <= {"plugin", "native_tool", "tool"}
+        alice_tools = {m["name"]: m for m in alice_modules if m["type"] == "tool"}
+        assert alice_tools["send_channel"]["origin"]["label"] == "builtin"
+        assert alice_tools["send_channel"]["enabled"] is True
 
         # --- output-sink wiring round-trip via the engine escape hatch ---
         # ``wire_output_sink`` attaches a secondary sink, returns its id;
@@ -786,14 +788,17 @@ class TestTerrariumIntegration:
 
         # --- module-options error branches on the privileged lead -------
         # ``get_module_options`` / ``set_module_options`` for an unknown
-        # module type are rejected; ``toggle_module`` on native_tool is
-        # rejected (native tools don't support toggle).
+        # module type are rejected; ``toggle_module`` on a native tool the
+        # creature does not have is a KeyError (404), and on an unknown
+        # module type a ValueError.
         with pytest.raises(ValueError):
             await service.get_module_options("lead", "not_a_type", "x")
         with pytest.raises(ValueError):
             await service.set_module_options("lead", "bogus", "x", {})
-        with pytest.raises(ValueError):
+        with pytest.raises(KeyError):
             await service.toggle_module("lead", "native_tool", "anything")
+        with pytest.raises(ValueError):
+            await service.toggle_module("lead", "bogus", "anything")
         # ``get_module_options`` for a missing native_tool raises KeyError.
         with pytest.raises(KeyError):
             await service.get_module_options("lead", "native_tool", "ghost_tool")
@@ -1634,7 +1639,7 @@ class TestTerrariumIntegration:
         assert "sandbox" in plugin_names
         assert "budget" in plugin_names
         modules = await service.list_modules("scout")
-        assert {m["type"] for m in modules} <= {"plugin", "native_tool"}
+        assert {m["type"] for m in modules} <= {"plugin", "native_tool", "tool"}
         # toggle a real built-in plugin on, then back off — the enabled
         # flag is the observable side effect.
         toggled_on = await service.toggle_plugin("scout", "budget", True)

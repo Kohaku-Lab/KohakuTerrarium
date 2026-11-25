@@ -1,10 +1,15 @@
-"""Unit tests for ordinary tools in the Rich module picker."""
+"""Unit tests for tools in the Rich module picker: option forms, origin labels, on/off."""
 
 from types import SimpleNamespace
 
 import pytest
 
+import kohakuterrarium as kt
 from kohakuterrarium.core.agent.tools.options import ToolOptions
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.origin import ToolOrigin
+from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.profiles.api_keys import save_api_key
 from kohakuterrarium.builtins.tools.web.fetch import WebFetchTool
@@ -100,3 +105,99 @@ class TestModulePickerToolTab:
         field = picker._form.fields[0]
         assert field.options == ["duckduckgo"]
         assert field.unavailable == {"deepseek": "configure key"}
+
+
+class _Probe(BaseTool):
+    def __init__(self, name, native=False):
+        super().__init__()
+        self._name = name
+        self.is_provider_native = native
+
+    @property
+    def tool_name(self):
+        return self._name
+
+    @property
+    def description(self):
+        return f"{self._name} tool"
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="ran")
+
+
+async def _agent_with_tools(tmp_path):
+    cfg = AgentConfig(
+        name="picker_agent",
+        system_prompt="Test.",
+        include_hints_in_prompt=False,
+        agent_path=tmp_path,
+        input=InputConfig(type="none"),
+        output=OutputConfig(type="none"),
+    )
+    agent = await kt.Agent.build(cfg, llm=ScriptedLLM(["ok"]), tools=[_Probe("info")])
+    agent.add_tool(_Probe("lab_query"), origin=ToolOrigin("mcp", "sandbox-lab"))
+    agent.add_tool(_Probe("hosted", native=True))
+    return agent
+
+
+def _select(picker, kind, name):
+    picker.active_type = kind
+    names = [m.name for m in picker._entries_by_type[kind]]
+    picker._cursor[kind] = names.index(name)
+
+
+class TestModulePickerToolSwitch:
+    async def test_tool_rows_show_origin_and_state(self, tmp_path):
+        agent = await _agent_with_tools(tmp_path)
+        agent.set_tool_enabled("info", False)
+        picker = ModulePicker(lambda: agent)
+        picker.open()
+        tools = {m.name: m for m in picker._entries_by_type["tool"]}
+        assert tools["lab_query"].origin == "mcp:sandbox-lab"
+        assert tools["lab_query"].enabled is True
+        assert tools["info"].enabled is False
+        natives = {m.name: m for m in picker._entries_by_type["native_tool"]}
+        assert natives["hosted"].origin == "runtime"
+        _select(picker, "tool", "lab_query")
+        rendered = picker.render(120)
+        assert "mcp:sandbox-lab" in rendered
+        assert "on/off" in rendered
+
+    async def test_t_turns_the_selected_tool_off_and_on(self, tmp_path):
+        agent = await _agent_with_tools(tmp_path)
+        picker = ModulePicker(lambda: agent)
+        picker.open()
+        _select(picker, "tool", "lab_query")
+        picker.handle_text("t")
+        assert agent.is_tool_enabled("lab_query") is False
+        assert picker._flash == "Tool 'lab_query' turned off."
+        lab = next(m for m in picker._entries_by_type["tool"] if m.name == "lab_query")
+        assert lab.enabled is False
+        _select(picker, "tool", "lab_query")
+        picker.handle_text("t")
+        assert agent.is_tool_enabled("lab_query") is True
+
+    async def test_native_tool_and_framework_warning(self, tmp_path):
+        agent = await _agent_with_tools(tmp_path)
+        picker = ModulePicker(lambda: agent)
+        picker.open()
+        _select(picker, "native_tool", "hosted")
+        picker.handle_text("t")
+        assert agent.disabled_tools == frozenset({"hosted"})
+        _select(picker, "tool", "info")
+        picker.handle_text("t")
+        assert picker._flash.startswith("Tool 'info' turned off. Warning:")
+
+    async def test_toggle_of_a_vanished_tool_reports_failure(self, tmp_path):
+        agent = await _agent_with_tools(tmp_path)
+        picker = ModulePicker(lambda: agent)
+        picker.open()
+        _select(picker, "tool", "lab_query")
+        agent.registry.unregister_tool("lab_query")
+        picker.handle_text("t")
+        assert picker._flash.startswith("Toggle failed: Unknown tool")
+        assert agent.disabled_tools == frozenset()

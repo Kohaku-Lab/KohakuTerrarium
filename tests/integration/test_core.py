@@ -1619,6 +1619,9 @@ class TestCoreIntegration:
                         match="snapshot and blob",
                     ),
                     ScriptEntry("processed media", match="caption-for-the-snapshot"),
+                    # Turn 7b: the model calls a tool that is turned off.
+                    ScriptEntry("[/fail][fail/]", match="fail while off"),
+                    ScriptEntry("fail is off", match="is turned off for this agent"),
                     # Turn 8: framework commands — ##jobs## lists jobs,
                     # ##info## fetches a tool's docs, ##read_job## on a
                     # ghost id errors, ##info## on an unknown tool errors.
@@ -1788,6 +1791,34 @@ class TestCoreIntegration:
                 if j.job_id.startswith("huge_")
             )
             assert huge_status.state.value == "done"
+
+            # --- Turn 7b: a tool turned off is hidden and refused -------
+            # ``/module disable`` through the service (the web / Lab path)
+            # turns the tool off: it leaves the schemas the model gets, a
+            # call is refused with a tool error, and toggling turns it on.
+            service = LocalTerrariumService(engine)
+            off = await service.execute_command("solo", "module", "disable fail")
+            assert off["output"] == "Tool 'fail' turned off."
+            assert agent.disabled_tools == frozenset({"fail"})
+            schema_names = {s.name for s in agent.controller._get_native_tool_schemas()}
+            assert "fail" not in schema_names and "echo" in schema_names
+            listed = {
+                (m["type"], m["name"]): m for m in await service.list_modules("solo")
+            }
+            assert listed[("tool", "fail")]["enabled"] is False
+            assert listed[("tool", "fail")]["origin"]["label"] == "builtin"
+            failures_before = convo7.count("deliberate failure")
+            out7b = await _drain_chat(creature, "call fail while off")
+            assert "fail is off" in out7b
+            convo7b = " ".join(
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            )
+            assert "Tool 'fail' is turned off for this agent" in convo7b
+            assert convo7b.count("deliberate failure") == failures_before
+            on = await service.toggle_module("solo", "tool", "fail")
+            assert on == {"name": "fail", "enabled": True, "warning": ""}
+            assert agent.is_tool_enabled("fail") is True
 
             # --- Turn 8: framework commands resolve inline --------------
             # ``[/jobs]`` / ``[/info]`` / ``[/read_job]`` are framework

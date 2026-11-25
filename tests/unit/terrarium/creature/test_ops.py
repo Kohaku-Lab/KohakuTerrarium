@@ -10,7 +10,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import kohakuterrarium as kt
+from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.origin import ToolOrigin
 from kohakuterrarium.modules.user_command.base import UserCommandResult
+from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.terrarium.creature import ops as co
 
 # ── _redact_env / agent_env ───────────────────────────────────
@@ -459,10 +464,39 @@ class TestModuleCatalog:
         with pytest.raises(ValueError):
             co.agent_set_module_options(ag, "garbage", "x", {})
 
-    async def test_toggle_module_native_tool_raises(self):
-        ag = SimpleNamespace()
-        with pytest.raises(ValueError, match="does not support"):
-            await co.agent_toggle_module(ag, "native_tool", "x")
+    async def test_toggle_module_turns_a_tool_off_and_on(self, tmp_path):
+        agent = await _tool_agent(tmp_path)
+        out = await co.agent_toggle_module(agent, "tool", "probe")
+        assert out == {"name": "probe", "enabled": False, "warning": ""}
+        assert agent.is_tool_enabled("probe") is False
+        out = await co.agent_toggle_module(agent, "tool", "probe")
+        assert out["enabled"] is True and agent.is_tool_enabled("probe")
+
+    async def test_toggle_module_native_tool_checks_the_kind(self, tmp_path):
+        agent = await _tool_agent(tmp_path)
+        with pytest.raises(KeyError):
+            await co.agent_toggle_module(agent, "native_tool", "probe")
+        with pytest.raises(KeyError):
+            await co.agent_toggle_module(agent, "tool", "hosted")
+        out = await co.agent_toggle_module(agent, "native_tool", "hosted")
+        assert out["enabled"] is False
+        assert agent.disabled_tools == frozenset({"hosted"})
+
+    async def test_list_modules_carries_tool_origin_and_state(self, tmp_path):
+        agent = await _tool_agent(tmp_path)
+        agent.set_tool_enabled("probe", False)
+        rows = {(m["type"], m["name"]): m for m in co.agent_list_modules(agent)}
+        probe = rows[("tool", "probe")]
+        assert probe["enabled"] is False
+        assert probe["origin"] == {
+            "kind": "mcp",
+            "name": "lab",
+            "label": "mcp:lab",
+        }
+        assert probe["schema"] == {} and probe["configured_options"] == {}
+        hosted = rows[("native_tool", "hosted")]
+        assert hosted["enabled"] is True
+        assert hosted["origin"]["label"] == "runtime"
 
     async def test_toggle_module_plugin_dispatches(self):
         ag = SimpleNamespace(plugins=_PMgr({"p1": _Plugin("p1")}))
@@ -473,6 +507,43 @@ class TestModuleCatalog:
         ag = SimpleNamespace()
         with pytest.raises(ValueError):
             await co.agent_toggle_module(ag, "garbage", "x")
+
+
+class _Probe(BaseTool):
+    def __init__(self, name, native=False):
+        super().__init__()
+        self._name = name
+        self.is_provider_native = native
+
+    @property
+    def tool_name(self):
+        return self._name
+
+    @property
+    def description(self):
+        return self._name
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="ran")
+
+
+async def _tool_agent(tmp_path):
+    cfg = AgentConfig(
+        name="ops_agent",
+        system_prompt="Test.",
+        include_hints_in_prompt=False,
+        agent_path=tmp_path,
+        input=InputConfig(type="none"),
+        output=OutputConfig(type="none"),
+    )
+    agent = await kt.Agent.build(cfg, llm=ScriptedLLM(["ok"]))
+    agent.add_tool(_Probe("probe"), origin=ToolOrigin("mcp", "lab"))
+    agent.add_tool(_Probe("hosted", native=True))
+    return agent
 
 
 # ── execute_command ────────────────────────────────────────────

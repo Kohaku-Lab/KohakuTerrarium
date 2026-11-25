@@ -410,6 +410,45 @@ Side effect：未建索引的事件会索引起来 (幂等)；代理执行中会
 
 ---
 
+### 运行中 creature 的模块
+
+模块是运行中 creature 可在运行时配置的部分：插件、provider 原生工具（`native_tool`）或一般工具（`tool`）。
+`{creature_id}` 接受 creature id 或其显示名称。
+
+#### `GET /api/sessions/{session_id}/creatures/{creature_id}/modules`
+
+返回 `{"modules": [...]}`。每个已注册的工具都会列出，包括没有运行时选项的工具。条目格式：
+
+```json
+{
+  "type": "tool",
+  "name": "lab_query",
+  "description": "...",
+  "schema": {},
+  "options": {},
+  "enabled": true,
+  "origin": {"kind": "mcp", "name": "sandbox-lab", "label": "mcp:sandbox-lab"},
+  "configured_options": {}
+}
+```
+
+- `tool` 与 `native_tool` 条目带有 `origin`。`kind` 为 `builtin`、`package`、`custom`、
+  `plugin`、`mcp`、`runtime` 之一；`label` 是显示用格式（`builtin`、`package:kt-biome`、`plugin:ui.apps` 等）。
+- 插件、工具与原生工具的 `enabled` 都是布尔值。
+- 插件条目另外带有 `priority` 与 `configured_enabled`。
+
+#### `POST /api/sessions/{session_id}/creatures/{creature_id}/modules/{module_type}/{name}/toggle`
+
+切换模块。插件的响应为 `{"name", "enabled"}`。对 `tool` / `native_tool`，会为此 creature
+关闭或开启该工具（对模型隐藏、调用时拒绝、随会话保存），并返回
+`{"name": "lab_query", "enabled": false, "warning": ""}`；关闭框架工具（`info`、`skill`、
+`send_channel`、`group_send`）时 `warning` 不为空。找不到该类型与名称的模块时返回 404
+（provider 原生工具必须使用 `native_tool`）。
+
+#### `GET` / `PUT /api/sessions/{session_id}/creatures/{creature_id}/modules/{module_type}/{name}/options`
+
+读取 `{"type", "name", "schema", "options"}`，或套用 `{"values": {...}}`。没有运行时选项的工具，其 `schema` 为空。
+
 ## Drive 记录
 
 [Drive 运行时](../concepts/multi-agent/drive.md)的记录。一个 *session*

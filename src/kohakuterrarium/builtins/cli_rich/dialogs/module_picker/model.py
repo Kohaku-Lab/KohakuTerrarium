@@ -6,9 +6,9 @@ neither of them imports the other (they both import from here).
 
 The module picker mirrors the runtime configurable-modules surface
 that the Vue ``ModulesPanel`` and the TUI ``ModulesModal`` already
-expose: per-type tabs (``Plugins`` / ``Native tools`` / future
-types), a navigable list with a toggle column for plugins, and an
-edit form whose fields are derived from each module's
+expose: per-type tabs (``Plugins`` / ``Native tools`` / ``Tools``),
+a navigable list with an on/off column for plugins and tools plus each
+tool's origin label, and an edit form whose fields are derived from each module's
 ``option_schema``. Every operation routes through the same agent
 helpers (``agent.plugins`` / ``agent.plugin_options`` /
 ``agent.native_tool_options`` / ``agent.tool_options``) the other surfaces use, so behaviour
@@ -38,6 +38,7 @@ class ModuleEntry:
     options: dict[str, Any] = field(default_factory=dict)
     enabled: bool | None = None
     priority: int | None = None
+    origin: str = ""
 
 
 @dataclass
