@@ -64,7 +64,11 @@ download models or incur API charges.
 
 The operation:
 1. Checks for a live Session and writer ownership; requires all external
-   writers and readers to have stopped.
+   writers and readers to have stopped. Historical read-only opens can leave
+   a zero-byte SQLite WAL and 32 KB shared-memory sidecar. After acquiring
+   the writer lock, a zero-frame SQLite TRUNCATE checkpoint may retire these
+   idle sidecars; an uncheckpointed WAL or still-live handle is refused.
+   Read-only inventory must never create or remove sidecars.
 2. Inspects old FTS and vector counts without materializing old indexes.
 3. Takes a same-directory stage copy of the database, rebuilding **only the
    derived Memory indexes** in that copy for all discovered Session agents.
@@ -80,6 +84,15 @@ The operation:
 The vector drop choice also sets the saved embedding provider to none so
 a later semantic search does not silently re-encode the discarded index.
 A subsequent explicit embedding build can restore semantic retrieval.
+Legacy configs with a provider but a null model select that provider's
+default. The saved Embedding config is read from the isolated staging copy;
+model setup failure cannot leave a new shared-memory sidecar on the source.
+Provider import/model load failures are reported by CLI rather than an
+uncaught traceback.
+Legacy configurations with a provider but `model=None` use that provider's
+default model; saved embedding settings are read from the staged copy so a
+failed model initialization cannot reintroduce sidecars on the source.
+Provider import/model setup exceptions are reported by CLI, not uncaught.
 
 This is not a concurrent live database migration; the same operation must
 not race unrelated processes that ignore the Session writer lock. Byte-for-

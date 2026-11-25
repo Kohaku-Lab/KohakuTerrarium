@@ -95,12 +95,20 @@ events are deleted, but some previously indexed blocks may no longer be
 searchable in the current projection.
 
 For safety, indexes are rebuilt in a **separate database copy** and published
-only after validation. The original database is saved as a backup; sidecar
-artifacts are not changed. If rebuilding fails, the original database remains
-in place. Existing vectors are not silently reused across incompatible index
+only after validation. The original database is saved as a backup; externally stored Session
+artifacts are not changed. SQLite may retire idle WAL/shared-memory sidecars.
+If rebuilding fails, the original database remains in place. Existing vectors are not silently reused across incompatible index
 formats, and the default mode does not silently drop them.
 If you choose to drop vectors, semantic search is disabled until you
 explicitly rebuild an embedding index.
+
+When an older Session stores an Embedding provider but leaves its model
+unspecified, rebuild uses that provider's default model. If model loading
+fails, the original database remains in place and the command can be retried.
+A previous read-only open may leave an empty SQLite WAL and a shared-memory
+sidecar: rebuild lets SQLite retire those files under the writer lock.
+**Do not manually delete SQLite sidecars**. A non-empty WAL or active reader/
+writer is still a reason to stop other processes before retrying.
 
 Old Search results may report `ANCHOR_REBUILD_REQUIRED` until the Session's
 derived indexes have been rebuilt. Normal Search never silently triggers

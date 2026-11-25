@@ -98,6 +98,12 @@ kt memory rebuild /path/to/session.kohakutr --vectors rebuild --provider sentenc
 在默认模式下擅自删除它们。显式舍弃旧向量后，需重新建立 Embedding
 索引才能恢复语义检索。
 
+旧 Session 即使保存了 Embedding Provider 但未保存模型名称，重建也会
+采用该 Provider 的默认模型。模型加载失败后，可在不修改原始数据库的
+情况下重试。若先前的只读访问留下了空 SQLite WAL 和共享内存 Sidecar，
+重建器会在持有写锁时通过 SQLite 正常回收。**不要手动删除 SQLite
+Sidecar**；非空 WAL 或仍有活动 Reader／Writer 时，必须先关闭占用进程。
+
 未重建的旧索引可能返回 `ANCHOR_REBUILD_REQUIRED`。普通 Search 不会
 自动启动重建。
 

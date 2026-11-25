@@ -147,9 +147,15 @@ def rebuild_memory_cli(
         print(f"Original database backup: {result.backup}")
         print("Done. Search and Anchor metadata now use the current index format.")
         return 0
-    except (ValueError, OSError, RuntimeError) as exc:
+    except Exception as exc:
+        # Providers can raise ImportError and library-specific load failures.
+        # The lower-level rebuild cleans staging in its finally block; keep
+        # expected model/setup failures actionable instead of a CLI traceback.
         print(f"Rebuild refused or incomplete: {exc}")
-        print("Original database has not been replaced unless success was reported.")
+        print(
+            "Check that the Session is closed and the embedding provider is "
+            "available, then retry. Any existing backup is left intact."
+        )
         return 1
 
 

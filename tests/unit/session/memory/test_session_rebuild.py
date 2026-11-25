@@ -276,3 +276,105 @@ def test_corrupt_backup_prevents_publication(tmp_path, monkeypatch):
         rebuild_session_memory(path)
     assert _hash(path) == original
     assert not list(tmp_path.glob("*.memory-rebuild-*.kohakutr"))
+
+
+def test_zero_wal_readonly_sidecars_are_recoverable_on_next_rebuild(tmp_path):
+    """A failed previous read-only model probe must not wedge future rebuilds."""
+    path = tmp_path / "stale-readonly.kohakutr"
+    _seed(path, vectors=True)
+    baseline = _hash(path)
+
+    # Read-only SessionStore uses the shared WAL and can leave -shm and an
+    # empty -wal even after closing its native handles.
+    reader = SessionStore.open_readonly(path)
+    try:
+        reader.state.get("embedding_config")
+    finally:
+        reader.close(update_status=False)
+    wal, shm = Path(str(path) + "-wal"), Path(str(path) + "-shm")
+    assert shm.exists() and wal.exists() and wal.stat().st_size == 0
+    assert _hash(path) == baseline
+
+    # Inspection is observational. Rebuild owns the writer lock and can use
+    # SQLite's normal WAL checkpoint/close to retire truly idle sidecars.
+    assert inspect_index(path).vectors_present
+    assert shm.exists() and wal.exists() and wal.stat().st_size == 0
+    assert _hash(path) == baseline
+    result = rebuild_session_memory(path, vectors="rebuild", embedder=_Embedder())
+    assert result.fts_rows == result.vector_rows == 2
+    assert _hash(result.backup) == baseline
+    assert not shm.exists() and not wal.exists()
+
+
+def test_failing_model_load_then_successful_retry_never_leaves_source_sidecars(
+    tmp_path, monkeypatch, capsys
+):
+    import kohakuterrarium.session.memory.rebuild as module
+
+    path = tmp_path / "retryable-model.kohakutr"
+    _seed(path, vectors=True)
+    store = SessionStore(path)
+    try:
+        store.state["embedding_config"] = {
+            "provider": "model2vec",
+            "model": None,
+            "dimensions": None,
+        }
+    finally:
+        store.close(update_status=False)
+    initial = _hash(path)
+    observed = []
+
+    def provision(config):
+        observed.append(dict(config))
+        if len(observed) == 1:
+            raise ImportError("test-only model setup unavailable")
+        return _Embedder()
+
+    monkeypatch.setattr(module, "create_embedder", provision)
+    assert rebuild_memory_cli(str(path), vectors="rebuild") == 1
+    assert "model setup unavailable" in capsys.readouterr().out
+    assert _hash(path) == initial
+    assert not Path(str(path) + "-shm").exists()
+    assert not Path(str(path) + "-wal").exists()
+    assert not list(tmp_path.glob("*.memory-rebuild-*.kohakutr"))
+
+    assert rebuild_memory_cli(str(path), vectors="rebuild") == 0
+    assert len(observed) == 2
+    assert next(tmp_path.glob("*.before-memory-rebuild-*.bak")).exists()
+    assert not Path(str(path) + "-shm").exists()
+
+
+def test_active_readonly_store_cannot_be_mistaken_for_idle_sidecars(tmp_path):
+    path = tmp_path / "reader-active.kohakutr"
+    _seed(path)
+    original = _hash(path)
+    reader = SessionStore.open_readonly(path)
+    try:
+        reader.state.get("embedding_config")
+        shm = Path(str(path) + "-shm")
+        wal = Path(str(path) + "-wal")
+        assert shm.exists() and wal.stat().st_size == 0
+        with pytest.raises(RebuildRefused, match="currently open"):
+            rebuild_session_memory(path)
+        assert _hash(path) == original
+        # An active reader must never be forcibly detached to satisfy the
+        # rebuild's publisher, even though its WAL has no pending frames.
+        assert shm.exists()
+    finally:
+        reader.close(update_status=False)
+
+
+def test_uncheckpointed_wal_is_not_discarded_during_rebuild(tmp_path):
+    path = tmp_path / "uncheckpointed.kohakutr"
+    _seed(path)
+    original = _hash(path)
+    wal = Path(str(path) + "-wal")
+    wal.write_bytes(b"SIMULATED_PENDING_WAL_FRAMES")
+    try:
+        with pytest.raises(RebuildRefused, match="uncheckpointed"):
+            rebuild_session_memory(path)
+        assert _hash(path) == original
+        assert wal.read_bytes() == b"SIMULATED_PENDING_WAL_FRAMES"
+    finally:
+        wal.unlink(missing_ok=True)

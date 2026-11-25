@@ -80,7 +80,10 @@ def _database_uri(path: Path) -> str:
 def inspect_index(path: Path) -> IndexInventory:
     """Inspect only SQLite schema/row counts; do not create index handles."""
     source = Path(path).resolve(strict=True)
-    _reject_busy_source(source)
+    # A zero-length WAL and leftover -shm can outlive a completed read-only
+    # SessionStore. Immutable inspection reads only the checkpointed main file
+    # and must not convert these inert sidecars into a user-facing blocker.
+    _reject_busy_source(source, allow_idle_sidecars=True)
     with closing(sqlite3.connect(_database_uri(source), uri=True)) as db:
         names = {name for (name,) in db.execute("SELECT name FROM sqlite_master")}
         fts_rows = (
@@ -106,7 +109,7 @@ def inspect_index(path: Path) -> IndexInventory:
     return IndexInventory(fts_rows, tuple(vectors), source.stat().st_size)
 
 
-def _reject_busy_source(path: Path) -> None:
+def _reject_busy_source(path: Path, *, allow_idle_sidecars: bool = False) -> None:
     if live_store_for(path) is not None:
         raise RebuildRefused(
             "Session is currently open in this process; stop its agents."
@@ -117,10 +120,53 @@ def _reject_busy_source(path: Path) -> None:
             "Session has an uncheckpointed SQLite WAL; stop all writers and "
             "close/checkpoint the Session before rebuilding."
         )
-    if Path(str(path) + "-shm").exists():
+    if not allow_idle_sidecars and Path(str(path) + "-shm").exists():
         raise RebuildRefused(
             "Session still has an SQLite shared-memory sidecar; close "
             "other readers and writers before rebuilding."
+        )
+
+
+def _retire_idle_sidecars(path: Path) -> None:
+    """Ask SQLite to retire abandoned read-only sidecars, never unlink them.
+
+    An old read-only SessionStore leaves an empty WAL and a -shm behind on
+    clean close. SQLite itself can reclaim these with a zero-frame TRUNCATE
+    checkpoint; the surrounding writer lock serializes cooperating writers.
+    If another connection still holds the shared-memory map, refuse safely
+    rather than bypass its lock or manually deleting its files.
+    """
+    wal = Path(str(path) + "-wal")
+    shm = Path(str(path) + "-shm")
+    _reject_busy_source(path, allow_idle_sidecars=True)
+    if not wal.exists() and not shm.exists():
+        return
+    try:
+        with closing(
+            sqlite3.connect(
+                path.resolve().as_uri() + "?mode=rw",
+                uri=True,
+                timeout=0,
+                isolation_level=None,
+            )
+        ) as db:
+            result = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if result is None or result[0] or result[1] or result[2]:
+                raise RebuildRefused(
+                    "SQLite checkpoint is not idle; close other Session readers "
+                    "and writers before rebuilding."
+                )
+    except sqlite3.Error as exc:
+        raise RebuildRefused(
+            "SQLite still has active connections; close the Session and retry."
+        ) from exc
+    _reject_busy_source(path)
+    if wal.exists() and wal.stat().st_size:
+        raise RebuildRefused("Unexpected uncheckpointed WAL after cleanup.")
+    if wal.exists() or shm.exists():
+        raise RebuildRefused(
+            "SQLite sidecars remained after checkpoint; other connections "
+            "may still be holding this Session open."
         )
 
 
@@ -300,13 +346,20 @@ def rebuild_session_memory(
         item is not None for item in (provider, model, dimensions, embedder)
     ):
         raise ValueError("Embedding settings require --vectors rebuild")
-    _reject_busy_source(source)
+    _reject_busy_source(source, allow_idle_sidecars=True)
     lock = acquire_writer_lock(str(source))
     stage = source.with_name(f"{source.stem}.memory-rebuild-{uuid4().hex}.kohakutr")
     try:
-        _reject_busy_source(source)
+        _reject_busy_source(source, allow_idle_sidecars=True)
+        clean_digest = _file_digest(source)
+        _retire_idle_sidecars(source)
+        if _file_digest(source) != clean_digest:
+            raise RebuildRefused(
+                "Source database changed during idle-sidecar cleanup; "
+                "stop other writers and verify the Session before retrying."
+            )
         before = source.stat()
-        before_digest = _file_digest(source)
+        before_digest = clean_digest
         inventory = inspect_index(source)
         if vectors == "auto" and inventory.vectors_present:
             details = ", ".join(
@@ -319,9 +372,13 @@ def rebuild_session_memory(
             )
         policy = "fts" if vectors == "auto" else vectors
         config = None
+        # Read the saved embedding preference from the isolated copy, never
+        # the source. The old read-only open created a new -shm on the source
+        # even when the provider failed before staging could begin.
+        shutil.copy2(source, stage)
         if policy == "rebuild":
             if embedder is None:
-                store = SessionStore.open_readonly(source)
+                store = SessionStore.open_readonly(stage)
                 try:
                     saved = store.state.get("embedding_config")
                 finally:
@@ -341,7 +398,6 @@ def rebuild_session_memory(
                 embedder = create_embedder(config)
             if isinstance(embedder, NullEmbedder) or embedder.dimensions <= 0:
                 raise RebuildRefused("Vector rebuild needs a real embedding model.")
-        shutil.copy2(source, stage)
         names, events, fts, vec = _rebuild_staging(
             stage,
             policy=policy,
