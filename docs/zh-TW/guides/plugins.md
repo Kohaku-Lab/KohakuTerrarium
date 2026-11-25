@@ -198,6 +198,46 @@ Slash 指令：
 
 外掛只會在 agent 啟動時載入一次；enable/disable 只是執行時旗標，不是重新載入。若你修改了設定，仍然需要重啟。
 
+## 工具來源與關閉工具
+
+每個已註冊的工具都帶有來源標籤，說明是誰把它放進來的：
+
+| 標籤 | 來源 |
+|------|------|
+| `builtin` | 框架工具：設定中宣告的內建工具、trigger 工具、provider 原生工具，或框架自行註冊的工具（`skill`、`send_channel`、`group_*`）。 |
+| `package:<pkg>` | 由已安裝套件 `<pkg>` 提供的 `package` 或 `custom` 工具（`@<pkg>/...` 模組，或位於該套件資料夾內的模組檔案）。沒有任何已安裝套件認領的 `package` 模組，以其頂層 Python 模組名稱作為標籤。 |
+| `custom:<creature>` | 來自所有已安裝套件之外的模組檔案的 `custom` 工具（例如 creature 自己的 `custom/` 資料夾）。 |
+| `plugin:<name>` | 外掛 `<name>` 透過 `contribute_tools()` 提供的工具。 |
+| `mcp:<server>` | 以 `ToolOrigin("mcp", "<server>")` 註冊的工具，用於轉送到 MCP 伺服器的工具。 |
+| `runtime` | 從 Python 加入的工具：`Agent.build(tools=...)`，或未指定來源的 `agent.add_tool(tool)`。 |
+
+`/module` 列出每個工具的來源與狀態（`●` 開啟，`○` 關閉）。Provider 原生工具列在
+*Native tools* 下，一般工具列在 *Tools* 下。任何工具都可以針對單一 agent 關閉，
+包括外掛沒有取代掉的工具：
+
+```
+/module disable bash
+/module enable bash
+/module toggle tool/bash
+```
+
+被關閉的工具：
+
+- 從模型看到的目錄中移除：原生工具 schema 以及每個列出工具的提示詞段落。系統提示詞會立即重建。
+- 模型仍然呼叫時會被拒絕。呼叫會回傳下列工具錯誤，工具本身不會執行：
+  `Tool 'bash' is turned off for this agent. Use another tool, or turn it on with /module enable bash.`
+- 以名稱保持關閉。被移除後再次註冊的工具（外掛停用後再啟用、以相同名稱呼叫 `add_tool`）仍然是關閉的。
+- 會隨工作階段儲存，恢復（resume）時在 agent 執行任何東西之前再次關閉。
+
+這個開關只作用於該 agent。Sub-agent 依自己的設定建立工具集，保留它列出的每個工具。
+框架工具（`info`、`skill`、`send_channel`、`group_send`）也可以關閉；`/module`
+會顯示警告，說明哪些功能會停止運作。`info` 關閉期間，原本需要先讀取文件的工具不會被阻擋。
+
+在 Python 中使用 `agent.set_tool_enabled(name, enabled)`、`agent.is_tool_enabled(name)`
+與 `agent.disabled_tools`。`agent.registry.get_origin(name)` 回傳工具的 `ToolOrigin`。
+對 `agent.add_tool` 傳入 `origin=ToolOrigin("mcp", "<server>")`（來自
+`kohakuterrarium.modules.tool`），即可為你為 MCP 伺服器註冊的工具加上標籤。
+
 ## 發佈外掛
 
 打包進 package：

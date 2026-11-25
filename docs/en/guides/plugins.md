@@ -412,6 +412,54 @@ Slash command:
 
 Plugins are loaded once at agent start; enable/disable is a runtime flag, not a reload. Re-enabling runs `on_load()` again through the manager's pending-load path. Configuration changes still require a restart.
 
+## Tool origins and turning tools off
+
+Every registered tool carries an origin label that says who put it there:
+
+| Label | Source |
+|-------|--------|
+| `builtin` | A framework tool: a built-in tool declared in the config, a trigger tool, a provider-native tool, or a tool the framework registers itself (`skill`, `send_channel`, `group_*`). |
+| `package:<pkg>` | A `package` or `custom` tool shipped by the installed package `<pkg>` (a `@<pkg>/...` module, or a module file inside the package's folder). A `package` module that no installed package claims is labelled with its top-level Python module name. |
+| `custom:<creature>` | A `custom` tool from a module file outside every installed package (for example, the creature's own `custom/` folder). |
+| `plugin:<name>` | A tool contributed by the plugin `<name>` through `contribute_tools()`. |
+| `mcp:<server>` | A tool registered with `ToolOrigin("mcp", "<server>")`, for a tool that forwards to an MCP server. |
+| `runtime` | A tool added from Python: `Agent.build(tools=...)` or `agent.add_tool(tool)` without an origin. |
+
+`/module` lists every tool with its origin and state (`●` on, `○` off).
+Provider-native tools are listed under *Native tools*; ordinary tools under
+*Tools*. Any tool can be turned off for one agent, including a tool that a
+plugin did not replace:
+
+```
+/module disable bash
+/module enable bash
+/module toggle tool/bash
+```
+
+A turned-off tool:
+
+- leaves the catalog the model sees: the native tool schemas and every prompt
+  section that names tools. The system prompt is rebuilt at once.
+- is refused when the model calls it anyway. The call returns this tool
+  error, and the tool does not run: `Tool 'bash' is turned off for this agent.
+  Use another tool, or turn it on with /module enable bash.`
+- stays off by name. A tool that is removed and registered again (a plugin
+  disabled and enabled, `add_tool` with the same name) is still off.
+- is saved with the session and turned off again on resume, before the agent
+  runs anything.
+
+The switch applies to this agent only. Sub-agents build their own tool set
+from their config and keep every tool they list. Framework tools (`info`,
+`skill`, `send_channel`, `group_send`) can be turned off too; `/module`
+prints a warning that says what stops working. While `info` is off, tools
+that would require reading their documentation first are not blocked.
+
+From Python, use `agent.set_tool_enabled(name, enabled)`,
+`agent.is_tool_enabled(name)` and `agent.disabled_tools`.
+`agent.registry.get_origin(name)` returns the tool's `ToolOrigin`. Pass
+`origin=ToolOrigin("mcp", "<server>")` (from `kohakuterrarium.modules.tool`)
+to `agent.add_tool` to label a tool you register for an MCP server.
+
 ## Distributing plugins
 
 Bundle into a package:

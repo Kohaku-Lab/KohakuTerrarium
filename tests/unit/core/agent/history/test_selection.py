@@ -6,8 +6,10 @@ from kohakuterrarium import Agent
 from kohakuterrarium.core.agent.history.selection import (
     load_model_selection,
     load_plugin_selection,
+    load_tool_selection,
     persist_model_selection,
     persist_plugin_selection,
+    persist_tool_selection,
     restore_selections,
 )
 from kohakuterrarium.session.store import SessionStore
@@ -59,6 +61,10 @@ class _Agent:
         self.session_store = store or _Store()
         self.plugins = plugins
         self.switched = []
+        self.restored_tools = []
+
+    def restore_disabled_tools(self, names):
+        self.restored_tools.append(list(names))
 
     def switch_model(self, selector):
         if selector == "bad/model":
@@ -199,6 +205,41 @@ class TestRestore:
         restore_selections(agent)
         assert agent.switched == []
         assert agent.plugins.is_enabled("budget")
+
+
+class TestToolSelection:
+    def test_persist_tool_selection_sorted_json(self):
+        agent = _Agent()
+        persist_tool_selection(agent, ["web_fetch", "bash"])
+        assert json.loads(agent.session_store.state["alice:disabled_tools"]) == [
+            "bash",
+            "web_fetch",
+        ]
+
+    def test_persist_tool_selection_without_store_is_silent(self):
+        agent = _Agent()
+        agent.session_store = None
+        persist_tool_selection(agent, ["bash"])
+
+    def test_load_tool_selection_round_trip_and_absent(self):
+        agent = _Agent()
+        assert load_tool_selection(agent) == ([], False)
+        persist_tool_selection(agent, [])
+        assert load_tool_selection(agent) == ([], True)
+        persist_tool_selection(agent, ["bash"])
+        assert load_tool_selection(agent) == (["bash"], True)
+
+    def test_restore_applies_saved_tool_names(self):
+        agent = _Agent()
+        agent.session_store.state["alice:disabled_tools"] = json.dumps(["bash"])
+        restore_selections(agent)
+        assert agent.restored_tools == [["bash"]]
+
+    def test_restore_without_tool_snapshot_leaves_tools_alone(self):
+        agent = _Agent()
+        agent.session_store.state["alice:disabled_tools"] = "not json"
+        restore_selections(agent)
+        assert agent.restored_tools == []
 
 
 class TestRuntimeToggleIsPersisted:

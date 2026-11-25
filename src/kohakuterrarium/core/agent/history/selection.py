@@ -1,4 +1,4 @@
-"""Persist runtime model / plugin selections so resume keeps them.
+"""Persist runtime model / plugin / tool selections so resume keeps them.
 
 ``switch_model`` and plugin toggles are pure in-memory operations today;
 a resumed agent rebuilds its LLM and plugin manager from config and falls
@@ -18,6 +18,7 @@ logger = get_logger(__name__)
 
 MODEL_SELECTION_STATE_KEY = "model_selection"
 PLUGIN_SELECTION_STATE_KEY = "plugin_selection"
+TOOL_SELECTION_STATE_KEY = "disabled_tools"
 
 
 def _store_of(agent: Any, store: Any | None = None) -> Any | None:
@@ -61,6 +62,18 @@ def persist_plugin_selection(agent: Any, enabled_names: list[str]) -> None:
         logger.warning("plugin selection persist skipped", exc_info=True)
 
 
+def persist_tool_selection(agent: Any, disabled_names: list[str]) -> None:
+    """Snapshot the turned-off tool names."""
+    store = _store_of(agent)
+    key = _state_key(agent, TOOL_SELECTION_STATE_KEY)
+    if store is None or key is None:
+        return
+    try:
+        store.state[key] = json.dumps(sorted(disabled_names))
+    except Exception:  # pragma: no cover - persistence must never break a toggle
+        logger.warning("tool selection persist skipped", exc_info=True)
+
+
 def track_plugin_selection(agent: Any) -> None:
     """Persist ``agent``'s enabled plugin set whenever any path toggles it."""
     pm = getattr(agent, "plugins", None)
@@ -93,15 +106,24 @@ def load_plugin_selection(
     callers can keep config defaults instead of treating a corrupted key
     as an explicit empty set.
     """
+    return _load_name_list(agent, store, PLUGIN_SELECTION_STATE_KEY)
+
+
+def load_tool_selection(agent: Any, store: Any | None = None) -> tuple[list[str], bool]:
+    """Return ``(disabled_tool_names, snapshot_ok)``, like :func:`load_plugin_selection`."""
+    return _load_name_list(agent, store, TOOL_SELECTION_STATE_KEY)
+
+
+def _load_name_list(
+    agent: Any, store: Any | None, suffix: str
+) -> tuple[list[str], bool]:
     store = _store_of(agent, store)
-    key = _state_key(agent, PLUGIN_SELECTION_STATE_KEY)
+    key = _state_key(agent, suffix)
     if store is None or key is None or key not in store.state:
         return [], False
     raw = store.state.get(key)
     if raw is None or raw == "":
-        # Corrupted/migrated blank values are treated like an absent
-        # snapshot, not an explicit empty set — otherwise resume would
-        # disable every plugin.
+        # A blank value is an absent snapshot, not an explicit empty set.
         return [], False
     try:
         parsed = json.loads(str(raw))
@@ -113,14 +135,14 @@ def load_plugin_selection(
 
 
 def restore_selections(agent: Any, store: Any | None = None) -> None:
-    """Re-apply persisted model / plugin selections on resume.
+    """Re-apply persisted model / tool / plugin selections on resume.
 
     Called after the conversation, scratchpad, and native-tool-option
     state have been restored. ``store`` may be passed explicitly because
-    resume calls this before ``attach_session_store``. Both restores are
-    best-effort: ``switch_model`` validates the profile and plugin toggles
-    tolerate names that no longer exist, so a stale selection degrades to
-    the default instead of failing the resume.
+    resume calls this before ``attach_session_store``. The restores are
+    best-effort: ``switch_model`` validates the profile, plugin toggles
+    tolerate names that no longer exist, and turned-off tool names stay off
+    even before their tool is registered.
     """
     selector = load_model_selection(agent, store)
     if selector:
@@ -134,6 +156,11 @@ def restore_selections(agent: Any, store: Any | None = None) -> None:
                     selector=selector,
                     exc_info=True,
                 )
+
+    disabled_tools, tools_ok = load_tool_selection(agent, store)
+    restore_tools = getattr(agent, "restore_disabled_tools", None)
+    if tools_ok and callable(restore_tools):
+        restore_tools(disabled_tools)
 
     enabled, snapshot_ok = load_plugin_selection(agent, store)
     pm = getattr(agent, "plugins", None)

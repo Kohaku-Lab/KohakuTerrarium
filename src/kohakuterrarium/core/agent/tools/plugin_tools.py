@@ -3,6 +3,7 @@
 from typing import Any
 
 from kohakuterrarium.errors import PluginToolConflictError
+from kohakuterrarium.modules.tool.origin import ToolOrigin
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -60,7 +61,7 @@ class AgentPluginToolsMixin:
         for name, (origin, tool) in desired.items():
             if name in installed or name in configured:
                 continue
-            self.registry.register_tool(tool)
+            self.registry.register_tool(tool, origin=ToolOrigin("plugin", origin))
             self.executor.register_tool(tool)
             installed[name] = (origin, tool)
             logger.info("Plugin tool added", tool_name=name, plugin_name=origin)

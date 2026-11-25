@@ -196,6 +196,46 @@ Slash 指令：
 
 插件只会在 agent 启动时加载一次；enable/disable 只是执行时旗标，不是重新加载。若你修改了设置，仍然需要重启。
 
+## 工具来源与关闭工具
+
+每个已注册的工具都带有来源标签，说明是谁把它放进来的：
+
+| 标签 | 来源 |
+|------|------|
+| `builtin` | 框架工具：配置中声明的内置工具、trigger 工具、provider 原生工具，或框架自行注册的工具（`skill`、`send_channel`、`group_*`）。 |
+| `package:<pkg>` | 由已安装套件 `<pkg>` 提供的 `package` 或 `custom` 工具（`@<pkg>/...` 模块，或位于该套件文件夹内的模块文件）。没有任何已安装套件认领的 `package` 模块，以其顶层 Python 模块名称作为标签。 |
+| `custom:<creature>` | 来自所有已安装套件之外的模块文件的 `custom` 工具（例如 creature 自己的 `custom/` 文件夹）。 |
+| `plugin:<name>` | 插件 `<name>` 通过 `contribute_tools()` 提供的工具。 |
+| `mcp:<server>` | 以 `ToolOrigin("mcp", "<server>")` 注册的工具，用于转发到 MCP 服务器的工具。 |
+| `runtime` | 从 Python 加入的工具：`Agent.build(tools=...)`，或未指定来源的 `agent.add_tool(tool)`。 |
+
+`/module` 列出每个工具的来源与状态（`●` 开启，`○` 关闭）。Provider 原生工具列在
+*Native tools* 下，一般工具列在 *Tools* 下。任何工具都可以针对单一 agent 关闭，
+包括插件没有替换掉的工具：
+
+```
+/module disable bash
+/module enable bash
+/module toggle tool/bash
+```
+
+被关闭的工具：
+
+- 从模型看到的目录中移除：原生工具 schema 以及每个列出工具的提示词段落。系统提示词会立即重建。
+- 模型仍然调用时会被拒绝。调用会返回下列工具错误，工具本身不会执行：
+  `Tool 'bash' is turned off for this agent. Use another tool, or turn it on with /module enable bash.`
+- 以名称保持关闭。被移除后再次注册的工具（插件停用后再启用、以相同名称调用 `add_tool`）仍然是关闭的。
+- 会随会话保存，恢复（resume）时在 agent 执行任何东西之前再次关闭。
+
+这个开关只作用于该 agent。Sub-agent 依自己的配置建立工具集，保留它列出的每个工具。
+框架工具（`info`、`skill`、`send_channel`、`group_send`）也可以关闭；`/module`
+会显示警告，说明哪些功能会停止运作。`info` 关闭期间，原本需要先读取文档的工具不会被阻挡。
+
+在 Python 中使用 `agent.set_tool_enabled(name, enabled)`、`agent.is_tool_enabled(name)`
+与 `agent.disabled_tools`。`agent.registry.get_origin(name)` 返回工具的 `ToolOrigin`。
+对 `agent.add_tool` 传入 `origin=ToolOrigin("mcp", "<server>")`（来自
+`kohakuterrarium.modules.tool`），即可为你为 MCP 服务器注册的工具加上标签。
+
 ## 发布插件
 
 打包进 package：

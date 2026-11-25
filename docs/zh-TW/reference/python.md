@@ -136,7 +136,8 @@ except kt.errors.KTError as e:
 
 執行期擴充 (每一項都會即時更新系統提示詞)：
 
-- `agent.add_tool(tool)`：registry + executor + prompt 一次搞定；對 `tool_name` 冪等。
+- `agent.add_tool(tool, origin=None)`：registry + executor + prompt 一次搞定；對 `tool_name` 冪等（重新加入會取代工具及其來源）。`origin` 是 `ToolOrigin`，預設為 `runtime`。
+- `agent.set_tool_enabled(name, enabled) -> bool`：為此 agent 關閉或開啟工具（對模型隱藏、呼叫時拒絕、隨工作階段儲存）；回傳狀態是否改變。未註冊的名稱會拋出 `NotFoundError`。以 `agent.is_tool_enabled(name)` 與 `agent.disabled_tools` 讀取。
 - `await agent.add_plugin(plugin, *, enabled=True)`：即使在 `start()` 之後加入，也會觸發外掛的 `on_load`。
 - `agent.add_subagent(config)`：註冊一個 `SubAgentConfig`。
 - `agent.refresh_system_prompt()`：手動重算聚合後的提示詞。

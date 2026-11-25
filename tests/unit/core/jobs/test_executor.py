@@ -12,6 +12,7 @@ from kohakuterrarium.core.events import EventType
 from kohakuterrarium.core.tools.execution_context import ExecutionBinding
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.core.jobs.job import JobState, JobStore
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
 from kohakuterrarium.modules.tool.base import (
@@ -368,10 +369,13 @@ class TestErrorPaths:
         assert ex.get_result(jid) is result
 
 
-def _agent(tool_doc_mode="standard", has_info=True):
+def _agent(tool_doc_mode="standard", has_info=True, disabled=()):
     """Minimal agent stub exposing the fields the manual-read gate reads."""
-    tools = {"info": object()} if has_info else {}
-    registry = types.SimpleNamespace(get_tool=tools.get)
+    registry = Registry()
+    if has_info:
+        registry.register_tool(_PlainTool("info"))
+    for name in disabled:
+        registry.set_tool_enabled(name, False)
     return types.SimpleNamespace(
         config=types.SimpleNamespace(tool_doc_mode=tool_doc_mode),
         registry=registry,
@@ -381,9 +385,14 @@ def _agent(tool_doc_mode="standard", has_info=True):
 class _PlainTool(BaseTool):
     """An ordinary tool that declares no documentation requirement."""
 
+    def __init__(self, name="plain"):
+        super().__init__()
+        self._name = name
+        self.calls = 0
+
     @property
     def tool_name(self):
-        return "plain"
+        return self._name
 
     @property
     def description(self):
@@ -394,6 +403,7 @@ class _PlainTool(BaseTool):
         return ExecutionMode.DIRECT
 
     async def _execute(self, args, **kwargs):
+        self.calls += 1
         return ToolResult(output="ran")
 
 
@@ -441,6 +451,50 @@ class TestManualReadGate:
         result = await ex.wait_for(await ex.submit("manual", {}))
         assert result.error is None
         assert result.output == "never reached"
+
+    async def test_turned_off_info_tool_bypasses_gate(self):
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="standard", disabled=("info",))
+        ex.register_tool(_ManualReadTool())
+        result = await ex.wait_for(await ex.submit("manual", {}))
+        assert result.error is None
+        assert result.output == "never reached"
+
+
+class TestTurnedOffTool:
+    async def test_turned_off_tool_is_refused_without_running(self):
+        ex = Executor()
+        ex._agent = _agent(disabled=("plain",))
+        tool = _PlainTool()
+        ex.register_tool(tool)
+        jid = await ex.submit("plain", {})
+        result = await ex.wait_for(jid)
+        expected = (
+            "Tool 'plain' is turned off for this agent. Use another tool, "
+            "or turn it on with /module enable plain."
+        )
+        assert result.error == expected
+        assert result.output == expected
+        assert result.exit_code == 1
+        assert tool.calls == 0
+        assert ex.get_status(jid).state == JobState.ERROR
+
+    async def test_tool_turned_back_on_runs(self):
+        ex = Executor()
+        ex._agent = _agent(disabled=("plain",))
+        ex._agent.registry.set_tool_enabled("plain", True)
+        tool = _PlainTool()
+        ex.register_tool(tool)
+        result = await ex.wait_for(await ex.submit("plain", {}))
+        assert result.error is None
+        assert tool.calls == 1
+
+    async def test_executor_without_agent_never_refuses(self):
+        ex = Executor()
+        tool = _PlainTool()
+        ex.register_tool(tool)
+        result = await ex.wait_for(await ex.submit("plain", {}))
+        assert result.output == "ran"
 
 
 # ── on_complete callback + event queue ───────────────────────────

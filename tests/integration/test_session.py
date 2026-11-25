@@ -457,6 +457,10 @@ class TestSessionIntegration:
             router.remove_secondary(other)
             router.remove_secondary(web)
             assert renderer_changes == [{"kt.ui": 1}, {}]
+
+            # Turning a tool off is saved to the store at once.
+            assert agent.set_tool_enabled("echo", False) is True
+            assert store.state["scribe:disabled_tools"] == '["echo"]'
         finally:
             await agent.stop()
 
@@ -856,6 +860,8 @@ class TestSessionIntegration:
             reopened.close()
 
         resumed_agent, resumed_store = resume_agent(session_path)
+        # The saved tool switch is applied before the agent runs anything.
+        assert resumed_agent.disabled_tools == frozenset({"echo"})
         # ``resume_agent`` returns the agent un-started (the caller runs
         # it). ``start()`` builds the compact manager, which restores
         # compact_count from the re-attached store.
@@ -928,6 +934,18 @@ class TestSessionIntegration:
             assert widgets.registry.get(widget_id).state == {"tip": 15}
             resumed_turn = str(resumed_agent.controller.conversation.to_messages())
             assert 'name="recalc"' in resumed_turn and '"tip": 18' in resumed_turn
+
+            # The switch is kept by name: an echo tool registered after the
+            # resume stays off and leaves the catalog until turned back on.
+            resumed_agent.add_tool(_EchoTool())
+            assert resumed_agent.is_tool_enabled("echo") is False
+            native_names = {
+                schema.name
+                for schema in resumed_agent.controller._get_native_tool_schemas()
+            }
+            assert "echo" not in native_names
+            assert resumed_agent.set_tool_enabled("echo", True) is True
+            assert resumed_store.state["scribe:disabled_tools"] == "[]"
         finally:
             await resumed_agent.stop()
             resumed_store.close()
@@ -1548,9 +1566,43 @@ class TestSessionIntegration:
             await resumed.run("continue after late completion")
             assert "echoed: late-checkpoint-result" in str(resumed_llm.last_messages)
             assert (resumed._turn_index, resumed._branch_id) == (3, 1)
+            resumed.set_tool_enabled("echo", False)
         finally:
             await resumed.stop()
             reopened.close(update_status=False)
+
+        # A tool turned off before a restart is off after it: hidden from
+        # the model, a call refused with a tool error, and back on demand.
+        switch_llm = ScriptedLLM(
+            [
+                "[/echo]while off[echo/]",
+                "the echo tool is off",
+                "[/echo]back on[echo/]",
+                "the echo tool ran again",
+            ]
+        )
+        switched, switched_store = await resume_agent_async(
+            background_path,
+            llm=switch_llm,
+            input_module=NoneInput(),
+            output_module=NoneOutput(),
+        )
+        try:
+            assert switched.disabled_tools == frozenset({"echo"})
+            switched.add_tool(_EchoTool())
+            assert switched.is_tool_enabled("echo") is False
+            await switched.start()
+            await switched.run("call echo while it is off")
+            refusal = str(switch_llm.call_log[1])
+            assert "Tool 'echo' is turned off for this agent" in refusal
+            assert "echoed: while off" not in refusal
+            assert switched.set_tool_enabled("echo", True) is True
+            assert switched_store.state["plain:disabled_tools"] == "[]"
+            await switched.run("call echo again")
+            assert "echoed: back on" in str(switch_llm.last_messages)
+        finally:
+            await switched.stop()
+            switched_store.close(update_status=False)
 
     async def test_memory_index_and_search_finds_exact_turn(
         self, patched_llm, tmp_path

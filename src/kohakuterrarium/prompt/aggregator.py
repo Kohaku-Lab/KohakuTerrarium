@@ -13,7 +13,11 @@ from typing import Any
 
 from kohakuterrarium.builtin_skills import get_all_subagent_docs, get_all_tool_docs
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.core.tools.gate import visible_subagent_names, visible_tool_names
+from kohakuterrarium.core.tools.gate import (
+    is_tool_visible,
+    visible_subagent_names,
+    visible_tool_names,
+)
 from kohakuterrarium.parsing.format import (
     BRACKET_FORMAT,
     XML_FORMAT,
@@ -238,8 +242,8 @@ def aggregate_system_prompt(
             if contribution:
                 parts.append(contribution)
 
-    # The byte budget bounds prompt growth; omitted skills remain callable.
-    if skill_registry is not None:
+    # Shown while the ``skill`` tool is visible; the byte budget bounds its size.
+    if skill_registry is not None and is_tool_visible("skill", visibility):
         skill_index = build_skill_index(
             skill_registry, budget_bytes=skill_index_budget_bytes
         )

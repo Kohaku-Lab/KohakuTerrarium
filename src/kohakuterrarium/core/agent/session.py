@@ -5,6 +5,7 @@ from typing import Any
 from kohakuterrarium.core.agent.history.compact import (
     restore_compact_state_from_session,
 )
+from kohakuterrarium.core.agent.history.selection import persist_tool_selection
 from kohakuterrarium.core.agent.observability import (
     build_session_info as _build_session_info,
     wire_plugin_hook_timing,
@@ -175,6 +176,11 @@ class AgentSessionMixin:
                     error=str(e),
                     exc_info=True,
                 )
+        disabled_tools = getattr(
+            getattr(self, "registry", None), "disabled_tools", None
+        )
+        if isinstance(disabled_tools, frozenset) and disabled_tools:
+            persist_tool_selection(self, sorted(disabled_tools))
         # Wave B: route scratchpad + plugin-hook events to the router.
         wire_scratchpad_observer(self)
         wire_plugin_hook_timing(self)

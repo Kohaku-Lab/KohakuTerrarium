@@ -9,11 +9,13 @@ from types import SimpleNamespace
 
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tools.gate import (
+    enabled_visibility,
     is_subagent_visible,
     is_tool_visible,
     renderer_visibility,
     router_renderers,
     tool_available,
+    tool_turned_off_message,
     visible_catalog,
     visible_subagent_names,
     visible_tool_names,
@@ -140,6 +142,45 @@ class TestVisibleCatalog:
         visible_catalog(_registry(), plugins, _Router({}))
         visible_catalog(_registry(), plugins, _Router({}), context="ctx")
         assert plugins.contexts == [None, "ctx"]
+
+
+class TestTurnedOffTools:
+    def test_no_restriction_while_every_tool_is_on(self):
+        assert enabled_visibility(_registry()) is None
+        assert enabled_visibility(None) is None
+        assert enabled_visibility(SimpleNamespace(list_tools=lambda: [])) is None
+
+    def test_turned_off_tool_is_hidden(self):
+        reg = _registry()
+        reg.set_tool_enabled("read", False)
+        got = enabled_visibility(reg)
+        assert got.allowed_tools == frozenset({"show_app", "show_chart"})
+        assert got.allowed_subagents is None
+
+    def test_unregistered_off_name_restricts_nothing(self):
+        reg = _registry()
+        reg.set_tool_enabled("gone", False)
+        assert enabled_visibility(reg) is None
+
+    def test_catalog_intersects_plugin_renderer_and_off(self):
+        reg = _registry()
+        reg.register_tool(_tool("grep"))
+        reg.set_tool_enabled("grep", False)
+        plugin = ToolVisibility(allowed_tools=frozenset({"read", "grep", "show_app"}))
+        got = visible_catalog(reg, _Plugins(plugin), _Router({}))
+        assert got.allowed_tools == frozenset({"read"})
+
+    def test_off_tool_hidden_without_plugins_or_renderer_gates(self):
+        reg = _registry()
+        reg.set_tool_enabled("read", False)
+        got = visible_catalog(reg, None, _Router({"kt.app": 1, "kt.ui": 1}))
+        assert visible_tool_names(reg, got) == ["show_app", "show_chart"]
+
+    def test_refusal_message_names_the_tool_and_the_command(self):
+        assert tool_turned_off_message("bash") == (
+            "Tool 'bash' is turned off for this agent. Use another tool, "
+            "or turn it on with /module enable bash."
+        )
 
 
 class TestNameFilters:

@@ -18,6 +18,7 @@ from kohakuterrarium.core.jobs.job import (
     JobType,
     generate_job_id,
 )
+from kohakuterrarium.core.tools.gate import tool_turned_off_message
 from kohakuterrarium.core.tools.output import normalize_tool_result
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolResult
 from kohakuterrarium.parsing.events import ToolCallEvent
@@ -208,6 +209,17 @@ class Executor(ExecutorContextMixin):
     ) -> JobResult:
         """Run a tool and update status."""
         try:
+            if self._tool_turned_off(tool.tool_name):
+                message = tool_turned_off_message(tool.tool_name)
+                self.job_store.update_status(
+                    job_id, state=JobState.ERROR, error=message
+                )
+                job_result = JobResult(
+                    job_id=job_id, output=message, exit_code=1, error=message
+                )
+                self.job_store.store_result(job_result)
+                return job_result
+
             if (
                 self._requires_manual_read(tool)
                 and not tool._manual_read

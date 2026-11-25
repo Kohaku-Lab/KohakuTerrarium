@@ -78,6 +78,7 @@ class TestConstruction:
             plugins=[_plugin("apps", "show_app")],
         )
         assert _registered(agent, "show_app")
+        assert agent.registry.get_origin("show_app").label == "plugin:apps"
 
     async def test_clash_with_an_existing_tool_fails_the_build(self, tmp_path):
         with pytest.raises(PluginToolConflictError, match="already registered"):

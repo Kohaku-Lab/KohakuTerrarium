@@ -17,6 +17,7 @@ from kohakuterrarium.core.agent.model import AgentModelMixin
 from kohakuterrarium.core.agent.observability import init_branch_state
 from kohakuterrarium.core.agent.session import AgentSessionMixin
 from kohakuterrarium.core.agent.startup import AgentStartupMixin
+from kohakuterrarium.core.agent.tools.enablement import AgentToolEnablementMixin
 from kohakuterrarium.core.agent.tools.gate import AgentToolGateMixin
 from kohakuterrarium.core.agent.tools.plugin_tools import AgentPluginToolsMixin
 from kohakuterrarium.core.agent.turn.budget_recovery import attach_recovery_hooks
@@ -30,6 +31,7 @@ from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.modules.tool.origin import RUNTIME_ORIGIN
 from kohakuterrarium.packages.walk import package_snapshot
 from kohakuterrarium.utils.logging import get_logger
 
@@ -56,6 +58,7 @@ class Agent(
     AgentLifecycleMixin,
     AgentToolGateMixin,
     AgentPluginToolsMixin,
+    AgentToolEnablementMixin,
 ):
     """Main agent orchestrator. Wires LLM, controller, executor, I/O.
 
@@ -151,7 +154,7 @@ class Agent(
             # Instance-injected tools (E7) — registered BEFORE the
             # controller so they land in the initial system prompt.
             for tool_instance in tools or []:
-                self.registry.register_tool(tool_instance)
+                self.registry.register_tool(tool_instance, origin=RUNTIME_ORIGIN)
                 self.executor.register_tool(tool_instance)
             self._init_plugins()
             for plugin_instance in plugins or []:

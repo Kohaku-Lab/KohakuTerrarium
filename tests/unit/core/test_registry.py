@@ -2,6 +2,7 @@
 
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.origin import BUILTIN_ORIGIN, ToolOrigin
 
 # ── helpers ──────────────────────────────────────────────────────
 
@@ -138,16 +139,82 @@ class TestRegistrySubAgents:
 # ── Registry — clear ─────────────────────────────────────────────
 
 
+class TestToolOrigins:
+    def test_origin_defaults_to_builtin(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="read"))
+        assert r.get_origin("read") == BUILTIN_ORIGIN
+
+    def test_explicit_origin_is_stored(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="lab"), origin=ToolOrigin("mcp", "lab"))
+        assert r.get_origin("lab").label == "mcp:lab"
+
+    def test_reregistering_replaces_the_origin(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="t"), origin=ToolOrigin("package", "p"))
+        r.register_tool(_FakeTool(name="t"), origin=ToolOrigin("runtime"))
+        assert r.get_origin("t") == ToolOrigin("runtime")
+
+    def test_unregister_drops_the_origin(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="t"), origin=ToolOrigin("plugin", "x"))
+        r.unregister_tool("t")
+        assert r.get_origin("t") is None
+
+    def test_unknown_tool_has_no_origin(self):
+        assert Registry().get_origin("ghost") is None
+
+
+class TestToolEnabled:
+    def test_tools_start_enabled(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="t"))
+        assert r.is_tool_enabled("t") is True
+        assert r.disabled_tools == frozenset()
+
+    def test_turning_off_and_on_reports_changes(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="t"))
+        assert r.set_tool_enabled("t", False) is True
+        assert r.set_tool_enabled("t", False) is False
+        assert r.is_tool_enabled("t") is False
+        assert r.disabled_tools == frozenset({"t"})
+        assert r.set_tool_enabled("t", True) is True
+        assert r.set_tool_enabled("t", True) is False
+        assert r.is_tool_enabled("t") is True
+
+    def test_off_state_survives_unregister_and_reregister(self):
+        r = Registry()
+        r.register_tool(_FakeTool(name="t"))
+        r.set_tool_enabled("t", False)
+        r.unregister_tool("t")
+        assert r.disabled_tools == frozenset({"t"})
+        r.register_tool(_FakeTool(name="t"))
+        assert r.is_tool_enabled("t") is False
+
+    def test_disabled_tools_is_a_snapshot(self):
+        r = Registry()
+        r.set_tool_enabled("t", False)
+        view = r.disabled_tools
+        r.set_tool_enabled("t", True)
+        assert view == frozenset({"t"})
+        assert r.disabled_tools == frozenset()
+
+
 class TestClear:
     def test_clear_resets_everything(self):
         r = Registry()
-        r.register_tool(_FakeTool(name="t"))
+        r.register_tool(_FakeTool(name="t"), origin=ToolOrigin("runtime"))
+        r.set_tool_enabled("t", False)
         r.register_command("c", lambda: 1)
         r.register_subagent("s", object())
         r.clear()
         assert r.list_tools() == []
         assert r.list_commands() == []
         assert r.list_subagents() == []
+        assert r.get_origin("t") is None
+        assert r.disabled_tools == frozenset()
 
 
 # NOTE: the module-level global registry + its ``@tool`` / ``@command``

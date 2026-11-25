@@ -148,23 +148,34 @@ def ensure_package_importable(package_name: str) -> bool:
     return True
 
 
-def ensure_module_importable(module_path: str) -> bool:
-    """Put the root of the installed package that ships ``module_path`` on sys.path.
+def package_for_module(module_path: str) -> str | None:
+    """Name of the installed package that ships the dotted ``module_path``, or None.
 
     Matches the top-level name against a ``<name>/`` folder or ``<name>.py``
-    file in each installed package root. Returns True when a root was found.
+    file in each installed package root; the local project is not searched.
     """
     top = module_path.split(".", 1)[0]
     if not top:
-        return False
+        return None
     for pkg in list_packages():
         name = pkg.get("name", "")
         root = get_package_root(name) if name else None
         if root is None:
             continue
         if (root / top).is_dir() or (root / f"{top}.py").is_file():
-            return ensure_package_importable(name)
-    return False
+            return name
+    return None
+
+
+def ensure_module_importable(module_path: str) -> bool:
+    """Put the root of the installed package that ships ``module_path`` on sys.path.
+
+    Returns True when :func:`package_for_module` found a package root.
+    """
+    name = package_for_module(module_path)
+    if name is None:
+        return False
+    return ensure_package_importable(name)
 
 
 def resolve_package_tool(tool_name: str) -> tuple[str, str] | None:

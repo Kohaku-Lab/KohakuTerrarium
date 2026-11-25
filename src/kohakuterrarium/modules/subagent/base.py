@@ -157,7 +157,9 @@ class SubAgent:
         for tool_name in self.config.tools:
             tool = self.parent_registry.get_tool(tool_name)
             if tool:
-                limited.register_tool(tool)
+                limited.register_tool(
+                    tool, origin=self.parent_registry.get_origin(tool_name)
+                )
             else:
                 self._missing_tools.append(tool_name)
                 logger.warning(

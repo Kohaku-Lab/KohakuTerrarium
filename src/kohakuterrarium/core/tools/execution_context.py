@@ -111,7 +111,17 @@ class ExecutorContextMixin:
         registry = getattr(agent, "registry", None)
         if registry is not None and registry.get_tool("info") is None:
             return False
+        if self._tool_turned_off("info"):
+            return False
         return True
+
+    def _tool_turned_off(self, tool_name: str) -> bool:
+        """Whether the bound agent turned this tool off; tool-only hosts never do."""
+        registry = getattr(self._agent, "registry", None)
+        is_enabled = getattr(registry, "is_tool_enabled", None)
+        if not callable(is_enabled):
+            return False
+        return is_enabled(tool_name) is False
 
     def _requires_manual_read(self, tool: Tool) -> bool:
         """Return whether this tool must be documented before its first use.

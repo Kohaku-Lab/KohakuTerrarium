@@ -14,6 +14,7 @@ from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig, ToolResult
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
+from kohakuterrarium.modules.tool.origin import ToolOrigin
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 
@@ -152,6 +153,17 @@ class TestLimits:
         assert result.success is False
         assert "turn limit" in result.error
         assert result.metadata["limit_reached"] == "max_turns"
+
+    def test_limited_registry_keeps_parent_origins_but_not_off_switches(self):
+        echo = _EchoTool()
+        parent = Registry()
+        parent.register_tool(echo, origin=ToolOrigin("plugin", "kit"))
+        parent.set_tool_enabled("echo", False)
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["echo"]), parent, ScriptedLLM(["ok"])
+        )
+        assert sa.registry.get_origin("echo") == ToolOrigin("plugin", "kit")
+        assert sa.registry.is_tool_enabled("echo") is True
 
     async def test_missing_tool_recorded_and_noted_in_prompt(self):
         # A tool requested in config but absent from the parent registry

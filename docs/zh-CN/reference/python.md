@@ -135,7 +135,8 @@ except kt.errors.KTError as e:
 
 运行时扩展（每个都会刷新当前系统提示词）：
 
-- `agent.add_tool(tool)`：注册表 + 执行器 + 提示词一步到位；按 `tool_name` 幂等。
+- `agent.add_tool(tool, origin=None)`：注册表 + 执行器 + 提示词一步到位；按 `tool_name` 幂等（重新加入会替换工具及其来源）。`origin` 是 `ToolOrigin`，默认为 `runtime`。
+- `agent.set_tool_enabled(name, enabled) -> bool`：为此 agent 关闭或开启工具（对模型隐藏、调用时拒绝、随会话保存）；返回状态是否改变。未注册的名称会抛出 `NotFoundError`。以 `agent.is_tool_enabled(name)` 与 `agent.disabled_tools` 读取。
 - `await agent.add_plugin(plugin, *, enabled=True)`：即使在 `start()` 之后添加，也会触发插件的 `on_load`。
 - `agent.add_subagent(config)`：注册一个 `SubAgentConfig`。
 - `agent.refresh_system_prompt()`：手动重算聚合提示词。

@@ -9,6 +9,7 @@ from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.plugin.manager.manager import PluginManager
+from kohakuterrarium.modules.tool.origin import RUNTIME_ORIGIN, ToolOrigin
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.utils.logging import get_logger
 
@@ -18,15 +19,15 @@ logger = get_logger(__name__)
 class AgentExtensionsMixin:
     """Mixin providing runtime extension registration for ``Agent``."""
 
-    def add_tool(self, tool: Any) -> None:
+    def add_tool(self, tool: Any, origin: ToolOrigin | None = None) -> None:
         """Register a tool instance — registry + executor + prompt.
 
         Idempotent on ``tool_name``: re-adding replaces the previous
-        instance.  The system prompt's tool list is recomputed so the
-        controller actually SEES the new tool (the old two-step
-        registry/executor dance left the prompt frozen).
+        instance and its origin.  ``origin`` defaults to ``runtime``.  The
+        system prompt's tool list is recomputed so the controller sees
+        the new tool.
         """
-        self.registry.register_tool(tool)
+        self.registry.register_tool(tool, origin=origin or RUNTIME_ORIGIN)
         self.executor.register_tool(tool)
         self.refresh_system_prompt()
         logger.info("Tool added at runtime", tool_name=tool.tool_name)

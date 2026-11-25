@@ -7,7 +7,10 @@ import pytest
 from kohakuterrarium.core.agent.tools.options import (
     TOOL_OPTIONS_STATE_SUFFIX,
     ToolOptions,
+    agent_tool_inventory,
 )
+from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.modules.tool.origin import ToolOrigin
 
 
 class _Tool:
@@ -168,3 +171,50 @@ class TestToolOptions:
 
         assert resumed.get("web_search")["backend"] == "deepseek"
         assert resumed_tool.applied["backend"] == "deepseek"
+
+
+class _PlainTool:
+    is_provider_native = False
+    description = "plain"
+    execution_mode = "direct"
+
+    def __init__(self, name, native=False):
+        self.tool_name = name
+        self.is_provider_native = native
+
+
+class TestAgentToolInventory:
+    def test_lists_every_ordinary_tool_with_origin_and_state(self):
+        registry = Registry()
+        configurable = _Tool()
+        configurable.tool_name = "web_search"
+        configurable.execution_mode = "direct"
+        registry.register_tool(configurable, origin=ToolOrigin("package", "kt-biome"))
+        registry.register_tool(_PlainTool("read"))
+        registry.register_tool(_PlainTool("hosted", native=True))
+        registry.set_tool_enabled("read", False)
+        agent = SimpleNamespace(
+            config=SimpleNamespace(name="a"),
+            registry=registry,
+            session=None,
+            session_store=None,
+        )
+        agent.tool_options = ToolOptions(agent)
+
+        by_name = {entry["name"]: entry for entry in agent_tool_inventory(agent)}
+
+        assert sorted(by_name) == ["read", "web_search"]
+        assert by_name["read"]["option_schema"] == {}
+        assert by_name["read"]["values"] == {}
+        assert by_name["read"]["enabled"] is False
+        assert by_name["read"]["origin"]["label"] == "builtin"
+        assert by_name["web_search"]["enabled"] is True
+        assert by_name["web_search"]["origin"] == {
+            "kind": "package",
+            "name": "kt-biome",
+            "label": "package:kt-biome",
+        }
+        assert by_name["web_search"]["values"]["backend"] == "duckduckgo"
+
+    def test_no_registry_lists_nothing(self):
+        assert agent_tool_inventory(SimpleNamespace()) == []

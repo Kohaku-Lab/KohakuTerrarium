@@ -17,8 +17,10 @@ from kohakuterrarium.errors import (
 from kohakuterrarium.packages import locations as loc_mod
 from kohakuterrarium.packages import resolve as res_mod
 from kohakuterrarium.packages.resolve import (
+    ensure_module_importable,
     ensure_package_importable,
     is_package_ref,
+    package_for_module,
     resolve_any_path,
     resolve_package_io,
     resolve_package_path,
@@ -174,6 +176,29 @@ class TestEnsurePackageImportable:
         assert ensure_package_importable("imp") is True
         # Already present → no duplicate inserted.
         assert sys.path == before
+
+
+class TestPackageForModule:
+    def test_finds_the_package_holding_the_top_level_folder(self, pkg_dir):
+        (pkg_dir / "kt-demo" / "kt_demo").mkdir(parents=True)
+        assert package_for_module("kt_demo.tools.search") == "kt-demo"
+
+    def test_finds_a_single_file_module(self, pkg_dir):
+        (pkg_dir / "solo").mkdir()
+        (pkg_dir / "solo" / "solo_tool.py").write_text("")
+        assert package_for_module("solo_tool") == "solo"
+
+    def test_unclaimed_or_empty_module_is_none(self, pkg_dir):
+        (pkg_dir / "kt-demo").mkdir()
+        assert package_for_module("other_pkg.mod") is None
+        assert package_for_module("") is None
+
+    def test_ensure_module_importable_uses_the_same_lookup(self, pkg_dir, monkeypatch):
+        (pkg_dir / "kt-demo" / "kt_demo").mkdir(parents=True)
+        monkeypatch.setattr(sys, "path", list(sys.path))
+        assert ensure_module_importable("kt_demo.x") is True
+        assert str((pkg_dir / "kt-demo").resolve()) in sys.path
+        assert ensure_module_importable("nobody.x") is False
 
 
 def _patch_packages(monkeypatch, packages):

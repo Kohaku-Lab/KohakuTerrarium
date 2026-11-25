@@ -3,6 +3,7 @@
 import json
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.core.agent.tools.enablement import tool_switch_state
 from kohakuterrarium.modules.tool.runtime_options import validate_tool_options
 from kohakuterrarium.utils.logging import get_logger
 
@@ -237,7 +238,10 @@ class ToolOptions:
 
 
 def agent_tool_inventory(agent: Any) -> list[dict[str, Any]]:
-    """Return configurable ordinary tools in the shared module shape."""
+    """Return every ordinary (non provider-native) tool with origin and on/off state.
+
+    Tools without runtime options carry an empty ``option_schema``.
+    """
     registry = getattr(agent, "registry", None)
     if registry is None:
         return []
@@ -252,14 +256,13 @@ def agent_tool_inventory(agent: Any) -> list[dict[str, Any]]:
             schema = schema_fn() if callable(schema_fn) else {}
         except Exception:
             schema = {}
-        if not schema:
-            continue
         out.append(
             {
                 "name": name,
                 "description": getattr(tool, "description", "") or "",
-                "option_schema": schema,
-                "values": helper.get(name) if helper else {},
+                "option_schema": schema or {},
+                "values": helper.get(name) if helper and schema else {},
+                **tool_switch_state(agent, name),
             }
         )
     out.sort(key=lambda entry: entry["name"])

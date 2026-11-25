@@ -8,6 +8,7 @@ from kohakuterrarium.bootstrap.tools import (
     _coerce_tool_config_value,
     _lookup_trigger_class,
     _universal_trigger_classes,
+    config_tool_origin,
     create_tool,
     init_tools,
 )
@@ -18,6 +19,8 @@ from kohakuterrarium.core.config.types import (
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.errors import ConfigError
+from kohakuterrarium.modules.tool.origin import ToolOrigin
+from kohakuterrarium.packages import locations as loc_mod
 
 # ── _coerce_tool_config_value ────────────────────────────────────
 
@@ -235,6 +238,112 @@ class TestInitTools:
         # The unknown one was skipped without crashing (lenient default
         # of the bare factory — Agent construction passes strict=True).
         assert "definitely_no_tool" not in reg.list_tools()
+
+    def test_registered_tools_carry_their_config_origin(self, tmp_path):
+        custom = tmp_path / "custom"
+        custom.mkdir()
+        (custom / "my_tool.py").write_text(textwrap.dedent("""
+                from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
+
+                class MyTool(BaseTool):
+                    @property
+                    def tool_name(self):
+                        return "my_tool"
+
+                    @property
+                    def description(self):
+                        return "my tool"
+
+                    async def _execute(self, args, **kwargs):
+                        return ToolResult(output="x")
+                """))
+        cfg = AgentConfig(
+            name="local-agent",
+            agent_path=tmp_path,
+            tools=[
+                ToolConfigItem(name="bash", type="builtin"),
+                ToolConfigItem(
+                    name="my_tool",
+                    type="custom",
+                    module="custom/my_tool.py",
+                    class_name="MyTool",
+                ),
+            ],
+        )
+        reg = Registry()
+        init_tools(cfg, reg, loader=ModuleLoader(agent_path=tmp_path))
+        assert reg.get_origin("bash") == ToolOrigin("builtin")
+        assert reg.get_origin("my_tool") == ToolOrigin("custom", "local-agent")
+
+
+# ── config_tool_origin ──────────────────────────────────────────
+
+
+@pytest.fixture
+def pkg_dir(tmp_path, monkeypatch):
+    d = tmp_path / "packages"
+    d.mkdir()
+    monkeypatch.setattr(loc_mod, "PACKAGES_DIR", d)
+    return d
+
+
+class TestConfigToolOrigin:
+    def _origin(self, item, agent_path=None, name="creature-a"):
+        return config_tool_origin(item, AgentConfig(name=name, agent_path=agent_path))
+
+    def test_builtin_and_trigger_tools_are_builtin(self):
+        assert self._origin(ToolConfigItem(name="bash")).label == "builtin"
+        assert (
+            self._origin(ToolConfigItem(name="add_timer", type="trigger")).label
+            == "builtin"
+        )
+
+    def test_package_module_shipped_by_an_installed_package(self, pkg_dir):
+        (pkg_dir / "kt-biome" / "kt_biome").mkdir(parents=True)
+        item = ToolConfigItem(
+            name="t", type="package", module="kt_biome.tools.t", class_name="T"
+        )
+        assert self._origin(item) == ToolOrigin("package", "kt-biome")
+
+    def test_package_module_no_package_claims_uses_its_top_module(self, pkg_dir):
+        item = ToolConfigItem(
+            name="t", type="package", module="thirdparty.tools", class_name="T"
+        )
+        assert self._origin(item).label == "package:thirdparty"
+
+    def test_custom_package_reference(self, pkg_dir):
+        item = ToolConfigItem(
+            name="t", type="custom", module="@kt-biome/tools/t.py", class_name="T"
+        )
+        assert self._origin(item).label == "package:kt-biome"
+
+    def test_custom_file_inside_an_installed_package(self, pkg_dir):
+        creature = pkg_dir / "kt-biome" / "creatures" / "swe"
+        creature.mkdir(parents=True)
+        item = ToolConfigItem(
+            name="t", type="custom", module="custom/t.py", class_name="T"
+        )
+        assert self._origin(item, agent_path=creature).label == "package:kt-biome"
+
+    def test_custom_file_outside_packages_is_custom(self, pkg_dir, tmp_path):
+        folder = tmp_path / "mine"
+        folder.mkdir()
+        item = ToolConfigItem(
+            name="t", type="custom", module="custom/t.py", class_name="T"
+        )
+        assert self._origin(item, agent_path=folder).label == "custom:creature-a"
+        absolute = ToolConfigItem(
+            name="t", type="custom", module=str(folder / "t.py"), class_name="T"
+        )
+        assert self._origin(absolute).label == "custom:creature-a"
+
+    def test_custom_without_location_is_custom(self, pkg_dir):
+        no_path = ToolConfigItem(name="t", type="custom", module="t.py")
+        assert self._origin(no_path).label == "custom:creature-a"
+        no_module = ToolConfigItem(name="t", type="custom")
+        assert self._origin(no_module).label == "custom:creature-a"
+        local_ref = ToolConfigItem(name="t", type="custom", module="@/tools/t.py")
+        assert self._origin(local_ref).label == "custom:creature-a"
 
 
 class TestStrictMode:

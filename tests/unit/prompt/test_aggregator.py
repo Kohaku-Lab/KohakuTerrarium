@@ -14,6 +14,7 @@ from kohakuterrarium.prompt.aggregator import (
     aggregate_system_prompt,
     build_context_message,
 )
+from kohakuterrarium.skills.registry import Skill, SkillRegistry
 
 
 def _tool(name, desc, *, doc_mode=None, contribution=None):
@@ -222,6 +223,30 @@ class TestToolGuidance:
     def test_section_absent_when_no_tool_contributes(self):
         out = aggregate_system_prompt("base", _registry(_tool("read", "Read")))
         assert "## Tool guidance" not in out
+
+
+class TestSkillIndexGate:
+    def _skills(self):
+        skills = SkillRegistry()
+        skills.add(Skill("deploy", "Deploy the app", "Run the deploy steps."))
+        return skills
+
+    def test_present_while_the_skill_tool_is_visible(self):
+        reg = _registry(_tool("skill", "Load a skill."))
+        out = aggregate_system_prompt(
+            "Base.", registry=reg, skill_registry=self._skills()
+        )
+        assert "## Skills" in out and "deploy" in out
+
+    def test_absent_while_the_skill_tool_is_hidden(self):
+        reg = _registry(_tool("skill", "Load a skill."), _tool("read", "Read."))
+        out = aggregate_system_prompt(
+            "Base.",
+            registry=reg,
+            skill_registry=self._skills(),
+            visibility=ToolVisibility(allowed_tools=frozenset({"read"})),
+        )
+        assert "## Skills" not in out
 
 
 class TestSectionOrder:

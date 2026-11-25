@@ -5,6 +5,7 @@ Strict mode rejects misconfigured tools; lenient interactive construction logs
 and skips them.
 """
 
+from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import ConfigError
@@ -13,10 +14,12 @@ from kohakuterrarium.core.config.load import AgentConfig
 from kohakuterrarium.core.loader import ModuleLoader, ModuleLoadError
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig
+from kohakuterrarium.modules.tool.origin import BUILTIN_ORIGIN, ToolOrigin
 from kohakuterrarium.modules.tool.request_replay import validate_request_replay
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.modules.trigger.callable import CallableTriggerTool
 from kohakuterrarium.modules.trigger.universal import list_universal_trigger_classes
+from kohakuterrarium.packages.resolve import package_for_module, package_ref
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -193,6 +196,45 @@ def create_tool(
             return None
 
 
+def config_tool_origin(tool_config: Any, config: AgentConfig) -> ToolOrigin:
+    """Origin of a tool declared in a creature config.
+
+    ``package`` and ``custom`` tools shipped by an installed package are
+    ``package:<pkg>``; other ``custom`` tools are ``custom:<creature>``; a
+    ``package`` module no installed package claims is labelled by its
+    top-level module name. Built-in and trigger tools are ``builtin``.
+    """
+    module = tool_config.module or ""
+    match tool_config.type:
+        case "package":
+            name = package_for_module(module) or module.split(".", 1)[0]
+            return ToolOrigin("package", name)
+        case "custom":
+            name = _package_for_file(module, config.agent_path)
+            if name:
+                return ToolOrigin("package", name)
+            return ToolOrigin("custom", config.name or "")
+        case _:
+            return BUILTIN_ORIGIN
+
+
+def _package_for_file(module: str, agent_path: Path | None) -> str:
+    """Installed package holding a custom tool file; empty when none does."""
+    if module.startswith("@"):
+        return module[1:].split("/", 1)[0]
+    if not module:
+        return ""
+    path = Path(module).expanduser()
+    if not path.is_absolute():
+        if agent_path is None:
+            return ""
+        path = Path(agent_path) / path
+    ref = package_ref(path)
+    if ref is None:
+        return ""
+    return ref[1:].split("/", 1)[0]
+
+
 def init_tools(
     config: AgentConfig,
     registry: Registry,
@@ -204,4 +246,4 @@ def init_tools(
     for tool_config in config.tools:
         tool = create_tool(tool_config, loader, strict=strict)
         if tool:
-            registry.register_tool(tool)
+            registry.register_tool(tool, origin=config_tool_origin(tool_config, config))

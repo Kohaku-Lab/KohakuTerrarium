@@ -16,6 +16,7 @@ from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputCo
 from kohakuterrarium.core.jobs.executor import Executor
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.function import FunctionTool
+from kohakuterrarium.modules.tool.origin import ToolOrigin
 from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -152,6 +153,15 @@ class TestRuntimeAdds:
             assert "add_numbers" in {s.name for s in schemas}
         finally:
             await agent.stop()
+
+    async def test_add_tool_origin_defaults_to_runtime_and_can_be_given(self, tmp_path):
+        agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
+        agent.add_tool(add_numbers)
+        assert agent.registry.get_origin("add_numbers").label == "runtime"
+        agent.add_tool(add_numbers, origin=ToolOrigin("mcp", "sandbox-lab"))
+        assert agent.registry.get_origin("add_numbers").label == "mcp:sandbox-lab"
+        agent.add_tool(add_numbers)
+        assert agent.registry.get_origin("add_numbers").label == "runtime"
 
     async def test_add_plugin_after_start_gets_on_load(self, tmp_path):
         loads: list[str] = []

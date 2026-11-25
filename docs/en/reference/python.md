@@ -143,7 +143,8 @@ Turn drivers (see [Turn results & events](#turn-results--events)):
 
 Runtime extension (each refreshes the live system prompt):
 
-- `agent.add_tool(tool)`: registry + executor + prompt in one call; idempotent on `tool_name`.
+- `agent.add_tool(tool, origin=None)`: registry + executor + prompt in one call; idempotent on `tool_name` (a re-add replaces the tool and its origin). `origin` is a `ToolOrigin` and defaults to `runtime`.
+- `agent.set_tool_enabled(name, enabled) -> bool`: turn a tool off or on for this agent (hidden from the model, refused when called, saved with the session); returns whether the state changed. An unregistered name raises `NotFoundError`. Read with `agent.is_tool_enabled(name)` and `agent.disabled_tools`.
 - `await agent.add_plugin(plugin, *, enabled=True)`: fires the plugin's `on_load` even when added after `start()`.
 - `agent.add_subagent(config)`: register a `SubAgentConfig`.
 - `agent.refresh_system_prompt()`: recompute the aggregated prompt by hand.

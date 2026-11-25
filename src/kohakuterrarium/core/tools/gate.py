@@ -1,4 +1,4 @@
-"""Model-facing tool catalog: plugin visibility combined with renderer availability.
+"""Model-facing tool catalog: plugin visibility, renderer availability and turned-off tools.
 
 Native schemas and every prompt section that names tools read the catalog
 through :func:`visible_catalog`, so a tool hidden here is hidden everywhere.
@@ -47,21 +47,44 @@ def renderer_visibility(
     return ToolVisibility(allowed_tools=frozenset(available))
 
 
+def tool_turned_off_message(name: str) -> str:
+    """The tool result an agent gets for calling a tool that is turned off."""
+    return (
+        f"Tool '{name}' is turned off for this agent. Use another tool, "
+        f"or turn it on with /module enable {name}."
+    )
+
+
+def enabled_visibility(registry: Any) -> ToolVisibility | None:
+    """Restriction hiding turned-off tools; None when every registered tool is on."""
+    disabled = getattr(registry, "disabled_tools", None)
+    if not isinstance(disabled, (set, frozenset)) or not disabled:
+        return None
+    names = list(registry.list_tools())
+    enabled = [name for name in names if name not in disabled]
+    if len(enabled) == len(names):
+        return None
+    return ToolVisibility(allowed_tools=frozenset(enabled))
+
+
 def visible_catalog(
     registry: Any,
     plugins: Any = None,
     router: Any = None,
     context: Any = None,
 ) -> ToolVisibility | None:
-    """Merge plugin tool visibility with renderer availability."""
-    plugin_visibility = None
+    """Intersect plugin tool visibility, renderer availability and turned-off tools."""
+    visibility = None
     collect = getattr(plugins, "collect_tool_visibility", None)
     if callable(collect):
-        plugin_visibility = collect() if context is None else collect(context)
-    gated = renderer_visibility(registry, router_renderers(router))
-    if gated is None:
-        return plugin_visibility
-    return merge_visibility(plugin_visibility, gated)
+        visibility = collect() if context is None else collect(context)
+    for restriction in (
+        renderer_visibility(registry, router_renderers(router)),
+        enabled_visibility(registry),
+    ):
+        if restriction is not None:
+            visibility = merge_visibility(visibility, restriction)
+    return visibility
 
 
 def is_tool_visible(name: str, visibility: ToolVisibility | None) -> bool:

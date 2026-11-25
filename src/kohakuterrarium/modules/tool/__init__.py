@@ -9,6 +9,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolInfo,
     ToolResult,
 )
+from kohakuterrarium.modules.tool.origin import ToolOrigin
 
 __all__ = [
     "Tool",
@@ -18,4 +19,5 @@ __all__ = [
     "ToolResult",
     "ToolInfo",
     "ExecutionMode",
+    "ToolOrigin",
 ]
