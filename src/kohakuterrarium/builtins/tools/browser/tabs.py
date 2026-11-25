@@ -36,6 +36,26 @@ class BrowserTabsTool(BrowserTool):
             "browser."
         )
 
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": list(ACTIONS),
+                    "description": "Default list",
+                },
+                TAB_ARG: {
+                    "type": "string",
+                    "description": 'Tab id for select or close; else ""',
+                },
+                "url": {
+                    "type": "string",
+                    "description": 'URL for new; else ""',
+                },
+            },
+        }
+
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         action = text_arg(args, "action") or text_arg(args, BODY_ARG) or "list"
         if action not in ACTIONS:

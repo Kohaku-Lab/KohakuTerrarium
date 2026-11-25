@@ -1,9 +1,9 @@
 """Strict-mode-safe arguments: a call with every schema property filled in at
 its neutral value must mean exactly what the minimal call means.
 
-The filled call is derived from ``llm/tools/schemas.py``, so a property added
-to a schema later is covered here, and a property without a declared neutral
-value fails the test.
+The filled call is derived from the schemas the model receives
+(``build_tool_schemas``), so a property added to a schema later is covered
+here, and a property without a declared neutral value fails the test.
 """
 
 import pytest
@@ -16,7 +16,8 @@ from kohakuterrarium.builtins.tools.browser.navigate import BrowserNavigateTool
 from kohakuterrarium.builtins.tools.browser.screenshot import BrowserScreenshotTool
 from kohakuterrarium.builtins.tools.browser.snapshot import BrowserSnapshotTool
 from kohakuterrarium.builtins.tools.browser.tabs import BrowserTabsTool
-from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS as BUILTIN_SCHEMAS
+from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.llm.tools.build import build_tool_schemas
 
 TOOLS = {
     tool.tool_name: tool
@@ -92,8 +93,19 @@ MINIMAL_ACTIONS = [
 ]
 
 
+def built_schemas() -> dict[str, dict]:
+    """The parameter schema of each browser tool, as the model receives it."""
+    registry = Registry()
+    for tool in TOOLS.values():
+        registry.register_tool(tool)
+    return {spec.name: spec.parameters for spec in build_tool_schemas(registry)}
+
+
+SCHEMAS = built_schemas()
+
+
 def schema(name: str) -> dict:
-    return BUILTIN_SCHEMAS[name]
+    return SCHEMAS[name]
 
 
 def item_schema() -> dict:

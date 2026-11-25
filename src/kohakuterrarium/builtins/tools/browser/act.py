@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from kohakuterrarium.browser.actions import BUTTONS, KINDS
 from kohakuterrarium.builtins.tools.browser.common import (
     BODY_ARG,
     TAB_ARG,
@@ -10,6 +11,7 @@ from kohakuterrarium.builtins.tools.browser.common import (
     files_list,
     guarded_path,
     tab_arg,
+    tab_schema,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import ToolContext
@@ -40,6 +42,59 @@ class BrowserActTool(BrowserTool):
             "Run a batch of browser actions by ref. Use it to interact with a page; "
             "returns statuses and what changed."
         )
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "description": (
+                        "Run in order; stops at the first failure. Unused fields: "
+                        '"", 0, [], false'
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string", "enum": list(KINDS)},
+                            "ref": {"type": "string"},
+                            "text": {"type": "string"},
+                            "secret": {"type": "string"},
+                            "submit": {"type": "boolean"},
+                            "slowly": {"type": "boolean"},
+                            "values": {"type": "array", "items": {"type": "string"}},
+                            "checked": {"type": "boolean"},
+                            "key": {"type": "string"},
+                            "x": {"type": "number"},
+                            "y": {"type": "number"},
+                            "button": {"type": "string", "enum": list(BUTTONS)},
+                            "double": {"type": "boolean"},
+                            "modifiers": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "dx": {"type": "number"},
+                            "dy": {"type": "number"},
+                            "to": {"type": "string"},
+                            "to_x": {"type": "number"},
+                            "to_y": {"type": "number"},
+                            "files": {"type": "array", "items": {"type": "integer"}},
+                            "seconds": {"type": "number"},
+                            "text_gone": {"type": "string"},
+                            "accept": {"type": "boolean"},
+                        },
+                        "required": ["kind"],
+                    },
+                },
+                FILES_ARG: {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Paths upload actions index into; [] = none",
+                },
+                TAB_ARG: tab_schema(),
+            },
+            "required": ["actions"],
+        }
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         actions = args.get("actions")

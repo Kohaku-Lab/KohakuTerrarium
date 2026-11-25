@@ -8,6 +8,7 @@ from kohakuterrarium.builtins.tools.browser.common import (
     bool_arg,
     int_arg,
     tab_arg,
+    tab_schema,
     text_arg,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
@@ -39,6 +40,35 @@ class BrowserSnapshotTool(BrowserTool):
             "element refs. Use it to reread a page, or narrow it with ref, query "
             "or interactive."
         )
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "ref": {
+                    "type": "string",
+                    "description": 'Only this element\'s subtree; "" = whole page',
+                },
+                "depth": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Levels below the root; 0 = no limit",
+                },
+                "query": {
+                    "type": "string",
+                    "description": 'Only lines matching this text; "" = all',
+                },
+                "interactive": {
+                    "type": "boolean",
+                    "description": "Only interactive elements",
+                },
+                "boxes": {
+                    "type": "boolean",
+                    "description": "Add [box=x,y,w,h] to each element",
+                },
+                TAB_ARG: tab_schema(),
+            },
+        }
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         return {

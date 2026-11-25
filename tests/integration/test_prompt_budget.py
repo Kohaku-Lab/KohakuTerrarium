@@ -25,6 +25,7 @@ from kohakuterrarium.builtins.plugins.ui_declarative.reference import (
 from kohakuterrarium.builtins.tools.app.show import ShowAppTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config.load import load_agent_config
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS
 from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.prompt.presentation import CLOSING, HEADING, OPENING
@@ -194,8 +195,14 @@ class TestPromptBudget:
 
         # ── the browser plugin's tools and prompt block, when it is on ──
         browser = BrowserPlugin()
+        browser_registry = Registry()
         for tool in browser.contribute_tools():
-            schema = json.dumps(_BUILTIN_SCHEMAS[tool.tool_name])
+            browser_registry.register_tool(tool)
+        browser_schemas = {
+            spec.name: spec.parameters for spec in build_tool_schemas(browser_registry)
+        }
+        for tool in browser.contribute_tools():
+            schema = json.dumps(browser_schemas[tool.tool_name])
             assert len(schema) <= MAX_SCHEMA_CHARS, (tool.tool_name, len(schema))
             assert len(tool.description) <= 160
             assert tool.prompt_contribution() is None

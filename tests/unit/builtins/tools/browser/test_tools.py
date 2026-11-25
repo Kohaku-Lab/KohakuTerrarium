@@ -17,8 +17,9 @@ from kohakuterrarium.builtins.tools.browser.screenshot import (
     MEDIA_POLICY,
     SCREENSHOT_MAX_BYTES,
 )
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.message import ImagePart, TextPart
-from kohakuterrarium.llm.tools.schemas import _BUILTIN_SCHEMAS
+from kohakuterrarium.llm.tools.build import build_tool_schemas
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.modules.tool.media_policy import resolve_media_policy
 from kohakuterrarium.skill_docs import load_skill_doc
@@ -30,6 +31,26 @@ from tests.helpers.browser_plugin import (
     scripted_plugin,
     tool_context,
 )
+
+
+def built_schema(tool) -> dict:
+    """``tool``'s parameter schema as ``build_tool_schemas`` hands it to the model."""
+    registry = Registry()
+    registry.register_tool(tool)
+    (spec,) = build_tool_schemas(registry)
+    return spec.parameters
+
+
+def walk_properties(schema: dict):
+    """Every ``(name, property)`` of ``schema``, nested objects and items included."""
+    for name, prop in schema.get("properties", {}).items():
+        yield name, prop
+        items = prop.get("items")
+        if isinstance(items, dict):
+            yield from walk_properties(items)
+        if "properties" in prop:
+            yield from walk_properties(prop)
+
 
 TOOLS = (
     "browser_navigate",
@@ -69,7 +90,27 @@ class TestCommon:
         assert len(tool.description) <= 160
         doc = load_skill_doc(BUILTIN_SKILLS_DIR / "tools" / f"{name}.md")
         assert doc.description == tool.description
-        assert name in _BUILTIN_SCHEMAS
+        assert built_schema(tool) == tool.get_parameters_schema()
+
+    @pytest.mark.parametrize("name", TOOLS)
+    def test_the_schema_is_a_well_formed_object_schema(self, name):
+        spec = built_schema(get_builtin_tool(name))
+        assert spec["type"] == "object" and spec["properties"]
+        assert set(spec.get("required", ())) <= set(spec["properties"])
+        valid = {"string", "integer", "number", "boolean", "object", "array"}
+        for prop_name, prop in walk_properties(spec):
+            assert prop.get("type") in valid, (name, prop_name)
+            if "enum" in prop:
+                assert isinstance(prop["enum"], list) and prop["enum"], prop_name
+
+    def test_each_call_returns_a_fresh_schema(self):
+        tool = get_builtin_tool("browser_act")
+        first = tool.get_parameters_schema()
+        first["properties"]["tab"]["description"] = "changed"
+        first["properties"]["actions"]["items"]["properties"].clear()
+        again = tool.get_parameters_schema()
+        assert again["properties"]["tab"]["description"] == 'Tab id; "" = active tab'
+        assert "kind" in again["properties"]["actions"]["items"]["properties"]
 
     def test_path_and_url_declarations(self):
         assert get_builtin_tool("browser_act").path_arguments == {"files": "read"}

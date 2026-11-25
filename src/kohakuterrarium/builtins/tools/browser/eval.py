@@ -8,6 +8,7 @@ from kohakuterrarium.builtins.tools.browser.common import (
     ArgumentError,
     BrowserTool,
     tab_arg,
+    tab_schema,
     text_arg,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
@@ -32,6 +33,23 @@ class BrowserEvalTool(BrowserTool):
             "Run JavaScript in the browser page and return JSON. Use it to read "
             "state the snapshot does not show."
         )
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "expression": {
+                    "type": "string",
+                    "description": "JavaScript expression or function",
+                },
+                "ref": {
+                    "type": "string",
+                    "description": 'Element passed to the function; "" = none',
+                },
+                TAB_ARG: tab_schema(),
+            },
+            "required": ["expression"],
+        }
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         expression = args.get("expression")

@@ -9,6 +9,7 @@ from kohakuterrarium.builtins.tools.browser.common import (
     ArgumentError,
     BrowserTool,
     tab_arg,
+    tab_schema,
     text_arg,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
@@ -35,6 +36,23 @@ class BrowserNavigateTool(BrowserTool):
             "start browsing or change page; returns the page text with element "
             "refs."
         )
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL for goto; ignored for other actions",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["goto", *HISTORY_STEPS],
+                    "description": "Default goto",
+                },
+                TAB_ARG: tab_schema(),
+            },
+        }
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         action = text_arg(args, "action")

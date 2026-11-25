@@ -216,6 +216,11 @@ def session_metadata(meta: dict[str, Any]) -> dict[str, Any]:
     return {"session_metadata": {"browser": meta}}
 
 
+def tab_schema() -> dict[str, str]:
+    """The ``tab`` property every browser tool's schema shares."""
+    return {"type": "string", "description": 'Tab id; "" = active tab'}
+
+
 def tab_arg(args: dict[str, Any]) -> str | None:
     """The ``tab`` argument: a tab id such as ``t2``, or ``None`` for the active tab."""
     return text_arg(args, TAB_ARG)

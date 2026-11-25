@@ -13,6 +13,7 @@ from kohakuterrarium.builtins.tools.browser.common import (
     guarded_path,
     session_metadata,
     tab_arg,
+    tab_schema,
     text_arg,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
@@ -52,6 +53,26 @@ class BrowserScreenshotTool(BrowserTool):
             "Capture the browser page or one element as an image. Use it for "
             "canvas, charts or layout the snapshot cannot show."
         )
+
+    def get_parameters_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "ref": {
+                    "type": "string",
+                    "description": "Only this element; wins over full_page",
+                },
+                "full_page": {
+                    "type": "boolean",
+                    "description": "Whole page",
+                },
+                PATH_ARG: {
+                    "type": "string",
+                    "description": 'Also save the image here; "" = don\'t',
+                },
+                TAB_ARG: tab_schema(),
+            },
+        }
 
     def parse(self, args: dict[str, Any], context: ToolContext | None) -> dict:
         ref = text_arg(args, "ref")
