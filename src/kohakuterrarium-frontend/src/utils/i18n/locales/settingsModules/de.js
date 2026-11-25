@@ -11,6 +11,22 @@ export default {
   "settings.modules.loading": "Wird geladen…",
   "settings.modules.empty": "Keine passenden konfigurierbaren Komponenten.",
   "settings.modules.native": "Anbieterintern",
+  "settings.modules.nativeTools": "Anbieterinterne Werkzeuge",
+  "settings.modules.groupByOrigin": "Nach Herkunft gruppieren",
+  "settings.modules.originHint":
+    "Werkzeuge mit der Markierung builtin laufen auf diesem Rechner. Ersetzt eine andere Quelle ein Werkzeug gleichen Namens, zeigt die Liste das aktive.",
+  "settings.modules.off": "aus",
+  "settings.modules.toggleWarning": "{name} ist aus. {warning}",
+  "settings.modules.toggleMissing":
+    "{name} ist nicht mehr an dieser Kreatur. Die Liste wurde aktualisiert.",
+  "settings.modules.originKind.builtin":
+    "Wird mit KohakuTerrarium geliefert und läuft auf diesem Rechner.",
+  "settings.modules.originKind.package": "Wird von einem installierten Paket bereitgestellt.",
+  "settings.modules.originKind.custom": "Eine Werkzeugdatei dieser Kreatur.",
+  "settings.modules.originKind.plugin": "Von einem Plugin hinzugefügt.",
+  "settings.modules.originKind.mcp": "Wird von einem MCP-Server bereitgestellt.",
+  "settings.modules.originKind.runtime": "Während der Laufzeit des Agenten hinzugefügt.",
+  "settings.modules.originKind.unknown": "Die Herkunft dieses Werkzeugs ist unbekannt.",
   "settings.search.backend": "Suchdienst",
   "settings.search.model": "Suchmodell",
   "settings.search.advanced": "Erweiterte Einstellungen",

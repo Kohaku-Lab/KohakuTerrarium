@@ -55,6 +55,10 @@ const stubs = {
     template:
       '<button :disabled="disabled" @click="$emit(\'change\', !modelValue)">{{ modelValue ? "on" : "off" }}</button>',
   }),
+  ElTooltip: defineComponent({
+    props: ["content"],
+    template: '<span :data-tip="content"><slot /></span>',
+  }),
 }
 let wrapper
 beforeEach(() => {
@@ -414,4 +418,210 @@ it("keeps the current editor usable after refresh fails", async () => {
   expect(moduleDefaultsAPI.patch).toHaveBeenCalledWith("tool", "web_search", {
     values: { backend: "codex" },
   })
+})
+
+const liveTools = () => [
+  {
+    type: "tool",
+    name: "read",
+    description: "Read a file",
+    schema: {},
+    options: {},
+    enabled: true,
+    origin: { kind: "builtin", name: "builtin", label: "builtin" },
+  },
+  {
+    type: "tool",
+    name: "lab_query",
+    schema: {},
+    options: {},
+    enabled: true,
+    origin: { kind: "mcp", name: "sandbox-lab", label: "mcp:sandbox-lab" },
+  },
+  {
+    type: "tool",
+    name: "info",
+    schema: {},
+    options: {},
+    enabled: false,
+    origin: { kind: "builtin", name: "builtin", label: "builtin" },
+  },
+  {
+    type: "tool",
+    name: "show_app",
+    schema: {},
+    options: {},
+    enabled: true,
+    origin: { kind: "plugin", name: "ui.apps", label: "plugin:ui.apps" },
+  },
+  {
+    type: "native_tool",
+    name: "image_gen",
+    schema: { size: { type: "string", default: "auto" } },
+    options: { size: "auto" },
+    enabled: true,
+    origin: { kind: "runtime", name: "", label: "runtime" },
+  },
+  { type: "plugin", name: "budget", schema: {}, options: {}, enabled: true },
+]
+const row = (name) => wrapper.findAll("[data-module]").find((r) => r.text().includes(name))
+const rowNames = () => wrapper.findAll("[data-module]").map((r) => r.attributes("data-module"))
+async function mountLive(entries = liveTools()) {
+  moduleAPI.list.mockResolvedValue(entries)
+  wrapper = mount(ModuleSettings, { props: { sessionId: "s", creatureId: "a" }, global: { stubs } })
+  await flushPromises()
+}
+
+it("labels each live tool with a colour-coded origin badge and a kind tooltip", async () => {
+  await mountLive()
+  const badge = (name) => row(name).find("[data-test='origin-badge']")
+  expect(badge("lab_query").text()).toBe("mcp:sandbox-lab")
+  expect(badge("lab_query").attributes("data-origin-kind")).toBe("mcp")
+  expect(badge("lab_query").classes()).toContain("text-iolite")
+  expect(badge("show_app").text()).toBe("plugin:ui.apps")
+  expect(badge("show_app").classes()).toContain("text-taaffeite-shadow")
+  expect(badge("read").classes()).toContain("text-warm-600")
+  expect(badge("image_gen").classes()).toContain("text-amber-shadow")
+  expect(row("lab_query").find("[data-tip]").attributes("data-tip")).toBe(
+    "settings.modules.originKind.mcp",
+  )
+  expect(wrapper.find("[data-test='origin-hint']").text()).toBe("settings.modules.originHint")
+  expect(row("read").find("[aria-expanded]").exists()).toBe(false)
+  expect(row("read").find(".i-carbon-chevron-down").exists()).toBe(false)
+  await row("read").find(".text-left").trigger("click")
+  expect(row("read").findComponent(ModuleEditForm).exists()).toBe(false)
+  expect(row("image_gen").find("[aria-expanded]").exists()).toBe(true)
+})
+
+it("groups tools by type, dims a tool that is off and switches every live tool", async () => {
+  await mountLive()
+  expect(wrapper.findAll("section").map((s) => s.attributes("data-section"))).toEqual([
+    "tool",
+    "native_tool",
+  ])
+  expect(row("info").classes()).toContain("opacity-60")
+  expect(row("info").find("[data-test='off-label']").text()).toBe("settings.modules.off")
+  expect(row("read").classes()).not.toContain("opacity-60")
+  expect(row("read").find("[data-test='off-label']").exists()).toBe(false)
+  for (const name of ["read", "lab_query", "info", "show_app", "image_gen"]) {
+    expect(
+      row(name)
+        .findAll("button")
+        .some((b) => ["on", "off"].includes(b.text())),
+    ).toBe(true)
+  }
+})
+
+it("turns a tool off, then refreshes the list so a changed origin shows", async () => {
+  await mountLive()
+  moduleAPI.toggle.mockResolvedValue({ name: "lab_query", enabled: false, warning: "" })
+  const after = liveTools()
+  after[1].enabled = false
+  after[0].origin = { kind: "plugin", name: "fs", label: "plugin:fs" }
+  moduleAPI.list.mockResolvedValue(after)
+  await row("lab_query")
+    .findAll("button")
+    .find((b) => b.text() === "on")
+    .trigger("click")
+  await flushPromises()
+  expect(moduleAPI.toggle).toHaveBeenCalledWith("s", "a", "tool", "lab_query")
+  expect(moduleAPI.list).toHaveBeenCalledTimes(2)
+  expect(row("lab_query").classes()).toContain("opacity-60")
+  expect(row("read").find("[data-test='origin-badge']").text()).toBe("plugin:fs")
+  expect(wrapper.find("[data-test='toggle-warning']").exists()).toBe(false)
+  expect(wrapper.find("[role='alert']").exists()).toBe(false)
+})
+
+it("shows the warning the backend returns when a framework tool is turned off", async () => {
+  await mountLive()
+  moduleAPI.toggle.mockResolvedValue({
+    name: "read",
+    enabled: false,
+    warning: "Tool docs stop working.",
+  })
+  await row("read")
+    .findAll("button")
+    .find((b) => b.text() === "on")
+    .trigger("click")
+  await flushPromises()
+  expect(wrapper.find("[data-test='toggle-warning']").text()).toBe("settings.modules.toggleWarning")
+  moduleAPI.toggle.mockResolvedValue({ name: "read", enabled: true, warning: "" })
+  await row("read")
+    .findAll("button")
+    .find((b) => ["on", "off"].includes(b.text()))
+    .trigger("click")
+  await flushPromises()
+  expect(wrapper.find("[data-test='toggle-warning']").exists()).toBe(false)
+})
+
+it("keeps the switch unchanged and explains a 404 after refreshing", async () => {
+  await mountLive()
+  moduleAPI.toggle.mockRejectedValue({ response: { status: 404, data: { detail: "nope" } } })
+  await row("lab_query")
+    .findAll("button")
+    .find((b) => b.text() === "on")
+    .trigger("click")
+  await flushPromises()
+  expect(wrapper.find("[role='alert']").text()).toContain("settings.modules.toggleMissing")
+  expect(wrapper.find("[role='alert']").text()).not.toContain("nope")
+  expect(moduleAPI.list).toHaveBeenCalledTimes(2)
+  expect(
+    row("lab_query")
+      .findAll("button")
+      .some((b) => b.text() === "on"),
+  ).toBe(true)
+  expect(row("lab_query").classes()).not.toContain("opacity-60")
+})
+
+it("shows the server detail for other toggle errors", async () => {
+  await mountLive()
+  moduleAPI.toggle.mockRejectedValue({ response: { status: 500, data: { detail: "boom" } } })
+  await row("read")
+    .findAll("button")
+    .find((b) => b.text() === "on")
+    .trigger("click")
+  await flushPromises()
+  expect(wrapper.find("[role='alert']").text()).toContain("boom")
+  expect(row("read").classes()).not.toContain("opacity-60")
+})
+
+it("filters by origin label and groups by origin across tool types", async () => {
+  await mountLive()
+  await wrapper.find("input").setValue("mcp:")
+  await flushPromises()
+  expect(rowNames()).toEqual(["tool:lab_query"])
+  await wrapper.find("input").setValue("")
+  await flushPromises()
+  await wrapper.find("[data-test='group-by-origin']").trigger("click")
+  await flushPromises()
+  expect(wrapper.find("[data-test='group-by-origin']").attributes("aria-pressed")).toBe("true")
+  expect(wrapper.findAll("section").map((s) => s.attributes("data-section"))).toEqual([
+    "builtin",
+    "plugin:ui.apps",
+    "mcp:sandbox-lab",
+    "runtime",
+  ])
+  const builtin = wrapper.find("section[data-section='builtin']")
+  expect(builtin.find("h3 [data-test='origin-badge']").text()).toBe("builtin")
+  expect(builtin.findAll("[data-module]").map((r) => r.attributes("data-module"))).toEqual([
+    "tool:read",
+    "tool:info",
+  ])
+  expect(builtin.find("[data-module] [data-test='origin-badge']").exists()).toBe(false)
+})
+
+it("keeps global defaults free of tool switches, origin hint and origin grouping", async () => {
+  moduleDefaultsAPI.list.mockResolvedValue(
+    liveTools().map(({ origin: _origin, ...entry }) => entry),
+  )
+  wrapper = mount(ModuleSettings, { global: { stubs } })
+  await flushPromises()
+  expect(wrapper.find("[data-test='origin-hint']").exists()).toBe(false)
+  expect(wrapper.find("[data-test='group-by-origin']").exists()).toBe(false)
+  expect(wrapper.find("[data-test='origin-badge']").exists()).toBe(false)
+  expect(
+    row("read")
+      .findAll("button")
+      .some((b) => ["on", "off"].includes(b.text())),
+  ).toBe(false)
 })

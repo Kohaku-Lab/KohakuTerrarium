@@ -48,7 +48,8 @@
 
     <!-- L2 body ───────────────────────────────────────────────── -->
     <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
-      <div v-if="error" class="px-3 py-1.5 text-[11px] text-coral font-mono shrink-0 border-b border-warm-200 dark:border-warm-700 truncate">{{ error }}</div>
+      <div v-if="error" class="px-3 py-1.5 text-[11px] text-coral font-mono shrink-0 border-b border-warm-200 dark:border-warm-700 truncate" role="alert" :title="error">{{ error }}</div>
+      <div v-if="notice" class="px-3 py-1.5 text-[11px] text-amber-shadow dark:text-amber-light shrink-0 border-b border-warm-200 dark:border-warm-700" role="status" data-test="toggle-warning">{{ notice }}</div>
 
       <!-- Empty state (whole panel) -->
       <div v-if="!hasAnyModules && !loading" class="flex-1 flex items-center justify-center px-4 text-warm-400 text-xs italic text-center">No configurable modules on this creature.</div>
@@ -58,18 +59,20 @@
         <div v-if="!activeTypeModules.length" class="flex items-center justify-center px-4 py-8 text-warm-400 text-xs italic text-center">No {{ activeTypeLabel.toLowerCase() }} on this creature.</div>
         <div v-else-if="!totalVisible" class="flex items-center justify-center px-4 py-8 text-warm-400 text-xs italic text-center">No matches for "{{ searchQuery }}".</div>
         <template v-else>
+          <p v-if="activeType !== 'plugin'" class="px-3 pt-2 text-[10px] text-warm-400 leading-snug" data-test="origin-hint">{{ t("settings.modules.originHint") }}</p>
           <section v-for="group in visibleGroups" :key="group.id">
             <h3 v-if="group.label" class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-warm-400 font-semibold">
               {{ group.label }} <span class="text-warm-500 font-mono">· {{ group.items.length }}</span>
             </h3>
             <ul class="divide-y divide-warm-200 dark:divide-warm-700">
-              <li v-for="m in group.items" :key="keyOf(m)" class="px-3 py-2 flex items-center gap-2 hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors group cursor-pointer" @click="enterEdit(m)">
+              <li v-for="m in group.items" :key="keyOf(m)" class="px-3 py-2 flex items-center gap-2 hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors group cursor-pointer" :class="{ 'opacity-60': m.type !== 'plugin' && m.enabled === false }" :data-module="keyOf(m)" @click="enterEdit(m)">
                 <span v-if="m.enabled !== null" class="w-1.5 h-1.5 rounded-full shrink-0" :class="m.enabled ? 'bg-aquamarine' : 'bg-warm-400'" />
                 <span class="font-medium text-warm-700 dark:text-warm-300 text-xs truncate">{{ m.name }}</span>
                 <el-tooltip v-if="m.description" :content="m.description" placement="top" :show-after="300" popper-class="kt-hint-tooltip">
                   <span class="i-carbon-information text-warm-400 group-hover:text-warm-600 dark:group-hover:text-warm-300 text-[12px] cursor-help" @click.stop />
                 </el-tooltip>
                 <span v-if="m.priority != null" class="text-[10px] text-warm-400 font-mono">p{{ m.priority }}</span>
+                <ToolOriginBadge v-if="m.origin" :origin="m.origin" />
                 <span class="flex-1" />
                 <span v-if="hasOptions(m)" class="text-[10px] text-warm-400 group-hover:text-iolite transition-colors">{{ Object.keys(m.schema).length }} opt</span>
                 <button v-if="m.enabled !== null" class="px-2 py-0.5 rounded border text-[10px] font-medium transition-colors disabled:opacity-50" :class="m.enabled ? 'border-coral/30 text-coral hover:bg-coral/8' : 'border-aquamarine/30 text-aquamarine hover:bg-aquamarine/8'" :disabled="togglingKey === keyOf(m)" @click.stop="onToggle(m)">
@@ -94,8 +97,11 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 
 import ModuleEditForm from "@/components/panels/modules/ModuleEditForm.vue"
+import { originLabel } from "@/components/settings/modules/toolOrigin"
+import ToolOriginBadge from "@/components/settings/modules/ToolOriginBadge.vue"
 import { useChatStore } from "@/stores/chat"
 import { moduleAPI } from "@/utils/api"
+import { useI18n } from "@/utils/i18n"
 
 /**
  * Per-creature configurable-modules panel.
@@ -137,6 +143,7 @@ const props = defineProps({
 })
 
 const chat = useChatStore()
+const { t } = useI18n()
 
 const modules = ref([])
 const activeType = ref("plugin")
@@ -144,6 +151,7 @@ const editTarget = ref(null) // { type, name } or null
 const loading = ref(false)
 const togglingKey = ref("")
 const error = ref("")
+const notice = ref("")
 const searchOpen = ref(false)
 const searchQuery = ref("")
 const searchInputRef = ref(null)
@@ -223,7 +231,7 @@ function priorityThenName(a, b) {
 
 function matchesSearch(m, q) {
   if (!q) return true
-  return m.name.toLowerCase().includes(q) || (m.description || "").toLowerCase().includes(q)
+  return [m.name, m.description, originLabel(m.origin)].some((text) => (text || "").toLowerCase().includes(q))
 }
 
 /**
@@ -362,17 +370,21 @@ async function onToggle(m) {
   const key = keyOf(m)
   togglingKey.value = key
   error.value = ""
+  notice.value = ""
   // Optimistic flip.
   m.enabled = !m.enabled
+  let failure = ""
   try {
-    await moduleAPI.toggle(sessionId.value, creatureId.value, m.type, m.name)
-    await reload()
+    const result = await moduleAPI.toggle(sessionId.value, creatureId.value, m.type, m.name)
+    if (result?.warning) notice.value = t("settings.modules.toggleWarning", { name: m.name, warning: result.warning })
   } catch (err) {
     m.enabled = !m.enabled // revert
-    error.value = err?.response?.data?.detail || err?.message || String(err)
+    failure = err?.response?.status === 404 ? t("settings.modules.toggleMissing", { name: m.name }) : err?.response?.data?.detail || err?.message || String(err)
   } finally {
     togglingKey.value = ""
   }
+  await reload()
+  if (failure) error.value = failure
 }
 
 async function submitOptions(name, values) {

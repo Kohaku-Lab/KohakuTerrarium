@@ -704,7 +704,7 @@ export const moduleAPI = {
     return data
   },
 
-  /** Toggle a module's enabled state (only supported for some types — plugin today). */
+  /** Toggle a plugin, tool or native tool on or off; tool responses carry a `warning` string. */
   async toggle(sessionId, creatureId, moduleType, name) {
     const { data } = await api.post(
       `/sessions/${encodeTarget(sessionId)}/creatures/${encodeTarget(creatureId)}/modules/${encodeURIComponent(moduleType)}/${encodeURIComponent(name)}/toggle`,

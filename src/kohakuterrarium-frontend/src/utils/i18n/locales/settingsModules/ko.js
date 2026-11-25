@@ -11,6 +11,22 @@ export default {
   "settings.modules.loading": "불러오는 중…",
   "settings.modules.empty": "일치하는 설정 가능 구성 요소가 없습니다.",
   "settings.modules.native": "공급자 기본 도구",
+  "settings.modules.nativeTools": "공급자 기본 도구",
+  "settings.modules.groupByOrigin": "출처별로 묶기",
+  "settings.modules.originHint":
+    "builtin으로 표시된 도구는 이 컴퓨터에서 실행됩니다. 다른 출처가 같은 이름의 도구를 대체하면 목록에는 현재 사용 중인 도구가 표시됩니다.",
+  "settings.modules.off": "꺼짐",
+  "settings.modules.toggleWarning": "{name}을(를) 껐습니다. {warning}",
+  "settings.modules.toggleMissing":
+    "{name}은(는) 더 이상 이 크리처에 없습니다. 목록을 새로 고쳤습니다.",
+  "settings.modules.originKind.builtin":
+    "KohakuTerrarium에 포함되어 있으며 이 컴퓨터에서 실행됩니다.",
+  "settings.modules.originKind.package": "설치된 패키지가 제공합니다.",
+  "settings.modules.originKind.custom": "이 크리처의 도구 파일입니다.",
+  "settings.modules.originKind.plugin": "플러그인이 추가했습니다.",
+  "settings.modules.originKind.mcp": "MCP 서버가 제공합니다.",
+  "settings.modules.originKind.runtime": "에이전트 실행 중에 추가되었습니다.",
+  "settings.modules.originKind.unknown": "이 도구의 출처를 알 수 없습니다.",
   "settings.search.backend": "검색 서비스",
   "settings.search.model": "검색 모델",
   "settings.search.advanced": "고급 설정",
