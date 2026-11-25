@@ -119,6 +119,23 @@ def test_kill_tree_of_a_process_that_leads_no_group_spares_its_group():
             process.wait(10)
 
 
+def test_released_processes_are_never_killed(monkeypatch):
+    sleeper = subprocess.Popen(
+        SLEEPER, **({} if sys.platform == "win32" else {"start_new_session": True})
+    )
+    try:
+        held = BrowserProcesses([sleeper.pid])
+        held.release()
+        trees = []
+        monkeypatch.setattr(processes_module, "kill_tree", trees.append)
+        held.kill()
+        assert trees == [], "a released pid, which may have been reused, was killed"
+        assert sleeper.poll() is None
+    finally:
+        sleeper.kill()
+        sleeper.wait(10)
+
+
 def test_a_root_that_already_exited_is_not_killed_again(monkeypatch):
     parent, child = spawn_tree()
     try:

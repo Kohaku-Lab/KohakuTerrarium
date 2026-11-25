@@ -75,7 +75,8 @@ class BrowserProcesses:
     On Windows an open handle per process stops its id being reused; on
     Linux a pidfd names the exact process. ``kill`` ends the root's tree only
     while the root is still the process that was held, then each held
-    process; ``release`` gives the holds back, as does garbage collection.
+    process; ``release`` gives the holds back and forgets the pids, as
+    garbage collection does.
     """
 
     def __init__(self, pids: list[int]) -> None:
@@ -93,7 +94,8 @@ class BrowserProcesses:
             _kill_held(hold, pid)
 
     def release(self) -> None:
-        self._holds = [None] * len(self.pids)
+        self.pids = []
+        self._holds = []
         self._finalizer()
 
 
