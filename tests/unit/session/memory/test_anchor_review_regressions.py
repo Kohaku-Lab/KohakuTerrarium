@@ -254,3 +254,48 @@ async def test_peer_certification_failure_retains_ordinary_search(
         assert not re.search(r"^anchor:", result.output, re.M)
     finally:
         _close(reopened, context)
+
+
+@pytest.mark.parametrize(
+    "marker",
+    ["UNICODE_TAIL_MARKER", "unicode_tail_marker", "UniCode_Tail_Marker"],
+)
+async def test_focused_unicode_preview_uses_original_source_offsets(tmp_path, marker):
+    """Case-insensitive matching must not use positions from expanded lowercase."""
+    store = SessionStore(tmp_path / "unicode-focus.kohakutr")
+    store.init_meta("s", "agent", "", str(tmp_path), ["alice"])
+    prefix = "İSTANBUL İLE İZMİR İÇİN BİLGİ. " * 40
+    raw_text = prefix + marker
+    store.append_event("alice", "user_input", {"content": "START_OF_HISTORY"})
+    store.append_event("alice", "text", {"content": raw_text})
+    context = _ctx(store)
+    tool = SearchMemoryTool()
+    try:
+        query = await tool.execute(
+            {"query": "UNICODE_TAIL_MARKER", "mode": "fts"},
+            context=context,
+        )
+        assert query.error is None, query.error
+        anchor = _anchor_from(query.output)
+
+        focused = await tool.execute(
+            {"anchor": anchor, "before": 0, "after": 0}, context=context
+        )
+        assert focused.error is None, focused.error
+        window = await context.session._memory.read_context(anchor, before=0, after=0)
+        event = window.events[0]
+        original_match = len(prefix)
+        assert original_match > 900
+        assert len(raw_text.lower()) > len(raw_text)
+        assert event.total == len(raw_text)
+        assert 0 <= event.start <= original_match < event.end <= len(raw_text)
+        assert marker in event.content
+        assert event.content == raw_text[event.start : event.end]
+
+        explicit = await context.session._memory.read_context(
+            anchor, before=0, after=0, offset=0
+        )
+        assert explicit.events[0].start == 0
+        assert explicit.events[0].content == raw_text[:900]
+    finally:
+        _close(store, context)

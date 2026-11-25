@@ -4,6 +4,7 @@ Legacy index rows can be searched, but only the explicit offline Session
 rebuild can upgrade their derived source-bound Anchors.
 """
 
+import re
 import secrets
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -457,9 +458,12 @@ class MemoryNavigator:
             content = _event_text(event)
             start = (offset or 0) if matched else 0
             if matched and offset is None and loc.focus:
-                focus_at = content.lower().find(loc.focus.lower())
-                if focus_at >= MAX_PREVIEW:
-                    start = max(0, focus_at - 120)
+                # Unicode lower()/casefold() may expand code points (e.g. İ),
+                # shifting offsets away from the original source coordinates.
+                # A literal ignore-case regex returns positions in *content*.
+                focus_match = re.search(re.escape(loc.focus), content, re.IGNORECASE)
+                if focus_match and focus_match.start() >= MAX_PREVIEW:
+                    start = max(0, focus_match.start() - 120)
             if start >= len(content) and start > 0:
                 raise MemoryNavigationError("INVALID_OFFSET", "offset exceeds event")
             end = min(len(content), start + MAX_PREVIEW)
