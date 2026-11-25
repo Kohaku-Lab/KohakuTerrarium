@@ -78,6 +78,12 @@ KohakuTerrarium 附带四个运行时插件。它们在框架里没有任何特�
   后允许。`mode` 为 `"allow"` 或 `"deny"`。`requires_os_confinement`
   在 `os_enforce=require` 生效时为真，表示绕过 `subprocess_runner` 起的
   行程会逃过它要求的内核约束。每次读取都跟随插件当下的选项。
+- **写入政策服务**：启用时插件也发布 `write_policy` 服务，供在工具呼叫
+  之外写入文件的组件（例如浏览器保存下载）使用。`check(path)` 回传
+  `None` 表示允许，否则回传简短的拒绝原因（例如 `fs_write=deny`），
+  判断与写入工具的路径参数完全相同：`fs_write`、工作区边界、`fs_deny`
+  与 `fs_write_allow`。相对路径以 agent 当下的工作目录解析。audit 模式
+  下记录后允许；每次呼叫都跟随插件当下的选项。
 - **子行程闸门**：插件透过 `runtime_services()` 发布
   `subprocess_runner` 服务。需要起子行程的工具（`bash` 等）从
   `ToolContext.runtime_services` 取用。Runner 会先检查 syscall 等级

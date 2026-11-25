@@ -78,6 +78,12 @@ KohakuTerrarium 附帶四個執行期外掛。它們在框架裡沒有任何特�
   後允許。`mode` 為 `"allow"` 或 `"deny"`。`requires_os_confinement`
   在 `os_enforce=require` 生效時為真，表示繞過 `subprocess_runner` 起的
   行程會逃過它要求的核心約束。每次讀取都跟隨外掛當下的選項。
+- **寫入政策服務**：啟用時外掛也發布 `write_policy` 服務，供在工具呼叫
+  之外寫入檔案的元件（例如瀏覽器儲存下載）使用。`check(path)` 回傳
+  `None` 表示允許，否則回傳簡短的拒絕原因（例如 `fs_write=deny`），
+  判斷與寫入工具的路徑參數完全相同：`fs_write`、工作區邊界、`fs_deny`
+  與 `fs_write_allow`。相對路徑以 agent 當下的工作目錄解析。audit 模式
+  下記錄後允許；每次呼叫都跟隨外掛當下的選項。
 - **子行程閘門**：外掛透過 `runtime_services()` 發布
   `subprocess_runner` 服務。需要起子行程的工具（`bash` 等）從
   `ToolContext.runtime_services` 取用。Runner 會先檢查 syscall 等級

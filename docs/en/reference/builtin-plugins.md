@@ -107,6 +107,14 @@ presets: `src/kohakuterrarium/modules/sandbox/profile.py`.
   true while `os_enforce=require` is enforced, meaning a process spawned
   outside the `subprocess_runner` would escape the confinement it demands.
   Each read follows the plugin's current options.
+- **Write policy service**: while enabled, the plugin also publishes a
+  `write_policy` service, for components that write files outside a tool
+  call (such as a browser saving a download). `check(path)` returns `None`
+  to allow or a short reason to refuse (such as `fs_write=deny`), by the
+  same decision a write tool's path argument gets: `fs_write`, the
+  workspace boundary, `fs_deny` and `fs_write_allow`. A relative path
+  resolves against the agent's current working directory. In audit mode it
+  logs and allows; each call follows the plugin's current options.
 - **Subprocess gating**: the plugin publishes a `subprocess_runner`
   service via `runtime_services()`. Tools that need to spawn
   subprocesses (`bash`, etc.) consume it from

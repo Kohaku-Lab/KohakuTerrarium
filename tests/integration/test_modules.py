@@ -52,6 +52,7 @@ from kohakuterrarium.builtins.tools.web import search as web_search
 from kohakuterrarium.builtins.tools.media.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.files.edit import EditTool
 from kohakuterrarium.builtins.tools.files.read import ReadTool
+from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.builtins.tools.bash.bash import ShellTool
 from kohakuterrarium.builtins.tools.files.glob import GlobTool
 from kohakuterrarium.builtins.tools.files.grep import GrepTool
@@ -872,6 +873,23 @@ class TestModulesIntegration:
             )
             assert policy.check("evil.test", 443) is None
             assert mgr.unregister("net_probe") is True
+
+            # A held write_policy gives a write outside a tool call the write
+            # tool's decision, against the agent's current directory.
+            monkeypatch.setattr(roots, "temp_roots", lambda: [])
+            await sandbox.on_load(ctx)
+            writes = mgr.collect_runtime_services(ctx)["write_policy"]
+            agent.executor.register_tool(WriteTool())
+            assert writes.check("downloads/page.pdf") is None
+            assert writes.check(work / "downloads" / "page.pdf") is None
+            refused = await run("write", {"path": str(outside / "x"), "content": "x"})
+            assert "outside working directory" in refused.error
+            assert "outside working directory" in writes.check(outside / "x")
+            assert not (outside / "x").exists()
+            mgr.set_plugin_options("sandbox", {"fs_write": "deny"})
+            assert "fs_write=deny" in writes.check("downloads/page.pdf")
+            mgr.set_plugin_options("sandbox", {"fs_write": "default"})
+            assert writes.check("downloads/page.pdf") is None
             if confinement_backend() is not None:
                 # pytest's base temp lies under /tmp on Linux, a writable root.
                 monkeypatch.setattr(roots, "temp_roots", lambda: [])

@@ -20,6 +20,7 @@ from kohakuterrarium.builtins.tools.files.write import WriteTool
 from kohakuterrarium.builtins.tools.web.fetch import WebFetchTool
 from kohakuterrarium.builtins.tools.web.search import WebSearchTool
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.agent.workspace import WorkspaceController
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
@@ -794,6 +795,114 @@ class TestNetworkPolicyService:
         assert policy.requires_os_confinement is True
         sandbox.set_options({"enabled": False})
         assert policy.requires_os_confinement is False
+
+
+class TestWritePolicyService:
+    """``runtime_services()['write_policy']`` answers write checks live."""
+
+    @pytest.fixture
+    def write_paths(self, paths, monkeypatch):
+        monkeypatch.setattr(roots, "temp_roots", lambda: [])
+        work, outside, _ = paths
+        return work, outside
+
+    async def _policy(self, work, **options):
+        sandbox = SandboxPlugin(**options)
+        await sandbox.on_load(PluginContext(working_dir=work))
+        return sandbox, sandbox.runtime_services(None)["write_policy"]
+
+    async def test_write_deny_refuses_every_path(self, write_paths):
+        work, outside = write_paths
+        _, policy = await self._policy(work, fs_write="deny")
+        for path in (work / "inside.txt", "inside.txt", outside / "x.txt"):
+            assert policy.check(path) == "fs_write=deny"
+
+    async def test_workspace_refuses_outside_and_allows_inside(self, write_paths):
+        work, outside = write_paths
+        _, policy = await self._policy(work, fs_write="workspace")
+        refused = f"path is outside working directory ({work})"
+        assert policy.check(outside / "x.txt") == refused
+        assert policy.check("../outside/x.txt") == refused
+        assert policy.check(work / "sub" / "new.txt") is None
+        assert policy.check("sub/new.txt") is None, "relative to the workspace"
+
+    async def test_fs_deny_entry_is_refused_under_broad_write(self, write_paths):
+        work, outside = write_paths
+        secret = outside / "secret"
+        _, policy = await self._policy(work, fs_write="broad", fs_deny=[str(secret)])
+        assert policy.check(secret / "key.pem") == "path is denied"
+        assert policy.check(outside / "free.txt") is None
+
+    async def test_matches_the_tool_hook_decision(self, write_paths):
+        work, outside = write_paths
+        sandbox, policy = await self._policy(
+            work,
+            fs_write="broad",
+            fs_deny=[str(outside)],
+            fs_write_allow=[str(outside / "drop")],
+        )
+        context = ToolContext("test", None, work)
+        for path, allowed in ((outside / "drop" / "a", True), (outside / "b", False)):
+            assert (policy.check(path) is None) is allowed
+            if allowed:
+                await sandbox.pre_tool_execute(
+                    {"path": str(path)}, tool_name="write", context=context
+                )
+                continue
+            with pytest.raises(PluginBlockError, match="path is denied"):
+                await sandbox.pre_tool_execute(
+                    {"path": str(path)}, tool_name="write", context=context
+                )
+
+    async def test_option_change_is_seen_through_a_held_service(self, write_paths):
+        work, _ = write_paths
+        sandbox, policy = await self._policy(work)
+        assert policy.check(work / "a.txt") is None
+        sandbox.set_options({"fs_write": "deny"})
+        assert policy.check(work / "a.txt") == "fs_write=deny"
+        sandbox.set_options({"enabled": False})
+        assert policy.check(work / "a.txt") is None
+
+    async def test_follows_the_agents_current_working_directory(self, write_paths):
+        work, outside = write_paths
+        agent = SimpleNamespace(executor=SimpleNamespace(_working_dir=work))
+        agent.workspace = WorkspaceController(agent)
+        sandbox = SandboxPlugin(fs_write="workspace")
+        await sandbox.on_load(PluginContext(working_dir=work, _host_agent=agent))
+        policy = sandbox.runtime_services(None)["write_policy"]
+        assert policy.check("x.txt") is None
+        assert policy.check(outside / "x.txt") is not None
+        agent.executor._working_dir = outside
+        assert policy.check(outside / "x.txt") is None
+        assert policy.check(work / "x.txt") is not None
+
+    async def test_audit_mode_logs_every_violation_and_allows(
+        self, write_paths, monkeypatch
+    ):
+        work, outside = write_paths
+        seen = _record_warnings(monkeypatch)
+        sandbox, policy = await self._policy(
+            work, backend="audit", fs_write="deny", fs_deny=[str(outside)]
+        )
+        target = outside / "x.txt"
+        assert policy.check(target) is None
+        assert seen == [
+            f"SandboxViolation[fs_write]: write_policy: path is denied ({target})",
+            f"SandboxViolation[fs_write]: write_policy: fs_write=deny ({target})",
+        ]
+        seen.clear()
+        context = ToolContext("test", None, work)
+        await sandbox.pre_tool_execute(
+            {"path": str(target)}, tool_name="write", context=context
+        )
+        assert [line.split(": ", 2)[2] for line in seen] == [
+            f"path is denied ({target})",
+            f"fs_write=deny ({target})",
+        ], "the tool hook still logs each violation in audit mode"
+
+    @pytest.mark.parametrize("options", [{"enabled": False}, {"backend": "off"}])
+    def test_disabled_plugin_exposes_no_service(self, options):
+        assert "write_policy" not in SandboxPlugin(**options).runtime_services(None)
 
 
 class TestLock:
