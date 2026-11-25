@@ -18,6 +18,7 @@ import pytest
 from kohakuterrarium.browser.errors import (
     BrowserError,
     BrowserStateLostError,
+    BrowserTimeoutError,
     ContextDestroyedError,
     DriverError,
     NavigationBlockedError,
@@ -818,6 +819,55 @@ class TestCaps:
             assert session._tabs.find(popups[0]).opened_by_page
             assert "* [t2] about:blank" in result.text
             assert "Tab opened: t3 http://pop.test/" in result.text
+
+    async def test_an_own_tab_open_that_times_out_is_not_a_page_tab(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        real = browser.new_page
+        release = asyncio.Event()
+        own = []
+
+        async def slow_new_page(timeout):
+            page = await real(timeout)
+            own.append(page)
+            await release.wait()
+            return page
+
+        browser.new_page = slow_new_page
+        browser.sink.window_opening(browser.page)
+        assert session._windows_due == 1
+        with pytest.raises(BrowserTimeoutError, match="opening a tab timed out"):
+            await session.tab_new()
+        release.set()
+        await asyncio.sleep(0.05)
+        assert own[0].closed, "the timed-out open's page stays open"
+        assert session._tabs.find(own[0]) is None
+        assert session._windows_due == 1 and session._windows_early == 0
+        popup = browser.open_popup("http://pop.test/")
+        listing = await session.tabs_list()
+        assert session._windows_due == 0
+        assert session._tabs.find(popup).opened_by_page
+        assert "Tab opened: t2 http://pop.test/" in listing.text
+        assert "about:blank" not in listing.text
+
+    async def test_an_own_tab_open_that_never_finishes_falls_back(self, made):
+        session, driver = made
+        await session.snapshot()
+        browser = driver.browser
+        real = browser.new_page
+        never = asyncio.Event()
+
+        async def stuck_new_page(timeout):
+            await real(timeout)
+            await never.wait()
+
+        browser.new_page = stuck_new_page
+        with pytest.raises(BrowserTimeoutError):
+            await session.tab_new()
+        await asyncio.sleep(0.9)
+        assert session._expect_page == 0, "a stuck open must not buffer pages forever"
+        assert len(session._tabs) == 2
 
     async def test_a_dialog_from_an_unknown_page_respects_the_cap(self, made):
         session, driver = made

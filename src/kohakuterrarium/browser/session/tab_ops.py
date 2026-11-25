@@ -4,8 +4,13 @@ import asyncio
 
 from kohakuterrarium.browser import results as fmt
 from kohakuterrarium.browser.dialogs import DialogManager
-from kohakuterrarium.browser.errors import PageClosedError, TabLimitError
+from kohakuterrarium.browser.errors import (
+    BrowserTimeoutError,
+    PageClosedError,
+    TabLimitError,
+)
 from kohakuterrarium.browser.options import BrowserOptions
+from kohakuterrarium.browser.protocol import PageDriver
 from kohakuterrarium.browser.session.types import (
     CALL_MARGIN_S,
     READY,
@@ -30,6 +35,8 @@ class SessionTabsMixin:
     _state: str
     _expect_page: int
     _max_tabs: int
+    _arrived: list[PageDriver]
+    _refused_pages: set[PageDriver]
 
     async def _open_tab(self) -> Tab:
         """A new active tab; ``TabLimitError`` when ``MAX_TABS`` are already open."""
@@ -41,16 +48,41 @@ class SessionTabsMixin:
         timeout = self.options.action_timeout_s
         browser = self._stack.browser
         self._expect_page += 1
+        opening = asyncio.ensure_future(browser.new_page(timeout))
         try:
             page = await self._bounded(
-                lambda: browser.new_page(timeout), timeout, "opening a tab"
+                lambda: asyncio.shield(opening), timeout, "opening a tab"
             )
+        except BrowserTimeoutError:
+            self._spawn(self._finish_late_open(opening, timeout))
+            raise
         except BaseException:
+            discard(opening)
             self._expect_page -= 1
             self._admit_arrivals(None)
             raise
         self._expect_page -= 1
         return self._admit_arrivals(page)
+
+    async def _finish_late_open(self, opening: asyncio.Future, timeout: float) -> None:
+        """Wait, one more ``timeout``, for a tab open that timed out; close the tab it made.
+
+        Pages that arrived meanwhile are admitted as opened by the site.
+        """
+        own = None
+        try:
+            own = await asyncio.wait_for(opening, timeout + CALL_MARGIN_S)
+        except Exception:
+            own = None
+        finally:
+            self._expect_page -= 1
+            arrived, self._arrived = self._arrived, []
+            if own is not None:
+                self._refused_pages.add(own)
+                self._spawn(own.close(timeout))
+            for page in arrived:
+                if page is not own:
+                    self._admit_by_page(page)
 
     async def tabs_list(self) -> BrowserResult:
         """The open tabs, active one marked; never launches the browser."""
