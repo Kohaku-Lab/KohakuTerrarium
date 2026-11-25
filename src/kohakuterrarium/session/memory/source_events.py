@@ -17,8 +17,12 @@ class SourcedEvent(dict):
         self.source_ref = source_ref
 
 
-def sourced_events(store, agent: str) -> list[dict]:
-    """Read exact physical rows for normal indexing; preserve legacy fallback."""
+def sourced_events(store, agent: str, *, strict: bool = False) -> list[dict]:
+    """Bind physical rows, with Search-only tolerant fallback by default.
+
+    A destructive index rebuild must use strict=True: a decoding failure or
+    missing physical row cannot be mistaken for an empty Agent history.
+    """
     store._flush_events_cache()
     prefix = f"{agent}:e"
     keys = [
@@ -47,6 +51,8 @@ def sourced_events(store, agent: str) -> list[dict]:
             sourced.append(SourcedEvent(event, ref))
         return sourced
     except Exception:
-        # Do not change existing Search behavior to require stronger source
-        # evidence; that evidence is needed only to sign new anchors.
+        if strict:
+            raise
+        # Ordinary Search remains available for malformed older history, but
+        # must not issue Anchors without physical source certification.
         return store.get_events(agent)

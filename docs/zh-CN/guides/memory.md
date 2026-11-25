@@ -71,8 +71,8 @@ kt embedding swe.kohakutr \
 
 ## 为旧 Session 重建记忆索引
 
-先关闭使用该 Session 的全部 Agent、Studio 及其他写入进程。对**整个
-Session** 执行一次重建，不需要逐个指定 Agent：
+先关闭使用该 Session 的全部 Agent、Studio、独立 Memory Reader 以及
+其他读写进程。对**整个 Session** 执行一次重建，不需要逐个指定 Agent：
 
 ```bash
 kt memory rebuild /path/to/session.kohakutr

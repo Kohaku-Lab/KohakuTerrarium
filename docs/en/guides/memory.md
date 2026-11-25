@@ -71,8 +71,9 @@ Incremental: running `kt embedding` again only indexes new events.
 
 ## Rebuild memory indexes for an older Session
 
-Close all agents/Studio instances that use this Session. Run one command for
-the **whole Session**, without selecting individual Agents:
+Close all agents, Studio instances and standalone Memory readers/writers
+that use this Session. Run one command for the **whole Session**, without
+selecting individual Agents:
 
 ```bash
 kt memory rebuild /path/to/session.kohakutr

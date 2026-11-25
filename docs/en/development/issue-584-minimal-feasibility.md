@@ -63,13 +63,22 @@ No incompatible old vector bytes are silently reused, and re-embedding may
 download models or incur API charges.
 
 The operation:
-1. Checks for a live Session and writer ownership; requires all external
-   writers and readers to have stopped. Historical read-only opens can leave
+1. Acquires the existing process-wide native occupancy gate *exclusively*
+   before source inspection or rebuild and holds it through publication. This
+   also excludes standalone SessionMemory and other KohakuVault handles not
+   registered as live SessionStore instances, while preventing new local
+   opens during the rebuild. A separate Session writer lock covers cooperating
+   processes; the operator must still stop unrelated external readers/writers
+   that do not participate in that lock. Historical read-only opens can leave
    a zero-byte SQLite WAL and 32 KB shared-memory sidecar. After acquiring
    the writer lock, a zero-frame SQLite TRUNCATE checkpoint may retire these
    idle sidecars; an uncheckpointed WAL or still-live handle is refused.
    Read-only inventory must never create or remove sidecars.
 2. Inspects old FTS and vector counts without materializing old indexes.
+   A destructive rebuild uses strict physical event decoding: an unreadable
+   event rejects publication instead of being reclassified as an empty Agent.
+   Normal Search still uses its existing tolerant fallback and withholds
+   unverifiable Anchors.
 3. Takes a same-directory stage copy of the database, rebuilding **only the
    derived Memory indexes** in that copy for all discovered Session agents.
    It clears old index cursors, manifest, FTS and known vector tables; it

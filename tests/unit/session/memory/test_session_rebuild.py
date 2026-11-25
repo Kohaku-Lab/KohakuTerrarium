@@ -378,3 +378,94 @@ def test_uncheckpointed_wal_is_not_discarded_during_rebuild(tmp_path):
         assert wal.read_bytes() == b"SIMULATED_PENDING_WAL_FRAMES"
     finally:
         wal.unlink(missing_ok=True)
+
+
+def test_standalone_memory_handles_block_rebuild_before_sqlite_cleanup(tmp_path):
+    """Standalone SessionMemory is native occupancy, not a live SessionStore."""
+    from kohakuterrarium.session.occupancy.gate import resource_gate
+
+    path = tmp_path / "native-occupancy.kohakutr"
+    _seed(path, vectors=True)
+    original = _hash(path)
+    index = SessionMemory(str(path))
+    try:
+        assert resource_gate.snapshot(path).legacy_active == 1
+        with pytest.raises(RebuildRefused, match="native|occupancy"):
+            inspect_index(path)
+        with pytest.raises(RebuildRefused, match="native|occupancy"):
+            rebuild_session_memory(path, vectors="drop")
+        assert _hash(path) == original
+        assert index._fts.count() == 2
+        assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+    finally:
+        index.close()
+
+
+def test_staged_build_holds_exclusive_native_occupancy(tmp_path, monkeypatch):
+    """Block new same-process raw SQLite copies until publication completes."""
+    import kohakuterrarium.session.memory.rebuild as module
+    from kohakuterrarium.session.occupancy.gate import (
+        REASON_FAST_ACTIVE,
+        resource_gate,
+    )
+
+    path = tmp_path / "admitted-rebuild.kohakutr"
+    _seed(path)
+    original = module._rebuild_staging
+
+    def observed_stage(*args, **kwargs):
+        snapshot = resource_gate.snapshot(path)
+        assert snapshot.new_active == 1 and snapshot.legacy_active == 0
+        assert resource_gate.try_fast(path, eligible=True).reason == REASON_FAST_ACTIVE
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_rebuild_staging", observed_stage)
+    result = rebuild_session_memory(path)
+    assert result.fts_rows == 2
+    assert not resource_gate.snapshot(path).registered
+
+
+def test_rebuild_must_not_publish_empty_fallback_for_unreadable_source(
+    tmp_path, monkeypatch
+):
+    import kohakuterrarium.session.memory.source_events as source_events
+
+    path = tmp_path / "unreadable-events.kohakutr"
+    _seed(path)
+    original = _hash(path)
+
+    def unreadable_rows(*args, **kwargs):
+        raise RuntimeError("synthetic physical event decode failure")
+
+    # Normal Search intentionally falls back to the tolerant reader.
+    # Rebuild must not inherit its empty-data result when physical keys exist.
+    monkeypatch.setattr(source_events, "read_values", unreadable_rows)
+    monkeypatch.setattr(SessionStore, "get_events", lambda self, agent: [])
+    with pytest.raises(RebuildRefused, match="source|event|decode|certif"):
+        rebuild_session_memory(path)
+    assert _hash(path) == original
+    assert not list(tmp_path.glob("*.before-memory-rebuild-*.bak"))
+
+
+def test_strict_source_attestation_does_not_change_tolerant_search(
+    tmp_path, monkeypatch
+):
+    import kohakuterrarium.session.memory.source_events as source_events
+
+    path = tmp_path / "tolerant-vs-strict.kohakutr"
+    _seed(path)
+    store = SessionStore(path)
+    try:
+        expected = store.get_events("alice")
+
+        def fail_decode(*args, **kwargs):
+            raise RuntimeError("synthetic corrupt source values")
+
+        monkeypatch.setattr(source_events, "read_values", fail_decode)
+        tolerated = source_events.sourced_events(store, "alice")
+        assert tolerated == expected
+        assert not hasattr(tolerated[0], "source_ref")
+        with pytest.raises(RuntimeError, match="corrupt source values"):
+            source_events.sourced_events(store, "alice", strict=True)
+    finally:
+        store.close(update_status=False)

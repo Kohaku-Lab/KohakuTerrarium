@@ -27,6 +27,7 @@ from kohakuterrarium.session.memory.embedding import (
 )
 from kohakuterrarium.session.memory.index import SessionMemory
 from kohakuterrarium.session.memory.source_events import SourcedEvent, sourced_events
+from kohakuterrarium.session.occupancy.gate import resource_gate
 from kohakuterrarium.session.occupancy.registry import live_store_for
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.store.lifecycle.lock import (
@@ -77,12 +78,34 @@ def _database_uri(path: Path) -> str:
     return path.resolve().as_uri() + "?mode=ro&immutable=1"
 
 
+def _reserve_source_occupancy(source: Path):
+    """Exclude every in-process native Store/Memory handle before SQLite opens.
+
+    The existing exclusive NEW gate also blocks new legacy enrollments for
+    the duration of a rebuild. A writer lock alone does not cover standalone
+    SessionMemory handles, which bypass the SessionStore registry.
+    """
+    admission = resource_gate.try_fast(source, eligible=True)
+    if admission.lease is None:
+        raise RebuildRefused(
+            "Session has active or uncertain native occupancy "
+            f"({admission.reason}); close all Store/Memory handles before rebuilding."
+        )
+    return admission.lease
+
+
 def inspect_index(path: Path) -> IndexInventory:
-    """Inspect only SQLite schema/row counts; do not create index handles."""
+    """Read index counts under a short-lived exclusive native lease."""
     source = Path(path).resolve(strict=True)
-    # A zero-length WAL and leftover -shm can outlive a completed read-only
-    # SessionStore. Immutable inspection reads only the checkpointed main file
-    # and must not convert these inert sidecars into a user-facing blocker.
+    lease = _reserve_source_occupancy(source)
+    try:
+        return _inspect_reserved_index(source)
+    finally:
+        lease.finish(source_released=True)
+
+
+def _inspect_reserved_index(source: Path) -> IndexInventory:
+    """Inspect schema/counts only while native access to source is excluded."""
     _reject_busy_source(source, allow_idle_sidecars=True)
     with closing(sqlite3.connect(_database_uri(source), uri=True)) as db:
         names = {name for (name,) in db.execute("SELECT name FROM sqlite_master")}
@@ -170,17 +193,25 @@ def _retire_idle_sidecars(path: Path) -> None:
         )
 
 
+def _strict_source_events(store, agent: str) -> list[SourcedEvent]:
+    """A destructive rebuild requires exact physical keys *and* decoded rows."""
+    try:
+        events = sourced_events(store, agent, strict=True)
+    except Exception as exc:
+        raise RebuildRefused(
+            f"Cannot certify physical source events for {agent!r}: {exc}"
+        ) from exc
+    if any(not isinstance(event, SourcedEvent) for event in events):
+        raise RebuildRefused(f"Cannot certify original physical source for {agent!r}.")
+    return events
+
+
 def _source_digest(store, names: tuple[str, ...]) -> tuple:
     """Fingerprint exact physical events, not mutable index-ordinal positions."""
     digest = hashlib.sha256()
     total = 0
     for name in names:
-        events = sourced_events(store, name)
-        if events and not all(isinstance(evt, SourcedEvent) for evt in events):
-            raise RebuildRefused(
-                f"Cannot certify original physical source for {name!r}; "
-                "indexing and Anchors must not guess event positions."
-            )
+        events = _strict_source_events(store, name)
         for event in events:
             digest.update(name.encode("utf-8"))
             digest.update(event.source_ref.encode("utf-8"))
@@ -280,11 +311,7 @@ def _rebuild_staging(
         rebuilt = SessionMemory(str(stage), embedder if policy == "rebuild" else None)
         try:
             for name in names:
-                events = sourced_events(store, name)
-                if events and not all(isinstance(evt, SourcedEvent) for evt in events):
-                    raise RebuildRefused(
-                        f"Unverifiable physical event source for {name!r}"
-                    )
+                events = _strict_source_events(store, name)
                 rebuilt.index_events(name, events)
             fts_count = rebuilt._fts.count()
             vector_count = (
@@ -346,6 +373,33 @@ def rebuild_session_memory(
         item is not None for item in (provider, model, dimensions, embedder)
     ):
         raise ValueError("Embedding settings require --vectors rebuild")
+    # Preserve the direct "currently open" diagnostic for a live Store.
+    # Admission immediately afterwards closes any race with new native opens.
+    _reject_busy_source(source, allow_idle_sidecars=True)
+    lease = _reserve_source_occupancy(source)
+    try:
+        return _rebuild_reserved(
+            source,
+            vectors=vectors,
+            provider=provider,
+            model=model,
+            dimensions=dimensions,
+            embedder=embedder,
+        )
+    finally:
+        lease.finish(source_released=True)
+
+
+def _rebuild_reserved(
+    source: Path,
+    *,
+    vectors: str,
+    provider: str | None,
+    model: str | None,
+    dimensions: int | None,
+    embedder: BaseEmbedder | None,
+) -> RebuildResult:
+    """Rebuild with exclusive process-local native occupancy held throughout."""
     _reject_busy_source(source, allow_idle_sidecars=True)
     lock = acquire_writer_lock(str(source))
     stage = source.with_name(f"{source.stem}.memory-rebuild-{uuid4().hex}.kohakutr")
@@ -360,7 +414,7 @@ def rebuild_session_memory(
             )
         before = source.stat()
         before_digest = clean_digest
-        inventory = inspect_index(source)
+        inventory = _inspect_reserved_index(source)
         if vectors == "auto" and inventory.vectors_present:
             details = ", ".join(
                 f"{rows}x{dim}d" for dim, rows in inventory.vector_rows if rows
