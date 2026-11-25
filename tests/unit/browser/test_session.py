@@ -273,8 +273,8 @@ class TestLifecycle:
         monkeypatch.setattr(
             lifecycle_module,
             "plan_launch",
-            lambda options, proxy: dataclasses.replace(
-                real(options, proxy), timeout_s=0.05
+            lambda options, proxy, **kwargs: dataclasses.replace(
+                real(options, proxy, **kwargs), timeout_s=0.05
             ),
         )
         driver.block = asyncio.Event()

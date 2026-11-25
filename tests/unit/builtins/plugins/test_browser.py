@@ -18,6 +18,7 @@ import pytest
 
 import kohakuterrarium as kt
 from kohakuterrarium.browser import proxy as proxy_module
+from kohakuterrarium.browser.launch import Candidate
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.builtins.plugin_catalog import is_default_on, lookup_plugin
 from kohakuterrarium.builtins.plugins.browser.plugin import (
@@ -453,7 +454,38 @@ class TestHostResources:
         context = tool_context(plugin, tmp_path, environment=restricted())
         assert (await call(plugin, "browser_snapshot", {}, context)).success
         assert driver.plans[0].headless is True
+        assert driver.plans[0].candidates == (Candidate("bundled chromium"),)
         await plugin.on_unload()
+
+    async def test_an_unrestricted_engine_may_fall_back_to_system_browsers(
+        self, tmp_path
+    ):
+        plugin, driver = await loaded(tmp_path)
+        assert (
+            await call(plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path))
+        ).success
+        assert [c.label for c in driver.plans[0].candidates] == [
+            "bundled chromium",
+            "system chrome",
+            "system msedge",
+        ]
+        await plugin.on_unload()
+
+    async def test_a_restriction_relaunches_a_browser_planned_with_system_ones(
+        self, tmp_path
+    ):
+        plugin, driver = await loaded(tmp_path)
+        free = tool_context(plugin, tmp_path)
+        assert (await call(plugin, "browser_snapshot", {}, free)).success
+        first = driver.browser
+        fenced = tool_context(plugin, tmp_path, environment=restricted())
+        assert (await call(plugin, "browser_snapshot", {}, fenced)).success
+        assert not first.alive and len(driver.plans) == 2
+        assert driver.plans[1].candidates == (Candidate("bundled chromium"),)
+        assert (await call(plugin, "browser_snapshot", {}, fenced)).success
+        assert len(driver.plans) == 2, "a bundled-only browser is kept"
+        await plugin.on_unload()
+        assert driver.alive() == []
 
     async def test_an_unrestricted_engine_allows_host_options(self, tmp_path):
         plugin, driver = await loaded(tmp_path, allow_loopback=True, headless=False)

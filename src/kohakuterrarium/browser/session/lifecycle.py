@@ -77,6 +77,7 @@ class SessionLifecycleMixin:
         proxy_factory: ProxyFactory,
     ) -> None:
         self._driver = driver
+        self.bundled_only = False
         self._proxy_factory = proxy_factory
         self._external_check = external_check
         self._stage_timeout = stage_timeout
@@ -142,6 +143,17 @@ class SessionLifecycleMixin:
         stack = self._stack
         if stack is not None:
             await stack.proxy.drop_connections()
+
+    async def require_bundled(self, required: bool) -> None:
+        """Launch only the bundled Chromium from now on while ``required``.
+
+        A running browser whose launch could have used another one is closed;
+        the next call starts a bundled one.
+        """
+        self.bundled_only = required
+        stack = self._stack
+        if required and stack is not None and not stack.bundled_only:
+            await self.close_browser()
 
     async def rejudge_connections(self) -> int:
         """Cut the open proxy connections the policy now refuses; how many were cut."""
@@ -252,7 +264,10 @@ class SessionLifecycleMixin:
         self._expect_page += 1
         try:
             await stack.proxy.start()
-            plan = plan_launch(self.options, stack.proxy.url)
+            stack.bundled_only = self.bundled_only
+            plan = plan_launch(
+                self.options, stack.proxy.url, bundled_only=stack.bundled_only
+            )
             stack.browser = await asyncio.wait_for(
                 self._driver.launch(plan, LaunchSink(self, generation)),
                 plan.timeout_s + CALL_MARGIN_S,

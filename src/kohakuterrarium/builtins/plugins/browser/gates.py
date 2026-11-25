@@ -62,6 +62,11 @@ class SandboxLink:
         return bool(getattr(self.policy, "requires_os_confinement", False))
 
 
+def bundled_only(source: Any) -> bool:
+    """Whether the creature behind ``source`` may launch only the bundled Chromium."""
+    return not host_resources_allowed(source)
+
+
 def host_resource_refusal(options: BrowserOptions, source: Any) -> str | None:
     """Why ``options`` are refused for the creature behind ``source``, or ``None``.
 

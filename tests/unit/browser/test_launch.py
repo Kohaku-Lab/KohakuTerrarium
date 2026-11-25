@@ -37,6 +37,16 @@ def test_explicit_executable_or_channel_is_used_alone():
     )
 
 
+def test_bundled_only_plans_the_bundled_chromium_alone():
+    bundled = (Candidate("bundled chromium"),)
+    options = BrowserOptions.from_mapping({})
+    assert plan_launch(options, PROXY, bundled_only=True).candidates == bundled
+    explicit = BrowserOptions.from_mapping(
+        {"channel": "chrome", "executable_path": "/opt/chrome"}
+    )
+    assert plan_launch(explicit, PROXY, bundled_only=True).candidates == bundled
+
+
 def test_launch_kwargs_route_everything_through_the_proxy():
     p = plan(headless=False)
     kwargs = p.launch_kwargs(p.candidates[0])

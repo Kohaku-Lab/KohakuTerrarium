@@ -79,20 +79,32 @@ class LaunchPlan:
         }
 
 
-def candidates_for(options: BrowserOptions) -> tuple[Candidate, ...]:
-    """Executables to try: an explicit path or channel alone, else bundled then system browsers."""
+BUNDLED = Candidate("bundled chromium")
+
+
+def candidates_for(
+    options: BrowserOptions, bundled_only: bool = False
+) -> tuple[Candidate, ...]:
+    """Executables to try: an explicit path or channel alone, else bundled then system browsers.
+
+    ``bundled_only`` gives the bundled Chromium alone, whatever the options name.
+    """
+    if bundled_only:
+        return (BUNDLED,)
     if options.executable_path:
         return (Candidate("executable_path", executable_path=options.executable_path),)
     if options.channel:
         return (Candidate(f"channel {options.channel}", channel=options.channel),)
     system = tuple(Candidate(f"system {c}", channel=c) for c in SYSTEM_CHANNELS)
-    return (Candidate("bundled chromium"),) + system
+    return (BUNDLED,) + system
 
 
-def plan_launch(options: BrowserOptions, proxy_server: str) -> LaunchPlan:
+def plan_launch(
+    options: BrowserOptions, proxy_server: str, *, bundled_only: bool = False
+) -> LaunchPlan:
     """The launch plan for ``options`` with all traffic sent to ``proxy_server``."""
     return LaunchPlan(
-        candidates=candidates_for(options),
+        candidates=candidates_for(options, bundled_only),
         headless=options.headless,
         args=NETWORK_ARGS,
         proxy_server=proxy_server,

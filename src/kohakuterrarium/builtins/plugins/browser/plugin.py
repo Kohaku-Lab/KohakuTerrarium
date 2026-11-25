@@ -18,6 +18,7 @@ from kohakuterrarium.browser.session import BrowserSession
 from kohakuterrarium.builtins.plugins.browser.gates import (
     CONFINEMENT_REFUSAL,
     SandboxLink,
+    bundled_only,
     host_resource_refusal,
 )
 from kohakuterrarium.builtins.tools.browser.act import FILES_ARG, BrowserActTool
@@ -282,6 +283,7 @@ class BrowserPlugin(BasePlugin):
         refusal = host_resource_refusal(self._browser_options, context)
         if refusal is not None:
             raise BrowserUnavailableError(refusal)
+        await session.require_bundled(bundled_only(context))
         self._link.bind(getattr(context, "runtime_services", None))
         if self._link.requires_confinement:
             if session.state != "new":

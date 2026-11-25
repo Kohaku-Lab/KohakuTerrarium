@@ -45,12 +45,16 @@ class BrowserResult:
 
 @dataclass(eq=False)
 class Stack:
-    """The resources of one launch: its proxy and, once started, its browser."""
+    """The resources of one launch: its proxy and, once started, its browser.
+
+    ``bundled_only`` is whether its launch plan named the bundled Chromium alone.
+    """
 
     proxy: FilteringProxy
     generation: int
     browser: BrowserDriver | None = None
     torn_down: bool = False
+    bundled_only: bool = False
 
 
 @dataclass(eq=False)
