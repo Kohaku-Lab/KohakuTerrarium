@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import os
+import socket
 
 import httpx
 import pytest
@@ -1083,6 +1084,21 @@ async def test_log_is_bounded(servers, make_proxy):
 # ---------------------------------------------------------------------------
 
 
+async def _ends_once_it_asks(sock: socket.socket) -> bool:
+    """Whether a client the proxy never accepted sees an end of stream or a reset after sending.
+
+    Raises ``TimeoutError`` when the connection hangs instead.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.sock_sendall(sock, b"CONNECT public.test:443 HTTP/1.1\r\n\r\n")
+        return await asyncio.wait_for(loop.sock_recv(sock, 16), 10) == b""
+    except ConnectionError:
+        return True
+    finally:
+        sock.close()
+
+
 async def test_close_with_open_tunnels_leaves_nothing_behind(servers):
     upstream = await servers(tcp_echo)
     before = asyncio.all_tasks()
@@ -1102,10 +1118,14 @@ async def test_close_with_open_tunnels_leaves_nothing_behind(servers):
         assert await reader.readexactly(9) == b"greeting\n"
         clients.append((reader, writer))
     idle_reader, idle_writer = await asyncio.open_connection("127.0.0.1", port)
+    await asyncio.wait_for(_until(lambda: len(proxy._tasks) == 3), 10)
+    unaccepted = socket.create_connection(("127.0.0.1", port), timeout=10)
+    unaccepted.setblocking(False)
 
-    await proxy.close()
+    await asyncio.wait_for(proxy.close(), 10)
     await proxy.close()
 
+    assert await _ends_once_it_asks(unaccepted)
     for reader, writer in clients + [(idle_reader, idle_writer)]:
         assert await asyncio.wait_for(reader.read(), 10) == b""
         writer.close()
