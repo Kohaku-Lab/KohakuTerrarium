@@ -207,6 +207,8 @@ class FakeContext:
         self.raise_on: dict[str, BaseException] = {}
         self.pause_error: BaseException | None = None
         self.timeouts: list[float] = []
+        self.blocked_after: dict[int, str] = {}
+        self.done = 0
 
     def require_no_dialog(self):
         if self.pending:
@@ -236,7 +238,11 @@ class FakeContext:
         return "answered"
 
     def action_done(self):
+        self.done += 1
         self.events.append(("done",))
+
+    def blocked_landing(self):
+        return self.blocked_after.get(self.done)
 
     async def pause(self, seconds):
         self.events.append(("pause", seconds))
@@ -383,6 +389,15 @@ class TestRunBatch:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    async def test_a_blocked_landing_fails_that_action_and_stops(self):
+        ctx = FakeContext()
+        ctx.blocked_after[2] = "it led to c.test, which the policy blocked"
+        report, _ = await run([CLICK, {"kind": "wait", "seconds": 0.01}, CLICK], ctx)
+        assert [o.status for o in report.outcomes] == [DONE, FAILED, SKIPPED]
+        assert report.outcomes[1].reason == "it led to c.test, which the policy blocked"
+        assert report.stopped.action.index == 1
+        assert [c[0] for c in ctx.page.calls] == ["click"]
 
 
 class TestFormatReport:

@@ -202,6 +202,10 @@ class ActionContext(Protocol):
         """Called after every executed action, before settling."""
         ...
 
+    def blocked_landing(self) -> str | None:
+        """After an action settled: why its main-frame landing was blocked, else ``None``."""
+        ...
+
 
 def is_neutral(value: Any, neutral: Any) -> bool:
     """Whether ``value`` is the "not given" value ``neutral``, also as text-format text."""
@@ -557,7 +561,11 @@ class _Reader:
 
 
 async def run_batch(actions: Sequence[Action], ctx: ActionContext) -> BatchReport:
-    """Run ``actions`` in order; stop at the first failure or interrupting dialog."""
+    """Run ``actions`` in order; stop at the first failure or interrupting dialog.
+
+    An action whose main-frame navigation the network policy blocked is a
+    failure too.
+    """
     outcomes: list[Outcome] = []
     stopped = False
     lost = False
@@ -582,10 +590,15 @@ async def run_batch(actions: Sequence[Action], ctx: ActionContext) -> BatchRepor
             outcomes.append(Outcome(action, FAILED, _reason(exc, action), detail))
             stopped = True
             continue
-        outcomes.append(Outcome(action, DONE, reason))
         ctx.action_done()
         if action.kind != "wait":
             await ctx.settle()
+        blocked = ctx.blocked_landing()
+        if blocked:
+            outcomes.append(Outcome(action, FAILED, blocked))
+            stopped = True
+            continue
+        outcomes.append(Outcome(action, DONE, reason))
     return BatchReport(outcomes, lost)
 
 

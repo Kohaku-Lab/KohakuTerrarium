@@ -467,7 +467,78 @@ class TestBlockedAttribution:
             [{"kind": "click", "ref": "e2"}, {"kind": "wait", "seconds": 0.05}]
         )
         assert "1. click e2: failed — it led to c.test:9000" in result.text
-        assert "2. wait 0.05 s: done" in result.text
+        assert "2. wait 0.05 s: not executed" in result.text
+        await session.close()
+
+    async def test_a_batch_stops_at_the_action_whose_landing_was_blocked(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+        clicked = []
+
+        async def click(ref, **_):
+            clicked.append(ref)
+            if ref == "e2":
+                driver.browser.sink.navigation_started(page, "http://c.test:9000/q3")
+                await self.proxied_get(session, "c.test:9000")
+
+        page.handlers["click"] = click
+        result = await session.act(
+            [
+                {"kind": "click", "ref": "e2"},
+                {"kind": "press", "key": "Enter"},
+                {"kind": "click", "ref": "e4"},
+            ]
+        )
+        assert clicked == ["e2"] and "press" not in page.names()
+        assert result.is_error and not result.meta["ok"]
+        lines = result.text.splitlines()
+        assert lines[1] == "Actions: 0 of 3 done; stopped at 1 (failed)"
+        assert lines[2].startswith("1. click e2: failed — it led to c.test:9000")
+        assert lines[3:5] == [
+            "2. press Enter: not executed",
+            "3. click e4: not executed",
+        ]
+        assert (
+            "Navigation blocked: http://shop.test/ → http://c.test:9000/q3; "
+            "the page did not load."
+        ) in result.text
+        assert [a["status"] for a in result.meta["actions"]] == [
+            "failed",
+            "not executed",
+            "not executed",
+        ]
+        await session.close()
+
+    async def test_a_later_action_whose_navigation_was_blocked_is_the_one_failed(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+
+        async def click(ref, **_):
+            if ref == "e4":
+                driver.browser.sink.navigation_started(page, "http://c.test:9000/q3")
+                await self.proxied_get(session, "c.test:9000")
+
+        page.handlers["click"] = click
+        result = await session.act(
+            [
+                {"kind": "click", "ref": "e2"},
+                {"kind": "click", "ref": "e4"},
+                {"kind": "click", "ref": "e2"},
+            ]
+        )
+        lines = result.text.splitlines()
+        assert lines[1] == "Actions: 1 of 3 done; stopped at 2 (failed)"
+        assert lines[2] == "1. click e2: done"
+        assert lines[3].startswith("2. click e4: failed — it led to c.test:9000")
+        assert lines[4] == "3. click e2: not executed"
+        clicked = [args["ref"] for name, args in page.calls if name == "click"]
+        assert clicked == ["e2", "e4"]
         await session.close()
 
     async def test_a_refused_same_origin_request_without_navigation_is_no_landing(

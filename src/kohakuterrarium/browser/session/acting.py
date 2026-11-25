@@ -66,6 +66,8 @@ class ActContext:
         self._tab = tab
         self._fresh = fresh
         self._done = 0
+        self._seen = 0
+        self._mark = session._stack.proxy.mark()
         self.navigated_at: int | None = None
         session._nav_event(tab).clear()
 
@@ -109,6 +111,24 @@ class ActContext:
         finally:
             event.clear()
             self._note_navigation()
+
+    def blocked_landing(self) -> str | None:
+        """The status reason when the last action navigated the tab to a blocked landing.
+
+        Only proxy records since the previous action count, and only when
+        the tab's main frame navigated during this one.
+        """
+        session = self._session
+        stack = session._stack
+        if stack is None:
+            return None
+        chain = session._nav_urls.get(self._tab.id, [])
+        mark, self._mark = self._mark, stack.proxy.mark()
+        moved, self._seen = len(chain) > self._seen, len(chain)
+        if not moved:
+            return None
+        blocked = session._blocked_hops([self.page.url], mark, self._tab)
+        return session._blocked_reason(blocked[-1]) if blocked else None
 
     async def answer_dialog(self, accept: bool, text: str | None) -> str:
         dialogs = self._session._dialogs
@@ -216,7 +236,8 @@ class SessionActMixin:
             landed = [after.url] if after is not None else []
             blocked = self._blocked_hops(landed, mark, tab)
         if blocked:
-            _fail_done(report, navigated_at, self._blocked_reason(blocked[-1]))
+            if report.stopped is None:
+                _fail_done(report, navigated_at, self._blocked_reason(blocked[-1]))
             delta = self._blocked_line(tab, before, after, blocked[-1])
         else:
             delta = await self._delta(tab, before, after, op)
