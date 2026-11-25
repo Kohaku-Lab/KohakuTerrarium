@@ -173,9 +173,10 @@ class TestBrowserIntegration:
         self, sites, tmp_path, monkeypatch
     ):
         """navigate with page text → snapshot → batch + delta → dialog → new tab
-        with its text → upload → download → screenshot → eval → blocked egress →
-        stale ref → interrupt → blocked redirect → a frame from another origin →
-        runtime disable / enable → stop, with no Chromium left behind."""
+        with its text → tab cap → upload → download → screenshot → eval → blocked
+        egress → stale ref → interrupt → blocked redirect stops its batch → a frame
+        from another origin → a frame ref from the frame's earlier page → runtime
+        disable / enable → stop, with no Chromium left behind."""
         pytest.importorskip("playwright.async_api")
         for name, value in browsers_env().items():
             monkeypatch.setenv(name, value)
@@ -306,6 +307,15 @@ class TestBrowserIntegration:
             closed = await creature.call("browser_tabs", action="close", tab="t2")
             assert "Tabs (1, active t1)" in closed
 
+            # The tab cap holds for tabs the tools open: the next one is refused.
+            plugin.session._max_tabs = 2
+            second = await creature.call("browser_tabs", action="new")
+            assert "Tabs (2, active t3)" in second
+            refused_tab = await creature.call("browser_tabs", action="new")
+            assert "the limit of 2 open tabs is reached" in refused_tab
+            await creature.call("browser_tabs", action="close", tab="t3")
+            plugin.session._max_tabs = 20
+
             # Upload a file from the working directory.
             (work / "notes.txt").write_bytes(UPLOAD)
             await creature.call(
@@ -403,7 +413,8 @@ class TestBrowserIntegration:
             left_out = await creature.call(
                 "browser_act",
                 actions=[
-                    {"kind": "click", "ref": ref_of(leave, "link", "Archive copy")}
+                    {"kind": "click", "ref": ref_of(leave, "link", "Archive copy")},
+                    {"kind": "wait", "seconds": 0.1},
                 ],
             )
             target = f"127.0.0.1:{listener.port}"
@@ -412,6 +423,8 @@ class TestBrowserIntegration:
                 f"{target}, which the browser network policy blocked"
             ) in left_out
             assert "the page did not load" in left_out
+            assert "Actions: 0 of 2 done; stopped at 1 (failed)" in left_out
+            assert "2. wait 0.1 s: not executed" in left_out
             assert "Navigation blocked: " in left_out and "Navigated:" not in left_out
             assert "Blocked 1 request" not in left_out
             assert listener.total_hits() == 0
@@ -433,6 +446,19 @@ class TestBrowserIntegration:
             assert "origin=" not in frames[0] and frames[1].endswith(foreign), frames
             assert framed.count("origin=") == 1
             assert body.count('- button "Frame button"') == 2
+            in_frame = ref_of(framed, "button", "Frame button")
+            await creature.call(
+                "browser_eval",
+                expression="() => { const f = document.querySelector('iframe'); "
+                "f.src = f.src; }",
+            )
+            await asyncio.sleep(1.0)
+            left_frame = await creature.call(
+                "browser_act", actions=[{"kind": "click", "ref": in_frame}]
+            )
+            assert f"ref {in_frame} is from a page its frame has since left" in (
+                left_frame
+            )
 
             # Disable at runtime: the browser exits and the tools refuse.
             pids = await browser_pids(plugin)
