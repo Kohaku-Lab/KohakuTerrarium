@@ -138,6 +138,24 @@ Agent 執行時底層就是用這套機制。
 
 ## 疑難排解
 
+連線失敗時會拋出一個帶型別的錯誤（`kohakuterrarium.errors.MCPConnectionError`、
+`MCPTimeoutError` 或 `MCPCommandNotFoundError`，都屬於 `MCPError`），訊息裡寫明伺服器名稱、
+URL（不含查詢字串和憑證）以及原因。Settings > MCP 的 **Test connection** 按鈕、`mcp_connect`
+和 agent 日誌顯示的是同一段文字。收到 HTTP 錯誤狀態碼或連線被拒時會立即結束，不會等到
+`connect_timeout`。header 的值不會出現在訊息或日誌裡。
+
+| 訊息 | 處理方式 |
+| --- | --- |
+| `HTTP 401 Unauthorized from <url>; check the headers/token`（或 403） | `Authorization` header 缺少或錯誤。如果用了 `${VAR}`，確認 KT 程序裡設定了該變數。 |
+| `HTTP 400 Bad Request from <url>; the server may speak streamable HTTP: try the streamable_http transport` | 條目用的是 `sse` / `http`，但伺服器只支援 streamable HTTP。 |
+| `HTTP 404 Not Found from <url>; check the URL path (for example /mcp)` | 端點路徑錯誤。FastMCP 的 streamable HTTP 在 `/mcp`，SSE 在 `/sse`。 |
+| `HTTP 5xx ...; server error: check the MCP server's logs` | 伺服器處理請求時出錯。 |
+| `cannot connect to <url>: <reason>` | 該主機與連接埠沒有服務在監聽，或 DNS 解析失敗。 |
+| `TLS handshake with <url> failed: <reason>` | 憑證或 TLS 問題。 |
+| `timed out after Ns; last HTTP response was ...` | 伺服器有回應，但沒有完成 MCP 握手。 |
+| `command not found: <command>` | stdio 伺服器的 `command` 不在 `PATH` 裡。 |
+| `the server process exited before the handshake finished` | stdio 伺服器啟動時崩潰。在 shell 裡執行它的命令查看錯誤。 |
+
 - **伺服器連不上（stdio）。** 先用 `kt config mcp list` 看解析後的命令。再把它直接拿去 shell 試跑（例如 `mcp-server-sqlite /path/to/db`），確認伺服器有正常印出 handshake。
 - **伺服器連不上（http / sse）。** 確認 URL 支援 SSE。有些伺服器同時提供 `/sse` 與 `/ws`；KohakuTerrarium 的 `http` / `sse` transport 需要 SSE 端點。
 - **伺服器連不上（streamable_http）。** 確認 URL 指向伺服器的 streamable HTTP 端點（例如 FastMCP 的 `streamable_http_app()` 路由），而不是舊式 SSE 路徑。

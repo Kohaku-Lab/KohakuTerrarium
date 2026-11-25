@@ -19,6 +19,7 @@ failures contained.
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `__init__.py` | Package docstring                                                                                                                                     |
 | `client.py`   | `MCPClientManager`, `MCPServerConfig`, `MCPServerInfo`: per-server `ClientSession`, tool discovery, lock-protected connect/disconnect, tool dispatch |
+| `diagnose.py` | `HandshakeObserver` (fail fast on an HTTP error or refused connection during the handshake), `explain_failure` / `explain_timeout`: one typed `MCPError` naming the root cause |
 | `tools.py`    | Four builtin tools (`@register_builtin`): `mcp_list`, `mcp_call`, `mcp_connect`, `mcp_disconnect`                                                    |
 
 ## Dependency direction

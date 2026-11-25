@@ -4,6 +4,14 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from kohakuterrarium.errors import MCPConfigError, MCPError
+from kohakuterrarium.mcp.diagnose import (
+    HandshakeObserver,
+    display_url,
+    explain_failure,
+    explain_timeout,
+    leaf_exceptions,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -20,7 +28,7 @@ def normalize_mcp_transport(transport: str) -> str:
         return "sse"
     if raw in {"streamable_http", "streamablehttp", "http_streamable"}:
         return "streamable_http"
-    raise ValueError(f"Unknown transport: {transport}")
+    raise MCPConfigError(f"Unknown transport: {transport}")
 
 
 @dataclass
@@ -46,6 +54,26 @@ class MCPServerInfo:
     status: str = "disconnected"  # "connected", "disconnected", "error"
     error: str = ""
     instructions: str = ""  # Server instructions from the initialize result
+
+
+def _observer_kind(transport: str) -> str:
+    try:
+        return normalize_mcp_transport(transport)
+    except MCPError:
+        return "stdio"
+
+
+def _kinds(exc: BaseException | None) -> list[str]:
+    """Exception type names of ``exc``'s root causes, safe to log."""
+    return [type(e).__name__ for e in leaf_exceptions(exc)] if exc else []
+
+
+async def _cancel_and_wait(task: asyncio.Task[Any]) -> None:
+    """Cancel ``task`` and wait for it to settle without re-raising its outcome."""
+    task.cancel()
+    await asyncio.wait({task})
+    if not task.cancelled():
+        task.exception()
 
 
 class _MCPConnection:
@@ -92,7 +120,7 @@ class _MCPConnection:
                 read_stream = entered[0]
                 write_stream = entered[1]
             except (IndexError, TypeError) as e:
-                raise ValueError(
+                raise MCPConfigError(
                     f"MCP server {name}: transport did not yield read/write streams"
                 ) from e
             session = client_session_cls(read_stream, write_stream)
@@ -104,20 +132,14 @@ class _MCPConnection:
             self.transports = (read_stream, write_stream)
         except BaseException as e:  # noqa: BLE001 — surfaced via self.error
             self.error = e
-            # Unwind whatever we entered, on THIS task.
-            if entered_session and session is not None:
-                try:
-                    await session.__aexit__(type(e), e, e.__traceback__)
-                except Exception:
-                    logger.debug("MCP session unwind after open failure", exc_info=True)
-            if entered_ctx:
-                try:
-                    await ctx.__aexit__(type(e), e, e.__traceback__)
-                except Exception:
-                    logger.debug(
-                        "MCP transport unwind after open failure", exc_info=True
-                    )
-            self._ready.set()
+            try:
+                await self._unwind(
+                    e,
+                    session if entered_session else None,
+                    ctx if entered_ctx else None,
+                )
+            finally:
+                self._ready.set()
             return
 
         # Open succeeded — let the connect() caller proceed, then hold
@@ -135,20 +157,37 @@ class _MCPConnection:
                 "Failed to exit MCP transport context", error=str(e), exc_info=True
             )
 
+    async def _unwind(self, error: BaseException, session: Any, ctx: Any) -> None:
+        """Exit the session and transport this task entered before ``error``."""
+        if session is not None:
+            try:
+                await session.__aexit__(type(error), error, error.__traceback__)
+            except BaseException as e:  # noqa: BLE001 — teardown of a failed open
+                logger.debug("MCP session unwind after open failure", cause=_kinds(e))
+        if ctx is not None:
+            try:
+                await ctx.__aexit__(type(error), error, error.__traceback__)
+            except BaseException as e:  # noqa: BLE001 — teardown of a failed open
+                logger.debug("MCP transport unwind after open failure", cause=_kinds(e))
+
     async def aclose(self) -> None:
         """Request teardown and wait for the owner task to finish it.
 
         Safe to call regardless of which task invokes it — the actual
-        CM exit happens on ``self._task``. Idempotent.
+        CM exit happens on ``self._task``. An open still in progress is
+        cancelled. Idempotent.
         """
         self._close.set()
         task = self._task
         if task is None:
             return
-        try:
-            await task
-        except Exception as e:
-            logger.debug("MCP connection owner task error", error=str(e), exc_info=True)
+        if not self._ready.is_set():
+            task.cancel()
+        await asyncio.wait({task})
+        if not task.cancelled() and task.exception() is not None:
+            logger.debug(
+                "MCP connection owner task error", cause=_kinds(task.exception())
+            )
 
 
 class MCPClientManager:
@@ -173,50 +212,93 @@ class MCPClientManager:
     async def connect(self, config: MCPServerConfig) -> MCPServerInfo:
         """Connect to an MCP server and discover its tools.
 
-        Raises ImportError if the mcp package is not installed.
+        An HTTP error status or a refused connection during the handshake
+        ends the attempt at once. Failures raise a typed
+        :class:`~kohakuterrarium.errors.MCPError` naming the root cause
+        (``MCPTimeoutError`` after ``connect_timeout``). Raises ImportError
+        if the mcp package is not installed.
         """
         timeout = config.connect_timeout
         if timeout is not None and timeout <= 0:
-            raise ValueError("connect_timeout must be greater than 0")
+            raise MCPConfigError("connect_timeout must be greater than 0")
+        if config.name in self._sessions:
+            logger.warning("MCP server already connected", server=config.name)
+            return self._servers[config.name]
 
-        if timeout is None:
-            return await self._connect_impl(config)
-
+        observer = HandshakeObserver(_observer_kind(config.transport))
+        connect_task = asyncio.create_task(self._connect_impl(config, observer))
+        failed_task = asyncio.create_task(observer.failed.wait())
         try:
-            return await asyncio.wait_for(self._connect_impl(config), timeout=timeout)
-        except asyncio.TimeoutError as e:
-            message = f"Timed out after {timeout:g}s"
-            info = self._servers.get(config.name)
-            if info is None:
-                info = MCPServerInfo(config=config)
-                self._servers[config.name] = info
-            info.status = "error"
-            info.error = message
-            logger.error(
-                "MCP connect timed out",
-                server=config.name,
-                transport=config.transport,
-                timeout_seconds=timeout,
+            done, _ = await asyncio.wait(
+                {connect_task, failed_task},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
             )
-            raise TimeoutError(f"MCP server {config.name}: {message}") from e
+        except asyncio.CancelledError:
+            await _cancel_and_wait(connect_task)
+            raise
+        finally:
+            failed_task.cancel()
 
-    async def _connect_impl(self, config: MCPServerConfig) -> MCPServerInfo:
+        if connect_task in done:
+            try:
+                info = connect_task.result()
+            except Exception as e:
+                error = explain_failure(config, e, observer, timeout=timeout)
+                cause: BaseException = e
+            else:
+                observer.disarm()
+                return info
+        else:
+            await _cancel_and_wait(connect_task)
+            if observer.failure is not None:
+                cause = observer.failure.error or RuntimeError("handshake failed")
+                error = explain_failure(config, cause, observer, timeout=timeout)
+            else:
+                cause = asyncio.TimeoutError()
+                error = explain_timeout(config, observer, float(timeout or 0))
+        observer.disarm()
+        self._record_failure(config, error, cause)
+        if error is cause:
+            raise error
+        raise error from cause
+
+    def _record_failure(
+        self, config: MCPServerConfig, error: BaseException, cause: BaseException
+    ) -> None:
+        info = self._servers.get(config.name)
+        if info is None:
+            info = MCPServerInfo(config=config)
+            self._servers[config.name] = info
+        info.status = "error"
+        info.error = str(error)
+        logger.warning(
+            "MCP connect failed",
+            server=config.name,
+            transport=config.transport,
+            url=display_url(config.url),
+            status=getattr(error, "status", None),
+            error=str(error),
+        )
+        logger.debug(
+            "MCP connect failure causes", server=config.name, cause=_kinds(cause)
+        )
+
+    async def _connect_impl(
+        self, config: MCPServerConfig, observer: HandshakeObserver
+    ) -> MCPServerInfo:
         from mcp import ClientSession
         from mcp.client.stdio import StdioServerParameters, stdio_client
 
         name = config.name
-        if name in self._sessions:
-            logger.warning("MCP server already connected", server=name)
-            return self._servers[name]
-
         info = MCPServerInfo(config=config, status="connecting")
         self._servers[name] = info
-        transport = normalize_mcp_transport(config.transport)
 
         try:
+            transport = normalize_mcp_transport(config.transport)
             if transport == "stdio":
                 if not config.command:
-                    raise ValueError(
+                    raise MCPConfigError(
                         f"MCP server {name}: stdio transport requires 'command'"
                     )
 
@@ -230,16 +312,26 @@ class MCPClientManager:
                 from mcp.client.sse import sse_client
 
                 if not config.url:
-                    raise ValueError(f"MCP server {name}: SSE transport requires 'url'")
-                ctx = sse_client(config.url, headers=config.headers or None)
+                    raise MCPConfigError(
+                        f"MCP server {name}: SSE transport requires 'url'"
+                    )
+                ctx = sse_client(
+                    config.url,
+                    headers=config.headers or None,
+                    httpx_client_factory=observer.client_factory,
+                )
             else:
                 from mcp.client.streamable_http import streamablehttp_client
 
                 if not config.url:
-                    raise ValueError(
+                    raise MCPConfigError(
                         f"MCP server {name}: streamable_http transport requires 'url'"
                     )
-                ctx = streamablehttp_client(config.url, headers=config.headers or None)
+                ctx = streamablehttp_client(
+                    config.url,
+                    headers=config.headers or None,
+                    httpx_client_factory=observer.client_factory,
+                )
 
             session = await self._open_transport_session(name, ctx, ClientSession)
             info.instructions = self._connections[name].instructions
@@ -259,17 +351,13 @@ class MCPClientManager:
                 "MCP server connected",
                 server=name,
                 transport=config.transport,
+                url=display_url(config.url),
                 tools=len(info.tools),
             )
             return info
-        except asyncio.CancelledError:
-            await self._cleanup_connection(name, remove_server=False)
-            raise
-        except Exception as e:
+        except BaseException:
             info.status = "error"
-            info.error = str(e)
             await self._cleanup_connection(name, remove_server=False)
-            logger.error("MCP connect failed", server=name, error=str(e))
             raise
 
     async def _open_transport_session(

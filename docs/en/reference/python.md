@@ -74,6 +74,12 @@ same failure historically raised (`FileNotFoundError` / `ValueError` /
   - `TurnError(KTError)`: a turn failed (provider error, unrecoverable tool crash).
   - `TurnTimeoutError(TurnError, TimeoutError)`: turn exceeded its `timeout=` budget and was cancelled.
   - `AgentNotRunningError(KTError, RuntimeError)`: operation needed a started agent.
+- MCP:
+  - `MCPError(KTError)`: base for MCP server entry and connection failures.
+  - `MCPConfigError(MCPError, ConfigError)`: invalid entry (unknown transport, unset `${VAR}`).
+  - `MCPConnectionError(MCPError, ConnectionError)`: server unreachable or rejected the handshake; carries `server`, `url`, `status`.
+  - `MCPCommandNotFoundError(MCPConnectionError, FileNotFoundError)`: a stdio server's command could not be started.
+  - `MCPTimeoutError(MCPConnectionError, TimeoutError)`: handshake did not finish within `connect_timeout`.
 - Request-shaped (used by the studio tier; the HTTP adapter maps them
   to status codes): `NotFoundError(KTError, KeyError)`,
   `InvalidRequestError(KTError, ValueError)`, `ConflictError(KTError)`.

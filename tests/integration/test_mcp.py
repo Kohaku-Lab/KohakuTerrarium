@@ -49,6 +49,7 @@ from kohakuterrarium.core.config.types import (
     ToolConfigItem,
 )
 from kohakuterrarium.core.session import Session
+from kohakuterrarium.errors import MCPConnectionError
 from kohakuterrarium.mcp.client import (
     MCPClientManager,
     MCPServerConfig,
@@ -59,7 +60,9 @@ from kohakuterrarium.terrarium.creature.host import Creature
 from kohakuterrarium.terrarium.engine.engine import Terrarium
 from kohakuterrarium.terrarium.runtime_prompt import apply_managed_section
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.testing.mcp_http import bearer_mcp_server, closed_loopback_port
 from kohakuterrarium.testing.output import OutputRecorder
+from kohakuterrarium.utils.logging import ColoredFormatter
 
 # ---------------------------------------------------------------------------
 # Real in-process stdio MCP servers — tiny FastMCP scripts spawned as
@@ -673,3 +676,93 @@ class TestMcpIntegration:
         # Engine __aexit__ stopped the creature; the manager's servers
         # were connected for the whole run.
         assert creature.is_running is False
+
+    @pytest.mark.timeout(90)
+    async def test_remote_streamable_http_server_with_bearer_token(self, caplog):
+        """A token-protected streamable-HTTP server, as the Settings > MCP
+        Test button and every agent connect reach it: the right token
+        connects and calls a tool; every way of getting it wrong fails
+        FAST with one readable sentence that never contains the token."""
+        token = "kt-it-s3cret-bearer"
+        with bearer_mcp_server(token) as base:
+            url = f"{base}/mcp"
+            manager = MCPClientManager()
+
+            info = await manager.connect(
+                MCPServerConfig(
+                    name="remote",
+                    transport="streamable_http",
+                    url=url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    connect_timeout=20,
+                )
+            )
+            assert [t["name"] for t in info.tools] == ["echo"]
+            assert (
+                await manager.call_tool("remote", "echo", {"text": "hi"}) == "echo: hi"
+            )
+            await manager.disconnect("remote")
+
+            loop = asyncio.get_running_loop()
+            closed = f"http://127.0.0.1:{closed_loopback_port()}/mcp"
+            cases = [
+                (
+                    "streamable_http",
+                    url,
+                    {},
+                    f"MCP server bad: HTTP 401 Unauthorized from {url}; "
+                    "check the headers/token",
+                ),
+                (
+                    "streamable_http",
+                    url,
+                    {"Authorization": "Bearer wrong"},
+                    f"MCP server bad: HTTP 401 Unauthorized from {url}; "
+                    "check the headers/token",
+                ),
+                (
+                    "http",
+                    url,
+                    {"Authorization": f"Bearer {token}"},
+                    f"MCP server bad: HTTP 400 Bad Request from {url}; the server "
+                    "may speak streamable HTTP: try the streamable_http transport",
+                ),
+                (
+                    "streamable_http",
+                    f"{base}/nope",
+                    {"Authorization": f"Bearer {token}"},
+                    f"MCP server bad: HTTP 404 Not Found from {base}/nope; "
+                    "check the URL path (for example /mcp)",
+                ),
+                (
+                    "streamable_http",
+                    closed,
+                    {"Authorization": f"Bearer {token}"},
+                    f"MCP server bad: cannot connect to {closed}: "
+                    "All connection attempts failed",
+                ),
+            ]
+            with caplog.at_level("DEBUG"):
+                for transport, target, headers, expected in cases:
+                    started = loop.time()
+                    with pytest.raises(MCPConnectionError) as caught:
+                        await manager.connect(
+                            MCPServerConfig(
+                                name="bad",
+                                transport=transport,
+                                url=target,
+                                headers=headers,
+                                connect_timeout=20,
+                            )
+                        )
+                    assert loop.time() - started < 5, expected
+                    assert str(caught.value) == expected
+                    assert manager.servers["bad"].status == "error"
+                    assert manager.servers["bad"].error == expected
+                    assert "bad" not in manager._sessions
+            rendered = "\n".join(
+                ColoredFormatter(use_color=False).format(r) for r in caplog.records
+            )
+            assert token not in rendered
+            assert "HTTP 401 Unauthorized" in rendered
+            await manager.shutdown()

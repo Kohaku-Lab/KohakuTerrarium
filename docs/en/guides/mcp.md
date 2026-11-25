@@ -140,6 +140,26 @@ The framework does not add these instructions to the system prompt.
 
 ## Troubleshooting
 
+A failed connect raises one typed error (`kohakuterrarium.errors.MCPConnectionError`,
+`MCPTimeoutError` or `MCPCommandNotFoundError`, all `MCPError`) whose message
+names the server, its URL (without query string or credentials) and the cause.
+The Settings > MCP **Test connection** button, `mcp_connect` and the agent log
+show the same text. An HTTP error status or a refused connection ends the
+attempt at once instead of waiting for `connect_timeout`. Header values never
+appear in messages or logs.
+
+| Message | What to do |
+| --- | --- |
+| `HTTP 401 Unauthorized from <url>; check the headers/token` (or 403) | The `Authorization` header is missing or wrong. If it uses `${VAR}`, check the variable is set for the KT process. |
+| `HTTP 400 Bad Request from <url>; the server may speak streamable HTTP: try the streamable_http transport` | The entry uses `sse` / `http` but the server only speaks streamable HTTP. |
+| `HTTP 404 Not Found from <url>; check the URL path (for example /mcp)` | Wrong endpoint path. FastMCP serves streamable HTTP at `/mcp` and SSE at `/sse`. |
+| `HTTP 5xx ...; server error: check the MCP server's logs` | The server failed while answering. |
+| `cannot connect to <url>: <reason>` | Nothing listens at that host and port, or DNS failed. |
+| `TLS handshake with <url> failed: <reason>` | Certificate or TLS problem. |
+| `timed out after Ns; last HTTP response was ...` | The server answered but never finished the MCP handshake. |
+| `command not found: <command>` | A stdio server whose `command` is not on `PATH`. |
+| `the server process exited before the handshake finished` | A stdio server crashed on start. Run its command in a shell to see its error. |
+
 - **Server not connecting (stdio).** Run `kt config mcp list` to see the resolved command. Try it in a shell first (`mcp-server-sqlite /path/to/db`) and check the server prints its handshake.
 - **Server not connecting (http / sse).** Verify the URL is SSE-compatible. Some servers expose both `/sse` and `/ws`; KohakuTerrarium's `http` / `sse` transport expects the SSE endpoint.
 - **Server not connecting (streamable_http).** Verify the URL points at the server's streamable HTTP endpoint (for example FastMCP's `streamable_http_app()` route) rather than a legacy SSE path.

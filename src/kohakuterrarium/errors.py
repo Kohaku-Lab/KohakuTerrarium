@@ -166,6 +166,48 @@ class SessionLockedError(SessionError, ConflictError, RuntimeError):
 
 
 # ---------------------------------------------------------------------------
+# MCP
+# ---------------------------------------------------------------------------
+
+
+class MCPError(KTError):
+    """An MCP server entry or connection failed."""
+
+
+class MCPConfigError(MCPError, ConfigError):
+    """An MCP server entry is invalid or names an unset environment variable."""
+
+
+class MCPConnectionError(MCPError, ConnectionError):
+    """An MCP server could not be reached or rejected the handshake.
+
+    ``server``, ``url`` and ``status`` identify the failing server, its
+    displayed URL (no query string or credentials) and the HTTP status.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        server: str = "",
+        url: str = "",
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.server = server
+        self.url = url
+        self.status = status
+
+
+class MCPCommandNotFoundError(MCPConnectionError, FileNotFoundError):
+    """A stdio MCP server's command could not be started."""
+
+
+class MCPTimeoutError(MCPConnectionError, TimeoutError):
+    """An MCP server did not finish the handshake within its connect timeout."""
+
+
+# ---------------------------------------------------------------------------
 # Turn execution
 # ---------------------------------------------------------------------------
 

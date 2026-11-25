@@ -8,6 +8,7 @@ import json
 from typing import Any
 
 from kohakuterrarium.builtins.tool_catalog import register_builtin
+from kohakuterrarium.errors import MCPError
 from kohakuterrarium.mcp.client import MCPClientManager, MCPServerConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.utils.logging import get_logger
@@ -325,6 +326,8 @@ class MCPConnectTool(BaseTool):
             return ToolResult(
                 error="MCP SDK not installed. Install with: pip install mcp"
             )
+        except MCPError as e:
+            return ToolResult(error=str(e))
         except Exception as e:
             return ToolResult(error=f"Failed to connect to {name}: {e}")
 

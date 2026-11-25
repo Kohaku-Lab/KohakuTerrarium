@@ -9,6 +9,7 @@ formats its output as documented, and surfaces precise errors.
 
 import pytest
 
+from kohakuterrarium.errors import MCPConnectionError
 from kohakuterrarium.mcp.tools import (
     MCPCallTool,
     MCPConnectTool,
@@ -433,6 +434,21 @@ class TestMcpConnectTool:
             {"name": "s", "command": "c"}, context=_ctx(mgr)
         )
         assert result.error == "Failed to connect to s: refused"
+
+    async def test_typed_connect_failure_is_shown_once(self):
+        mgr = _FakeManager(
+            connect_result=MCPConnectionError(
+                "MCP server s: HTTP 401 Unauthorized from http://h/mcp; "
+                "check the headers/token"
+            )
+        )
+        result = await MCPConnectTool().execute(
+            {"name": "s", "url": "http://h/mcp"}, context=_ctx(mgr)
+        )
+        assert result.error == (
+            "MCP server s: HTTP 401 Unauthorized from http://h/mcp; "
+            "check the headers/token"
+        )
 
     async def test_no_manager_returns_error(self):
         result = await MCPConnectTool().execute(
