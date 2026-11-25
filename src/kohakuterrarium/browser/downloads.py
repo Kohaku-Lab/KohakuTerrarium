@@ -67,8 +67,10 @@ def reserve_path(directory: Path, name: str) -> Path:
 class Downloads:
     """Saves each download in the background and reports finished ones once.
 
-    At most ``max_count`` downloads per browser are kept, and ``max_bytes``
-    in total; later ones are cancelled or deleted and reported as failed.
+    Over the session's lifetime at most ``max_count`` downloads are started
+    and at most ``max_bytes`` are kept; a download past the count is
+    cancelled, one that takes the kept total over ``max_bytes`` is saved in
+    full and then deleted, and both are reported as failed.
     """
 
     def __init__(
@@ -97,7 +99,7 @@ class Downloads:
         self.started += 1
         if self._accepted >= self.max_count:
             self._failed.append(
-                (name, f"refused: the limit of {self.max_count} downloads per browser")
+                (name, f"refused: the limit of {self.max_count} downloads per session")
             )
             task = asyncio.create_task(_cancel(download))
             self._cancels.add(task)
@@ -115,6 +117,11 @@ class Downloads:
         try:
             path = reserve_path(self.directory, safe_filename(name))
             await asyncio.wait_for(download.save_as(str(path)), self.save_timeout)
+        except asyncio.TimeoutError:
+            await _cancel(download)
+            _discard(path)
+            self._failed.append((name, f"timed out after {self.save_timeout:g} s"))
+            return
         except asyncio.CancelledError:
             _discard(path)
             raise
@@ -149,12 +156,11 @@ class Downloads:
         return finished, failed
 
     def clear(self) -> None:
-        """Cancel saves in progress and forget everything, limits included."""
+        """Cancel saves in progress and forget unreported results; the caps keep counting."""
         for task in list(self._tasks):
             task.cancel()
         self._tasks.clear()
         self._finished, self._failed = [], []
-        self._accepted = self._bytes = 0
 
 
 async def _cancel(download: DownloadDriver) -> None:

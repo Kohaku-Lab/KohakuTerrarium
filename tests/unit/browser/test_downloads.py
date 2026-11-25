@@ -128,7 +128,7 @@ async def test_count_cap_refuses_and_cancels_later_downloads(tmp_path):
     await asyncio.sleep(0.01)
     finished, failed = downloads.drain()
     assert [name for name, _ in finished] == ["f0.bin", "f1.bin"]
-    assert failed == [("f2.bin", "refused: the limit of 2 downloads per browser")]
+    assert failed == [("f2.bin", "refused: the limit of 2 downloads per session")]
     assert items[2].cancelled and items[2].saved_to is None
 
 
@@ -142,6 +142,39 @@ async def test_byte_cap_deletes_what_goes_over(tmp_path):
     assert [name for name, _ in finished] == ["small.bin"]
     assert failed == [("big.bin", "refused: over the 10-byte total download limit")]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["small.bin"]
+
+
+async def test_caps_hold_across_a_relaunch(tmp_path):
+    downloads = Downloads(tmp_path, max_count=2, max_bytes=10)
+    downloads.start(ScriptedDownload("small.bin", b"12345"))
+    await downloads.wait(1.0)
+    downloads.clear()
+    downloads.start(ScriptedDownload("nine.bin", b"123456789"))
+    await downloads.wait(1.0)
+    item = CancellableDownload("third.bin")
+    downloads.start(item)
+    await downloads.wait(1.0)
+    await asyncio.sleep(0.01)
+    finished, failed = downloads.drain()
+    assert finished == []
+    assert failed == [
+        ("nine.bin", "refused: over the 10-byte total download limit"),
+        ("third.bin", "refused: the limit of 2 downloads per session"),
+    ]
+    assert item.cancelled and item.saved_to is None
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["small.bin"]
+
+
+async def test_a_save_that_times_out_cancels_the_download(tmp_path):
+    downloads = Downloads(tmp_path, save_timeout=0.05)
+    item = SlowDownload("slow.bin")
+    downloads.start(item)
+    await downloads.wait(1.0)
+    finished, failed = downloads.drain()
+    assert finished == []
+    assert failed == [("slow.bin", "timed out after 0.05 s")]
+    assert item.cancelled
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_reserve_path_gives_up_when_every_probe_is_taken(tmp_path, monkeypatch):
