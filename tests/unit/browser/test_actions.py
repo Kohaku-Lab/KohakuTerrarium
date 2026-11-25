@@ -217,7 +217,8 @@ class FakeContext:
         if self.pending:
             raise DialogPendingError("a dialog is waiting")
 
-    def secret(self, name):
+    async def secret(self, name, ref):
+        self.events.append(("secret", name, ref))
         return "s3cret-value"
 
     async def check_ref(self, ref):
@@ -378,7 +379,22 @@ class TestRunBatch:
     async def test_secret_is_resolved_at_execution(self):
         report, ctx = await run([{"kind": "type", "ref": "e1", "secret": "pw"}])
         assert ctx.page.calls[0] == ("fill", ("e1", "s3cret-value", 1.0), {})
+        assert ctx.events[:2] == [("check", "e1"), ("secret", "pw", "e1")]
         assert report.outcomes[0].reason == "typed secret pw"
+
+    async def test_a_refused_secret_types_nothing(self):
+        ctx = FakeContext()
+
+        async def refuse(name, ref):
+            raise ActionFailedError(f"refused: secret {name} may not go to {ref}")
+
+        ctx.secret = refuse
+        report = await run_batch(
+            parse_actions([{"kind": "type", "ref": "e1", "secret": "pw"}]), ctx
+        )
+        assert ctx.page.calls == []
+        assert report.outcomes[0].status == "failed"
+        assert report.outcomes[0].reason == "refused: secret pw may not go to e1"
 
     async def test_cancellation_propagates(self):
         ctx = FakeContext()

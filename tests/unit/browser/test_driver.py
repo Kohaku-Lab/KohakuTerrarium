@@ -770,7 +770,9 @@ async def test_secrets_redaction_crash_recovery_then_close_leaves_no_process(
                     "allow_loopback": True,
                     "action_timeout_s": 5,
                     "nav_timeout_s": 8,
-                    "secrets": {"pw": "env:KT_T_LIVE_PW"},
+                    "secrets": {
+                        "pw": {"env": "KT_T_LIVE_PW", "origins": [site.url("/")]}
+                    },
                 }
             ),
             downloads_dir=downloads,

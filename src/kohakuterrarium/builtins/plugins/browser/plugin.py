@@ -79,7 +79,10 @@ def _schema() -> dict[str, dict[str, Any]]:
         ),
         "allow_private": entry("bool", "Allow private-network addresses.", False),
         "secrets": entry(
-            "dict", "Secret names to env:VAR_NAME references for type actions.", {}
+            "dict",
+            "Secrets for type actions: name -> {env: VAR_NAME, origins: "
+            "[https://site.example]}; typed only into those origins.",
+            {},
         ),
         "nav_timeout_s": entry(
             "float", "Navigation timeout in seconds.", defaults.nav_timeout_s
@@ -121,7 +124,10 @@ def option_values(options: BrowserOptions) -> dict[str, Any]:
         "block_hosts": list(options.block_hosts),
         "allow_loopback": options.allow_loopback,
         "allow_private": options.allow_private,
-        "secrets": dict(options.secrets),
+        "secrets": {
+            name: {"env": spec["env"], "origins": list(spec["origins"])}
+            for name, spec in options.secrets.items()
+        },
         "nav_timeout_s": options.nav_timeout_s,
         "action_timeout_s": options.action_timeout_s,
         "snapshot_max_chars": options.snapshot_max_chars,

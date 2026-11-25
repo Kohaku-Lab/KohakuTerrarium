@@ -57,6 +57,7 @@ PAGE = (
     "  - /url: /next"
 )
 SECRET_VALUE = "hunter2-very-secret"
+SHOP_SECRET = {"shop_pw": {"env": "SHOP_PW", "origins": ["http://shop.test"]}}
 
 
 def shop(browser) -> None:
@@ -678,7 +679,7 @@ class TestObservation:
                 }
             ]
 
-        session, _ = make(tmp_path, setup, secrets={"shop_pw": "env:SHOP_PW"})
+        session, _ = make(tmp_path, setup, secrets=SHOP_SECRET)
         try:
             result = await session.snapshot()
         finally:
@@ -820,7 +821,7 @@ class TestAct:
 
     async def test_typed_secret_never_appears(self, tmp_path, monkeypatch, caplog):
         monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
-        session, driver = make(tmp_path, secrets={"shop_pw": "env:SHOP_PW"})
+        session, driver = make(tmp_path, secrets=SHOP_SECRET)
         caplog.set_level(logging.DEBUG)
         try:
             await session.snapshot()
@@ -847,6 +848,94 @@ class TestAct:
         ):
             assert SECRET_VALUE not in blob
         assert SECRET_VALUE not in caplog.text
+
+    async def test_a_secret_is_refused_on_another_origin(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
+        session, driver = make(tmp_path, secrets=SHOP_SECRET)
+        try:
+            await session.snapshot()
+            page = driver.browser.page
+            page.load("http://evil.test/login", snapshot=PAGE)
+            await session.snapshot()
+            result = await session.act(
+                [{"kind": "type", "ref": "e3", "secret": "shop_pw"}]
+            )
+        finally:
+            await session.close()
+        assert result.is_error and not result.meta["ok"]
+        assert (
+            "1. type e3: failed — refused: secret shop_pw may be typed only into "
+            "http://shop.test; e3 is on http://evil.test"
+        ) in result.text
+        assert not [c for c in page.calls if c[0] in ("fill", "type_text")]
+        assert SECRET_VALUE not in result.text + json.dumps(result.meta)
+        assert "frame_views" not in page.names(), "the main frame needs no round trip"
+
+    async def test_a_cross_origin_frame_in_an_allowed_page_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
+        framed = (
+            PAGE + "\n"
+            '- iframe [ref=e5]:\n  - textbox "Card" [ref=f1e1]\n'
+            '- iframe [ref=e6]:\n  - textbox "Login" [ref=f2e1]'
+        )
+
+        def setup(browser):
+            shop(browser)
+            browser.page.snapshot_text = framed
+            browser.page.frame_url_map = {
+                "e5": "https://pay.test/card",
+                "e6": "http://shop.test/inner",
+            }
+
+        session, driver = make(tmp_path, setup, secrets=SHOP_SECRET)
+        try:
+            await session.snapshot()
+            page = driver.browser.page
+            refused = await session.act(
+                [{"kind": "type", "ref": "f1e1", "secret": "shop_pw"}]
+            )
+            typed = await session.act(
+                [{"kind": "type", "ref": "f2e1", "secret": "shop_pw"}]
+            )
+        finally:
+            await session.close()
+        assert (
+            "refused: secret shop_pw may be typed only into http://shop.test; "
+            "f1e1 is on https://pay.test"
+        ) in refused.text
+        fills = [c[1] for c in page.calls if c[0] == "fill"]
+        assert fills == [{"ref": "f2e1", "text": SECRET_VALUE, "timeout": 0.3}]
+        assert "typed secret shop_pw" in typed.text and typed.meta["ok"]
+        for blob in (refused.text, typed.text):
+            assert SECRET_VALUE not in blob
+
+    async def test_a_frame_whose_origin_cannot_be_read_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SHOP_PW", SECRET_VALUE)
+
+        def setup(browser):
+            shop(browser)
+            browser.page.snapshot_text = (
+                PAGE + '\n- iframe [ref=e5]:\n  - textbox "Card" [ref=f1e1]'
+            )
+            browser.page.frame_url_map = {"e5": "about:srcdoc"}
+
+        session, driver = make(tmp_path, setup, secrets=SHOP_SECRET)
+        try:
+            await session.snapshot()
+            result = await session.act(
+                [{"kind": "type", "ref": "f1e1", "secret": "shop_pw"}]
+            )
+        finally:
+            await session.close()
+        assert (
+            "refused: secret shop_pw may be typed only into http://shop.test; "
+            "the origin of the frame holding f1e1 could not be read"
+        ) in result.text
+        assert not [c for c in driver.browser.page.calls if c[0] == "fill"]
 
     async def test_typed_text_stays_out_of_reasons_and_meta(self, made):
         session, driver = made
@@ -1862,7 +1951,7 @@ class TestPageText:
                 }
             ]
 
-        session, driver = make(tmp_path, setup, secrets={"shop_pw": "env:SHOP_PW"})
+        session, driver = make(tmp_path, setup, secrets=SHOP_SECRET)
         try:
             nav = await session.navigate("http://shop.test/")
             page = driver.browser.page

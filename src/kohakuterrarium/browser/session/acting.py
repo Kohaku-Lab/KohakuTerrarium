@@ -23,6 +23,7 @@ from kohakuterrarium.browser.actions import (
 )
 from kohakuterrarium.browser.dialogs import DialogManager
 from kohakuterrarium.browser.errors import (
+    ActionFailedError,
     BrowserTimeoutError,
     DialogOpenedError,
     DriverDisconnectedError,
@@ -79,8 +80,20 @@ class ActContext:
     def require_no_dialog(self) -> None:
         self._session._dialogs.require_none()
 
-    def secret(self, name: str) -> str:
-        return self._session._secrets.resolve(name)
+    async def secret(self, name: str, ref: str) -> str:
+        secrets = self._session._secrets
+        origin = await self._session._ref_origin(self._tab, ref)
+        if not secrets.allows(name, origin):
+            where = (
+                f"{ref} is on {origin}"
+                if origin is not None
+                else f"the origin of the frame holding {ref} could not be read"
+            )
+            raise ActionFailedError(
+                f"refused: secret {name} may be typed only into "
+                f"{', '.join(secrets.origins(name))}; {where}"
+            )
+        return secrets.resolve(name)
 
     async def check_ref(self, ref: str) -> None:
         if self._fresh is None:

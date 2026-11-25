@@ -52,7 +52,12 @@ plugins:
       allow_hosts: ["127.0.0.1:{port}", "localhost:{port}", "169.254.169.254"]
       action_timeout_s: 8
       nav_timeout_s: 15
+      secrets:
+        pw:
+          env: KT_T_SITE_PW
+          origins: ["http://127.0.0.1:{port}"]
 """
+SITE_SECRET = "site-secret-7731"
 
 
 class StepLLM(ScriptedLLM):
@@ -175,11 +180,13 @@ class TestBrowserIntegration:
         """navigate with page text → snapshot → batch + delta → dialog → new tab
         with its text → tab cap → upload → download → screenshot → eval → blocked
         egress → stale ref → interrupt → blocked redirect stops its batch → a frame
-        from another origin → a frame ref from the frame's earlier page → runtime
+        from another origin → a secret refused in that frame and typed in its own
+        → a frame ref from the frame's earlier page → runtime
         disable / enable → stop, with no Chromium left behind."""
         pytest.importorskip("playwright.async_api")
         for name, value in browsers_env().items():
             monkeypatch.setenv(name, value)
+        monkeypatch.setenv("KT_T_SITE_PW", SITE_SECRET)
         site, listener = sites
         arrived, release = threading.Event(), threading.Event()
         site.routes["/api/slow"] = serve_slowly(arrived, release)
@@ -446,6 +453,31 @@ class TestBrowserIntegration:
             assert "origin=" not in frames[0] and frames[1].endswith(foreign), frames
             assert framed.count("origin=") == 1
             assert body.count('- button "Frame button"') == 2
+
+            # A secret is typed only into its own origin, frame by frame.
+            own, foreign_input = re.findall(
+                r'textbox "Frame input"[^\n]*?\[ref=(\w+)\]', framed
+            )
+            assert own.startswith("f") and foreign_input.startswith("f")
+            refused_secret = await creature.call(
+                "browser_act",
+                actions=[{"kind": "type", "ref": foreign_input, "secret": "pw"}],
+            )
+            assert (
+                f"type {foreign_input}: failed — refused: secret pw may be typed only "
+                f"into http://127.0.0.1:{site.port}; {foreign_input} is on "
+                f"http://localhost:{site.port}"
+            ) in refused_secret
+            typed_secret = await creature.call(
+                "browser_act", actions=[{"kind": "type", "ref": own, "secret": "pw"}]
+            )
+            assert f"1. type {own}: done — typed secret pw" in typed_secret
+            assert SITE_SECRET not in refused_secret + typed_secret
+            shown = await creature.call("browser_snapshot")
+            assert f'[ref={own}]: "[secret:pw]"' in shown or (
+                f"[ref={own}]: [secret:pw]" in shown
+            ), shown
+            assert SITE_SECRET not in shown
             in_frame = ref_of(framed, "button", "Frame button")
             await creature.call(
                 "browser_eval",

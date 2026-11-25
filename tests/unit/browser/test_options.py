@@ -40,7 +40,9 @@ def test_full_mapping_is_normalised():
             "block_hosts": ("ads.example.com",),
             "allow_loopback": True,
             "allow_private": True,
-            "secrets": {"bank_pw": "env:BANK_PW"},
+            "secrets": {
+                "bank_pw": {"env": "BANK_PW", "origins": ["https://Bank.example/"]}
+            },
             "nav_timeout_s": 10,
             "action_timeout_s": 2.5,
             "snapshot_max_chars": 5000,
@@ -55,7 +57,10 @@ def test_full_mapping_is_normalised():
     assert opts.allow_hosts == ("example.com", "*.xn--bcher-kva.example:443")
     assert opts.block_hosts == ("ads.example.com",)
     assert opts.allow_loopback is True and opts.allow_private is True
-    assert dict(opts.secrets) == {"bank_pw": "env:BANK_PW"}
+    assert dict(opts.secrets["bank_pw"]) == {
+        "env": "BANK_PW",
+        "origins": ("https://bank.example",),
+    }
     assert opts.nav_timeout_s == 10.0 and isinstance(opts.nav_timeout_s, float)
     assert opts.action_timeout_s == 2.5
     assert opts.snapshot_max_chars == 5000
@@ -75,12 +80,17 @@ def test_viewport_list_form():
 
 
 def test_options_are_frozen_and_secrets_read_only():
-    source = {"a": "env:A"}
+    inner = {"env": "A", "origins": ["https://a.example"]}
+    source = {"a": inner}
     opts = BrowserOptions.from_mapping({"secrets": source})
-    source["b"] = "env:B"
-    assert dict(opts.secrets) == {"a": "env:A"}
+    source["b"] = {"env": "B", "origins": ["https://b.example"]}
+    inner["origins"].append("https://evil.example")
+    assert list(opts.secrets) == ["a"]
+    assert opts.secrets["a"]["origins"] == ("https://a.example",)
     with pytest.raises(TypeError):
-        opts.secrets["c"] = "env:C"
+        opts.secrets["c"] = inner
+    with pytest.raises(TypeError):
+        opts.secrets["a"]["env"] = "C"
     with pytest.raises(dataclasses.FrozenInstanceError):
         opts.headless = False
 
@@ -109,11 +119,18 @@ BAD = [
     ({"allow_hosts": [3]}, "allow_hosts"),
     ({"block_hosts": ["*"]}, "block_hosts"),
     ({"secrets": ["env:A"]}, "secrets"),
-    ({"secrets": {"a": "B"}}, "secrets"),
-    ({"secrets": {"a": "file:/x"}}, "secrets"),
+    ({"secrets": {"a": "env:A"}}, "secrets"),
     ({"secrets": {"a": 3}}, "secrets"),
-    ({"secrets": {"": "env:A"}}, "secrets"),
-    ({"secrets": {"bad name": "env:A"}}, "secrets"),
+    ({"secrets": {"a": {"env": "A"}}}, "secrets"),
+    ({"secrets": {"a": {"env": "A", "origins": []}}}, "secrets"),
+    ({"secrets": {"a": {"env": "A", "origins": ["https://a.example/x"]}}}, "secrets"),
+    ({"secrets": {"a": {"env": "A", "origins": ["https://*.a.example"]}}}, "secrets"),
+    ({"secrets": {"a": {"env": "A B", "origins": ["https://a.example"]}}}, "secrets"),
+    ({"secrets": {"": {"env": "A", "origins": ["https://a.example"]}}}, "secrets"),
+    (
+        {"secrets": {"bad name": {"env": "A", "origins": ["https://a.example"]}}},
+        "secrets",
+    ),
     ({"nav_timeout_s": 0}, "nav_timeout_s"),
     ({"nav_timeout_s": -1}, "nav_timeout_s"),
     ({"nav_timeout_s": float("nan")}, "nav_timeout_s"),

@@ -104,17 +104,26 @@ def _mark_frames(nodes: list[snap.Node], origins: dict[str, str]) -> list[snap.N
     return out
 
 
-def _frame_docs(nodes: list[snap.Node], docs: dict[str, Any]) -> dict[str, Any]:
-    """``{ref prefix of an iframe's content: its frame's document id}``."""
-    found: dict[str, Any] = {}
+def frame_owners(nodes: list[snap.Node]) -> dict[str, str]:
+    """``{ref prefix of an iframe's content: the ref of that iframe}``."""
+    found: dict[str, str] = {}
     for node, _, _ in snap.walk(nodes):
-        if node.role != "iframe" or docs.get(node.uid or "") is None:
+        if node.role != "iframe" or not node.uid:
             continue
         inner = (frame_prefix(n.uid or "") for n, _, _ in snap.walk(node.children))
         prefix = next((p for p in inner if p), "")
         if prefix:
-            found[prefix] = docs[node.uid]
+            found[prefix] = node.uid
     return found
+
+
+def _frame_docs(nodes: list[snap.Node], docs: dict[str, Any]) -> dict[str, Any]:
+    """``{ref prefix of an iframe's content: its frame's document id}``."""
+    return {
+        prefix: docs[ref]
+        for prefix, ref in frame_owners(nodes).items()
+        if docs.get(ref) is not None
+    }
 
 
 def _process(

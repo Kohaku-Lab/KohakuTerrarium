@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from kohakuterrarium.browser.policy import ExternalCheck, HostPattern, NetworkPolicy
-from kohakuterrarium.browser.secrets import SecretStore
+from kohakuterrarium.browser.secrets import parse_secrets
 from kohakuterrarium.errors import ConfigError
 
 VIEWPORT_WIDTH = (320, 7680)
@@ -34,7 +34,7 @@ class BrowserOptions:
     block_hosts: tuple[str, ...] = ()
     allow_loopback: bool = False
     allow_private: bool = False
-    secrets: Mapping[str, str] = field(
+    secrets: Mapping[str, Mapping[str, Any]] = field(
         default_factory=lambda: MappingProxyType({}), hash=False
     )
     nav_timeout_s: float = 30.0
@@ -121,14 +121,11 @@ def _hosts(key: str, value: Any) -> tuple[str, ...]:
     return tuple(result)
 
 
-def _secrets(key: str, value: Any) -> Mapping[str, str]:
-    if not isinstance(value, Mapping):
-        raise _fail(key, "must map secret names to 'env:VAR_NAME' references")
+def _secrets(key: str, value: Any) -> Mapping[str, Mapping[str, Any]]:
     try:
-        SecretStore(value)
+        return parse_secrets(value)
     except ConfigError as exc:
         raise _fail(key, str(exc)) from None
-    return MappingProxyType(dict(value))
 
 
 def _is_int(value: Any) -> bool:

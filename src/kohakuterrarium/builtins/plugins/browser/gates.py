@@ -66,7 +66,8 @@ def host_resource_refusal(options: BrowserOptions, source: Any) -> str | None:
     """Why ``options`` are refused for the creature behind ``source``, or ``None``.
 
     Where host resources are off, only a headless browser with a throwaway
-    profile, the bundled Chromium and public addresses is allowed.
+    profile, the bundled Chromium and public addresses is allowed, and no
+    secret (a server environment variable) may be configured.
     """
     if host_resources_allowed(source):
         return None
@@ -79,6 +80,7 @@ def host_resource_refusal(options: BrowserOptions, source: Any) -> str | None:
             ("channel", options.channel is not None),
             ("allow_loopback", options.allow_loopback),
             ("allow_private", options.allow_private),
+            ("secrets", bool(options.secrets)),
         )
         if on
     ]
@@ -86,6 +88,6 @@ def host_resource_refusal(options: BrowserOptions, source: Any) -> str | None:
         return None
     return (
         "this creature may not use host resources here, so the browser runs only "
-        "headless with a throwaway profile, the bundled Chromium and public "
-        "addresses; refused options: " + ", ".join(used)
+        "headless with a throwaway profile, the bundled Chromium, public "
+        "addresses and no secrets; refused options: " + ", ".join(used)
     )

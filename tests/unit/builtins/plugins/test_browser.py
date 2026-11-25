@@ -242,8 +242,20 @@ class TestCatalogAndConstruction:
             BrowserPlugin(options={"headless": "yes"})
         with pytest.raises(ConfigError, match="unknown browser option"):
             BrowserPlugin(bogus=1)
-        with pytest.raises(ConfigError, match="env:VAR_NAME"):
+        with pytest.raises(ConfigError, match="origins"):
             BrowserPlugin(secrets={"pw": "literal-password"})
+        with pytest.raises(ConfigError, match="origins"):
+            BrowserPlugin(secrets={"pw": {"env": "PW", "origins": []}})
+
+    def test_secrets_round_trip_as_plain_values(self):
+        given = {"pw": {"env": "SHOP_PW", "origins": ["https://Shop.example/"]}}
+        plugin = BrowserPlugin(secrets=given)
+        shown = plugin.get_options()["secrets"]
+        assert shown == {"pw": {"env": "SHOP_PW", "origins": ["https://shop.example"]}}
+        assert json.loads(json.dumps(shown)) == shown
+        again = plugin.set_options({"secrets": json.loads(json.dumps(shown))})
+        assert again["secrets"] == shown
+        assert plugin.option_schema()["secrets"]["type"] == "dict"
 
 
 class TestOptionsAtRuntime:
@@ -415,6 +427,23 @@ class TestHostResources:
             assert name in result.error, result.error
         assert "allow_private" in result.error and "executable_path" not in result.error
         assert driver.plans == [], "refused, not silently downgraded"
+        await plugin.on_unload()
+
+    async def test_restricted_engine_refuses_secrets_without_launching(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_T_SERVER_TOKEN", "server-side-token")
+        secrets = {"pw": {"env": "KT_T_SERVER_TOKEN", "origins": ["http://shop.test"]}}
+        plugin, driver = await loaded(tmp_path, secrets=secrets)
+        context = tool_context(plugin, tmp_path, environment=restricted())
+        for name in ("browser_snapshot", "browser_act"):
+            args = {"actions": [{"kind": "type", "ref": "e3", "secret": "pw"}]}
+            result = await call(
+                plugin, name, args if name == "browser_act" else {}, context
+            )
+            assert not result.success and "refused options: secrets" in result.error
+            assert "server-side-token" not in result.error
+        assert driver.plans == []
         await plugin.on_unload()
 
     async def test_restricted_engine_allows_a_headless_throwaway_profile(

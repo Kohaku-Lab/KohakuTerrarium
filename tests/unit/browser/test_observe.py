@@ -13,6 +13,7 @@ from kohakuterrarium.browser.observe import (
     blocked_reason,
     cap_text,
     format_blocked_records,
+    frame_owners,
     observe,
     origin_of,
     read_fresh,
@@ -254,3 +255,16 @@ async def test_frame_reads_are_capped_and_skipped_without_frames():
     plain.snapshot = Page().snapshot
     await observe(plain, run, 1.0)
     assert plain.asked == []
+
+
+def test_frame_owners_maps_each_content_prefix_to_its_iframe():
+    text = (
+        '- button "Top" [ref=e1]\n'
+        "- iframe [ref=e2]:\n"
+        '  - button "Outer" [ref=f1e1]\n'
+        "  - iframe [ref=f1e2]:\n"
+        '    - textbox "Inner" [ref=f2e1]\n'
+        "- iframe [ref=e3]\n"
+    )
+    assert frame_owners(snap.parse(text)) == {"f1": "e2", "f2": "f1e2"}
+    assert frame_owners(snap.parse('- button "x" [ref=e1]')) == {}

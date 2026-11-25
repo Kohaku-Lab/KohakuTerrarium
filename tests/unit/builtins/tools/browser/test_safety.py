@@ -55,7 +55,8 @@ class TestHostilePageThroughTools:
         self, tmp_path, secret_env
     ):
         plugin, driver = scripted_plugin(
-            hostile_setup, secrets={"pw": "env:KT_T_BROWSER_PW"}
+            hostile_setup,
+            secrets={"pw": {"env": "KT_T_BROWSER_PW", "origins": ["http://evil.test"]}},
         )
         await plugin.on_load(plugin_context(tmp_path))
         results = []

@@ -53,7 +53,8 @@ def assert_no_secret(blob: str) -> None:
 @pytest.fixture
 def secret_env(monkeypatch):
     monkeypatch.setenv("KT_T_BROWSER_PW", SECRET)
-    return {"secrets": {"pw": "env:KT_T_BROWSER_PW"}}
+    origins = ["http://shop.test", "https://evil.test", "http://evil.test"]
+    return {"secrets": {"pw": {"env": "KT_T_BROWSER_PW", "origins": origins}}}
 
 
 @pytest.fixture
@@ -434,7 +435,9 @@ class TestBlockedAttribution:
         session, _ = make(
             tmp_path,
             block_hosts=["*.evil.test"],
-            secrets={"tok": "env:KT_T_BROWSER_TOKEN"},
+            secrets={
+                "tok": {"env": "KT_T_BROWSER_TOKEN", "origins": ["http://shop.test"]}
+            },
         )
         await session.snapshot()
         host = "x" * 50 + "." + token + "." + "y" * 50 + ".evil.test"

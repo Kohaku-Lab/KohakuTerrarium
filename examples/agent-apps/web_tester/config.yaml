@@ -35,3 +35,10 @@ plugins:
       allow_loopback: true
       allow_hosts: ["localhost", "127.0.0.1"]
       action_timeout_s: 10
+      # To log in to your app, name a secret: the model types it by name, its
+      # value comes from the environment variable, and it is typed only into
+      # pages (and frames) of the listed origins.
+      # secrets:
+      #   app_password:
+      #     env: WEB_TESTER_PASSWORD
+      #     origins: ["http://localhost:5173"]
