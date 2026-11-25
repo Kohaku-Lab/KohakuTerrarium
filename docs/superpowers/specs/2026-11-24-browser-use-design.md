@@ -1,7 +1,9 @@
 # Browser use: design
 
 Date: 2026-11-24. Status: implemented (`browser/`, the `browser` plugin and
-its six tools); this document describes what was built.
+its six tools); this document describes what was built. `browser/` is a
+component of its own that other parts of the framework can use; see "The
+runtime as a component".
 
 ## Intent
 
@@ -107,7 +109,9 @@ model is the dominant cost of a browsing task.
 therefore accepts a list, a JSON string, or the call body. For strict function
 calling, every optional argument has a neutral value meaning "not given"
 (`""`, `0`, `false`, `[]`; `goto` and `list` for the two enums), dropped
-before parsing. Conflicts resolve by stated precedence: a non-empty `ref`
+before parsing. Each tool class returns its own parameter schema from
+`get_parameters_schema()`; the framework's shared schema table holds no
+browser entry. Conflicts resolve by stated precedence: a non-empty `ref`
 wins over coordinates (`0, 0` means none), `secret` over `text`, `wait` takes
 `text`, then `text_gone`, then `seconds` above 0, and a screenshot `ref` over
 `full_page`. A real value on another action kind's field is refused. A test
@@ -372,6 +376,71 @@ and it is one option away: `allow_loopback: true`.
   close finishes, and the next browser call waits for that (bounded by its
   close timeout) before launching, so two browsers never share a profile.
 
+## The runtime as a component
+
+`browser/` is a library: the plugin and its tools are one consumer, and any
+other part of the framework (a `web_fetch` backend, a custom tool, a script)
+can use the same policed Chromium. Rationale: a second browser stack (the
+Crawl4AI renderer behind `web_fetch` runs its own unproxied Chromium) would
+duplicate the hard part, the network policy, without it.
+
+**Boundary.** Modules under `browser/` import nothing from the framework but
+`kohakuterrarium.errors` and `kohakuterrarium.utils`, counting imports inside
+functions and under `TYPE_CHECKING`; `scripts/dep_graph.py` checks it as an
+allowlist tier and `tests/unit/test_dep_graph_lint.py` runs that check. The
+package's `__init__` is a lazy PEP 562 facade: importing it loads no
+submodule, so a tool that only needs the service key or an error type pays
+nothing, and Playwright stays a lazy import of `driver.py`.
+
+**Layers.** `browser/README.md` sorts every module into the runtime layer
+(process, proxy and policy, driver protocol, settling, tabs, downloads,
+dialogs, lifecycle, the structured read, the access contract) and the
+agent-facing layer (snapshot, refs, hidden-text filtering, observation,
+result wording, the action batch, the `BrowserResult`-returning operations).
+The runtime layer does not import the agent-facing one, with two exceptions
+in `session/lifecycle` (it owns the `RefBook` and clears per-tab
+observations when a browser is lost); `tests/unit/browser/test_layers.py`
+enforces the map on the import graph. The session mixins were not split into
+two packages: the layer map states the directions, the guard keeps them.
+
+**Reaching the agent's browser.** `browser/access.py` owns the
+runtime-service key (`BROWSER_SERVICE = "browser"`), the `BrowserAccess`
+protocol (`session`, `prepare(context)`) that the plugin's service implements,
+and `agent_session(context)`, which a tool calls with its `ToolContext` to get
+the agent's session after the plugin's per-call gates, or `None` without the
+plugin. The tools and the plugin take the key from there; nothing outside the
+plugin imports the plugin.
+
+**The structured read.** `BrowserSession.read_page(url, max_chars=...)`
+returns a `PageRead` (final URL, HTTP status, title, serialized DOM, the
+body's `innerText`), the data a non-agent consumer needs instead of model
+text. It reuses the URL check, proxy and policy of `navigate` and raises the
+same typed errors. It runs in a temporary page that the session's events
+route to the read, never to the tab registry: no tab id, no refs, no
+observation, no dialog left pending (dismissed), no download kept
+(cancelled), no blocked-request report, and every window that opens while it
+runs is closed. It holds the operation lock and does not count toward the tab
+cap, so at most one exists. Secrets are redacted from every field and a
+secret split by the size cut is dropped; the hidden-text probe is not
+applied, because a reader of HTML wants the document, and the fields are
+documented as untrusted. A read that relaunches a lost browser leaves the
+"state was lost" notice for the agent's next call. `read_page(url, options)`
+at the package level does the same in a browser of its own; a session built
+without a downloads directory refuses every download, so it writes nothing.
+`async with BrowserSession(...)` closes the session on exit.
+
+**What stays with the tools.** The neutral "not given" values of a strict
+native call exist because of how such calls arrive, but nested action items
+reach the session's action parser unchanged, so `actions.py` keeps
+`is_neutral` and `ACTION_NEUTRALS`; the tools use the same function for their
+top-level arguments. Argument schemas and text-format coercion live with the
+tools.
+
+**`web_fetch`, next.** Using this from `web_fetch` is a separate change: a
+browser backend would call `read_page` with the sandbox's `network_policy`
+as `external_check`, which gives it the private-address and redirect
+filtering it lacks today.
+
 ## Secrets
 
 Options hold references only, each with the origins the secret may be typed
@@ -411,12 +480,15 @@ in the catalog and is off by default.
 ## Layout
 
 ```
-src/kohakuterrarium/browser/           runtime; imports nothing from studio / api / cli
-  options  policy  proxy  secrets      no Playwright
-  snapshot  refs  hidden  results      no Playwright
-  observe  images  errors  tasks       no Playwright
-  actions  settle  dialogs  tabs       driver-protocol only
-  downloads  launch  protocol
+src/kohakuterrarium/browser/           imports only browser, errors, utils (README.md)
+  __init__                             lazy public facade
+  access  read                         the access contract; the one-shot read
+  options  policy  proxy  egress       no Playwright
+  secrets  errors  tasks
+  snapshot  refs  hidden  results      agent-facing, no Playwright
+  observe  images  actions
+  settle  dialogs  tabs  downloads     driver-protocol only
+  launch  protocol
   processes                            process-tree kill, no Playwright
   session/                             BrowserSession pseudo-class package (README.md)
   driver                               the only module that imports Playwright
@@ -444,8 +516,14 @@ The existing `browser` extra keeps meaning Crawl4AI for `web_fetch`.
   a scripted LLM against a loopback fixture site navigates, snapshots, acts,
   answers a dialog, works in a new tab, uploads, downloads, screenshots,
   evaluates, hits the network policy, is interrupted mid-action, is disabled
-  and re-enabled, stops, and no browser process survives. They skip cleanly
-  without Playwright or Chromium and share the `browser` xdist group.
+  and re-enabled, stops, and no browser process survives; a second
+  workflow uses the runtime with no plugin and no agent (a read under an
+  external check, a refused redirect and loopback URL, a download-only URL,
+  the one-shot read). They skip cleanly without Playwright or Chromium and
+  share the `browser` xdist group.
+- **Boundary guards.** The dependency allowlist of `browser/`, the layer map,
+  and a subprocess check that importing the facade loads no submodule and no
+  Playwright.
 - **Benchmark, real model, not in CI.** `scripts/browser_bench/`: 29 local
   micro-tasks, each with a programmatic check on server-side state,
   including infeasible tasks, injection canaries and egress probes, a

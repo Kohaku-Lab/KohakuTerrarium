@@ -273,6 +273,36 @@ origin 由协议、主机和可选的端口组成，例如 `https://staging.exam
 
 在启用了用户账户的服务器上，只有管理员的引擎可以使用主机资源。对其他所有用户（以及匿名槽位），浏览器只能以 headless 方式、用一次性 profile、自带的 Chromium 访问公网地址，且不能使用密钥。如果 Creature 的 options 要求更多（`headless: false`、`profile_dir`、`executable_path`、`channel`、`allow_loopback`、`allow_private` 或 `secrets`），每次浏览器调用都会在启动任何浏览器之前报错，并列出被拒绝的 options。这样的 Creature 绝不会退而使用已安装的 Chrome 或 Edge：没有自带的 Chromium 时，报错会提示运行 `playwright install chromium`；限制生效前已启动的浏览器会在下一次调用时被关闭。单用户主机、`kt run` 和 CLI 不受此限制。
 
+## 在你自己的工具或代码里使用浏览器
+
+浏览器运行时 `kohakuterrarium.browser` 是一个独立的组件；插件和它的六个工具只是它的一个使用者。自定义工具、脚本或测试都可以直接使用同一个受管控的 Chromium，走同一个代理和网络策略，而不必经过这些工具。`import kohakuterrarium.browser` 很轻，绝不会导入 Playwright；只有在某个调用真正需要浏览器时才会启动。
+
+有三种用法：
+
+- **Agent 共享的浏览器。** 在工具里，用该工具的 `ToolContext` 调用 `await browser.agent_session(context)`。它返回 `browser_*` 工具所用的那个会话，先经过插件自己的检查（sandbox、多用户限制）；插件未加载时返回 `None`；检查拒绝时抛出异常。你的调用和工具的调用一起排队。
+- **自己的会话。** `async with browser.BrowserSession(options) as session:` 得到一个别人碰不到的浏览器，代码块结束时关闭。不提供 `downloads_dir` 时，每个下载都会被取消，磁盘上不会写入任何东西。
+- **一次性读取。** `await browser.read_page(url, options)` 启动浏览器、读取页面，并在返回前关闭浏览器。
+
+`read_page`（会话上的或一次性的）是把页面当作数据读取的调用。它返回一个 `PageRead`：最终的 `url`（跟随重定向之后）、HTTP `status`、`title`、`html`（页面脚本运行后的 DOM）和 `text`（body 渲染后的文字，也就是人看到的排版），每项都在 `max_chars`（默认 1 000 000）处截断。配置的密钥会从每一项中脱敏。不做隐藏文字过滤，所以请把这些字段当作不可信的页面内容。
+
+读取走的是和 `browser_navigate` 相同的 URL 检查、代理和网络策略，出错时抛出异常而不是返回错误文本：URL 被拒绝或重定向被拦截时抛 `NavigationBlockedError`，加载超过 `nav_timeout_s` 时抛 `BrowserTimeoutError`，加载失败或 URL 只触发下载时抛 `NavigationError`。它在一个 Creature 永远看不到的临时标签页里运行：不在标签页列表里，不改变当前标签页及其 ref，无论走哪条路径结束都会被关闭。它打开的对话框会被关闭（dismiss），它开始的下载会被取消，它打开的窗口会被关闭。
+
+```python
+from kohakuterrarium import browser
+
+async def summarize_page(url: str, context) -> str:
+    # sandbox 开启时跟随它：它的 network_policy 服务会检查页面连接的每个主机。
+    policy = (context.runtime_services or {}).get("network_policy")
+    page = await browser.read_page(
+        url,
+        browser.BrowserOptions(allow_hosts=("docs.example.com",)),
+        external_check=policy.check if policy is not None else None,
+    )
+    return page.text
+```
+
+`external_check(host, port)` 返回 `None` 表示允许连接，返回一个原因则拒绝；代理打开的每个连接都会询问它。sandbox 的 `network_policy` 运行时服务正好是这个形状，所以工具不必导入 sandbox 就能跟随它。所有名称和签名见 [Python 参考](../reference/python.md#browser)。
+
 ## 限制与已知缺口
 
 - 每次 `browser_act` 最多 20 个动作；`wait` 最多 10 秒，一批最多 60 秒（`action_timeout_s` 较长时更多）。

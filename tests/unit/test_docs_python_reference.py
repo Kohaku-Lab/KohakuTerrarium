@@ -224,6 +224,29 @@ DOCUMENTED_SYMBOLS: list[tuple[str, str]] = [
     ("kohakuterrarium.testing.output", "OutputRecorder"),
     ("kohakuterrarium.testing.events", "EventRecorder"),
     ("kohakuterrarium.testing.agent", "TestAgentBuilder"),
+    # -- browser --------------------------------------------------------
+    ("kohakuterrarium.browser", "BrowserSession"),
+    ("kohakuterrarium.browser", "BrowserSession.read_page"),
+    ("kohakuterrarium.browser", "BrowserSession.close"),
+    ("kohakuterrarium.browser", "BrowserOptions"),
+    ("kohakuterrarium.browser", "BrowserOptions.from_mapping"),
+    ("kohakuterrarium.browser", "BrowserResult"),
+    ("kohakuterrarium.browser", "PageRead"),
+    ("kohakuterrarium.browser", "read_page"),
+    ("kohakuterrarium.browser", "BROWSER_SERVICE"),
+    ("kohakuterrarium.browser", "BrowserAccess"),
+    ("kohakuterrarium.browser", "BrowserAccess.prepare"),
+    ("kohakuterrarium.browser", "browser_access"),
+    ("kohakuterrarium.browser", "agent_session"),
+    ("kohakuterrarium.browser", "BrowserError"),
+    ("kohakuterrarium.browser", "BrowserUnavailableError"),
+    ("kohakuterrarium.browser", "BrowserLaunchError"),
+    ("kohakuterrarium.browser", "BrowserClosedError"),
+    ("kohakuterrarium.browser", "BrowserTimeoutError"),
+    ("kohakuterrarium.browser", "BrowserStateLostError"),
+    ("kohakuterrarium.browser", "NavigationBlockedError"),
+    ("kohakuterrarium.browser", "NavigationError"),
+    ("kohakuterrarium.browser", "PageNavigatingError"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -232,6 +255,20 @@ DOCUMENTED_SYMBOLS: list[tuple[str, str]] = [
 # ---------------------------------------------------------------------------
 
 DOCUMENTED_SIGNATURES: list[tuple[str, str, list[str]]] = [
+    (
+        "kohakuterrarium.browser",
+        "BrowserSession",
+        ["options", "downloads_dir", "driver", "external_check"],
+    ),
+    ("kohakuterrarium.browser", "BrowserSession.read_page", ["url", "max_chars"]),
+    (
+        "kohakuterrarium.browser",
+        "read_page",
+        ["url", "options", "external_check", "max_chars", "driver"],
+    ),
+    ("kohakuterrarium.browser", "BrowserAccess.prepare", ["context"]),
+    ("kohakuterrarium.browser", "browser_access", ["context"]),
+    ("kohakuterrarium.browser", "agent_session", ["context"]),
     (
         "kohakuterrarium",
         "Agent.build",
@@ -362,6 +399,19 @@ DOCUMENTED_SIGNATURES: list[tuple[str, str, list[str]]] = [
 # ---------------------------------------------------------------------------
 
 DOCUMENTED_FIELDS: list[tuple[str, str, list[str]]] = [
+    (
+        "kohakuterrarium.browser",
+        "PageRead",
+        [
+            "url",
+            "status",
+            "title",
+            "html",
+            "text",
+            "html_truncated",
+            "text_truncated",
+        ],
+    ),
     (
         "kohakuterrarium",
         "TurnResult",
@@ -530,6 +580,33 @@ class TestDocsPythonReference:
         }
         missing = documented - set(packages.__all__)
         assert not missing, f"packages.__all__ lost documented names {missing}"
+
+    def test_browser_errors_match_doc(self):
+        browser = importlib.import_module("kohakuterrarium.browser")
+        errors = importlib.import_module("kohakuterrarium.errors")
+        for name in (
+            "BrowserUnavailableError",
+            "BrowserLaunchError",
+            "BrowserClosedError",
+            "BrowserTimeoutError",
+            "BrowserStateLostError",
+            "NavigationBlockedError",
+            "NavigationError",
+            "PageNavigatingError",
+        ):
+            cls = getattr(browser, name)
+            assert issubclass(cls, browser.BrowserError) and issubclass(
+                cls, errors.KTError
+            ), name
+        assert issubclass(browser.BrowserTimeoutError, TimeoutError)
+        assert issubclass(browser.NavigationBlockedError, PermissionError)
+        assert browser.BROWSER_SERVICE == "browser"
+        documented = {
+            attr.split(".")[0]
+            for module, attr in DOCUMENTED_SYMBOLS
+            if module == "kohakuterrarium.browser"
+        }
+        assert documented == set(browser.__all__)
 
     def test_compose_effects_is_deleted(self):
         # The reference deliberately documents that Effects is gone.

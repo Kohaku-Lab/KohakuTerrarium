@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: The public kohakuterrarium surface: errors, Agent, turn results, the Terrarium engine, Creature, sessions, packages, compose, validate, and testing.
+summary: The public kohakuterrarium surface: errors, Agent, turn results, the Terrarium engine, Creature, sessions, packages, browser, compose, validate, and testing.
 tags:
   - reference
   - python
@@ -571,6 +571,70 @@ packages.ensure("@kt-biome")                  # idempotent install
 path = packages.resolve_package_path("@kt-biome/creatures/swe")
 for pkg in packages.list_packages():
     print(pkg["name"], pkg["version"])
+```
+
+---
+
+## Browser
+
+Module: `kohakuterrarium.browser`, a lazy facade (PEP 562): importing
+it loads no submodule and never Playwright. The runtime behind the
+`browser` plugin, usable on its own; see
+[guides/browser](../guides/browser.md#using-the-browser-from-your-own-tool-or-code).
+
+Sessions and reads:
+
+- `BrowserSession(options, *, downloads_dir=None, driver=None, external_check=None, ...)`:
+  one lazily launched Chromium behind a filtering proxy. Operations run
+  one at a time; the browser closes after `options.idle_close_s` idle and
+  relaunches on the next call; `await session.close()` is final.
+  `async with BrowserSession(...) as session:` closes it on exit.
+  Without `downloads_dir`, downloads are cancelled.
+  `external_check(host, port) -> str | None` is asked for every
+  connection (a reason refuses it).
+- `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`:
+  load `url` in a temporary tab invisible to the session's other
+  operations and return it as data. Same URL check, proxy and network
+  policy as `navigate`.
+- `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`:
+  the same with a browser of its own, closed before it returns.
+- `PageRead`: frozen dataclass. `url` (final, after redirects),
+  `status` (`int | None`), `title`, `html` (serialized DOM after
+  scripts ran), `text` (`document.body.innerText`), `html_truncated`,
+  `text_truncated`. Secrets configured in `options.secrets` are
+  redacted from every field; the content is otherwise untrusted page
+  text.
+- `BrowserOptions`: frozen dataclass of the plugin's options;
+  `BrowserOptions.from_mapping(dict)` validates plain data.
+- `BrowserResult`: what the agent-facing operations (`navigate`,
+  `snapshot`, `act`, `screenshot`, `evaluate`, `tab_*`) return; `text`
+  is formatted for a model.
+
+The agent's shared session:
+
+- `BROWSER_SERVICE`: the `runtime_services` key the plugin publishes
+  under (`"browser"`).
+- `BrowserAccess`: protocol with `session` and
+  `await prepare(context) -> BrowserSession`, which applies the
+  publisher's per-call gates.
+- `browser_access(context) -> BrowserAccess | None`
+- `await agent_session(context) -> BrowserSession | None`: the agent's
+  session for a tool call, `None` when no browser plugin is loaded.
+
+Typed errors (all `BrowserError(KTError)`): `BrowserUnavailableError`
+(Playwright or Chromium missing), `BrowserLaunchError`,
+`BrowserClosedError`, `BrowserTimeoutError` (also a `TimeoutError`),
+`BrowserStateLostError`, `NavigationBlockedError` (also a
+`PermissionError`), `NavigationError`, `PageNavigatingError`.
+
+```python
+from kohakuterrarium import browser
+
+page = await browser.read_page(
+    "https://example.com/",
+    browser.BrowserOptions(allow_hosts=("example.com",)),
+)
+print(page.status, page.title, len(page.html))
 ```
 
 ---

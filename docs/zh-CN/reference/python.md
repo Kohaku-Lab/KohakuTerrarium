@@ -1,6 +1,6 @@
 ---
 title: Python API
-summary: kohakuterrarium 的公开 Python 接口：errors、Agent、轮次结果、Terrarium 引擎、Creature、会话、packages、compose、validate 与 testing。
+summary: kohakuterrarium 的公开 Python 接口：errors、Agent、轮次结果、Terrarium 引擎、Creature、会话、packages、browser、compose、validate 与 testing。
 tags:
   - reference
   - python
@@ -508,6 +508,65 @@ packages.ensure("@kt-biome")                  # idempotent install
 path = packages.resolve_package_path("@kt-biome/creatures/swe")
 for pkg in packages.list_packages():
     print(pkg["name"], pkg["version"])
+```
+
+---
+
+## Browser
+
+模块：`kohakuterrarium.browser`，一个惰性门面（PEP 562）：导入它不会加载
+任何子模块，也绝不会导入 Playwright。它是 `browser` 插件背后的运行时，可以
+单独使用；见
+[guides/browser](../guides/browser.md#在你自己的工具或代码里使用浏览器)。
+
+会话与读取：
+
+- `BrowserSession(options, *, downloads_dir=None, driver=None, external_check=None, ...)`：
+  一个惰性启动、位于过滤代理之后的 Chromium。操作逐个执行；空闲
+  `options.idle_close_s` 后关闭浏览器，下次调用时重新启动；
+  `await session.close()` 之后不可再用。
+  `async with BrowserSession(...) as session:` 在退出时关闭它。
+  没有 `downloads_dir` 时下载会被取消。
+  每个连接都会询问 `external_check(host, port) -> str | None`（返回原因即拒绝）。
+- `await session.read_page(url, *, max_chars=1_000_000) -> PageRead`：
+  在一个会话其他操作看不到的临时标签页中加载 `url`，并以数据形式返回。
+  URL 检查、代理与网络策略都与 `navigate` 相同。
+- `await read_page(url, options=None, *, external_check=None, max_chars=1_000_000, driver=None) -> PageRead`：
+  同上，但使用自己的浏览器，并在返回前关闭它。
+- `PageRead`：冻结的 dataclass。`url`（跟随重定向后的最终 URL）、
+  `status`（`int | None`）、`title`、`html`（脚本运行后序列化的 DOM）、
+  `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。
+  `options.secrets` 中配置的密钥会从每一项中脱敏；除此之外内容都是不可信的
+  页面文字。
+- `BrowserOptions`：插件 options 的冻结 dataclass；
+  `BrowserOptions.from_mapping(dict)` 校验普通数据。
+- `BrowserResult`：面向 agent 的操作（`navigate`、`snapshot`、`act`、
+  `screenshot`、`evaluate`、`tab_*`）的返回值；`text` 是为模型排好版的文本。
+
+Agent 共享的会话：
+
+- `BROWSER_SERVICE`：插件发布时使用的 `runtime_services` 键（`"browser"`）。
+- `BrowserAccess`：带有 `session` 与
+  `await prepare(context) -> BrowserSession` 的协议，`prepare` 会执行发布者
+  的逐次调用检查。
+- `browser_access(context) -> BrowserAccess | None`
+- `await agent_session(context) -> BrowserSession | None`：一次工具调用所用的
+  agent 会话；没有加载 browser 插件时为 `None`。
+
+类型化错误（都是 `BrowserError(KTError)`）：`BrowserUnavailableError`
+（缺少 Playwright 或 Chromium）、`BrowserLaunchError`、`BrowserClosedError`、
+`BrowserTimeoutError`（同时是 `TimeoutError`）、`BrowserStateLostError`、
+`NavigationBlockedError`（同时是 `PermissionError`）、`NavigationError`、
+`PageNavigatingError`。
+
+```python
+from kohakuterrarium import browser
+
+page = await browser.read_page(
+    "https://example.com/",
+    browser.BrowserOptions(allow_hosts=("example.com",)),
+)
+print(page.status, page.title, len(page.html))
 ```
 
 ---

@@ -500,6 +500,66 @@ the error says to run `playwright install chromium`, and a browser started
 before the restriction applied is closed at the next call. Single-user hosts,
 `kt run` and the CLI are not restricted.
 
+## Using the browser from your own tool or code
+
+The browser runtime, `kohakuterrarium.browser`, is a component of its own; the
+plugin and its six tools are one user of it. A custom tool, a script or a test
+can use the same policed Chromium, with the same proxy and network policy,
+without going through the tools. `import kohakuterrarium.browser` is cheap and
+never imports Playwright; nothing starts until a call needs a browser.
+
+There are three ways in:
+
+- **The agent's shared browser.** From a tool, call
+  `await browser.agent_session(context)` with the tool's `ToolContext`. It
+  returns the session the `browser_*` tools use, after the plugin's own
+  checks (sandbox, multi-user restrictions), or `None` when the plugin is not
+  loaded; a refusal raises. Your calls queue with the tools' calls.
+- **A session of your own.** `async with browser.BrowserSession(options) as
+  session:` gives a browser no one else touches, closed when the block ends.
+  Without a `downloads_dir` every download is cancelled, so nothing is written
+  to disk.
+- **A one-shot read.** `await browser.read_page(url, options)` starts a
+  browser, reads the page and closes the browser before it returns.
+
+`read_page`, on a session or one-shot, is the call for reading a page as
+data. It returns a `PageRead` with the final `url` (after redirects), the
+HTTP `status`, the `title`, `html` (the page's DOM after its scripts ran) and
+`text` (the rendered text of the body, the way a person sees it laid out),
+each cut at `max_chars` (1 000 000 by default). Configured secrets are
+redacted from every field. Hidden-text filtering is not applied, so treat the
+fields as untrusted page content.
+
+A read goes through the same URL check, proxy and network policy as
+`browser_navigate`, and raises instead of returning an error text:
+`NavigationBlockedError` for a refused URL or a blocked redirect,
+`BrowserTimeoutError` for a load past `nav_timeout_s`, `NavigationError` for a
+failed load or a URL that only downloads. It runs in a temporary tab that the
+creature never sees: it is not in the tab list, does not change the active
+tab or its refs, and is closed afterwards on every path. Dialogs it opens are
+dismissed, downloads it starts are cancelled, and windows it opens are closed.
+
+```python
+from kohakuterrarium import browser
+
+async def summarize_page(url: str, context) -> str:
+    # Follow the sandbox when it is on: its network_policy service checks
+    # every host the page connects to.
+    policy = (context.runtime_services or {}).get("network_policy")
+    page = await browser.read_page(
+        url,
+        browser.BrowserOptions(allow_hosts=("docs.example.com",)),
+        external_check=policy.check if policy is not None else None,
+    )
+    return page.text
+```
+
+`external_check(host, port)` returns `None` to allow a connection or a reason
+to refuse it, and is asked for every connection the proxy opens. The sandbox's
+`network_policy` runtime service has that shape, so a tool follows the
+sandbox without importing it. See [the Python reference](../reference/python.md#browser)
+for every name and signature.
+
 ## Limits and known gaps
 
 - At most 20 actions per `browser_act`; a `wait` lasts at most 10 seconds,

@@ -423,6 +423,56 @@ Chromium，只能連公開位址，也不能使用密鑰。若生物的 options 
 限制生效前已啟動的瀏覽器會在下一次呼叫時被關閉。單人使用的
 主機、`kt run` 與 CLI 不受此限制。
 
+## 在你自己的工具或程式碼裡使用瀏覽器
+
+瀏覽器執行環境 `kohakuterrarium.browser` 是一個獨立的元件；插件與它的六個工具只是
+它的一個使用者。自訂工具、腳本或測試都能直接使用同一個受管控的 Chromium，走同一個
+代理與網路政策，不必經過那些工具。`import kohakuterrarium.browser` 很輕，絕不會
+import Playwright；要等某個呼叫真的需要瀏覽器時才會啟動。
+
+有三種用法：
+
+- **Agent 共用的瀏覽器。** 在工具裡，用該工具的 `ToolContext` 呼叫
+  `await browser.agent_session(context)`。它回傳 `browser_*` 工具所用的那個工作
+  階段，先經過插件自己的檢查（sandbox、多使用者限制）；插件沒載入時回傳 `None`；
+  檢查拒絕時拋出例外。你的呼叫和工具的呼叫一起排隊。
+- **自己的工作階段。** `async with browser.BrowserSession(options) as session:`
+  得到一個別人碰不到的瀏覽器，區塊結束時關閉。沒給 `downloads_dir` 時，每個下載
+  都會被取消，磁碟上不會寫入任何東西。
+- **一次性讀取。** `await browser.read_page(url, options)` 啟動瀏覽器、讀取頁面，
+  並在回傳前關閉瀏覽器。
+
+`read_page`（工作階段上的或一次性的）是把頁面當成資料讀取的呼叫。它回傳一個
+`PageRead`：最終的 `url`（跟隨重新導向之後）、HTTP `status`、`title`、`html`
+（頁面腳本執行後的 DOM）與 `text`（body 算繪後的文字，也就是人看到的排版），每一
+項都在 `max_chars`（預設 1 000 000）處截斷。設定的密鑰會從每一項中遮蔽。不做隱藏
+文字過濾，所以請把這些欄位當成不受信任的頁面內容。
+
+讀取走的是與 `browser_navigate` 相同的 URL 檢查、代理與網路政策，出錯時拋出例外而
+不是回傳錯誤文字：URL 被拒或重新導向被擋時拋 `NavigationBlockedError`，載入超過
+`nav_timeout_s` 時拋 `BrowserTimeoutError`，載入失敗或 URL 只觸發下載時拋
+`NavigationError`。它在一個生物永遠看不到的暫時分頁裡執行：不在分頁清單裡，不改變
+目前的分頁與它的 ref，不論從哪條路徑結束都會被關閉。它開啟的對話框會被關掉
+（dismiss），它開始的下載會被取消，它開啟的視窗會被關閉。
+
+```python
+from kohakuterrarium import browser
+
+async def summarize_page(url: str, context) -> str:
+    # sandbox 開啟時跟隨它：它的 network_policy 服務會檢查頁面連線的每個主機。
+    policy = (context.runtime_services or {}).get("network_policy")
+    page = await browser.read_page(
+        url,
+        browser.BrowserOptions(allow_hosts=("docs.example.com",)),
+        external_check=policy.check if policy is not None else None,
+    )
+    return page.text
+```
+
+`external_check(host, port)` 回傳 `None` 表示允許連線，回傳一個原因則拒絕；代理開啟
+的每個連線都會問它。sandbox 的 `network_policy` 執行環境服務正好是這個形狀，所以工具
+不必 import sandbox 就能跟隨它。所有名稱與簽章見 [Python 參考](../reference/python.md#browser)。
+
 ## 限制與已知缺口
 
 - 每個 `browser_act` 最多 20 個動作；`wait` 最多 10 秒，一批最多 60 秒
