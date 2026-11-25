@@ -5,12 +5,16 @@ import os
 import re
 import secrets
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 
 from kohakuterrarium.browser.protocol import DownloadDriver
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+WriteCheck = Callable[[Path], str | None]
+Directory = Path | Callable[[], Path]
 
 SAVE_TIMEOUT_S = 300.0
 CANCEL_TIMEOUT_S = 5.0
@@ -48,17 +52,41 @@ def _create(path: Path) -> bool:
         return False
 
 
-def reserve_path(directory: Path, name: str) -> Path:
+class WriteRefused(Exception):
+    """The write check refused a path; ``reason`` is its answer."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _require_writable(check: WriteCheck | None, path: Path) -> None:
+    """Raise ``WriteRefused`` unless ``check`` allows writing ``path``; a failing check refuses."""
+    if check is None:
+        return
+    try:
+        reason = check(path)
+    except Exception as exc:
+        reason = f"the check failed ({type(exc).__name__})"
+    if reason:
+        raise WriteRefused(str(reason))
+
+
+def reserve_path(directory: Path, name: str, check: WriteCheck | None = None) -> Path:
     """Create an empty file named ``name`` in ``directory`` and return it.
 
     Taken names become ``name (2)`` … ``name (NUMBERED_TRIES)``, then
-    ``name-<random hex>``; a handful of probes at most.
+    ``name-<random hex>``; a handful of probes at most. ``check`` judges the
+    directory before it is created and each name before it is; a refusal
+    raises ``WriteRefused``.
     """
+    _require_writable(check, directory)
     directory.mkdir(parents=True, exist_ok=True)
     stem, ext = os.path.splitext(name)
     numbered = [name] + [f"{stem} ({n}){ext}" for n in range(2, NUMBERED_TRIES + 1)]
     randomized = [f"{stem}-{secrets.token_hex(4)}{ext}" for _ in range(RANDOM_TRIES)]
     for candidate in numbered + randomized:
+        _require_writable(check, directory / candidate)
         if _create(directory / candidate):
             return directory / candidate
     raise FileExistsError(f"no free file name for {name!r} in {directory}")
@@ -70,18 +98,23 @@ class Downloads:
     Over the session's lifetime at most ``max_count`` downloads are started
     and at most ``max_bytes`` are kept; a download past the count is
     cancelled, one that takes the kept total over ``max_bytes`` is saved in
-    full and then deleted, and both are reported as failed.
+    full and then deleted, and both are reported as failed. ``directory``
+    (a path, or a callable read as each download starts) receives the
+    files; ``write_check`` judges every path before it is created, and a
+    download it refuses is cancelled and reported as refused.
     """
 
     def __init__(
         self,
-        directory: Path,
+        directory: Directory,
         save_timeout: float = SAVE_TIMEOUT_S,
         *,
         max_count: int = MAX_DOWNLOADS,
         max_bytes: int = MAX_DOWNLOAD_BYTES,
+        write_check: WriteCheck | None = None,
     ) -> None:
-        self.directory = directory
+        self._directory = directory
+        self._write_check = write_check
         self.save_timeout = save_timeout
         self.max_count = max_count
         self.max_bytes = max_bytes
@@ -93,6 +126,12 @@ class Downloads:
         self._finished: list[tuple[str, str]] = []
         self._failed: list[tuple[str, str]] = []
 
+    @property
+    def directory(self) -> Path:
+        """The directory a download starting now is saved in."""
+        directory = self._directory
+        return Path(directory() if callable(directory) else directory)
+
     def start(self, download: DownloadDriver) -> None:
         """Begin saving ``download``; called from the driver's event callback."""
         name = download.suggested_filename or FALLBACK_NAME
@@ -101,22 +140,32 @@ class Downloads:
             self._failed.append(
                 (name, f"refused: the limit of {self.max_count} downloads per session")
             )
-            task = asyncio.create_task(_cancel(download))
-            self._cancels.add(task)
-            task.add_done_callback(self._cancels.discard)
+            self._cancel_soon(download)
             return
         self._accepted += 1
-        self._track(asyncio.create_task(self._save(download, name)), name)
+        task = asyncio.create_task(self._save(download, name, self.directory))
+        self._track(task, name)
+
+    def _cancel_soon(self, download: DownloadDriver) -> None:
+        task = asyncio.create_task(_cancel(download))
+        self._cancels.add(task)
+        task.add_done_callback(self._cancels.discard)
 
     def _track(self, task: asyncio.Task, name: str) -> None:
         self._tasks[task] = name
         task.add_done_callback(lambda t: self._tasks.pop(t, None))
 
-    async def _save(self, download: DownloadDriver, name: str) -> None:
+    async def _save(self, download: DownloadDriver, name: str, directory: Path) -> None:
         path: Path | None = None
         try:
-            path = reserve_path(self.directory, safe_filename(name))
+            path = reserve_path(directory, safe_filename(name), self._write_check)
             await asyncio.wait_for(download.save_as(str(path)), self.save_timeout)
+        except WriteRefused as exc:
+            await _cancel(download)
+            self._failed.append(
+                (name, f"refused by the file-write policy: {exc.reason}")
+            )
+            return
         except asyncio.TimeoutError:
             await _cancel(download)
             _discard(path)

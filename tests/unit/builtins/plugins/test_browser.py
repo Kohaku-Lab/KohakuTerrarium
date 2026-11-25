@@ -34,6 +34,7 @@ from kohakuterrarium.modules.plugin.option_validation import PluginOptionError
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.terrarium.channels.channels import TERRARIUM_ENGINE_KEY
 from kohakuterrarium.testing.llm import ScriptedLLM
+from tests.helpers.browser_driver import ScriptedDownload
 from tests.helpers.browser_plugin import (
     call,
     plugin_context,
@@ -545,6 +546,97 @@ class TestSandboxWiring:
         )
         assert driver.plans == []
         await manager.unload_all()
+
+
+class TestDownloads:
+    async def run_download(self, work, sandbox_options=None, workspace=None):
+        """A click that starts one download, through the manager; the act result."""
+        plugin, driver = scripted_plugin()
+        manager = PluginManager()
+        if sandbox_options is not None:
+            manager.register(SandboxPlugin(options=sandbox_options))
+        manager.register(plugin)
+        load = plugin_context(work, manager)
+        if workspace is not None:
+            load.host_agent.workspace = workspace
+        await manager.load_all(load)
+        tools = {tool.tool_name: tool for tool in plugin.contribute_tools()}
+        context = manager_context(manager, work)
+        await wrapped(manager, tools["browser_snapshot"], context)({}, context)
+        page = driver.browser.page
+        item = ScriptedDownload("report.csv", b"1")
+        page.handlers["click"] = lambda **_: driver.browser.sink.download_started(
+            page, item
+        )
+        result = await wrapped(manager, tools["browser_act"], context)(
+            {"actions": [{"kind": "click", "ref": "e2"}]}, context
+        )
+        await manager.unload_all()
+        assert driver.alive() == []
+        return result, item
+
+    async def test_write_deny_refuses_the_download_and_creates_nothing(self, tmp_path):
+        result, item = await self.run_download(tmp_path, {"fs_write": "deny"})
+        assert not (tmp_path / DOWNLOADS_DIR).exists()
+        assert item.cancelled and item.saved_to is None
+        body = result.output.split("</page_content>")[0]
+        assert (
+            "Download failed: report.csv (refused by the file-write policy: "
+            "fs_write=deny)"
+        ) in body
+
+    async def test_workspace_write_allows_the_download(self, tmp_path):
+        result, item = await self.run_download(tmp_path, {"fs_write": "workspace"})
+        saved = tmp_path / DOWNLOADS_DIR / "report.csv"
+        assert saved.read_bytes() == b"1" and not item.cancelled
+        assert f"Downloaded: report.csv → {saved}" in result.output
+
+    async def test_a_denied_path_refuses_the_download(self, tmp_path):
+        denied = str(tmp_path / DOWNLOADS_DIR)
+        result, item = await self.run_download(tmp_path, {"fs_deny": [denied]})
+        assert not (tmp_path / DOWNLOADS_DIR).exists() and item.cancelled
+        assert "refused by the file-write policy: path is denied" in result.output
+
+    async def test_no_sandbox_saves_the_download(self, tmp_path):
+        result, _ = await self.run_download(tmp_path)
+        assert (tmp_path / DOWNLOADS_DIR / "report.csv").read_bytes() == b"1"
+
+    async def test_downloads_follow_the_agents_working_directory(self, tmp_path):
+        first, second = tmp_path / "first", tmp_path / "second"
+        first.mkdir()
+        second.mkdir()
+        current = [first]
+        plugin, driver = scripted_plugin()
+        load = plugin_context(first)
+        load.host_agent.workspace = SimpleNamespace(get=lambda: str(current[0]))
+        await plugin.on_load(load)
+        context = tool_context(plugin, first)
+        assert (await call(plugin, "browser_snapshot", {}, context)).success
+
+        async def download(name: str) -> None:
+            page = driver.browser.page
+            page.handlers["click"] = lambda **_: driver.browser.sink.download_started(
+                page, ScriptedDownload(name, b"x")
+            )
+            await call(
+                plugin,
+                "browser_act",
+                {"actions": [{"kind": "click", "ref": "e2"}]},
+                tool_context(plugin, current[0]),
+            )
+
+        await download("a.csv")
+        current[0] = second
+        await download("b.csv")
+        await plugin.session.close_browser()
+        await call(plugin, "browser_snapshot", {}, tool_context(plugin, second))
+        await download("c.csv")
+        assert (first / DOWNLOADS_DIR / "a.csv").exists()
+        assert sorted(p.name for p in (second / DOWNLOADS_DIR).iterdir()) == [
+            "b.csv",
+            "c.csv",
+        ]
+        await plugin.on_unload()
 
 
 def _cfg(tmp_path, tool_format: str = "native") -> AgentConfig:

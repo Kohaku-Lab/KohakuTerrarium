@@ -194,6 +194,86 @@ class VanishingDownload(ScriptedDownload):
         os.remove(path)
 
 
+class TestWriteCheck:
+    async def test_a_refused_download_writes_nothing_and_is_cancelled(self, tmp_path):
+        target = tmp_path / "downloads"
+        asked = []
+
+        def refuse(path):
+            asked.append(path)
+            return "fs_write=deny"
+
+        downloads = Downloads(target, write_check=refuse)
+        item = CancellableDownload("report.csv")
+        downloads.start(item)
+        await downloads.wait(1.0)
+        await asyncio.sleep(0.01)
+        finished, failed = downloads.drain()
+        assert finished == []
+        assert failed == [
+            ("report.csv", "refused by the file-write policy: fs_write=deny")
+        ]
+        assert item.cancelled and item.saved_to is None
+        assert not target.exists(), "the directory was created before the check"
+        assert asked == [target]
+
+    async def test_every_probed_name_is_checked_before_it_is_created(self, tmp_path):
+        (tmp_path / "a.txt").write_text("taken")
+        asked = []
+
+        def deny_second(path):
+            asked.append(path.name)
+            return "path is denied" if path.name == "a (2).txt" else None
+
+        downloads = Downloads(tmp_path, write_check=deny_second)
+        downloads.start(CancellableDownload("a.txt"))
+        await downloads.wait(1.0)
+        await asyncio.sleep(0.01)
+        finished, failed = downloads.drain()
+        assert finished == [] and failed[0][1].endswith("path is denied")
+        assert asked == [tmp_path.name, "a.txt", "a (2).txt"]
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["a.txt"]
+
+    async def test_a_check_that_raises_refuses(self, tmp_path):
+        def broken(path):
+            raise RuntimeError("policy gone")
+
+        downloads = Downloads(tmp_path / "d", write_check=broken)
+        downloads.start(CancellableDownload("x.bin"))
+        await downloads.wait(1.0)
+        await asyncio.sleep(0.01)
+        _, failed = downloads.drain()
+        assert failed == [
+            (
+                "x.bin",
+                "refused by the file-write policy: the check failed (RuntimeError)",
+            )
+        ]
+        assert not (tmp_path / "d").exists()
+
+    async def test_an_allowing_check_saves_as_before(self, tmp_path):
+        downloads = Downloads(tmp_path, write_check=lambda path: None)
+        downloads.start(ScriptedDownload("ok.csv", b"1"))
+        await downloads.wait(1.0)
+        finished, failed = downloads.drain()
+        assert finished == [("ok.csv", str(tmp_path / "ok.csv"))] and failed == []
+
+    async def test_the_directory_is_read_when_a_download_starts(self, tmp_path):
+        current = [tmp_path / "first"]
+        downloads = Downloads(lambda: current[0])
+        downloads.start(ScriptedDownload("a.bin", b"1"))
+        await downloads.wait(1.0)
+        current[0] = tmp_path / "second"
+        assert downloads.directory == tmp_path / "second"
+        downloads.start(ScriptedDownload("b.bin", b"2"))
+        await downloads.wait(1.0)
+        finished, _ = downloads.drain()
+        assert finished == [
+            ("a.bin", str(tmp_path / "first" / "a.bin")),
+            ("b.bin", str(tmp_path / "second" / "b.bin")),
+        ]
+
+
 async def test_cancel_failures_and_vanished_files_are_survived(tmp_path):
     downloads = Downloads(tmp_path, max_count=1, max_bytes=10)
     downloads.start(VanishingDownload("gone.bin", b"1" * 50))

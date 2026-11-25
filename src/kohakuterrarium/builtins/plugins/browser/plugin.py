@@ -165,7 +165,7 @@ class BrowserPlugin(BasePlugin):
         self._session: BrowserSession | None = None
         self._accepting = False
         self._ended = False
-        self._link = SandboxLink()
+        self._link = SandboxLink(self._live_services)
         self._service = BrowserService(self)
         self._tools: list[BaseTool] | None = None
         self._pending: set[asyncio.Task] = set()
@@ -293,13 +293,31 @@ class BrowserPlugin(BasePlugin):
         return session
 
     def _new_session(self) -> BrowserSession:
-        context = self._context
-        root = Path(context.working_dir) if context is not None else Path.cwd()
         return self.session_factory(
             self._browser_options,
-            downloads_dir=root / DOWNLOADS_DIR,
+            downloads_dir=self._downloads_dir,
             external_check=self._link.check,
+            write_check=self._link.check_write,
         )
+
+    def _downloads_dir(self) -> Path:
+        """``browser-downloads`` under the agent's working directory as it is now."""
+        context = self._context
+        agent = context.host_agent if context is not None else None
+        workspace = getattr(agent, "workspace", None)
+        if workspace is not None:
+            root = Path(workspace.get())
+        elif context is not None:
+            root = Path(context.working_dir)
+        else:
+            root = Path.cwd()
+        return root / DOWNLOADS_DIR
+
+    def _live_services(self) -> dict[str, Any] | None:
+        """The host's runtime services now; ``None`` without a plugin manager."""
+        manager = self._manager
+        collect = getattr(manager, "collect_runtime_services", None)
+        return collect(None) if callable(collect) else None
 
     async def _follow_sandbox(self, services: dict[str, Any] | None) -> None:
         """Rebind the sandbox service; drop open connections when it changed or denies."""

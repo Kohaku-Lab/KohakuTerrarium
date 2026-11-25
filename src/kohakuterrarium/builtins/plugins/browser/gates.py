@@ -1,35 +1,54 @@
 """Per-call gates of the ``browser`` plugin: the sandbox link and the host-resources rule."""
 
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.terrarium.creature.host_resources import host_resources_allowed
 
 NETWORK_POLICY = "network_policy"
+WRITE_POLICY = "write_policy"
 CONFINEMENT_REFUSAL = (
     "the browser cannot start: the sandbox requires OS-level confinement "
     "(os_enforce=require) and Chromium cannot run under the sandbox's "
     "subprocess confinement"
 )
 
+Services = dict[str, Any]
+
 
 class SandboxLink:
-    """The sandbox's ``network_policy`` service as the browser proxy's external check.
+    """The sandbox's policy services as the browser's network and file-write checks.
 
-    ``bind`` is called with every tool call's runtime services, so a sandbox
-    that was disabled, re-enabled or reconfigured is followed from the next
-    call on; ``check`` is what the proxy consults for every connection.
+    ``live`` returns the host's current runtime services, or ``None`` when
+    no host is reachable; then the services of the latest tool call given to
+    ``bind`` stand in. ``check`` is what the proxy consults for every
+    connection; ``check_write`` judges a download path.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, live: Callable[[], Services | None] | None = None) -> None:
         self.policy: Any = None
+        self._live = live
+        self._bound: Services = {}
 
-    def bind(self, services: dict[str, Any] | None) -> bool:
+    def bind(self, services: Services | None) -> bool:
         """Follow ``services``; whether the bound service changed."""
-        policy = (services or {}).get(NETWORK_POLICY)
+        self._bound = dict(services or {})
+        policy = self._bound.get(NETWORK_POLICY)
         changed = policy is not self.policy
         self.policy = policy
         return changed
+
+    def services(self) -> Services:
+        """The runtime services in force now."""
+        live = self._live() if self._live is not None else None
+        return self._bound if live is None else live
+
+    def check_write(self, path: Path) -> str | None:
+        """Why the sandbox refuses writing ``path``, or ``None`` to allow it."""
+        policy = self.services().get(WRITE_POLICY)
+        return None if policy is None else policy.check(path)
 
     def check(self, host: str, port: int) -> str | None:
         """Why the sandbox refuses ``host:port``, or ``None`` to allow it."""

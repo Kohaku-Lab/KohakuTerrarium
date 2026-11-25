@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from kohakuterrarium.browser.downloads import Downloads
+from kohakuterrarium.browser.downloads import Directory, Downloads, WriteCheck
 from kohakuterrarium.browser.driver import PlaywrightDriver
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.policy import ExternalCheck
@@ -34,7 +34,9 @@ class BrowserSession(
 ):
     """One agent's browser: lazy launch, FIFO lock, bounded calls, terminal close.
 
-    ``downloads_dir`` receives page downloads; ``external_check`` is consulted
+    ``downloads_dir`` (a path, or a callable read as each download starts)
+    receives page downloads; ``write_check`` judges each download path
+    before it is created; ``external_check`` is consulted
     by the network policy for every connection; ``driver`` defaults to
     Playwright; ``close_stage_timeout`` bounds each shutdown stage and
     ``close_timeout`` the whole of ``close``;
@@ -46,9 +48,10 @@ class BrowserSession(
         self,
         options: BrowserOptions,
         *,
-        downloads_dir: str | Path,
+        downloads_dir: str | Directory,
         driver: Driver | None = None,
         external_check: ExternalCheck | None = None,
+        write_check: WriteCheck | None = None,
         close_stage_timeout: float = CLOSE_STAGE_TIMEOUT_S,
         close_timeout: float = CLOSE_TIMEOUT_S,
         settle_grace: float = NAV_GRACE_S,
@@ -62,6 +65,9 @@ class BrowserSession(
             driver or PlaywrightDriver(),
             external_check,
             close_stage_timeout,
-            Downloads(Path(downloads_dir)),
+            Downloads(
+                downloads_dir if callable(downloads_dir) else Path(downloads_dir),
+                write_check=write_check,
+            ),
             proxy_factory,
         )
