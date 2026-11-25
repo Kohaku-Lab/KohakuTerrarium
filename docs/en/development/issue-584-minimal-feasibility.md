@@ -17,6 +17,15 @@ silently reinterpreted as a neighboring event.
   builder use the same sourced-events adapter.
 - Anchor issuance checks exact event content, selected-lineage visibility and
   the canonical block extractor; expansion uses bounded physical key probes.
+  A matching paragraph proves only *which physical event* to read. Context
+  then paginates the **whole original event text**, even when Search indexed
+  it as several separate paragraph blocks.
+- Peer-Agent hits from an unfiltered Search are certified on demand only for
+  namespaces actually returned and not yet certified in the live session.
+  A failure in this extra certification withholds Anchors but preserves the
+  ordinary Search hits; unrelated Agent histories are not scanned.
+- An active Anchor is promoted ahead of neighbor-token allocation so its own
+  expansion cannot evict it when the 2048-token process cache is at capacity.
 - Expansion is capped to 10 neighboring events per direction, 256 examined
   keys per side, and 900 characters per displayed event slice. Continuity can
   be unknown when the source budget cannot determine whether more history

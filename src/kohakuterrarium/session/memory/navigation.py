@@ -1,7 +1,7 @@
 """Opaque, source-bound navigation over the selected-lineage Memory index.
 
-Legacy index rows require an explicit offline provenance backfill; ordinary
-search remains available without that migration.
+Legacy index rows can be searched, but only the explicit offline Session
+rebuild can upgrade their derived source-bound Anchors.
 """
 
 import secrets
@@ -47,7 +47,6 @@ class _Location:
     fingerprint: str
     view: tuple[tuple[int, int], ...]
     ref: str
-    part: int = 0
     focus: str = ""
 
 
@@ -116,19 +115,13 @@ def _certify(events: list[dict]) -> None:
         ancestry_by_scope[key] = path_tuple
 
 
-def _event_text(event: dict, part: int = 0) -> str:
+def _event_text(event: dict) -> str:
+    """Show the complete physical event, not one searchable paragraph block."""
     kind = event.get("type")
     if kind == "tool_call":
         return f"{event.get('name', '')} {event.get('args', {})}"
     if kind == "tool_result":
         return _content_to_text(event.get("error") or event.get("output"))
-    if kind in ("text", "text_chunk"):
-        content = _content_to_text(event.get("content", ""))
-        if len(content) > 300:
-            paras = [p.strip() for p in content.split("\n\n") if p.strip()]
-            if part < len(paras):
-                return paras[part]
-        return content
     return _content_to_text(
         event.get("content") or event.get("error") or event.get("summary") or ""
     )
@@ -161,12 +154,22 @@ class MemoryNavigator:
     def __init__(self, store, memory=None):
         self._store = store
         self._memory = memory
-        self._certified_sources: dict[str, bool] = {}
+        # One process-local physical frontier per certified Agent; a later
+        # append invalidates trust without scanning that Agent on every query.
+        self._certified_sources: dict[str, int | None] = {}
         self._anchors: OrderedDict[str, _Location] = OrderedDict()
 
     def certify_source(self, agent: str, trusted: bool) -> None:
-        """Source data checked during the normal keyword-index refresh."""
-        self._certified_sources[agent] = trusted
+        """Remember the Store frontier checked during the index refresh."""
+        frontier = self._store._event_seq.get(agent)
+        self._certified_sources[agent] = (
+            frontier if trusted and type(frontier) is int else None
+        )
+
+    def source_certified(self, agent: str) -> bool:
+        """O(1) trust check; invalidate on new physical event appends."""
+        frontier = self._store._event_seq.get(agent)
+        return type(frontier) is int and self._certified_sources.get(agent) == frontier
 
     def close(self) -> None:
         self._anchors.clear()
@@ -181,8 +184,8 @@ class MemoryNavigator:
     def register_hits(self, hits: list, query: str = "") -> list:
         """Only physically certified hits can receive anchors.
 
-        Each row is independently validated, so an interrupted offline
-        backfill cannot authorize an incomplete row or invalidate a good one.
+        Each hit is independently validated; an incompatible historical
+        index cannot authorize an unverified physical source.
         """
         first_error = None
         for hit in hits:
@@ -190,7 +193,7 @@ class MemoryNavigator:
                 hit, "source_fingerprint", ""
             ):
                 if first_error is None:
-                    if self._certified_sources.get(hit.agent, False):
+                    if self.source_certified(hit.agent):
                         first_error = MemoryNavigationError(
                             "ANCHOR_REBUILD_REQUIRED",
                             "Existing index row has no certified source. "
@@ -349,7 +352,7 @@ class MemoryNavigator:
         return tuple(sorted(selected.items()))
 
     def _direct_hit(self, hit, query: str) -> _Location:
-        if not self._certified_sources.get(hit.agent, False):
+        if not self.source_certified(hit.agent):
             raise MemoryNavigationError(
                 "UNVERIFIABLE_SOURCE", "Current event source is not certifiable."
             )
@@ -381,9 +384,9 @@ class MemoryNavigator:
             raise MemoryNavigationError(
                 "STALE_INDEX", "Indexed block is not derived from its physical source."
             )
-        return _Location(
-            hit.agent, hit.source_fingerprint, view, ref, part, query[:100]
-        )
+        # Paragraph index only proves the hit belongs to the event. The
+        # resulting Anchor identifies the whole physical event, not a part.
+        return _Location(hit.agent, hit.source_fingerprint, view, ref, query[:100])
 
     def _expand_direct(
         self, anchor: str, loc: _Location, before: int, after: int, offset: int | None
@@ -445,10 +448,13 @@ class MemoryNavigator:
             (loc.ref, raw, "match"),
             *((ref, evt, "after") for ref, evt in later),
         ]
+        # The in-use cursor must survive the new neighbor tokens issued
+        # during the same expansion, even when the cache is full.
+        self._anchors.move_to_end(anchor)
         out = []
         for ref, event, role in ordered:
             matched = role == "match"
-            content = _event_text(event, loc.part if matched else 0)
+            content = _event_text(event)
             start = (offset or 0) if matched else 0
             if matched and offset is None and loc.focus:
                 focus_at = content.lower().find(loc.focus.lower())
@@ -474,5 +480,4 @@ class MemoryNavigator:
                     len(content),
                 )
             )
-        self._anchors.move_to_end(anchor)
         return ContextWindow(out, has_before, has_after)
