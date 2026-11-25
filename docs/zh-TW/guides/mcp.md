@@ -121,12 +121,20 @@ await manager.connect(MCPServerConfig(
     args=["/tmp/db.sqlite"],
 ))
 
-tools = await manager.list_tools("sqlite")
+tools = manager.get_server_tools("sqlite")
 result = await manager.call_tool("sqlite", "query", {"sql": "SELECT 1"})
 await manager.disconnect("sqlite")
 ```
 
 Agent 執行時底層就是用這套機制。
+
+`call_tool` 以文字回傳結果：文字部分以換行串接，二進位部分顯示為
+`[binary data: N bytes]`，伺服器把結果標為錯誤時會加上 `[MCP Error] ` 前綴。
+`call_tool_result` 接受相同參數，回傳原始的 `mcp.types.CallToolResult`
+（結構化內容、圖片、`isError` 旗標），給需要自行呈現結果的呼叫端使用。
+伺服器未連線或沒有列出該工具時，兩者都會拋出 `ValueError`。`connect` 之後，
+`MCPServerInfo.instructions` 保存伺服器在 `initialize` 結果中送出的說明
+（沒有送出時為空字串）。框架不會把這段說明加進系統提示詞。
 
 ## 疑難排解
 

@@ -45,6 +45,7 @@ class MCPServerInfo:
     tools: list[dict[str, Any]] = field(default_factory=list)
     status: str = "disconnected"  # "connected", "disconnected", "error"
     error: str = ""
+    instructions: str = ""  # Server instructions from the initialize result
 
 
 class _MCPConnection:
@@ -65,6 +66,7 @@ class _MCPConnection:
     def __init__(self) -> None:
         self.session: Any = None
         self.transports: tuple[Any, Any] | None = None
+        self.instructions: str = ""
         self.error: BaseException | None = None
         self._ready = asyncio.Event()
         self._close = asyncio.Event()
@@ -96,7 +98,8 @@ class _MCPConnection:
             session = client_session_cls(read_stream, write_stream)
             await session.__aenter__()
             entered_session = True
-            await session.initialize()
+            init_result = await session.initialize()
+            self.instructions = getattr(init_result, "instructions", None) or ""
             self.session = session
             self.transports = (read_stream, write_stream)
         except BaseException as e:  # noqa: BLE001 — surfaced via self.error
@@ -239,6 +242,7 @@ class MCPClientManager:
                 ctx = streamablehttp_client(config.url, headers=config.headers or None)
 
             session = await self._open_transport_session(name, ctx, ClientSession)
+            info.instructions = self._connections[name].instructions
 
             tools_response = await session.list_tools()
             info.tools = [
@@ -313,12 +317,13 @@ class MCPClientManager:
         logger.info("MCP server disconnected", server=name)
         return True
 
-    async def call_tool(
+    async def call_tool_result(
         self, server_name: str, tool_name: str, args: dict[str, Any]
-    ) -> str:
-        """Call a tool on a specific MCP server.
+    ) -> Any:
+        """Call a tool on a specific MCP server and return the raw ``CallToolResult``.
 
-        Returns the tool result as a string.
+        Raises ValueError when the server is not connected or does not list
+        the tool.
         """
         session = self._sessions.get(server_name)
         if not session:
@@ -333,7 +338,16 @@ class MCPClientManager:
                     f"Available: {', '.join(tool_names)}"
                 )
 
-        result = await session.call_tool(tool_name, arguments=args)
+        return await session.call_tool(tool_name, arguments=args)
+
+    async def call_tool(
+        self, server_name: str, tool_name: str, args: dict[str, Any]
+    ) -> str:
+        """Call a tool on a specific MCP server.
+
+        Returns the tool result as a string.
+        """
+        result = await self.call_tool_result(server_name, tool_name, args)
 
         parts = []
         for content in result.content:

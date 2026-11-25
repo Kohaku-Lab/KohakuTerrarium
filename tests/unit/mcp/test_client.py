@@ -75,6 +75,9 @@ class _FakeClientSession:
 
     async def initialize(self):
         self.initialized = True
+        return self._init_result
+
+    _init_result = None
 
     async def list_tools(self):
         return _FakeToolsResponse(self._tools)
@@ -215,6 +218,7 @@ class TestServerDataclasses:
         info = MCPServerInfo(config=cfg)
         assert info.status == "disconnected"
         assert info.error == ""
+        assert info.instructions == ""
         assert info.tools == []
         assert info.config is cfg
 
@@ -255,6 +259,36 @@ class TestConnect:
         assert session.initialized is True
         assert mgr._sessions["srv"] is session
         assert mgr.servers["srv"] is info
+
+    async def test_connect_keeps_server_instructions_from_initialize(self, monkeypatch):
+        session = _FakeClientSession("r", "w", tools=[])
+        session._init_result = types.SimpleNamespace(
+            instructions="Call list_rooms before join_room."
+        )
+        _install_fake_mcp(monkeypatch, session_cls=lambda r, w: session)
+
+        mgr = MCPClientManager()
+        info = await mgr.connect(MCPServerConfig(name="srv", command="c"))
+
+        assert info.instructions == "Call list_rooms before join_room."
+        assert mgr.servers["srv"].instructions == "Call list_rooms before join_room."
+
+    @pytest.mark.parametrize(
+        "init_result",
+        [None, types.SimpleNamespace(instructions=None), types.SimpleNamespace()],
+    )
+    async def test_connect_without_server_instructions_leaves_empty_string(
+        self, monkeypatch, init_result
+    ):
+        session = _FakeClientSession("r", "w", tools=[])
+        session._init_result = init_result
+        _install_fake_mcp(monkeypatch, session_cls=lambda r, w: session)
+
+        mgr = MCPClientManager()
+        info = await mgr.connect(MCPServerConfig(name="srv", command="c"))
+
+        assert info.status == "connected"
+        assert info.instructions == ""
 
     async def test_stdio_passes_command_args_env_to_params(self, monkeypatch):
         session = _FakeClientSession("r", "w", tools=[])
@@ -628,6 +662,44 @@ class TestCallTool:
         )
         out = await mgr.call_tool("srv", "e", {})
         assert out == "(no output)"
+
+    async def test_call_tool_result_returns_the_raw_result(self, monkeypatch):
+        result = _FakeCallResult(
+            [_FakeContentText("a"), _FakeContentBinary(b"xy")], is_error=True
+        )
+        mgr, session = await self._connected_mgr(
+            monkeypatch, tools=[_FakeToolDecl("raw")], call_result=result
+        )
+        out = await mgr.call_tool_result("srv", "raw", {"k": 1})
+        assert out is result
+        assert session.calls == [("raw", {"k": 1})]
+
+    async def test_call_tool_result_unknown_server_raises(self):
+        mgr = MCPClientManager()
+        with pytest.raises(ValueError, match="MCP server not connected: ghost"):
+            await mgr.call_tool_result("ghost", "t", {})
+
+    async def test_call_tool_result_unknown_tool_raises_without_calling(
+        self, monkeypatch
+    ):
+        mgr, session = await self._connected_mgr(
+            monkeypatch,
+            tools=[_FakeToolDecl("real")],
+            call_result=_FakeCallResult([_FakeContentText("x")]),
+        )
+        with pytest.raises(ValueError, match="Tool 'fake' not found on server 'srv'"):
+            await mgr.call_tool_result("srv", "fake", {})
+        assert session.calls == []
+
+    async def test_call_tool_mixed_content_renders_like_before(self, monkeypatch):
+        result = _FakeCallResult(
+            [_FakeContentText("head"), _FakeContentBinary(b"12345")], is_error=True
+        )
+        mgr, _ = await self._connected_mgr(
+            monkeypatch, tools=[_FakeToolDecl("m")], call_result=result
+        )
+        out = await mgr.call_tool("srv", "m", {})
+        assert out == "[MCP Error] head\n[binary data: 5 bytes]"
 
     async def test_call_tool_error_result_prefixed(self, monkeypatch):
         result = _FakeCallResult([_FakeContentText("bad input")], is_error=True)

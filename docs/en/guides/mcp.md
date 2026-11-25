@@ -121,12 +121,22 @@ await manager.connect(MCPServerConfig(
     args=["/tmp/db.sqlite"],
 ))
 
-tools = await manager.list_tools("sqlite")
+tools = manager.get_server_tools("sqlite")
 result = await manager.call_tool("sqlite", "query", {"sql": "SELECT 1"})
 await manager.disconnect("sqlite")
 ```
 
 The agent's runtime uses this under the hood.
+
+`call_tool` returns the result as text: text parts joined by newlines, binary
+parts shown as `[binary data: N bytes]`, and an `[MCP Error] ` prefix when the
+server marks the result as an error. `call_tool_result` takes the same
+arguments and returns the raw `mcp.types.CallToolResult` (structured content,
+images, the `isError` flag) for callers that want to render it themselves.
+Both raise `ValueError` when the server is not connected or does not list the
+tool. After `connect`, `MCPServerInfo.instructions` holds the instructions the
+server sent in its `initialize` result (an empty string when it sent none).
+The framework does not add these instructions to the system prompt.
 
 ## Troubleshooting
 
