@@ -93,6 +93,10 @@ def prompt_server_dict(
         json.dumps(existing.get("env", {}), ensure_ascii=False),
     )
     url = prompt("URL", existing.get("url", ""))
+    headers_raw = prompt(
+        "Headers JSON object",
+        json.dumps(existing.get("headers", {}), ensure_ascii=False),
+    )
     timeout_raw = prompt(
         "Connect timeout (seconds)",
         (
@@ -115,6 +119,12 @@ def prompt_server_dict(
         raise ValueError(f"Invalid env JSON: {e}") from e
     if not isinstance(env, dict):
         raise ValueError("Env must be a JSON object")
+    try:
+        headers = json.loads(headers_raw) if headers_raw else {}
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid headers JSON: {e}") from e
+    if not isinstance(headers, dict):
+        raise ValueError("Headers must be a JSON object")
     if not name:
         raise ValueError("Name is required")
 
@@ -133,6 +143,7 @@ def prompt_server_dict(
         "args": args,
         "env": env,
         "url": url,
+        "headers": headers,
         "connect_timeout": connect_timeout,
     }
 

@@ -33,9 +33,11 @@ mcp_servers:
     transport: streamable_http
     url: https://mcp.example.com/mcp
     connect_timeout: 20
-    env:
-      API_KEY: "${DOCS_API_KEY}"
+    headers:
+      Authorization: "Bearer ${DOCS_API_KEY}"
 ```
+
+`headers` 用於 `sse` 和 `streamable_http` 傳輸；`env` 用於 `stdio`。
 
 只有這個生物會連上這些伺服器。
 

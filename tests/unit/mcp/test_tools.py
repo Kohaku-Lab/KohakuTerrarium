@@ -342,6 +342,19 @@ class TestMcpConnectTool:
         )
         assert mgr.connect_calls[0].transport == "streamable_http"
 
+    async def test_headers_are_passed_to_the_connection(self):
+        mgr = _FakeManager(connect_result=_ConnInfo(tools=[]))
+        auth = {"Authorization": "Bearer t0ken"}
+        await MCPConnectTool().execute(
+            {"name": "remote", "url": "http://h/mcp", "headers": auth},
+            context=_ctx(mgr),
+        )
+        assert mgr.connect_calls[0].headers == auth
+        await MCPConnectTool().execute(
+            {"name": "other", "url": "http://h/mcp"}, context=_ctx(mgr)
+        )
+        assert mgr.connect_calls[1].headers == {}
+
     async def test_explicit_transport_preserved(self):
         mgr = _FakeManager(connect_result=_ConnInfo(tools=[]))
         await MCPConnectTool().execute(

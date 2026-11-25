@@ -39,6 +39,31 @@ class TestPatch:
         # Unchanged fields preserved.
         assert body["server"]["command"] == "npx"
 
+    def test_patch_headers_roundtrip_and_clear(self, client):
+        auth = {"Authorization": "Bearer t0ken"}
+        resp = client.patch(
+            "/api/settings/mcp/fs",
+            json={"transport": "http", "url": "http://h/mcp", "headers": auth},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["server"]["headers"] == auth
+        stored = {
+            s["name"]: s for s in client.get("/api/settings/mcp").json()["servers"]
+        }
+        assert stored["fs"]["headers"] == auth
+
+        client.patch("/api/settings/mcp/fs", json={"url": "http://h/other"})
+        stored = {
+            s["name"]: s for s in client.get("/api/settings/mcp").json()["servers"]
+        }
+        assert stored["fs"]["headers"] == auth, "an unrelated patch keeps the headers"
+
+        client.patch("/api/settings/mcp/fs", json={"headers": {}})
+        stored = {
+            s["name"]: s for s in client.get("/api/settings/mcp").json()["servers"]
+        }
+        assert stored["fs"]["headers"] == {}
+
     def test_patch_name_immutable(self, client):
         resp = client.patch(
             "/api/settings/mcp/fs",

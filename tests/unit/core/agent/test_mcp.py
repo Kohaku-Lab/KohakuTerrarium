@@ -64,6 +64,26 @@ class TestInitMCP:
         assert a._mcp_manager is fake
         assert fake._connect_log == ["s1", "s2"]
 
+    async def test_headers_reach_the_server_config(self, monkeypatch):
+        fake = _FakeManager()
+        monkeypatch.setattr(am, "MCPClientManager", lambda: fake)
+        auth = {"Authorization": "Bearer t0ken"}
+        a = _agent_with_mcp(
+            mcp_configs=[
+                {
+                    "name": "remote",
+                    "transport": "streamable_http",
+                    "url": "http://h/mcp",
+                    "headers": auth,
+                },
+                {"name": "plain", "transport": "stdio", "command": "echo"},
+            ]
+        )
+        await init_mcp(a)
+        configs = {c.args[0].name: c.args[0] for c in fake.connect.await_args_list}
+        assert configs["remote"].headers == auth
+        assert configs["plain"].headers == {}
+
     async def test_skips_non_dict_entries(self, monkeypatch):
         fake = _FakeManager()
         monkeypatch.setattr(am, "MCPClientManager", lambda: fake)

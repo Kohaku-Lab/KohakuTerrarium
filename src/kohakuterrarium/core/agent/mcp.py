@@ -32,6 +32,7 @@ async def init_mcp(agent: Any) -> None:
                 args=srv_data.get("args", []),
                 env=srv_data.get("env", {}),
                 url=srv_data.get("url", ""),
+                headers=srv_data.get("headers", {}),
                 connect_timeout=srv_data.get("connect_timeout", None),
             )
             if config.name:

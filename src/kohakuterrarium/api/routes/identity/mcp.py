@@ -29,6 +29,7 @@ class MCPServerRequest(BaseModel):
     args: list[str] = []
     env: dict[str, str] = {}
     url: str = ""
+    headers: dict[str, str] = {}
     connect_timeout: float | None = None
 
 
@@ -44,6 +45,7 @@ class MCPServerPatch(BaseModel):
     args: list[str] | None = None
     env: dict[str, str] | None = None
     url: str | None = None
+    headers: dict[str, str] | None = None
     connect_timeout: float | None = None
 
 
@@ -167,6 +169,7 @@ async def _probe_server(server: dict[str, Any]) -> dict[str, Any]:
         "args",
         "env",
         "url",
+        "headers",
         "connect_timeout",
     }
     cfg = MCPServerConfig(**{k: v for k, v in server.items() if k in allowed})

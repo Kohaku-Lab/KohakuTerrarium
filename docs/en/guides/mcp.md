@@ -33,9 +33,11 @@ mcp_servers:
     transport: streamable_http
     url: https://mcp.example.com/mcp
     connect_timeout: 20
-    env:
-      API_KEY: "${DOCS_API_KEY}"
+    headers:
+      Authorization: "Bearer ${DOCS_API_KEY}"
 ```
+
+`headers` apply to the `sse` and `streamable_http` transports; `env` applies to `stdio`.
 
 Only this creature connects to these servers.
 

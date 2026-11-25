@@ -753,6 +753,10 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                 "type": "object",
                 "description": "Extra environment variables for stdio transport.",
             },
+            "headers": {
+                "type": "object",
+                "description": "HTTP headers for sse / streamable-http transport.",
+            },
             "connect_timeout": {
                 "type": "number",
                 "description": "Seconds to wait for handshake (default 10).",

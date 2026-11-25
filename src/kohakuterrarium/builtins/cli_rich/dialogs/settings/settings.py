@@ -250,6 +250,7 @@ class SettingsOverlay:
                     "connect_timeout": s.get("connect_timeout", None),
                     "args": s.get("args", []),
                     "env": s.get("env", {}),
+                    "headers": s.get("headers", {}),
                     "raw": s,
                 }
             )
@@ -555,6 +556,7 @@ class SettingsOverlay:
                 "original_name": row["name"] if row else "",
                 "preserved_args": row.get("args", []) if row else [],
                 "preserved_env": row.get("env", {}) if row else {},
+                "preserved_headers": row.get("headers", {}) if row else {},
             },
         )
 
@@ -671,6 +673,7 @@ class SettingsOverlay:
                         ),
                         "args": ctx.get("preserved_args", []),
                         "env": ctx.get("preserved_env", {}),
+                        "headers": ctx.get("preserved_headers", {}),
                     }
                 )
                 save_servers(servers)

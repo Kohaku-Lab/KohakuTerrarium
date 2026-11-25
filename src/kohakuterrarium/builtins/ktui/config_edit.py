@@ -458,6 +458,7 @@ class ConfigEdit:
                 "connect_timeout": timeout,
                 "args": server.get("args", []),
                 "env": server.get("env", {}),
+                "headers": server.get("headers", {}),
             }
         )
         save_servers(kept)

@@ -246,6 +246,11 @@ class MCPConnectTool(BaseTool):
                     "description": "Environment variables for stdio transport",
                     "additionalProperties": {"type": "string"},
                 },
+                "headers": {
+                    "type": "object",
+                    "description": "HTTP headers for SSE or streamable_http transport",
+                    "additionalProperties": {"type": "string"},
+                },
                 "connect_timeout": {
                     "type": "number",
                     "description": "Optional timeout in seconds for the MCP connection",
@@ -267,6 +272,7 @@ class MCPConnectTool(BaseTool):
         cmd_args = args.get("args", [])
         url = args.get("url", "")
         env = args.get("env", {})
+        headers = args.get("headers", {})
         connect_timeout = args.get("connect_timeout", None)
 
         if not name:
@@ -300,6 +306,7 @@ class MCPConnectTool(BaseTool):
             args=cmd_args,
             env=env,
             url=url,
+            headers=headers,
             connect_timeout=timeout_value,
         )
 

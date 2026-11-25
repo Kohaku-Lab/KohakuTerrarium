@@ -33,9 +33,11 @@ mcp_servers:
     transport: streamable_http
     url: https://mcp.example.com/mcp
     connect_timeout: 20
-    env:
-      API_KEY: "${DOCS_API_KEY}"
+    headers:
+      Authorization: "Bearer ${DOCS_API_KEY}"
 ```
+
+`headers` 用于 `sse` 和 `streamable_http` 传输；`env` 用于 `stdio`。
 
 只有这个 Creature会连上这些服务器。
 

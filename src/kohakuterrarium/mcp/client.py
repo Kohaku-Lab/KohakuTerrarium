@@ -33,6 +33,7 @@ class MCPServerConfig:
     args: list[str] = field(default_factory=list)  # For stdio: command arguments
     env: dict[str, str] = field(default_factory=dict)  # For stdio: env vars
     url: str = ""  # For sse / streamable_http: server URL
+    headers: dict[str, str] = field(default_factory=dict)  # For sse / streamable_http
     connect_timeout: float | None = None  # Optional per-server connection timeout
 
 
@@ -227,7 +228,7 @@ class MCPClientManager:
 
                 if not config.url:
                     raise ValueError(f"MCP server {name}: SSE transport requires 'url'")
-                ctx = sse_client(config.url)
+                ctx = sse_client(config.url, headers=config.headers or None)
             else:
                 from mcp.client.streamable_http import streamablehttp_client
 
@@ -235,7 +236,7 @@ class MCPClientManager:
                     raise ValueError(
                         f"MCP server {name}: streamable_http transport requires 'url'"
                     )
-                ctx = streamablehttp_client(config.url)
+                ctx = streamablehttp_client(config.url, headers=config.headers or None)
 
             session = await self._open_transport_session(name, ctx, ClientSession)
 

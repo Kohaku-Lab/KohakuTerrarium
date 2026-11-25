@@ -134,16 +134,18 @@ def _install_fake_mcp(monkeypatch, *, session_cls=None, transport_ctx=None):
 
     sse_mod = types.ModuleType("mcp.client.sse")
 
-    def _sse_client(url):
+    def _sse_client(url, headers=None):
         transport_ctx.url = url
+        transport_ctx.headers = headers
         return transport_ctx
 
     sse_mod.sse_client = _sse_client
 
     http_mod = types.ModuleType("mcp.client.streamable_http")
 
-    def _streamablehttp_client(url):
+    def _streamablehttp_client(url, headers=None):
         transport_ctx.url = url
+        transport_ctx.headers = headers
         return transport_ctx
 
     http_mod.streamablehttp_client = _streamablehttp_client
@@ -312,6 +314,22 @@ class TestConnect:
             MCPServerConfig(name="s", transport="streamable_http", url="http://h/mcp")
         )
         assert ctx.url == "http://h/mcp"
+        assert ctx.headers is None
+
+    async def test_http_transports_send_the_configured_headers(self, monkeypatch):
+        auth = {"Authorization": "Bearer t0ken"}
+        for transport, name in (("sse", "a"), ("streamable_http", "b")):
+            session = _FakeClientSession("r", "w", tools=[])
+            ctx = _FakeTransportContext()
+            _install_fake_mcp(
+                monkeypatch, session_cls=lambda r, w: session, transport_ctx=ctx
+            )
+            await MCPClientManager().connect(
+                MCPServerConfig(
+                    name=name, transport=transport, url="http://h/x", headers=auth
+                )
+            )
+            assert ctx.headers == auth, transport
 
     async def test_reconnect_same_name_is_noop_returns_existing(self, monkeypatch):
         session = _FakeClientSession("r", "w", tools=[_FakeToolDecl("t")])

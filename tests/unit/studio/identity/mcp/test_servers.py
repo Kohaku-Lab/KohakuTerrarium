@@ -123,6 +123,27 @@ class TestPromptServerDict:
         assert out["env"] == {"K": "V"}
         assert out["connect_timeout"] == 5.5
 
+    def test_headers_are_parsed_and_default_to_empty(self):
+        base = {"Name": "remote", "Transport": "streamable_http", "URL": "http://h/mcp"}
+        assert prompt_server_dict(None, _make_prompt(base))["headers"] == {}
+        with_headers = {**base, "Headers JSON object": '{"Authorization":"Bearer t"}'}
+        out = prompt_server_dict(None, _make_prompt(with_headers))
+        assert out["headers"] == {"Authorization": "Bearer t"}
+        existing = {"name": "remote", "headers": {"X-Key": "k"}}
+        assert prompt_server_dict(existing, _make_prompt({}))["headers"] == {
+            "X-Key": "k"
+        }
+
+    def test_invalid_headers_json(self):
+        p = _make_prompt({"Name": "x", "Headers JSON object": "{not json"})
+        with pytest.raises(ValueError, match="Invalid headers JSON"):
+            prompt_server_dict(None, p)
+
+    def test_headers_not_dict(self):
+        p = _make_prompt({"Name": "x", "Headers JSON object": "[1,2]"})
+        with pytest.raises(ValueError, match="Headers must be"):
+            prompt_server_dict(None, p)
+
     def test_invalid_args_json(self):
         p = _make_prompt({"Name": "x", "Args JSON array": "{not json"})
         with pytest.raises(ValueError, match="Invalid args JSON"):

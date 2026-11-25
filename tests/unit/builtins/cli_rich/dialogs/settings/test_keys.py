@@ -19,3 +19,21 @@ class TestSettingsCredentialProviders:
         assert deepseek["has_key"] is True
         assert deepseek["env"] == "DEEPSEEK_API_KEY"
         assert "ds-secret" not in deepseek["masked"]
+
+
+class TestSettingsMcpHeaders:
+    def test_editing_a_server_in_the_form_keeps_its_headers(self, monkeypatch):
+        server = {
+            "name": "remote",
+            "transport": "streamable_http",
+            "url": "http://h/mcp",
+            "headers": {"Authorization": "Bearer t0ken"},
+        }
+        monkeypatch.setattr(settings, "load_servers", lambda: [server])
+
+        overlay = SettingsOverlay()
+        row = next(r for r in overlay._load_mcp() if r["name"] == "remote")
+        form = overlay._build_mcp_form(row)
+
+        assert row["headers"] == server["headers"]
+        assert form.context["preserved_headers"] == server["headers"]

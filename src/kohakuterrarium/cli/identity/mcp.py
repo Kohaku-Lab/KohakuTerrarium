@@ -37,6 +37,8 @@ def list_cli() -> int:
             print(f"  timeout:   {server.get('connect_timeout')}s")
         if server.get("env"):
             print(f"  env keys:  {list((server.get('env') or {}).keys())}")
+        if server.get("headers"):
+            print(f"  headers:   {list((server.get('headers') or {}).keys())}")
     return 0
 
 
@@ -94,6 +96,9 @@ def list_for_agent_cli(agent_path: str) -> int:
             env = server.get("env", {})
             if env:
                 print(f"     Env vars: {', '.join(env.keys())}")
+            headers = server.get("headers", {})
+            if headers:
+                print(f"     Headers: {', '.join(headers.keys())}")
         else:
             print(f"  {i}. {server}")
         print()
