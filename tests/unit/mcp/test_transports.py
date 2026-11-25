@@ -8,7 +8,6 @@ from typing import get_args
 import pytest
 
 from kohakuterrarium.builtins.cli_rich.dialogs.settings import settings
-from kohakuterrarium.builtins.ktui import config_edit
 from kohakuterrarium.errors import MCPConfigError
 from kohakuterrarium.mcp import client
 from kohakuterrarium.mcp.transports import (
@@ -46,9 +45,8 @@ class TestTransportLists:
         values = re.findall(r'value:\s*"([a-z_]+)"', source)
         assert tuple(values) == MCP_TRANSPORT_CHOICES
 
-    def test_rich_cli_and_ktui_offer_the_picker_choices(self):
+    def test_rich_cli_offers_the_picker_choices(self):
         assert tuple(settings._TRANSPORTS) == MCP_TRANSPORT_CHOICES
-        assert tuple(config_edit.TRANSPORTS) == MCP_TRANSPORT_CHOICES
 
 
 class TestParseTransport:

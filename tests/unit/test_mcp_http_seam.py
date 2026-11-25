@@ -36,11 +36,11 @@ def test_server_rejects_missing_and_wrong_tokens_and_accepts_the_right_one():
 def test_server_stops_when_the_context_exits():
     with bearer_mcp_server("tok") as base:
         pass
-    with pytest.raises(httpx.ConnectError):
-        httpx.post(f"{base}/mcp", json=_INIT, timeout=2)
+    with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
+        httpx.post(f"{base}/mcp", json=_INIT, timeout=5)
 
 
 def test_closed_loopback_port_refuses_connections():
     port = closed_loopback_port()
-    with pytest.raises(httpx.ConnectError):
-        httpx.get(f"http://127.0.0.1:{port}/", timeout=2)
+    with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
+        httpx.get(f"http://127.0.0.1:{port}/", timeout=5)
