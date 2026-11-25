@@ -68,6 +68,28 @@ kt config mcp delete sqlite
 
 Global servers are available to any creature that references them.
 
+Registry entries may use `${VAR}` and `${VAR:default}` in `command`, `args`,
+`env`, `url` and `headers`, so a token does not have to live in the file:
+
+```yaml
+- name: sandbox
+  transport: streamable_http
+  url: http://127.0.0.1:8765/mcp
+  headers:
+    Authorization: "Bearer ${SANDBOX_TOKEN}"
+```
+
+The markers are expanded from the KT process environment each time the entry
+is turned into a connection: when a creature starts, when `mcp_connect` names a
+registered server, and when Settings > MCP > **Test connection** runs. The file
+and the `GET /api/settings/mcp` response keep the raw `${VAR}` text, never the
+value. A variable that is not set and has no default stops that server with
+`environment variable SANDBOX_TOKEN is not set (used in headers of server
+sandbox)` instead of sending the literal `${SANDBOX_TOKEN}`; the creature still
+starts without it. `${VAR:}` means "empty when unset". An inline
+`mcp_connect` definition written by the model is used as given and is not
+expanded.
+
 ## Transports
 
 - **stdio**: launches a subprocess (`command` + `args` + `env`). Best for local servers, low latency, isolated-per-agent process lifetime.
@@ -164,7 +186,7 @@ appear in messages or logs.
 - **Server not connecting (http / sse).** Verify the URL is SSE-compatible. Some servers expose both `/sse` and `/ws`; KohakuTerrarium's `http` / `sse` transport expects the SSE endpoint.
 - **Server not connecting (streamable_http).** Verify the URL points at the server's streamable HTTP endpoint (for example FastMCP's `streamable_http_app()` route) rather than a legacy SSE path.
 - **Tool not found.** The meta-tools list is computed at connection time. Reconnect (`mcp_disconnect` + `mcp_connect`) if the server hot-added tools.
-- **Env vars not substituted.** MCP config supports `${VAR}` and `${VAR:default}`, same as creature configs.
+- **Env vars not substituted.** MCP config supports `${VAR}` and `${VAR:default}`, same as creature configs. The variable must be set in the environment of the process that runs KT (the `kt serve` / `kt app` process for the web UI), not only in your shell.
 - **Server crashes mid-session.** Stdio servers respawn on next `mcp_call`. Check the server's own logs.
 
 ## See also

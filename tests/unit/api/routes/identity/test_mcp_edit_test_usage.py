@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.identity import mcp as mcp_mod
 from kohakuterrarium.errors import MCPConnectionError, MCPTimeoutError
-from kohakuterrarium.mcp.client import MCPClientManager
+from kohakuterrarium.mcp.client import MCPClientManager, MCPServerInfo
 
 if sys.version_info < (3, 11):  # pragma: no cover - CI runs 3.12+
     from exceptiongroup import ExceptionGroup
@@ -148,6 +148,59 @@ class TestTest:
         client.patch("/api/settings/mcp/fs", json={"connect_timeout": 3})
         client.post("/api/settings/mcp/fs/test")
         assert seen[-1] == 3
+
+    def test_probe_expands_env_vars_but_the_registry_keeps_them_raw(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setenv("KT_UT_SANDBOX_TOKEN", "s3cret")
+        client.post(
+            "/api/settings/mcp",
+            json={
+                "name": "sandbox",
+                "transport": "streamable_http",
+                "url": "http://h/mcp",
+                "headers": {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"},
+            },
+        )
+        seen = []
+
+        async def _capture(self, config):
+            seen.append(config.headers)
+            return MCPServerInfo(config=config, status="connected")
+
+        monkeypatch.setattr(MCPClientManager, "connect", _capture)
+        body = client.post("/api/settings/mcp/sandbox/test").json()
+        assert body["ok"] is True
+        assert seen == [{"Authorization": "Bearer s3cret"}]
+        listed = client.get("/api/settings/mcp").json()["servers"]
+        stored = next(s for s in listed if s["name"] == "sandbox")
+        assert stored["headers"] == {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"}
+        assert "s3cret" not in client.get("/api/settings/mcp").text
+
+    def test_probe_with_unset_env_var_reports_it(self, client, monkeypatch):
+        monkeypatch.delenv("KT_UT_SANDBOX_TOKEN", raising=False)
+        client.post(
+            "/api/settings/mcp",
+            json={
+                "name": "sandbox",
+                "transport": "streamable_http",
+                "url": "http://h/mcp",
+                "headers": {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"},
+            },
+        )
+        connects = []
+
+        async def _capture(self, config):
+            connects.append(config)
+
+        monkeypatch.setattr(MCPClientManager, "connect", _capture)
+        body = client.post("/api/settings/mcp/sandbox/test").json()
+        assert body["ok"] is False
+        assert body["error"] == (
+            "environment variable KT_UT_SANDBOX_TOKEN is not set "
+            "(used in headers of server sandbox)"
+        )
+        assert connects == []
 
     def test_test_success_path(self, client, monkeypatch):
         async def _fake(server):

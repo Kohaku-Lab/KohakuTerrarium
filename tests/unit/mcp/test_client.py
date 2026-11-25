@@ -14,7 +14,7 @@ import types
 import httpx
 import pytest
 
-from kohakuterrarium.errors import MCPConnectionError, MCPTimeoutError
+from kohakuterrarium.errors import MCPConfigError, MCPConnectionError, MCPTimeoutError
 from kohakuterrarium.mcp.client import (
     DEFAULT_MCP_CONNECT_TIMEOUT,
     MCPClientManager,
@@ -198,6 +198,103 @@ class TestNormalizeMcpTransport:
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
+
+class TestFromEntry:
+    def test_registry_entry_is_expanded_and_extra_keys_ignored(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_TOKEN", "s3cret")
+        monkeypatch.setenv("KT_UT_HOST", "mcp.local")
+        monkeypatch.delenv("KT_UT_PORT", raising=False)
+        cfg = MCPServerConfig.from_entry(
+            {
+                "name": "sandbox",
+                "transport": "streamable_http",
+                "url": "http://${KT_UT_HOST}:${KT_UT_PORT:8000}/mcp",
+                "headers": {"Authorization": "Bearer ${KT_UT_TOKEN}"},
+                "connect_timeout": "15",
+                "description": "not a connection field",
+            }
+        )
+        assert cfg == MCPServerConfig(
+            name="sandbox",
+            transport="streamable_http",
+            url="http://mcp.local:8000/mcp",
+            headers={"Authorization": "Bearer s3cret"},
+            connect_timeout=15.0,
+        )
+
+    def test_stdio_fields_are_expanded(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_BIN", "/opt/srv")
+        monkeypatch.setenv("KT_UT_KEY", "k1")
+        cfg = MCPServerConfig.from_entry(
+            {
+                "name": "fs",
+                "command": "${KT_UT_BIN}/run",
+                "args": ["--key", "${KT_UT_KEY}"],
+                "env": {"API_KEY": "${KT_UT_KEY}"},
+            }
+        )
+        assert cfg.transport == "stdio"
+        assert cfg.command == "/opt/srv/run"
+        assert cfg.args == ["--key", "k1"]
+        assert cfg.env == {"API_KEY": "k1"}
+
+    def test_unset_variable_without_default_is_a_clear_error(self, monkeypatch):
+        monkeypatch.delenv("SANDBOX_TOKEN", raising=False)
+        with pytest.raises(MCPConfigError) as caught:
+            MCPServerConfig.from_entry(
+                {
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "url": "http://h/mcp",
+                    "headers": {"Authorization": "Bearer ${SANDBOX_TOKEN}"},
+                }
+            )
+        assert str(caught.value) == (
+            "environment variable SANDBOX_TOKEN is not set "
+            "(used in headers of server sandbox)"
+        )
+        assert isinstance(caught.value, ValueError)
+
+    def test_several_unset_variables_are_all_named(self, monkeypatch):
+        monkeypatch.delenv("KT_UT_A", raising=False)
+        monkeypatch.delenv("KT_UT_B", raising=False)
+        with pytest.raises(MCPConfigError) as caught:
+            MCPServerConfig.from_entry(
+                {"name": "x", "command": "c", "args": ["${KT_UT_A}", "${KT_UT_B}"]}
+            )
+        assert str(caught.value) == (
+            "environment variables KT_UT_A, KT_UT_B are not set "
+            "(used in args of server x)"
+        )
+
+    def test_without_expansion_markers_stay_literal(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_TOKEN", "s3cret")
+        cfg = MCPServerConfig.from_entry(
+            {"name": "x", "url": "http://h/?k=${KT_UT_TOKEN}", "transport": "sse"},
+            expand_env=False,
+        )
+        assert cfg.url == "http://h/?k=${KT_UT_TOKEN}"
+
+    def test_entry_is_not_mutated(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_TOKEN", "s3cret")
+        entry = {"name": "x", "url": "u", "headers": {"A": "${KT_UT_TOKEN}"}}
+        MCPServerConfig.from_entry(entry)
+        assert entry["headers"] == {"A": "${KT_UT_TOKEN}"}
+
+    def test_missing_and_null_fields_take_defaults(self):
+        cfg = MCPServerConfig.from_entry(
+            {"name": "x", "transport": None, "args": None, "headers": None}
+        )
+        assert cfg == MCPServerConfig(name="x")
+
+    def test_bad_shapes_are_rejected(self):
+        with pytest.raises(MCPConfigError, match="args of server x must be a list"):
+            MCPServerConfig.from_entry({"name": "x", "args": "--a"})
+        with pytest.raises(MCPConfigError, match="headers of server x must be"):
+            MCPServerConfig.from_entry({"name": "x", "headers": ["A: b"]})
+        with pytest.raises(MCPConfigError, match="connect_timeout of server x"):
+            MCPServerConfig.from_entry({"name": "x", "connect_timeout": "soon"})
 
 
 class TestServerDataclasses:

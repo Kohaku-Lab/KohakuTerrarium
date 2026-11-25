@@ -12,6 +12,7 @@ from kohakuterrarium.mcp.diagnose import (
     explain_timeout,
     leaf_exceptions,
 )
+from kohakuterrarium.utils.env_interp import interpolate_env_vars, unset_env_vars
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +44,74 @@ class MCPServerConfig:
     url: str = ""  # For sse / streamable_http: server URL
     headers: dict[str, str] = field(default_factory=dict)  # For sse / streamable_http
     connect_timeout: float | None = None  # Optional per-server connection timeout
+
+    @classmethod
+    def from_entry(
+        cls, entry: dict[str, Any], *, expand_env: bool = True
+    ) -> "MCPServerConfig":
+        """Build a config from a registry or ``mcp_servers`` entry.
+
+        Keys that are not connection fields are ignored and ``entry`` is not
+        changed. With ``expand_env``, ``${VAR}`` / ``${VAR:default}`` in
+        command, args, env, url and headers are expanded; an unset variable
+        without a default raises :class:`MCPConfigError`.
+        """
+        name = str(entry.get("name") or "")
+        values = {key: entry.get(key) for key in _EXPANDED_FIELDS}
+        if expand_env:
+            for key in _EXPANDED_FIELDS:
+                _require_env_vars(name, key, values[key])
+            values = interpolate_env_vars(values)
+        return cls(
+            name=name,
+            transport=str(entry.get("transport") or "stdio"),
+            command=str(values["command"] or ""),
+            args=[str(a) for a in _shaped(name, "args", values["args"], list)],
+            env={
+                str(k): str(v)
+                for k, v in _shaped(name, "env", values["env"], dict).items()
+            },
+            url=str(values["url"] or ""),
+            headers={
+                str(k): str(v)
+                for k, v in _shaped(name, "headers", values["headers"], dict).items()
+            },
+            connect_timeout=_entry_timeout(name, entry.get("connect_timeout")),
+        )
+
+
+_EXPANDED_FIELDS = ("command", "args", "env", "url", "headers")
+
+
+def _require_env_vars(server: str, key: str, value: Any) -> None:
+    missing = unset_env_vars(value)
+    if not missing:
+        return
+    if len(missing) == 1:
+        subject = f"environment variable {missing[0]} is not set"
+    else:
+        subject = f"environment variables {', '.join(missing)} are not set"
+    raise MCPConfigError(f"{subject} (used in {key} of server {server})")
+
+
+def _shaped(server: str, key: str, value: Any, kind: type) -> Any:
+    if value is None:
+        return kind()
+    if not isinstance(value, kind):
+        noun = "a list" if kind is list else "a mapping"
+        raise MCPConfigError(f"{key} of server {server} must be {noun}")
+    return value
+
+
+def _entry_timeout(server: str, value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError) as e:
+        raise MCPConfigError(
+            f"connect_timeout of server {server} must be a number, got {value!r}"
+        ) from e
 
 
 @dataclass

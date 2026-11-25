@@ -84,6 +84,53 @@ class TestInitMCP:
         assert configs["remote"].headers == auth
         assert configs["plain"].headers == {}
 
+    async def test_registry_style_entry_has_env_vars_expanded(self, monkeypatch):
+        fake = _FakeManager()
+        monkeypatch.setattr(am, "MCPClientManager", lambda: fake)
+        monkeypatch.setenv("KT_UT_SANDBOX_TOKEN", "s3cret")
+        a = _agent_with_mcp(
+            mcp_configs=[
+                {
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "url": "http://h/mcp",
+                    "headers": {"Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"},
+                }
+            ]
+        )
+        await init_mcp(a)
+        sent = fake.connect.await_args_list[0].args[0]
+        assert sent.headers == {"Authorization": "Bearer s3cret"}
+        assert a.config.mcp_servers[0]["headers"] == {
+            "Authorization": "Bearer ${KT_UT_SANDBOX_TOKEN}"
+        }
+
+    async def test_unset_env_var_skips_the_server_with_a_clear_warning(
+        self, monkeypatch, caplog
+    ):
+        fake = _FakeManager()
+        monkeypatch.setattr(am, "MCPClientManager", lambda: fake)
+        monkeypatch.delenv("KT_UT_MISSING_TOKEN", raising=False)
+        a = _agent_with_mcp(
+            mcp_configs=[
+                {
+                    "name": "sandbox",
+                    "transport": "streamable_http",
+                    "url": "http://h/mcp",
+                    "headers": {"Authorization": "Bearer ${KT_UT_MISSING_TOKEN}"},
+                },
+                {"name": "plain", "transport": "stdio", "command": "echo"},
+            ]
+        )
+        with caplog.at_level("WARNING"):
+            await init_mcp(a)
+        assert fake._connect_log == ["plain"]
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert [getattr(r, "error", "") for r in warnings] == [
+            "environment variable KT_UT_MISSING_TOKEN is not set "
+            "(used in headers of server sandbox)"
+        ]
+
     async def test_skips_non_dict_entries(self, monkeypatch):
         fake = _FakeManager()
         monkeypatch.setattr(am, "MCPClientManager", lambda: fake)

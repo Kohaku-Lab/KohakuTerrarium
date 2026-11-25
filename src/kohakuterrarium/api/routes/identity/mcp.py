@@ -173,22 +173,10 @@ async def mcp_server_usage(name: str) -> list[CreatureRef]:
 async def _probe_server(server: dict[str, Any]) -> dict[str, Any]:
     """Connect to a registry entry and return its advertised tool count.
 
-    The client defers its optional SDK import until connection, and shutdown is
-    attempted for every outcome.
+    ``${VAR}`` markers are expanded for the connection only, and shutdown
+    is attempted for every outcome.
     """
-    # Registry entries may carry metadata that is not part of the connection
-    # schema, so only constructor-supported fields cross this boundary.
-    allowed = {
-        "name",
-        "transport",
-        "command",
-        "args",
-        "env",
-        "url",
-        "headers",
-        "connect_timeout",
-    }
-    cfg = MCPServerConfig(**{k: v for k, v in server.items() if k in allowed})
+    cfg = MCPServerConfig.from_entry(server)
     cfg.connect_timeout = _probe_timeout(server)
     mgr = MCPClientManager()
     try:

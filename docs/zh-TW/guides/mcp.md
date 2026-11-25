@@ -68,6 +68,24 @@ kt config mcp delete sqlite
 
 全域伺服器可被任何有參照它的生物使用。
 
+註冊表條目的 `command`、`args`、`env`、`url` 和 `headers` 可以使用 `${VAR}` 與
+`${VAR:default}`，這樣權杖不必寫在檔案裡：
+
+```yaml
+- name: sandbox
+  transport: streamable_http
+  url: http://127.0.0.1:8765/mcp
+  headers:
+    Authorization: "Bearer ${SANDBOX_TOKEN}"
+```
+
+每次把條目變成連線時（生物啟動、`mcp_connect` 指定已註冊的伺服器、Settings > MCP >
+**Test connection**），都會用 KT 程序的環境變數展開這些標記。檔案和 `GET /api/settings/mcp`
+的回應保留原始的 `${VAR}` 文字，不會包含變數的值。沒有設定且沒有預設值的變數會讓該伺服器停下，
+並給出 `environment variable SANDBOX_TOKEN is not set (used in headers of server sandbox)`，
+而不是把字面的 `${SANDBOX_TOKEN}` 送出去；生物仍然會在沒有該伺服器的情況下啟動。
+`${VAR:}` 表示「未設定時為空」。模型在 `mcp_connect` 裡寫的內嵌定義按原樣使用，不會展開。
+
 ## 傳輸方式
 
 - **stdio**：啟動一個子程序（`command` + `args` + `env`）。最適合本機伺服器，延遲低，每個 agent 都有獨立的程序生命週期。
@@ -160,7 +178,7 @@ URL（不含查詢字串和憑證）以及原因。Settings > MCP 的 **Test con
 - **伺服器連不上（http / sse）。** 確認 URL 支援 SSE。有些伺服器同時提供 `/sse` 與 `/ws`；KohakuTerrarium 的 `http` / `sse` transport 需要 SSE 端點。
 - **伺服器連不上（streamable_http）。** 確認 URL 指向伺服器的 streamable HTTP 端點（例如 FastMCP 的 `streamable_http_app()` 路由），而不是舊式 SSE 路徑。
 - **找不到工具。** Meta-tool 清單是在連線當下計算的。如果伺服器在執行中熱新增了工具，請重新連線（`mcp_disconnect` + `mcp_connect`）。
-- **環境變數沒有替換。** MCP 設定支援 `${VAR}` 與 `${VAR:default}`，和生物設定一樣。
+- **環境變數沒有替換。** MCP 設定支援 `${VAR}` 與 `${VAR:default}`，和生物設定一樣。變數必須設定在執行 KT 的程序環境裡（網頁介面對應 `kt serve` / `kt app` 程序），而不只是你的 shell。
 - **伺服器在工作階段中途崩潰。** Stdio 伺服器會在下一次 `mcp_call` 時重新啟動。也請查看伺服器自己的日誌。
 
 ## 延伸閱讀

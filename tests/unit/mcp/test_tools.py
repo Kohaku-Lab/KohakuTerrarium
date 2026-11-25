@@ -381,9 +381,65 @@ class TestMcpConnectTool:
         mgr = _FakeManager()
         result = await MCPConnectTool().execute({"name": "s"}, context=_ctx(mgr))
         assert result.error == (
-            "Provide either 'command' (for stdio) or 'url' (for HTTP transports)."
+            "No registered MCP server named 's'. Provide either 'command' "
+            "(for stdio) or 'url' (for HTTP transports)."
         )
         assert mgr.connect_calls == []
+
+    async def test_registry_name_connects_with_env_vars_expanded(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setenv("KT_UT_SANDBOX_TOKEN", "s3cret")
+        (tmp_path / "mcp_servers.yaml").write_text(
+            "- name: sandbox\n"
+            "  transport: streamable_http\n"
+            "  url: http://h/mcp\n"
+            "  headers:\n"
+            "    Authorization: Bearer ${KT_UT_SANDBOX_TOKEN}\n",
+            encoding="utf-8",
+        )
+        mgr = _FakeManager(connect_result=_ConnInfo(tools=[{"name": "run"}]))
+        result = await MCPConnectTool().execute({"name": "sandbox"}, context=_ctx(mgr))
+        assert result.output == "Connected to sandbox (1 tools available): run"
+        sent = mgr.connect_calls[0]
+        assert sent.transport == "streamable_http"
+        assert sent.headers == {"Authorization": "Bearer s3cret"}
+
+    async def test_registry_name_with_unset_env_var_is_a_clear_error(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        monkeypatch.delenv("KT_UT_SANDBOX_TOKEN", raising=False)
+        (tmp_path / "mcp_servers.yaml").write_text(
+            "- name: sandbox\n"
+            "  url: http://h/mcp\n"
+            "  transport: streamable_http\n"
+            "  headers: {Authorization: 'Bearer ${KT_UT_SANDBOX_TOKEN}'}\n",
+            encoding="utf-8",
+        )
+        mgr = _FakeManager(connect_result=_ConnInfo(tools=[]))
+        result = await MCPConnectTool().execute({"name": "sandbox"}, context=_ctx(mgr))
+        assert result.error == (
+            "environment variable KT_UT_SANDBOX_TOKEN is not set "
+            "(used in headers of server sandbox)"
+        )
+        assert mgr.connect_calls == []
+
+    async def test_inline_definition_is_not_env_expanded(self, monkeypatch):
+        monkeypatch.setenv("KT_UT_SECRET", "s3cret")
+        mgr = _FakeManager(connect_result=_ConnInfo(tools=[]))
+        await MCPConnectTool().execute(
+            {
+                "name": "x",
+                "url": "http://h/mcp?k=${KT_UT_SECRET}",
+                "headers": {"A": "${KT_UT_SECRET}"},
+            },
+            context=_ctx(mgr),
+        )
+        sent = mgr.connect_calls[0]
+        assert sent.url == "http://h/mcp?k=${KT_UT_SECRET}"
+        assert sent.headers == {"A": "${KT_UT_SECRET}"}
 
     async def test_non_numeric_timeout_rejected(self):
         mgr = _FakeManager()

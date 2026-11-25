@@ -22,6 +22,8 @@ Opens a session to an MCP server so its tools become callable.
 
 - Give either a registry `name`, or `command`/`args` for stdio, or `url` for
   HTTP.
+- A registry entry's `${VAR}` markers are filled from the environment; an
+  inline definition is used as given.
 - Connecting is idempotent; an already-connected server returns success.
 
 ## Limits

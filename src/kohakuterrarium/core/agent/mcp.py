@@ -25,16 +25,7 @@ async def init_mcp(agent: Any) -> None:
         if not isinstance(srv_data, dict):
             continue
         try:
-            config = MCPServerConfig(
-                name=srv_data.get("name", ""),
-                transport=srv_data.get("transport", "stdio"),
-                command=srv_data.get("command", ""),
-                args=srv_data.get("args", []),
-                env=srv_data.get("env", {}),
-                url=srv_data.get("url", ""),
-                headers=srv_data.get("headers", {}),
-                connect_timeout=srv_data.get("connect_timeout", None),
-            )
+            config = MCPServerConfig.from_entry(srv_data)
             if config.name:
                 logger.info(
                     "MCP connecting",
