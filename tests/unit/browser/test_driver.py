@@ -9,6 +9,7 @@ not finish within ``LIMIT_S``. The first tests need no browser.
 
 import asyncio
 import inspect
+import io
 import os
 import re
 import sys
@@ -17,6 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+from PIL import Image
 
 from kohakuterrarium.browser import driver as driver_module
 from kohakuterrarium.browser.driver import (
@@ -251,6 +253,14 @@ class TestWithoutBrowser:
             await dialog.dismiss()
 
 
+TALL_BOX = (
+    "<!doctype html><title>Box</title><body style='margin:0;background:#fff'>"
+    "<div style='height:300px'>Head</div><section aria-label='Box' "
+    "style='height:5000px;background:linear-gradient(#f00 0 2500px,#00f 2500px 100%)'>"
+    "<button>Inside</button></section></body>"
+)
+
+
 @pytest.fixture(scope="module")
 def site():
     pytest.importorskip("playwright.async_api")
@@ -276,6 +286,7 @@ def site():
         "application/javascript",
     )
     server.html("/tall", "<!doctype html><div style='height:5000px'>tall</div>")
+    server.html("/tallbox", TALL_BOX)
     server.file(
         "/report.csv",
         b"a,b\n1,2\n",
@@ -593,7 +604,19 @@ async def test_screenshots_and_evaluate(live, site):
     tall = await live.screenshot(full_page=True, max_height=2000)
     assert (tall.meta["width"], tall.meta["height"]) == (1280, 2000)
     small = await live.screenshot(full_page=True, max_height=2000, max_bytes=2000)
-    assert small.mime_type in ("image/png", "image/jpeg")
+    assert small.mime_type == "image/jpeg" and len(small.image) <= 2000
+    assert "downscaled from 1280x2000 CSS px" in small.text
+    tiny = await live.screenshot(full_page=True, max_height=2000, max_bytes=200)
+    assert tiny.is_error and tiny.image is None
+    boxed = (await live.navigate(site.url("/tallbox"))).text
+    region = await live.screenshot(ref=ref_of(boxed, "region", "Box"), max_height=2000)
+    assert region.meta["height"] == 2000 and region.meta["width"] > 1000
+    assert "at most the top 2000 px of the element" in region.text
+    with Image.open(io.BytesIO(region.image)) as image:
+        rgb = image.convert("RGB")
+        right = rgb.width - 5
+        assert [rgb.getpixel((right, y)) for y in (5, 1990)] == [(255, 0, 0)] * 2
+    await live.navigate(site.url("/tall"))
     value = await live.evaluate("({a: [1, 2], t: document.title})")
     assert value.text.split("\n")[2] == '{"a": [1, 2], "t": ""}'
     await live.navigate(site.url("/form"))

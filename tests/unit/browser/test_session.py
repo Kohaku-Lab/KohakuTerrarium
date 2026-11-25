@@ -30,6 +30,7 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
 )
 from kohakuterrarium.browser import actions as actions_module
+from kohakuterrarium.browser.images import image_size
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.protocol import NavResponse, ProbeFrames
 from kohakuterrarium.browser.proxy import FilteringProxy
@@ -44,6 +45,7 @@ from tests.helpers.browser_driver import (
     ScriptedDriver,
     ScriptedPage,
     jpeg_bytes,
+    noise_image,
     png_bytes,
 )
 
@@ -1405,8 +1407,30 @@ class TestScreenshotAndEvaluate:
         qualities = [k["quality"] for n, k in page.calls if n == "screenshot"]
         assert qualities[-3:] == [None, 75, 50]
         page.handlers["screenshot"] = lambda **_: png_bytes(1280, 800, 5000)
-        over = await session.screenshot(max_bytes=1000)
-        assert "over the 1000-byte budget" in over.text
+        broken = await session.screenshot(max_bytes=1000)
+        assert broken.is_error and broken.image is None
+
+        def noisy(image_type, quality, **_):
+            return noise_image(1280, 800, image_type, quality)
+
+        page.handlers["screenshot"] = noisy
+        budget = len(noise_image(1280, 800, "jpeg", 30)) // 3
+        scaled = await session.screenshot(max_bytes=budget)
+        assert not scaled.is_error and len(scaled.image) <= budget
+        width, height = scaled.meta["width"], scaled.meta["height"]
+        assert image_size(scaled.image) == (width, height) and width < 1280
+        assert (
+            f"Screenshot: {width}x{height} px, downscaled from 1280x800 CSS px to "
+            f"fit the {budget}-byte budget (multiply image coordinates by "
+            f"{1280 / width:.3g} for CSS px), image/jpeg, {len(scaled.image)} bytes"
+        ) in scaled.text
+        floor = await session.screenshot(max_bytes=1000)
+        assert floor.is_error and floor.image is None
+        assert (
+            "Screenshot not returned: even downscaled it stays over the "
+            "1000-byte budget; screenshot one element (ref) or the viewport "
+            "instead."
+        ) in floor.text
 
     async def test_ref_and_full_page(self, made):
         session, driver = made
@@ -1417,6 +1441,17 @@ class TestScreenshotAndEvaluate:
         shots = [k for n, k in page.calls if n == "screenshot"]
         assert shots[0]["ref"] == "e2"
         assert shots[1]["full_page"] and shots[1]["max_height"] == 1234
+        assert "at most the top" not in (await session.screenshot(ref="e2")).text
+        page.handlers["screenshot"] = lambda max_height, **_: png_bytes(640, max_height)
+        element = await session.screenshot(ref="e2", max_height=900)
+        assert "The image shows at most the top 900 px of the element." in (
+            element.text
+        )
+        full = await session.screenshot(full_page=True, max_height=1234)
+        assert "The image shows at most the top 1234 px of the page." in full.text
+        viewport = await session.screenshot(max_height=800)
+        assert "at most the top" not in viewport.text
+        del page.handlers["screenshot"]
         stale = await session.screenshot(ref="e9")
         assert stale.is_error and stale.image is None
         assert "Screenshot not taken: ref e9 is not on the page" in stale.text

@@ -180,7 +180,7 @@ class PageDriver(Protocol):
         quality: int | None,
         timeout: float,
     ) -> bytes:
-        """A CSS-scale screenshot; a full page is clipped to ``max_height`` CSS pixels."""
+        """A CSS-scale screenshot; a full page or element is clipped to ``max_height`` CSS px."""
 
     async def bring_to_front(self, timeout: float) -> None: ...
 

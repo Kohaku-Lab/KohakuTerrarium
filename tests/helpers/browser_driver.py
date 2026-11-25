@@ -11,9 +11,13 @@ the fake browser process would still be running.
 
 import asyncio
 import inspect
+import io
 import itertools
+import random
 import struct
 from typing import Any
+
+from PIL import Image
 
 from kohakuterrarium.browser.errors import DriverDisconnectedError, PageClosedError
 from kohakuterrarium.browser.launch import LaunchPlan
@@ -39,6 +43,20 @@ def jpeg_bytes(width: int, height: int, padding: int = 0) -> bytes:
     """A JPEG start with an SOF0 segment announcing ``width`` x ``height``."""
     sof = b"\xff\xc0" + struct.pack(">HBHH", 11, 8, height, width) + b"\x03\x01\x22\x00"
     return b"\xff\xd8" + sof + b"\x00" * padding
+
+
+def noise_image(
+    width: int, height: int, image_type: str = "png", quality: int | None = None
+) -> bytes:
+    """A real PNG or JPEG of random pixels, which compresses badly."""
+    pixels = random.Random(width * 7919 + height).randbytes(width * height * 3)
+    image = Image.frombytes("RGB", (width, height), pixels)
+    out = io.BytesIO()
+    if image_type == "png":
+        image.save(out, "PNG")
+    else:
+        image.save(out, "JPEG", quality=quality or 75)
+    return out.getvalue()
 
 
 class ScriptedDialog:

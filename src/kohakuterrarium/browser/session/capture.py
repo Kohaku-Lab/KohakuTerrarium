@@ -1,5 +1,6 @@
 """``screenshot`` and ``evaluate``: pixels and script results from the page."""
 
+import asyncio
 import json
 from typing import Any
 
@@ -14,7 +15,7 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
     PageNavigatingError,
 )
-from kohakuterrarium.browser.images import image_size, mime_type
+from kohakuterrarium.browser.images import downscale, image_size, mime_type
 from kohakuterrarium.browser.observe import origin_of
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.session.types import (
@@ -56,9 +57,10 @@ class SessionCaptureMixin:
         max_height: int = FULL_PAGE_MAX_HEIGHT,
         tab_id: str | None = None,
     ) -> BrowserResult:
-        """A CSS-pixel screenshot: viewport, one element, or a height-capped full page.
+        """A CSS-pixel screenshot: viewport, or one element or the full page capped in height.
 
-        PNG unless it exceeds ``max_bytes``; then JPEG at falling quality.
+        PNG unless it exceeds ``max_bytes``; then JPEG at falling quality,
+        then a downscaled JPEG, else an error result without an image.
         """
         if ref is not None and full_page:
             raise ActionSpecError("give either ref or full_page, not both")
@@ -89,10 +91,30 @@ class SessionCaptureMixin:
                 if max_bytes is None or len(data) <= max_bytes:
                     break
             width, height = image_size(data) or (0, 0)
-            mime = mime_type(data)
-            line = f"Screenshot: {width}x{height} CSS px, {mime}, {len(data)} bytes"
+            if (ref is not None or full_page) and height >= max_height:
+                what = "page" if full_page else "element"
+                op.notes.insert(
+                    0, f"The image shows at most the top {max_height} px of the {what}."
+                )
+            size = f"{width}x{height} CSS px"
             if max_bytes is not None and len(data) > max_bytes:
-                line += f" (over the {max_bytes}-byte budget even as JPEG)"
+                data = await asyncio.to_thread(downscale, data, max_bytes)
+                if data is None:
+                    line = (
+                        f"Screenshot not returned: even downscaled it stays over the "
+                        f"{max_bytes}-byte budget; screenshot one element (ref) or "
+                        "the viewport instead."
+                    )
+                    return self._error_result(tab, op, line, "")
+                css_width = width
+                width, height = image_size(data) or (0, 0)
+                size = (
+                    f"{width}x{height} px, downscaled from {size} to fit the "
+                    f"{max_bytes}-byte budget (multiply image coordinates by "
+                    f"{css_width / max(width, 1):.3g} for CSS px)"
+                )
+            mime = mime_type(data)
+            line = f"Screenshot: {size}, {mime}, {len(data)} bytes"
             text = fmt.join_sections(
                 self._header(tab, tab.page.url), line, self._notes(op, None)
             )

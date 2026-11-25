@@ -1,8 +1,15 @@
-"""Pixel size and MIME type of the PNG and JPEG screenshots the driver returns."""
+"""Pixel size, MIME type and downscaling of the screenshots the driver returns."""
 
+import io
+import math
 import struct
+import warnings
+
+from PIL import Image
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+DOWNSCALE_MIN_SIDE = 200
+DOWNSCALE_QUALITY = 50
 _JPEG_FRAMES = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB})
 
 
@@ -35,3 +42,34 @@ def image_size(data: bytes) -> tuple[int, int] | None:
             return width, height
         i += 2 + length
     return None
+
+
+def downscale(
+    data: bytes, max_bytes: int, min_side: int = DOWNSCALE_MIN_SIDE
+) -> bytes | None:
+    """``data`` shrunk into a JPEG of at most ``max_bytes``, keeping its aspect ratio.
+
+    ``None`` when it cannot be read or would need a side shorter than
+    ``min_side``. CPU-bound: run it in a worker thread.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as source:
+                image = source.convert("RGB")
+    except (OSError, ValueError, Image.DecompressionBombError, Warning):
+        return None
+    width, height = image.size
+    scale, size = 1.0, len(data)
+    while True:
+        scale *= min(0.9, max(0.5, math.sqrt(max_bytes / size)))
+        shape = (round(width * scale), round(height * scale))
+        if min(shape) < min_side:
+            return None
+        out = io.BytesIO()
+        image.resize(shape, Image.Resampling.LANCZOS).save(
+            out, "JPEG", quality=DOWNSCALE_QUALITY
+        )
+        size = out.tell()
+        if size <= max_bytes:
+            return out.getvalue()

@@ -1,7 +1,12 @@
 """Unit tests for ``kohakuterrarium.browser.images``: PNG / JPEG size and type."""
 
-from kohakuterrarium.browser.images import image_size, mime_type
-from tests.helpers.browser_driver import jpeg_bytes, png_bytes
+from kohakuterrarium.browser.images import (
+    DOWNSCALE_MIN_SIDE,
+    downscale,
+    image_size,
+    mime_type,
+)
+from tests.helpers.browser_driver import jpeg_bytes, noise_image, png_bytes
 
 
 def test_png():
@@ -21,3 +26,22 @@ def test_unknown_or_truncated():
     )
     assert image_size(b"\xff\xd8\x00\x00\x00\x00\x00\x00\x00\x00\x00") is None
     assert image_size(b"\xff\xd8") is None
+
+
+def test_downscale_fits_the_budget_as_a_smaller_jpeg():
+    data = noise_image(800, 600, "jpeg", 30)
+    budget = len(data) // 3
+    smaller = downscale(data, budget)
+    assert smaller is not None and len(smaller) <= budget
+    assert mime_type(smaller) == "image/jpeg"
+    width, height = image_size(smaller)
+    assert width < 800 and height < 600
+    assert abs(width / height - 800 / 600) < 0.02
+
+
+def test_downscale_gives_up_below_the_floor_or_on_unreadable_data():
+    data = noise_image(800, 600, "jpeg", 30)
+    assert downscale(data, 500) is None
+    assert downscale(data, len(data) // 3, min_side=590) is None
+    assert downscale(png_bytes(800, 600, 100), 50) is None
+    assert DOWNSCALE_MIN_SIDE >= 100

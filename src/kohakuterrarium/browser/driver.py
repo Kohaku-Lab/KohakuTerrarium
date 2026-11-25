@@ -54,6 +54,7 @@ _TIMEOUT_HINTS = (
 _CALL_PREFIX = re.compile(r"^(?:Error: )?(?:[A-Za-z]+\.[A-Za-z_]+: )?(?:Error: )?")
 _TIMEOUT_MS = re.compile(r"Timeout (\d+)ms exceeded")
 _NET_ERROR = re.compile(r"\bnet::ERR_[A-Z_]{1,60}")
+_SCROLL_JS = "() => [window.scrollX, window.scrollY]"
 _SCROLL_HEIGHT_JS = (
     "() => Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"
     " document.body ? document.body.scrollHeight : 0)"
@@ -433,7 +434,7 @@ class PlaywrightPage:
         if quality is not None:
             options["quality"] = quality
         if ref is not None:
-            return await self._run(lambda: self._ref(ref).screenshot(**options))
+            return await self._element_shot(ref, max_height, options, timeout)
         if full_page:
             options["full_page"] = True
             height = await self._run(
@@ -444,6 +445,26 @@ class PlaywrightPage:
             width = (self._page.viewport_size or {"width": 1280})["width"]
             if isinstance(height, (int, float)) and height > max_height:
                 options["clip"] = {"x": 0, "y": 0, "width": width, "height": max_height}
+        return await self._run(lambda: self._page.screenshot(**options))
+
+    async def _element_shot(
+        self, ref: str, max_height: int, options: dict[str, Any], timeout: float
+    ) -> bytes:
+        """The element ``ref``, clipped to its top ``max_height`` CSS pixels."""
+        locator = self._ref(ref)
+        box = await self._run(lambda: locator.bounding_box(timeout=timeout * 1000))
+        if box is None or box["height"] <= max_height:
+            return await self._run(lambda: locator.screenshot(**options))
+        scroll = await self._run(
+            lambda: asyncio.wait_for(self._page.evaluate(_SCROLL_JS), timeout)
+        )
+        options["full_page"] = True
+        options["clip"] = {
+            "x": box["x"] + scroll[0],
+            "y": box["y"] + scroll[1],
+            "width": box["width"],
+            "height": max_height,
+        }
         return await self._run(lambda: self._page.screenshot(**options))
 
     async def bring_to_front(self, timeout: float) -> None:
