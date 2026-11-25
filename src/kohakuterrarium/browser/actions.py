@@ -7,6 +7,7 @@ them in order through an :class:`ActionContext` and stops at the first
 failure or dialog.
 """
 
+import asyncio
 import json
 import math
 import re
@@ -24,10 +25,13 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
 )
 from kohakuterrarium.browser.protocol import PageDriver
+from kohakuterrarium.browser.tasks import discard
 from kohakuterrarium.errors import KTError
 
 MAX_ACTIONS = 20
 WAIT_MAX_S = 10.0
+BATCH_MIN_S = 60.0
+BATCH_SLOW_ACTIONS = 3
 MAX_TEXT_CHARS = 10000
 SLOW_KEY_S = 0.05
 SCROLL_DEFAULT_PX = 600
@@ -560,12 +564,22 @@ class _Reader:
         return tuple(value)
 
 
-async def run_batch(actions: Sequence[Action], ctx: ActionContext) -> BatchReport:
+def batch_deadline_s(action_timeout: float) -> float:
+    """Seconds one batch may run: ``BATCH_MIN_S``, or more for slow action timeouts."""
+    return max(BATCH_MIN_S, BATCH_SLOW_ACTIONS * (action_timeout + WAIT_MAX_S))
+
+
+async def run_batch(
+    actions: Sequence[Action], ctx: ActionContext, deadline_s: float | None = None
+) -> BatchReport:
     """Run ``actions`` in order; stop at the first failure or interrupting dialog.
 
     An action whose main-frame navigation the network policy blocked is a
-    failure too.
+    failure too, and so is the action running when the batch has taken
+    ``deadline_s`` (default :func:`batch_deadline_s` of ``ctx.timeout``).
     """
+    limit = batch_deadline_s(ctx.timeout) if deadline_s is None else deadline_s
+    deadline = asyncio.get_running_loop().time() + limit
     outcomes: list[Outcome] = []
     stopped = False
     lost = False
@@ -574,7 +588,7 @@ async def run_batch(actions: Sequence[Action], ctx: ActionContext) -> BatchRepor
             outcomes.append(Outcome(action, SKIPPED))
             continue
         try:
-            reason = await execute(action, ctx)
+            reason = await _execute_by(action, ctx, deadline, limit)
         except DialogOpenedError as exc:
             outcomes.append(Outcome(action, PENDING, str(exc)))
             stopped = True
@@ -600,6 +614,30 @@ async def run_batch(actions: Sequence[Action], ctx: ActionContext) -> BatchRepor
             continue
         outcomes.append(Outcome(action, DONE, reason))
     return BatchReport(outcomes, lost)
+
+
+async def _execute_by(
+    action: Action, ctx: ActionContext, deadline: float, limit: float
+) -> str:
+    """:func:`execute`, failed with ``ActionFailedError`` once the loop time passes ``deadline``."""
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        raise ActionFailedError(
+            f"not started: the batch reached its {limit:g} s time limit"
+        )
+    task = asyncio.ensure_future(execute(action, ctx))
+    try:
+        done, _ = await asyncio.wait({task}, timeout=remaining)
+    except asyncio.CancelledError:
+        discard(task)
+        raise
+    if task in done:
+        return task.result()
+    discard(task)
+    await asyncio.wait({task})
+    raise ActionFailedError(
+        f"the batch reached its {limit:g} s time limit while this action ran"
+    )
 
 
 def _reason(exc: BaseException, action: Action) -> str:

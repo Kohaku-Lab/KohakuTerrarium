@@ -29,6 +29,7 @@ from kohakuterrarium.browser.errors import (
     NotFileInputError,
     PageClosedError,
 )
+from kohakuterrarium.browser import actions as actions_module
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.protocol import NavResponse, ProbeFrames
 from kohakuterrarium.browser.proxy import FilteringProxy
@@ -741,6 +742,32 @@ class TestAct:
             "not executed",
         ]
         assert "fill" not in driver.browser.page.names()
+
+    async def test_a_batch_past_its_deadline_stops_the_running_action(
+        self, made, monkeypatch
+    ):
+        session, driver = made
+        monkeypatch.setattr(actions_module, "batch_deadline_s", lambda timeout: 0.2)
+        await session.snapshot()
+        page = driver.browser.page
+        page.hang.add("click")
+        start = time.perf_counter()
+        result = await session.act(
+            [{"kind": "click", "ref": "e2"}, {"kind": "press", "key": "Enter"}]
+        )
+        assert time.perf_counter() - start < 0.7
+        assert result.is_error and not result.meta["ok"]
+        lines = result.text.splitlines()
+        assert lines[1:4] == [
+            "Actions: 0 of 2 done; stopped at 1 (failed)",
+            "1. click e2: failed — the batch reached its 0.2 s time limit while this "
+            "action ran",
+            "2. press Enter: not executed",
+        ]
+        assert "press" not in page.names()
+        page.hang.clear()
+        again = await session.act([{"kind": "click", "ref": "e2"}])
+        assert again.meta["ok"]
 
     async def test_invalid_actions_fail_before_launch(self, made):
         session, driver = made

@@ -6,6 +6,8 @@ import json
 import pytest
 
 from kohakuterrarium.browser.actions import (
+    BATCH_MIN_S,
+    BATCH_SLOW_ACTIONS,
     DONE,
     FAILED,
     MAX_ACTIONS,
@@ -15,6 +17,7 @@ from kohakuterrarium.browser.actions import (
     Action,
     BatchReport,
     Outcome,
+    batch_deadline_s,
     format_details,
     format_report,
     parse_actions,
@@ -250,9 +253,9 @@ class FakeContext:
             raise self.pause_error
 
 
-async def run(items, ctx=None, files=()):
+async def run(items, ctx=None, files=(), deadline_s=None):
     ctx = ctx or FakeContext(files)
-    report = await run_batch(parse_actions(items, files=files), ctx)
+    report = await run_batch(parse_actions(items, files=files), ctx, deadline_s)
     return report, ctx
 
 
@@ -398,6 +401,44 @@ class TestRunBatch:
         assert report.outcomes[1].reason == "it led to c.test, which the policy blocked"
         assert report.stopped.action.index == 1
         assert [c[0] for c in ctx.page.calls] == ["click"]
+
+    async def test_the_batch_deadline_fails_the_running_action(self):
+        ctx = FakeContext()
+        started = []
+
+        async def hang(*args, **kwargs):
+            started.append(args)
+            await asyncio.Event().wait()
+
+        ctx.page.__dict__["hover"] = hang
+        report, _ = await run(
+            [CLICK, {"kind": "hover", "ref": "e6"}, CLICK], ctx, deadline_s=0.05
+        )
+        assert [o.status for o in report.outcomes] == [DONE, FAILED, SKIPPED]
+        assert report.outcomes[1].reason == (
+            "the batch reached its 0.05 s time limit while this action ran"
+        )
+        assert report.stopped.action.index == 1
+        assert len(started) == 1
+        assert [c[0] for c in ctx.page.calls] == ["click"]
+
+    async def test_an_action_due_after_the_deadline_is_not_started(self):
+        ctx = FakeContext()
+
+        async def slow_settle():
+            await asyncio.sleep(0.1)
+
+        ctx.settle = slow_settle
+        report, _ = await run([CLICK, CLICK, CLICK], ctx, deadline_s=0.05)
+        assert [o.status for o in report.outcomes] == [DONE, FAILED, SKIPPED]
+        assert report.outcomes[1].reason == (
+            "not started: the batch reached its 0.05 s time limit"
+        )
+        assert [c[0] for c in ctx.page.calls] == ["click"]
+
+    def test_the_default_deadline_leaves_room_for_slow_actions(self):
+        assert batch_deadline_s(5.0) == BATCH_MIN_S
+        assert batch_deadline_s(100.0) == BATCH_SLOW_ACTIONS * (100.0 + WAIT_MAX_S)
 
 
 class TestFormatReport:
