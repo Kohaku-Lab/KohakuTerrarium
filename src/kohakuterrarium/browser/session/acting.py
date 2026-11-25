@@ -66,7 +66,7 @@ class ActContext:
         self._tab = tab
         self._fresh = fresh
         self._done = 0
-        self._seen = 0
+        self._seen = session._nav_counts.get(tab.id, 0)
         self._mark = session._stack.proxy.mark()
         self.navigated_at: int | None = None
         session._nav_event(tab).clear()
@@ -122,9 +122,9 @@ class ActContext:
         stack = session._stack
         if stack is None:
             return None
-        chain = session._nav_urls.get(self._tab.id, [])
+        count = session._nav_counts.get(self._tab.id, 0)
         mark, self._mark = self._mark, stack.proxy.mark()
-        moved, self._seen = len(chain) > self._seen, len(chain)
+        moved, self._seen = count > self._seen, count
         if not moved:
             return None
         blocked = session._blocked_hops([self.page.url], mark, self._tab)
@@ -152,6 +152,7 @@ class SessionActMixin:
     _secrets: SecretStore
     _last: dict[str, Observation]
     _nav_urls: dict[str, list[str]]
+    _nav_counts: dict[str, int]
 
     async def act(
         self,

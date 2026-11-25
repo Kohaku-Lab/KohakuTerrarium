@@ -103,6 +103,7 @@ class SessionLifecycleMixin:
         self._refused_pages: set[PageDriver] = set()
         self._arrived: list[PageDriver] = []
         self._nav_urls: dict[str, list[str]] = {}
+        self._nav_counts: dict[str, int] = {}
         self._tabs = TabRegistry()
         self._refs = RefBook()
         self._dialogs = DialogManager()
@@ -326,6 +327,7 @@ class SessionLifecycleMixin:
         self._downloads.clear()
         self._nav.clear()
         self._nav_urls.clear()
+        self._nav_counts.clear()
         self._last.clear()
         self._blocked.clear()
         self._refused_pages.clear()
@@ -537,10 +539,11 @@ class SessionLifecycleMixin:
         if tab is None:
             return
         self._nav_event(tab).set()
+        self._nav_counts[tab.id] = self._nav_counts.get(tab.id, 0) + 1
         if url:
             chain = self._nav_urls.setdefault(tab.id, [])
-            if len(chain) < NAV_CHAIN_MAX:
-                chain.append(url)
+            chain.append(url)
+            del chain[:-NAV_CHAIN_MAX]
 
     def _nav_event(self, tab: Tab) -> asyncio.Event:
         event = self._nav.get(tab.id)

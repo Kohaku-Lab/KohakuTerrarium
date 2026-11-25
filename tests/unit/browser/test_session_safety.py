@@ -589,6 +589,34 @@ class TestBlockedAttribution:
         ]
         await session.close()
 
+    async def test_a_blocked_landing_after_many_navigations_is_still_attributed(
+        self, tmp_path
+    ):
+        session, driver = make(tmp_path, block_hosts=["c.test:9000"])
+        await session.snapshot()
+        page = driver.browser.page
+        hops = iter(range(100))
+
+        async def click(ref, **_):
+            if ref == "e4":
+                driver.browser.sink.navigation_started(page, "http://c.test:9000/q3")
+                await self.proxied_get(session, "c.test:9000")
+                return
+            for _ in range(4):
+                driver.browser.sink.navigation_started(
+                    page, f"http://shop.test/p{next(hops)}"
+                )
+
+        page.handlers["click"] = click
+        actions = [{"kind": "click", "ref": "e2"}] * 8
+        actions += [{"kind": "click", "ref": "e4"}, {"kind": "click", "ref": "e2"}]
+        result = await session.act(actions)
+        lines = result.text.splitlines()
+        assert lines[1] == "Actions: 8 of 10 done; stopped at 9 (failed)"
+        assert lines[10].startswith("9. click e4: failed — it led to c.test:9000")
+        assert lines[11] == "10. click e2: not executed"
+        await session.close()
+
     async def test_a_later_action_whose_navigation_was_blocked_is_the_one_failed(
         self, tmp_path
     ):
