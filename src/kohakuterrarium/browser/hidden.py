@@ -2,8 +2,12 @@
 
 ``PROBE_JS`` runs in each frame (``frame.evaluate(PROBE_JS)``) and reports
 the text the user cannot see but the ARIA snapshot still contains, plus the
-current password-field values. The Python half drops that text from a parsed
-snapshot, never touching interactive elements, and redacts passwords.
+whole current value of every password field (and of a field whose
+``autocomplete`` names a password, as one toggled to show its text is). The
+Python half drops that text from a parsed snapshot, never touching
+interactive elements, and redacts passwords. Chromium's ARIA snapshot
+carries password values in plain text, so where the probe did not run every
+text-field value is withheld instead.
 """
 
 from collections.abc import Iterable
@@ -116,8 +120,9 @@ PROBE_JS = r"""
       if (node.nodeType !== Node.ELEMENT_NODE || SKIP.has(node.tagName)) continue;
       const st = getComputedStyle(node);
       if (st.display === "none") continue;
-      if (node.tagName === "INPUT" && node.type === "password" && node.value
-          && passwords.length < MAX_PASSWORDS) passwords.push(node.value.slice(0, MAX_LEN));
+      if (node.tagName === "INPUT" && node.value && passwords.length < MAX_PASSWORDS
+          && (node.type === "password" || /password/i.test(node.getAttribute("autocomplete") || "")))
+        passwords.push(node.value);
       const flag = inherited || boxHides(st, node);
       const kids = node.shadowRoot ? [...node.shadowRoot.childNodes, ...node.childNodes] : [...node.childNodes];
       for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], flag]);
@@ -141,6 +146,8 @@ PROBE_JS = r"""
 """
 
 REDACTED = "(redacted)"
+WITHHELD = "(withheld)"
+TEXT_FIELD_ROLE = "textbox"
 MAX_STRINGS = 1000
 PROBE_CLIP_CHARS = 1000
 MAX_STRING_CHARS = PROBE_CLIP_CHARS
@@ -149,10 +156,10 @@ MIN_EXCISE_CHARS = 16
 MIN_SUBSTRING_PASSWORD = 4
 
 
-def _strings(value: object) -> list[str]:
+def _strings(value: object, limit: int | None = MAX_STRING_CHARS) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [s[:MAX_STRING_CHARS] for s in value if isinstance(s, str)]
+    return [s[:limit] for s in value if isinstance(s, str)]
 
 
 @dataclass(frozen=True)
@@ -186,7 +193,7 @@ class ProbeResult:
                 for text in _strings(frame.get(key)):
                     if len(target) < MAX_STRINGS and (norm := normalize(text)):
                         target.add(norm)
-            for value in _strings(frame.get("passwords")):
+            for value in _strings(frame.get("passwords"), None):
                 if (
                     value.strip()
                     and value not in passwords
@@ -326,6 +333,22 @@ def _redact(nodes: list[Node], secrets: list[str], exact: set[str]) -> list[Node
             value=_redact_text(node.value, secrets, exact),
             raw=_redact_text(node.raw, secrets, exact) or "",
             children=_redact(node.children, secrets, exact),
+        )
+        for node in nodes
+    ]
+
+
+def withhold_field_values(nodes: list[Node]) -> list[Node]:
+    """Replace the value of every text field (``textbox``) with ``WITHHELD``."""
+    return [
+        replace(
+            node,
+            value=(
+                WITHHELD
+                if node.role == TEXT_FIELD_ROLE and node.value is not None
+                else node.value
+            ),
+            children=withhold_field_values(node.children),
         )
         for node in nodes
     ]

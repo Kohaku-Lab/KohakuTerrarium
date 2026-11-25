@@ -740,18 +740,33 @@ class TestObservation:
         session, driver = made
         await session.snapshot()
         page = driver.browser.page
+        page.snapshot_text = PAGE + '\n- textbox "Password" [ref=e9]: pw-plain-9876'
         if failure == "raise":
             page.raises["probe"] = DriverError("probe exploded")
         elif failure == "hang":
             page.hang.add("probe")
         else:
-            page.handlers["probe"] = lambda **_: ProbeFrames([], 2)
+            page.handlers["probe"] = lambda **_: ProbeFrames(
+                [{"hidden": [], "visible": [], "passwords": []}], 2
+            )
         result = await session.snapshot()
         assert 'button "Buy" [ref=e2]' in result.text
+        assert "pw-plain-9876" not in result.text
+        assert 'textbox "Password" [ref=e9]: (withheld)' in result.text
+        withheld = "text-field values are withheld"
         if failure == "frame":
             assert "Hidden-text check failed in 2 frames" in result.text
         else:
             assert "Hidden-text check skipped" in result.text
+        assert withheld in result.text.split(f"</{WRAPPER_TAG}>")[1]
+
+    async def test_a_working_probe_shows_text_field_values(self, made):
+        session, driver = made
+        await session.snapshot()
+        driver.browser.page.snapshot_text = PAGE + '\n- textbox "City" [ref=e9]: Kyoto'
+        result = await session.snapshot()
+        assert 'textbox "City" [ref=e9]: Kyoto' in result.text
+        assert "withheld" not in result.text
 
     async def test_filters_and_empty_query(self, made):
         session, _ = made

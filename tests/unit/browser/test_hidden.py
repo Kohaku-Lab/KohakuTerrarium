@@ -16,11 +16,13 @@ from kohakuterrarium.browser.hidden import (
     PROBE_CLIP_CHARS,
     PROBE_JS,
     REDACTED,
+    WITHHELD,
     HiddenOutcome,
     ProbeResult,
     apply_probe,
     drop_hidden,
     redact_passwords,
+    withhold_field_values,
 )
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "browser"
@@ -115,6 +117,49 @@ class TestProbeResult:
 
     def test_empty_password_values_are_ignored(self):
         assert ProbeResult.merge([{"passwords": ["", "  ", "ok"]}]).passwords == ("ok",)
+
+    def test_passwords_are_kept_whole(self):
+        long_value = "pw-" + "z" * (MAX_STRING_CHARS * 3)
+        result = ProbeResult.merge([{"passwords": [long_value]}])
+        assert result.passwords == (long_value,)
+        nodes = snap.parse(
+            f'- textbox "P" [ref=e1]: {long_value}\n- paragraph: echo {long_value} end'
+        )
+        text = snap.to_text(apply_probe(nodes, result).nodes)
+        assert "zzzz" not in text
+        assert (
+            text
+            == f'- textbox "P" [ref=e1]: {REDACTED}\n- paragraph: echo {REDACTED} end'
+        )
+
+    def test_the_probe_sends_password_values_unclipped(self):
+        body = PROBE_JS.split("passwords.push(", 1)[1].split(");", 1)[0]
+        assert body == "node.value"
+
+
+class TestWithholdFieldValues:
+    def test_every_text_field_value_is_withheld_and_nothing_else(self):
+        nodes = snap.parse(
+            '- textbox "User" [ref=e1]: alice\n'
+            '- textbox "Pass" [ref=e2]: hunter2-plain\n'
+            '- textbox "Empty" [ref=e3]\n'
+            '- combobox "Theme" [ref=e4]: Dark\n'
+            "- paragraph: Some text\n"
+            '- iframe [ref=e5]:\n  - textbox "Card" [ref=f1e1]: 4111'
+        )
+        text = snap.to_text(withhold_field_values(nodes))
+        assert text.splitlines() == [
+            f'- textbox "User" [ref=e1]: {WITHHELD}',
+            f'- textbox "Pass" [ref=e2]: {WITHHELD}',
+            '- textbox "Empty" [ref=e3]',
+            '- combobox "Theme" [ref=e4]: Dark',
+            "- paragraph: Some text",
+            "- iframe [ref=e5]:",
+            f'  - textbox "Card" [ref=f1e1]: {WITHHELD}',
+        ]
+        assert snap.fingerprints(withhold_field_values(nodes)) == snap.fingerprints(
+            nodes
+        )
 
 
 class TestDropHidden:
@@ -344,3 +389,31 @@ class TestProbeInChromium:
         raw = page.evaluate(PROBE_JS)
         assert raw["truncated"] is True
         assert len(raw["hidden"]) <= 300
+
+    def test_the_aria_snapshot_carries_password_values(self, chromium_page):
+        """Why a failed probe must withhold text-field values: Chromium shows them."""
+        page = chromium_page
+        page.set_content(
+            '<input aria-label="Pass" type="password">'
+            '<input aria-label="Shown" type="password" autocomplete="current-password">'
+        )
+        page.fill("[aria-label=Pass]", "typed-pw-value")
+        page.fill("[aria-label=Shown]", "toggled-pw-value")
+        page.evaluate("document.querySelector('[aria-label=Shown]').type = 'text'")
+        text = page.aria_snapshot(mode="ai")
+        assert "typed-pw-value" in text and "toggled-pw-value" in text
+        result = ProbeResult.merge([page.evaluate(PROBE_JS)])
+        assert set(result.passwords) == {"typed-pw-value", "toggled-pw-value"}
+        shown = snap.to_text(apply_probe(snap.parse(text), result).nodes)
+        assert "pw-value" not in shown
+
+    def test_a_long_password_is_reported_whole(self, chromium_page):
+        page = chromium_page
+        long_value = "Lp-" + "q7" * 1500
+        page.set_content('<input aria-label="Pass" type="password">')
+        page.fill("[aria-label=Pass]", long_value)
+        result = ProbeResult.merge([page.evaluate(PROBE_JS)])
+        assert result.passwords == (long_value,)
+        text = page.aria_snapshot(mode="ai")
+        shown = snap.to_text(apply_probe(snap.parse(text), result).nodes)
+        assert "q7q7" not in shown and REDACTED in shown

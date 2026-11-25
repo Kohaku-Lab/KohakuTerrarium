@@ -5,7 +5,9 @@ Raw snapshot text (secrets redacted, then cut at ``RAW_SNAPSHOT_MAX_CHARS``) →
 ``snapshot.clean``. An ``iframe`` line whose frame shows another origin than
 the page gets ``[origin=...]``. The CPU-heavy steps run in a worker thread. A
 probe that fails or times out never fails the observation; it leaves a note
-instead, and a failed frame read only leaves the frame lines without origins.
+instead and every text-field value is withheld, since the snapshot carries
+password values the probe would have redacted. A failed frame read only
+leaves the frame lines without origins.
 """
 
 import asyncio
@@ -23,7 +25,12 @@ from kohakuterrarium.browser.errors import (
     DriverError,
     PageClosedError,
 )
-from kohakuterrarium.browser.hidden import PROBE_JS, ProbeResult, apply_probe
+from kohakuterrarium.browser.hidden import (
+    PROBE_JS,
+    ProbeResult,
+    apply_probe,
+    withhold_field_values,
+)
 from kohakuterrarium.browser.policy import NetworkPolicy, parse_ip
 from kohakuterrarium.browser.protocol import (
     DOCUMENT_ID_JS,
@@ -39,6 +46,7 @@ Call = Callable[[Callable[[], Awaitable[Any]], float, str], Awaitable[Any]]
 Redact = Callable[[str], str]
 RAW_SNAPSHOT_MAX_CHARS = 1_000_000
 MAX_FRAME_ORIGINS = 20
+WITHHELD_NOTE = "text-field values are withheld"
 
 _IFRAME_REF = re.compile(r"^[ \t]*- iframe\b[^\n]*?\[ref=([^\]\s]+)\]", re.MULTILINE)
 
@@ -133,13 +141,15 @@ def _process(
     redact: Redact | None,
     views: dict[str, FrameView] | None = None,
     page_origin: str | None = None,
+    withhold: bool = False,
 ) -> dict[str, Any]:
     prepared, cut_from, kept = _prepare(text, limit, redact)
     raw, boxes = snap.split_boxes(snap.parse(prepared))
     views = views or {}
     origins = _origins(views, page_origin, redact)
     outcome = apply_probe(raw, ProbeResult.merge(results))
-    nodes = _mark_frames(outcome.nodes, origins) if origins else outcome.nodes
+    nodes = withhold_field_values(outcome.nodes) if withhold else outcome.nodes
+    nodes = _mark_frames(nodes, origins) if origins else nodes
     return {
         "raw": raw,
         "nodes": snap.clean(nodes),
@@ -263,17 +273,28 @@ async def observe(
         if frames.failed:
             note = (
                 f"Hidden-text check failed in {frames.failed} frame"
-                f"{'' if frames.failed == 1 else 's'}; visually hidden text there may be shown."
+                f"{'' if frames.failed == 1 else 's'}; visually hidden text there "
+                f"may be shown, and {WITHHELD_NOTE}."
             )
     except (DriverDisconnectedError, PageClosedError, DialogOpenedError):
         raise
     except (DriverError, BrowserTimeoutError) as exc:
-        frames = ProbeFrames([])
-        note = f"Hidden-text check skipped ({exc}); visually hidden text may be shown."
+        frames = ProbeFrames([], 1)
+        note = (
+            f"Hidden-text check skipped ({exc}); visually hidden text may be shown, "
+            f"and {WITHHELD_NOTE}."
+        )
     kept, _ = cap_text(text or "", max_chars)
     views, page_origin = await _frame_views(page, call, timeout, kept)
     parts = await asyncio.to_thread(
-        _process, text, list(frames.results), max_chars, redact, views, page_origin
+        _process,
+        text,
+        list(frames.results),
+        max_chars,
+        redact,
+        views,
+        page_origin,
+        bool(frames.failed),
     )
     title = await call(lambda: page.title(timeout), timeout, "reading the title")
     return Observation(
