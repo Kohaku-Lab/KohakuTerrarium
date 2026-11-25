@@ -10,6 +10,7 @@ when the agent stops, the plugin unloads, or the plugin is disabled at runtime.
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.browser.access import BROWSER_SERVICE
 from kohakuterrarium.browser.errors import BrowserClosedError, BrowserUnavailableError
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.session import BrowserSession
@@ -21,7 +22,7 @@ from kohakuterrarium.builtins.plugins.browser.gates import (
 )
 from kohakuterrarium.builtins.plugins.browser.retired import RetiredSessions
 from kohakuterrarium.builtins.tools.browser.act import FILES_ARG, BrowserActTool
-from kohakuterrarium.builtins.tools.browser.common import SERVICE, files_list
+from kohakuterrarium.builtins.tools.browser.common import files_list
 from kohakuterrarium.builtins.tools.browser.eval import BrowserEvalTool
 from kohakuterrarium.builtins.tools.browser.navigate import BrowserNavigateTool
 from kohakuterrarium.builtins.tools.browser.screenshot import (
@@ -215,7 +216,7 @@ class BrowserPlugin(BasePlugin):
     def runtime_services(self, context: Any) -> dict[str, Any]:
         if self._session is None and not self._accepting:
             return {}
-        return {SERVICE: self._service}
+        return {BROWSER_SERVICE: self._service}
 
     def get_prompt_content(self, context: PluginContext) -> str | None:
         if self._ended or not self._any_tool_visible(context):

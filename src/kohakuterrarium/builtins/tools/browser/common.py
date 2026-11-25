@@ -1,14 +1,15 @@
 """Shared base of the browser tools: session lookup, argument reading, result shaping.
 
-Every tool reads its ``BrowserSession`` from ``runtime_services["browser"]``,
-which the ``browser`` plugin publishes, and turns the session's
-``BrowserResult`` or raised ``BrowserError`` into a ``ToolResult``.
+Every tool reaches its ``BrowserSession`` through ``browser.access`` (the
+``browser`` plugin publishes it) and turns the session's ``BrowserResult`` or
+raised ``BrowserError`` into a ``ToolResult``.
 """
 
 import json
 from pathlib import Path
 from typing import Any
 
+from kohakuterrarium.browser.access import browser_access
 from kohakuterrarium.browser.actions import is_neutral
 from kohakuterrarium.browser.errors import BrowserError
 from kohakuterrarium.browser.results import wrap_untrusted
@@ -25,7 +26,6 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-SERVICE = "browser"
 ERROR_ORIGIN = "browser error detail"
 TAB_ARG = "tab"
 BODY_ARG = "content"
@@ -160,8 +160,7 @@ class BrowserTool(BaseTool):
     async def _execute(
         self, args: dict[str, Any], context: ToolContext | None = None, **kwargs: Any
     ) -> ToolResult:
-        services = getattr(context, "runtime_services", None) or {}
-        service = services.get(SERVICE)
+        service = browser_access(context)
         if service is None:
             return ToolResult(error=NO_PLUGIN)
         session = None
