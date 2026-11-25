@@ -281,25 +281,26 @@ Implementation: `src/kohakuterrarium/builtins/plugins/permgate/plugin.py`.
 
 | Option | Type | Default | Purpose |
 |---|---|---|---|
-| `enabled` | bool | true | Master on / off. |
-| `tools` | list[str] / `"all"` | `"all"` | Which tools require approval. `"all"` = every tool. |
-| `whitelist` | list[str] | `[]` | Tools that bypass approval (added to a per-session "always allow" list when the user picks "always"). |
-| `auto_approve_pattern` | str | "" | Regex pattern; matching tool args auto-approve without prompting. Use sparingly. |
-| `prompt_template` | str | default | Customise the approval prompt shown to the user. |
+| `gated_tools` | list[str] | `[]` | Tools that require approval. Empty list = every tool; `"*"` also matches every tool. |
+| `allowlist` | list[str] | `[]` | Tools that never require approval, even when listed in `gated_tools`. |
+| `timeout_s` | float | null | Seconds to wait for the user; null = wait forever. No answer in time denies the call. |
+| `surface` | `modal` / `chat` | `modal` | Where the approval prompt appears. |
 
 ### Behaviour
 
-`pre_tool_execute` emits a `tool_approval_request` output event with
-the tool name, args, and a request id. The agent waits on the output
-bus for a `tool_approval_reply` event with a matching id; the reply
-carries `decision ∈ {approve, deny, always}`. `always` adds the tool
-to a per-session whitelist persisted in plugin state. `deny` raises
-`PluginBlockError` so the agent sees the rejection as a tool failure.
+`pre_tool_execute` emits an interactive `confirm` output event on the
+configured `surface`, naming the tool and summarising its arguments, and
+waits for the reply. The choices are `allow_once`, `allow_session`
+("Always allow") and `deny`. `allow_session` stops asking about that tool
+for the life of the plugin instance; it is not persisted. Any other
+outcome (deny, cancellation, no answer within `timeout_s`, a bus error)
+raises `PluginBlockError`, so the agent sees the rejection as a tool failure.
 
 The web UI and TUI render the approval as an inline prompt on the
 output stream; CLI surfaces it via the same output bus and replies
 through the input loop. Headless deployments without a user surface
-should disable permgate or set `auto_approve_pattern: "^.*$"`.
+should disable permgate or set `timeout_s`, so an unanswered call is
+denied instead of waiting forever.
 
 ### Example
 
@@ -307,8 +308,8 @@ should disable permgate or set `auto_approve_pattern: "^.*$"`.
 plugins:
   - name: permgate
     options:
-      tools: ["bash", "write", "edit"]
-      whitelist: ["read", "grep", "glob"]
+      gated_tools: ["bash", "write", "edit"]
+      allowlist: ["read", "grep", "glob"]
 ```
 
 ## `ui.apps`
@@ -391,7 +392,7 @@ plugins:
       network_allowlist: ["api.example.com"]
   - name: permgate
     options:
-      tools: "all"
+      gated_tools: ["*"]
   - name: budget
     options:
       turn_budget: [40, 60]
