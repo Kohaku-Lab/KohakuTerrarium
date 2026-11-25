@@ -116,8 +116,9 @@ function formatTokens(n) {
 async function stopJob(jobId, name) {
   const sid = props.instance?.graph_id || props.instance?.id
   if (!sid) return
+  const target = chat.runningJobs[jobId]?.tab || chat.terrariumTarget || props.instance?.creatures?.[0]?.name || (props.instance?.has_root ? "root" : "")
+  if (!target) return
   try {
-    const target = chat.terrariumTarget || props.instance?.creatures?.[0]?.name || "root"
     await terrariumAPI.stopCreatureTask(sid, target, jobId)
   } catch (err) {
     console.error("Failed to stop job", name, err)

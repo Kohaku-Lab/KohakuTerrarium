@@ -119,6 +119,28 @@ describe("graph model", () => {
     ).toEqual([["lead", "coder"]])
   })
 
+  it("marks a creature as the chat root only in a session that has a root", () => {
+    const graph = (id, hasRoot) => ({
+      graph_id: id,
+      has_root: hasRoot,
+      creatures: [
+        creature(`${id}-boss`, { is_privileged: true, is_root: true }),
+        creature(`${id}-peer`),
+      ],
+      channels: [],
+      output_edges: [],
+    })
+    const model = buildGraphModel({
+      version: 1,
+      graphs: [graph("rooted", true), graph("peers", false)],
+    })
+    const byName = Object.fromEntries(model.creatures.map((c) => [c.name, c]))
+    expect(byName["rooted-boss"].root).toBe(true)
+    expect(byName["rooted-peer"].root).toBe(false)
+    expect(byName["peers-boss"].root).toBe(false)
+    expect(byName["peers-boss"].privileged).toBe(true)
+  })
+
   it("prefers the canonical llm_name and carries backend token usage", () => {
     const model = buildGraphModel({
       version: 1,

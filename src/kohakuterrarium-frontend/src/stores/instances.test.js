@@ -221,6 +221,39 @@ describe("instances store", () => {
     expect(store.current.id).toBe("graph_team")
   })
 
+  it("keeps the root flag only when the roster holds the root creature", async () => {
+    const store = useInstancesStore()
+    const peer = (name) => ({ name, creature_id: name, is_privileged: false, running: true })
+    // Wire shape of a recipe without ``root:``: no privileged creature at all.
+    sessionAPI.getActive.mockResolvedValueOnce({
+      session_id: "graph_peers",
+      name: "discord_bot",
+      has_root: true,
+      creatures: [peer("ch-0576"), peer("ch-1234")],
+      channels: [{ name: "ch-0576" }, { name: "ch-1234" }],
+    })
+    const peers = await store.fetchOne("graph_peers")
+    expect(peers.has_root).toBe(false)
+    expect(peers.creatures.map((c) => c.is_root)).toEqual([false, false])
+    expect(peers.llm_name).toBe("")
+
+    // Wire shape of a recipe root: privileged and named "root", no ``is_root`` key.
+    sessionAPI.getActive.mockResolvedValueOnce({
+      session_id: "graph_rooted",
+      name: "rooted",
+      has_root: true,
+      creatures: [
+        { ...peer("gamma"), llm_name: "p/gamma" },
+        { name: "root", creature_id: "root", is_privileged: true, llm_name: "p/root" },
+      ],
+      channels: [],
+    })
+    const rooted = await store.fetchOne("graph_rooted")
+    expect(rooted.has_root).toBe(true)
+    expect(rooted.creatures.map((c) => c.is_root)).toEqual([false, true])
+    expect(rooted.llm_name).toBe("p/root")
+  })
+
   it("maps a 1-creature Session as a creature-shaped instance", async () => {
     const store = useInstancesStore()
     sessionAPI.getActive.mockResolvedValue({

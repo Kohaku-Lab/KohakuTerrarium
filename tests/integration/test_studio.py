@@ -1188,6 +1188,8 @@ class TestStudioIntegration:
                 for cid in g.creature_ids
             }
             assert running == {"gamma": True, "delta": False}
+            # A recipe without ``root:`` must not claim a root after restore.
+            assert studio.sessions.get(pair_sid).has_root is False
 
             beta_sid = by_name["beta"]["session_id"]
             beta_cid2 = studio.sessions.get(beta_sid).creatures[0]["creature_id"]

@@ -207,6 +207,26 @@ function _mergeSession(data, previous) {
   }
 }
 
+/** Index of the creature the backend's "root" alias resolves to, or -1.
+ * Mirrors ``studio/sessions/find.py``: an ``is_root`` flag, then the id or
+ * name "root", then the first privileged creature by id.
+ */
+function _rootCreatureIndex(creatures) {
+  const flagged = creatures.findIndex((c) => c?.is_root)
+  if (flagged >= 0) return flagged
+  const byId = creatures.findIndex((c) => c?.creature_id === "root")
+  if (byId >= 0) return byId
+  const byName = creatures.findIndex((c) => c?.name === "root")
+  if (byName >= 0) return byName
+  let best = -1
+  creatures.forEach((c, i) => {
+    if (!c?.is_privileged) return
+    if (best < 0 || String(c.creature_id || "") < String(creatures[best].creature_id || ""))
+      best = i
+  })
+  return best
+}
+
 /** Map Session details or SessionListing summaries to InstanceInfo.
  * Summary creature_count is independent of the last-known creatures array.
  */
@@ -218,7 +238,8 @@ function _mapSession(data) {
   // Coerce both shapes here so callers stay uniform.
   const sessionHome = data.home_node || data.node_id || "_host"
   const rawCreatures = Array.isArray(data.creatures) ? data.creatures : []
-  const creatures = rawCreatures.map((c) => ({
+  const rootIndex = data.has_root ? _rootCreatureIndex(rawCreatures) : -1
+  const creatures = rawCreatures.map((c, i) => ({
     name: c.name || c.creature_id || "",
     config_name: c.config_name || "",
     config_ref: c.config_ref || "",
@@ -235,7 +256,7 @@ function _mapSession(data) {
     context_tokens: c.context_tokens || 0,
     listen_channels: c.listen_channels || [],
     send_channels: c.send_channels || [],
-    is_root: !!c.is_root,
+    is_root: i === rootIndex,
     // Per-creature lab cluster site; fall back to session-level home.
     home_node: c.home_node || sessionHome,
   }))
@@ -247,7 +268,9 @@ function _mapSession(data) {
   }))
   // Pick the "primary" creature for legacy single-target panels:
   // root if recipe-flagged, else first creature.
-  const primary = (data.has_root && creatures.find((c) => c.is_root)) || creatures[0] || {}
+  const primary = creatures[rootIndex] || creatures[0] || {}
+  // A roster without its root creature has no "root" tab to open.
+  const hasRoot = Array.isArray(data.creatures) ? rootIndex >= 0 : !!data.has_root
   // ``isMulti`` from creature array length OR from the int count on
   // the listing payload — same semantics, different wire shape.
   const creatureCount =
@@ -265,7 +288,7 @@ function _mapSession(data) {
     config_ref: primary.config_ref || "",
     pwd: data.pwd || "",
     status: "running",
-    has_root: !!data.has_root,
+    has_root: hasRoot,
     config_path: data.config_path || "",
     created_at: data.created_at || "",
     model: primary.model || "",

@@ -2,7 +2,8 @@ import { createPinia, getActivePinia, setActivePinia } from "pinia"
 import { computed, isReactive, toRaw } from "vue"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { terrariumAPI } from "@/utils/api"
+import { sessionAPI, terrariumAPI } from "@/utils/api"
+import { useInstancesStore } from "./instances"
 import { subscribeAttentionEdges } from "./attention"
 import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
 import { workForScope, clearAttentionRegistry } from "./attention.js"
@@ -113,6 +114,62 @@ describe("chat store — websocket ownership", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("binds a terrarium to a creature that exists, with or without a root", async () => {
+    const values = new Map()
+    vi.stubGlobal("localStorage", {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, String(value)),
+      removeItem: (key) => values.delete(key),
+    })
+    const sockets = installFakeWebSocket()
+    const history = vi
+      .spyOn(terrariumAPI, "getHistory")
+      .mockResolvedValue({ messages: [], events: [] })
+    const peer = (name) => ({ name, creature_id: name, is_privileged: false, running: true })
+    // A resumed recipe without ``root:`` as older servers report it.
+    vi.spyOn(sessionAPI, "getActive").mockResolvedValueOnce({
+      session_id: "graph_peers",
+      name: "discord_bot",
+      has_root: true,
+      creatures: [peer("ch-0576"), peer("ch-1234")],
+      channels: [{ name: "ch-0576" }, { name: "ch-1234" }],
+    })
+    const peers = await useInstancesStore().fetchOne("graph_peers")
+    const chat = useChatStore()
+    chat.initForInstance(peers)
+    sockets[0].readyState = 1
+    sockets[0].send = vi.fn()
+    sockets[0].onopen()
+    await vi.waitFor(() => expect(history).toHaveBeenCalled())
+
+    expect(chat.tabs).toEqual(["ch-0576"])
+    expect(chat.activeTab).toBe("ch-0576")
+    expect(sockets[0].url).toContain("/ws/sessions/graph_peers/creatures/ch-0576/chat")
+    expect(chat._rootSourceName).toBeNull()
+    expect(chat.modelByTab.root).toBeUndefined()
+    chat.openTab("ch-1234")
+    expect(chat.terrariumTarget).toBe("ch-1234")
+    expect(history.mock.calls.map((call) => call[1])).not.toContain("root")
+
+    chat.resetForRouteSwitch()
+    vi.spyOn(sessionAPI, "getActive").mockResolvedValueOnce({
+      session_id: "graph_rooted",
+      name: "rooted",
+      has_root: true,
+      creatures: [
+        peer("gamma"),
+        { name: "root", creature_id: "root", is_privileged: true, llm_name: "p/root" },
+      ],
+      channels: [],
+    })
+    chat.initForInstance(await useInstancesStore().fetchOne("graph_rooted"))
+    const rooted = sockets[sockets.length - 1]
+    expect(chat.tabs[0]).toBe("root")
+    expect(rooted.url).toContain("/ws/sessions/graph_rooted/creatures/root/chat")
+    expect(chat._rootSourceName).toBe("root")
+    expect(chat.modelByTab.root.llmName).toBe("p/root")
   })
 
   it("stores the socket raw, closes the previous owner, and rejects all stale callbacks", () => {

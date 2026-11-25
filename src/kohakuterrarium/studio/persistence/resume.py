@@ -108,7 +108,7 @@ async def resume_session(
         "config_path": meta.get("config_path", ""),
         "pwd": meta.get("pwd", os.getcwd()),
         "created_at": _now_iso(),
-        "has_root": kind == "terrarium" and bool(meta.get("terrarium_creatures")),
+        "has_root": kind == "terrarium" and _graph_has_recipe_root(engine, sid),
         "resumed_from": str(path),
     }
     if store is not None:
@@ -144,6 +144,18 @@ def _read_classes_or_empty(path: Path) -> dict[str, str]:
             error=str(exc),
         )
         return {}
+
+
+def _graph_has_recipe_root(engine, sid: str) -> bool:
+    """Whether the resumed graph holds the privileged creature a recipe ``root:`` builds."""
+    for cid in engine.get_graph(sid).creature_ids:
+        try:
+            creature = engine.get_creature(cid)
+        except KeyError:
+            continue
+        if creature.name == "root" and getattr(creature, "is_privileged", False):
+            return True
+    return False
 
 
 def _first_agent_name(meta: dict) -> str | None:

@@ -3,11 +3,14 @@
 import asyncio
 import threading
 from contextlib import closing
+from pathlib import Path
 
 import kohakuterrarium.session.run_state as rs
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import resume_session
+from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.live import live_sessions
+from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.studio.persistence.session_index import get_session_index_default
 from kohakuterrarium.studio.persistence.session_index import reconcile as reconcile_mod
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
@@ -128,5 +131,42 @@ async def test_resume_keeps_stopped_creatures_stopped_and_does_not_nudge(
         )
     for sid in (halted.session_id, cutoff.session_id, forced.session_id):
         hook = index_hooks.registry().pop(sid, None)
+        if hook is not None:
+            await asyncio.to_thread(hook.detach)
+
+
+async def test_resumed_terrarium_reports_has_root_only_for_a_recipe_root(tmp_path):
+    recipes = {
+        "peers": "terrarium:\n  name: peers\n  creatures:\n"
+        "    - {name: alpha, system_prompt: a}\n"
+        "    - {name: beta, system_prompt: b}\n",
+        "rooted": "terrarium:\n  name: rooted\n  root: {system_prompt: r}\n"
+        "  creatures:\n    - {name: gamma, system_prompt: g}\n",
+    }
+    saved: dict[str, str] = {}
+    async with Terrarium(session_dir=str(tmp_path)) as engine:
+        service = LocalTerrariumService(engine)
+        for name, text in recipes.items():
+            recipe = tmp_path / name / "terrarium.yaml"
+            recipe.parent.mkdir()
+            recipe.write_text(text, encoding="utf-8")
+            started = await lifecycle.start_terrarium(
+                service, config_path=str(recipe.parent), pwd=str(tmp_path)
+            )
+            assert started.has_root is (name == "rooted")
+            saved[name] = str(stores_for(service)[started.session_id].path)
+            await lifecycle.stop_session(service, started.session_id)
+
+        resumed = {
+            name: await resume_session(service, Path(path), restore_runs=False)
+            for name, path in saved.items()
+        }
+        assert resumed["peers"].has_root is False
+        assert resumed["rooted"].has_root is True
+        listed = lifecycle.get_session(service, resumed["peers"].session_id)
+        assert listed.has_root is False
+        assert sorted(c["name"] for c in listed.creatures) == ["alpha", "beta"]
+    for session in resumed.values():
+        hook = index_hooks.registry().pop(session.session_id, None)
         if hook is not None:
             await asyncio.to_thread(hook.detach)

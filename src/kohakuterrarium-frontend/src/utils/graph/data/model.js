@@ -56,7 +56,7 @@ export function creatureStatus(raw) {
   return "idle"
 }
 
-function normalizeCreature(raw, sessionId, sessionHost) {
+function normalizeCreature(raw, sessionId, sessionHost, hasRoot) {
   return {
     id: raw.creature_id || raw.agent_id,
     name: raw.name || raw.creature_id || raw.agent_id,
@@ -65,7 +65,8 @@ function normalizeCreature(raw, sessionId, sessionHost) {
     status: creatureStatus(raw),
     killed: !!raw.killed,
     privileged: !!(raw.is_privileged || raw.is_root),
-    root: !!raw.is_root,
+    // The chat store aliases this creature as the "root" tab only when the session has a root.
+    root: !!raw.is_root && hasRoot,
     parentId: raw.parent_creature_id || null,
     recipeRootId: raw.recipe_root_id || null,
     model: raw.llm_name || raw.model || "",
@@ -220,7 +221,7 @@ export function buildGraphModel(snapshot) {
     const privilegedIds = new Set()
     const sessionHosts = new Set()
     for (const raw of rawCreatures) {
-      const creature = normalizeCreature(raw, sessionId, sessionHost)
+      const creature = normalizeCreature(raw, sessionId, sessionHost, !!graph.has_root)
       for (const name of new Set([...creature.listen, ...creature.send])) {
         if (!isDirect(name)) continue
         if (!aliasMembers.has(name)) aliasMembers.set(name, [])
