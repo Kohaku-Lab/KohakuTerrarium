@@ -254,7 +254,7 @@ plugins:
 | `allow_private` | bool | false | 允许内网、运营商级 NAT 与 IPv6 唯一本地地址。 |
 | `secrets` | dict | `{}` | 密钥名到 `env:VAR_NAME` 引用的映射，供 `type` 动作使用；其值会从结果中遮蔽。 |
 | `nav_timeout_s` | float | 30 | 导航超时（秒）。 |
-| `action_timeout_s` | float | 5 | 每个动作的超时（秒）。 |
+| `action_timeout_s` | float | 5 | 每个动作的超时（秒）；一批 `browser_act` 最多 60 秒，若（此值 + 10 秒）的三倍更长则取后者。 |
 | `snapshot_max_chars` | int | 20000 | 快照长度上限（1000–1000000）。 |
 | `idle_close_s` | float | 600 | 闲置这么多秒后关闭浏览器；下一次调用会启动新的。 |
 

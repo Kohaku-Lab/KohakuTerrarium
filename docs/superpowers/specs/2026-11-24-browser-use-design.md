@@ -91,7 +91,12 @@ Six tools, split by risk class so name-based gating is meaningful.
 `hover` (ref, or x/y), `scroll`, `drag` (ref or x/y → `to` ref or
 `to_x`/`to_y`), `upload` (ref, indexes into `files`), `wait` (`text` /
 `text_gone` / `seconds`, capped at 10 s), `dialog` (`accept`, `text`). At
-most 20 actions per batch.
+most 20 actions per batch. A batch stops at the first failed action or
+dialog. An action whose main-frame navigation the network policy blocked is
+failed as soon as it settles, so the actions after it never run. A batch may
+run for `batch_deadline_s(action_timeout_s)`: 60 s, or three times
+(`action_timeout_s` + `WAIT_MAX_S`) when longer; the action running then
+fails and an action due after it fails as not started.
 
 One batch per call exists for two reasons. Tool calls from one turn run
 concurrently in this framework, so two separate calls cannot express "click,
@@ -114,15 +119,18 @@ the page's own text wrapped. A closed session, a failed launch, invalid
 arguments and URLs the network policy refuses raise typed errors
 (`browser/errors.py`, all `KTError`); the tool turns them into error results
 whose fixed wording is outside the wrapper and whose page-derived detail is
-inside it.
+inside it. The driver keeps at most 10000 characters of an error's detail;
+the session redacts it and only then cuts it to 200 characters. Everywhere
+page-derived text is both shortened and redacted, redaction comes first, so
+a cut never leaves part of a secret.
 
 ## Observation
 
 **Snapshot.** Playwright's AI-mode ARIA snapshot (`aria_snapshot(mode="ai")`)
 of the whole page, always taken page-wide and filtered in Python. A scoped
 snapshot invalidates refs elsewhere on the page, so Playwright-side scoping is
-never used. The raw text is cut at 1,000,000 characters and processed off the
-event loop.
+never used. The raw text is redacted (step 1 below), then cut at 1,000,000
+characters, and processed off the event loop.
 
 Post-processing, in order:
 
@@ -192,10 +200,17 @@ that the session must compensate for:
 
 - Acting on a stale ref waits the whole timeout before failing. The session
   checks `locator.count()` first and fails in a millisecond.
-- Ref numbers can be reused inside an iframe after it navigates. The session
+- Ref numbers restart inside an iframe after it navigates. The session
   keeps the role and name each ref had in the last result it returned,
   re-snapshots before a batch, and rejects a ref whose role or name changed,
   or which the model was never in a position to have seen.
+- Role and name can match by chance in the frame's new document. Each
+  observation also reads the document id (`performance.timeOrigin`) of the
+  iframes whose URLs it reads, in the same per-frame call, and the ref book
+  keeps it with every ref of that frame. Before a frame ref is used, one
+  evaluate on its element reads the document it is in now; a different one
+  rejects the ref. Main-frame refs need no such read, since a new main
+  document already resets the tab's refs.
 
 A rejected ref returns a specific error naming the ref and telling the model
 to take a snapshot.
@@ -213,8 +228,11 @@ measured attack success from 57.7% to 41.7% in AgentDojo.
 `scale="css"`, so screenshot pixels are CSS pixels and coordinate clicks do
 not drift on HiDPI displays. PNG by default (measured smaller than JPEG on
 text pages), JPEG when a PNG would exceed the per-image budget (about
-500 KB); full pages stop at 8000 px. The text part names what was captured
-and where it was saved. Text tool formats flatten tool results to text, so
+500 KB). An image still over the budget is downscaled with Pillow until it
+fits, and the text gives the factor back to CSS pixels; below a 200 px
+shorter side the result is an error without an image. Full pages and
+elements stop at 8000 px (an element is clipped to its top part), and the
+text says so. The text part names what was captured and where it was saved. Text tool formats flatten tool results to text, so
 there the image never reaches the model; the text says so.
 
 ## Session
@@ -245,13 +263,20 @@ runs before in-flight tool jobs are cancelled.
   returns "dialog pending" instead of hanging. While a `confirm` or `prompt`
   is pending only the `dialog` action is accepted. `alert` and
   `beforeunload` are auto-accepted and reported.
-- **Tabs.** Stable ids (`t1`, `t2`), at most 20; tabs a page opens beyond that
-  are closed and reported. A tab opened by an action becomes the active tab
+- **Tabs.** Stable ids (`t1`, `t2`), at most 20 for the session. A tab the
+  tools open beyond that is refused (`TabLimitError`) before any page opens.
+  Pages a persistent profile restores at launch, pages that open while the
+  session opens its own, and unknown pages that show a dialog go through the
+  same admission; beyond the cap they are closed and reported. A tab opened by an action becomes the active tab
   and the result says so; when Chromium has announced a new window, the
   action waits up to 3 s for it to register.
 - **Downloads.** Saved under `browser-downloads/` in the agent's working
   directory and reported with their path; the result waits up to 2 s for a
-  download the batch started. At most 50 downloads and 1 GiB per browser.
+  download the batch started. Over the session's lifetime, relaunches
+  included, at most 50 downloads are started and 1 GiB is kept; one past
+  the count is cancelled, one that takes the kept total over the byte cap is
+  saved in full and then deleted, and a save still running after 5 minutes
+  is cancelled.
   Playwright's own copies are deleted with the context.
 - **Uploads.** Paths come from the top-level `files` argument so the sandbox
   path check sees them. A hidden file input has no ref, so the action falls

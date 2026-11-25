@@ -28,8 +28,10 @@ text line with the tab, URL, size and format.
 
 ## Limits
 
-- PNG, or JPEG when a PNG would exceed about 500 KB; full pages stop at 8000
-  px high.
+- PNG, or JPEG when a PNG would exceed about 500 KB, downscaled when still
+  too big (the result gives the factor back to CSS pixels); an image that
+  would need a side under 200 px is not returned.
+- Full pages and elements stop at 8000 px high; the result says so.
 
 ## Reference
 

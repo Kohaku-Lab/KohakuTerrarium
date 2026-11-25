@@ -153,7 +153,8 @@ first failure. Returns one status line per action and the page delta (lines
 added or changed, elements marked `(moved)`, navigation, tabs opened with
 their text, dialogs, downloads, blocked requests), or the whole page when it
 loaded a new one or the delta would hide more than it shows. An action that
-led to a blocked page is reported as failed. At most 20
+led to a blocked page is reported as failed and ends the batch, and so does
+the batch's time limit (60 s by default). At most 20
 actions per call. `click`, `hover` and `drag` also take viewport coordinates
 (`x` / `y`, `to_x` / `to_y`); a non-empty `ref` wins over them.
 
@@ -162,8 +163,8 @@ actions per call. `click`, `hover` and `drag` also take viewport coordinates
   (paths the `upload` actions index into).
 
 **`browser_screenshot`**: The viewport, one element or the whole page as an
-image in CSS pixels (PNG, or JPEG above about 500 KB; full pages stop at 8000
-px). The image reaches the model with native tool calling; text tool formats
+image in CSS pixels (PNG, or JPEG above about 500 KB, downscaled when still
+too big; full pages and elements stop at 8000 px). The image reaches the model with native tool calling; text tool formats
 pass on the text line only.
 
 - Args: `ref` (wins over `full_page`), `full_page`, `path` (also save the
@@ -171,7 +172,7 @@ pass on the text line only.
 
 **`browser_tabs`**: List, open, select or close tabs, or close the browser (the
 next call starts a fresh one). `list` never starts the browser. At most 20
-tabs.
+tabs; `new` beyond that is refused.
 
 - Args: `action` (`list` default, `new`, `select`, `close`, `close_browser`),
   `tab` (for `select` / `close`), `url` (for `new`).

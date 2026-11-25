@@ -34,6 +34,8 @@ returns one status line per action plus what changed on the page.
 ## Limits
 
 - At most 20 actions per call; `wait` at most 10 s.
+- One call runs for at most 60 s (longer when the action timeout is over
+  10 s); the action running then fails and the rest are not executed.
 
 ## Reference
 
@@ -71,12 +73,17 @@ draggable rows, hover areas) and prefer refs otherwise.
 - **failed — ref eN now points at a different element** (stale ref): the page
   changed since you saw it. Take a snapshot and use the new refs.
 - **failed — ref eN is no longer on the page**: the element is gone.
+- **failed — ref fNeM is from a page its frame has since left**: the frame
+  loaded another page, even if it shows the same kind of element. Take a
+  snapshot.
+- **failed — the batch reached its N s time limit**: the call ran out of
+  time; check the page and send the remaining actions again.
 - **dialog pending**: an alert, confirm or prompt opened. Only the `dialog`
   action is accepted until you answer it; `alert` dialogs are accepted for you
   and reported.
 - **failed — it led to host:port, which the browser network policy
-  blocked**: the action's page did not load; the result says `Navigation
-  blocked`. Other refused requests are listed under `Blocked N requests`; a
+  blocked**: the action's page did not load, the actions after it are not
+  executed, and the result says `Navigation blocked`. Other refused requests are listed under `Blocked N requests`; a
   form that posts to a blocked host does not submit.
 - Downloads are saved under `browser-downloads/` in the working directory and
   listed with their path; new tabs a click opened become active and are named.

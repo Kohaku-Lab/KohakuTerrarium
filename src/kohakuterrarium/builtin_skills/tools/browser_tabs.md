@@ -29,7 +29,9 @@ their ids, the active one marked `*`.
 
 ## Limits
 
-- At most 20 tabs; tabs a page opens beyond that are closed and reported.
+- At most 20 open tabs: `new` beyond that is refused, so close a tab first.
+  Tabs a page opens (or a restored profile brings) beyond it are closed and
+  reported.
 
 ## Reference
 

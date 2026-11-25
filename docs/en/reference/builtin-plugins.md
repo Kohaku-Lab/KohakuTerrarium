@@ -428,7 +428,7 @@ the runtime is `src/kohakuterrarium/browser/`.
 | `allow_private` | bool | false | Allow private, carrier-grade NAT and IPv6 unique-local addresses. |
 | `secrets` | dict | `{}` | Secret names to `env:VAR_NAME` references for `type` actions; values are redacted from results. |
 | `nav_timeout_s` | float | 30 | Navigation timeout in seconds. |
-| `action_timeout_s` | float | 5 | Per-action timeout in seconds. |
+| `action_timeout_s` | float | 5 | Per-action timeout in seconds; one `browser_act` batch gets 60 s, or three times (this + 10 s) when longer. |
 | `snapshot_max_chars` | int | 20000 | Snapshot size cap (1000–1000000). |
 | `idle_close_s` | float | 600 | Close the browser after this many idle seconds; the next call starts a fresh one. |
 

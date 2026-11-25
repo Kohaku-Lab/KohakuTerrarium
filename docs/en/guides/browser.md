@@ -162,7 +162,10 @@ batches, read the result.**
 3. **Act in one batch.** Put the steps of one intent in one `browser_act`:
    type the name, pick the plan, tick the box, click Save, then `wait` for the
    confirmation text. Actions run in order and the batch stops at the first
-   failure; the rest are reported as not executed. One call per intent matters
+   failure; the rest are reported as not executed. An action whose
+   navigation the network policy blocked is a failure, and so is the action
+   running when the batch reaches its time limit: 60 seconds, or three times
+   (`action_timeout_s` + 10 s) when that is longer. One call per intent matters
    because tool calls from one turn run concurrently, so separate calls cannot
    express "click, then type, and stop if the click failed", and every round
    trip to the model is the slow part of a browsing task.
@@ -189,21 +192,30 @@ batches, read the result.**
 Refs are valid for the page as it was last shown to the model. Before a batch
 the session takes a fresh snapshot and rejects a ref whose element is gone or
 now names a different element, at once and with a message naming the ref,
-instead of waiting for a timeout. Take a new snapshot and use the new refs.
+instead of waiting for a timeout. A ref inside a frame is also refused once
+the frame has loaded another page, even when that page has an element with
+the same role and name. Take a new snapshot and use the new refs.
 
 ### Tabs, dialogs, downloads, uploads
 
 - **Tabs** have stable ids (`t1`, `t2`, …). A tab a click opens becomes the
   active tab, and the action's result says so and shows its text. When Chromium has announced a new window, the action waits up to
-  3 seconds for it to open before returning.
+  3 seconds for it to open before returning. At most 20 tabs are open at
+  once: `browser_tabs` refuses to open another and asks you to close one
+  first, and tabs a page opens beyond the limit (or that a `profile_dir`
+  restores at launch) are closed and reported.
 - **Dialogs.** `alert` and `beforeunload` are accepted for you and reported.
   A `confirm` or `prompt` dialog leaves the call with "dialog pending"; until
   it is answered with a `dialog` action, every other browser call returns an
   error that says a dialog is waiting.
 - **Downloads** are saved under `browser-downloads/` in the creature's working
   directory, and the result gives the saved path. A download still running
-  after two seconds is reported as in progress. A browser keeps at most 50
-  downloads and 1 GB in total; later ones are refused and reported.
+  after two seconds is reported as in progress. Over the session's lifetime,
+  browser restarts included, at most 50 downloads are started and at most
+  1 GB of downloaded files is kept. A download past the count is cancelled;
+  one that would take the kept total over 1 GB is fetched in full and then
+  deleted. Both are reported as failed, and so is a download still saving
+  after 5 minutes, which is cancelled.
 - **Uploads** take their paths from the call's `files` argument (relative to
   the working directory), so the sandbox checks them like any other file read.
   A file input that is hidden behind a styled button has no ref of its own;
@@ -243,7 +255,7 @@ creature is built.
 | `allow_private` | bool | `false` | Allow private-network addresses (10/8, 172.16/12, 192.168/16, carrier-grade NAT, IPv6 unique-local). |
 | `secrets` | map | `{}` | Secret names to `env:VAR_NAME` references, for `type` actions. See [Secrets](#secrets). |
 | `nav_timeout_s` | number | `30` | Navigation timeout, in seconds (above 0, at most 3600). |
-| `action_timeout_s` | number | `5` | Timeout of each action and page read, in seconds (above 0, at most 3600). |
+| `action_timeout_s` | number | `5` | Timeout of each action and page read, in seconds (above 0, at most 3600). A whole `browser_act` batch gets 60 s, or three times (this + 10 s) when that is longer. |
 | `snapshot_max_chars` | int | `20000` | Cap on a snapshot's length (1000–1000000). A cut snapshot ends with a line saying how much was left out and how to narrow. |
 | `idle_close_s` | number | `600` | Close the browser after this many seconds without a call (above 0, at most 86400). |
 
@@ -283,8 +295,9 @@ it under `Blocked N requests` with the reason. A navigation whose main page
 (or any host on its redirect chain) is blocked becomes a tool error that names
 the URL and the reason. When a `browser_act` action leads to a blocked page
 (a link or form that redirects to a blocked host), that action is reported
-as failed, naming the host and the reason, and the result says `Navigation
-blocked` and that the page did not load. `browser_navigate` also refuses non-web schemes
+as failed, naming the host and the reason, the actions after it are not
+run, and the result says `Navigation blocked` and that the page did not
+load. `browser_navigate` also refuses non-web schemes
 (`file:`, `javascript:` …) and URLs with embedded credentials up front.
 
 **Local dev servers.** Loopback is blocked by default. Testing a local app is
@@ -428,13 +441,18 @@ options. Single-user hosts, `kt run` and the CLI are not restricted.
 
 ## Limits and known gaps
 
-- At most 20 actions per `browser_act`; a `wait` lasts at most 10 seconds.
-- At most 20 open tabs; tabs a page opens beyond that are closed and
+- At most 20 actions per `browser_act`; a `wait` lasts at most 10 seconds,
+  and a batch at most 60 seconds (more with a long `action_timeout_s`).
+- At most 20 open tabs; `browser_tabs` refuses to open another, and tabs a
+  page opens (or a restored profile brings) beyond that are closed and
   reported.
 - `browser_eval` results are cut at 10000 characters, and the script must
   finish within `action_timeout_s`.
-- Screenshots are PNG, or JPEG when a PNG would exceed about 500 KB; a
-  full-page screenshot stops at 8000 pixels high.
+- Screenshots are PNG, or JPEG when a PNG would exceed about 500 KB. An
+  image still too big is downscaled, and the result gives the factor that
+  turns image coordinates back into CSS pixels; one that would need a side
+  under 200 pixels is not returned. Full-page and element screenshots stop
+  at 8000 pixels high, and the result says so.
 - After an action the session waits for the page to go quiet (150 ms without
   DOM changes, at most 2 seconds). It cannot see pending timers: when a page
   updates later, add a `wait` for the text you expect.

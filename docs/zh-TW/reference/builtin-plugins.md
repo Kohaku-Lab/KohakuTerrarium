@@ -254,7 +254,7 @@ plugins:
 | `allow_private` | bool | false | 允許私有、電信級 NAT 與 IPv6 unique-local 位址。 |
 | `secrets` | dict | `{}` | 密鑰名稱對應 `env:VAR_NAME` 參照，供 `type` 動作使用；值會從結果中遮蔽。 |
 | `nav_timeout_s` | float | 30 | 導覽逾時秒數。 |
-| `action_timeout_s` | float | 5 | 每個動作的逾時秒數。 |
+| `action_timeout_s` | float | 5 | 每個動作的逾時秒數；一批 `browser_act` 最多 60 秒，若（此值 + 10 秒）的三倍更長則取後者。 |
 | `snapshot_max_chars` | int | 20000 | 快照長度上限（1000–1000000）。 |
 | `idle_close_s` | float | 600 | 閒置這麼多秒後關閉瀏覽器；下一次呼叫會啟動新的。 |
 
