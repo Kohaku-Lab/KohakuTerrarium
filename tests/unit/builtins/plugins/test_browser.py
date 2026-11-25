@@ -409,6 +409,111 @@ class TestLifecycle:
         assert driver.alive() == []
 
 
+def live_at_launch(driver) -> list[int]:
+    """How many browsers were alive as each later launch began."""
+    seen: list[int] = []
+    real = driver.launch
+
+    async def launch(plan, sink):
+        seen.append(len(driver.alive()))
+        return await real(plan, sink)
+
+    driver.launch = launch
+    return seen
+
+
+def hold_close(browser) -> None:
+    """Make every close stage of ``browser`` hang until its stage timeout."""
+    browser.hang_stages = {"context", "browser", "playwright"}
+
+
+class TestNoOverlap:
+    async def test_an_option_change_waits_for_the_old_browser_to_close(self, tmp_path):
+        profile = str(tmp_path / "profile")
+        plugin, driver = await loaded(tmp_path, profile_dir=profile)
+        assert (
+            await call(plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path))
+        ).success
+        old = driver.browser
+        hold_close(old)
+        seen = live_at_launch(driver)
+        plugin.set_options({"viewport": "800x600"})
+        result = await call(
+            plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path)
+        )
+        assert result.success and len(driver.plans) == 2
+        assert seen == [0], "a second browser started on the same profile"
+        assert not old.alive and driver.plans[1].profile_dir == profile
+        await plugin.on_unload()
+        assert driver.alive() == []
+
+    async def test_disable_then_enable_never_runs_on_the_dying_browser(self, tmp_path):
+        plugin, driver = scripted_plugin()
+        manager = PluginManager()
+        manager.register(plugin)
+        await manager.load_all(plugin_context(tmp_path, manager))
+        assert (
+            await call(plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path))
+        ).success
+        old_session, old = plugin.session, driver.browser
+        hold_close(old)
+        seen = live_at_launch(driver)
+        manager.disable("browser")
+        manager.enable("browser")
+        context = tool_context(plugin, tmp_path)
+        first = await call(plugin, "browser_snapshot", {}, context)
+        second = await call(plugin, "browser_snapshot", {}, context)
+        assert first.success and second.success, (first.error, second.error)
+        assert plugin.session is not old_session and old_session.state == "closed"
+        assert len(driver.plans) == 2 and seen == [0]
+        assert len(driver.alive()) == 1
+        await manager.unload_all()
+        assert driver.alive() == []
+
+    async def test_a_close_without_a_loop_is_kept_for_later(self, tmp_path, caplog):
+        plugin, driver = await loaded(tmp_path)
+        assert (
+            await call(plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path))
+        ).success
+        old_session = plugin.session
+
+        def no_loop():
+            raise RuntimeError("no running event loop")
+
+        real = asyncio.get_running_loop
+        try:
+            asyncio.get_running_loop = no_loop
+            plugin.set_options({"viewport": "800x600"})
+        finally:
+            asyncio.get_running_loop = real
+        assert "close of the old browser session was deferred" in caplog.text
+        assert old_session.state != "closed" and len(driver.alive()) == 1
+        seen = live_at_launch(driver)
+        assert (
+            await call(plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path))
+        ).success
+        assert old_session.state == "closed" and seen == [0]
+        await plugin.on_unload()
+        assert driver.alive() == []
+
+    async def test_unload_closes_a_session_whose_close_was_deferred(self, tmp_path):
+        plugin, driver = await loaded(tmp_path)
+        assert (
+            await call(plugin, "browser_snapshot", {}, tool_context(plugin, tmp_path))
+        ).success
+        real = asyncio.get_running_loop
+        try:
+            asyncio.get_running_loop = lambda: (_ for _ in ()).throw(
+                RuntimeError("no running event loop")
+            )
+            plugin.on_disable()
+        finally:
+            asyncio.get_running_loop = real
+        assert len(driver.alive()) == 1
+        await plugin.on_unload()
+        assert driver.alive() == []
+
+
 class TestHostResources:
     async def test_restricted_engine_refuses_host_options_without_launching(
         self, tmp_path

@@ -7,8 +7,6 @@ services as the host publishes them at each moment, and closes the session
 when the agent stops, the plugin unloads, or the plugin is disabled at runtime.
 """
 
-import asyncio
-from collections.abc import Awaitable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +19,7 @@ from kohakuterrarium.builtins.plugins.browser.gates import (
     bundled_only,
     host_resource_refusal,
 )
+from kohakuterrarium.builtins.plugins.browser.retired import RetiredSessions
 from kohakuterrarium.builtins.tools.browser.act import FILES_ARG, BrowserActTool
 from kohakuterrarium.builtins.tools.browser.common import SERVICE, files_list
 from kohakuterrarium.builtins.tools.browser.eval import BrowserEvalTool
@@ -176,7 +175,7 @@ class BrowserPlugin(BasePlugin):
         self._link = SandboxLink(self._live_services)
         self._service = BrowserService(self)
         self._tools: list[BaseTool] | None = None
-        self._pending: set[asyncio.Task] = set()
+        self._retired = RetiredSessions()
 
     @property
     def session(self) -> BrowserSession | None:
@@ -184,7 +183,11 @@ class BrowserPlugin(BasePlugin):
         return self._session
 
     def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
-        """Validate the merged options as a whole, then replace the session if they changed."""
+        """Validate the merged options as a whole, then replace the session if they changed.
+
+        The old session closes in the background; no new browser launches
+        before that close has finished.
+        """
         cleaned = validate_plugin_options(
             self.name, values or {}, type(self).option_schema()
         )
@@ -192,9 +195,7 @@ class BrowserPlugin(BasePlugin):
         self.options = option_values(options)
         if options != self._browser_options:
             self._browser_options = options
-            old, self._session = self._session, None
-            if old is not None:
-                self._spawn(old.close())
+            self._retire_session()
             if self._accepting:
                 self._session = self._new_session()
         return self.get_options()
@@ -249,14 +250,12 @@ class BrowserPlugin(BasePlugin):
         self._ended = True
         self._context = None
         await self._close()
-        if self._pending:
-            await asyncio.gather(*self._pending, return_exceptions=True)
 
     def on_disable(self) -> None:
-        """Close the browser a runtime disable leaves without an owner."""
+        """Let go of the session a runtime disable leaves without an owner; it closes in the background."""
         session = self._session
         if session is not None and session.state != CLOSED:
-            self._spawn(session.close())
+            self._retire_session()
 
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
         """Show the sandbox only real file paths of ``browser_act`` and ``browser_screenshot``.
@@ -277,8 +276,10 @@ class BrowserPlugin(BasePlugin):
     async def prepare(self, context: Any) -> BrowserSession:
         """Gate one tool call: closed session, host resources, sandbox; then the session.
 
-        Open connections are judged again by the sandbox as it is now.
+        Sessions this plugin let go of finish closing first; open connections
+        are judged again by the sandbox as it is now.
         """
+        await self._retired.settle()
         session = self._live_session()
         refusal = host_resource_refusal(self._browser_options, context)
         if refusal is not None:
@@ -331,24 +332,22 @@ class BrowserPlugin(BasePlugin):
         return collect(None) if callable(collect) else None
 
     async def _close(self) -> None:
+        """Close the current session and every session let go of before it."""
         session = self._session
         if session is not None:
             await session.close()
+        await self._retired.settle()
+
+    def _retire_session(self) -> None:
+        """Hand the current session to the background close; a later call gets a new one."""
+        old, self._session = self._session, None
+        if old is not None:
+            self._retired.retire(old)
 
     def _enabled(self) -> bool:
         """Loaded, not stopped, and not disabled in the host's plugin manager."""
         manager = self._manager
         return self._accepting and (manager is None or manager.is_enabled(self.name))
-
-    def _spawn(self, work: Awaitable[None]) -> None:
-        """Run ``work`` in the background; on_unload waits for it."""
-        try:
-            task = asyncio.get_running_loop().create_task(work)
-        except RuntimeError:
-            work.close()
-            return
-        self._pending.add(task)
-        task.add_done_callback(self._pending.discard)
 
 
 def _files_for_sandbox(args: dict) -> dict | None:
