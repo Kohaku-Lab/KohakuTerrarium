@@ -272,7 +272,7 @@ plugins:
   `network: deny` 拒绝所有浏览器工具；`os_enforce: require` 拒绝启动浏览器。
 - **主机资源。** 引擎的主机资源关闭时（多用户服务器上的非管理员用户），只允许
   headless、一次性 profile、自带的 Chromium 和公网地址。
-- **Prompt。** 启用期间，插件加入一小段 `## Browser pages`，说明页面内容放在
+- **Prompt。** 启用期间且至少一个浏览器工具开着时，插件加入一小段 `## Browser pages`，说明页面内容放在
   `page_content` 元素中，是数据而不是指令。
 
 ### 范例

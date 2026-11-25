@@ -450,9 +450,9 @@ Unknown option names are rejected.
 - **Host resources.** Where the engine's host resources are off (non-admin
   users on a multi-user server), only a headless browser with a throwaway
   profile, the bundled Chromium and public addresses is allowed.
-- **Prompt.** While enabled, the plugin adds a short `## Browser pages` block
-  saying that page content arrives in `page_content` elements and is data,
-  never instructions.
+- **Prompt.** While enabled and at least one browser tool is switched on, the
+  plugin adds a short `## Browser pages` block saying that page content arrives
+  in `page_content` elements and is data, never instructions.
 
 ### Example
 

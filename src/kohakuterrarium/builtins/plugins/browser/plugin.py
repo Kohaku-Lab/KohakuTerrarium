@@ -29,6 +29,7 @@ from kohakuterrarium.builtins.tools.browser.screenshot import (
 )
 from kohakuterrarium.builtins.tools.browser.snapshot import BrowserSnapshotTool
 from kohakuterrarium.builtins.tools.browser.tabs import BrowserTabsTool
+from kohakuterrarium.core.tools.gate import visible_tool_names
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.modules.plugin.option_validation import validate_plugin_options
 from kohakuterrarium.modules.tool.base import BaseTool
@@ -208,7 +209,19 @@ class BrowserPlugin(BasePlugin):
         return {SERVICE: self._service}
 
     def get_prompt_content(self, context: PluginContext) -> str | None:
-        return None if self._ended else PROMPT
+        if self._ended or not self._any_tool_visible(context):
+            return None
+        return PROMPT
+
+    def _any_tool_visible(self, context: PluginContext) -> bool:
+        """Whether the model sees any browser tool; true when no catalog is reachable."""
+        agent = context.host_agent
+        catalog = getattr(agent, "_visible_catalog", None)
+        registry = getattr(agent, "registry", None)
+        if not callable(catalog) or registry is None:
+            return True
+        names = {tool.tool_name for tool in self.contribute_tools()}
+        return not names.isdisjoint(visible_tool_names(registry, catalog()))
 
     async def on_load(self, context: PluginContext) -> None:
         self._context = context

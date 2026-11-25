@@ -272,7 +272,7 @@ plugins:
   `network: deny` 會拒絕所有瀏覽器工具；`os_enforce: require` 會拒絕啟動瀏覽器。
 - **主機資源。** engine 的主機資源關閉時（多使用者伺服器上的非管理員），只允許
   headless、用完即丟的設定檔、內附的 Chromium 與公開位址。
-- **提示詞。** 啟用期間，外掛會加上一小段 `## Browser pages`，說明頁面內容放在
+- **提示詞。** 啟用期間且至少一個瀏覽器工具開著時，外掛會加上一小段 `## Browser pages`，說明頁面內容放在
   `page_content` 元素裡，是資料，永遠不是指令。
 
 ### 範例

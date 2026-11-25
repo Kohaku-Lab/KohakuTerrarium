@@ -24,6 +24,7 @@ from kohakuterrarium.builtins.plugins.browser.plugin import (
     BrowserPlugin,
 )
 from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
+from kohakuterrarium.core.agent.tools.enablement import switch_tool, tool_switch_state
 from kohakuterrarium.core.config.types import AgentConfig, InputConfig, OutputConfig
 from kohakuterrarium.errors import ConfigError
 from kohakuterrarium.llm.base import NativeToolCall
@@ -608,6 +609,42 @@ class TestThroughTheAgent:
             agent.plugins.enable("browser")
             await agent.plugins.load_pending()
             assert PROMPT in agent.get_system_prompt()
+        finally:
+            await agent.stop()
+        assert driver.alive() == []
+
+    async def test_tools_carry_the_plugin_origin_and_switch_off_with_the_block(
+        self, tmp_path
+    ):
+        plugin, driver = scripted_plugin()
+        agent = await kt.Agent.build(
+            _cfg(tmp_path), llm=ScriptedLLM(["x"]), plugins=[plugin]
+        )
+        await agent.start()
+        try:
+            for name in TOOLS:
+                state = tool_switch_state(agent, name)
+                assert state == {
+                    "origin": {
+                        "kind": "plugin",
+                        "name": "browser",
+                        "label": "plugin:browser",
+                    },
+                    "enabled": True,
+                }
+            for name in TOOLS[1:]:
+                switch_tool(agent, name, False)
+            assert PROMPT in agent.get_system_prompt(), "one browser tool is still on"
+            switch_tool(agent, TOOLS[0], False)
+            assert PROMPT not in agent.get_system_prompt(), "every browser tool is off"
+            agent.plugins.disable("browser")
+            agent.plugins.enable("browser")
+            await agent.plugins.load_pending()
+            assert not any(agent.is_tool_enabled(name) for name in TOOLS)
+            assert PROMPT not in agent.get_system_prompt(), "a re-enable keeps them off"
+            switch_tool(agent, "browser_snapshot", True)
+            assert PROMPT in agent.get_system_prompt()
+            assert tool_switch_state(agent, "browser_snapshot")["enabled"] is True
         finally:
             await agent.stop()
         assert driver.alive() == []
