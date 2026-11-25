@@ -3,7 +3,7 @@
 import pytest
 
 from kohakuterrarium.browser import errors as err
-from kohakuterrarium.errors import KTError
+from kohakuterrarium.errors import ConflictError, KTError
 
 
 @pytest.mark.parametrize(
@@ -14,6 +14,7 @@ from kohakuterrarium.errors import KTError
         err.NavigationBlockedError,
         err.ActionFailedError,
         err.DialogPendingError,
+        err.TabLimitError,
         err.DriverError,
         err.DriverTimeoutError,
     ],
@@ -39,3 +40,7 @@ def test_dialog_opened_keeps_its_record():
     exc = err.DialogOpenedError(record, "a confirm dialog opened", detail="Sure?")
     assert exc.record is record
     assert str(exc) == "a confirm dialog opened" and exc.detail == "Sure?"
+
+
+def test_tab_limit_is_a_conflict():
+    assert isinstance(err.TabLimitError("full"), ConflictError)

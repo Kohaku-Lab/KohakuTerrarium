@@ -250,8 +250,8 @@ class SessionObserveMixin:
         if self._refused_tabs:
             count, self._refused_tabs = self._refused_tabs, 0
             notes.append(
-                f"Closed {count} tab{'' if count == 1 else 's'} the page opened beyond "
-                f"the limit of {self._max_tabs} open tabs."
+                f"Closed {count} tab{'' if count == 1 else 's'} beyond the limit of "
+                f"{self._max_tabs} open tabs."
             )
         return fmt.join_sections(*notes)
 

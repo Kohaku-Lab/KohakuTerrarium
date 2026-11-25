@@ -49,6 +49,10 @@ class NoTabError(BrowserError, InvalidRequestError):
     """The operation needs a tab and there is none, or the tab id is unknown."""
 
 
+class TabLimitError(BrowserError, ConflictError):
+    """Opening a tab was refused because the session already has its limit of tabs open."""
+
+
 class DialogPendingError(BrowserError, ConflictError):
     """A page dialog is waiting for an answer; only the ``dialog`` action is accepted."""
 

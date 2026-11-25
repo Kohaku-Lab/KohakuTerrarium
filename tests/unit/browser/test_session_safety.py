@@ -22,11 +22,12 @@ from kohakuterrarium.browser.errors import (
     DriverError,
     NavigationBlockedError,
     NoTabError,
+    TabLimitError,
 )
 from kohakuterrarium.browser.protocol import NavResponse
 from kohakuterrarium.browser.session import observing as observing_module
 from kohakuterrarium.browser.session import types as types_module
-from tests.helpers.browser_driver import ScriptedDialog, ScriptedDownload
+from tests.helpers.browser_driver import ScriptedDialog, ScriptedDownload, ScriptedPage
 from tests.unit.browser.test_session import PAGE, made, make  # noqa: F401
 
 SECRET = "Sx9f2kq-hunter-77"
@@ -646,9 +647,81 @@ class TestCaps:
         await asyncio.sleep(0.01)
         assert [p.closed for p in popups] == [False, False, True, True]
         result = await session.tabs_list()
-        assert "Closed 2 tabs the page opened beyond the limit of 3 open tabs." in (
-            outside(result.text)
-        )
+        assert "Closed 2 tabs beyond the limit of 3 open tabs." in outside(result.text)
+
+    async def test_a_tool_tab_beyond_the_cap_is_refused_without_opening_one(self, made):
+        session, driver = made
+        session._max_tabs = 2
+        await session.snapshot()
+        await session.tab_new()
+        for _ in range(2):
+            with pytest.raises(TabLimitError) as info:
+                await session.tab_new()
+            assert str(info.value) == (
+                "the limit of 2 open tabs is reached; close a tab with browser_tabs "
+                "close first"
+            )
+        with pytest.raises(TabLimitError):
+            await session.tab_new("http://shop.test/x")
+        assert len(driver.browser.pages()) == 2 and len(session._tabs) == 2
+
+    async def test_launch_pages_beyond_the_cap_are_closed_and_reported(self, tmp_path):
+        def restore(browser):
+            for i in range(4):
+                browser.open_popup(f"http://p{i}.test/")
+
+        session, driver = make(tmp_path, restore)
+        session._max_tabs = 3
+        result = await session.snapshot()
+        await asyncio.sleep(0.01)
+        assert len(session._tabs) == 3 and len(driver.browser.pages()) == 3
+        assert [p.closed for p in driver.browser.page_list] == [
+            False,
+            False,
+            False,
+            True,
+            True,
+        ]
+        assert "Closed 2 tabs beyond the limit of 3 open tabs." in outside(result.text)
+        await session.close()
+
+    @pytest.mark.parametrize("cap", [2, 3])
+    async def test_a_popup_while_a_tool_tab_opens_is_a_page_tab(self, made, cap):
+        session, driver = made
+        session._max_tabs = cap
+        await session.snapshot()
+        browser = driver.browser
+        real = browser.new_page
+        popups = []
+
+        async def new_page(timeout):
+            popups.append(browser.open_popup("http://pop.test/"))
+            return await real(timeout)
+
+        browser.new_page = new_page
+        result = await session.tab_new()
+        await asyncio.sleep(0.01)
+        own = browser.page_list[-1]
+        assert session._tabs.active.page is own
+        if cap == 2:
+            assert popups[0].closed and len(session._tabs) == 2
+            assert "Closed 1 tab beyond the limit of 2 open tabs." in result.text
+        else:
+            assert not popups[0].closed and len(session._tabs) == 3
+            assert session._tabs.find(popups[0]).opened_by_page
+            assert "* [t2] about:blank" in result.text
+            assert "Tab opened: t3 http://pop.test/" in result.text
+
+    async def test_a_dialog_from_an_unknown_page_respects_the_cap(self, made):
+        session, driver = made
+        session._max_tabs = 1
+        await session.snapshot()
+        stray = ScriptedPage(driver.browser, "http://stray.test/")
+        dialog = ScriptedDialog("alert", "hi")
+        driver.browser.sink.dialog_opened(stray, dialog)
+        await asyncio.sleep(0.01)
+        assert dialog.answer == ("dismiss", None)
+        assert len(session._tabs) == 1 and session._dialogs.pending is None
 
     async def test_titles_are_read_concurrently_under_one_timeout(self, made):
         session, driver = made

@@ -1442,6 +1442,29 @@ class TestEdgePaths:
         finally:
             await session.close()
 
+    async def test_a_failed_launch_leaves_no_page_for_the_next_one(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(ScriptedBrowser, "start", lambda self: None)
+        real = ScriptedBrowser.new_page
+
+        async def new_page(self, timeout):
+            if len(self.driver.browsers) == 1:
+                self.open_popup("http://first.test/")
+                raise DriverError("the call failed")
+            return await real(self, timeout)
+
+        monkeypatch.setattr(ScriptedBrowser, "new_page", new_page)
+        session, driver = make(tmp_path, setup=None)
+        try:
+            with pytest.raises(DriverError):
+                await session.snapshot()
+            result = await session.snapshot()
+            assert result.text.startswith("[t1] about:blank")
+            assert [t.page for t in session._tabs] == driver.browser.page_list
+        finally:
+            await session.close()
+
     async def test_pages_a_driver_does_not_report_are_registered(
         self, tmp_path, monkeypatch
     ):

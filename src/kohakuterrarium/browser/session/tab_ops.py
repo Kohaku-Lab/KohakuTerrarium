@@ -4,7 +4,7 @@ import asyncio
 
 from kohakuterrarium.browser import results as fmt
 from kohakuterrarium.browser.dialogs import DialogManager
-from kohakuterrarium.browser.errors import PageClosedError
+from kohakuterrarium.browser.errors import PageClosedError, TabLimitError
 from kohakuterrarium.browser.options import BrowserOptions
 from kohakuterrarium.browser.session.types import (
     CALL_MARGIN_S,
@@ -29,8 +29,15 @@ class SessionTabsMixin:
     _stale: list[Stack]
     _state: str
     _expect_page: int
+    _max_tabs: int
 
     async def _open_tab(self) -> Tab:
+        """A new active tab; ``TabLimitError`` when ``MAX_TABS`` are already open."""
+        if len(self._tabs) >= self._max_tabs:
+            raise TabLimitError(
+                f"the limit of {self._max_tabs} open tabs is reached; close a tab "
+                "with browser_tabs close first"
+            )
         timeout = self.options.action_timeout_s
         browser = self._stack.browser
         self._expect_page += 1
@@ -38,9 +45,12 @@ class SessionTabsMixin:
             page = await self._bounded(
                 lambda: browser.new_page(timeout), timeout, "opening a tab"
             )
-        finally:
+        except BaseException:
             self._expect_page -= 1
-        return self._tabs.add(page)
+            self._admit_arrivals(None)
+            raise
+        self._expect_page -= 1
+        return self._admit_arrivals(page)
 
     async def tabs_list(self) -> BrowserResult:
         """The open tabs, active one marked; never launches the browser."""

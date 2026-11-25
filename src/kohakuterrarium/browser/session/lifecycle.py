@@ -100,6 +100,7 @@ class SessionLifecycleMixin:
         self._windows_early = 0
         self._window_arrived = asyncio.Event()
         self._refused_pages: set[PageDriver] = set()
+        self._arrived: list[PageDriver] = []
         self._nav_urls: dict[str, list[str]] = {}
         self._tabs = TabRegistry()
         self._refs = RefBook()
@@ -248,15 +249,15 @@ class SessionLifecycleMixin:
                 self._driver.launch(plan, LaunchSink(self, generation)),
                 plan.timeout_s + CALL_MARGIN_S,
             )
-            for page in stack.browser.pages():
-                if self._tabs.find(page) is None:
-                    self._tabs.add(page)
+            arrived, self._arrived = self._arrived, []
+            for page in dict.fromkeys([*arrived, *stack.browser.pages()]):
+                self._admit(page, opened_by_page=False)
             if not len(self._tabs):
                 timeout = self.options.action_timeout_s
                 page = await self._bounded(
                     lambda: stack.browser.new_page(timeout), timeout, "opening a tab"
                 )
-                self._tabs.add(page)
+                self._admit_arrivals(page)
         except asyncio.TimeoutError:
             await self._teardown_shielded(stack)
             limit = plan.timeout_s if plan else 0
@@ -268,6 +269,7 @@ class SessionLifecycleMixin:
             raise
         finally:
             self._expect_page -= 1
+            self._arrived = []
         return stack
 
     async def _stage(self, operation: Callable[[], Awaitable[Any]], name: str) -> bool:
@@ -325,6 +327,7 @@ class SessionLifecycleMixin:
         self._last.clear()
         self._blocked.clear()
         self._refused_pages.clear()
+        self._arrived = []
         self._refused_tabs = 0
         self._windows_due = 0
         self._windows_early = 0
@@ -416,20 +419,49 @@ class SessionLifecycleMixin:
             self._teardowns = {t for t in self._teardowns if not t.done()}
 
     def _on_page_opened(self, page: PageDriver) -> None:
-        if self._tabs.find(page) is not None or page in self._refused_pages:
+        known = self._tabs.find(page) is not None or page in self._refused_pages
+        if known or page in self._arrived:
             return
-        by_page = self._expect_page == 0
-        if by_page and self._windows_due:
-            self._windows_due -= 1
-            self._window_arrived.set()
-        elif by_page:
-            self._windows_early += 1
-        if by_page and len(self._tabs) >= self._max_tabs:
+        if self._expect_page:
+            self._arrived.append(page)
+            return
+        self._admit_by_page(page)
+
+    def _admit(self, page: PageDriver, *, opened_by_page: bool) -> Tab | None:
+        """The tab of ``page``; ``None`` after closing it when ``MAX_TABS`` are open."""
+        tab = self._tabs.find(page)
+        if tab is not None or page in self._refused_pages:
+            return tab
+        if len(self._tabs) >= self._max_tabs:
             self._refused_tabs += 1
             self._refused_pages.add(page)
             self._spawn(page.close(self.options.action_timeout_s))
-            return
-        self._tabs.add(page, opened_by_page=by_page)
+            return None
+        return self._tabs.add(page, opened_by_page=opened_by_page)
+
+    def _admit_by_page(self, page: PageDriver) -> Tab | None:
+        """Admit a page the site opened, matching it with an announced window."""
+        if self._windows_due:
+            self._windows_due -= 1
+            self._window_arrived.set()
+        else:
+            self._windows_early += 1
+        return self._admit(page, opened_by_page=True)
+
+    def _admit_arrivals(self, own: PageDriver | None) -> Tab | None:
+        """Admit the pages that opened while the session opened ``own``.
+
+        ``own`` (already allowed by the cap) is admitted first and stays
+        active; the others count as opened by the page.
+        """
+        arrived, self._arrived = self._arrived, []
+        tab = None if own is None else self._tabs.add(own)
+        for page in arrived:
+            if page is not own:
+                self._admit_by_page(page)
+        if tab is not None:
+            self._tabs.select(tab.id)
+        return tab
 
     def _spawn(self, coroutine: Awaitable[Any]) -> None:
         """Run ``coroutine`` in the background; its failure is logged, never raised."""
@@ -444,6 +476,8 @@ class SessionLifecycleMixin:
             logger.debug("Background browser call failed", error=error)
 
     def _on_page_closed(self, page: PageDriver) -> None:
+        if page in self._arrived:
+            self._arrived.remove(page)
         tab = self._tabs.remove(page)
         if tab is not None:
             self._forget_tab(tab)
@@ -455,10 +489,14 @@ class SessionLifecycleMixin:
         self._last.pop(tab.id, None)
 
     def _on_dialog(self, page: PageDriver, dialog: DialogDriver) -> None:
-        if page in self._refused_pages:
+        tab = self._tabs.find(page)
+        if tab is None and page not in self._refused_pages:
+            if page in self._arrived:
+                self._arrived.remove(page)
+            tab = self._admit_by_page(page)
+        if tab is None:
             self._spawn(dialog.dismiss())
             return
-        tab = self._tabs.find(page) or self._tabs.add(page, opened_by_page=True)
         self._dialogs.opened(tab.id, dialog)
 
     def _on_window_opening(self, page: PageDriver) -> None:
