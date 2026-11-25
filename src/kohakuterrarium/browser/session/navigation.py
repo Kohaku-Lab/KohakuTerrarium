@@ -5,8 +5,6 @@ blocked decision during it for a host on its redirect chain; response
 headers never decide it.
 """
 
-from urllib.parse import urlsplit
-
 from kohakuterrarium.browser import snapshot as snap
 from kohakuterrarium.browser.errors import (
     ActionFailedError,
@@ -20,9 +18,14 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
     PageNavigatingError,
 )
-from kohakuterrarium.browser.observe import blocked_reason
+from kohakuterrarium.browser.egress import (
+    blocked_reason,
+    endpoint_of,
+    hop_note,
+    unreachable,
+)
 from kohakuterrarium.browser.options import BrowserOptions
-from kohakuterrarium.browser.policy import WEB_SCHEMES, NetworkPolicy, normalize_host
+from kohakuterrarium.browser.policy import NetworkPolicy
 from kohakuterrarium.browser.protocol import NavResponse
 from kohakuterrarium.browser.proxy import EgressRecord
 from kohakuterrarium.browser.session.types import (
@@ -35,7 +38,6 @@ from kohakuterrarium.browser.settle import settle
 from kohakuterrarium.browser.tabs import Tab, TabRegistry
 
 _NONE_LEFT = {"back": "earlier", "forward": "later"}
-_UNREACHABLE = {"upstream": "connect to", "resolve_failed": "resolve"}
 
 
 class SessionNavigationMixin:
@@ -178,13 +180,7 @@ class SessionNavigationMixin:
         if not blocked:
             return
         record = blocked[-1]
-        start = endpoint_of(target)
-        if (record.host, record.port) == start:
-            hop = ""
-        elif record.host == start[0]:
-            hop = f" (it led to {record.host}:{record.port})"
-        else:
-            hop = f" (it led to {record.host})"
+        hop = hop_note(record, target)
         raise NavigationBlockedError(
             self._redact(
                 f"loading {target} was blocked by the browser network policy{hop}: "
@@ -194,15 +190,9 @@ class SessionNavigationMixin:
 
     def _unreachable(self, mark: int, response: NavResponse) -> str:
         """Why the proxy could not reach the final host, when it recorded so; else empty."""
-        host, port = endpoint_of(response.url)
-        for record in self._stack.proxy.since(mark):
-            if (record.host, record.port) == (host, port) and (
-                record.code == response.blocked
-            ):
-                verb = _UNREACHABLE.get(record.code)
-                if verb:
-                    return f"could not {verb} {host}"
-        return ""
+        return unreachable(
+            self._stack.proxy.since(mark), response.url, response.blocked
+        )
 
     async def _settle_tab(self, tab: Tab) -> None:
         event = self._nav_event(tab)
@@ -254,19 +244,3 @@ class SessionNavigationMixin:
             if not rendered.text and query:
                 rendered = snap.Rendered(f"(nothing matches {query!r})", 0, 0, 0, {})
             return await self._page_result(tab, obs, op, rendered, not interactive)
-
-
-def host_of(url: str) -> str:
-    """The host of ``url`` normalised the way the proxy records it; empty when none."""
-    return endpoint_of(url)[0]
-
-
-def endpoint_of(url: str) -> tuple[str, int]:
-    """``(host, port)`` of ``url`` as the proxy records them; ``("", 0)`` when none."""
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname or ""
-        port = parts.port or WEB_SCHEMES.get(parts.scheme.lower(), 0)
-        return (normalize_host(host), port) if host else ("", 0)
-    except ValueError:
-        return ("", 0)

@@ -1,6 +1,7 @@
 """``BrowserSession`` assembled from its parts; see ``README.md`` for the part map."""
 
 from pathlib import Path
+from types import TracebackType
 
 from kohakuterrarium.browser.downloads import Directory, Downloads, WriteCheck
 from kohakuterrarium.browser.driver import PlaywrightDriver
@@ -16,6 +17,7 @@ from kohakuterrarium.browser.session.lifecycle import (
 )
 from kohakuterrarium.browser.session.navigation import SessionNavigationMixin
 from kohakuterrarium.browser.session.observing import SessionObserveMixin
+from kohakuterrarium.browser.session.reading import SessionReadMixin
 from kohakuterrarium.browser.session.tab_ops import SessionTabsMixin
 from kohakuterrarium.browser.session.types import (
     CLOSE_STAGE_TIMEOUT_S,
@@ -31,12 +33,14 @@ class BrowserSession(
     SessionActMixin,
     SessionCaptureMixin,
     SessionTabsMixin,
+    SessionReadMixin,
 ):
     """One agent's browser: lazy launch, FIFO lock, bounded calls, terminal close.
 
     ``downloads_dir`` (a path, or a callable read as each download starts)
-    receives page downloads; ``write_check`` judges each download path
-    before it is created; ``external_check`` is consulted
+    receives page downloads, and ``None`` refuses them; ``write_check``
+    judges each download path before it is created; ``async with`` closes
+    the session on exit; ``external_check`` is consulted
     by the network policy for every connection; ``driver`` defaults to
     Playwright; ``close_stage_timeout`` bounds each shutdown stage and
     ``close_timeout`` the whole of ``close``;
@@ -48,7 +52,7 @@ class BrowserSession(
         self,
         options: BrowserOptions,
         *,
-        downloads_dir: str | Directory,
+        downloads_dir: str | Directory | None = None,
         driver: Driver | None = None,
         external_check: ExternalCheck | None = None,
         write_check: WriteCheck | None = None,
@@ -61,13 +65,24 @@ class BrowserSession(
         self.settle_grace = settle_grace
         self.close_timeout = close_timeout
         self._init_observe()
+        if downloads_dir is not None and not callable(downloads_dir):
+            downloads_dir = Path(downloads_dir)
         self._init_lifecycle(
             driver or PlaywrightDriver(),
             external_check,
             close_stage_timeout,
-            Downloads(
-                downloads_dir if callable(downloads_dir) else Path(downloads_dir),
-                write_check=write_check,
-            ),
+            Downloads(downloads_dir, write_check=write_check),
             proxy_factory,
         )
+        self._init_read()
+
+    async def __aenter__(self) -> "BrowserSession":
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self.close()

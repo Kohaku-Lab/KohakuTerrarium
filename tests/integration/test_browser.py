@@ -1,11 +1,13 @@
-"""Integration test for ``kohakuterrarium.browser``: one creature browsing a real site.
+"""Integration test for ``kohakuterrarium.browser``: a creature and a standalone component.
 
 The comprehensive usage example for ``browser/``: a real :class:`Agent` built
 from an on-disk creature config that enables the ``browser`` plugin, driven by
 a ``ScriptedLLM`` that speaks native tool calls, against a loopback fixture
 site, through real Chromium and the session's real filtering proxy. The LLM is
 the only seam; the plugin is toggled through ``agent_toggle_plugin``, the
-helper behind the Studio and HTTP plugin switches.
+helper behind the Studio and HTTP plugin switches. A second workflow uses the
+runtime as a library, with no plugin and no agent, the way a tool such as
+``web_fetch`` would.
 
 Skips when Playwright or its Chromium is missing; any other launch failure
 fails. Every await is bounded, so a hang fails with its own message.
@@ -17,9 +19,11 @@ import json
 import re
 import threading
 from collections import deque
+from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium import browser
 from kohakuterrarium.browser.errors import BrowserClosedError, BrowserUnavailableError
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.llm.base import NativeToolCall
@@ -257,6 +261,21 @@ class TestBrowserIntegration:
                 )
             }
             assert ref_of(page, "button", "Save profile") == refs["Save profile"]
+
+            # Another tool reads a page through the agent's shared browser; the
+            # creature's tab, refs and next batch are untouched.
+            tool_context = SimpleNamespace(
+                runtime_services=plugin.runtime_services(None)
+            )
+            shared = await within(browser.agent_session(tool_context), "agent_session")
+            assert shared is plugin.session
+            help_page = await within(
+                shared.read_page(site.url("/help.html")), "read_page"
+            )
+            assert (help_page.title, help_page.status) == ("Help fixture", 200)
+            assert "Help centre" in help_page.text
+            assert [tab.id for tab in shared._tabs] == ["t1"]
+            assert site.hits["/help.html"] == 1
 
             # One batch fills and submits the form; the result is a delta.
             saved = await creature.call(
@@ -536,3 +555,88 @@ class TestBrowserIntegration:
         with pytest.raises(BrowserClosedError):
             await plugin.runtime_services(None)["browser"].prepare(None)
         assert plugin.session.state == "closed"
+
+    async def test_a_component_reads_pages_without_a_creature(
+        self, sites, tmp_path, monkeypatch
+    ):
+        """a session with no plugin and no agent → read under an external check →
+        a redirect the check refuses → a loopback URL the policy refuses → a URL
+        that only downloads → ``async with`` exit, no Chromium left → the one-shot
+        helper, nothing left running and nothing written."""
+        pytest.importorskip("playwright.async_api")
+        for name, value in browsers_env().items():
+            monkeypatch.setenv(name, value)
+        site, listener = sites
+        site.html(
+            "/rendered",
+            "<!doctype html><title>Loading</title><main id=app></main><script>"
+            "app.innerHTML = '<h1>Rendered</h1><p>Seats: 5</p>';"
+            "document.title = 'Rendered'</script>",
+        )
+        site.redirect("/away", listener.url("/landing"))
+        site.file(
+            "/report.csv",
+            REPORT,
+            "text/csv",
+            **{"Content-Disposition": 'attachment; filename="report.csv"'},
+        )
+        refused = {listener.port}
+        asked: list[tuple[str, int]] = []
+
+        class Sandbox:
+            """Stands in for the sandbox's ``network_policy`` runtime service."""
+
+            def check(self, host: str, port: int) -> str | None:
+                asked.append((host, port))
+                return "port closed by the sandbox" if port in refused else None
+
+        monkeypatch.chdir(tmp_path)
+        options = browser.BrowserOptions(
+            allow_loopback=True, action_timeout_s=8, nav_timeout_s=15
+        )
+        session = browser.BrowserSession(options, external_check=Sandbox().check)
+        pids: list[int] = []
+        async with session:
+            try:
+                page = await within(session.read_page(site.url("/rendered")), "read")
+            except browser.BrowserUnavailableError as exc:
+                pytest.skip(f"no Chromium for Playwright: {exc}")
+            assert (page.url, page.status, page.title) == (
+                site.url("/rendered"),
+                200,
+                "Rendered",
+            )
+            assert page.text.splitlines() == ["Rendered", "", "Seats: 5"]
+            assert "<h1>Rendered</h1>" in page.html
+            assert ("127.0.0.1", site.port) in asked
+            pids = await within(session.process_ids(), "process_ids")
+            assert pids and process_alive(pids[0])
+
+            with pytest.raises(browser.NavigationBlockedError) as caught:
+                await within(session.read_page(site.url("/away")), "blocked read")
+            assert "port closed by the sandbox" in str(caught.value)
+            assert listener.total_hits() == 0
+
+            strict = browser.BrowserSession(browser.BrowserOptions())
+            with pytest.raises(browser.NavigationBlockedError, match="loopback"):
+                await strict.read_page(site.url("/rendered"))
+            assert strict.state == "new"
+            await strict.close()
+
+            with pytest.raises(browser.NavigationError, match="started a download"):
+                await within(session.read_page(site.url("/report.csv")), "download")
+            listing = await within(session.tabs_list(), "tabs_list")
+            assert [tab["tab"] for tab in listing.meta["tabs"]] == ["t1"]
+        assert session.state == "closed"
+        left = await survivors(pids)
+        assert left == [], f"alive after async with: {left} of {pids}"
+
+        once = await within(
+            browser.read_page(
+                site.url("/rendered"), options, external_check=Sandbox().check
+            ),
+            "one-shot read",
+        )
+        assert once.title == "Rendered" and not once.html_truncated
+        assert site.hits["/rendered"] == 2
+        assert list(tmp_path.iterdir()) == []

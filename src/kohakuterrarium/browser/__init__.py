@@ -8,7 +8,8 @@ three ways to use it::
 
     session = await browser.agent_session(context)   # the agent's shared browser
     async with browser.BrowserSession(browser.BrowserOptions()) as own:
-        ...
+        page = await own.read_page("https://example.com/")
+    page = await browser.read_page("https://example.com/")  # one shot
 
 Framework modules import the defining submodule instead of this facade.
 """
@@ -24,6 +25,8 @@ _EXPORTS = {
     "BrowserOptions": "kohakuterrarium.browser.options",
     "BrowserResult": "kohakuterrarium.browser.session",
     "BrowserSession": "kohakuterrarium.browser.session",
+    "PageRead": "kohakuterrarium.browser.session.reading",
+    "read_page": "kohakuterrarium.browser.read",
     "BrowserError": "kohakuterrarium.browser.errors",
     "BrowserUnavailableError": "kohakuterrarium.browser.errors",
     "BrowserLaunchError": "kohakuterrarium.browser.errors",

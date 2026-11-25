@@ -101,12 +101,13 @@ class Downloads:
     full and then deleted, and both are reported as failed. ``directory``
     (a path, or a callable read as each download starts) receives the
     files; ``write_check`` judges every path before it is created, and a
-    download it refuses is cancelled and reported as refused.
+    download it refuses is cancelled and reported as refused. Without a
+    ``directory`` every download is cancelled and reported as refused.
     """
 
     def __init__(
         self,
-        directory: Directory,
+        directory: Directory | None,
         save_timeout: float = SAVE_TIMEOUT_S,
         *,
         max_count: int = MAX_DOWNLOADS,
@@ -127,24 +128,37 @@ class Downloads:
         self._failed: list[tuple[str, str]] = []
 
     @property
-    def directory(self) -> Path:
-        """The directory a download starting now is saved in."""
+    def directory(self) -> Path | None:
+        """The directory a download starting now is saved in; ``None`` keeps none."""
         directory = self._directory
+        if directory is None:
+            return None
         return Path(directory() if callable(directory) else directory)
 
     def start(self, download: DownloadDriver) -> None:
         """Begin saving ``download``; called from the driver's event callback."""
         name = download.suggested_filename or FALLBACK_NAME
         self.started += 1
-        if self._accepted >= self.max_count:
-            self._failed.append(
-                (name, f"refused: the limit of {self.max_count} downloads per session")
-            )
+        directory = self.directory
+        refusal = self._refusal(directory)
+        if refusal is not None:
+            self._failed.append((name, refusal))
             self._cancel_soon(download)
             return
         self._accepted += 1
-        task = asyncio.create_task(self._save(download, name, self.directory))
+        task = asyncio.create_task(self._save(download, name, directory))
         self._track(task, name)
+
+    def _refusal(self, directory: Path | None) -> str | None:
+        """Why a download starting now is refused before any file exists, or ``None``.
+
+        The file-write policy judges the file's path itself, in ``_save``.
+        """
+        if directory is None:
+            return "refused: this browser session keeps no downloads"
+        if self._accepted >= self.max_count:
+            return f"refused: the limit of {self.max_count} downloads per session"
+        return None
 
     def _cancel_soon(self, download: DownloadDriver) -> None:
         task = asyncio.create_task(_cancel(download))

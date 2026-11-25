@@ -283,3 +283,22 @@ async def test_cancel_failures_and_vanished_files_are_survived(tmp_path):
     finished, failed = downloads.drain()
     assert [name for name, _ in finished] == ["gone.bin"]
     assert [name for name, _ in failed] == ["extra.bin"]
+
+
+async def test_without_a_directory_every_download_is_refused_and_cancelled(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    downloads = Downloads(None)
+    items = [CancellableDownload(f"f{i}.bin") for i in range(3)]
+    for item in items:
+        downloads.start(item)
+    await asyncio.sleep(0.05)
+    finished, failed = downloads.drain()
+    assert finished == [] and downloads.in_progress() == []
+    assert failed == [
+        (f"f{i}.bin", "refused: this browser session keeps no downloads")
+        for i in range(3)
+    ]
+    assert all(item.cancelled and item.saved_to is None for item in items)
+    assert downloads.started == 3 and list(tmp_path.iterdir()) == []

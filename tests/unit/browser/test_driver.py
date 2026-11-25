@@ -36,6 +36,7 @@ from kohakuterrarium.browser.errors import (
     DriverError,
     DriverTimeoutError,
     NavigationBlockedError,
+    NavigationError,
 )
 from kohakuterrarium.browser.launch import Candidate
 from kohakuterrarium.browser.options import BrowserOptions
@@ -114,6 +115,9 @@ list.addEventListener('drop', e => {
 </script>"""
 ANIMATED = """<!doctype html><title>Animated</title><div id=x>anim</div><button>Poke</button>
 <script>let i = 0; setInterval(() => x.setAttribute('data-i', i++), 50)</script>"""
+SCRIPTED = """<!doctype html><title>Before</title><div id=root></div>
+<p style="display:none">display none</p><p style="visibility:hidden">not visible</p>
+<script>root.textContent = 'made by script'; document.title = 'Scripted';</script>"""
 SERVICE_WORKER = """<!doctype html><title>SW</title><script>
 navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready)
   .then(() => { document.title = 'sw ready' }, e => { document.title = 'sw failed ' + e })
@@ -380,6 +384,8 @@ def site():
         '<!doctype html><title>Start</title><a href="/hidden.html">Go hidden</a>',
     )
     server.html("/sw", SERVICE_WORKER)
+    server.html("/scripted", SCRIPTED)
+    server.redirect("/to-scripted", "/scripted")
     server.file(
         "/sw.js",
         b"self.addEventListener('fetch', () => {});",
@@ -776,6 +782,78 @@ async def test_page_setup_and_loopback_goes_through_the_proxy(live, site):
             break
         await asyncio.sleep(0.1)
     assert title == '"sw ready"'
+
+
+@LIVE
+async def test_content_is_the_rendered_dom_and_its_visible_text(live, site):
+    await live.navigate(site.url("/scripted"))
+    page = live._tabs.active.page
+    full = await within(page.content(100_000, 5), "reading the page")
+    assert full.html.startswith("<!DOCTYPE html><html><head><title>Scripted")
+    assert "made by script" in full.html and "display none" in full.html
+    assert "made by script" in full.text
+    for gone in ("display none", "not visible", "root.textContent", "Scripted"):
+        assert gone not in full.text, gone
+    assert (full.html_chars, full.text_chars) == (len(full.html), len(full.text))
+    cut = await within(page.content(10, 5), "reading the page cut short")
+    assert (cut.html, cut.text) == (full.html[:10], full.text[:10])
+    assert (cut.html_chars, cut.text_chars) == (full.html_chars, full.text_chars)
+
+
+def site_test_proxy(site):
+    """A proxy factory that resolves ``site.test`` to a public address served by ``site``."""
+
+    def proxy(policy):
+        async def resolve(host, port):
+            return [PUBLIC_IP] if host == "site.test" else []
+
+        async def dial(address, port):
+            if address == PUBLIC_IP:
+                return await asyncio.open_connection("127.0.0.1", site.port)
+            return await asyncio.open_connection(address, port)
+
+        return FilteringProxy(policy, resolver=resolve, dialer=dial)
+
+    return proxy
+
+
+@LIVE
+async def test_a_page_read_goes_through_the_proxy_and_leaves_no_tab(site, browser_env):
+    secret = FixtureSite()
+    secret.html("/secret", "secret")
+    target = f"http://127.0.0.1:{secret.port}/secret"
+    site.redirect("/to-secret", target)
+    session = Bounded(
+        BrowserSession(BrowserOptions(), proxy_factory=site_test_proxy(site))
+    )
+    public = f"http://site.test:{site.port}"
+    try:
+        with pytest.raises(NavigationBlockedError, match="loopback"):
+            await session.read_page(target)
+        assert session.state == "new"
+        try:
+            got = await session.read_page(public + "/to-scripted")
+        except BrowserUnavailableError as exc:
+            pytest.skip(f"no Chromium for Playwright: {exc}")
+        assert (got.url, got.status, got.title) == (
+            public + "/scripted",
+            200,
+            "Scripted",
+        )
+        assert "made by script" in got.text and "display none" not in got.text
+        assert "display none" in got.html and not got.html_truncated
+        with pytest.raises(NavigationBlockedError) as caught:
+            await session.read_page(public + "/to-secret")
+        assert "(it led to 127.0.0.1)" in str(caught.value)
+        with pytest.raises(NavigationError, match="started a download"):
+            await session.read_page(public + "/report.csv")
+        listing = await session.tabs_list()
+        assert [tab["tab"] for tab in listing.meta["tabs"]] == ["t1"]
+        assert len(session._stack.browser.pages()) == 1
+        assert secret.total_hits() == 0
+    finally:
+        await session.close()
+        secret.close()
 
 
 @LIVE

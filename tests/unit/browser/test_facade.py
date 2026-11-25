@@ -7,8 +7,9 @@ import sys
 import pytest
 
 import kohakuterrarium.browser as browser
-from kohakuterrarium.browser import access, errors, options
+from kohakuterrarium.browser import access, errors, options, read
 from kohakuterrarium.browser import session as session_package
+from kohakuterrarium.browser.session import reading
 
 EXPECTED = {
     "BROWSER_SERVICE": access,
@@ -18,6 +19,8 @@ EXPECTED = {
     "BrowserOptions": options,
     "BrowserResult": session_package,
     "BrowserSession": session_package,
+    "PageRead": reading,
+    "read_page": read,
     "BrowserError": errors,
     "BrowserUnavailableError": errors,
     "BrowserLaunchError": errors,

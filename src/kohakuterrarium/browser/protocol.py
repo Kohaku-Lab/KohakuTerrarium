@@ -22,12 +22,29 @@ class NavResponse:
     """The main-document response of a navigation.
 
     ``blocked`` is the ``X-KT-Browser-Blocked`` code when the filtering proxy
-    answered instead of the site.
+    answered instead of the site; ``download`` is true when the load turned
+    into a download instead of a page.
     """
 
     url: str
     status: int | None = None
     blocked: str | None = None
+    download: bool = False
+
+
+@dataclass(frozen=True)
+class PageContent:
+    """The main frame's rendered document, each part cut at the caller's bound.
+
+    ``html`` is the doctype plus ``documentElement.outerHTML``; ``text`` is
+    ``document.body.innerText`` (the root's ``textContent`` without a body).
+    ``html_chars`` / ``text_chars`` are their full lengths before the cut.
+    """
+
+    html: str
+    text: str
+    html_chars: int
+    text_chars: int
 
 
 @dataclass(frozen=True)
@@ -116,6 +133,9 @@ class PageDriver(Protocol):
         timeout: float,
     ) -> Any:
         """Run script in the main frame, or against the element of ``ref`` as first argument."""
+
+    async def content(self, max_chars: int, timeout: float) -> PageContent:
+        """The main frame's serialized DOM and rendered text, each cut at ``max_chars``."""
 
     async def ref_count(self, ref: str, timeout: float) -> int: ...
 

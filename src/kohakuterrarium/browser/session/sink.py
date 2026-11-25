@@ -1,4 +1,7 @@
-"""The driver event sink of one launch; stale launches are ignored."""
+"""The driver event sink of one launch; stale launches are ignored.
+
+Events of a page a structured read owns go to the read, never to the tabs.
+"""
 
 from typing import TYPE_CHECKING
 
@@ -21,27 +24,28 @@ class LaunchSink:
         return s._generation == self._generation and s._state in (LAUNCHING, READY)
 
     def page_opened(self, page: PageDriver) -> None:
-        if self._live():
+        if self._live() and not self._session._read_claims(page):
             self._session._on_page_opened(page)
 
     def page_closed(self, page: PageDriver) -> None:
         if self._live():
+            self._session._read_closed(page)
             self._session._on_page_closed(page)
 
     def dialog_opened(self, page: PageDriver, dialog: DialogDriver) -> None:
-        if self._live():
+        if self._live() and not self._session._read_dialog(page, dialog):
             self._session._on_dialog(page, dialog)
 
     def download_started(self, page: PageDriver, download: DownloadDriver) -> None:
-        if self._live():
+        if self._live() and not self._session._read_download(page, download):
             self._session._downloads.start(download)
 
     def navigation_started(self, page: PageDriver, url: str | None = None) -> None:
-        if self._live():
+        if self._live() and not self._session._read_navigation(page, url):
             self._session._on_navigation(page, url)
 
     def window_opening(self, page: PageDriver) -> None:
-        if self._live():
+        if self._live() and not self._session._read_window(page):
             self._session._on_window_opening(page)
 
     def disconnected(self) -> None:

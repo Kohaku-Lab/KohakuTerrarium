@@ -26,6 +26,7 @@ from kohakuterrarium.browser.protocol import (
     FRAME_DOCUMENT_ID_JS,
     FrameView,
     NavResponse,
+    PageContent,
     ProbeFrames,
 )
 from kohakuterrarium.browser.settle import QUIET_JS
@@ -125,6 +126,8 @@ class ScriptedPage:
         self.snapshot_text = snapshot
         self.boxes_text = ""
         self.title_text = title
+        self.html_text = ""
+        self.body_text = ""
         self.doc = next(_DOCS)
         self.probe_results: list[Any] = [{"hidden": [], "visible": [], "passwords": []}]
         self.probe_failed = 0
@@ -153,10 +156,16 @@ class ScriptedPage:
     def load(
         self, url: str, snapshot: str | None = None, title: str | None = None
     ) -> None:
-        """Simulate a main-document navigation: new document, event fired."""
+        """Simulate a main-document navigation: new document, event fired.
+
+        Fields ``browser.site[url]`` names (``snapshot_text``, ``title_text``,
+        ``html_text``, ``body_text``) are set first.
+        """
         self.history_back.append(self._url)
         self._url = url
         self.doc = next(_DOCS)
+        for name, value in self.browser.site.get(url, {}).items():
+            setattr(self, name, value)
         if snapshot is not None:
             self.snapshot_text = snapshot
         if title is not None:
@@ -257,6 +266,11 @@ class ScriptedPage:
         return await self._do(
             "evaluate", self.eval_value, expression=expression, ref=ref, timeout=timeout
         )
+
+    async def content(self, max_chars: int, timeout: float) -> PageContent:
+        html, text = self.html_text, self.body_text
+        default = PageContent(html[:max_chars], text[:max_chars], len(html), len(text))
+        return await self._do("content", default, max_chars=max_chars, timeout=timeout)
 
     async def ref_count(self, ref: str, timeout: float) -> int:
         present = 1 if f"[ref={ref}]" in self.snapshot_text else 0
@@ -372,6 +386,8 @@ class ScriptedBrowser:
         self.hang_stages: set[str] = set()
         self.fail_stages: set[str] = set()
         self.page_list: list[ScriptedPage] = []
+        self.site: dict[str, dict[str, Any]] = {}
+        self.page_setup = None
         self._hung: list[asyncio.Future] = []
         first = 4000 + 10 * len(driver.browsers)
         self.pids = [first, first + 1, first + 2]
@@ -417,6 +433,8 @@ class ScriptedBrowser:
         if self.dead:
             raise DriverDisconnectedError("the browser closed unexpectedly")
         page = ScriptedPage(self)
+        if self.page_setup is not None:
+            self.page_setup(page)
         self.page_list.append(page)
         self.sink.page_opened(page)
         return page

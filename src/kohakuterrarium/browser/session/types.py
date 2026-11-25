@@ -63,7 +63,7 @@ class Op:
 
     ``stack`` is the browser the operation runs on, ``launched`` whether
     the operation launched it, ``downloads_mark`` the download count when
-    it began.
+    it began; a ``quiet`` operation leaves the lost-state notice to the next.
     """
 
     tab: Tab | None = None
@@ -71,3 +71,4 @@ class Op:
     stack: Stack | None = None
     launched: bool = False
     downloads_mark: int = 0
+    quiet: bool = False

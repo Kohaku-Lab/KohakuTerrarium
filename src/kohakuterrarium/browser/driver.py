@@ -27,6 +27,7 @@ from kohakuterrarium.browser.protocol import (
     EventSink,
     FrameView,
     NavResponse,
+    PageContent,
     ProbeFrames,
 )
 from kohakuterrarium.browser.proxy import BLOCKED_HEADER
@@ -63,6 +64,16 @@ _CALL_PREFIX = re.compile(r"^(?:Error: )?(?:[A-Za-z]+\.[A-Za-z_]+: )?(?:Error: )
 _TIMEOUT_MS = re.compile(r"Timeout (\d+)ms exceeded")
 _NET_ERROR = re.compile(r"\bnet::ERR_[A-Z_]{1,60}")
 _SCROLL_JS = "() => [window.scrollX, window.scrollY]"
+_CONTENT_JS = """(limit) => {
+  const doctype = document.doctype
+    ? new XMLSerializer().serializeToString(document.doctype) : "";
+  const root = document.documentElement;
+  const html = doctype + (root ? root.outerHTML : "");
+  const body = document.body;
+  const text = body ? body.innerText : (root ? root.textContent || "" : "");
+  return {html: html.slice(0, limit), text: text.slice(0, limit),
+          htmlChars: html.length, textChars: text.length};
+}"""
 _SCROLL_HEIGHT_JS = (
     "() => Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"
     " document.body ? document.body.scrollHeight : 0)"
@@ -171,7 +182,7 @@ class PlaywrightPage:
             )
         except DriverError as exc:
             if "Download is starting" in exc.detail:
-                return NavResponse(self._page.url)
+                return NavResponse(self._page.url, download=True)
             raise
         return self._response(response)
 
@@ -262,6 +273,16 @@ class PlaywrightPage:
             )
         return await self._run(
             lambda: asyncio.wait_for(self._page.evaluate(expression, arg), timeout)
+        )
+
+    async def content(self, max_chars: int, timeout: float) -> PageContent:
+        found = await self._run(
+            lambda: asyncio.wait_for(
+                self._page.evaluate(_CONTENT_JS, max_chars), timeout
+            )
+        )
+        return PageContent(
+            found["html"], found["text"], found["htmlChars"], found["textChars"]
         )
 
     async def ref_count(self, ref: str, timeout: float) -> int:

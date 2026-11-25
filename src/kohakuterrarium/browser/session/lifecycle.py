@@ -166,10 +166,12 @@ class SessionLifecycleMixin:
             raise BrowserClosedError("the browser session is closed")
 
     @asynccontextmanager
-    async def _operation(self, *, launch: bool = True) -> AsyncIterator[Op]:
+    async def _operation(
+        self, *, launch: bool = True, quiet: bool = False
+    ) -> AsyncIterator[Op]:
         """Hold the lock for one operation, launching first unless ``launch`` is false."""
         self._require_open()
-        op = Op(downloads_mark=self._downloads.started)
+        op = Op(downloads_mark=self._downloads.started, quiet=quiet)
         async with self._lock:
             self._require_open()
             self._cancel_idle()
@@ -227,6 +229,7 @@ class SessionLifecycleMixin:
 
     async def _ensure_ready(self, op: Op) -> None:
         if self._state == READY and self._stack.browser.is_connected():
+            self._note_lost(op)
             return
         if self._state == READY:
             self._mark_lost(LOST_CRASH)
@@ -251,7 +254,11 @@ class SessionLifecycleMixin:
         self._stack = stack
         self._state = READY
         op.launched = True
-        if self._lost:
+        self._note_lost(op)
+
+    def _note_lost(self, op: Op) -> None:
+        """Tell ``op`` once that the previous browser's state was lost."""
+        if self._lost and not op.quiet:
             op.notes.append(
                 f"Browser state was lost ({self._lost}); a fresh browser was started, so "
                 "earlier tabs, refs, logins and page state are gone."

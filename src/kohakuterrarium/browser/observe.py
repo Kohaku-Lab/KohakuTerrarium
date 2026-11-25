@@ -25,13 +25,14 @@ from kohakuterrarium.browser.errors import (
     DriverError,
     PageClosedError,
 )
+from kohakuterrarium.browser.egress import blocked_reason
 from kohakuterrarium.browser.hidden import (
     PROBE_JS,
     ProbeResult,
     apply_probe,
     withhold_field_values,
 )
-from kohakuterrarium.browser.policy import NetworkPolicy, parse_ip
+from kohakuterrarium.browser.policy import NetworkPolicy
 from kohakuterrarium.browser.protocol import (
     DOCUMENT_ID_JS,
     FrameView,
@@ -300,18 +301,6 @@ async def observe(
     return Observation(
         doc_id=doc_id, url=page.url, title=title or "", note=note, **parts
     )
-
-
-def blocked_reason(record: EgressRecord, policy: NetworkPolicy) -> str:
-    """The policy's sentence for a blocked proxy decision, falling back to its code."""
-    address = record.address
-    if address is None and parse_ip(record.host) is not None:
-        address = record.host
-    if address is not None:
-        decision = policy.check_address(address, record.port)
-    else:
-        decision = policy.check_host(record.host, record.port)
-    return decision.reason if not decision.allowed else record.code
 
 
 def format_blocked_records(
