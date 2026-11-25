@@ -38,13 +38,16 @@ class PageContent:
 
     ``html`` is the doctype plus ``documentElement.outerHTML``; ``text`` is
     ``document.body.innerText`` (the root's ``textContent`` without a body).
-    ``html_chars`` / ``text_chars`` are their full lengths before the cut.
+    ``html_chars`` / ``text_chars`` are their full lengths before the cut;
+    ``passwords`` holds the main frame's password-field values, current and
+    as attributes.
     """
 
     html: str
     text: str
     html_chars: int
     text_chars: int
+    passwords: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -238,6 +241,13 @@ class EventSink(Protocol):
 
     def window_opening(self, page: PageDriver) -> None:
         """``page`` asked for a new window; its ``page_opened`` follows later."""
+
+    def popup_opened(self, opener: PageDriver, page: PageDriver) -> None:
+        """``page``, just reported by ``page_opened``, was opened by ``opener``.
+
+        Delivered right after that ``page_opened`` and before any other event
+        of ``page``; never for a window opened without an opener.
+        """
 
     def disconnected(self) -> None:
         """The browser went away without the session asking."""

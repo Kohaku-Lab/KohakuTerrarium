@@ -302,3 +302,36 @@ async def test_without_a_directory_every_download_is_refused_and_cancelled(
     ]
     assert all(item.cancelled and item.saved_to is None for item in items)
     assert downloads.started == 3 and list(tmp_path.iterdir()) == []
+
+
+async def test_refusals_are_ordered_no_directory_then_count_cap_then_write_policy(
+    tmp_path,
+):
+    asked = []
+
+    def refuse_all(path):
+        asked.append(path.name)
+        return "outside the writable roots"
+
+    keepless = Downloads(None, max_count=1, write_check=refuse_all)
+    for name in ("a.bin", "b.bin"):
+        keepless.start(CancellableDownload(name))
+    await asyncio.sleep(0.05)
+    _, failed = keepless.drain()
+    assert [reason for _, reason in failed] == [
+        "refused: this browser session keeps no downloads"
+    ] * 2
+    assert asked == []
+
+    capped = Downloads(tmp_path, max_count=1, write_check=refuse_all)
+    items = [CancellableDownload(name) for name in ("a.bin", "b.bin")]
+    for item in items:
+        capped.start(item)
+    await asyncio.sleep(0.05)
+    _, failed = capped.drain()
+    assert dict(failed) == {
+        "a.bin": "refused by the file-write policy: outside the writable roots",
+        "b.bin": "refused: the limit of 1 downloads per session",
+    }
+    assert "b.bin" not in asked and all(item.cancelled for item in items)
+    assert list(tmp_path.iterdir()) == []

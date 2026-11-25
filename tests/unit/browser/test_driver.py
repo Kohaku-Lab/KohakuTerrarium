@@ -800,6 +800,33 @@ async def test_content_is_the_rendered_dom_and_its_visible_text(live, site):
     assert (cut.html_chars, cut.text_chars) == (full.html_chars, full.text_chars)
 
 
+FIELDS = """<!doctype html><title>Fields</title>
+<input type=password id=p1 value="attr-pass-1234">
+<input type=password id=p2>
+<input type=password id=p3 value="before-copy-1">
+<input id=t1 value="attr-text-1">
+<textarea id=ta>attr-area-1</textarea>
+<script>
+const v = (...parts) => parts.join('-');
+p2.value = v('property', 'pass', '5678');
+p3.value = v('copied', 'pass', '9012'); p3.setAttribute('value', p3.value);
+t1.value = v('property', 'text', '1'); ta.value = v('property', 'area', '1');
+</script>"""
+
+
+@LIVE
+async def test_a_read_never_shows_a_password_field_value(live, site):
+    site.html("/fields", FIELDS)
+    got = await live.read_page(site.url("/fields"))
+    blob = got.html + got.text + got.title
+    for value in ("property-pass-5678", "property-text-1", "property-area-1"):
+        assert value not in blob, value
+    for value in ("attr-pass-1234", "copied-pass-9012", "before-copy-1"):
+        assert value not in blob, value
+    assert got.html.count("[redacted]") == 2
+    assert "attr-text-1" in got.html and "attr-area-1" in got.html
+
+
 def site_test_proxy(site):
     """A proxy factory that resolves ``site.test`` to a public address served by ``site``."""
 
@@ -815,6 +842,79 @@ def site_test_proxy(site):
         return FilteringProxy(policy, resolver=resolve, dialer=dial)
 
     return proxy
+
+
+@LIVE
+async def test_during_a_read_only_the_read_page_windows_are_closed(live, site):
+    def slow_reader(handler) -> None:
+        time.sleep(3.0)
+        body = (
+            b"<!doctype html><title>Slow</title><p>slow</p>"
+            b"<script>window.open('/child?from=read')</script>"
+        )
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.end_headers()
+        handler.wfile.write(body)
+
+    site.routes["/slow-read"] = slow_reader
+    site.html(
+        "/pop-soon",
+        '<!doctype html><title>Pop soon</title><button onclick="setTimeout(() =>'
+        " window.open('/child?from=agent'), 1500)\">Pop soon</button>",
+    )
+    for tab in list(live._tabs)[1:]:
+        await live.tab_close(tab.id)
+    text = (await live.navigate(site.url("/pop-soon"))).text
+    await live.act([{"kind": "click", "ref": ref_of(text, "button", "Pop soon")}])
+    got = await live.read_page(site.url("/slow-read"))
+    assert got.title == "Slow"
+    await asyncio.sleep(0.5)
+    listing = await live.tabs_list()
+    urls = [tab["url"] for tab in listing.meta["tabs"]]
+    assert any(url.endswith("/child?from=agent") for url in urls), urls
+    assert not any("from=read" in url for url in urls), urls
+    pages = [page.url for page in live._stack.browser.pages()]
+    assert not any("from=read" in url for url in pages), pages
+    for tab in list(live._tabs)[1:]:
+        await live.tab_close(tab.id)
+
+
+@LIVE
+async def test_a_connection_cut_by_the_rejudge_mid_read_raises_a_typed_error(
+    site, browser_env
+):
+    def slow(handler) -> None:
+        time.sleep(6.0)
+        handler.send_response(200)
+        handler.send_header("Content-Length", "2")
+        handler.end_headers()
+        handler.wfile.write(b"ok")
+
+    site.routes["/very-slow"] = slow
+    refuse = {"on": False}
+    session = Bounded(
+        BrowserSession(
+            BrowserOptions(allow_loopback=True, nav_timeout_s=20),
+            external_check=lambda host, port: (
+                "the sandbox now refuses it" if refuse["on"] else None
+            ),
+        )
+    )
+    try:
+        await start(session, site.url("/form"))
+        reading = asyncio.ensure_future(session.read_page(site.url("/very-slow")))
+        await asyncio.sleep(1.0)
+        refuse["on"] = True
+        started = time.monotonic()
+        with pytest.raises(NavigationBlockedError, match="the sandbox now refuses it"):
+            await reading
+        assert time.monotonic() - started < 5.0
+        assert [tab.id for tab in session._tabs] == ["t1"]
+        assert len(session._stack.browser.pages()) == 1
+    finally:
+        await session.close()
 
 
 @LIVE

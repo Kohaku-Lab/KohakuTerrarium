@@ -48,6 +48,10 @@ class LaunchSink:
         if self._live() and not self._session._read_window(page):
             self._session._on_window_opening(page)
 
+    def popup_opened(self, opener: PageDriver, page: PageDriver) -> None:
+        if self._live():
+            self._session._read_popup(opener, page)
+
     def disconnected(self) -> None:
         if self._live() and self._session._state == READY:
             self._session._mark_lost(LOST_CRASH)

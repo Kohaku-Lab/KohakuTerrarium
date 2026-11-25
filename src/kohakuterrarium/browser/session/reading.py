@@ -41,7 +41,11 @@ from kohakuterrarium.browser.protocol import (
     PageDriver,
 )
 from kohakuterrarium.browser.proxy import EgressRecord
-from kohakuterrarium.browser.secrets import SecretStore, value_forms
+from kohakuterrarium.browser.secrets import (
+    MIN_REDACT_LENGTH,
+    SecretStore,
+    value_forms,
+)
 from kohakuterrarium.browser.session.types import (
     CALL_MARGIN_S,
     NAV_CHAIN_MAX,
@@ -93,6 +97,7 @@ class SessionReadMixin:
     _tabs: TabRegistry
     _dialogs: DialogManager
     _expect_page: int
+    _late_opens: int
     _arrived: list[PageDriver]
     _refused_pages: set[PageDriver]
     # owned by SessionObserveMixin
@@ -108,6 +113,7 @@ class SessionReadMixin:
         self._read_popups = 0
         self._read_arrived = asyncio.Event()
         self._read_downloaded = False
+        self._read_undecided: dict[PageDriver, PageDriver | None] = {}
 
     async def read_page(self, url: str, *, max_chars: int = READ_MAX_CHARS) -> PageRead:
         """Load ``url`` in a temporary tab and return it as a :class:`PageRead`.
@@ -143,19 +149,22 @@ class SessionReadMixin:
         return url
 
     async def _open_read_page(self, op: Op) -> PageDriver:
-        """A new page outside the tab registry; windows that arrive meanwhile are admitted."""
+        """A new page outside the tab registry; windows that arrive meanwhile are admitted.
+
+        An open that times out or is cancelled keeps running in the
+        background; the page it makes is the read's and is closed.
+        """
         timeout = self.options.action_timeout_s
         browser = op.stack.browser
         self._expect_page += 1
+        opening = asyncio.ensure_future(browser.new_page(timeout))
         try:
             page = await self._bounded(
-                lambda: browser.new_page(timeout), timeout, "opening a tab to read in"
+                lambda: asyncio.shield(opening), timeout, "opening a tab to read in"
             )
         except BaseException:
-            self._expect_page -= 1
-            arrived, self._arrived = self._arrived, []
-            for orphan in arrived:
-                self._claim(orphan)
+            self._late_opens += 1
+            self._spawn(self._finish_late_read_open(opening, timeout))
             raise
         self._expect_page -= 1
         if page in self._arrived:
@@ -169,6 +178,32 @@ class SessionReadMixin:
         self._read_windows = self._read_popups = 0
         self._read_downloaded = False
         return page
+
+    async def _finish_late_read_open(
+        self, opening: asyncio.Future, timeout: float
+    ) -> None:
+        """Wait, one more ``timeout``, for a read's page open that gave up; close its page.
+
+        Pages that arrived meanwhile are admitted as opened by the site once
+        no other open is waiting for its own page.
+        """
+        own = None
+        try:
+            own = await asyncio.wait_for(opening, timeout + CALL_MARGIN_S)
+        except Exception:
+            own = None
+        finally:
+            self._expect_page -= 1
+            self._late_opens -= 1
+            if own is not None:
+                if own in self._arrived:
+                    self._arrived.remove(own)
+                self._read_owned.add(own)
+                self._spawn(self._close_read_page(own))
+            if not self._expect_page:
+                arrived, self._arrived = self._arrived, []
+                for page in arrived:
+                    self._admit_by_page(page)
 
     async def _read(self, page: PageDriver, url: str, limit: int) -> PageRead:
         stack = self._stack
@@ -289,8 +324,17 @@ class SessionReadMixin:
         content: PageContent,
         limit: int,
     ) -> PageRead:
-        redact = self._secrets.redact
-        forms = self._secret_forms()
+        passwords = content.passwords
+
+        def redact(text: str) -> str:
+            return self._secrets.redact(text, extra=passwords)
+
+        forms = self._secret_forms() + [
+            form
+            for value in passwords
+            if len(value) >= MIN_REDACT_LENGTH
+            for form in value_forms(value)
+        ]
         html, html_cut = _cut(redact, forms, content.html, content.html_chars, limit)
         text, text_cut = _cut(redact, forms, content.text, content.text_chars, limit)
         title, _ = _cut(redact, forms, title, len(title), limit)
@@ -342,20 +386,49 @@ class SessionReadMixin:
         self._spawn(self._close_read_page(page))
 
     def _read_claims(self, page: PageDriver) -> bool:
-        """Whether an opened ``page`` belongs to a read: its own, or any opened while one runs."""
-        if page in self._read_owned:
+        """Whether an opened ``page`` is the read's to handle; any opened while one runs is.
+
+        Such a page is decided a moment later by its opener (``popup_opened``
+        arrives right after): a window of an agent tab becomes a tab, any
+        other is the read's and is closed.
+        """
+        if page in self._read_owned or page in self._read_undecided:
             return True
-        if self._read_page is None or self._expect_page:
+        if self._read_page is None:
             return False
         if self._tabs.find(page) is not None or page in self._refused_pages:
             return False
         if page in self._arrived:
             return False
-        self._claim(page)
+        self._read_undecided[page] = None
+        loop = asyncio.get_running_loop()
+        loop.call_soon(self._read_decide, page, self._stack)
         return True
+
+    def _read_popup(self, opener: PageDriver, page: PageDriver) -> None:
+        """Record who opened a window a running read has not decided yet."""
+        if page in self._read_undecided:
+            self._read_undecided[page] = opener
+
+    def _read_decide(self, page: PageDriver, stack: Stack | None = None) -> None:
+        """Hand an undecided window to the tabs when an agent tab opened it, else claim it.
+
+        A window of a browser that was lost (``stack`` no longer current) is
+        only forgotten.
+        """
+        if page not in self._read_undecided:
+            return
+        opener = self._read_undecided.pop(page)
+        if stack is not None and stack is not self._stack:
+            return
+        if opener is not None and opener not in self._read_owned:
+            self._on_page_opened(page)
+        else:
+            self._claim(page)
 
     def _read_dialog(self, page: PageDriver, dialog: DialogDriver) -> bool:
         """Dismiss a dialog of a read's page; whether ``page`` was a read's."""
+        self._read_decide(page)
         if page not in self._read_owned:
             return False
         self._spawn(dialog.dismiss())
@@ -363,6 +436,7 @@ class SessionReadMixin:
 
     def _read_download(self, page: PageDriver, download: DownloadDriver) -> bool:
         """Cancel a download of a read's page; whether ``page`` was a read's."""
+        self._read_decide(page)
         if page not in self._read_owned:
             return False
         if page is self._read_page:
@@ -372,6 +446,7 @@ class SessionReadMixin:
 
     def _read_navigation(self, page: PageDriver, url: str | None) -> bool:
         """Record a main-frame hop of the read's page; whether ``page`` was a read's."""
+        self._read_decide(page)
         if page not in self._read_owned:
             return False
         if page is self._read_page:
@@ -383,6 +458,7 @@ class SessionReadMixin:
 
     def _read_window(self, page: PageDriver) -> bool:
         """Count a window the read's page announced; whether ``page`` was a read's."""
+        self._read_decide(page)
         if page not in self._read_owned:
             return False
         if page is self._read_page:
@@ -390,6 +466,7 @@ class SessionReadMixin:
         return True
 
     def _read_closed(self, page: PageDriver) -> None:
+        self._read_undecided.pop(page, None)
         self._read_owned.discard(page)
 
 

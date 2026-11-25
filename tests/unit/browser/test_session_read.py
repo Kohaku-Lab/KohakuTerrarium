@@ -12,6 +12,7 @@ import pytest
 from kohakuterrarium.browser.errors import (
     ActionSpecError,
     BrowserClosedError,
+    BrowserStateLostError,
     BrowserTimeoutError,
     ContextDestroyedError,
     DriverError,
@@ -356,7 +357,9 @@ class TestSecrets:
     @pytest.fixture
     def secret_env(self, monkeypatch):
         monkeypatch.setenv("KT_T_READ_PW", SECRET)
-        return {"secrets": {"pw": "env:KT_T_READ_PW"}}
+        return {
+            "secrets": {"pw": {"env": "KT_T_READ_PW", "origins": ["http://news.test"]}}
+        }
 
     async def test_secrets_are_redacted_from_every_field(self, tmp_path, secret_env):
         url = f"http://news.test/?token={SECRET}"
@@ -391,6 +394,32 @@ class TestSecrets:
             assert got.html_truncated and len(field) <= limit
             assert not any(field.endswith(SECRET[:k]) for k in range(1, cut + 1))
             assert field.startswith("a" * (limit - cut))
+        await session.close()
+
+    @pytest.mark.parametrize("limit", [200, 33])
+    async def test_password_field_values_are_redacted(self, tmp_path, limit):
+        password = "pw-from-a-field-42"
+        html = "a" * 25 + f'<input type=password value="{password}">'
+
+        def setup(page):
+            page.password_values = [password, "abc"]
+
+        def site_with_field(browser):
+            site(browser)
+            browser.site[NEWS] = {
+                "html_text": html,
+                "body_text": f"echo {password}",
+                "title_text": password,
+            }
+            browser.page_setup = setup
+
+        session, _ = make(tmp_path, setup=site_with_field)
+        got = await session.read_page(NEWS, max_chars=limit)
+        blob = repr(got)
+        assert not [s for s in slices(password) if s in blob], blob
+        if limit == 200:
+            assert '<input type=password value="[redacted]">' in got.html
+            assert got.title == "[redacted]" and got.text == "echo [redacted]"
         await session.close()
 
     async def test_an_error_message_never_carries_a_secret(self, tmp_path, secret_env):
@@ -690,3 +719,193 @@ class TestOneShot:
             max_chars=5,
         )
         assert got.html == NEWS_HTML[:5] and got.html_truncated
+
+
+def browser_keeps_opening(browser, release, asked=None) -> list:
+    """Make ``new_page`` slow the way Chromium is: the page is created after ``release``
+    even when the caller gave up (timed out or was cancelled) before that."""
+    real, made = browser.new_page, []
+
+    async def create(timeout):
+        await release.wait()
+        made.append(await real(timeout))
+        return made[-1]
+
+    async def slow(timeout):
+        if asked is not None:
+            asked.set()
+        return await asyncio.shield(asyncio.ensure_future(create(timeout)))
+
+    browser.new_page = slow
+    return made
+
+
+class TestOpenSeams:
+    """The read's own page versus late tab opens, cancellation and agent popups."""
+
+    async def test_a_read_cancelled_while_its_page_opens_never_lists_that_page(
+        self, tmp_path
+    ):
+        session, driver = reader(tmp_path)
+        await session.snapshot()
+        browser = driver.browser
+        release, asked = asyncio.Event(), asyncio.Event()
+        made = browser_keeps_opening(browser, release, asked)
+        task = asyncio.create_task(session.read_page(NEWS))
+        await asked.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()
+        for _ in range(50):
+            if made and made[0].closed:
+                break
+            await asyncio.sleep(0.01)
+        assert made and made[0].closed
+        assert [t.id for t in session._tabs] == ["t1"]
+        assert session._windows_early == 0 and session._windows_due == 0
+        assert session._expect_page == 0 and session._arrived == []
+        listing = await session.tabs_list()
+        assert [t["tab"] for t in listing.meta["tabs"]] == ["t1"]
+        await session.close()
+
+    async def test_a_read_whose_page_opens_too_late_times_out_and_closes_it(
+        self, tmp_path
+    ):
+        session, driver = reader(tmp_path)
+        await session.snapshot()
+        browser = driver.browser
+        release = asyncio.Event()
+        made = browser_keeps_opening(browser, release)
+        browser.sink.window_opening(browser.page)
+        with pytest.raises(BrowserTimeoutError):
+            await session.read_page(NEWS)
+        assert made == []
+        release.set()
+        await asyncio.sleep(0.05)
+        assert made[0].closed and session._tabs.find(made[0]) is None
+        assert session._windows_due == 1 and session._windows_early == 0
+        assert session._expect_page == 0 and session._arrived == []
+        await session.close()
+
+    async def test_a_pending_late_tab_open_never_takes_a_window_of_the_read(
+        self, tmp_path
+    ):
+        session, driver = reader(tmp_path)
+        await session.snapshot()
+        browser = driver.browser
+        real, release = browser.new_page, asyncio.Event()
+        late = []
+
+        async def slow_once(timeout):
+            page = await real(timeout)
+            if not late:
+                late.append(page)
+                await release.wait()
+            return page
+
+        browser.new_page = slow_once
+        with pytest.raises(BrowserTimeoutError):
+            await session.tab_new()
+        popups = []
+
+        def setup(page):
+            async def goto(url, timeout):
+                page.load(url)
+                popups.append(browser.open_popup("http://pop.test/", opener=page))
+                popups.append(browser.open_popup("http://pop.test/noopener"))
+                return NavResponse(url, 200)
+
+            page.handlers["goto"] = goto
+
+        browser.page_setup = setup
+        await session.read_page(NEWS)
+        release.set()
+        await asyncio.sleep(0.05)
+        assert all(p.closed for p in popups) and late[0].closed
+        assert [t.id for t in session._tabs] == ["t1"]
+        assert session._expect_page == 0 and session._arrived == []
+        await session.close()
+
+    async def test_a_window_an_agent_tab_opens_during_a_read_becomes_its_tab(
+        self, tmp_path
+    ):
+        session, driver = reader(tmp_path)
+        await session.snapshot()
+        browser = driver.browser
+        agent = browser.page
+        popups = []
+
+        def setup(page):
+            async def goto(url, timeout):
+                page.load(url)
+                browser.sink.window_opening(agent)
+                popups.append(
+                    browser.open_popup("http://agent-pop.test/", opener=agent)
+                )
+                popups.append(browser.open_popup("http://read-pop.test/", opener=page))
+                return NavResponse(url, 200)
+
+            page.handlers["goto"] = goto
+
+        browser.page_setup = setup
+        await session.read_page(NEWS)
+        await asyncio.sleep(0.05)
+        agent_popup, read_popup = popups
+        assert read_popup.closed and session._tabs.find(read_popup) is None
+        assert not agent_popup.closed
+        tab = session._tabs.find(agent_popup)
+        assert tab is not None and tab.opened_by_page
+        assert session._windows_due == 0 and session._windows_early == 0
+        result = await session.snapshot()
+        assert "agent-pop.test" in result.text and "read-pop.test" not in result.text
+        await session.close()
+
+    async def test_a_dialog_of_an_undecided_window_follows_its_opener(self, tmp_path):
+        session, driver = reader(tmp_path)
+        await session.snapshot()
+        browser = driver.browser
+        opened = []
+
+        def setup(page):
+            async def goto(url, timeout):
+                page.load(url)
+                popup = browser.open_popup("http://read-pop.test/", opener=page)
+                opened.append(popup.open_dialog(ScriptedDialog("confirm", "Leave?")))
+                return NavResponse(url, 200)
+
+            page.handlers["goto"] = goto
+
+        browser.page_setup = setup
+        await session.read_page(NEWS)
+        await asyncio.sleep(0.05)
+        assert opened[0].answer == ("dismiss", None)
+        assert session._dialogs.pending is None
+        assert [t.id for t in session._tabs] == ["t1"]
+        await session.close()
+
+    async def test_a_window_undecided_when_the_browser_is_lost_is_never_a_tab(
+        self, tmp_path
+    ):
+        session, driver = reader(tmp_path)
+        await session.snapshot()
+        browser = driver.browser
+        agent = browser.page
+        popups = []
+
+        def setup(page):
+            async def goto(url, timeout):
+                page.load(url)
+                popups.append(browser.open_popup("http://pop.test/", opener=agent))
+                browser.crash()
+                return NavResponse(url, 200)
+
+            page.handlers["goto"] = goto
+
+        browser.page_setup = setup
+        with pytest.raises(BrowserStateLostError):
+            await session.read_page(NEWS)
+        await asyncio.sleep(0.05)
+        assert session._tabs.find(popups[0]) is None and len(session._tabs) == 0
+        assert session._read_undecided == {}
+        await session.close()

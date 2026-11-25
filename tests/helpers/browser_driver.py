@@ -128,6 +128,7 @@ class ScriptedPage:
         self.title_text = title
         self.html_text = ""
         self.body_text = ""
+        self.password_values: list[str] = []
         self.doc = next(_DOCS)
         self.probe_results: list[Any] = [{"hidden": [], "visible": [], "passwords": []}]
         self.probe_failed = 0
@@ -269,7 +270,13 @@ class ScriptedPage:
 
     async def content(self, max_chars: int, timeout: float) -> PageContent:
         html, text = self.html_text, self.body_text
-        default = PageContent(html[:max_chars], text[:max_chars], len(html), len(text))
+        default = PageContent(
+            html[:max_chars],
+            text[:max_chars],
+            len(html),
+            len(text),
+            tuple(self.password_values),
+        )
         return await self._do("content", default, max_chars=max_chars, timeout=timeout)
 
     async def ref_count(self, ref: str, timeout: float) -> int:
@@ -439,11 +446,24 @@ class ScriptedBrowser:
         self.sink.page_opened(page)
         return page
 
-    def open_popup(self, url: str, snapshot: str = "", title: str = "") -> ScriptedPage:
-        """A page the site opened (``window.open``, ``target=_blank``)."""
+    def open_popup(
+        self,
+        url: str,
+        snapshot: str = "",
+        title: str = "",
+        opener: "ScriptedPage | None" = None,
+    ) -> ScriptedPage:
+        """A page the site opened (``window.open``, ``target=_blank``).
+
+        With an ``opener``, ``popup_opened`` follows ``page_opened`` at once,
+        the order Playwright reports them in; without one it is a
+        ``noopener`` window.
+        """
         page = ScriptedPage(self, url, snapshot, title)
         self.page_list.append(page)
         self.sink.page_opened(page)
+        if opener is not None:
+            self.sink.popup_opened(opener, page)
         return page
 
     def crash(self) -> None:

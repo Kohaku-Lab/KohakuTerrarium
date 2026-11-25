@@ -71,8 +71,14 @@ _CONTENT_JS = """(limit) => {
   const html = doctype + (root ? root.outerHTML : "");
   const body = document.body;
   const text = body ? body.innerText : (root ? root.textContent || "" : "");
+  const passwords = [];
+  for (const field of document.querySelectorAll("input[type=password]")) {
+    for (const value of [field.value, field.getAttribute("value")]) {
+      if (value && passwords.length < 100) passwords.push(value.slice(0, 1000));
+    }
+  }
   return {html: html.slice(0, limit), text: text.slice(0, limit),
-          htmlChars: html.length, textChars: text.length};
+          htmlChars: html.length, textChars: text.length, passwords};
 }"""
 _SCROLL_HEIGHT_JS = (
     "() => Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"
@@ -282,7 +288,11 @@ class PlaywrightPage:
             )
         )
         return PageContent(
-            found["html"], found["text"], found["htmlChars"], found["textChars"]
+            found["html"],
+            found["text"],
+            found["htmlChars"],
+            found["textChars"],
+            tuple(found.get("passwords") or ()),
         )
 
     async def ref_count(self, ref: str, timeout: float) -> int:
@@ -543,6 +553,12 @@ class PlaywrightBrowser:
             wrapped = self._pages[page] = PlaywrightPage(self, page)
         return wrapped
 
+    def _on_popup(self, sink: EventSink, opener: PlaywrightPage, page: Any) -> None:
+        """Report ``opener`` of a popup already reported by ``page_opened``."""
+        wrapped = self._pages.get(page)
+        if wrapped is not None:
+            sink.popup_opened(opener, wrapped)
+
     def _on_page(self, page: Any) -> None:
         if page in self._pages:
             return
@@ -551,6 +567,7 @@ class PlaywrightBrowser:
         page.on("dialog", lambda d: sink.dialog_opened(wrapped, _Dialog(d, self)))
         page.on("download", lambda d: sink.download_started(wrapped, _Download(d)))
         page.on("close", lambda _: self._on_page_close(page))
+        page.on("popup", lambda p: self._on_popup(sink, wrapped, p))
         page.on(
             "request",
             lambda r: (
