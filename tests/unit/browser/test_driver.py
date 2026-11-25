@@ -12,6 +12,7 @@ import inspect
 import io
 import os
 import re
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -38,6 +39,7 @@ from kohakuterrarium.browser.errors import (
 )
 from kohakuterrarium.browser.launch import Candidate
 from kohakuterrarium.browser.options import BrowserOptions
+from kohakuterrarium.browser.processes import BrowserProcesses
 from kohakuterrarium.browser.proxy import FilteringProxy
 from kohakuterrarium.browser.session import BrowserSession
 from kohakuterrarium.browser.session.types import CLOSE_TIMEOUT_S
@@ -47,6 +49,7 @@ from tests.helpers.browser_site import (
     browsers_env,
     kill_process,
     process_alive,
+    suspend_process,
 )
 
 # One worker runs this module and tests/integration/test_browser.py, one after the other.
@@ -231,6 +234,103 @@ class TestWithoutBrowser:
         timeout = handle.translate(api.TimeoutError("Timeout 300ms exceeded."), page)
         assert isinstance(timeout, DriverTimeoutError)
         assert str(timeout) == "timed out after 0.3 s"
+
+    def test_kill_ends_the_recorded_browser_processes_before_the_driver(
+        self, monkeypatch
+    ):
+        handle, _ = self.fake_browser()
+        order = []
+        proc = SimpleNamespace(pid=7000, returncode=None)
+        proc.kill = lambda: order.append(("driver kill", proc.pid))
+        handle._manager = SimpleNamespace(
+            _connection=SimpleNamespace(_transport=SimpleNamespace(_proc=proc))
+        )
+        monkeypatch.setattr(
+            driver_module, "kill_tree", lambda pid: order.append(("tree", pid))
+        )
+        handle._held = SimpleNamespace(
+            pids=[100, 101],
+            kill=lambda: order.append(("held", 100)),
+            release=lambda: order.append(("released", 100)),
+        )
+        handle.kill()
+        assert order == [
+            ("held", 100),
+            ("tree", 7000),
+            ("driver kill", 7000),
+            ("released", 100),
+        ]
+
+    async def test_a_kill_after_a_clean_driver_stop_still_ends_the_browser(self):
+        handle, _ = self.fake_browser()
+
+        async def stopped():
+            pass
+
+        handle._playwright = SimpleNamespace(stop=stopped)
+        extra = {} if sys.platform == "win32" else {"start_new_session": True}
+        hung = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"], **extra
+        )
+        try:
+            handle._held = BrowserProcesses([hung.pid])
+            await handle.stop()
+            handle.kill()
+            assert hung.wait(10) is not None
+        finally:
+            if hung.poll() is None:
+                hung.kill()
+                hung.wait(10)
+
+    async def test_launch_processes_are_recorded_without_failing_the_launch(self):
+        handle, _ = self.fake_browser()
+
+        class Session:
+            async def send(self, method):
+                assert method == "SystemInfo.getProcessInfo"
+                return {
+                    "processInfo": [
+                        {"type": "renderer", "id": 22},
+                        {"type": "browser", "id": 11},
+                    ]
+                }
+
+            async def detach(self):
+                pass
+
+        async def new_session():
+            return Session()
+
+        handle._browser.new_browser_cdp_session = new_session
+        await handle.record_processes(1.0)
+        assert handle._held.pids == [11, 22]
+
+        async def broken():
+            raise RuntimeError("no CDP")
+
+        handle._browser.new_browser_cdp_session = broken
+        await handle.record_processes(1.0)
+        assert handle._held.pids == [11, 22], "a failed read keeps what was known"
+        handle._held.release()
+
+    async def test_a_persistent_context_reads_processes_through_its_browser(self):
+        handle, _ = self.fake_browser()
+        browser = handle._browser
+        handle._browser = None
+        handle._context = SimpleNamespace(browser=browser)
+
+        class Session:
+            async def send(self, method):
+                return {"processInfo": [{"type": "browser", "id": 5}]}
+
+            async def detach(self):
+                pass
+
+        async def new_session():
+            return Session()
+
+        browser.new_browser_cdp_session = new_session
+        assert await handle.process_ids() == [5]
 
     async def test_dialog_answer_errors_are_driver_errors(self):
         handle, api = self.fake_browser()
@@ -834,3 +934,32 @@ async def crash_and_recover(live, site):
         await asyncio.sleep(0.1)
     old = [pid for pid in survivors if pid in pids]
     assert survivors == [], f"alive 15 s after close: killed {old}, fresh {survivors}"
+
+
+@LIVE
+async def test_a_forced_kill_ends_a_hung_browser_and_all_its_processes(
+    site, browser_env, downloads
+):
+    session = Bounded(
+        BrowserSession(
+            BrowserOptions.from_mapping(
+                {"allow_loopback": True, "action_timeout_s": 5}
+            ),
+            downloads_dir=downloads,
+        )
+    )
+    await start(session, site.url("/form"))
+    try:
+        pids = await session.process_ids()
+        assert len(pids) > 1 and process_alive(pids[0])
+        suspend_process(pids[0])
+        session.session._stack.browser.kill()
+        survivors = list(pids)
+        for _ in range(200):
+            survivors = [pid for pid in pids if process_alive(pid)]
+            if not survivors:
+                break
+            await asyncio.sleep(0.1)
+        assert survivors == [], f"alive 20 s after a forced kill: {survivors} of {pids}"
+    finally:
+        await session.close()

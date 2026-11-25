@@ -159,6 +159,21 @@ def process_alive(pid: int) -> bool:
     return True
 
 
+def suspend_process(pid: int) -> None:
+    """Freeze process ``pid`` so it answers nothing, the way a hung process does."""
+    if sys.platform == "win32":
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x0800, False, pid)
+        if not handle:
+            raise OSError(f"cannot open process {pid} to suspend it")
+        try:
+            ctypes.windll.ntdll.NtSuspendProcess(handle)
+        finally:
+            kernel32.CloseHandle(handle)
+        return
+    os.kill(pid, signal.SIGSTOP)
+
+
 def kill_process(pid: int) -> None:
     """End process ``pid`` at once."""
     if sys.platform == "win32":

@@ -25,7 +25,12 @@ from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.terrarium.creature.ops import agent_toggle_plugin
 from kohakuterrarium.testing.llm import ScriptedLLM
-from tests.helpers.browser_site import FixtureSite, browsers_env, process_alive
+from tests.helpers.browser_site import (
+    FixtureSite,
+    browsers_env,
+    process_alive,
+    suspend_process,
+)
 
 pytestmark = [pytest.mark.xdist_group("browser"), pytest.mark.timeout(120)]
 
@@ -181,7 +186,7 @@ class TestBrowserIntegration:
         with its text → tab cap → upload → download → screenshot → eval → blocked
         egress → stale ref → interrupt → blocked redirect stops its batch → a frame
         from another origin → a secret refused in that frame and typed in its own
-        → a frame ref from the frame's earlier page → runtime
+        → a frame ref from the frame's earlier page → a hung browser killed → runtime
         disable / enable → stop, with no Chromium left behind."""
         pytest.importorskip("playwright.async_api")
         for name, value in browsers_env().items():
@@ -492,6 +497,16 @@ class TestBrowserIntegration:
                 left_frame
             )
 
+            # A hung browser: the call times out and the forced kill leaves nothing.
+            hung = await browser_pids(plugin)
+            suspend_process(hung[0])
+            stuck = await creature.call("browser_snapshot")
+            assert "state was lost" in stuck, stuck
+            left = await survivors(hung)
+            assert left == [], f"alive after a forced kill: {left} of {hung}"
+            back = await creature.call("browser_navigate", url=app)
+            assert "Browser state was lost (the browser stopped responding)" in back
+
             # Disable at runtime: the browser exits and the tools refuse.
             pids = await browser_pids(plugin)
             await agent_toggle_plugin(agent, "browser", False)
@@ -509,7 +524,7 @@ class TestBrowserIntegration:
             await agent_toggle_plugin(agent, "browser", True)
             fresh = await creature.call("browser_navigate", url=app)
             assert fresh.startswith(f"[t1] {app}\n<page_content")
-            assert site.hits["/workflow.html"] == 2
+            assert site.hits["/workflow.html"] == 3
             old, pids = pids, await browser_pids(plugin)
             assert set(pids).isdisjoint(old)
         finally:

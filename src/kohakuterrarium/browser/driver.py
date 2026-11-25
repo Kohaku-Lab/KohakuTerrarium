@@ -21,6 +21,7 @@ from kohakuterrarium.browser.errors import (
     PageClosedError,
 )
 from kohakuterrarium.browser.launch import Candidate, LaunchPlan, check_event_loop
+from kohakuterrarium.browser.processes import BrowserProcesses, kill_tree
 from kohakuterrarium.browser.protocol import (
     DOCUMENT_ID_JS,
     EventSink,
@@ -38,6 +39,7 @@ INSTALL_HINT = (
     "and then run: playwright install chromium"
 )
 CLEANUP_TIMEOUT_S = 10.0
+PROCESS_READ_TIMEOUT_S = 5.0
 REASON_CHARS = 200
 DETAIL_MAX_CHARS = 10_000
 DRAG_STEPS = 8
@@ -504,6 +506,7 @@ class PlaywrightBrowser:
         self._closing = False
         self._context_closed = False
         self._watchers: set[asyncio.Task] = set()
+        self._held = BrowserProcesses([])
 
     def attach(self, sink: EventSink) -> None:
         """Start delivering events to ``sink`` and wrap the pages already open."""
@@ -627,14 +630,32 @@ class PlaywrightBrowser:
         await self._playwright.stop()
 
     def kill(self) -> None:
+        """End the browser processes held since launch with their trees, then the driver."""
         self._closing = True
+        self._held.kill()
+        driver_pid = _driver_pid(self._manager)
+        if driver_pid is not None:
+            kill_tree(driver_pid)
         _kill_driver(self._manager)
+        self._held.release()
+
+    async def record_processes(self, timeout: float) -> None:
+        """Hold the browser's processes for ``kill``; a failed read keeps the old hold."""
+        try:
+            pids = await asyncio.wait_for(self.process_ids(), timeout)
+        except Exception as exc:
+            logger.debug("Reading browser process ids failed", error=type(exc).__name__)
+            return
+        if pids:
+            self._held.release()
+            self._held = BrowserProcesses(pids)
 
     async def process_ids(self) -> list[int]:
         """Ids of every browser process (browser first), read over CDP; empty when unavailable."""
-        if self._browser is None:
+        browser = self._browser or getattr(self._context, "browser", None)
+        if browser is None:
             return []
-        session = await self._browser.new_browser_cdp_session()
+        session = await browser.new_browser_cdp_session()
         try:
             info = await session.send("SystemInfo.getProcessInfo")
         finally:
@@ -644,10 +665,23 @@ class PlaywrightBrowser:
         return [int(p["id"]) for p in ordered]
 
 
-def _kill_driver(manager: Any) -> None:
+def _driver_process(manager: Any) -> Any:
     connection = getattr(manager, "_connection", None)
     transport = getattr(connection, "_transport", None)
-    process = getattr(transport, "_proc", None)
+    return getattr(transport, "_proc", None)
+
+
+def _driver_pid(manager: Any) -> int | None:
+    """The Playwright driver's process id while it runs."""
+    process = _driver_process(manager)
+    if process is None or process.returncode is not None:
+        return None
+    pid = getattr(process, "pid", None)
+    return pid if isinstance(pid, int) else None
+
+
+def _kill_driver(manager: Any) -> None:
+    process = _driver_process(manager)
     if process is not None and process.returncode is None:
         try:
             process.kill()
@@ -670,6 +704,7 @@ class PlaywrightDriver:
             handle.attach(sink)
             if not context.pages:
                 await handle.new_page(plan.timeout_s)
+            await handle.record_processes(PROCESS_READ_TIMEOUT_S)
             return handle
         except BaseException:
             await _cleanup(manager, playwright, browser, context)
