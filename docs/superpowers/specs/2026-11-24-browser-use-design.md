@@ -418,12 +418,20 @@ text. It reuses the URL check, proxy and policy of `navigate` and raises the
 same typed errors. It runs in a temporary page that the session's events
 route to the read, never to the tab registry: no tab id, no refs, no
 observation, no dialog left pending (dismissed), no download kept
-(cancelled), no blocked-request report, and every window that opens while it
-runs is closed. It holds the operation lock and does not count toward the tab
-cap, so at most one exists. Secrets are redacted from every field and a
-secret split by the size cut is dropped; the hidden-text probe is not
-applied, because a reader of HTML wants the document, and the fields are
-documented as untrusted. A read that relaunches a lost browser leaves the
+(cancelled), no blocked-request report. A window that opens while it runs
+is decided by its opener (Playwright's `popup` event, which follows the
+page's registration in the same dispatch): an agent tab's window is admitted
+as a tab, any other is closed. A read that gives up while its page is still
+being created waits for that page in the background, like a timed-out
+`tab_new`, and closes it, so it never reaches the tab registry. It holds the
+operation lock and does not count toward the tab cap, so at most one exists.
+Secrets, and the values of the main document's password fields (current
+values and attributes, read with the content), are redacted from every field,
+and a value split by the size cut is dropped. Other text fields' script-set
+values never reach `html`, which serializes attributes only. The hidden-text
+probe is not applied, because a reader of HTML wants the document, and the
+fields are documented as untrusted. A connection the proxy's re-judge cuts
+mid-read surfaces as `NavigationBlockedError` with the policy's reason. A read that relaunches a lost browser leaves the
 "state was lost" notice for the agent's next call. `read_page(url, options)`
 at the package level does the same in a browser of its own; a session built
 without a downloads directory refuses every download, so it writes nothing.

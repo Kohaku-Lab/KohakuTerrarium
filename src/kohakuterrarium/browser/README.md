@@ -77,10 +77,14 @@ page = await browser.read_page(url, options, external_check=check)
   `max_chars` (1 000 000 by default, at most 10 000 000; each field on its own).
 
 What is filtered: every field has the session's configured secrets redacted
-(`[secret:<name>]`, every encoded spelling), and a secret that the size cut
-split is dropped from the end of the field. Nothing else is filtered: all of it
-is page-chosen, untrusted text, and a consumer that hands it to a model wraps
-it as untrusted itself.
+(`[secret:<name>]`, every encoded spelling), and so has every value of a
+password field of the main document, whether the page wrote it as an
+attribute or set it from a script or an autofill (`[redacted]`). A value the
+size cut split is dropped from the end of the field. Values of other text
+fields that a script set are not in `html` (the serialized DOM carries only
+`value` attributes) nor in `text`. Nothing else is filtered: all of it is
+page-chosen, untrusted text, and a consumer that hands it to a model wraps it
+as untrusted itself.
 
 How it behaves:
 
@@ -92,6 +96,9 @@ How it behaves:
   could not reach the host, and when the URL only started a download), a page
   that never stops navigating `PageNavigatingError`. A closed session raises
   `BrowserClosedError`; a browser lost mid-read `BrowserStateLostError`.
+  A connection the proxy cuts mid-read because the policy changed (it
+  re-judges open connections) raises `NavigationBlockedError` with the
+  policy's reason.
 - It holds the session's operation lock, launches the browser if needed, and
   re-arms the idle close like any operation. A read that launches a browser
   after a loss leaves the "state was lost" notice to the agent's next call.
@@ -100,12 +107,16 @@ How it behaves:
   does not count toward the tab cap (reads are serialized, so at most one
   exists). Requests the proxy blocked during the read are dropped, not
   reported to the agent. The tab is closed on every path, cancellation
-  included.
+  included; when the read gives up while the browser is still creating the
+  tab (timeout or cancellation), the tab is closed once it appears and is
+  never listed.
 - Dialogs the read's page opens are dismissed at once; downloads it starts are
-  cancelled and never saved. Any window that opens while a read runs is
-  closed and never becomes a tab, as is a window the read's page announced
-  that arrives within 3 s of a successful read. A window an agent tab opens on
-  its own during a read is closed too: the lock means no agent call is running.
+  cancelled and never saved. A window opened while a read runs is decided by
+  its opener: one an agent tab opened (a timer firing between agent calls)
+  becomes a tab as it would without the read; one the read's page opened, or
+  one with no opener (`noopener`), is closed and never becomes a tab. So is a
+  window the read's page announced that arrives within 3 s of a successful
+  read.
 
 ## Layers
 
@@ -118,6 +129,7 @@ anything for a model:
 | `options`, `policy`, `secrets` | options, the network policy, secret references and redaction |
 | `proxy`, `egress` | the filtering proxy every connection goes through; navigation endpoints and refusal reasons |
 | `launch`, `protocol`, `driver` | the launch plan, the driver protocol, its Playwright implementation |
+| `processes` | ending a browser's whole process tree when it no longer answers |
 | `settle`, `tabs`, `tasks` | settling after a load or action, the tab registry, background futures |
 | `downloads`, `dialogs` | download saving and caps; dialog bookkeeping |
 | `session/types`, `session/sink`, `session/lifecycle` | states and limits, driver events, launch / lock / teardown / idle close |

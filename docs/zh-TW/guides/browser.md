@@ -445,15 +445,17 @@ import Playwright；要等某個呼叫真的需要瀏覽器時才會啟動。
 `read_page`（工作階段上的或一次性的）是把頁面當成資料讀取的呼叫。它回傳一個
 `PageRead`：最終的 `url`（跟隨重新導向之後）、HTTP `status`、`title`、`html`
 （頁面腳本執行後的 DOM）與 `text`（body 算繪後的文字，也就是人看到的排版），每一
-項都在 `max_chars`（預設 1 000 000）處截斷。設定的密鑰會從每一項中遮蔽。不做隱藏
-文字過濾，所以請把這些欄位當成不受信任的頁面內容。
+項都在 `max_chars`（預設 1 000 000）處截斷。設定的密鑰以及頁面密碼欄位的值會從
+每一項中遮蔽。不做隱藏文字過濾，所以請把這些欄位當成不受信任的頁面內容。
 
 讀取走的是與 `browser_navigate` 相同的 URL 檢查、代理與網路政策，出錯時拋出例外而
 不是回傳錯誤文字：URL 被拒或重新導向被擋時拋 `NavigationBlockedError`，載入超過
 `nav_timeout_s` 時拋 `BrowserTimeoutError`，載入失敗或 URL 只觸發下載時拋
-`NavigationError`。它在一個生物永遠看不到的暫時分頁裡執行：不在分頁清單裡，不改變
-目前的分頁與它的 ref，不論從哪條路徑結束都會被關閉。它開啟的對話框會被關掉
-（dismiss），它開始的下載會被取消，它開啟的視窗會被關閉。
+`NavigationError`；讀取期間因 sandbox 現在拒絕而被代理切斷的連線也拋
+`NavigationBlockedError`。它在一個生物永遠看不到的暫時分頁裡執行：不在分頁清單裡，
+不改變目前的分頁與它的 ref，不論從哪條路徑結束都會被關閉。它開啟的對話框會被關掉
+（dismiss），它開始的下載會被取消，它開啟的視窗會被關閉；這段期間生物的某個分頁
+開啟的視窗照常成為分頁。
 
 ```python
 from kohakuterrarium import browser

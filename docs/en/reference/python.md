@@ -601,9 +601,9 @@ Sessions and reads:
 - `PageRead`: frozen dataclass. `url` (final, after redirects),
   `status` (`int | None`), `title`, `html` (serialized DOM after
   scripts ran), `text` (`document.body.innerText`), `html_truncated`,
-  `text_truncated`. Secrets configured in `options.secrets` are
-  redacted from every field; the content is otherwise untrusted page
-  text.
+  `text_truncated`. Secrets configured in `options.secrets` and the
+  values of the page's password fields are redacted from every field;
+  the content is otherwise untrusted page text.
 - `BrowserOptions`: frozen dataclass of the plugin's options;
   `BrowserOptions.from_mapping(dict)` validates plain data.
 - `BrowserResult`: what the agent-facing operations (`navigate`,

@@ -543,7 +543,7 @@ for pkg in packages.list_packages():
 - `PageRead`：凍結的 dataclass。`url`（跟隨重新導向後的最終 URL）、
   `status`（`int | None`）、`title`、`html`（腳本執行後序列化的 DOM）、
   `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。
-  `options.secrets` 中設定的密鑰會從每一項中遮蔽；除此之外內容都是不受信任的
+  `options.secrets` 中設定的密鑰以及頁面密碼欄位的值會從每一項中遮蔽；除此之外內容都是不受信任的
   頁面文字。
 - `BrowserOptions`：插件 options 的凍結 dataclass；
   `BrowserOptions.from_mapping(dict)` 驗證一般資料。

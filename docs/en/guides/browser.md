@@ -526,18 +526,22 @@ There are three ways in:
 data. It returns a `PageRead` with the final `url` (after redirects), the
 HTTP `status`, the `title`, `html` (the page's DOM after its scripts ran) and
 `text` (the rendered text of the body, the way a person sees it laid out),
-each cut at `max_chars` (1 000 000 by default). Configured secrets are
-redacted from every field. Hidden-text filtering is not applied, so treat the
-fields as untrusted page content.
+each cut at `max_chars` (1 000 000 by default). Configured secrets and the
+values of the page's password fields are redacted from every field.
+Hidden-text filtering is not applied, so treat the fields as untrusted page
+content.
 
 A read goes through the same URL check, proxy and network policy as
 `browser_navigate`, and raises instead of returning an error text:
 `NavigationBlockedError` for a refused URL or a blocked redirect,
 `BrowserTimeoutError` for a load past `nav_timeout_s`, `NavigationError` for a
-failed load or a URL that only downloads. It runs in a temporary tab that the
-creature never sees: it is not in the tab list, does not change the active
-tab or its refs, and is closed afterwards on every path. Dialogs it opens are
-dismissed, downloads it starts are cancelled, and windows it opens are closed.
+failed load or a URL that only downloads; a connection the proxy cuts during
+the read because the sandbox now refuses it also raises
+`NavigationBlockedError`. It runs in a temporary tab that the creature never
+sees: it is not in the tab list, does not change the active tab or its refs,
+and is closed afterwards on every path. Dialogs it opens are dismissed,
+downloads it starts are cancelled, and windows it opens are closed; a window
+one of the creature's tabs opens meanwhile becomes a tab as usual.
 
 ```python
 from kohakuterrarium import browser

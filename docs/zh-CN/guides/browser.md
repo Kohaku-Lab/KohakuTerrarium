@@ -283,9 +283,9 @@ origin 由协议、主机和可选的端口组成，例如 `https://staging.exam
 - **自己的会话。** `async with browser.BrowserSession(options) as session:` 得到一个别人碰不到的浏览器，代码块结束时关闭。不提供 `downloads_dir` 时，每个下载都会被取消，磁盘上不会写入任何东西。
 - **一次性读取。** `await browser.read_page(url, options)` 启动浏览器、读取页面，并在返回前关闭浏览器。
 
-`read_page`（会话上的或一次性的）是把页面当作数据读取的调用。它返回一个 `PageRead`：最终的 `url`（跟随重定向之后）、HTTP `status`、`title`、`html`（页面脚本运行后的 DOM）和 `text`（body 渲染后的文字，也就是人看到的排版），每项都在 `max_chars`（默认 1 000 000）处截断。配置的密钥会从每一项中脱敏。不做隐藏文字过滤，所以请把这些字段当作不可信的页面内容。
+`read_page`（会话上的或一次性的）是把页面当作数据读取的调用。它返回一个 `PageRead`：最终的 `url`（跟随重定向之后）、HTTP `status`、`title`、`html`（页面脚本运行后的 DOM）和 `text`（body 渲染后的文字，也就是人看到的排版），每项都在 `max_chars`（默认 1 000 000）处截断。配置的密钥以及页面密码框的值会从每一项中脱敏。不做隐藏文字过滤，所以请把这些字段当作不可信的页面内容。
 
-读取走的是和 `browser_navigate` 相同的 URL 检查、代理和网络策略，出错时抛出异常而不是返回错误文本：URL 被拒绝或重定向被拦截时抛 `NavigationBlockedError`，加载超过 `nav_timeout_s` 时抛 `BrowserTimeoutError`，加载失败或 URL 只触发下载时抛 `NavigationError`。它在一个 Creature 永远看不到的临时标签页里运行：不在标签页列表里，不改变当前标签页及其 ref，无论走哪条路径结束都会被关闭。它打开的对话框会被关闭（dismiss），它开始的下载会被取消，它打开的窗口会被关闭。
+读取走的是和 `browser_navigate` 相同的 URL 检查、代理和网络策略，出错时抛出异常而不是返回错误文本：URL 被拒绝或重定向被拦截时抛 `NavigationBlockedError`，加载超过 `nav_timeout_s` 时抛 `BrowserTimeoutError`，加载失败或 URL 只触发下载时抛 `NavigationError`；读取期间因 sandbox 现在拒绝而被代理切断的连接也抛 `NavigationBlockedError`。它在一个 Creature 永远看不到的临时标签页里运行：不在标签页列表里，不改变当前标签页及其 ref，无论走哪条路径结束都会被关闭。它打开的对话框会被关闭（dismiss），它开始的下载会被取消，它打开的窗口会被关闭；在此期间 Creature 的某个标签页打开的窗口照常成为标签页。
 
 ```python
 from kohakuterrarium import browser

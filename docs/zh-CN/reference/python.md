@@ -536,7 +536,7 @@ for pkg in packages.list_packages():
 - `PageRead`：冻结的 dataclass。`url`（跟随重定向后的最终 URL）、
   `status`（`int | None`）、`title`、`html`（脚本运行后序列化的 DOM）、
   `text`（`document.body.innerText`）、`html_truncated`、`text_truncated`。
-  `options.secrets` 中配置的密钥会从每一项中脱敏；除此之外内容都是不可信的
+  `options.secrets` 中配置的密钥以及页面密码框的值会从每一项中脱敏；除此之外内容都是不可信的
   页面文字。
 - `BrowserOptions`：插件 options 的冻结 dataclass；
   `BrowserOptions.from_mapping(dict)` 校验普通数据。
