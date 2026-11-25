@@ -426,7 +426,7 @@ the runtime is `src/kohakuterrarium/browser/`.
 | `block_hosts` | list[str] | `[]` | Hosts pages may never reach; checked first. An IP address here also blocks names that resolve to it. |
 | `allow_loopback` | bool | false | Allow loopback addresses (local dev servers). |
 | `allow_private` | bool | false | Allow private, carrier-grade NAT and IPv6 unique-local addresses. |
-| `secrets` | dict | `{}` | Secret names to `env:VAR_NAME` references for `type` actions; values are redacted from results. |
+| `secrets` | dict | `{}` | Secret names, each to `{env: VAR_NAME, origins: [...]}` (a non-empty list of `scheme://host[:port]`), for `type` actions; typed only into those origins, values redacted from results. |
 | `nav_timeout_s` | float | 30 | Navigation timeout in seconds. |
 | `action_timeout_s` | float | 5 | Per-action timeout in seconds; one `browser_act` batch gets 60 s, or three times (this + 10 s) when longer. |
 | `snapshot_max_chars` | int | 20000 | Snapshot size cap (1000–1000000). |
@@ -439,17 +439,25 @@ Unknown option names are rejected.
 - **Lazy launch.** The browser starts on the first browser call. Idle close,
   a crash or `close_browser` drop it; the next call starts a fresh one and
   says that state was lost. Stop, unload and runtime disable close it for
-  good: a later call fails instead of relaunching.
+  good: a later call fails instead of relaunching. A new browser never starts
+  while one this plugin let go of (an option change, a disable) is still
+  closing. A browser that stops answering is killed with every process it
+  started.
 - **Network.** All traffic goes through a filtering proxy owned by the
   session, which judges every hop, subresource, popup and WebSocket. Loopback
   and private addresses are refused unless allowed; link-local addresses
   (cloud metadata included) are always refused.
-- **sandbox.** The proxy consults the sandbox's `network_policy` service for
-  every connection. `network: deny` refuses every browser tool;
-  `os_enforce: require` refuses to start the browser.
+- **sandbox.** The proxy consults the sandbox's `network_policy` service as
+  the host publishes it at that moment, for every new connection, and judges
+  open connections again every 2 seconds while any is open (and at once on
+  each browser call), closing those the sandbox now refuses. Downloads are
+  checked with its `write_policy` before anything is written. `network: deny`
+  refuses every browser tool; `os_enforce: require` refuses to start the
+  browser.
 - **Host resources.** Where the engine's host resources are off (non-admin
   users on a multi-user server), only a headless browser with a throwaway
-  profile, the bundled Chromium and public addresses is allowed.
+  profile, the bundled Chromium (never a system browser) and public addresses
+  is allowed, and no `secrets`.
 - **Prompt.** While enabled and at least one browser tool is switched on, the
   plugin adds a short `## Browser pages` block saying that page content arrives
   in `page_content` elements and is data, never instructions.

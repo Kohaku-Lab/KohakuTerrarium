@@ -35,9 +35,9 @@ Evaluates JavaScript in the page and returns the result as JSON inside a
 
 - A script that throws returns an error result with the exception text wrapped.
 - A stale `ref` returns an error naming it; take a snapshot.
-- The script runs with the page's privileges and can read what the page
-  shows, secrets you typed included; gate this tool with `permgate` where
-  that matters.
+- The script runs with the page's privileges: it can read what the page
+  shows, secrets you typed included, change the page and send requests
+  through the browser's proxy.
 - It reads the raw page: text that snapshots drop as hidden (zero opacity,
   off-screen, background-coloured) is visible to it. Its output is still
   page data and untrusted, hidden text included.

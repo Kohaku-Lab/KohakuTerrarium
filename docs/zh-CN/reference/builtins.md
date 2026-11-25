@@ -116,7 +116,7 @@ Chromium，来自页面的文字放在标记为不可信的 `page_content` 元�
 
 **`browser_snapshot`**：以带元素 ref（`e12`；标签页载入新页面后或 frame 内为 `f1e12` / `f2e12`）的无障碍树
 返回当前页面，ref 标在可交互元素、frame、对话框、表格、行、article 和有名称的容器上，frame 的 origin 与页面不同时写在它那一行，隐藏文字被丢弃，密码与密钥值被遮蔽，长度上限为插件的
-`snapshot_max_chars`。
+`snapshot_max_chars`。没有浏览器在运行时会启动它。
 
 - 参数：`ref`（单个子树）、`depth`（0 表示不限）、`query`（匹配的行及其祖先）、
   `interactive`（只看控件）、`boxes`（以视口像素表示的元素位置）。
@@ -133,20 +133,20 @@ Chromium，来自页面的文字放在标记为不可信的 `page_content` 元�
 
 **`browser_screenshot`**：以 CSS 像素截取视口、单个元素或整个页面（PNG，
 超过约 500 KB 时改用 JPEG，仍然太大时缩小；整页和元素最高 8000 px）。原生工具调用下图片会送到模型；
-文本工具格式只传回说明行。
+文本工具格式只传回说明行。没有浏览器在运行时会启动它。
 
-- 参数：`ref`（优先于 `full_page`）、`full_page`、`path`（同时把图片存到该
-  路径）。
+- 参数：`ref`（优先于 `full_page`）、`full_page`、`path`（同时把图片写入该
+  文件；sandbox 把它当作文件写入来检查）。
 
 **`browser_tabs`**：列出、打开、切换或关闭标签页，或关闭浏览器（下一次调用
-会启动一个新的）。`list` 从不启动浏览器。最多 20 个标签页；超出后 `new` 会被拒绝。
+会启动一个新的）。`list` 从不启动浏览器；带 `url` 的 `new` 会打开该页面，和 `browser_navigate` 一样。最多 20 个标签页；超出后 `new` 会被拒绝。
 
 - 参数：`action`（默认 `list`，以及 `new`、`select`、`close`、
   `close_browser`）、`tab`（用于 `select` / `close`）、`url`（用于 `new`）。
 
 **`browser_eval`**：在页面中运行一段 JavaScript 表达式或函数，可选地传入一个
-元素，返回其 JSON 结果（在 10000 字符处截断）。它能看到页面持有的一切，包括
-已输入的密钥。
+元素，返回其 JSON 结果（在 10000 字符处截断）。脚本以页面的权限运行：它能看到页面持有的一切，包括
+已输入的密钥，还能修改页面，并经由浏览器的代理发出请求。想在没有它的情况下使用插件，就关掉这个工具（`/module disable browser_eval`）。
 
 - 参数：`expression`、`ref`。
 

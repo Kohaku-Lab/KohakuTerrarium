@@ -51,7 +51,8 @@ Refs look like `e12`; after the tab loads a new page they carry a prefix such as
   Interactive elements are always kept.
 - A password field's value shows as `(redacted)`, a configured secret as
   `[secret:name]`, and a password value repeated elsewhere (a title, a URL)
-  as `[redacted]`.
+  as `[redacted]`. When password fields could not be found on a page, every
+  text field's value shows as `(withheld)` and the result says so.
 
 ### Errors
 

@@ -86,10 +86,12 @@ draggable rows, hover areas) and prefer refs otherwise.
   executed, and the result says `Navigation blocked`. Other refused requests are listed under `Blocked N requests`; a
   form that posts to a blocked host does not submit.
 - Downloads are saved under `browser-downloads/` in the working directory and
-  listed with their path; new tabs a click opened become active and are named.
+  listed with their path (or as refused, when the sandbox forbids the write); new tabs a click opened become active and are named.
 
 ### Secrets
 
 A `type` action with `secret` types the value of a configured secret; the
-value never appears in results. Screenshots and `browser_eval` can still see
-what a page shows.
+value never appears in results. Each secret lists the origins it may be typed
+into: a field on any other origin, a cross-origin frame included, fails with
+`refused: secret <name> may be typed only into ...`. Screenshots and
+`browser_eval` can still see what a page shows.

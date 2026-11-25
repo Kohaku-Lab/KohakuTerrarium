@@ -16,7 +16,7 @@ text line with the tab, URL, size and format.
 | --- | --- | --- | --- |
 | ref | string | no | Capture this element; wins over `full_page` |
 | full_page | boolean | no | Capture the whole page, height-capped |
-| path | string | no | Also save the image to this file; `""` to skip |
+| path | string | no | Also write the image to this file; `""` to skip |
 | tab | string | no | Tab id; `""` for the active tab |
 
 ## Behavior

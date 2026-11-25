@@ -39,7 +39,8 @@ playwright install chromium
 
 The first line installs Playwright. The second downloads the Chromium build
 Playwright drives. Without that download the plugin falls back to an installed
-Google Chrome, then Microsoft Edge (see [Launch](#launch)). The
+Google Chrome, then Microsoft Edge (see [Launch](#launch)), except for a
+creature without host resources, which only ever runs the bundled Chromium. The
 `kohakuterrarium[full]` extra includes `browser-use`; the older `browser` extra
 is the Crawl4AI renderer behind `web_fetch` and does not install Playwright.
 
@@ -66,12 +67,14 @@ creature starts.
 The plugin is discovered for every creature, so it can be switched on in a
 running session: `/plugin enable browser` from the chat, or the Plugins tab in
 the web UI, which can also edit its options. Changed options take effect
-on the next browser call: the current browser closes and a new one starts with
-the new options.
+on the next browser call: the current browser closes, and a new one starts with
+the new options once the old one has finished closing (two browsers never run
+on the same profile at once).
 
-Disabling the plugin closes the browser at once. The tools disappear from the
-creature, and enabling the plugin again starts a fresh browser on the next call
-(no tabs, cookies or logins carried over).
+Disabling the plugin starts closing the browser at once. The tools disappear
+from the creature, and enabling the plugin again starts a fresh browser on the
+next call, after the old one has closed (no tabs, cookies or logins carried
+over).
 
 ### From Python
 
@@ -97,14 +100,23 @@ the same way.
 | `browser_navigate` | egress | Open a `url` (`action` `goto`, the default), or go `back` / `forward` / `reload`, which ignore `url`. Returns the page header and the page text with refs (only the interactive elements when the page is longer than 8000 characters). |
 | `browser_snapshot` | read | Read the current page as an accessibility tree with refs. Narrow it with `ref` (one subtree), `depth` (0 for no limit), `query` (lines matching a text, with their ancestors) or `interactive` (controls only); `boxes` adds each element's position in viewport pixels. |
 | `browser_act` | mutate | Run an ordered batch of `actions` on one tab. Returns one status line per action and what changed on the page. `files` lists the paths that upload actions use. |
-| `browser_screenshot` | read | The viewport, one element (`ref`, which wins over `full_page`) or the whole page (`full_page`) as an image; `path` also saves it to a file. |
-| `browser_tabs` | session | `list` (the default), `new` (optionally with a `url`), `select` or `close` a tab, or `close_browser`. |
+| `browser_screenshot` | read, file write | The viewport, one element (`ref`, which wins over `full_page`) or the whole page (`full_page`) as an image; `path` also saves it to a file. |
+| `browser_tabs` | session, egress | `list` (the default), `new` (optionally with a `url`, which it opens), `select` or `close` a tab, or `close_browser`. |
 | `browser_eval` | script | Run a JavaScript expression or function in the page, optionally on one element `ref`, and return its JSON result. |
 
 Every tool except `browser_tabs` takes an optional `tab` (a tab id such as
 `t2`; default the active tab). The tools are split by risk so that name-based
 gates (`permgate`, `sandbox`) can tell reading a page from changing it or
-running script in it.
+running script in it. What each one can do beyond its main job:
+
+- `browser_snapshot` and `browser_screenshot` start the browser when none is
+  running (only `browser_tabs` with `list` never does).
+- `browser_screenshot` with `path` writes an image file; the sandbox checks
+  that path as a write.
+- `browser_tabs` `new` with a `url` opens that page, like `browser_navigate`.
+- `browser_eval` runs any script with the page's privileges: it can read
+  everything the page holds, change the page, and send requests (through the
+  same filtering proxy as the page). It is not a read-only tool.
 
 Models that must fill in every argument (strict function calling) can send an
 empty value for each one they do not use: `""`, `0`, `false` or `[]` means
@@ -209,7 +221,10 @@ the same role and name. Take a new snapshot and use the new refs.
   it is answered with a `dialog` action, every other browser call returns an
   error that says a dialog is waiting.
 - **Downloads** are saved under `browser-downloads/` in the creature's working
-  directory, and the result gives the saved path. A download still running
+  directory as it is when the download starts, and the result gives the saved
+  path. With the sandbox on, a download whose path its file-write rules refuse
+  is cancelled before anything is written and reported as refused, with the
+  reason. A download still running
   after two seconds is reported as in progress. Over the session's lifetime,
   browser restarts included, at most 50 downloads are started and at most
   1 GB of downloaded files is kept. A download past the count is cancelled;
@@ -226,7 +241,8 @@ the same role and name. Take a new snapshot and use the new refs.
 
 The browser starts on the first browser call (`browser_tabs` with `list` does
 not start it). It closes after `idle_close_s` without use, when it crashes,
-or on `close_browser`; the next call starts a fresh one and says that state
+or on `close_browser`; a browser that stops answering is killed together with
+every process it started. The next call starts a fresh one and says that state
 was lost. A fresh browser has a throwaway profile unless `profile_dir` is set,
 so logins do not survive a restart.
 
@@ -253,7 +269,7 @@ creature is built.
 | `block_hosts` | list | `[]` | Hosts pages may never reach. Checked before `allow_hosts`. |
 | `allow_loopback` | bool | `false` | Allow `localhost` and other loopback addresses (local dev servers). |
 | `allow_private` | bool | `false` | Allow private-network addresses (10/8, 172.16/12, 192.168/16, carrier-grade NAT, IPv6 unique-local). |
-| `secrets` | map | `{}` | Secret names to `env:VAR_NAME` references, for `type` actions. See [Secrets](#secrets). |
+| `secrets` | map | `{}` | Secret names, each to `{env: VAR_NAME, origins: [...]}`: the environment variable that holds it and the web origins it may be typed into, for `type` actions. See [Secrets](#secrets). |
 | `nav_timeout_s` | number | `30` | Navigation timeout, in seconds (above 0, at most 3600). |
 | `action_timeout_s` | number | `5` | Timeout of each action and page read, in seconds (above 0, at most 3600). A whole `browser_act` batch gets 60 s, or three times (this + 10 s) when that is longer. |
 | `snapshot_max_chars` | int | `20000` | Cap on a snapshot's length (1000–1000000). A cut snapshot ends with a line saying how much was left out and how to narrow. |
@@ -263,8 +279,9 @@ creature is built.
 
 With `executable_path`, only that browser is tried; with `channel`, only that
 channel. With neither, the plugin tries Playwright's bundled Chromium, then an
-installed Google Chrome, then Microsoft Edge. Pages always get a fixed
-viewport at a device scale factor of 1.
+installed Google Chrome, then Microsoft Edge. A creature without host resources
+(see [Multi-user hosts](#multi-user-hosts)) tries the bundled Chromium only.
+Pages always get a fixed viewport at a device scale factor of 1.
 
 ## Network policy
 
@@ -332,10 +349,16 @@ no option permits them.
 ## With the sandbox
 
 The browser follows the [`sandbox`](../reference/builtin-plugins.md#sandbox)
-plugin when both are on. The proxy asks the sandbox about every connection,
-so a change to the sandbox's options applies from the next request. When the
-sandbox is switched on or off, or denies the network, open browser
-connections are dropped.
+plugin when both are on, as the sandbox is at each moment: switched on or off,
+and with its current options. No tool call is needed for a change to apply.
+
+- **New connections** are judged by the sandbox's rules at the moment they
+  open.
+- **Open connections** are judged again every 2 seconds while any is open, and
+  at once on each browser call. One whose host the rules now refuse is closed
+  and listed as blocked in the next result, so a narrowed `network_allowlist`
+  or a switch to `network: deny` closes the connections it refuses within about
+  2 seconds.
 
 - **`network: deny`**: no browser tool runs. The sandbox refuses the call
   before it reaches the browser.
@@ -350,6 +373,9 @@ connections are dropped.
 - **File paths**: `files` in `browser_act` (read) and `path` in
   `browser_screenshot` (write) go through the same path checks as other file
   tools.
+- **Downloads** are checked against the file-write rules (`fs_write`,
+  `fs_deny`) before anything is created; a refused download is cancelled and
+  reported as refused.
 - **`backend: audit`** logs what it would refuse and lets it through.
 
 ## With permgate
@@ -371,36 +397,67 @@ plugins:
         - browser_tabs
 ```
 
-`browser_snapshot` and `browser_screenshot` only read the page and stay
-ungated. An empty `gated_tools` gates every tool, so list them.
+`browser_tabs` is gated because `new` with a `url` opens a page.
+`browser_snapshot` and `browser_screenshot` stay ungated here: they read the
+page (and start the browser if none runs), and the screenshot `path` is a file
+write the sandbox checks. An empty `gated_tools` gates every tool, so list
+them.
+
+`browser_eval` can change the page and send requests, not only read. To run
+the plugin without it, turn that one tool off: `/module disable browser_eval`,
+or `agent.set_tool_enabled("browser_eval", False)` from Python. It stays off
+when the plugin is disabled and enabled again, and is saved with the session
+(see [turning tools off](plugins.md#tool-origins-and-turning-tools-off)).
 
 ## Secrets
 
-Options hold references, never values:
+Options hold references, never values. Each secret names the environment
+variable that holds it and the web origins it may be typed into:
 
 ```yaml
 plugins:
   - name: browser
     options:
       secrets:
-        staging_pw: "env:STAGING_PASSWORD"
+        staging_pw:
+          env: STAGING_PASSWORD
+          origins: ["https://staging.example.com"]
 ```
 
+An origin is a scheme, a host and an optional port, such as
+`https://staging.example.com` or `http://localhost:5173`. A path, a wildcard,
+an empty list, or a secret without `origins` is a configuration error.
+
 A `type` action that names `secret: staging_pw` (instead of `text`) types the
-value of `STAGING_PASSWORD`, read from the environment when the action runs.
+value of `STAGING_PASSWORD`, read from the environment when the action runs,
+but only when the element's own document has one of the listed origins. A
+frame counts on its own: a cross-origin frame inside an allowed page is
+refused unless its origin is listed too. A refused action fails with a reason
+that names the secret and the offending origin, never the value, for example
+`refused: secret staging_pw may be typed only into https://staging.example.com;
+e7 is on https://evil.example`.
+
 The value must be at least four characters. In every text result it shows as
 `[secret:staging_pw]`, raw and in its URL- and JSON-encoded spellings.
 Password fields are redacted too: a password field's value shows as
 `(redacted)` in snapshots (`[secret:staging_pw]` when the secret filled it),
 and the same value appearing anywhere else in a result (a title, a URL) as
-`[redacted]`.
+`[redacted]`. This also covers a field whose `autocomplete` names a password,
+which a field switched to show its text usually keeps. Chromium's
+accessibility tree carries password values in plain text, so when the check
+that finds password fields fails on a page, every text field's value shows as
+`(withheld)` and the result says so.
+
+A creature without host resources (see [Multi-user hosts](#multi-user-hosts))
+may not use `secrets`: they name environment variables of the server.
 
 What can still see a secret:
 
 - **Screenshots.** A page that echoes the value as visible text shows it in
   the image.
 - **`browser_eval`.** A script runs with the page's privileges and can read a
-  field's value. Gate `browser_eval` with `permgate` when secrets are in play.
+  field's value. Gate `browser_eval` with `permgate`, or turn it off, when
+  secrets are in play.
 - **The site itself**, of course. Type secrets only into sites you trust.
 
 ## Untrusted page content
@@ -433,11 +490,15 @@ it secrets or tools it does not need.
 
 On a server with user accounts, only administrators' engines may use host
 resources. For every other user (and the anonymous slot), the browser runs
-only headless, with a throwaway profile, the bundled Chromium and public
-addresses. A creature whose options ask for more (`headless: false`,
-`profile_dir`, `executable_path`, `channel`, `allow_loopback` or
-`allow_private`) gets an error on every browser call naming the refused
-options. Single-user hosts, `kt run` and the CLI are not restricted.
+only headless, with a throwaway profile, the bundled Chromium, public
+addresses and no secrets. A creature whose options ask for more
+(`headless: false`, `profile_dir`, `executable_path`, `channel`,
+`allow_loopback`, `allow_private` or `secrets`) gets an error on every browser
+call naming the refused options, before any browser starts. Such a creature
+never falls back to an installed Chrome or Edge: without the bundled Chromium
+the error says to run `playwright install chromium`, and a browser started
+before the restriction applied is closed at the next call. Single-user hosts,
+`kt run` and the CLI are not restricted.
 
 ## Limits and known gaps
 

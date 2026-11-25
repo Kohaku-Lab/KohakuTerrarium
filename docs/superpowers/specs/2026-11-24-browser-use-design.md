@@ -251,7 +251,10 @@ runs before in-flight tool jobs are cancelled.
 - **Timeouts.** Every driver call is bounded. A hung page costs one action
   timeout, not thirty seconds. After a timeout the session sends the browser
   a 1 s round-trip probe; a browser that does not answer is killed and marked
-  lost.
+  lost. The kill does not ask the browser: the driver reads the browser's
+  process ids over CDP right after launch and holds them (a process handle on
+  Windows, a pidfd on Linux, so an id cannot be reused), and a forced kill
+  ends the held root's process tree, each held process, then the driver.
 - **Cancellation.** On cancel the session releases the lock, marks its refs
   stale and re-raises. It does not tear the browser down.
 - **Settling.** After an action: a short grace for a navigation to start,
@@ -271,7 +274,10 @@ runs before in-flight tool jobs are cancelled.
   and the result says so; when Chromium has announced a new window, the
   action waits up to 3 s for it to register.
 - **Downloads.** Saved under `browser-downloads/` in the agent's working
-  directory and reported with their path; the result waits up to 2 s for a
+  directory (read when each download starts) and reported with their path.
+  Each path is first checked by a write check the plugin passes in (the
+  sandbox's `write_policy`, looked up live); a refused download is cancelled
+  before any file is created and reported as refused with the reason; the result waits up to 2 s for a
   download the batch started. Over the session's lifetime, relaunches
   included, at most 50 downloads are started and 1 GiB is kept; one past
   the count is cancelled, one that takes the kept total over the byte cap is
@@ -282,7 +288,9 @@ runs before in-flight tool jobs are cancelled.
   path check sees them. A hidden file input has no ref, so the action falls
   back to the file-chooser path on the visible control.
 - **Launch.** An explicit `executable_path` alone, else a `channel` alone,
-  else Playwright's bundled Chromium, then system Chrome, then Edge. A fresh
+  else Playwright's bundled Chromium, then system Chrome, then Edge; a
+  session marked bundled-only (no host resources) tries the bundled Chromium
+  alone and closes a running browser that was not launched that way. A fresh
   throwaway profile by default; `profile_dir` opts in to a persistent one. On
   Windows a non-Proactor event loop is rejected with a clear error before
   Playwright fails obscurely.
@@ -336,8 +344,14 @@ and it is one option away: `allow_loopback: true`.
   checks them in addition to its built-in tool-name tables, as it already
   does for paths, so `web_fetch` / `web_search` are gated exactly as before
   and any other tool can opt in. The sandbox exposes its
-  network policy as a runtime service for the proxy. With `network: deny` no
-  browser tool runs, and open connections are dropped. The browser is treated
+  network policy as a runtime service for the proxy, which the plugin looks
+  up through the plugin manager on every check, so a sandbox enabled,
+  disabled or reconfigured mid-session applies without a tool call. New
+  connections are judged when they open; open ones are judged again every
+  `REJUDGE_INTERVAL_S` (2 s) while any is open and at once on each browser
+  call, and those now refused are closed. With `network: deny` no browser
+  tool runs. The plugin's `pre_tool_execute` touches only `browser_act` and
+  `browser_screenshot` arguments. The browser is treated
   as a network tool, not as an arbitrary subprocess, so it is not blocked by
   the `syscall` axis; it is refused when OS-level enforcement is required,
   because Chromium cannot be confined by the subprocess runner. The plugin's
@@ -349,19 +363,31 @@ and it is one option away: `allow_loopback: true`.
   `browser_snapshot` and `browser_screenshot` ungated.
 - **Host resources.** When `host_resources_allowed` is false (a non-admin
   user's engine in multi-user mode) only a headless browser with a throwaway
-  profile, the bundled Chromium and public addresses is permitted:
-  `headless: false`, `profile_dir`, `executable_path`, `channel`,
-  `allow_loopback` and `allow_private` are refused.
-- **Runtime disable.** `BasePlugin.on_disable` closes the browser when the
-  plugin is disabled; re-enabling it creates a fresh session.
+  profile, the bundled Chromium (never a system browser) and public addresses
+  is permitted: `headless: false`, `profile_dir`, `executable_path`,
+  `channel`, `allow_loopback`, `allow_private` and `secrets` are refused.
+- **Runtime disable.** `BasePlugin.on_disable` starts closing the browser
+  when the plugin is disabled; re-enabling it creates a fresh session. A
+  session the plugin lets go of (disable, option change) is tracked until its
+  close finishes, and the next browser call waits for that (bounded by its
+  close timeout) before launching, so two browsers never share a profile.
 
 ## Secrets
 
-Options hold references only (`secrets: {bank_pw: "env:BANK_PW"}`). A `type`
-action names the secret; the value (at least four characters) is read from
-the environment at execution and redacted as `[secret:<name>]` from every
-text result, raw and URL- or JSON-encoded. Screenshots and `browser_eval` can
-still observe a value; the docs say so and recommend gating `browser_eval`.
+Options hold references only, each with the origins the secret may be typed
+into (`secrets: {bank_pw: {env: BANK_PW, origins: ["https://bank.example"]}}`).
+An origin is `scheme://host[:port]` (http or https, default port dropped, no
+path or wildcard); a secret without origins is a configuration error. A
+`type` action names the secret; it is typed only when the origin of the
+element's own frame document is listed (for a ref inside a frame, the
+frame's URL, not the top page's), otherwise the action fails naming the
+secret and the offending origin. The value (at least four characters) is read
+from the environment at execution and redacted as `[secret:<name>]` from
+every text result, raw and URL- or JSON-encoded. Password field values are
+redacted whole; Chromium's aria snapshot carries them in plain text, so when
+the probe that locates them fails, every text field's value is withheld.
+Screenshots and `browser_eval` can still observe a value; the docs say so and
+recommend gating or turning off `browser_eval`.
 
 ## Configuration
 
@@ -391,9 +417,10 @@ src/kohakuterrarium/browser/           runtime; imports nothing from studio / ap
   observe  images  errors  tasks       no Playwright
   actions  settle  dialogs  tabs       driver-protocol only
   downloads  launch  protocol
+  processes                            process-tree kill, no Playwright
   session/                             BrowserSession pseudo-class package (README.md)
   driver                               the only module that imports Playwright
-src/kohakuterrarium/builtins/plugins/browser/{plugin,gates}.py
+src/kohakuterrarium/builtins/plugins/browser/{plugin,gates,retired}.py
 src/kohakuterrarium/builtins/tools/browser/{navigate,snapshot,act,screenshot,tabs,eval,common}.py
 src/kohakuterrarium/builtin_skills/tools/browser_*.md
 ```

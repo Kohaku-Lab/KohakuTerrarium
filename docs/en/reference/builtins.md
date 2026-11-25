@@ -142,7 +142,8 @@ refs (`e12`; `f1e12` / `f2e12` after the tab loads a new page or inside
 frames) on interactive elements, frames, dialogs, tables, rows, articles and
 named containers, a frame's origin on its line when it differs from the
 page's, hidden text dropped, password and secret
-values redacted, capped at the plugin's `snapshot_max_chars`.
+values redacted, capped at the plugin's `snapshot_max_chars`. Starts the
+browser when none is running.
 
 - Args: `ref` (one subtree), `depth` (0 = no limit), `query` (matching lines with their
   ancestors), `interactive` (controls only), `boxes` (element positions in
@@ -165,21 +166,25 @@ actions per call. `click`, `hover` and `drag` also take viewport coordinates
 **`browser_screenshot`**: The viewport, one element or the whole page as an
 image in CSS pixels (PNG, or JPEG above about 500 KB, downscaled when still
 too big; full pages and elements stop at 8000 px). The image reaches the model with native tool calling; text tool formats
-pass on the text line only.
+pass on the text line only. Starts the browser when none is running.
 
-- Args: `ref` (wins over `full_page`), `full_page`, `path` (also save the
-  image there).
+- Args: `ref` (wins over `full_page`), `full_page`, `path` (also write the
+  image to that file; the sandbox checks it as a file write).
 
 **`browser_tabs`**: List, open, select or close tabs, or close the browser (the
-next call starts a fresh one). `list` never starts the browser. At most 20
-tabs; `new` beyond that is refused.
+next call starts a fresh one). `list` never starts the browser; `new` with a
+`url` opens that page, as `browser_navigate` does. At most 20 tabs; `new`
+beyond that is refused.
 
 - Args: `action` (`list` default, `new`, `select`, `close`, `close_browser`),
   `tab` (for `select` / `close`), `url` (for `new`).
 
 **`browser_eval`**: Run a JavaScript expression or function in the page,
 optionally receiving one element, and return its JSON result (cut at 10000
-characters). It sees what the page holds, typed secrets included.
+characters). The script runs with the page's privileges: it sees what the
+page holds, typed secrets included, can change the page and can send requests
+through the browser's proxy. To run the plugin without it, turn the tool off
+(`/module disable browser_eval`).
 
 - Args: `expression`, `ref`.
 

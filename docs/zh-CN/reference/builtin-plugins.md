@@ -252,7 +252,7 @@ plugins:
 | `block_hosts` | list[str] | `[]` | 页面永远不能访问的主机；最先检查。这里的 IP 地址也会拦截解析到它的主机名。 |
 | `allow_loopback` | bool | false | 允许回环地址（本地开发服务器）。 |
 | `allow_private` | bool | false | 允许内网、运营商级 NAT 与 IPv6 唯一本地地址。 |
-| `secrets` | dict | `{}` | 密钥名到 `env:VAR_NAME` 引用的映射，供 `type` 动作使用；其值会从结果中遮蔽。 |
+| `secrets` | dict | `{}` | 密钥名，各自映射到 `{env: VAR_NAME, origins: [...]}`（非空的 `scheme://host[:port]` 列表），供 `type` 动作使用；只会输入到这些 origin，其值会从结果中遮蔽。 |
 | `nav_timeout_s` | float | 30 | 导航超时（秒）。 |
 | `action_timeout_s` | float | 5 | 每个动作的超时（秒）；一批 `browser_act` 最多 60 秒，若（此值 + 10 秒）的三倍更长则取后者。 |
 | `snapshot_max_chars` | int | 20000 | 快照长度上限（1000–1000000）。 |
@@ -264,14 +264,19 @@ plugins:
 
 - **延迟启动。** 浏览器在第一次浏览器调用时启动。闲置关闭、崩溃或
   `close_browser` 会丢弃它；下一次调用启动一个新的，并说明状态已丢失。停止、
-  卸载和运行时停用会永久关闭它：之后的调用直接失败，不会重新启动。
+  卸载和运行时停用会永久关闭它：之后的调用直接失败，不会重新启动。插件放手的浏览器
+  （修改 option、停用）还在关闭时，绝不会启动新的浏览器。不再响应的浏览器会连同它
+  启动的所有进程一起被强制结束。
 - **网络。** 所有流量都经过会话持有的过滤代理，代理会检查每一跳、子资源、
   弹出窗口和 WebSocket。回环与内网地址默认拒绝，可用 option 放行；链路本地
   地址（包括云元数据地址）一律拒绝。
-- **sandbox。** 代理对每个连接都会查询 sandbox 的 `network_policy` 服务。
+- **sandbox。** 代理按宿主此刻发布的 sandbox `network_policy` 服务判定每个新连接；
+  只要还有连接开着，每 2 秒重新判定已打开的连接（每次浏览器调用时也立刻判定），
+  关闭 sandbox 现在拒绝的连接。下载在写入任何内容之前先用它的 `write_policy` 检查。
   `network: deny` 拒绝所有浏览器工具；`os_enforce: require` 拒绝启动浏览器。
 - **主机资源。** 引擎的主机资源关闭时（多用户服务器上的非管理员用户），只允许
-  headless、一次性 profile、自带的 Chromium 和公网地址。
+  headless、一次性 profile、自带的 Chromium（绝不用系统浏览器）和公网地址，且不能
+  使用 `secrets`。
 - **Prompt。** 启用期间且至少一个浏览器工具开着时，插件加入一小段 `## Browser pages`，说明页面内容放在
   `page_content` 元素中，是数据而不是指令。
 

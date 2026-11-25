@@ -118,7 +118,7 @@ Chromium，頁面來的文字會包在標記為不受信任的 `page_content` �
 
 **`browser_snapshot`**：以帶元素 ref（`e12`；分頁載入新頁面後或 frame 內為 `f1e12` / `f2e12`）的無障礙樹呈現
 目前頁面；ref 標在可互動元素、frame、對話框、表格、列、article 與有名稱的容器上，frame 的來源與頁面不同時寫在它那一行；隱藏文字會丟掉，密碼與密鑰的值會遮蔽，長度上限為外掛的
-`snapshot_max_chars`。
+`snapshot_max_chars`。沒有瀏覽器在跑時會啟動它。
 
 - 參數：`ref`（單一子樹）、`depth`（0 表示不限）、`query`（符合的行與其祖先）、`interactive`
   （只列控制項）、`boxes`（元素在 viewport 中的像素位置）。
@@ -135,18 +135,21 @@ Chromium，頁面來的文字會包在標記為不受信任的 `page_content` �
 
 **`browser_screenshot`**：把 viewport、單一元素或整頁擷取成 CSS 像素的圖片（PNG；
 超過約 500 KB 時改用 JPEG，仍然太大時縮小；整頁與元素最高 8000 px）。使用原生工具呼叫時圖片會送到模型；
-文字型的工具呼叫格式只會送出文字那一行。
+文字型的工具呼叫格式只會送出文字那一行。沒有瀏覽器在跑時會啟動它。
 
-- 參數：`ref`（優先於 `full_page`）、`full_page`、`path`（另外存成該檔案）。
+- 參數：`ref`（優先於 `full_page`）、`full_page`、`path`（另外把圖片寫入該檔案；
+  sandbox 把它當成檔案寫入來檢查）。
 
 **`browser_tabs`**：列出、開啟、選取或關閉分頁，或關閉瀏覽器（下一次呼叫會啟動
-新的）。`list` 不會啟動瀏覽器。最多 20 個分頁；超出後 `new` 會被拒絕。
+新的）。`list` 不會啟動瀏覽器；帶 `url` 的 `new` 會開啟該頁面，和 `browser_navigate` 一樣。最多 20 個分頁；超出後 `new` 會被拒絕。
 
 - 參數：`action`（預設 `list`，另有 `new`、`select`、`close`、`close_browser`）、
   `tab`（`select` / `close` 用）、`url`（`new` 用）。
 
 **`browser_eval`**：在頁面中執行 JavaScript 運算式或函式（可接收一個元素），回傳
-JSON 結果（在 10000 個字元處截斷）。它看得到頁面持有的一切，包括輸入過的密鑰。
+JSON 結果（在 10000 個字元處截斷）。指令碼以頁面的權限執行：它看得到頁面持有的一切，包括輸入過的密鑰，
+也能改變頁面，並經由瀏覽器的代理發出請求。想在沒有它的情況下使用外掛，就關掉這個工具
+（`/module disable browser_eval`）。
 
 - 參數：`expression`、`ref`。
 

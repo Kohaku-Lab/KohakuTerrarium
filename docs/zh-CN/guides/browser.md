@@ -27,7 +27,7 @@ pip install "kohakuterrarium[browser-use]"
 playwright install chromium
 ```
 
-第一行安装 Playwright，第二行下载 Playwright 所驱动的 Chromium。没有下载这份 Chromium 时，插件会依次退而使用已安装的 Google Chrome、Microsoft Edge（见下文「启动顺序」）。`kohakuterrarium[full]` 包含 `browser-use`；较早的 `browser` extra 是 `web_fetch` 背后的 Crawl4AI 渲染器，不会安装 Playwright。
+第一行安装 Playwright，第二行下载 Playwright 所驱动的 Chromium。没有下载这份 Chromium 时，插件会依次退而使用已安装的 Google Chrome、Microsoft Edge（见下文「启动顺序」）；没有主机资源的 Creature 例外，它只会运行自带的 Chromium。`kohakuterrarium[full]` 包含 `browser-use`；较早的 `browser` extra 是 `web_fetch` 背后的 Crawl4AI 渲染器，不会安装 Playwright。
 
 ## 在 Creature 上启用
 
@@ -46,9 +46,9 @@ plugins:
 
 ### 运行时
 
-每个 Creature 都能发现这个插件，所以可以在运行中的会话里打开它：在聊天里输入 `/plugin enable browser`，或者使用网页 UI 的 Plugins 标签页，那里也能编辑它的 options。修改后的 options 从下一次浏览器调用开始生效：当前浏览器关闭，再用新 options 启动一个新的。
+每个 Creature 都能发现这个插件，所以可以在运行中的会话里打开它：在聊天里输入 `/plugin enable browser`，或者使用网页 UI 的 Plugins 标签页，那里也能编辑它的 options。修改后的 options 从下一次浏览器调用开始生效：当前浏览器关闭，等旧浏览器关闭完成后，再用新 options 启动一个新的（同一个 profile 上绝不会同时跑两个浏览器）。
 
-停用插件会立即关闭浏览器，工具也会从 Creature 上消失；重新启用后，下一次调用会启动一个全新的浏览器（标签页、cookie、登录都不会保留）。
+停用插件会立即开始关闭浏览器，工具也会从 Creature 上消失；重新启用后，下一次调用会在旧浏览器关闭之后启动一个全新的浏览器（标签页、cookie、登录都不会保留）。
 
 ### 在 Python 中
 
@@ -73,11 +73,16 @@ agent = await Agent.build(
 | `browser_navigate` | 外连 | 打开一个 `url`（`action` 为 `goto`，这是默认值），或执行 `back` / `forward` / `reload`，这三者会忽略 `url`。返回页面头部信息以及带 ref 的页面文字（页面超过 8000 个字符时只列可交互元素）。 |
 | `browser_snapshot` | 读取 | 以带 ref 的无障碍树读取当前页面。可用 `ref`（只看一个子树）、`depth`（0 表示不限）、`query`（匹配某段文字的行及其祖先）或 `interactive`（只看控件）缩小范围；`boxes` 会给每个元素加上以视口像素表示的位置。 |
 | `browser_act` | 修改 | 在一个标签页上按顺序执行一批 `actions`。每个动作返回一行状态，并附上页面发生了什么变化。`files` 列出上传动作要用的路径。 |
-| `browser_screenshot` | 读取 | 把视口、单个元素（`ref`，优先于 `full_page`）或整个页面（`full_page`）截成图片；`path` 会同时存成文件。 |
-| `browser_tabs` | 会话 | `list`（默认）、`new`（可带 `url`）、`select` 或 `close` 某个标签页，或者 `close_browser`。 |
+| `browser_screenshot` | 读取、写文件 | 把视口、单个元素（`ref`，优先于 `full_page`）或整个页面（`full_page`）截成图片；`path` 会同时存成文件。 |
+| `browser_tabs` | 会话、外连 | `list`（默认）、`new`（可带 `url`，会打开该页面）、`select` 或 `close` 某个标签页，或者 `close_browser`。 |
 | `browser_eval` | 脚本 | 在页面中运行一段 JavaScript 表达式或函数，可选地作用于某个元素 `ref`，返回其 JSON 结果。 |
 
-除 `browser_tabs` 外，每个工具都接受可选的 `tab`（如 `t2` 这样的标签页 id；默认为当前活动标签页）。工具按风险拆分，这样按名称把关的 `permgate`、`sandbox` 就能区分"读页面""改页面"和"在页面里跑脚本"。
+除 `browser_tabs` 外，每个工具都接受可选的 `tab`（如 `t2` 这样的标签页 id；默认为当前活动标签页）。工具按风险拆分，这样按名称把关的 `permgate`、`sandbox` 就能区分"读页面""改页面"和"在页面里跑脚本"。各工具在主要用途之外还能做的事：
+
+- 没有浏览器在运行时，`browser_snapshot` 和 `browser_screenshot` 会启动它（只有 `action` 为 `list` 的 `browser_tabs` 从不启动）。
+- 带 `path` 的 `browser_screenshot` 会写入一个图片文件；sandbox 把这个路径当作写入来检查。
+- 带 `url` 的 `browser_tabs` `new` 会打开该页面，和 `browser_navigate` 一样。
+- `browser_eval` 以页面的权限运行任意脚本：它能读取页面持有的一切、修改页面，并发出请求（经过与页面相同的过滤代理）。它不是只读工具。
 
 必须填写每个参数的模型（严格模式的函数调用）可以给用不到的参数传空值：`""`、`0`、`false` 或 `[]` 都表示"未提供"。
 
@@ -120,12 +125,12 @@ ref 只对模型最后一次看到的页面有效。每次批量操作前，会�
 
 - **标签页** 有稳定的 id（`t1`、`t2`……）。点击打开的新标签页会成为活动标签页，动作结果会说明这一点，并显示它的文字。如果 Chromium 已经通知要开新窗口，动作会最多等 3 秒让它打开再返回。同时最多打开 20 个标签页：`browser_tabs` 会拒绝再开新的，并提示先关闭一个；页面超出上限打开的标签页（或 `profile_dir` 在启动时恢复的标签页）会被关闭并报告。
 - **对话框。** `alert` 和 `beforeunload` 会自动接受并在结果中报告。`confirm` 或 `prompt` 对话框会让调用返回 "dialog pending"；在用 `dialog` 动作回答之前，其他所有浏览器调用都会报错，提示有对话框在等待。
-- **下载** 保存在 Creature 工作目录下的 `browser-downloads/` 中，结果会给出保存路径。两秒后仍在进行的下载会被报告为进行中。在整个会话期间（包括浏览器重启）最多开始 50 个下载、最多保留 1 GB 的下载文件。超出数量的下载会被取消；会让保留总量超过 1 GB 的下载会先完整下载、再被删除。两者都报告为失败；5 分钟后仍未保存完的下载也会被取消并报告为失败。
+- **下载** 保存在 Creature 工作目录（以下载开始时为准）下的 `browser-downloads/` 中，结果会给出保存路径。启用 sandbox 时，路径被其文件写入规则拒绝的下载会在写入任何内容之前被取消，并报告为被拒绝，附上原因。两秒后仍在进行的下载会被报告为进行中。在整个会话期间（包括浏览器重启）最多开始 50 个下载、最多保留 1 GB 的下载文件。超出数量的下载会被取消；会让保留总量超过 1 GB 的下载会先完整下载、再被删除。两者都报告为失败；5 分钟后仍未保存完的下载也会被取消并报告为失败。
 - **上传** 的路径来自本次调用的 `files` 参数（相对于工作目录），所以 sandbox 会像检查其他文件读取一样检查它们。藏在样式化按钮后面的文件输入框本身没有 ref；把 `upload` 指向那个可见按钮，会话会通过文件选择框完成上传。
 
 ### 浏览器保留什么，何时重来
 
-浏览器在第一次浏览器调用时启动（`action` 为 `list` 的 `browser_tabs` 不会启动它）。闲置超过 `idle_close_s`、崩溃，或执行 `close_browser` 时，它会关闭；下一次调用会启动一个新的，并说明状态已丢失。除非设置了 `profile_dir`，新浏览器用的都是一次性 profile，所以登录状态不会跨重启保留。
+浏览器在第一次浏览器调用时启动（`action` 为 `list` 的 `browser_tabs` 不会启动它）。闲置超过 `idle_close_s`、崩溃，或执行 `close_browser` 时，它会关闭；不再响应的浏览器会连同它启动的所有进程一起被强制结束。下一次调用会启动一个新的，并说明状态已丢失。除非设置了 `profile_dir`，新浏览器用的都是一次性 profile，所以登录状态不会跨重启保留。
 
 Creature 停止、插件被卸载或停用时，浏览器永久关闭。之后的调用会直接失败，绝不会在背后悄悄再启动一个。
 
@@ -146,7 +151,7 @@ Creature 的子代理共用它的浏览器。Creature 与子代理的调用在�
 | `block_hosts` | list | `[]` | 页面永远不能访问的主机。先于 `allow_hosts` 检查。 |
 | `allow_loopback` | bool | `false` | 允许 `localhost` 及其他回环地址（本地开发服务器）。 |
 | `allow_private` | bool | `false` | 允许内网地址（10/8、172.16/12、192.168/16、运营商级 NAT、IPv6 唯一本地地址）。 |
-| `secrets` | map | `{}` | 密钥名到 `env:VAR_NAME` 引用的映射，供 `type` 动作使用。见下文「密钥」。 |
+| `secrets` | map | `{}` | 密钥名，各自映射到 `{env: VAR_NAME, origins: [...]}`：存放它的环境变量，以及允许输入它的网页 origin，供 `type` 动作使用。见下文「密钥」。 |
 | `nav_timeout_s` | number | `30` | 导航超时（秒，大于 0，最多 3600）。 |
 | `action_timeout_s` | number | `5` | 每个动作和每次读取页面的超时（秒，大于 0，最多 3600）。一整批 `browser_act` 最多 60 秒，若（此值 + 10 秒）的三倍更长则取后者。 |
 | `snapshot_max_chars` | int | `20000` | 快照长度上限（1000–1000000）。被截断的快照末尾会有一行，说明省略了多少以及如何缩小范围。 |
@@ -154,7 +159,7 @@ Creature 的子代理共用它的浏览器。Creature 与子代理的调用在�
 
 ### 启动顺序
 
-设置了 `executable_path` 时只尝试那一个浏览器；设置了 `channel` 时只尝试那个 channel。两者都没设时，插件依次尝试 Playwright 自带的 Chromium、已安装的 Google Chrome、Microsoft Edge。页面始终使用固定视口，设备缩放比例为 1。
+设置了 `executable_path` 时只尝试那一个浏览器；设置了 `channel` 时只尝试那个 channel。两者都没设时，插件依次尝试 Playwright 自带的 Chromium、已安装的 Google Chrome、Microsoft Edge。没有主机资源的 Creature（见下文「多用户主机」）只尝试自带的 Chromium。页面始终使用固定视口，设备缩放比例为 1。
 
 ## 网络策略
 
@@ -196,12 +201,16 @@ plugins:
 
 ## 与 sandbox 一起使用
 
-两者都启用时，浏览器会遵从 [`sandbox`](../reference/builtin-plugins.md#sandbox) 插件。代理对每个连接都会询问 sandbox，所以 sandbox 的 options 改了之后，从下一个请求开始生效。sandbox 被打开或关闭，或者它禁止网络时，浏览器已打开的连接会被断开。
+两者都启用时，浏览器会遵从 [`sandbox`](../reference/builtin-plugins.md#sandbox) 插件当下的状态：是否启用，以及当前的 options。改动不需要等到下一次工具调用才生效。
+
+- **新连接** 在打开那一刻按 sandbox 的规则判定。
+- **已打开的连接** 只要还有连接开着，每 2 秒重新判定一次，每次浏览器调用时也会立刻判定。规则现在拒绝其主机的连接会被关闭，并在下一次结果中列为被拦截；因此收紧 `network_allowlist` 或改为 `network: deny`，会在约 2 秒内关闭它所拒绝的连接。
 
 - **`network: deny`**：任何浏览器工具都不会运行，sandbox 在调用到达浏览器之前就会拒绝。
 - **`network_allowlist`**：`browser_navigate` 和 `browser_tabs` 的 URL 参数要过它的检查，代理打开的每一个连接（包括子资源）也一样。allowlist 只写主机名（不带端口），它叠加在浏览器自己的 `allow_hosts` 之上，一个主机必须两边都通过。
 - **`os_enforce: require`**：浏览器拒绝启动（已在运行的也会被关闭），因为 Chromium 无法在 sandbox 的子进程隔离下运行。浏览器被视为网络工具，所以 `syscall` 级别不会拦它。
 - **文件路径**：`browser_act` 的 `files`（读取）和 `browser_screenshot` 的 `path`（写入）与其他文件工具一样经过路径检查。
+- **下载** 在创建任何文件之前，先按文件写入规则（`fs_write`、`fs_deny`）检查；被拒绝的下载会被取消，并报告为被拒绝。
 - **`backend: audit`** 只记录本来会拒绝的操作，然后放行。
 
 ## 与 permgate 一起使用
@@ -220,26 +229,36 @@ plugins:
         - browser_tabs
 ```
 
-`browser_snapshot` 和 `browser_screenshot` 只读取页面，不必把关。`gated_tools` 为空表示所有工具都要批准，所以要把它们明确列出来。
+`browser_tabs` 要把关，因为带 `url` 的 `new` 会打开页面。这里不给 `browser_snapshot` 和 `browser_screenshot` 把关：它们读取页面（没有浏览器在运行时会启动它），截图的 `path` 是一次由 sandbox 检查的文件写入。`gated_tools` 为空表示所有工具都要批准，所以要把它们明确列出来。
+
+`browser_eval` 不只是读取，还能修改页面、发出请求。想在没有它的情况下使用插件，就单独关掉这个工具：`/module disable browser_eval`，或在 Python 中 `agent.set_tool_enabled("browser_eval", False)`。插件停用后再启用，它仍保持关闭，并随会话保存（见[插件](plugins.md)中的「工具来源与关闭工具」）。
 
 ## 密钥
 
-options 里只放引用，从不放值：
+options 里只放引用，从不放值。每个密钥写明存放它的环境变量，以及允许输入它的网页 origin：
 
 ```yaml
 plugins:
   - name: browser
     options:
       secrets:
-        staging_pw: "env:STAGING_PASSWORD"
+        staging_pw:
+          env: STAGING_PASSWORD
+          origins: ["https://staging.example.com"]
 ```
 
-一个写了 `secret: staging_pw`（代替 `text`）的 `type` 动作，会输入 `STAGING_PASSWORD` 的值；这个值在动作执行时才从环境变量读取，至少要有四个字符。在所有文本结果中，它（包括原文以及 URL 编码、JSON 编码后的写法）都显示为 `[secret:staging_pw]`。密码框也会被遮蔽：在快照里，密码框的值显示为 `(redacted)`（如果是这个密钥填进去的，则显示 `[secret:staging_pw]`）；同一个值出现在结果的其他地方（标题、URL）时显示为 `[redacted]`。
+origin 由协议、主机和可选的端口组成，例如 `https://staging.example.com` 或 `http://localhost:5173`。带路径、通配符、空列表，或者没有 `origins` 的密钥，都是配置错误。
+
+一个写了 `secret: staging_pw`（代替 `text`）的 `type` 动作，会输入 `STAGING_PASSWORD` 的值；这个值在动作执行时才从环境变量读取。但只有当元素所在文档本身的 origin 在列表中时才会输入。frame 单独计算：允许的页面里嵌着的跨 origin frame 会被拒绝，除非它的 origin 也在列表中。被拒绝的动作会失败，原因里写明密钥名和违规的 origin，绝不写出值，例如 `refused: secret staging_pw may be typed only into https://staging.example.com; e7 is on https://evil.example`。
+
+值至少要有四个字符。在所有文本结果中，它（包括原文以及 URL 编码、JSON 编码后的写法）都显示为 `[secret:staging_pw]`。密码框也会被遮蔽：在快照里，密码框的值显示为 `(redacted)`（如果是这个密钥填进去的，则显示 `[secret:staging_pw]`）；同一个值出现在结果的其他地方（标题、URL）时显示为 `[redacted]`。`autocomplete` 指明为密码的输入框也一样（切换为显示明文的密码框通常保留这个属性）。Chromium 的无障碍树以明文携带密码值，所以当某个页面上查找密码框的检查失败时，所有文本框的值都显示为 `(withheld)`，结果也会说明这一点。
+
+没有主机资源的 Creature（见下文「多用户主机」）不能使用 `secrets`：它们指向的是服务器上的环境变量。
 
 仍然可能看到密钥的地方：
 
 - **截图。** 如果页面把这个值作为可见文字显示出来，它就会出现在图片里。
-- **`browser_eval`。** 脚本拥有页面的权限，可以读取输入框的值。涉及密钥时，请用 `permgate` 给 `browser_eval` 把关。
+- **`browser_eval`。** 脚本拥有页面的权限，可以读取输入框的值。涉及密钥时，请用 `permgate` 给 `browser_eval` 把关，或者关掉它。
 - **网站本身**，这是当然的。只把密钥输入到你信任的网站。
 
 ## 不可信的页面内容
@@ -252,7 +271,7 @@ plugins:
 
 ## 多用户主机
 
-在启用了用户账户的服务器上，只有管理员的引擎可以使用主机资源。对其他所有用户（以及匿名槽位），浏览器只能以 headless 方式、用一次性 profile、自带的 Chromium 访问公网地址。如果 Creature 的 options 要求更多（`headless: false`、`profile_dir`、`executable_path`、`channel`、`allow_loopback` 或 `allow_private`），每次浏览器调用都会报错，并列出被拒绝的 options。单用户主机、`kt run` 和 CLI 不受此限制。
+在启用了用户账户的服务器上，只有管理员的引擎可以使用主机资源。对其他所有用户（以及匿名槽位），浏览器只能以 headless 方式、用一次性 profile、自带的 Chromium 访问公网地址，且不能使用密钥。如果 Creature 的 options 要求更多（`headless: false`、`profile_dir`、`executable_path`、`channel`、`allow_loopback`、`allow_private` 或 `secrets`），每次浏览器调用都会在启动任何浏览器之前报错，并列出被拒绝的 options。这样的 Creature 绝不会退而使用已安装的 Chrome 或 Edge：没有自带的 Chromium 时，报错会提示运行 `playwright install chromium`；限制生效前已启动的浏览器会在下一次调用时被关闭。单用户主机、`kt run` 和 CLI 不受此限制。
 
 ## 限制与已知缺口
 

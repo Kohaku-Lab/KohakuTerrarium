@@ -37,7 +37,8 @@ playwright install chromium
 ```
 
 第一行安裝 Playwright，第二行下載 Playwright 要驅動的 Chromium。沒有下載的話，
-外掛會改用已安裝的 Google Chrome，再來是 Microsoft Edge（見[啟動](#啟動)）。
+外掛會改用已安裝的 Google Chrome，再來是 Microsoft Edge（見[啟動](#啟動)）；
+沒有主機資源的生物例外，它只會執行內附的 Chromium。
 `kohakuterrarium[full]` 已包含 `browser-use`；較早的 `browser` extra 是
 `web_fetch` 背後的 Crawl4AI 算繪器，不會安裝 Playwright。
 
@@ -63,10 +64,11 @@ plugins:
 每個生物都會發現這個外掛，所以可以在執行中的工作階段把它打開：在聊天裡輸入
 `/plugin enable browser`，或使用網頁 UI 的 Plugins 分頁（也能在那裡編輯它的
 options）。修改過的 options 從下一次瀏覽器呼叫開始生效：目前的瀏覽器關閉，
-再用新的 options 啟動一個。
+等舊的關閉完成後，再用新的 options 啟動一個（同一個設定檔上絕不會同時跑兩個
+瀏覽器）。
 
-停用外掛會立刻關閉瀏覽器，工具也會從生物身上消失；再次啟用後，下一次呼叫會啟動
-一個全新的瀏覽器（分頁、cookie、登入都不會帶過來）。
+停用外掛會立刻開始關閉瀏覽器，工具也會從生物身上消失；再次啟用後，下一次呼叫會在
+舊瀏覽器關閉之後啟動一個全新的瀏覽器（分頁、cookie、登入都不會帶過來）。
 
 ### 從 Python
 
@@ -92,13 +94,22 @@ agent = await Agent.build(
 | `browser_navigate` | 對外連線 | 開啟一個 `url`（`action` 為 `goto`，即預設值），或做 `back` / `forward` / `reload`，這三種會忽略 `url`。回傳頁首資訊與帶 ref 的頁面文字（頁面超過 8000 個字元時只列可互動元素）。 |
 | `browser_snapshot` | 讀取 | 以帶 ref 的無障礙樹讀取目前頁面。可用 `ref`（單一子樹）、`depth`（0 表示不限）、`query`（含某段文字的行與其祖先）或 `interactive`（只列控制項）縮小範圍；`boxes` 會加上每個元素在 viewport 中的像素位置。 |
 | `browser_act` | 變更 | 在單一分頁上依序執行一批 `actions`。每個動作回傳一行狀態，加上頁面的變化。`files` 列出上傳動作要用的路徑。 |
-| `browser_screenshot` | 讀取 | 把 viewport、單一元素（`ref`，優先於 `full_page`）或整頁（`full_page`）擷取成圖片；`path` 會另外存成檔案。 |
-| `browser_tabs` | 工作階段 | `list`（預設）、`new`（可帶 `url`）、`select` 或 `close` 分頁，或 `close_browser`。 |
+| `browser_screenshot` | 讀取、寫檔 | 把 viewport、單一元素（`ref`，優先於 `full_page`）或整頁（`full_page`）擷取成圖片；`path` 會另外存成檔案。 |
+| `browser_tabs` | 工作階段、對外連線 | `list`（預設）、`new`（可帶 `url`，會開啟該頁面）、`select` 或 `close` 分頁，或 `close_browser`。 |
 | `browser_eval` | 指令碼 | 在頁面裡執行 JavaScript 運算式或函式，可選擇作用於某個元素 `ref`，回傳 JSON 結果。 |
 
 除了 `browser_tabs` 以外，每個工具都接受選用的 `tab`（分頁 id，例如 `t2`；
 預設為使用中的分頁）。工具依風險拆開，讓依名稱判斷的閘門（`permgate`、
-`sandbox`）分得出「讀頁面」、「改頁面」和「在頁面裡跑程式」的差別。
+`sandbox`）分得出「讀頁面」、「改頁面」和「在頁面裡跑程式」的差別。各工具在主要
+用途之外還能做的事：
+
+- 沒有瀏覽器在跑時，`browser_snapshot` 與 `browser_screenshot` 會啟動它（只有
+  `list` 的 `browser_tabs` 從不啟動）。
+- 帶 `path` 的 `browser_screenshot` 會寫入一個圖片檔；sandbox 把這個路徑當成
+  寫入來檢查。
+- 帶 `url` 的 `browser_tabs` `new` 會開啟該頁面，和 `browser_navigate` 一樣。
+- `browser_eval` 以頁面的權限執行任意指令碼：它讀得到頁面持有的一切、能改變
+  頁面，也能發出請求（經過和頁面相同的過濾代理）。它不是唯讀工具。
 
 必須填滿每個參數的模型（嚴格模式的函式呼叫）可以對用不到的參數傳空值：`""`、
 `0`、`false` 或 `[]` 都代表「沒有提供」。
@@ -182,7 +193,9 @@ Ref 只對模型最後看到的那一版頁面有效。每批動作之前，工�
 - **對話框。** `alert` 與 `beforeunload` 會自動接受並回報。`confirm` 或
   `prompt` 對話框會讓該次呼叫以「dialog pending」結束；在用 `dialog` 動作回答
   之前，其他瀏覽器呼叫都會回傳錯誤，說明有對話框在等待。
-- **下載**存放在生物工作目錄下的 `browser-downloads/`，結果會給出存檔路徑。
+- **下載**存放在生物工作目錄（以下載開始時為準）下的 `browser-downloads/`，結果
+  會給出存檔路徑。啟用 sandbox 時，路徑被其檔案寫入規則拒絕的下載，會在寫入任何
+  東西之前被取消，並回報為被拒絕，附上原因。
   兩秒後還沒下載完的檔案會回報為進行中。在整個工作階段期間（包括瀏覽器重啟）
   最多開始 50 個下載、最多保留 1 GB 的下載檔案。超出數量的下載會被取消；會讓
   保留總量超過 1 GB 的下載會先完整下載、再被刪除。兩者都回報為失敗；5 分鐘後
@@ -194,8 +207,9 @@ Ref 只對模型最後看到的那一版頁面有效。每批動作之前，工�
 ### 瀏覽器保留什麼、何時重來
 
 瀏覽器在第一次瀏覽器呼叫時啟動（`browser_tabs` 的 `list` 不會啟動它）。閒置
-超過 `idle_close_s`、當機，或呼叫 `close_browser` 時，瀏覽器會關閉；下一次呼叫
-會啟動新的，並說明狀態已遺失。除非設定了 `profile_dir`，新瀏覽器用的是用完即丟
+超過 `idle_close_s`、當機，或呼叫 `close_browser` 時，瀏覽器會關閉；不再回應的
+瀏覽器會連同它啟動的所有行程一起被強制結束。下一次呼叫會啟動新的，並說明狀態
+已遺失。除非設定了 `profile_dir`，新瀏覽器用的是用完即丟
 的設定檔，所以登入狀態撐不過重啟。
 
 生物停止，或外掛被卸載、停用時，瀏覽器就永久關閉。之後的呼叫會直接失敗，不會在
@@ -218,7 +232,7 @@ Ref 只對模型最後看到的那一版頁面有效。每批動作之前，工�
 | `block_hosts` | list | `[]` | 頁面永遠不能連到的主機。比 `allow_hosts` 先檢查。 |
 | `allow_loopback` | bool | `false` | 允許 `localhost` 與其他 loopback 位址（本機開發伺服器）。 |
 | `allow_private` | bool | `false` | 允許私有網路位址（10/8、172.16/12、192.168/16、電信級 NAT、IPv6 unique-local）。 |
-| `secrets` | map | `{}` | 密鑰名稱對應到 `env:VAR_NAME` 參照，供 `type` 動作使用。見[密鑰](#密鑰)。 |
+| `secrets` | map | `{}` | 密鑰名稱，各自對應到 `{env: VAR_NAME, origins: [...]}`：存放它的環境變數，以及允許輸入它的網頁來源，供 `type` 動作使用。見[密鑰](#密鑰)。 |
 | `nav_timeout_s` | number | `30` | 導覽逾時秒數（大於 0，最多 3600）。 |
 | `action_timeout_s` | number | `5` | 每個動作與頁面讀取的逾時秒數（大於 0，最多 3600）。一整批 `browser_act` 最多 60 秒，若（此值 + 10 秒）的三倍更長則取後者。 |
 | `snapshot_max_chars` | int | `20000` | 快照長度上限（1000–1000000）。被截斷的快照最後一行會說明省略了多少、該怎麼縮小範圍。 |
@@ -228,7 +242,8 @@ Ref 只對模型最後看到的那一版頁面有效。每批動作之前，工�
 
 設了 `executable_path` 時只會試那一個瀏覽器；設了 `channel` 時只試那個 channel。
 兩者都沒設時，外掛依序嘗試 Playwright 內附的 Chromium、已安裝的 Google Chrome、
-Microsoft Edge。頁面一律使用固定的 viewport，device scale factor 為 1。
+Microsoft Edge。沒有主機資源的生物（見[多使用者主機](#多使用者主機)）只試內附的
+Chromium。頁面一律使用固定的 viewport，device scale factor 為 1。
 
 ## 網路政策
 
@@ -285,8 +300,12 @@ link-local 位址就算列在 `allow_hosts` 裡也會被拒絕；沒有任何 op
 ## 搭配 sandbox
 
 兩者都啟用時，瀏覽器會遵循 [`sandbox`](../reference/builtin-plugins.md#sandbox)
-外掛。代理對每一條連線都會詢問 sandbox，所以 sandbox 的 options 一改，從下一個
-請求起就生效。sandbox 被開啟或關閉，或它拒絕所有網路時，瀏覽器已開的連線會被切斷。
+外掛當下的狀態：是否啟用，以及目前的 options。改動不需要等下一次工具呼叫才生效。
+
+- **新連線**在開啟那一刻依 sandbox 的規則判定。
+- **已開的連線**只要還有連線開著，每 2 秒重新判定一次，每次瀏覽器呼叫時也會立刻
+  判定。規則現在拒絕其主機的連線會被關閉，並在下一個結果裡列為被擋下；因此收緊
+  `network_allowlist` 或改成 `network: deny`，會在約 2 秒內關掉它所拒絕的連線。
 
 - **`network: deny`**：任何瀏覽器工具都不會執行。sandbox 會在呼叫到達瀏覽器之前
   就拒絕。
@@ -298,6 +317,8 @@ link-local 位址就算列在 `allow_hosts` 裡也會被拒絕；沒有任何 op
   等級不會擋它。
 - **檔案路徑**：`browser_act` 的 `files`（讀取）與 `browser_screenshot` 的
   `path`（寫入）會經過和其他檔案工具相同的路徑檢查。
+- **下載**在建立任何檔案之前，先依檔案寫入規則（`fs_write`、`fs_deny`）檢查；
+  被拒絕的下載會被取消，並回報為被拒絕。
 - **`backend: audit`** 會記錄它原本要拒絕的東西，然後放行。
 
 ## 搭配 permgate
@@ -317,33 +338,59 @@ plugins:
         - browser_tabs
 ```
 
-`browser_snapshot` 與 `browser_screenshot` 只讀取頁面，不需要閘門。
-`gated_tools` 留空代表每個工具都要批准，所以請明確列出來。
+`browser_tabs` 要加閘門，因為帶 `url` 的 `new` 會開啟頁面。這裡不替
+`browser_snapshot` 與 `browser_screenshot` 加閘門：它們讀取頁面（沒有瀏覽器在跑時
+會啟動它），截圖的 `path` 是一次由 sandbox 檢查的檔案寫入。`gated_tools` 留空
+代表每個工具都要批准，所以請明確列出來。
+
+`browser_eval` 不只是讀取，還能改變頁面、發出請求。想在沒有它的情況下使用外掛，
+就單獨關掉這個工具：`/module disable browser_eval`，或在 Python 裡
+`agent.set_tool_enabled("browser_eval", False)`。外掛停用再啟用後它仍保持關閉，
+並隨工作階段儲存（見[外掛](plugins.md)中的「工具來源與關閉工具」）。
 
 ## 密鑰
 
-options 裡放的是參照，永遠不是值本身：
+options 裡放的是參照，永遠不是值本身。每個密鑰寫明存放它的環境變數，以及允許
+輸入它的網頁來源（origin）：
 
 ```yaml
 plugins:
   - name: browser
     options:
       secrets:
-        staging_pw: "env:STAGING_PASSWORD"
+        staging_pw:
+          env: STAGING_PASSWORD
+          origins: ["https://staging.example.com"]
 ```
 
+來源由 scheme、主機與選用的連接埠組成，例如 `https://staging.example.com` 或
+`http://localhost:5173`。帶路徑、萬用字元、空清單，或沒有 `origins` 的密鑰，都是
+設定錯誤。
+
 `type` 動作若指定 `secret: staging_pw`（取代 `text`），就會輸入
-`STAGING_PASSWORD` 的值，這個值在動作執行時才從環境變數讀取，長度至少要四個字元。
+`STAGING_PASSWORD` 的值，這個值在動作執行時才從環境變數讀取；但只有元素所在文件
+本身的來源列在清單上時才會輸入。frame 各自計算：允許的頁面裡內嵌的跨來源 frame
+會被拒絕，除非它的來源也列在清單上。被拒絕的動作會失敗，原因裡寫明密鑰名稱與
+違規的來源，絕不寫出值，例如
+`refused: secret staging_pw may be typed only into https://staging.example.com; e7 is on https://evil.example`。
+
+值的長度至少要四個字元。
 在每個文字結果裡，它（包括原始值以及 URL、JSON 編碼後的寫法）都會顯示成
 `[secret:staging_pw]`。密碼欄位也會遮蔽：在快照裡，密碼欄位的值顯示成
 `(redacted)`（若是這個密鑰填入的，則顯示 `[secret:staging_pw]`）；同一個值出現在
-結果其他地方（標題、URL）時顯示成 `[redacted]`。
+結果其他地方（標題、URL）時顯示成 `[redacted]`。`autocomplete` 標明為密碼的欄位
+也一樣（切換成顯示明文的密碼欄位通常保留這個屬性）。Chromium 的無障礙樹以明文
+帶著密碼值，所以某個頁面上找出密碼欄位的檢查失敗時，所有文字欄位的值都顯示成
+`(withheld)`，結果也會說明。
+
+沒有主機資源的生物（見[多使用者主機](#多使用者主機)）不能使用 `secrets`：它們
+指向的是伺服器上的環境變數。
 
 仍然看得到密鑰的地方：
 
 - **截圖。** 頁面若把這個值當成可見文字顯示出來，圖片裡就看得到。
 - **`browser_eval`。** 指令碼以頁面的權限執行，讀得到欄位的值。牽涉到密鑰時，
-  請用 `permgate` 替 `browser_eval` 加上閘門。
+  請用 `permgate` 替 `browser_eval` 加上閘門，或把它關掉。
 - **網站本身**，這是當然的。只在你信任的網站上輸入密鑰。
 
 ## 不受信任的頁面內容
@@ -368,9 +415,12 @@ plugins:
 
 在有使用者帳號的伺服器上，只有管理員的 engine 可以使用主機資源。對其他使用者
 （以及匿名名額）來說，瀏覽器只能以 headless 執行，搭配用完即丟的設定檔、內附的
-Chromium，且只能連公開位址。若生物的 options 要求更多（`headless: false`、
-`profile_dir`、`executable_path`、`channel`、`allow_loopback` 或
-`allow_private`），每次瀏覽器呼叫都會得到一個列出被拒 option 的錯誤。單人使用的
+Chromium，只能連公開位址，也不能使用密鑰。若生物的 options 要求更多
+（`headless: false`、`profile_dir`、`executable_path`、`channel`、
+`allow_loopback`、`allow_private` 或 `secrets`），每次瀏覽器呼叫都會在啟動任何
+瀏覽器之前得到一個列出被拒 option 的錯誤。這樣的生物絕不會改用已安裝的 Chrome
+或 Edge：沒有內附的 Chromium 時，錯誤會提示執行 `playwright install chromium`；
+限制生效前已啟動的瀏覽器會在下一次呼叫時被關閉。單人使用的
 主機、`kt run` 與 CLI 不受此限制。
 
 ## 限制與已知缺口
