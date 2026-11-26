@@ -60,6 +60,8 @@ NETWORK_URL_ARGS = {
 
 NETWORK_TOOLS = {"web_search"}
 
+URL_EDGE_CHARS = "".join(map(chr, range(33)))  # C0 controls and space
+
 NETWORK_DENIED = "network access denied"
 
 UNLOCK_ENV = "KT_SANDBOX_ALLOW_UNLOCK"
@@ -437,9 +439,7 @@ class SandboxPlugin(BasePlugin):
         ]
         for arg_name in dict.fromkeys(url_args):
             for url in _url_values(args.get(arg_name)):
-                if not url.startswith(("http://", "https://")):
-                    url = "https://" + url
-                self._check_network(tool_name, url)
+                self._check_network(tool_name, _network_url(url))
         if getattr(tool, "network_access", False):
             if self._profile.network == "deny":
                 self._violate("network", tool_name, f"{tool_name}: {NETWORK_DENIED}")
@@ -450,8 +450,12 @@ class SandboxPlugin(BasePlugin):
         if not self._network_allowlist:
             return
         try:
-            host = urlparse(url).hostname or ""
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
         except ValueError:
+            parsed = None
+        # Browsers end the host at a backslash; urllib reads past it.
+        if parsed is None or "\\" in parsed.netloc:
             self._violate("network", url, f"{tool_name}: unparseable URL")
             return
         reason = self._allowlist_denial(host)
@@ -594,6 +598,14 @@ def _url_values(value: Any) -> list[str]:
     if isinstance(value, (list, tuple)):
         return [str(item) for item in value if item]
     return [str(value)] if value else []
+
+
+def _network_url(value: str) -> str:
+    """``value`` trimmed of control characters and spaces, as an http(s) URL."""
+    url = value.strip(URL_EDGE_CHARS)
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    return url
 
 
 def _iter_tool_paths(
