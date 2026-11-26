@@ -58,8 +58,9 @@ const ElSelectStub = {
   template: "<div><slot /></div>",
 }
 
-function mountShared(context) {
+function mountShared(context, options = {}) {
   return mount(ModelSwitcher, {
+    ...options,
     global: {
       provide: { [MODEL_SWITCHER_CONTEXT]: context },
       stubs: {
@@ -102,7 +103,7 @@ describe("shared ModelSwitcher host context", () => {
     }
     const wrapper = mountShared(context)
     await openDrawer(wrapper)
-    const list = wrapper.get('[role="region"][aria-label="Provider models"]')
+    const list = wrapper.get('[role="tabpanel"][aria-label="Provider models"]')
     expect(list.findAll(".model-row")).toHaveLength(50)
     expect(list.element.contains(buttonByText(wrapper, "Saved presets").element)).toBe(false)
     await buttonByText(list, "Show more models (15)").trigger("click")
@@ -112,7 +113,7 @@ describe("shared ModelSwitcher host context", () => {
     expect(wrapper.get("code").text()).toBe("codex/model-65")
     await buttonByText(wrapper, "Saved presets").trigger("click")
     expect(
-      wrapper.get('[role="region"][aria-label="Saved presets"]').findAll(".model-row"),
+      wrapper.get('[role="tabpanel"][aria-label="Saved presets"]').findAll(".model-row"),
     ).toHaveLength(2)
     wrapper.unmount()
   })
@@ -210,11 +211,11 @@ describe("shared ModelSwitcher host context", () => {
     expect(wrapper.text()).not.toContain("Wrong provider")
     await buttonByText(wrapper, "Refresh").trigger("click")
     await flushPromises()
-    expect(api.discoverModels.mock.calls).toEqual([["mimo"], ["qwen"], ["qwen"]])
+    expect(api.discoverModels.mock.calls).toEqual([["mimo"], ["qwen"], ["qwen", { refresh: true }]])
     expect(api.getBackends).toHaveBeenCalledTimes(1)
     expect(refreshPresets).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain("Provider is offline")
-    expect(wrapper.text()).not.toContain("Version one")
+    expect(wrapper.text()).toContain("Version one")
     await buttonByText(wrapper, "Saved presets").trigger("click")
     expect(wrapper.text()).toContain("No matching presets.")
   })
@@ -317,5 +318,301 @@ describe("shared ModelSwitcher host context", () => {
     // The drawer stays open (no success path closed it) and the failure is shown.
     expect(wrapper.text()).toContain("Refresh")
     expect(wrapper.text()).not.toMatch(/Switched/)
+  })
+
+  it("opens Provider models on the current model's row and variations, under real tablists", async () => {
+    const groups = { effort: { low: {}, high: {} }, speed: { fast: {} } }
+    const context = makeContext({
+      hostKey: ref("catalog-current"),
+      models: [
+        { provider: "codex", name: "sol", model: "sol", available: true, variation_groups: groups },
+      ],
+    })
+    context.currentModel.value = "codex/sol@effort=high"
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", model_discovery: true, available: true }],
+      }),
+      discoverModels: async () => ({
+        models: [
+          {
+            id: "sol",
+            name: "Sol",
+            preset: { name: "sol", model: "sol", provider: "codex", variation_groups: groups },
+          },
+          {
+            id: "luna",
+            name: "Luna",
+            preset: {
+              name: "luna",
+              model: "luna",
+              provider: "codex",
+              variation_groups: { effort: { minimal: {}, low: {} } },
+            },
+          },
+        ],
+      }),
+    }
+    const wrapper = mountShared(context)
+    await flushPromises()
+    await openDrawer(wrapper)
+
+    const source = wrapper.get('[data-test="model-source-tabs"]')
+    expect(source.attributes("role")).toBe("tablist")
+    const sourceTabs = source.findAll('[role="tab"]')
+    expect(
+      sourceTabs.map((tab) => [
+        tab.text(),
+        tab.attributes("aria-selected"),
+        tab.attributes("tabindex"),
+      ]),
+    ).toEqual([
+      ["Provider models", "true", "0"],
+      ["Saved presets", "false", "-1"],
+    ])
+    const panel = wrapper.get('[role="tabpanel"][aria-label="Provider models"]')
+    expect(sourceTabs[0].attributes("aria-controls")).toBe(panel.attributes("id"))
+    const providerTab = wrapper.get(
+      '[data-test="model-provider-tabs"] [role="tab"][aria-selected="true"]',
+    )
+    expect(providerTab.text()).toBe("codex")
+    expect(providerTab.attributes("tabindex")).toBe("0")
+
+    expect(wrapper.get(".model-row.is-active").text()).toContain("Sol")
+    const chips = wrapper.get('[data-test="model-variations"]').findAll(".variation-chip")
+    expect(
+      chips.map((chip) => [chip.text(), chip.attributes("aria-pressed"), chip.attributes("title")]),
+    ).toEqual([
+      ["low", "false", "low"],
+      ["high", "true", "high"],
+      ["fast", "false", "fast"],
+    ])
+    expect(wrapper.get("code").text()).toBe("codex/sol@effort=high")
+    await buttonByText(wrapper, "Switch").trigger("click")
+    await flushPromises()
+    expect(context.switchModel).not.toHaveBeenCalled()
+
+    await wrapper
+      .findAll(".model-row")
+      .find((row) => row.text().includes("Luna"))
+      .trigger("click")
+    expect(wrapper.get("code").text()).toBe("codex/luna")
+    await wrapper
+      .findAll(".variation-chip")
+      .find((chip) => chip.text() === "minimal")
+      .trigger("click")
+    expect(wrapper.get("code").text()).toBe("codex/luna@effort=minimal")
+
+    await sourceTabs[1].trigger("click")
+    expect(source.findAll('[role="tab"]').map((tab) => tab.attributes("aria-selected"))).toEqual([
+      "false",
+      "true",
+    ])
+    expect(wrapper.find('[role="tabpanel"][aria-label="Saved presets"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it("leaves Provider models unselected when the current preset only shares a model id", async () => {
+    const context = makeContext({
+      hostKey: ref("catalog-renamed"),
+      models: [
+        {
+          provider: "codex",
+          name: "my-sol",
+          model: "sol",
+          available: true,
+          variation_groups: { effort: { high: {} } },
+        },
+      ],
+    })
+    context.currentModel.value = "codex/my-sol@effort=high"
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", model_discovery: true, available: true }],
+      }),
+      discoverModels: async () => ({
+        models: [
+          { id: "sol", name: "Sol", preset: { name: "sol", model: "sol", provider: "codex" } },
+        ],
+      }),
+    }
+    const wrapper = mountShared(context)
+    await flushPromises()
+    await openDrawer(wrapper)
+    expect(wrapper.findAll(".model-row")).toHaveLength(1)
+    expect(wrapper.find(".model-row.is-active").exists()).toBe(false)
+    expect(wrapper.find('[data-test="model-variations"]').exists()).toBe(false)
+    expect(wrapper.get("code").text()).toBe("—")
+    expect(buttonByText(wrapper, "Save & switch")).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it("moves keyboard focus along the provider tabs without selecting them", async () => {
+    const context = makeContext({
+      hostKey: ref("provider-keys"),
+      models: [
+        { provider: "alpha", name: "a", model: "a", available: true },
+        { provider: "codex", name: "current", model: "current", available: true },
+        { provider: "zeta", name: "z", model: "z", available: true },
+      ],
+    })
+    const wrapper = mountShared(context, { attachTo: document.body })
+    await flushPromises()
+    await openDrawer(wrapper)
+    const tabs = () => wrapper.get('[data-test="model-provider-tabs"]').findAll('[role="tab"]')
+    expect(tabs().map((tab) => [tab.attributes("title"), tab.attributes("tabindex")])).toEqual([
+      ["alpha", "-1"],
+      ["codex", "0"],
+      ["zeta", "-1"],
+    ])
+    tabs()[1].element.focus()
+    await tabs()[1].trigger("keydown", { key: "ArrowDown" })
+    expect(document.activeElement.title).toBe("zeta")
+    await tabs()[2].trigger("keydown", { key: "ArrowRight" })
+    expect(document.activeElement.title).toBe("alpha")
+    await tabs()[0].trigger("keydown", { key: "End" })
+    expect(document.activeElement.title).toBe("zeta")
+    expect(tabs()[1].attributes("aria-selected")).toBe("true")
+    await tabs()[2].trigger("click")
+    expect(tabs()[2].attributes("aria-selected")).toBe("true")
+    expect(tabs()[2].attributes("tabindex")).toBe("0")
+    wrapper.unmount()
+  })
+
+  it("restores the current choices and context when either tab shows the current preset again", async () => {
+    const groups = { effort: { low: {}, high: {} } }
+    const context = makeContext({
+      hostKey: ref("tab-restore"),
+      models: [
+        { provider: "codex", name: "sol", model: "sol", available: true, variation_groups: groups },
+        {
+          provider: "codex",
+          name: "luna",
+          model: "luna",
+          available: true,
+          variation_groups: groups,
+        },
+      ],
+    })
+    context.currentModel.value = "codex/sol@effort=high,context=500000"
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", model_discovery: true, available: true }],
+      }),
+      discoverModels: async () => ({
+        models: [
+          {
+            id: "sol",
+            name: "Sol",
+            preset: { name: "sol", model: "sol", provider: "codex", variation_groups: groups },
+          },
+          {
+            id: "luna",
+            name: "Luna",
+            preset: { name: "luna", model: "luna", provider: "codex", variation_groups: groups },
+          },
+        ],
+      }),
+    }
+    const wrapper = mountShared(context)
+    await flushPromises()
+    await openDrawer(wrapper)
+    const current = "codex/sol@effort=high,context=500000"
+    const pressed = () =>
+      wrapper.findAll('.variation-chip[aria-pressed="true"]').map((chip) => chip.text())
+    const pickOtherContext = () =>
+      wrapper
+        .findAll("[data-context-pick]")
+        .find((chip) => chip.attributes("data-context-pick") !== "500000")
+        .trigger("click")
+    expect(wrapper.get("code").text()).toBe(current)
+
+    await wrapper
+      .findAll(".variation-chip")
+      .find((chip) => chip.text() === "low")
+      .trigger("click")
+    await pickOtherContext()
+    expect(wrapper.get("code").text()).not.toBe(current)
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    expect(wrapper.get(".model-row.is-active").text()).toContain("sol")
+    expect(pressed()).toEqual(["high"])
+    expect(wrapper.get("code").text()).toBe(current)
+    await buttonByText(wrapper, "Switch").trigger("click")
+    await flushPromises()
+    expect(context.switchModel).not.toHaveBeenCalled()
+
+    await wrapper
+      .findAll(".variation-chip")
+      .find((chip) => chip.text() === "low")
+      .trigger("click")
+    await pickOtherContext()
+    await buttonByText(wrapper, "Provider models").trigger("click")
+    await flushPromises()
+    expect(wrapper.get(".model-row.is-active").text()).toContain("Sol")
+    expect(pressed()).toEqual(["high"])
+    expect(wrapper.get("code").text()).toBe(current)
+
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    await wrapper
+      .findAll(".model-row")
+      .find((row) => row.text().startsWith("luna"))
+      .trigger("click")
+    expect(pressed()).toEqual([])
+    await wrapper
+      .findAll(".variation-chip")
+      .find((chip) => chip.text() === "low")
+      .trigger("click")
+    expect(wrapper.get("code").text()).toMatch(/^codex\/luna@effort=low/)
+    await buttonByText(wrapper, "Provider models").trigger("click")
+    await flushPromises()
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    expect(wrapper.get(".model-row.is-active").text()).toContain("luna")
+    expect(pressed()).toEqual([])
+    expect(wrapper.get("code").text()).toMatch(/^codex\/luna(@context=\d+)?$/)
+    wrapper.unmount()
+  })
+
+  it("restores choices only for the current preset, not a same-named preset of another model", async () => {
+    const groups = { effort: { low: {}, high: {} } }
+    const context = makeContext({
+      hostKey: ref("tab-restore-model"),
+      models: [
+        {
+          provider: "codex",
+          name: "sol",
+          model: "sol-2",
+          available: true,
+          variation_groups: groups,
+        },
+      ],
+    })
+    context.currentModel.value = "codex/sol@effort=high"
+    context.inventory.catalog = {
+      getBackends: async () => ({
+        backends: [{ name: "codex", model_discovery: true, available: true }],
+      }),
+      discoverModels: async () => ({
+        models: [
+          {
+            id: "sol",
+            name: "Sol",
+            preset: { name: "sol", model: "sol", provider: "codex", variation_groups: groups },
+          },
+        ],
+      }),
+    }
+    const wrapper = mountShared(context)
+    await flushPromises()
+    await openDrawer(wrapper)
+    await wrapper.get(".model-row").trigger("click")
+    expect(wrapper.findAll('.variation-chip[aria-pressed="true"]')).toHaveLength(0)
+    expect(wrapper.get("code").text()).toBe("codex/sol")
+    expect(buttonByText(wrapper, "Save & switch")).toBeDefined()
+    await buttonByText(wrapper, "Saved presets").trigger("click")
+    expect(
+      wrapper.findAll('.variation-chip[aria-pressed="true"]').map((chip) => chip.text()),
+    ).toEqual(["high"])
+    expect(wrapper.get("code").text()).toBe("codex/sol@effort=high")
+    wrapper.unmount()
   })
 })

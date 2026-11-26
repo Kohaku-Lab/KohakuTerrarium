@@ -212,6 +212,7 @@ import { useAuthStore } from "@/stores/auth"
 import { activeSection, selectSection } from "@/stores/settingsNav"
 import { registerBuiltinSettingsSections, visibleSettingsGroups } from "@/stores/settingsSectionRegistry"
 import { useI18n } from "@/utils/i18n"
+import { invalidateProviderModels } from "@/utils/providerModels"
 
 const auth = useAuthStore()
 import { configAPI, settingsAPI } from "@/utils/api"
@@ -386,6 +387,7 @@ async function runCodexLoginRemote(node) {
 }
 
 async function onCodexLoginDone() {
+  invalidateProviderModels()
   ElMessage.success("Codex login successful")
   await loadKeys()
   await loadBackends()

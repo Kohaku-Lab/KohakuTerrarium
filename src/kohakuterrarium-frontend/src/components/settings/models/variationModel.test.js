@@ -187,6 +187,12 @@ describe("variation groups", () => {
     ])
   })
 
+  it("offers no context knob: context length is a number set per session", () => {
+    const built = VARIATION_TEMPLATES.map((template) => template.build())
+    expect(VARIATION_TEMPLATES.map((template) => template.id)).not.toContain("context")
+    expect(built.some((group) => group.target === "max_context")).toBe(false)
+  })
+
   it("offers templates that are valid as built", () => {
     for (const template of VARIATION_TEMPLATES) {
       expect(validateGroups([template.build()])).toEqual([])

@@ -38,11 +38,15 @@
           <label class="flex flex-col gap-1">
             <span :class="LABEL">{{ t("settings.models.field.context") }}</span>
             <el-input-number v-model="form.max_context" size="small" :min="1024" :step="1024" :disabled="builtin" controls-position="right" class="!w-full" data-field="max_context" />
+            <span v-if="contextWindow" class="kt-text-caption" :class="contextOver ? 'text-amber' : 'text-warm-500'" data-context-window>{{ t("settings.models.contextWindow", { size: formatContext(contextWindow) }) }}</span>
           </label>
           <label class="flex flex-col gap-1">
             <span :class="LABEL">{{ t("settings.models.field.output") }}</span>
             <el-input-number v-model="form.max_output" size="small" :min="1" :step="1024" :disabled="builtin" controls-position="right" class="!w-full" data-field="max_output" />
           </label>
+        </div>
+        <div v-if="contextOver" class="px-4 pb-4">
+          <el-alert type="warning" :closable="false" show-icon :title="t('settings.models.contextOver', { size: formatContext(contextWindow) })" data-context-warning />
         </div>
       </SettingsGroup>
 
@@ -97,6 +101,7 @@ import VariationEditor from "@/components/settings/models/VariationEditor.vue"
 import { deserializeGroups, isBlocking, serializeGroups, validateGroups } from "@/components/settings/models/variationModel"
 import SettingsGroup from "@/components/settings/ui/SettingsGroup.vue"
 import SettingsRow from "@/components/settings/ui/SettingsRow.vue"
+import { exceedsWindow, formatContext, parseContext } from "@/utils/contextLength"
 import { useI18n } from "@/utils/i18n"
 
 /** Edits one preset: model fields, defaults, variation groups and raw `extra_body`. Built-ins open read-only. */
@@ -123,6 +128,9 @@ const form = reactive({
   variation_groups: [],
 })
 const advancedOpen = ref(false)
+// The model's known window: shown as a hint and a warning, never as a cap.
+const contextWindow = ref(null)
+const contextOver = computed(() => exceedsWindow(form.max_context, contextWindow.value))
 
 const builtin = computed(() => props.mode === "view")
 const editing = computed(() => props.mode === "edit")
@@ -181,6 +189,7 @@ function load(preset) {
   form.model = preset?.model || ""
   form.provider = preset?.provider || props.backends?.[0]?.name || ""
   form.max_context = preset?.max_context || 128000
+  contextWindow.value = parseContext(preset?.context_window)
   form.max_output = preset?.max_output || 16384
   form.temperature = preset?.temperature ?? null
   form.reasoning_effort = preset?.reasoning_effort || ""

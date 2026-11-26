@@ -37,6 +37,10 @@ const currentModel = computed(() => {
   return live?.llmName || live?.model || creature.value?.llm_name || creature.value?.model || ""
 })
 
+const liveInfo = computed(() => chat.modelByTab?.[tab.value] || {})
+const currentMaxContext = computed(() => liveInfo.value.maxContext || creature.value?.max_context || 0)
+const currentContextWindow = computed(() => liveInfo.value.contextWindow || creature.value?.context_window || null)
+
 async function switchModel({ selector }) {
   const sid = session.sessionId.value
   const name = creatureName.value
@@ -56,6 +60,8 @@ provideModelSwitcherContext({
   targetOptions: computed(() => []),
   selectedTarget: computed(() => (creature.value ? creatureName.value : null)),
   currentModel,
+  currentMaxContext,
+  currentContextWindow,
   selectTarget: () => {},
   switchModel,
   inventory: useModelInventory(),
