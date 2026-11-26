@@ -165,6 +165,14 @@ class SessionLockedError(SessionError, ConflictError, RuntimeError):
         self.holder_pid = holder_pid
 
 
+class ProjectsFileError(KTError, RuntimeError):
+    """The saved projects file cannot be read; it is left untouched."""
+
+    def __init__(self, message: str, *, path: str = "") -> None:
+        super().__init__(message)
+        self.path = path
+
+
 # ---------------------------------------------------------------------------
 # MCP
 # ---------------------------------------------------------------------------

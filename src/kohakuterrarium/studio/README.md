@@ -41,7 +41,8 @@ studio/
 │   ├── cluster/               fold, paths
 │   ├── live/  summary/        live run tracking, session summaries
 │   └── lifecycle.py  registry.py  topology.py  wiring.py  stop.py  find.py  ...
-├── persistence/               saved sessions: store, fork, history, resume, artifacts, viewer
+├── persistence/               saved sessions: store, fork, history, resume, artifacts, viewer,
+│                              projects (working-folder groups)
 ├── editors/                   creature / module / workspace editing
 │   ├── codegen/               common, init, io, pending, plugin, subagent, tool, trigger
 │   ├── workspace/             fs, manifest, wiring

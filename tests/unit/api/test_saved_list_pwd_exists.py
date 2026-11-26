@@ -23,6 +23,9 @@ class _Index:
     def list(self, **kwargs):
         return _Page(self._rows)
 
+    def location_counts(self):
+        return {}
+
 
 class TestListPwdExists:
     def test_local_rows_annotated_remote_rows_left_alone(self, monkeypatch, tmp_path):

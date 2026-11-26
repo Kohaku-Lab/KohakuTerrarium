@@ -350,6 +350,7 @@ Query 參數：
 | `offset` | int | `0` | 跳過 N 個。 |
 | `search` | str |（無）| 依名字、config、代理、preview 過濾 (不分大小寫)。 |
 | `refresh` | bool | `false` | 強制重建索引。 |
+| `project` | str | （無） | 只列這個專案 id 的工作階段（見 [專案](#專案-projects)）；`none` = 沒有工作資料夾的工作階段。 |
 
 Response：
 
@@ -360,7 +361,8 @@ Response：
       "name": "...", "filename": "...", "config_type": "agent|terrarium",
       "config_path": "...", "agents": [...], "terrarium_name": "...",
       "status": "...", "created_at": "...", "last_active": "...",
-      "preview": "...", "pwd": "..."
+      "preview": "...", "pwd": "...",
+      "project": {"id": "p_1a2b3c4d5e6f", "name": "repo-x"}
     }
   ],
   "total": 123,
@@ -370,6 +372,16 @@ Response：
 ```
 
 Side effect：索引在第一次請求或 30 秒過後會重建。
+
+每一列還帶 `"project": {"id", "name"}`（該工作階段所屬的專案，見 [專案](#專案-projects)）
+或 `null`。啟用多使用者驗證時，列表只讀取目前使用者自己的工作階段目錄。
+
+### `GET /api/sessions/open`
+
+對話欄：正在執行的 runtime，加上仍標記為開啟的已存對話。回傳 JSON 陣列；每列有
+`id`、`conversation_id`、`runtime_id`、`saved_name`、`config_name`、`type`、
+`status`、`is_live`、`pwd`、`node_id`、`creatures`、`last_active` 與 `project`
+（`{"id", "name"}` 或 `null`，規則與 `GET /api/sessions` 相同）。
 
 ### `DELETE /api/sessions/{session_name}`
 
@@ -451,6 +463,62 @@ Side effect：未建索引的事件會索引起來 (冪等)；代理執行中會
 #### `GET` / `PUT /api/sessions/{session_id}/creatures/{creature_id}/modules/{module_type}/{name}/options`
 
 讀取 `{"type", "name", "schema", "options"}`，或套用 `{"values": {...}}`。沒有執行時選項的工具，其 `schema` 為空。
+
+---
+
+## 專案 (Projects)
+
+專案是某個節點上的一個工作資料夾。工作階段屬於最深的那個專案：專案資料夾等於工作
+階段的 `pwd`，或是它在同一節點上的上層資料夾；沒有 `pwd` 的工作階段是 *未分類*
+(unassigned)。**發現的**專案來自工作階段歷史（每個不在已存專案裡、也不在其他工作
+階段資料夾裡的不同 `pwd`）。**已存的**專案是使用者新增或修改過的，存在設定目錄的
+`projects.json`（啟用多使用者驗證時，每位使用者一份 `users/<id>/projects.json`）。
+專案 `id` 是穩定的：發現的專案被儲存後 id 不變。
+
+專案物件 (`P`)：
+
+```json
+{
+  "id": "p_1a2b3c4d5e6f", "path": "/home/me/repo-x", "node": null,
+  "name": "repo-x", "pinned": false, "hidden": false, "saved": false,
+  "exists": true, "session_count": 12, "running_count": 1,
+  "last_active": "2026-11-20T10:00:00+00:00"
+}
+```
+
+`node` 為 `null` 表示本機，否則是 worker 節點 id。`name` 預設為資料夾最後一段。
+`exists` 表示資料夾在本機是否存在（遠端節點為 `null`）。`running_count` 計算執行中
+的工作階段；`session_count` / `last_active` 來自工作階段索引。
+
+### `GET /api/projects`
+
+- Query：`include_hidden`（bool，預設 `false`）。
+- Response：`{"projects": [P, ...], "unassigned": {"session_count",
+  "running_count", "last_active"}}`。順序：釘選在前，然後依 `last_active`
+  由新到舊，再依名稱。
+
+### `POST /api/projects`
+
+- Body：`{"path": str, "node": str|null, "name": str|null}`。
+- Response：`P`（已存）。新增已儲存的資料夾會回傳該專案（給了 `name` 就改名，
+  若被隱藏則重新顯示）。
+- 本機資料夾不是已存在的絕對路徑目錄時回傳 `400`。
+
+### `PATCH /api/projects/{id}`
+
+- Body：`{"name": str|null, "pinned": bool, "hidden": bool}` 中任意欄位。只改傳入
+  的欄位；`"name": null` 恢復預設名稱。修改發現的專案會將其儲存。
+- Response：`P`。未知 id 回傳 `404`。
+
+### `DELETE /api/projects/{id}`
+
+忘記一個已存專案。不動它的工作階段；仍有工作階段的資料夾會以發現的專案重新出現。
+
+- Response：`{"status": "forgotten", "id"}`。沒有該 id 的已存專案時回傳 `404`。
+
+啟用多使用者驗證時，所有專案路由都跟隨請求的使用者（不需要 admin token）。
+
+---
 
 ## Drive 記錄
 

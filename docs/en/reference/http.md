@@ -383,6 +383,7 @@ Query params:
 | `offset` | int | `0` | Skip N. |
 | `search` | str | (none) | Filter by name, config, agents, preview (case-insensitive). |
 | `refresh` | bool | `false` | Reconcile the index against disk before listing (incremental, fingerprint-diffed). Concurrent refreshes are single-flighted: a burst costs at most two scans, and each refresh reflects changes up to its own arrival. |
+| `project` | str | (none) | Only sessions of this project id (see [Projects](#projects)); `none` = sessions without a working folder. |
 
 Response:
 
@@ -393,7 +394,8 @@ Response:
       "name": "...", "filename": "...", "config_type": "agent|terrarium",
       "config_path": "...", "agents": [...], "terrarium_name": "...",
       "status": "...", "created_at": "...", "last_active": "...",
-      "preview": "...", "pwd": "..."
+      "preview": "...", "pwd": "...",
+      "project": {"id": "p_1a2b3c4d5e6f", "name": "repo-x"}
     }
   ],
   "total": 123,
@@ -403,6 +405,18 @@ Response:
 ```
 
 Side effects: the index is rebuilt on first request or after 30 seconds.
+
+Each row also has `"project": {"id", "name"}` (the session's project, see
+[Projects](#projects)) or `null`. Under multi-user auth the list reads the
+calling user's session folder only.
+
+### `GET /api/sessions/open`
+
+The Conversations rail: live runtimes plus saved conversations still marked
+open. Returns a JSON array; each row has `id`, `conversation_id`,
+`runtime_id`, `saved_name`, `config_name`, `type`, `status`, `is_live`,
+`pwd`, `node_id`, `creatures`, `last_active`, and `project`
+(`{"id", "name"}` or `null`, by the same rule as `GET /api/sessions`).
 
 ### `DELETE /api/sessions/{session_name}`
 
@@ -509,6 +523,69 @@ exists (a provider-native tool must use `native_tool`).
 
 Read `{"type", "name", "schema", "options"}`, or apply
 `{"values": {...}}`. A tool without runtime options has an empty `schema`.
+
+---
+
+## Projects
+
+A project is a working folder on one node. Sessions belong to the deepest
+project whose folder is their `pwd` or a parent of it on the same node; a
+session with no `pwd` is *unassigned*. **Found** projects come from the
+session history (every distinct `pwd` that is not inside a saved project or
+inside another session folder). **Saved** projects are the ones the user
+added or changed; they live in `projects.json` in the config folder
+(`users/<id>/projects.json` per user with multi-user auth). A project `id`
+is stable: a found project keeps its id after it is saved.
+
+Project object (`P`):
+
+```json
+{
+  "id": "p_1a2b3c4d5e6f", "path": "/home/me/repo-x", "node": null,
+  "name": "repo-x", "pinned": false, "hidden": false, "saved": false,
+  "exists": true, "session_count": 12, "running_count": 1,
+  "last_active": "2026-11-20T10:00:00+00:00"
+}
+```
+
+`node` is `null` for this host, else the worker node id. `name` defaults to
+the last folder segment. `exists` is whether the folder exists on this host
+(`null` for a remote node). `running_count` counts live sessions;
+`session_count` / `last_active` come from the session index.
+
+### `GET /api/projects`
+
+- Query: `include_hidden` (bool, default `false`).
+- Response: `{"projects": [P, ...], "unassigned": {"session_count",
+  "running_count", "last_active"}}`. Order: pinned first, then most recent
+  `last_active`, then name.
+
+### `POST /api/projects`
+
+- Body: `{"path": str, "node": str|null, "name": str|null}`.
+- Response: `P` (saved). Adding a folder that is already saved returns that
+  project (renamed if `name` is given, and shown again if it was hidden).
+- `400` when a folder on this host is not an existing absolute directory.
+
+### `PATCH /api/projects/{id}`
+
+- Body: any of `{"name": str|null, "pinned": bool, "hidden": bool}`. Only
+  sent fields change; `"name": null` restores the default name. Changing a
+  found project saves it.
+- Response: `P`. `404` for an unknown id.
+
+### `DELETE /api/projects/{id}`
+
+Forget a saved project. Its sessions are not touched; a folder that still
+has sessions comes back as a found project.
+
+- Response: `{"status": "forgotten", "id"}`. `404` when no saved project has
+  this id.
+
+All project routes follow the request's user under multi-user auth (no admin
+token needed).
+
+---
 
 ## Drive records
 

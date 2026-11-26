@@ -347,6 +347,7 @@ Query 参数：
 | `offset` | int | `0` | 跳过 N 个。 |
 | `search` | str | （无） | 依名字、config、代理、preview 过滤 (不分大小写)。 |
 | `refresh` | bool | `false` | 强制重建索引。 |
+| `project` | str | （无） | 只列这个项目 id 的会话（见 [项目](#项目-projects)）；`none` = 没有工作文件夹的会话。 |
 
 Response：
 
@@ -357,7 +358,8 @@ Response：
       "name": "...", "filename": "...", "config_type": "agent|terrarium",
       "config_path": "...", "agents": [...], "terrarium_name": "...",
       "status": "...", "created_at": "...", "last_active": "...",
-      "preview": "...", "pwd": "..."
+      "preview": "...", "pwd": "...",
+      "project": {"id": "p_1a2b3c4d5e6f", "name": "repo-x"}
     }
   ],
   "total": 123,
@@ -367,6 +369,16 @@ Response：
 ```
 
 Side effect：索引在第一次请求或 30 秒过后会重建。
+
+每一行还带 `"project": {"id", "name"}`（该会话所属的项目，见 [项目](#项目-projects)）
+或 `null`。开启多用户认证时，列表只读取当前用户自己的会话目录。
+
+### `GET /api/sessions/open`
+
+会话栏：正在运行的 runtime，加上仍标记为打开的已存对话。返回 JSON 数组；每行有
+`id`、`conversation_id`、`runtime_id`、`saved_name`、`config_name`、`type`、
+`status`、`is_live`、`pwd`、`node_id`、`creatures`、`last_active` 和 `project`
+（`{"id", "name"}` 或 `null`，规则与 `GET /api/sessions` 相同）。
 
 ### `DELETE /api/sessions/{session_name}`
 
@@ -448,6 +460,62 @@ Side effect：未建索引的事件会索引起来 (幂等)；代理执行中会
 #### `GET` / `PUT /api/sessions/{session_id}/creatures/{creature_id}/modules/{module_type}/{name}/options`
 
 读取 `{"type", "name", "schema", "options"}`，或套用 `{"values": {...}}`。没有运行时选项的工具，其 `schema` 为空。
+
+---
+
+## 项目 (Projects)
+
+项目是某个节点上的一个工作文件夹。会话属于最深的那个项目：项目文件夹等于会话的
+`pwd`，或是它在同一节点上的上层文件夹；没有 `pwd` 的会话是 *未归类* (unassigned)。
+**发现的**项目来自会话历史（每个不在已存项目里、也不在其他会话文件夹里的不同
+`pwd`）。**已存的**项目是用户添加或修改过的，存在配置目录的 `projects.json`
+（开启多用户认证时，每个用户一份 `users/<id>/projects.json`）。项目 `id` 是稳定的：
+发现的项目被保存后 id 不变。
+
+项目对象 (`P`)：
+
+```json
+{
+  "id": "p_1a2b3c4d5e6f", "path": "/home/me/repo-x", "node": null,
+  "name": "repo-x", "pinned": false, "hidden": false, "saved": false,
+  "exists": true, "session_count": 12, "running_count": 1,
+  "last_active": "2026-11-20T10:00:00+00:00"
+}
+```
+
+`node` 为 `null` 表示本机，否则是 worker 节点 id。`name` 默认为文件夹最后一段。
+`exists` 表示文件夹在本机是否存在（远程节点为 `null`）。`running_count` 统计运行中的
+会话；`session_count` / `last_active` 来自会话索引。
+
+### `GET /api/projects`
+
+- Query：`include_hidden`（bool，默认 `false`）。
+- Response：`{"projects": [P, ...], "unassigned": {"session_count",
+  "running_count", "last_active"}}`。顺序：置顶在前，然后按 `last_active`
+  由新到旧，再按名字。
+
+### `POST /api/projects`
+
+- Body：`{"path": str, "node": str|null, "name": str|null}`。
+- Response：`P`（已存）。添加已保存的文件夹会返回该项目（给了 `name` 就改名，
+  若被隐藏则重新显示）。
+- 本机文件夹不是已存在的绝对路径目录时返回 `400`。
+
+### `PATCH /api/projects/{id}`
+
+- Body：`{"name": str|null, "pinned": bool, "hidden": bool}` 中任意字段。只改传入的
+  字段；`"name": null` 恢复默认名。修改发现的项目会将其保存。
+- Response：`P`。未知 id 返回 `404`。
+
+### `DELETE /api/projects/{id}`
+
+忘记一个已存项目。不动它的会话；仍有会话的文件夹会以发现的项目重新出现。
+
+- Response：`{"status": "forgotten", "id"}`。没有该 id 的已存项目时返回 `404`。
+
+开启多用户认证时，所有项目路由都跟随请求的用户（不需要 admin token）。
+
+---
 
 ## Drive 记录
 
