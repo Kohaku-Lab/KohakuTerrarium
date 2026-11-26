@@ -32,6 +32,7 @@ from kohakuterrarium.browser.protocol import (
     ProbeFrames,
 )
 from kohakuterrarium.browser.proxy import BLOCKED_HEADER
+from kohakuterrarium.browser.tasks import outlast
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -911,7 +912,7 @@ class PlaywrightDriver:
                 await handle.record_processes(PROCESS_READ_TIMEOUT_S)
             return handle
         except BaseException:
-            await _outlast(handle.abandon(), ABANDON_TIMEOUT_S)
+            await outlast(handle.abandon(), ABANDON_TIMEOUT_S)
             raise
 
     async def _open(
@@ -952,30 +953,6 @@ def _launch_failure(failures: list[tuple[Candidate, str]]) -> Exception:
             f"no usable Chromium was found (tried {tried}); run: playwright install chromium"
         )
     return BrowserLaunchError(f"the browser failed to start (tried {tried})")
-
-
-_outlasting: set[asyncio.Future] = set()
-
-
-async def _outlast(operation: Awaitable[None], bound: float) -> None:
-    """Run ``operation`` to its end, up to ``bound`` s, whatever cancels the caller.
-
-    A cancellation that arrived meanwhile is raised once ``operation`` ended
-    or the bound passed; past the bound ``operation`` runs on, unwaited.
-    """
-    task = asyncio.ensure_future(operation)
-    _outlasting.add(task)
-    task.add_done_callback(_outlasting.discard)
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + bound
-    cancelled = False
-    while not task.done() and loop.time() < deadline:
-        try:
-            await asyncio.wait({task}, timeout=deadline - loop.time())
-        except asyncio.CancelledError:
-            cancelled = True
-    if cancelled:
-        raise asyncio.CancelledError
 
 
 async def _quietly(operation: Awaitable[Any]) -> None:

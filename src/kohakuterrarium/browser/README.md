@@ -177,7 +177,7 @@ A driver that was killed or crashed proves nothing. A failed launch closes
 what it opened, stops the driver, and kills what is still not known gone. A
 launch that started nothing frees the profile as soon as its driver stops.
 
-That cleanup runs in a task of its own (`driver._outlast`, bounded by
+That cleanup runs in a task of its own (`tasks.outlast`, bounded by
 `ABANDON_TIMEOUT_S`): it begins inside a launch that was already cancelled
 (the launch timeout, or a `close()`), and a second cancellation (the tool
 call interrupted, `close()` cancelling the launch again) would otherwise
